@@ -57,7 +57,13 @@ type GeneratedEntityRow = Record<string, unknown>;
 export type GeneratedEntityConnection = {
   rows: GeneratedEntityRow[];
   nextCursor: string | null;
-  totalCount: number;
+  /**
+   * Total number of rows matching the filter, or null when the caller did not
+   * request it. Computing this runs a second count(*) over the same predicate,
+   * so it is opt-in (see `includeTotal`) to avoid an unbounded scan on every
+   * page fetch (issue #17).
+   */
+  totalCount: number | null;
 };
 
 const generatedCrudTables = new Map(
@@ -263,6 +269,7 @@ async function listGeneratedEntitiesForTable(
     filter?: Record<string, unknown> | null;
     sort?: { field?: string | null; direction?: string | null } | null;
     fixedWhere?: Array<{ column: string; value: unknown }>;
+    includeTotal?: boolean;
   },
 ): Promise<GeneratedEntityConnection> {
   const limit = normalizeLimit(input.limit);
@@ -281,14 +288,20 @@ async function listGeneratedEntitiesForTable(
       offset ${offset}
     `.execute(trx);
 
-    const countResult = await sql<{ total_count: string | number }>`
-      select count(*) as total_count
-      from ${sql.id(table.schema, table.table)} as row_source
-      where ${where}
-    `.execute(trx);
+    // The count is a second scan over the same (possibly unindexable) predicate,
+    // so only run it when the caller asked for the total. Otherwise a page fetch
+    // would always pay for a full scan (issue #17).
+    let totalCount: number | null = null;
+    if (input.includeTotal) {
+      const countResult = await sql<{ total_count: string | number }>`
+        select count(*) as total_count
+        from ${sql.id(table.schema, table.table)} as row_source
+        where ${where}
+      `.execute(trx);
+      totalCount = Number(countResult.rows[0]?.total_count ?? 0);
+    }
 
     const rows = result.rows.slice(0, limit).map((row) => row.row);
-    const totalCount = Number(countResult.rows[0]?.total_count ?? 0);
     return {
       rows,
       totalCount,
@@ -307,6 +320,7 @@ export async function listGeneratedEntities(
     cursor?: string | null;
     filter?: Record<string, unknown> | null;
     sort?: { field?: string | null; direction?: string | null } | null;
+    includeTotal?: boolean;
   },
 ): Promise<GeneratedEntityConnection> {
   const table = readGeneratedCrudTable(input.table);
@@ -499,32 +513,35 @@ export async function listGeneratedEntityRelation(
     relationship: GeneratedCrudRelationship;
     targetTable: GeneratedCrudTable;
     limit?: number | null;
+    includeTotal?: boolean;
   },
 ): Promise<GeneratedEntityConnection> {
   const relationship = input.relationship;
   if (!relationship.foreignKey) {
-    return { rows: [], nextCursor: null, totalCount: 0 };
+    return { rows: [], nextCursor: null, totalCount: input.includeTotal ? 0 : null };
   }
 
   if (relationship.resolve === "belongsTo") {
     const id = input.parent[relationship.foreignKey];
     if (id == null) {
-      return { rows: [], nextCursor: null, totalCount: 0 };
+      return { rows: [], nextCursor: null, totalCount: input.includeTotal ? 0 : null };
     }
     return listGeneratedEntitiesForTable(db, session, input.targetTable, {
       limit: 1,
       fixedWhere: [{ column: input.targetTable.primaryKey!, value: id }],
+      ...(input.includeTotal ? { includeTotal: true } : {}),
     });
   }
 
   const parentId = input.parent.id;
   if (parentId == null) {
-    return { rows: [], nextCursor: null, totalCount: 0 };
+    return { rows: [], nextCursor: null, totalCount: input.includeTotal ? 0 : null };
   }
   const targetDefaultSort = input.targetTable.source?.graphql?.defaultSort;
   return listGeneratedEntitiesForTable(db, session, input.targetTable, {
     limit: input.limit ?? 50,
     fixedWhere: [{ column: relationship.foreignKey, value: parentId }],
+    ...(input.includeTotal ? { includeTotal: true } : {}),
     ...(targetDefaultSort
       ? { sort: { field: targetDefaultSort.field, direction: targetDefaultSort.direction } }
       : {}),

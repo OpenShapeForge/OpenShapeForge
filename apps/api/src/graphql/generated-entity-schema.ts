@@ -1,4 +1,4 @@
-import { GraphQLError } from "graphql";
+import { GraphQLError, type GraphQLResolveInfo } from "graphql";
 import {
   getGeneratedCrudTables,
   getGeneratedEntity,
@@ -195,7 +195,42 @@ function requireGeneratedDb(context: GraphqlContext) {
   return context.db;
 }
 
-function toConnection(rows: Record<string, unknown>[], nextCursor: string | null, totalCount: number) {
+/**
+ * Whether the client selected `fieldName` directly on the resolved field.
+ * Used to make `totalCount` opt-in so a page fetch does not always run a
+ * second count(*) scan (issue #17). Only inspects the immediate selection set
+ * (fragments spread at this level are followed); if `info` is unavailable we
+ * conservatively report the field as unselected.
+ */
+function isFieldSelected(info: GraphQLResolveInfo | undefined, fieldName: string): boolean {
+  if (!info) return false;
+  for (const node of info.fieldNodes) {
+    const selections = node.selectionSet?.selections ?? [];
+    for (const selection of selections) {
+      if (selection.kind === "Field" && selection.name.value === fieldName) {
+        return true;
+      }
+      if (selection.kind === "InlineFragment") {
+        for (const inner of selection.selectionSet?.selections ?? []) {
+          if (inner.kind === "Field" && inner.name.value === fieldName) return true;
+        }
+      }
+      if (selection.kind === "FragmentSpread") {
+        const fragment = info.fragments[selection.name.value];
+        for (const inner of fragment?.selectionSet.selections ?? []) {
+          if (inner.kind === "Field" && inner.name.value === fieldName) return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function toConnection(
+  rows: Record<string, unknown>[],
+  nextCursor: string | null,
+  totalCount: number | null,
+) {
   return {
     edges: rows.map((row, index) => ({
       node: row,
@@ -234,10 +269,13 @@ const queryResolvers = Object.fromEntries(
             after?: string | null;
           },
           context: GraphqlContext,
+          info: GraphQLResolveInfo,
         ) => {
           const db = requireGeneratedDb(context);
+          const includeTotal = isFieldSelected(info, "totalCount");
           const result = await listGeneratedEntities(db, context.session, {
             table: table.name,
+            includeTotal,
             ...(args.first === undefined ? {} : { limit: args.first }),
             ...(args.after === undefined ? {} : { cursor: args.after }),
             ...(args.filter === undefined ? {} : { filter: args.filter }),
@@ -326,8 +364,9 @@ const objectResolvers = Object.fromEntries(
                 relationship,
                 targetTable,
                 limit: 1,
+                includeTotal: true,
               });
-              return { count: result.totalCount };
+              return { count: result.totalCount ?? 0 };
             },
           ],
         ];

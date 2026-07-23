@@ -1,0 +1,143 @@
+name: CI
+
+# Gate every PR to main (and pushes to main) with the project's own proof
+# gates: the compiler generator + determinism checks, typechecks, unit tests,
+# the third-party notices check, the Keycloak SPI build, the Helm chart, and
+# the database migration tests. These mirror the gates documented in AGENTS.md.
+#
+# NOTE: wiring these jobs as required_status_checks in branch protection is a
+# separate repo-admin step tracked in issue #47.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: Generate, typecheck, unit tests, notices
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.4
+
+      # --frozen-lockfile: fail if bun.lock is out of date rather than mutating it.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # generate is REQUIRED before the api typecheck/tests (produces
+      # apps/api/src/generated/**).
+      - name: Generate artifacts
+        run: bun run generate
+
+      - name: Typecheck
+        run: bun run typecheck:compiler && bun run typecheck:api
+
+      - name: Compiler unit tests
+        run: bun test packages/compiler
+
+      # Determinism + freshness gate: regenerates twice and fails on drift, so
+      # it must run after (or independently of) the generate step above.
+      - name: Check generated artifacts are fresh and deterministic
+        run: bun run check:generated
+
+      - name: Check local authoring catalog is self-consistent
+        run: bun run check:authoring-local
+
+      - name: Check THIRD-PARTY-NOTICES is up to date
+        run: bun run check:notices
+
+  keycloak-spi:
+    name: Build Keycloak SPI (Maven)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # SPI targets Java 17 (packages/keycloak-spi/pom.xml).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Package SPI
+        run: mvn -B -f packages/keycloak-spi/pom.xml -DskipTests package
+
+  helm:
+    name: Lint and template Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - name: Helm lint
+        run: helm lint ./deploy/helm/openshapeforge-api
+
+      # The chart is fail-closed: it refuses to render without credentials, so
+      # template with throwaway CI-only values purely to validate the manifests.
+      # These are not real secrets and are never deployed.
+      - name: Helm template
+        run: |
+          helm template ./deploy/helm/openshapeforge-api \
+            --set database.url="postgres://app:app@db:5432/app" \
+            --set database.migrateUrl="postgres://mig:mig@db:5432/app" \
+            --set auth.internalContextSecret="ci-template-only"
+
+  db-tests:
+    name: Database migration tests
+    runs-on: ubuntu-latest
+    services:
+      # Matches docker-compose.local.yml (pgvector on Postgres 17). The tests
+      # create throwaway scratch databases and provision the openshapeforge_app
+      # role through the privileged connection, so the service must run as the
+      # superuser openshapeforge role. These credentials are the documented
+      # local-dev-only values from AGENTS.md, never used outside CI/local dev.
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: openshapeforge
+          POSTGRES_PASSWORD: openshapeforge
+          POSTGRES_DB: openshapeforge_dev
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U openshapeforge -d openshapeforge_dev"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # apps/api types consume generated artifacts; generate before running.
+      - name: Generate artifacts
+        run: bun run generate
+
+      # The db tests default to localhost:5434 with the openshapeforge role and
+      # a /postgres admin URL — the exact service configured above — so no extra
+      # env wiring is needed.
+      - name: Migration + drift tests
+        run: cd apps/api && bun test src/db
+
+# Follow-up: the full GraphQL e2e suite (apps/api test:e2e) additionally needs a
+# running Keycloak issuer to mint bearer tokens for the transport-auth flows, so
+# it is not wired here yet. Tracked as a follow-up to issue #22.

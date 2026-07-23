@@ -85,15 +85,25 @@ export function __resetSessionResolverForTests(): void {
   cachedTenantBypassRoles = null;
 }
 
+/** Matches an `Authorization: Bearer <token>` header (case-insensitive). */
+const BEARER_AUTHORIZATION = /^Bearer\s+(.+)$/i;
+
 /**
  * Resolves the canonical session context for a request.
  *
- * - If `Authorization: Bearer …` is present AND the bearer verifier is
- *   configured via env (OPENSHAPEFORGE_API_VERIFY_BEARER_*), verify the token and
- *   use the resulting identity. Verification failure fails closed — we do
- *   NOT silently fall back to trusted-context, because the caller signaled
- *   bearer auth and that signal must not be downgrade-attackable.
- * - Otherwise, fall back to trusted-context HMAC verification.
+ * - If `Authorization: Bearer …` is present, it is the caller's explicit
+ *   signal to authenticate by bearer. That signal must not be
+ *   downgrade-attackable, so it is resolved ONLY by the bearer verifier:
+ *     - Verifier configured + token valid → use the resulting identity.
+ *     - Verifier configured + verification fails → fail closed (EMPTY_SESSION).
+ *     - Verifier NOT configured → fail closed (EMPTY_SESSION). We do NOT fall
+ *       through to trusted-context, because doing so would silently swap the
+ *       active trust boundary (a rollout/config error that leaves the bearer
+ *       env unset would trust inbound HMAC-signed context headers instead of
+ *       verifying the presented token — a materially larger attack surface
+ *       than the operator intended, with no startup signal).
+ * - If there is no bearer header, fall back to trusted-context HMAC
+ *   verification. Trusted-context-only deployments are unaffected.
  *
  * The returned `groups` are raw Keycloak group paths from the access token's
  * `groups` claim. Translation to internal org-unit UUIDs (for RLS) happens
@@ -104,28 +114,38 @@ export async function resolveSessionContext(
   headers: Headers,
 ): Promise<TrustedSessionContext> {
   const authorization = headers.get("authorization");
-  const verifier = getBearerVerifier();
 
-  if (authorization && verifier) {
-    const match = /^Bearer\s+(.+)$/i.exec(authorization);
-    if (match?.[1]) {
-      try {
-        const { identity } = await verifier(match[1]);
-        const groups = identity.groups ?? [];
-        return {
-          tenantId: identity.tenantId,
-          userId: identity.userId,
-          roles: identity.roles,
-          groups,
-          scope: resolveScope(identity.roles, groups),
-        };
-      } catch (error) {
-        console.warn(
-          "[auth] Bearer verification failed:",
-          error instanceof Error ? error.message : String(error),
-        );
-        return EMPTY_SESSION;
-      }
+  if (authorization && BEARER_AUTHORIZATION.test(authorization)) {
+    const verifier = getBearerVerifier();
+    if (!verifier) {
+      // A bearer credential was presented but no verifier is configured. Fail
+      // closed rather than downgrading to the trusted-context header path.
+      console.warn(
+        "[auth] Authorization: Bearer header present but no bearer verifier is " +
+          "configured (OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI/ISSUER unset). " +
+          "Rejecting the request instead of falling back to trusted-context.",
+      );
+      return EMPTY_SESSION;
+    }
+
+    const match = BEARER_AUTHORIZATION.exec(authorization);
+    const token = match![1]!;
+    try {
+      const { identity } = await verifier(token);
+      const groups = identity.groups ?? [];
+      return {
+        tenantId: identity.tenantId,
+        userId: identity.userId,
+        roles: identity.roles,
+        groups,
+        scope: resolveScope(identity.roles, groups),
+      };
+    } catch (error) {
+      console.warn(
+        "[auth] Bearer verification failed:",
+        error instanceof Error ? error.message : String(error),
+      );
+      return EMPTY_SESSION;
     }
   }
 

@@ -41,9 +41,31 @@ issues, pull requests, and review comments. Act accordingly.
   exit codes).
 - PRs must describe the change, the verification performed, and link the
   issue they address. Do not open PRs that only reformat or restyle code.
-- Issues: include reproduction steps, expected vs actual behavior, and the
+- **Use the PR template**
+  ([.github/PULL_REQUEST_TEMPLATE.md](.github/PULL_REQUEST_TEMPLATE.md)):
+  fill in "What and why" (with `Closes #<issue>`), paste the `N pass / N fail`
+  gate results under "How it was verified", and tick every checklist item.
+  `gh pr create` with no `--body` opens the template prefilled; if you pass
+  `--body`/`--body-file`, copy the template's structure so no section is
+  dropped.
+
+## Issues and plans
+
+- **Every unit of work is a GitHub issue.** Bugs, review findings, tasks,
+  hardening items, and follow-ups all get a GitHub issue — nothing is
+  tracked only in a branch name, a commit message, or a local file. Open the
+  issue before starting work and link it from the PR that closes it. Label by
+  severity and area so the tracker stays filterable.
+- Issue content: reproduction steps, expected vs actual behavior, and the
   output of the relevant gate or test — with secrets and local paths
   scrubbed.
+- **Plans live in issues under the `plan` label, not in the repo.** When you
+  write up an approach, a design, or a multi-step roadmap, open (or update) a
+  GitHub issue labeled `plan` instead of committing a plan document. This
+  lets several people read, comment on, and revise the plan concurrently
+  without editing files or churning git history, and keeps branch diffs
+  limited to actual code changes. Break the plan into sub-task issues and
+  reference the `plan` issue from each PR that implements a step.
 
 ## Working rules for this codebase
 

@@ -25,6 +25,14 @@ import type {
 
 export type ExpressionPayload = Record<string, unknown>;
 
+// Bounds for the `matches` formula operator. The regex pattern is
+// author-controlled and executed against runtime payloads, so an unbounded
+// input combined with a backtracking-prone pattern is a ReDoS vector. Capping
+// both lengths keeps the worst case finite without needing a linear-time regex
+// engine (this file must stay dependency-free — see the header comment).
+const MATCHES_MAX_PATTERN_LENGTH = 1000;
+const MATCHES_MAX_INPUT_LENGTH = 10_000;
+
 export function evaluateExpression(
   expr: CompilerExpressionInput | null | undefined,
   payload: ExpressionPayload,
@@ -202,6 +210,17 @@ function evalFormula(expr: FormulaExpr, payload: ExpressionPayload): unknown {
     case "matches": {
       const [s, pattern] = values;
       if (typeof s !== "string" || typeof pattern !== "string") return false;
+      // `pattern` is an author-controlled regex compiled and run at
+      // workflow-evaluation time against runtime payloads. A catastrophically
+      // backtracking pattern (e.g. `(a+)+$`) against a long input string can
+      // hang the evaluating thread (ReDoS). We cannot pull in a linear-time
+      // regex engine here (this file is copied verbatim into consumer repos and
+      // must stay dependency-free), so we bound the blast radius by capping both
+      // the pattern and the input length before compiling. This makes any
+      // backtracking blow-up finite and cheap. `matches` patterns are still
+      // trusted-author-only by contract.
+      if (pattern.length > MATCHES_MAX_PATTERN_LENGTH) return false;
+      if (s.length > MATCHES_MAX_INPUT_LENGTH) return false;
       try {
         return new RegExp(pattern).test(s);
       } catch {

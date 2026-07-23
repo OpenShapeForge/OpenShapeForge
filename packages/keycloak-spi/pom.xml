@@ -12,7 +12,11 @@
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
-        <keycloak.version>26.1.0</keycloak.version>
+        <!-- Must match the runtime Keycloak image in Dockerfile (FROM quay.io/keycloak/keycloak:<version>).
+             The SPI compiles against internal, non-public server SPIs that carry no cross-minor
+             stability guarantee, so compile-time and runtime versions must stay in lockstep. The
+             Dockerfile overrides this with -Dkeycloak.version from its KEYCLOAK_VERSION build arg. -->
+        <keycloak.version>26.5.3</keycloak.version>
     </properties>
 
     <dependencies>

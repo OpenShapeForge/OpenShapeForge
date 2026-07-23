@@ -5,8 +5,10 @@ name: CI
 # the third-party notices check, the Keycloak SPI build, the Helm chart, and
 # the database migration tests. These mirror the gates documented in AGENTS.md.
 #
-# NOTE: wiring these jobs as required_status_checks in branch protection is a
-# separate repo-admin step tracked in issue #47.
+# NOTE: these job names are referenced as required_status_checks in
+# scripts/github/protect-main.ruleset.json (issue #47). APPLYING that ruleset
+# to the repo is a separate repo-admin step
+# (scripts/github/apply-branch-protection.sh).
 
 on:
   pull_request:
@@ -27,9 +29,9 @@ jobs:
     name: Generate, typecheck, unit tests, notices
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.4
 
@@ -63,10 +65,10 @@ jobs:
     name: Build Keycloak SPI (Maven)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # SPI targets Java 17 (packages/keycloak-spi/pom.xml).
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
         with:
           distribution: temurin
           java-version: "17"
@@ -79,9 +81,9 @@ jobs:
     name: Lint and template Helm chart
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
 
       - name: Helm lint
         run: helm lint ./deploy/helm/openshapeforge-api
@@ -119,9 +121,9 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.4
 
@@ -137,6 +139,30 @@ jobs:
       # env wiring is needed.
       - name: Migration + drift tests
         run: cd apps/api && bun test src/db
+
+  security-scan:
+    name: Dependency and secret scan (Trivy)
+    runs-on: ubuntu-latest
+    # Supply-chain hygiene: an OSV-backed filesystem scan of the whole tree
+    # (JS/Bun deps via bun.lock, the Maven SPI, and Dockerfiles) plus a secret
+    # scan. This is a hardening signal, not yet a required gate, so it is
+    # deliberately NON-BLOCKING (exit-code: 0) to avoid failing PRs on newly
+    # disclosed upstream CVEs the repo cannot immediately fix. To turn it into a
+    # blocking gate later, set exit-code to 1 and wire it into
+    # required_status_checks (see scripts/github/protect-main.ruleset.json).
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Trivy filesystem scan (vulnerabilities + secrets)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "0"
+          format: table
 
 # Follow-up: the full GraphQL e2e suite (apps/api test:e2e) additionally needs a
 # running Keycloak issuer to mint bearer tokens for the transport-auth flows, so

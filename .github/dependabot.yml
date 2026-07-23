@@ -1,0 +1,55 @@
+version: 2
+updates:
+  # Bun workspace (apps/*, packages/*, examples/plugins/*) — root lockfile
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Amsterdam"
+    open-pull-requests-limit: 10
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "docker"
+    directories:
+      - "/apps/api"
+      - "/packages/keycloak-spi"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Amsterdam"
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Amsterdam"
+
+  # Keycloak SPI (Java)
+  - package-ecosystem: "maven"
+    directory: "/packages/keycloak-spi"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Amsterdam"
+
+  # GitHub Actions used by the workflows in .github/workflows. The actions are
+  # pinned to full commit SHAs (see ci.yml); this keeps those pins current by
+  # opening automated update PRs when a new release is published, so an action
+  # CVE does not go unnoticed.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Amsterdam"

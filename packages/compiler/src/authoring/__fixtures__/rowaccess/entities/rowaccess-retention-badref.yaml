@@ -1,0 +1,42 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: RowAccessRetentionBadRef
+title: Row Access Retention Bad Ref
+description: Test fixture — retention policyRef pointing at a non-existent catalog key. Not part of the shipped slice.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Row Access Retention Bad Ref
+  nl: Row Access Retention Bad Ref
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+retention:
+  mode: policyRef
+  policy: this-policy-does-not-exist
+  startsFrom:
+    field: createdAt
+fields:
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    persisted:
+      column: name
+      storageClass: core

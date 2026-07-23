@@ -236,3 +236,34 @@ describe("deriveRowScope unit guards (§C.1 emit-time fail-closed)", () => {
     ).toThrow(/column "org_unit_id" must be uuid, found text/);
   });
 });
+
+describe("retention compilation fail-closed guards (M-07)", () => {
+  it("throws (does not silently default to 7y) on an unresolved policyRef, naming the entity + key", () => {
+    expect(() => compileFixtures(["rowaccess-retention-badref"])).toThrow(
+      /Entity "RowAccessRetentionBadRef" retention references unknown policy "this-policy-does-not-exist"/,
+    );
+  });
+
+  it("throws (does not silently default to 7y) on an unparseable ISO-8601 duration, naming the entity + value", () => {
+    expect(() => compileFixtures(["rowaccess-retention-baddur"])).toThrow(
+      /Entity "RowAccessRetentionBadDuration" retention has an unparseable ISO-8601 duration "P1W"/,
+    );
+  });
+
+  it("compiles a legitimately authored inline retention into an exact rule (no bad-value masking)", () => {
+    const manifest = compileFixtures(["rowaccess-retention-ok"]);
+    const table = tableByName(manifest, "row_access_retention_oks");
+    expect(table?.retention).toEqual({
+      clock: { column: "created_at" },
+      rules: [
+        {
+          id: "rowaccess_retention_ok_retention",
+          after: { years: 3 },
+          action: "delete",
+          reason: "Test fixture retention",
+        },
+      ],
+      source: "authoring-entity-retention",
+    });
+  });
+});

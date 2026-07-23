@@ -1,0 +1,48 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: RowAccessRetentionBadDuration
+title: Row Access Retention Bad Duration
+description: Test fixture — inline retention with an unparseable ISO-8601 duration. Not part of the shipped slice.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Row Access Retention Bad Duration
+  nl: Row Access Retention Bad Duration
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+retention:
+  mode: inline
+  legalBasis:
+    type: legitimate_interest
+    reference: "Test fixture retention"
+  duration:
+    default: P1W
+  disposition:
+    action: delete
+  startsFrom:
+    field: createdAt
+fields:
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    persisted:
+      column: name
+      storageClass: core

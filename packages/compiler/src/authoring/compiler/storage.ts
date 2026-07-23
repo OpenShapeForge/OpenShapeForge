@@ -13,6 +13,29 @@
 import type { Field, EntityProfile, Relationship, CompiledColumn } from "../types.js";
 import { fieldSqlType } from "./helpers.js";
 
+/**
+ * Strict SQL column-identifier allowlist. Authoring-controlled column names
+ * (persisted.column, belongsTo foreignKey — and, transitively, the
+ * authorization owner/group columns which must reference one of these) flow
+ * verbatim into generated DDL and RLS predicates via quoteIdent(). Anything
+ * outside a plain lowercase snake_case identifier is rejected here, BEFORE any
+ * SQL is emitted, so a hostile name like `foo" GENERATED ALWAYS ... --` or one
+ * that closes the RLS predicate paren can never reach the generator. quoteIdent
+ * still escapes embedded quotes as defense-in-depth, but this is the primary
+ * guard.
+ */
+const SAFE_COLUMN_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
+
+function validateColumnIdentifier(column: string, source: string): void {
+  if (!SAFE_COLUMN_IDENTIFIER.test(column)) {
+    throw new Error(
+      `Unsafe storage column name "${column}" (from ${source}) — column names must match ${SAFE_COLUMN_IDENTIFIER} ` +
+        `(lowercase letters, digits, and underscores; not starting with a digit). ` +
+        `This identifier is emitted into generated SQL DDL and RLS policies and cannot contain other characters.`,
+    );
+  }
+}
+
 export function resolveStorageColumns(
   coreFields: Field[],
   profiles: EntityProfile[],
@@ -23,6 +46,7 @@ export function resolveStorageColumns(
   // Core fields
   for (const field of coreFields) {
     if (!field.persisted) continue;
+    validateColumnIdentifier(field.persisted.column, `field "${field.key}" persisted.column`);
     columns.push({
       field: field.key,
       column: field.persisted.column,
@@ -43,6 +67,7 @@ export function resolveStorageColumns(
   // request. See generators/db.ts for the matching FK target column.
   for (const rel of relationships) {
     if (rel.kind === "belongsTo" && rel.foreignKey) {
+      validateColumnIdentifier(rel.foreignKey, `belongsTo "${rel.key}" foreignKey`);
       if (!columns.some((c) => c.column === rel.foreignKey)) {
         const isTenantFk = rel.target === "Tenant";
         columns.push({
@@ -61,6 +86,10 @@ export function resolveStorageColumns(
     if (!profile.fields) continue;
     for (const field of profile.fields) {
       if (!field.persisted) continue;
+      validateColumnIdentifier(
+        field.persisted.column,
+        `profile "${profile.profile}" field "${field.key}" persisted.column`,
+      );
       columns.push({
         field: field.key,
         column: field.persisted.column,

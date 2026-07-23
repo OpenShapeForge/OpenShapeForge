@@ -52,8 +52,8 @@ in-memory entry point `scripts/check-generated-artifacts.mjs` uses here).
 
 Web UI artifact generation is keyed on one thing: an **`apps/web` directory
 existing at the repo root** (`webPresent = existsSync(join(repoRoot,
-"apps/web"))`). Create one (a reference implementation exists in the private
-upstream repo this base was extracted from) and rerun `generate`; the
+"apps/web"))`). This repo does not ship an `apps/web` directory, so web
+generation is inactive by default. Create one and rerun `generate`; the
 compiler then additionally emits, with no compiler changes:
 
 - CRUD pages, entity manifests, and server actions under

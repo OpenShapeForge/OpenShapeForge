@@ -27,6 +27,7 @@ config).
 
 ```sh
 bun install
+cp apps/api/.env.example apps/api/.env                      # required before db:migrate/dev:api; defaults match the compose stack
 docker compose -f docker-compose.local.yml up -d --build   # Postgres :5434, Keycloak :8181
 
 bun run generate      # compile YAML -> schema.sql, manifest, realm, plugin artifacts
@@ -38,8 +39,7 @@ bun run test:e2e:report                        # + HTML report in .e2e-report/
 bun run test:perf                              # k6 load suite (brew install k6)
 ```
 
-Copy `apps/api/.env.example` → `apps/api/.env` first; requests need a
-Keycloak bearer token or signed trusted-context headers — see
+Requests need a Keycloak bearer token or signed trusted-context headers — see
 [docs/api.md](docs/api.md).
 
 ## Documentation

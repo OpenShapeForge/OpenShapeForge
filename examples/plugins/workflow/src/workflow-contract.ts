@@ -621,7 +621,7 @@ function buildExpressionEvaluatorSource(): string {
 
 function buildLabelAutocompleteSource(contractImportPath: string): string {
   const raw = readFileSync(join(CANONICAL_DIR, "label-autocomplete.ts"), "utf-8");
-  // Strip the upstream "Source file for…" preamble so consumers get the
+  // Strip the source "Source file for…" preamble so consumers get the
   // generated-file header instead.
   const withoutPreamble = raw.replace(
     /^\/\/ Source file for the shared label-rule autocomplete helper\.[\s\S]*?per-action \/ per-handle gating \(see openshapeforge-workflow entity-workflow\.ts\)\.\n/,

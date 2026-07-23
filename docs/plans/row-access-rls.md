@@ -36,7 +36,7 @@ The `RowScopePolicy` type (`packages/compiler/src/schema.ts:52-84`) and the vali
 - `createDbSessionContext` → `normalizeScope(input.scope)` → `input.scope` is `undefined` → returns `"self"` (`session.ts:63-66,84`). So `app.scope` GUC (`session.ts:96`) is always `'self'`, and `app.has_scope('tenant')` never fires.
 
 ### 0.5 No org-unit / closure model exists
-Repo has 3 commits total. `erp.org_unit_closure` and "login resolver" are referenced only in **comments** describing an upstream system that was stripped (`schema.ts:66-68`, `identity.ts:96-100`, `storage.ts:38`). There is **no** org_unit table, no closure table, no group-resolution code. `app.current_groups()` reads the `app.user_groups` GUC (`app-helpers.ts:28-34`); `normalizeGroups` already filters token groups to UUIDs and caps at `MAX_SESSION_GROUPS=256` (`session.ts:45-61`). The group subsystem must be designed fresh and minimal.
+This repo ships **no** org_unit table, no closure table, and no group-resolution code — there is nothing to build on and the group subsystem must be designed fresh and minimal. `app.current_groups()` reads the `app.user_groups` GUC (`app-helpers.ts:28-34`); `normalizeGroups` already filters token groups to UUIDs and caps at `MAX_SESSION_GROUPS=256` (`session.ts:45-61`).
 
 ---
 

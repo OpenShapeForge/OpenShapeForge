@@ -1,6 +1,6 @@
-# Plugin overlay patch: opts Relation back into entity workflow-node
-# generation. This restores the `workflow:` block the base entity carried
-# before the web layer was stripped (git 437751a^) and demonstrates
+# Plugin overlay patch: opts Relation into entity workflow-node
+# generation. It adds the `workflow:` block that the base entity does not
+# carry on its own and demonstrates
 # plugin + authoring-layer + entityPatch composition: the workflow plugin's
 # authoring/ directory is appended as a layer automatically, and this patch
 # strategically merges into the base entities/core/relation.yaml by slug.

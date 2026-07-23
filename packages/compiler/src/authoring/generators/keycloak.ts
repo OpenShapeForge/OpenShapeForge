@@ -17,6 +17,13 @@
  *   - gateway client's protocolMappers (tid, organization, act, audience-*)
  *   - bearerOnly / serviceAccount client shape (bearerOnly flag, direct-access, etc.)
  *   - realm name falls back to "openshapeforge-dev"
+ *
+ * Security-sensitive values that MUST come from YAML (never hardcoded):
+ *   - gateway redirectUris / webOrigins — explicit per-client allow-list;
+ *     wildcards ("*") are refused and generation fails without a concrete list.
+ *   - client secrets — either a dev-only `devSecret` (permitted only on a dev
+ *     realm) or a `${env:VAR}` reference resolved at generate time. A non-dev
+ *     realm carrying a checked-in literal secret fails generation.
  */
 // @ts-nocheck
 import type { CompiledEntityContract } from "../types/compiled.js";
@@ -24,6 +31,7 @@ import type {
   AuthorizationConfigFile,
   AuthorizationClient,
   AuthorizationGroupNode,
+  AuthorizationRealmConfig,
   AuthorizationRealmRole,
 } from "../types/authoring.js";
 
@@ -236,16 +244,130 @@ function gatewayProtocolMappers(resourceClientIds: string[]): KeycloakProtocolMa
   ];
 }
 
+/**
+ * A realm is treated as "development" — where committed literal `devSecret`s and
+ * plain-text passwords are acceptable — when it opts out of TLS
+ * (`sslRequired: none`) or its name ends in `-dev`. Any other realm is treated
+ * as production-grade: literal checked-in secrets are rejected and secrets must
+ * come from an env reference.
+ */
+export function isDevRealm(realm: AuthorizationRealmConfig | undefined): boolean {
+  const name = realm?.name ?? DEFAULT_REALM_NAME;
+  return realm?.sslRequired === "none" || name === DEFAULT_REALM_NAME || name.endsWith("-dev");
+}
+
+const ENV_REF_RE = /^\$\{env:([A-Za-z_][A-Za-z0-9_]*)(?::-(.*))?\}$/;
+
+/**
+ * Resolve a client secret for a given realm.
+ *
+ * Precedence and rules:
+ *   - `${env:VAR}` / `${env:VAR:-fallback}` in `secret` is resolved from the
+ *     environment at generate time (allowed in any realm). Fails if unset and
+ *     no fallback is given.
+ *   - a literal `secret` (not an env ref) is only allowed on a dev realm.
+ *   - `devSecret` is a dev-only literal; allowed only on a dev realm.
+ *   - a non-dev realm that still carries a literal `secret` or any `devSecret`
+ *     fails generation, so checked-in default credentials can never ship to
+ *     production.
+ */
+export function resolveClientSecret(
+  def: AuthorizationClient,
+  dev: boolean,
+): string | undefined {
+  if (def.secret !== undefined) {
+    const match = ENV_REF_RE.exec(def.secret.trim());
+    if (match) {
+      const [, varName, fallback] = match;
+      const fromEnv = process.env[varName];
+      if (fromEnv !== undefined && fromEnv !== "") return fromEnv;
+      if (fallback !== undefined) return fallback;
+      throw new Error(
+        `Client "${def.id}": secret references env var ${varName}, but it is not set and no \${env:${varName}:-fallback} default was given.`,
+      );
+    }
+    // Literal secret.
+    if (!dev) {
+      throw new Error(
+        `Client "${def.id}": a literal client secret is committed for a non-dev realm. Use a \${env:VAR} reference resolved at generate/deploy time instead.`,
+      );
+    }
+  }
+
+  if (def.devSecret !== undefined) {
+    if (!dev) {
+      throw new Error(
+        `Client "${def.id}": devSecret is dev-only but the realm is not a development realm. Remove it and reference the secret via \${env:VAR}.`,
+      );
+    }
+    if (def.secret !== undefined) {
+      throw new Error(
+        `Client "${def.id}": set either "secret" or "devSecret", not both.`,
+      );
+    }
+    return def.devSecret;
+  }
+
+  return def.secret;
+}
+
+/**
+ * Reject open-redirect-enabling wildcards. A bare "*" (any host) is always
+ * refused. For redirectUris a trailing PATH wildcard on a concrete origin
+ * (e.g. `https://app.example.com/*`) is the pattern Keycloak recommends and is
+ * allowed; a wildcard anywhere in the scheme/host is refused. webOrigins are
+ * CORS origins with no path, so any "*" is refused.
+ */
+function assertNoOpenWildcard(
+  def: AuthorizationClient,
+  field: "redirectUris" | "webOrigins",
+  value: string,
+): void {
+  const reject = () => {
+    throw new Error(
+      `Gateway client "${def.id}": ${field} entry "${value}" uses an open/host wildcard, which is forbidden. List a concrete origin (a trailing "/path/*" is allowed for redirectUris).`,
+    );
+  };
+
+  if (!value.includes("*")) return;
+  if (value === "*") reject();
+
+  if (field === "webOrigins") reject();
+
+  // redirectUris: only a single trailing "*" that lands in the path portion of
+  // an absolute http(s) URL is permitted. Anything else (host wildcard,
+  // multiple "*", protocol-relative, etc.) is refused.
+  const match = /^(https?:\/\/[^/*]+)(\/[^*]*)?\*$/.exec(value);
+  if (!match) reject();
+}
+
+function validateGatewayAllowList(
+  def: AuthorizationClient,
+  field: "redirectUris" | "webOrigins",
+  values: string[] | undefined,
+): string[] {
+  if (!values || values.length === 0) {
+    throw new Error(
+      `Gateway client "${def.id}": ${field} must be an explicit allow-list in authorization.yaml. Wildcard/standard-flow OIDC clients without concrete ${field} are refused.`,
+    );
+  }
+  for (const value of values) {
+    assertNoOpenWildcard(def, field, value);
+  }
+  return values;
+}
+
 function buildClient(
   def: AuthorizationClient,
   resourceClientIds: string[],
+  dev: boolean,
 ): KeycloakClient {
   const base = {
     clientId: def.id,
     name: def.name,
     enabled: true,
     clientAuthenticatorType: "client-secret" as const,
-    secret: def.secret,
+    secret: resolveClientSecret(def, dev),
     publicClient: false,
     protocol: "openid-connect" as const,
   };
@@ -257,8 +379,8 @@ function buildClient(
         directAccessGrantsEnabled: true,
         serviceAccountsEnabled: false,
         standardFlowEnabled: true,
-        redirectUris: ["*"],
-        webOrigins: ["*"],
+        redirectUris: validateGatewayAllowList(def, "redirectUris", def.redirectUris),
+        webOrigins: validateGatewayAllowList(def, "webOrigins", def.webOrigins),
         defaultClientScopes: ["basic", "profile", "email", "roles", "organization"],
         protocolMappers: gatewayProtocolMappers(resourceClientIds),
       };
@@ -491,6 +613,7 @@ export function generateKeycloakRealmArtifacts(
   const resourceClientIds = clientDefs
     .filter((c) => c.kind === "bearerOnly")
     .map((c) => c.id);
+  const dev = isDevRealm(authConfig.realm);
 
   const entityAggregate = aggregateFromEntities(contracts, entityRoleClient);
 
@@ -530,7 +653,7 @@ export function generateKeycloakRealmArtifacts(
     clientRolesOut[clientId] = existing;
   }
 
-  const clients = clientDefs.map((c) => buildClient(c, resourceClientIds));
+  const clients = clientDefs.map((c) => buildClient(c, resourceClientIds, dev));
 
   const groupNodes = authConfig.groups ?? [];
   const groupsOut = groupNodes.length > 0 ? buildKeycloakGroupsFromAuthoring(groupNodes, "") : undefined;

@@ -113,7 +113,7 @@
         },
         "clients": {
           "type": "array",
-          "description": "Clients to emit into realm-export.json. Shape (protocolMappers, redirectUris, defaults) comes from the generator.",
+          "description": "Clients to emit into realm-export.json. Protocol mappers and non-security defaults come from the generator; redirectUris/webOrigins/secret are security-sensitive and authored here.",
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -122,7 +122,26 @@
               "id": { "type": "string", "minLength": 1 },
               "kind": { "type": "string", "enum": ["gateway", "bearerOnly", "serviceAccount"] },
               "name": { "type": "string" },
-              "secret": { "type": "string" }
+              "secret": {
+                "type": "string",
+                "description": "Client secret. Use a ${env:VAR} (or ${env:VAR:-fallback}) reference resolved at generate time. A literal value is rejected for non-dev realms; use devSecret for dev-only credentials.",
+                "minLength": 1
+              },
+              "devSecret": {
+                "type": "string",
+                "description": "Dev-only literal client secret. Honored only on a development realm; generation fails if a non-dev realm carries it.",
+                "minLength": 1
+              },
+              "redirectUris": {
+                "type": "array",
+                "description": "Explicit redirect-URI allow-list for gateway clients. Required for kind=gateway. A concrete http(s) origin, optionally with a trailing path wildcard (e.g. https://app.example.com/*); a bare '*' or host/scheme wildcard is forbidden (enforced by the generator).",
+                "items": { "type": "string", "minLength": 1, "not": { "const": "*" } }
+              },
+              "webOrigins": {
+                "type": "array",
+                "description": "Explicit CORS web-origin allow-list for gateway clients. Wildcards ('*') are forbidden.",
+                "items": { "type": "string", "minLength": 1, "not": { "pattern": "\\*" } }
+              }
             }
           }
         }

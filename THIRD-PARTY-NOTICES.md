@@ -1,8 +1,8 @@
 # Third-Party Notices
 
-OpenShapeForge is distributed under the PolyForm Noncommercial License 1.0.0 (see [LICENSE](LICENSE)). It depends on the third-party open-source packages listed below, each under its own license. This file satisfies the attribution requirements of those licenses.
+OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENSE](LICENSE)). It depends on the third-party open-source packages listed below, each under its own license. This file satisfies the attribution requirements of those licenses.
 
-These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a noncommercial one.
+These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
 Regenerate with `bun run notices`. 97 packages.
 

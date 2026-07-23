@@ -2,7 +2,7 @@
 Thanks for contributing. Keep changes to one logical thing per PR.
 Do NOT include secrets or internal references (see AGENTS.md). By contributing
 you agree your contribution is licensed under the project's license
-(inbound = outbound; see LICENSE, PolyForm Noncommercial).
+(inbound = outbound; see LICENSE, Business Source License 1.1).
 -->
 
 ## What and why

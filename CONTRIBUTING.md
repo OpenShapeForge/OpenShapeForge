@@ -119,8 +119,11 @@ plugins included, and fails on any byte drift. Study the two examples under
 
 ## Licensing of contributions
 
-This project is source-available under the PolyForm Noncommercial License 1.0.0 (see
-`LICENSE`); commercial use requires a separate commercial license, and commercial
-licenses are not currently offered. By submitting a contribution you agree that it is
-licensed under the project's license (inbound = outbound) and that you have the right
-to submit it under those terms.
+This project is source-available under the Business Source License 1.1 (see
+`LICENSE`); any production use requires a separate commercial license from
+BatterAI B.V., and each version converts to the Apache License 2.0 four years
+after its publication. By submitting a contribution you agree that it is
+licensed under the project's license (inbound = outbound), that you grant
+BatterAI B.V. the right to license your contribution under other terms
+(including commercial licenses and the Change License), and that you have the
+right to submit it under those terms.

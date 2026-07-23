@@ -90,12 +90,13 @@ bun run test:perf                # when touching the API hot path (needs k6)
 
 ## Licensing
 
-This project is source-available under a **noncommercial license** (see
-[LICENSE](LICENSE)); commercial licensing is not currently offered.
-Contributions are accepted under the same license (inbound = outbound). Do
-not vendor in code whose license is incompatible with noncommercial
-distribution, and record the origin and license of any third-party code you
-introduce.
+This project is source-available under the **Business Source License 1.1**
+(see [LICENSE](LICENSE)); production use requires a commercial license from
+BatterAI B.V. Contributions are accepted under the same license (inbound =
+outbound). Do not vendor in code whose license is incompatible with
+source-available (non-open-source) distribution — notably copyleft licenses
+such as GPL/AGPL — and record the origin and license of any third-party code
+you introduce.
 
 ## Orientation
 

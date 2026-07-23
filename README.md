@@ -55,6 +55,13 @@ Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-OpenShapeForge is source-available for **non-commercial use only**. Commercial
-licensing is not currently offered. See [LICENSE](LICENSE) for the exact
-terms.
+OpenShapeForge is **source-available** under the
+[Business Source License 1.1](LICENSE) (BUSL-1.1). You may copy, modify,
+redistribute, and use it for non-production purposes such as development,
+testing, and evaluation. **Any production use — commercial or not, including
+internal deployments by companies, non-profits, or other institutions —
+requires a commercial license from BatterAI B.V.**
+
+Each released version automatically and irrevocably converts to the
+[Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) four years
+after its publication. See [LICENSE](LICENSE) for the exact terms.

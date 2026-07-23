@@ -157,9 +157,13 @@ describe("generated schema migration", () => {
         expect(first.checksum).toBe(manifest.checksum);
         expect(first.rollForward).toBeUndefined();
         // Phase 2 ships the org-unit closure trigger as a versioned migration,
-        // so a fresh install applies it (and only it). The list mirrors the
-        // registry in migrations/versioned/index.ts.
-        expect(first.versionedApplied).toEqual(["0002_org-unit-closure-trigger"]);
+        // and 0003 hardens it against a cross-tenant/nonexistent parent_id, so a
+        // fresh install applies both in order. The list mirrors the registry in
+        // migrations/versioned/index.ts.
+        expect(first.versionedApplied).toEqual([
+          "0002_org-unit-closure-trigger",
+          "0003_org-unit-parent-tenant-guard",
+        ]);
 
         await withDb(url, async (db) => {
           expect(

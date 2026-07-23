@@ -16,14 +16,45 @@
 export const DEV_CONTEXT_SECRET_DEFAULT = "openshapeforge-local-dev-context-secret";
 
 /**
+ * Minimum character length required of a production trusted-context secret.
+ * The secret is the sole trust proof for the trusted-context path — anyone
+ * presenting a valid HMAC over client-supplied identity headers is trusted as
+ * that tenant/user/role — so a short, guessable value is effectively no
+ * protection. 32 characters is a conservative floor for a randomized secret
+ * (e.g. 24+ random bytes base64url-encoded). Configurable via
+ * OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET_MIN_LENGTH for operators with stricter
+ * policies.
+ */
+export const DEFAULT_CONTEXT_SECRET_MIN_LENGTH = 32;
+
+/**
+ * Minimum number of DISTINCT characters required, as a cheap entropy floor that
+ * rejects low-variety values (e.g. "aaaaaaaa…") that clear the length bar.
+ */
+const CONTEXT_SECRET_MIN_DISTINCT_CHARS = 8;
+
+function contextSecretMinLength(env: NodeJS.ProcessEnv): number {
+  const raw = env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET_MIN_LENGTH;
+  if (raw === undefined || raw === "") {
+    return DEFAULT_CONTEXT_SECRET_MIN_LENGTH;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    return DEFAULT_CONTEXT_SECRET_MIN_LENGTH;
+  }
+  return parsed;
+}
+
+/**
  * Throws a clear, multi-line error when NODE_ENV === 'production' and the auth
  * configuration is unsafe. Returns cleanly in every other environment.
  *
  * Fails if ANY of:
  *   (a) bearer verification is intended (JWKS_URI or ISSUER set) but AUDIENCE
  *       is unset — an unpinned audience accepts sibling-client tokens;
- *   (b) the trusted-context secret is unset OR still equals the dev default —
- *       a forgeable trusted-context path;
+ *   (b) the trusted-context secret is unset, still equals the dev default, or
+ *       is too short / low-entropy to resist guessing — a forgeable
+ *       trusted-context path;
  *   (c) no auth method is fully configured — neither a COMPLETE bearer verifier
  *       (jwks + issuer + audience) nor a non-default context secret — which
  *       would leave the service with no trustworthy way to authenticate.
@@ -67,6 +98,25 @@ export function assertProductionEnv(env: NodeJS.ProcessEnv = process.env): void 
         `('${DEV_CONTEXT_SECRET_DEFAULT}'). Anyone can forge trusted-context ` +
         "headers. Set a strong, randomized secret.",
     );
+  } else {
+    const minLength = contextSecretMinLength(env);
+    const distinctChars = new Set(contextSecret).size;
+    if (contextSecret.length < minLength) {
+      problems.push(
+        "OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET is too short " +
+          `(${contextSecret.length} chars; minimum ${minLength}). The secret is ` +
+          "the only proof of trust for the trusted-context path — a short or " +
+          "guessable value lets anyone who guesses it forge headers claiming " +
+          "any tenant/user/role. Set a strong, randomized secret.",
+      );
+    } else if (distinctChars < CONTEXT_SECRET_MIN_DISTINCT_CHARS) {
+      problems.push(
+        "OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET has too little variety " +
+          `(${distinctChars} distinct characters; minimum ` +
+          `${CONTEXT_SECRET_MIN_DISTINCT_CHARS}). A low-entropy secret is ` +
+          "guessable. Set a strong, randomized secret.",
+      );
+    }
   }
 
   // (c) No complete auth method at all.

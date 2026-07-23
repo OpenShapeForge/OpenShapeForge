@@ -2,7 +2,7 @@
   "name": "@openshapeforge/compiler",
   "version": "0.1.0",
   "private": true,
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "BUSL-1.1",
   "type": "module",
   "scripts": {
     "generate": "bun src/index.ts",

@@ -2,7 +2,7 @@
   "name": "@openshapeforge/auth",
   "version": "0.1.0",
   "private": true,
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "BUSL-1.1",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

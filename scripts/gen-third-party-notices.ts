@@ -130,7 +130,7 @@ for (const p of pkgs) byLicense.set(p.license, (byLicense.get(p.license) ?? 0) +
 const lines: string[] = [];
 lines.push("# Third-Party Notices\n");
 lines.push(
-  "OpenShapeForge is distributed under the PolyForm Noncommercial License 1.0.0 " +
+  "OpenShapeForge is distributed under the Business Source License 1.1 " +
     "(see [LICENSE](LICENSE)). It depends on the third-party open-source packages " +
     "listed below, each under its own license. This file satisfies the attribution " +
     "requirements of those licenses.\n",
@@ -138,7 +138,7 @@ lines.push(
 lines.push(
   "These packages are **not** relicensed under OpenShapeForge's license — each remains " +
     "under the terms stated here. Their permissive licenses permit inclusion in a project " +
-    "distributed under any license, including a noncommercial one.\n",
+    "distributed under any license, including a source-available one.\n",
 );
 lines.push(`Regenerate with \`bun run notices\`. ${pkgs.length} packages.\n`);
 lines.push("## License summary\n");

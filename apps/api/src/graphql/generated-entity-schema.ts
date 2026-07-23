@@ -311,6 +311,7 @@ const objectResolvers = Object.fromEntries(
               const db = requireGeneratedDb(context);
               const result = await listGeneratedEntityRelation(db, context.session, {
                 parent,
+                parentTable: table,
                 relationship,
                 targetTable,
               });
@@ -323,6 +324,7 @@ const objectResolvers = Object.fromEntries(
               const db = requireGeneratedDb(context);
               const result = await listGeneratedEntityRelation(db, context.session, {
                 parent,
+                parentTable: table,
                 relationship,
                 targetTable,
                 limit: 1,

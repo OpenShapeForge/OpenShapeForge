@@ -4,7 +4,7 @@ import { getActiveContext, getActiveLang } from "@/lib/server-context";
 import type { NavItem } from "@/lib/navigation/types";
 import "./globals.css";
 
-export const metadata = { title: "<%= title %>", description: "Schema-first ERP platform" };
+export const metadata = { title: <%- JSON.stringify(title) %>, description: "Schema-first ERP platform" };
 
 const navItems: NavItem[] = <%- JSON.stringify(navItems, null, 2) %>;
 const settingsPanelItems: NavItem[] = <%- JSON.stringify(settingsPanelItems, null, 2) %>;

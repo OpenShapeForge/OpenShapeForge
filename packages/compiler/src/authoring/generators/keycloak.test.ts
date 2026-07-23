@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
   generateKeycloakRealmArtifacts,
   isDevRealm,
+  normalizeKeycloakRoleName,
   resolveClientSecret,
 } from "./keycloak.js";
 import type { AuthorizationConfigFile } from "../types/authoring.js";
+import type { CompiledEntityContract } from "../types/compiled.js";
 
 function devConfig(
   overrides: Partial<AuthorizationConfigFile["keycloak"]> = {},
@@ -179,6 +181,68 @@ describe("resolveClientSecret — env references", () => {
   it("throws when an env ref is unset and has no fallback", () => {
     expect(() => resolveClientSecret({ id: "c", kind: "serviceAccount", secret: `\${env:${KEY}}` }, false)).toThrow(
       /is not set and no/,
+    );
+  });
+});
+
+function entityWithReadRoles(
+  name: string,
+  slug: string,
+  readRoles: string[],
+): CompiledEntityContract {
+  return {
+    entity: { name },
+    authorization: {
+      entitySlug: slug,
+      roles: { read: readRoles, create: [], update: [], delete: [] },
+      compositeRoles: [],
+      fieldAuthorizations: [],
+      profileAuthorizations: {},
+    },
+  } as unknown as CompiledEntityContract;
+}
+
+const authConfig = {
+  keycloak: { entityRoleClient: "erp-provider" },
+} as never;
+
+describe("normalizeKeycloakRoleName", () => {
+  it("rewrites known Dutch segments to their canonical English form", () => {
+    expect(normalizeKeycloakRoleName("Vastgoed.All.Read")).toBe("RealEstate.All.Read");
+  });
+});
+
+describe("generateKeycloakRealmArtifacts role-name collisions", () => {
+  it("fails when two distinct authored roles normalize to the same name", () => {
+    const contracts = [
+      entityWithReadRoles("RealEstateEn", "real-estate-en", ["RealEstate.All.Read"]),
+      entityWithReadRoles("RealEstateNl", "real-estate-nl", ["Vastgoed.All.Read"]),
+    ];
+    expect(() => generateKeycloakRealmArtifacts(contracts, authConfig)).toThrow(
+      /role-name collision/i,
+    );
+  });
+
+  it("does not fail when the same authored role name repeats across entities", () => {
+    const contracts = [
+      entityWithReadRoles("A", "a", ["Vastgoed.All.Read"]),
+      entityWithReadRoles("B", "b", ["Vastgoed.All.Read"]),
+    ];
+    expect(() => generateKeycloakRealmArtifacts(contracts, authConfig)).not.toThrow();
+  });
+
+  it("fails on collisions declared via authConfig.clientRoles", () => {
+    const config = {
+      keycloak: { entityRoleClient: "erp-provider" },
+      clientRoles: {
+        "erp-provider": ["Vastgoed.All.Read", "RealEstate.All.Read"],
+      },
+    } as never;
+    // Include an entity so a realm is actually emitted (the generator returns
+    // early when there are no clients and no entity roles).
+    const contracts = [entityWithReadRoles("A", "a", ["Cases.All.Read"])];
+    expect(() => generateKeycloakRealmArtifacts(contracts, config)).toThrow(
+      /role-name collision/i,
     );
   });
 });

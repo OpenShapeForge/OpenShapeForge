@@ -414,12 +414,23 @@ function aggregateFromEntities(
 ): EntityRoleAggregate {
   const clientRoles = new Map<string, KeycloakRole[]>();
   const entityComposites = new Map<string, { entity: string; roles: string[] }>();
+  // Tracks, per client, which distinct authored (pre-normalization) role names
+  // collapse onto each normalized Keycloak role name. Two different source
+  // spellings mapping to one normalized name silently merge access grants, so
+  // this is used to fail generation on collision.
+  const normalizedSources = new Map<string, Map<string, Set<string>>>();
 
   const push = (clientId: string, role: KeycloakRole) => {
+    const normalizedName = normalizeKeycloakRoleName(role.name);
+    const perClient = normalizedSources.get(clientId) ?? new Map<string, Set<string>>();
+    const sources = perClient.get(normalizedName) ?? new Set<string>();
+    sources.add(role.name);
+    perClient.set(normalizedName, sources);
+    normalizedSources.set(clientId, perClient);
     const list = clientRoles.get(clientId) ?? [];
     list.push({
       ...role,
-      name: normalizeKeycloakRoleName(role.name),
+      name: normalizedName,
       composites: role.composites
         ? {
             client: Object.fromEntries(
@@ -494,6 +505,20 @@ function aggregateFromEntities(
         entity: auth.entitySlug,
         roles: normalizeKeycloakRoleNames(composite.composites ?? []),
       });
+    }
+  }
+
+  for (const [clientId, perClient] of normalizedSources) {
+    for (const [normalizedName, sources] of perClient) {
+      if (sources.size > 1) {
+        const spellings = [...sources].sort().map((name) => `"${name}"`).join(", ");
+        throw new Error(
+          `Keycloak role-name collision on client "${clientId}": ` +
+            `distinct authored roles ${spellings} all normalize to "${normalizedName}". ` +
+            `Merging them would silently combine their access grants. ` +
+            `Use a single canonical spelling for this role.`,
+        );
+      }
     }
   }
 
@@ -633,10 +658,26 @@ export function generateKeycloakRealmArtifacts(
     for (const [clientId, names] of Object.entries(authConfig.clientRoles)) {
       const seen = new Set<string>();
       const list: KeycloakRole[] = [];
-      for (const name of normalizeKeycloakRoleNames(names)) {
+      const sourcesByNormalized = new Map<string, Set<string>>();
+      for (const rawName of names) {
+        const name = normalizeKeycloakRoleName(rawName);
+        const sources = sourcesByNormalized.get(name) ?? new Set<string>();
+        sources.add(rawName);
+        sourcesByNormalized.set(name, sources);
         if (seen.has(name)) continue;
         seen.add(name);
         list.push({ name, composite: false });
+      }
+      for (const [name, sources] of sourcesByNormalized) {
+        if (sources.size > 1) {
+          const spellings = [...sources].sort().map((s) => `"${s}"`).join(", ");
+          throw new Error(
+            `Keycloak role-name collision on client "${clientId}": ` +
+              `distinct authored roles ${spellings} all normalize to "${name}". ` +
+              `Merging them would silently combine their access grants. ` +
+              `Use a single canonical spelling for this role.`,
+          );
+        }
       }
       clientRolesOut[clientId] = list;
     }

@@ -1325,6 +1325,44 @@ function resolveRelationshipPresentationMetadata(
   };
 }
 
+/**
+ * Resolves the list sort/filter fallback column when the authored value is
+ * absent or not a real field. Prefers `displayName` (only when the entity
+ * actually has it), then the primary-key field, then the first sortable core
+ * field. Fails the build if no valid column exists rather than silently
+ * emitting a reference to a nonexistent `displayName` column.
+ */
+export function resolveListFallbackField(
+  contract: CompiledEntityContract,
+  coreFieldNames: Set<string>,
+): string {
+  if (coreFieldNames.has("displayName")) {
+    return "displayName";
+  }
+  const primaryKeyColumn = contract.storage.columns.find((column) => column.field === "id")?.field;
+  if (primaryKeyColumn && coreFieldNames.has(primaryKeyColumn)) {
+    return primaryKeyColumn;
+  }
+  if (coreFieldNames.has("id")) {
+    return "id";
+  }
+  const firstSortable = contract.model.fields.find(
+    (field) => field.sortable && coreFieldNames.has(field.key),
+  );
+  if (firstSortable) {
+    return firstSortable.key;
+  }
+  const firstCore = contract.graphql.fields[0]?.name;
+  if (firstCore) {
+    return firstCore;
+  }
+  throw new Error(
+    `Cannot resolve a list sort/filter fallback field for entity "${contract.entity.name}": ` +
+      `the entity has no "displayName" field, no primary-key column, and no sortable core field. ` +
+      `Configure an explicit filterField and defaultSort.key on a real column.`,
+  );
+}
+
 function buildListConfigFromPresentation(
   contract: CompiledEntityContract,
   context: string,
@@ -1334,6 +1372,7 @@ function buildListConfigFromPresentation(
 ): GeneratedListConfig {
   const profileType = context !== "core" ? contract.graphql.profileTypes[context] : undefined;
   const coreFieldNames = new Set(contract.graphql.fields.map((field) => field.name));
+  const fallbackField = resolveListFallbackField(contract, coreFieldNames);
   const selection = buildSelectionSet(
     contract,
     context,
@@ -1367,11 +1406,11 @@ function buildListConfigFromPresentation(
     filterField:
       contract.profiles[context]?.filterField ??
       contract.entity.filterField ??
-      "displayName",
+      fallbackField,
     searchPlaceholder: list.search?.placeholder ?? { en: "Search...", nl: "Zoeken..." },
     defaultSort: list.defaultSort
       ? {
-          key: coreFieldNames.has(list.defaultSort.key) ? list.defaultSort.key : "displayName",
+          key: coreFieldNames.has(list.defaultSort.key) ? list.defaultSort.key : fallbackField,
           direction: list.defaultSort.direction,
         }
       : undefined,

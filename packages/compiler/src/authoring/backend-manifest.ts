@@ -416,6 +416,31 @@ function retentionAction(policy: RetentionPolicy | undefined): RetentionAction {
 }
 
 /**
+ * Normalise the authored `disposition.review` (which may be a boolean or an
+ * object) into the compiled review gate, or `undefined` when review is not
+ * required. Carried through so an executor can honor a mandatory review queue
+ * before acting on a record (see #100).
+ */
+function retentionReview(
+  policy: RetentionPolicy | undefined,
+): { required: boolean; queue?: string } | undefined {
+  const review = policy?.disposition?.review;
+  if (review === undefined || review === false) {
+    return undefined;
+  }
+  if (review === true) {
+    return { required: true };
+  }
+  if (!review.required) {
+    return undefined;
+  }
+  return {
+    required: true,
+    ...(typeof review.queue === "string" ? { queue: review.queue } : {}),
+  };
+}
+
+/**
  * Resolve authored entity-level indexes (field keys) into TableDefinition
  * indexes (column names). `tenantId` is accepted directly for tenant-scoped
  * tables since the compiler auto-attaches a `tenant_id` column.
@@ -491,35 +516,96 @@ function compileRetention(
   }
   const duration = parsedDuration ?? { years: 7 };
 
+  const entityName = candidate.contract.entity.name;
+  const strategy = entityRetention.startsFrom?.strategy;
   const startFields = [
     ...(entityRetention.startsFrom?.fields ?? []),
     ...(entityRetention.startsFrom?.field ? [entityRetention.startsFrom.field] : []),
   ];
-  const clockColumns = startFields
-    .map((fieldKey) => columnsByField.get(fieldKey))
-    .filter((column): column is ColumnDefinition => column !== undefined)
-    .filter((column) => columnsByName.get(column.name)?.type === "timestamptz");
+
+  // #97: resolve the retention clock deterministically. A retention policy is
+  // a statutory/GDPR erasure control — silently dropping a start field or
+  // emitting no clock at all would let an entity advertise a retention window
+  // that compiles to nothing. So every declared start field must resolve to a
+  // usable timestamp anchor (`timestamptz` or `date`); anything else is a hard
+  // build error rather than a silent filter.
+  const clockColumns = startFields.map((fieldKey) => {
+    const column = columnsByField.get(fieldKey);
+    if (!column) {
+      throw new Error(
+        `[${entityName}] retention.startsFrom references unknown field "${fieldKey}".`,
+      );
+    }
+    const columnType = columnsByName.get(column.name)?.type;
+    if (columnType !== "timestamptz" && columnType !== "date") {
+      throw new Error(
+        `[${entityName}] retention.startsFrom field "${fieldKey}" resolves to column ` +
+          `"${column.name}" of type "${columnType ?? "unknown"}", which cannot serve as a ` +
+          `retention clock. Anchor retention on a timestamptz or date field.`,
+      );
+    }
+    return { column, type: columnType as "timestamptz" | "date" };
+  });
+
   const [clock, ...fallbacks] = clockColumns;
   if (!clock) {
-    return undefined;
+    // A start field is only meaningful with an explicit-field strategy; the
+    // `createdAt`/`updatedAt` strategies anchor on operational timestamps the
+    // storage layer always provides, so they need no declared field. But if a
+    // policy declares no usable anchor at all, refuse to emit a clockless (and
+    // therefore unenforceable) retention rule.
+    if (strategy === "field" || strategy === "firstNonNull") {
+      throw new Error(
+        `[${entityName}] retention.startsFrom.strategy is "${strategy}" but no start field was ` +
+          `declared — cannot resolve a retention clock.`,
+      );
+    }
+    throw new Error(
+      `[${entityName}] declares a retention policy but no retention clock column could be ` +
+        `resolved. Declare startsFrom.field (or .fields) pointing at a timestamptz/date column.`,
+    );
   }
+
+  const disposition = policy?.disposition?.action;
+  const review = retentionReview(policy);
+  const legalHold = policy?.holds?.suspendDestruction === true;
+  const cryptoDeleteKey =
+    disposition === "cryptoDelete" &&
+    typeof policy?.legalBasis?.reference === "string"
+      ? policy.legalBasis.reference
+      : undefined;
 
   return {
     clock: {
-      column: clock.name,
-      ...(fallbacks.length === 0 ? {} : { fallbackColumns: fallbacks.map((column) => column.name) }),
+      column: clock.column.name,
+      type: clock.type,
+      ...(fallbacks.length === 0
+        ? {}
+        : { fallbackColumns: fallbacks.map((entry) => entry.column.name) }),
     },
     rules: [
       {
         id: `${snakeCase(candidate.slug)}_retention`,
         after: duration,
         action: retentionAction(policy),
+        // #100: preserve the authored disposition, review gate, and crypto-delete
+        // key so a future executor can honor them instead of the coarse action.
+        ...(disposition === undefined ? {} : { disposition }),
         reason:
           typeof policy?.legalBasis?.reference === "string"
             ? policy.legalBasis.reference
             : "Authoring catalog retention policy.",
+        ...(review === undefined ? {} : { review }),
+        ...(disposition === "cryptoDelete"
+          ? {
+              cryptoDelete: cryptoDeleteKey === undefined ? {} : { keyReference: cryptoDeleteKey },
+            }
+          : {}),
       },
     ],
+    // #100: a legal hold must suspend all destructive dispositions; carry it so
+    // an executor never deletes a record under litigation hold.
+    ...(legalHold ? { legalHold: { suspendDestruction: true } } : {}),
     source: entityRetention.policy ?? "authoring-entity-retention",
   };
 }

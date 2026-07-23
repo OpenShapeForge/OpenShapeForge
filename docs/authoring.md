@@ -190,7 +190,9 @@ Catalog files under `catalogs/` merge across authoring layers automatically
 - **`transforms.yaml`** — named mapping transforms (`enumMap`, `cast`,
   `fallbackChain`) used by entity mappings.
 - **`retention-policies.yaml`** — named retention policies entities/fields
-  can reference.
+  can reference. What the compiler emits from these, and the (not-yet-built)
+  runtime enforcement and data-subject erasure gaps, are documented in
+  [retention.md](retention.md).
 - **`field-authoring-profiles.yaml`** — presets for a (web) field-authoring
   editor; no effect on the data layer.
 

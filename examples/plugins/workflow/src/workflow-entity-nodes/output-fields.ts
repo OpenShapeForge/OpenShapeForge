@@ -11,7 +11,8 @@ export function buildRecordIdField(
 ): Field {
   return {
     key: "recordId",
-    type: idField?.type ?? "uuid",
+    valueType: idField?.valueType ?? "string",
+    validation: idField?.validation ?? { format: "uuid" },
     required: true,
     semanticType,
     label: {

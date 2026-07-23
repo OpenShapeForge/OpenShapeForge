@@ -4,8 +4,14 @@
  *
  * Reads YAML authoring files under `packages/compiler/config/authoring/workflow-nodes/**\/*.yaml`
  * (one file per hand-written workflow node, e.g. `ai/extract-parameters.yaml`),
- * validates each against `workflow-node.schema.json`, and emits a single generated
- * TypeScript module to both the workflow runtime and the web-client designer.
+ * applies the light structural checks in `validateWorkflowNodeConfig` (kind,
+ * required top-level shape, unique nodeType, and every config/output field
+ * carrying a `key` + `valueType`), and emits a single generated TypeScript
+ * module to both the workflow runtime and the web-client designer. These checks
+ * are intentionally shallow — they are not a full JSON-schema validation of
+ * `config/schemas/workflow-node.schema.json`; they exist to turn malformed
+ * authoring input into a clear generation-time error instead of a downstream
+ * runtime or typecheck failure.
  *
  * The emitted module exposes each node's canonical `configFields: Field[]`, so the
  * runtime can resolve config-slot types (for typed variable hydration) and the
@@ -49,19 +55,122 @@ function collectYamlFiles(dir: string): string[] {
   return results.sort();
 }
 
+const FIELD_VALUE_TYPES = new Set([
+  "string",
+  "integer",
+  "number",
+  "boolean",
+  "date",
+  "datetime",
+  "object",
+]);
+
+/**
+ * Light structural validation for a parsed workflow-node authoring file. This
+ * is deliberately shallow (see the module docstring): it guards the invariants
+ * the generator relies on so a malformed YAML fails here with a clear message
+ * instead of producing a broken catalog seed / generated type.
+ */
+function validateWorkflowNodeConfig(parsed: unknown, filePath: string): WorkflowNodeConfigAuthoring {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`Workflow-node authoring file ${filePath} is not a YAML mapping.`);
+  }
+
+  const node = parsed as Record<string, unknown>;
+  if (node.kind !== "workflowNode") {
+    throw new Error(
+      `Workflow-node authoring file ${filePath} has unexpected kind "${
+        typeof node.kind === "string" ? node.kind : "<none>"
+      }".`,
+    );
+  }
+  if (typeof node.nodeType !== "string" || node.nodeType.length === 0) {
+    throw new Error(`Workflow-node authoring file ${filePath} is missing a non-empty "nodeType".`);
+  }
+  if (typeof node.category !== "string" || node.category.length === 0) {
+    throw new Error(
+      `Workflow-node authoring file ${filePath} (${node.nodeType}) is missing a non-empty "category".`,
+    );
+  }
+  if (!node.label || typeof node.label !== "object") {
+    throw new Error(
+      `Workflow-node authoring file ${filePath} (${node.nodeType}) is missing a "label" object.`,
+    );
+  }
+  if (!Array.isArray(node.configFields)) {
+    throw new Error(
+      `Workflow-node authoring file ${filePath} (${node.nodeType}) is missing a "configFields" array.`,
+    );
+  }
+  if (node.outputFields !== undefined && !Array.isArray(node.outputFields)) {
+    throw new Error(
+      `Workflow-node authoring file ${filePath} (${node.nodeType}) has a non-array "outputFields".`,
+    );
+  }
+
+  validateFields(node.configFields as unknown[], filePath, node.nodeType, "configFields");
+  if (Array.isArray(node.outputFields)) {
+    validateFields(node.outputFields as unknown[], filePath, node.nodeType, "outputFields");
+  }
+
+  return node as WorkflowNodeConfigAuthoring;
+}
+
+/** Recursively assert every field carries a `key` and a known `valueType`. */
+function validateFields(
+  fields: unknown[],
+  filePath: string,
+  nodeType: string,
+  path: string,
+): void {
+  fields.forEach((field, index) => {
+    const location = `${path}[${index}]`;
+    if (!field || typeof field !== "object" || Array.isArray(field)) {
+      throw new Error(
+        `Workflow-node authoring file ${filePath} (${nodeType}) has a non-object field at ${location}.`,
+      );
+    }
+    const record = field as Record<string, unknown>;
+    if (typeof record.key !== "string" || record.key.length === 0) {
+      throw new Error(
+        `Workflow-node authoring file ${filePath} (${nodeType}) has a field at ${location} missing a non-empty "key".`,
+      );
+    }
+    if (typeof record.valueType !== "string" || !FIELD_VALUE_TYPES.has(record.valueType)) {
+      throw new Error(
+        `Workflow-node authoring file ${filePath} (${nodeType}) field "${record.key}" (${location}) has an invalid "valueType" (${
+          typeof record.valueType === "string" ? `"${record.valueType}"` : "<missing>"
+        }). Expected one of: ${[...FIELD_VALUE_TYPES].join(", ")}.`,
+      );
+    }
+    if (Array.isArray(record.children)) {
+      validateFields(record.children, filePath, nodeType, `${location}.children`);
+    }
+    if (record.item && typeof record.item === "object" && !Array.isArray(record.item)) {
+      validateFields([record.item], filePath, nodeType, `${location}.item`);
+    }
+  });
+}
+
 function loadWorkflowNodeConfigs(authoringDir: string): WorkflowNodeConfigAuthoring[] {
   const rootDir = join(authoringDir, "workflow-nodes");
   const files = collectYamlFiles(rootDir);
   const entries: WorkflowNodeConfigAuthoring[] = [];
+  const seenNodeTypes = new Map<string, string>();
 
   for (const filePath of files) {
-    const parsed = parseYaml(readFileSync(filePath, "utf-8")) as WorkflowNodeConfigAuthoring;
-    if (!parsed || parsed.kind !== "workflowNode") {
+    const parsed = parseYaml(readFileSync(filePath, "utf-8")) as unknown;
+    const entry = validateWorkflowNodeConfig(parsed, filePath);
+
+    const priorFile = seenNodeTypes.get(entry.nodeType);
+    if (priorFile) {
       throw new Error(
-        `Workflow-node authoring file ${filePath} has unexpected kind "${parsed?.kind ?? "<none>"}".`,
+        `Workflow-node authoring files ${priorFile} and ${filePath} both declare nodeType "${entry.nodeType}"; nodeType must be unique.`,
       );
     }
-    entries.push(parsed);
+    seenNodeTypes.set(entry.nodeType, filePath);
+
+    entries.push(entry);
   }
 
   return entries;

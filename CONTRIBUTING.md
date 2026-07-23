@@ -121,9 +121,22 @@ plugins included, and fails on any byte drift. Study the two examples under
 
 This project is source-available under the Business Source License 1.1 (see
 `LICENSE`); any production use requires a separate commercial license from
-BatterAI B.V., and each version converts to the GNU AGPLv3 four years
-after its publication. By submitting a contribution you agree that it is
-licensed under the project's license (inbound = outbound), that you grant
-BatterAI B.V. the right to license your contribution under other terms
-(including commercial licenses and the Change License), and that you have the
-right to submit it under those terms.
+BatterAI B.V., and each version converts to the GNU AGPLv3 four years after
+its publication.
+
+By submitting a contribution you accept the following contributor terms:
+
+- **Copyright.** Your contribution is licensed under the project's license
+  (inbound = outbound). In addition, you grant BatterAI B.V. a perpetual,
+  worldwide, non-exclusive, irrevocable, royalty-free copyright license to
+  use, reproduce, modify, distribute, and sublicense your contribution as
+  part of the project, including under the Change License and under separate
+  commercial licenses. You retain ownership of your contribution.
+- **Patents.** You grant BatterAI B.V. and all recipients of the project a
+  perpetual, worldwide, non-exclusive, irrevocable, royalty-free patent
+  license for patent claims licensable by you that are necessarily infringed
+  by your contribution alone or by its combination with the project.
+- **Authority.** You represent that your contribution is your original work
+  and that you are entitled to grant these rights — in particular that, where
+  applicable, your employer has authorized the contribution or waived its
+  rights in it.

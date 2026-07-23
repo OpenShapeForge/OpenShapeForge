@@ -56,14 +56,20 @@ Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 OpenShapeForge is **source-available** under the
-[Business Source License 1.1](LICENSE) (BUSL-1.1). You may copy, modify,
-redistribute, and use it for non-production purposes such as development,
-testing, and evaluation. **Any production use — commercial or not, including
-internal deployments by companies, non-profits, or other institutions —
-requires a commercial license from BatterAI B.V.**
+[Business Source License 1.1](LICENSE) (BUSL-1.1). In plain terms:
 
-Each released version automatically and irrevocably converts to the
-[GNU AGPLv3](https://www.gnu.org/licenses/agpl-3.0.html) four years after its
-publication, so converted versions remain copyleft: derivatives — including
-hosted network services — must publish their source. See [LICENSE](LICENSE)
-for the exact terms.
+- You may copy, modify, redistribute, and make non-production use of this
+  software — for example development, testing, and evaluation.
+- **Any production use requires a commercial license from BatterAI B.V.**
+  This includes internal production deployments and applies to all
+  organizations alike: companies, non-profits, governments, educational and
+  other institutions.
+- On the Change Date — at the latest four years after a version is
+  published — that version automatically and irrevocably becomes available
+  under the [GNU AGPLv3](https://www.gnu.org/licenses/agpl-3.0.html).
+  Converted versions remain copyleft: if you convey a modified version, or
+  let users interact with one over a network, you must offer those users its
+  corresponding source (AGPLv3 §13).
+
+This summary is informational only; the [LICENSE](LICENSE) file contains the
+binding terms.

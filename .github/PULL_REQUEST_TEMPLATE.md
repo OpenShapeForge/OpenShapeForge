@@ -1,8 +1,11 @@
 <!--
 Thanks for contributing. Keep changes to one logical thing per PR.
-Do NOT include secrets or internal references (see AGENTS.md). By contributing
-you agree your contribution is licensed under the project's license
-(inbound = outbound; see LICENSE, Business Source License 1.1).
+Do NOT include secrets or internal references (see AGENTS.md). By submitting
+this pull request you accept the contributor terms in CONTRIBUTING.md
+("Licensing of contributions"): your contribution is licensed under the
+project's license (inbound = outbound; see LICENSE, Business Source License
+1.1) and you grant BatterAI B.V. the copyright and patent licenses described
+there, including for commercial licensing.
 -->
 
 ## What and why

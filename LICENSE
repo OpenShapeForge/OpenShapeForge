@@ -1,26 +1,5 @@
-OpenShapeForge License Notice
-=========================
-
-Copyright (c) 2026 BatterAI B.V.
-
-This software is source-available under the Business Source License 1.1
-(BUSL-1.1), reproduced in full below.
-
-- You may copy, modify, redistribute, and make non-production use of this
-  software — for example development, testing, and evaluation.
-- Any production use requires a commercial license from BatterAI B.V.
-  This includes internal production deployments and applies to all
-  organizations alike: companies, non-profits, governments, educational
-  and other institutions.
-- On the Change Date — at the latest four years after a version is
-  published — that version automatically and irrevocably becomes
-  available under the GNU Affero General Public License, Version 3.0.
-
-Required Notice: Copyright (c) 2026 BatterAI B.V.
-
----------------------------------------------------------------------
-
-Business Source License 1.1
+License text copyright (c) 2017 MariaDB Corporation Ab, All Rights Reserved.
+"Business Source License" is a trademark of MariaDB Corporation Ab.
 
 Parameters
 
@@ -45,9 +24,6 @@ Notice
 The Business Source License (this document, or the "License") is not an Open
 Source license. However, the Licensed Work will eventually be made available
 under an Open Source License, as stated in this License.
-
-License text copyright (c) 2017 MariaDB Corporation Ab, All Rights Reserved.
-"Business Source License" is a trademark of MariaDB Corporation Ab.
 
 -----------------------------------------------------------------------------
 

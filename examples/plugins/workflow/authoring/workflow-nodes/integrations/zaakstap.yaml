@@ -1,0 +1,342 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: zaakstap
+category: integrations
+label:
+  nl: Zaakstap
+  en: Case step
+description:
+  nl: Definieert een zaakstap binnen een case-workflow.
+  en: Defines a case step inside a case workflow.
+configFields:
+  - key: definitionId
+    valueType: string
+    label:
+      nl: Procesworkflow
+      en: Process workflow
+    description:
+      nl: De procesworkflow die door deze zaakstapactie wordt uitgevoerd.
+      en: The process workflow executed by this case-step action.
+    help:
+      nl: Dit legacy verborgen veld wordt niet gebruikt voor nieuwe zaaksjabloon-authoring. Zaakstapacties verwijzen naar
+        gepubliceerde procesworkflows.
+      en: This legacy hidden field is not used for new case-template authoring. Case-step actions point to published process
+        workflows.
+    defaultValue: ""
+    readOnly: true
+    workflowInspector: &hiddenWorkflowInspector
+      displayMode: hidden
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/published-workflows/options?category=process
+    render:
+      component: OptionVariablePicker
+      props:
+        clearable: true
+        selectionSync: publishedWorkflow
+        hideVariables: true
+  - key: waitForCompletion
+    valueType: boolean
+    label:
+      nl: Wacht op voltooiing
+      en: Wait for completion
+    description:
+      nl: Laat de parent workflow wachten totdat de zaakstap-workflow een terminal pad bereikt.
+      en: Let the parent workflow wait until the case-step workflow reaches a terminal path.
+    help:
+      nl: Laat dit aan voor normale zaakstructuren. De parent case gebruikt de terminale paden om vervolg-zaakstappen en
+        outputs betrouwbaar te bepalen.
+      en: Leave this enabled for normal case structures. The parent case uses terminal paths to determine follow-up case steps
+        and outputs reliably.
+    defaultValue: true
+    render:
+      component: Switch
+  - key: childExecutionMode
+    valueType: string
+    label:
+      nl: Substappen uitvoeren
+      en: Run substeps
+    description:
+      nl: Bepaalt of gekoppelde substappen een voor een of tegelijk worden gestart.
+      en: Controls whether linked substeps start one by one or at the same time.
+    help:
+      nl: Sequentieel maakt upstream zaakstap-output beschikbaar voor latere stappen. Parallel start sibling-substappen
+        tegelijk; gebruik dat alleen wanneer ze onafhankelijk kunnen lopen.
+      en: Sequential execution makes upstream case-step output available to later steps. Parallel starts sibling substeps at
+        the same time; use it only when they can run independently.
+    defaultValue: sequential
+    validation:
+      required: true
+    options:
+      type: static
+      items:
+        - value: sequential
+          label:
+            nl: Sequentieel
+            en: Sequential
+        - value: parallel
+          label:
+            nl: Parallel
+            en: Parallel
+    render:
+      component: ReferenceSelect
+      props:
+        clearable: false
+  - key: childFailurePolicy
+    valueType: string
+    label:
+      nl: Foutafhandeling substappen
+      en: Substep failure handling
+    description:
+      nl: Interne policy voor fouten in gekoppelde substappen.
+      en: Internal policy for failures in linked substeps.
+    help:
+      nl: De huidige runtime wacht op alle gestarte substappen en faalt daarna als een substap faalt. Dit verborgen veld is
+        vastgezet om die runtime-aanname expliciet te bewaren.
+      en: The current runtime waits for all started substeps and then fails if any substep failed. This hidden field is locked
+        to preserve that runtime assumption explicitly.
+    defaultValue: wait_all_then_fail
+    readOnly: true
+    workflowInspector: *hiddenWorkflowInspector
+    options:
+      type: static
+      items:
+        - value: wait_all_then_fail
+          label:
+            nl: Wacht op alles en faal
+            en: Wait all then fail
+    render:
+      component: ReferenceSelect
+  - key: definitionName
+    valueType: string
+    label:
+      nl: Interne workflownaam
+      en: Internal workflow name
+    description:
+      nl: Gesynchroniseerde naam van de gekoppelde zaakstap-workflow.
+      en: Synchronized name of the linked case-step workflow.
+    help:
+      nl: De designer gebruikt dit verborgen veld voor labels en traceerbaarheid van de gekoppelde subflow.
+      en: The designer uses this hidden field for labels and traceability of the linked subflow.
+    defaultValue: ""
+    readOnly: true
+    workflowInspector: *hiddenWorkflowInspector
+    render:
+      component: Input
+  - key: publishedVersion
+    valueType: string
+    label:
+      nl: Interne versie
+      en: Internal version
+    description:
+      nl: Gesynchroniseerde gepubliceerde versie van de gekoppelde zaakstap-workflow.
+      en: Synchronized published version of the linked case-step workflow.
+    help:
+      nl: Dit verborgen veld hoort bij de gekoppelde definitionId en helpt de designer gepubliceerde subflowmetadata te
+        bewaren.
+      en: This hidden field belongs to the linked definitionId and helps the designer store published subflow metadata.
+    defaultValue: ""
+    readOnly: true
+    workflowInspector: *hiddenWorkflowInspector
+    render:
+      component: Input
+  - key: processStepValues
+    valueType: object
+    label:
+      nl: Zaakstap-eigenschappen
+      en: Case-step properties
+    description:
+      nl: ERP-eigenschappen die op de processtap voor deze zaakstap worden vastgelegd.
+      en: ERP properties stored on the process step for this case step.
+    help:
+      nl: Deze waarden beschrijven de zaakstap in de zaakhiërarchie. Ze veranderen niet de innerlijke workflowlogica van de
+        gekoppelde case_step-subflow.
+      en: These values describe the case step in the case hierarchy. They do not change the inner workflow logic of the
+        linked case_step subflow.
+    workflowInspector:
+      objectPresentation: inlineChildren
+    children:
+      - key: description
+        valueType: string
+        required: false
+        label:
+          en: Description
+          nl: Omschrijving
+        description:
+          en: Optional explanation shown on the case step.
+          nl: Optionele toelichting die op de zaakstap wordt vastgelegd.
+        help:
+          nl: Gebruik dit voor korte medewerkercontext over de bedoeling van deze zaakstap.
+          en: Use this for short employee-facing context about the purpose of this case step.
+        render:
+          component: Textarea
+          props:
+            rows: 3
+            maxLength: 4000
+      - key: isMilestone
+        valueType: boolean
+        required: true
+        label:
+          en: Milestone
+          nl: Mijlpaal
+        description:
+          en: Marks this case step as an important milestone.
+          nl: Markeert deze zaakstap als belangrijk formeel moment.
+        help:
+          nl: Mijlpalen kunnen in overzichten en voortgang worden uitgelicht. Zet dit alleen aan voor stappen die echt een
+            formeel beslis- of voortgangsmoment zijn.
+          en: Milestones can be highlighted in overviews and progress. Enable this only for steps that are truly formal
+            decision or progress moments.
+        render:
+          component: Switch
+      - key: isBlocking
+        valueType: boolean
+        required: true
+        label:
+          en: Blocking
+          nl: Blokkerend
+        description:
+          en: When enabled, follow-up work waits for this step to finish.
+          nl: Als dit aan staat, wacht vervolgwerk tot deze stap klaar is.
+        help:
+          nl: Blokkerende stappen houden afhankelijke opvolging tegen tot de stap klaar is. Gebruik dit voor verplichte
+            inhoudelijke stappen, niet voor puur informatieve taken.
+          en: Blocking steps hold dependent follow-up work until the step is done. Use this for required substantive steps,
+            not for purely informational tasks.
+        render:
+          component: Switch
+      - key: assignedGroupId
+        valueType: string
+        validation:
+          format: uuid
+        required: false
+        label:
+          en: Assigned group
+          nl: Toegewezen groep
+        description:
+          en: Choose the assigned group to associate.
+          nl: Kies de toegewezen groep om te koppelen.
+        help:
+          nl: Kies de relatiegroep of gebruik een variabele die een relationGroupId oplevert. De waarde wordt op de ERP
+            processtap opgeslagen voor werkverdeling.
+          en: Choose the relation group or use a variable that resolves to a relationGroupId. The value is stored on the ERP
+            process step for work assignment.
+        semanticType: relationGroupId
+        options:
+          type: remote
+          remoteUrl: /api/workflow/designer/core-entity-options?entity=relation-group
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: insertText
+  - key: terminalPaths
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    label:
+      nl: Interne terminale paden
+      en: Internal terminal paths
+    description:
+      nl: Gesynchroniseerde eindpaden van de gekoppelde zaakstap-workflow.
+      en: Synchronized terminal paths of the linked case-step workflow.
+    help:
+      nl: De designer gebruikt deze verborgen lijst voor connectors en typed output van de zaakstap. De inhoud komt uit de
+        gepubliceerde case_step-subflow.
+      en: The designer uses this hidden list for connectors and typed output from the case step. The content comes from the
+        published case_step subflow.
+    defaultValue: []
+    workflowInspector: *hiddenWorkflowInspector
+    item:
+      key: terminalPath
+      valueType: object
+      description:
+        nl: Eén eindpad van de gekoppelde zaakstap-workflow.
+        en: One terminal path of the linked case-step workflow.
+      help:
+        nl: Elke entry vertegenwoordigt een end-node in de zaakstap-subflow en bepaalt een mogelijke uitgang op deze
+          zaakstap.
+        en: Each entry represents an end node in the case-step subflow and determines one possible exit on this case step.
+      children:
+        - key: endNodeId
+          valueType: string
+          label:
+            nl: Eindnode ID
+            en: End node ID
+          description:
+            nl: Technische node-id van de end-node in de zaakstap-subflow.
+            en: Technical node id of the end node in the case-step subflow.
+          help:
+            nl: Deze id wordt gebruikt als connector-handle en moet overeenkomen met de gepubliceerde subflow.
+            en: This id is used as the connector handle and must match the published subflow.
+        - key: endLabel
+          valueType: string
+          label:
+            nl: Padlabel
+            en: Path label
+          description:
+            nl: Leesbaar label voor dit terminale zaakstappad.
+            en: Human-readable label for this terminal case-step path.
+          help:
+            nl: Dit label verschijnt op de connector zodat auteurs het juiste vervolgpad kunnen kiezen.
+            en: This label appears on the connector so authors can choose the right follow-up path.
+        - key: outputs
+          valueType: object
+          cardinality:
+            min: 0
+            max: "unbounded"
+          description:
+            nl: Outputvelden die de zaakstap-subflow op dit eindpad publiceert.
+            en: Output fields published by the case-step subflow on this terminal path.
+          help:
+            nl: Deze velden worden beschikbaar als zaakstap-output voor downstream nodes en, bij sequentiële zaakstappen,
+              voor latere zaakstappen in de case.
+            en: These fields become case-step output for downstream nodes and, with sequential case steps, later case steps in
+              the case.
+          item:
+            key: output
+            valueType: object
+            description:
+              nl: Eén gepubliceerd outputveld van het terminale zaakstappad.
+              en: One published output field from the terminal case-step path.
+            help:
+              nl: De entry is een samenvatting van het outputveld op de end-node van de zaakstap-subflow.
+              en: The entry summarizes an output field on the end node of the case-step subflow.
+            children:
+              - key: key
+                valueType: string
+                label:
+                  nl: Sleutel
+                  en: Key
+                description:
+                  nl: De technische outputkey.
+                  en: The technical output key.
+                help:
+                  nl: Variabelen en mappings gebruiken deze key om de zaakstap-output te lezen.
+                  en: Variables and mappings use this key to read the case-step output.
+              - key: label
+                valueType: string
+                label:
+                  nl: Label
+                  en: Label
+                description:
+                  nl: Leesbare naam van het outputveld.
+                  en: Human-readable name of the output field.
+                help:
+                  nl: Dit label helpt auteurs het veld te herkennen in de variabelezoeker.
+                  en: This label helps authors recognize the field in the variable picker.
+              - key: semanticType
+                valueType: string
+                label:
+                  nl: Semantisch type
+                  en: Semantic type
+                description:
+                  nl: Optioneel semantisch type van het outputveld.
+                  en: Optional semantic type of the output field.
+                help:
+                  nl: Het semantische type bewaart de domeinbetekenis van de waarde en helpt bij passende variabelekeuzes.
+                  en: The semantic type preserves the domain meaning of the value and helps with compatible variable choices.
+    render:
+      component: JsonFieldEditor
+      props:
+        rows: 8

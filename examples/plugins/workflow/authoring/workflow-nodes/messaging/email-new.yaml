@@ -1,0 +1,118 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: message.emailNew
+category: Messaging
+label:
+  en: New email message
+  nl: Nieuw emailbericht
+description:
+  en: Start a new email conversation with a subject and body.
+  nl: Start een nieuwe emailconversatie met een onderwerp en berichttekst.
+configFields:
+  - key: sourceConversationId
+    valueType: string
+    semanticType: conversationId
+    label:
+      en: Source conversation ID
+      nl: Bronconversatie-ID
+    description:
+      en: Optional existing conversation used as context for the new email.
+      nl: Optionele bestaande conversatie die als context voor de nieuwe e-mail wordt gebruikt.
+    help:
+      en: When provided, the runtime may reuse relation, display-name, and contact context from this conversation. The email
+        is still created as a new email conversation.
+      nl: Wanneer dit is ingevuld, kan de runtime relatie-, weergavenaam- en contactcontext uit deze conversatie hergebruiken.
+        De e-mail wordt nog steeds als nieuwe e-mailconversatie aangemaakt.
+    runtime:
+      aliases:
+        - conversationId
+  - key: emailAddress
+    valueType: string
+    validation:
+      required: true
+    label:
+      en: Email address
+      nl: E-mailadres
+    description:
+      en: Recipient email address for the new outbound email.
+      nl: E-mailadres van de ontvanger van de nieuwe uitgaande e-mail.
+    help:
+      en: Enter a valid email address or provide it through an alias. If omitted, the runtime can fall back to contact data
+        from the source conversation or relation when available.
+      nl: Vul een geldig e-mailadres in of lever het via een alias. Als dit ontbreekt, kan de runtime terugvallen op
+        contactgegevens uit de bronconversatie of relatie wanneer die beschikbaar zijn.
+    render:
+      component: Input
+    runtime:
+      aliases:
+        - to
+        - contactAddress
+  - key: subject
+    valueType: string
+    validation:
+      required: true
+    label:
+      en: Subject
+      nl: Onderwerp
+    description:
+      en: Subject stored on the new email conversation and delivery command.
+      nl: Onderwerp dat op de nieuwe e-mailconversatie en verzendopdracht wordt opgeslagen.
+    help:
+      en: Use a concise customer-facing subject. If runtime config does not provide one, the bridge falls back to a generic
+        OpenShapeForge subject.
+      nl: Gebruik een kort klantgericht onderwerp. Als de runtimeconfiguratie geen onderwerp levert, valt de bridge terug op
+        een generiek OpenShapeForge-onderwerp.
+    render:
+      component: Input
+  - key: body
+    valueType: string
+    semanticType: variableTemplate
+    validation:
+      required: true
+      minLength: 1
+    label:
+      en: Message
+      nl: Bericht
+    description:
+      en: Email body to queue for delivery.
+      nl: E-mailtekst die voor verzending wordt klaargezet.
+    help:
+      en: This field supports workflow variables and must resolve to non-empty text. The queued message is stored with an
+        idempotency key so retries do not create duplicate workflow replies.
+      nl: Dit veld ondersteunt workflowvariabelen en moet naar niet-lege tekst oplossen. Het klaargezette bericht wordt met
+        een idempotentiesleutel opgeslagen zodat retries geen dubbele workflowantwoorden maken.
+    render:
+      component: Textarea
+      props:
+        rows: 5
+    runtime:
+      aliases:
+        - messageBody
+        - text
+  - key: relationId
+    valueType: string
+    semanticType: relationId
+    label:
+      en: Relation ID
+      nl: Relatie-ID
+    description:
+      en: Relation used to resolve recipient context when needed.
+      nl: Relatie waarmee ontvangercontext wordt opgezocht wanneer nodig.
+    help:
+      en: Provide this when the email address should be resolved from relation contact details or when the new conversation
+        should keep relation context.
+      nl: Vul dit in wanneer het e-mailadres uit relatiecontactgegevens moet worden opgezocht of wanneer de nieuwe conversatie
+        relatiecontext moet behouden.
+  - key: idempotencyKey
+    valueType: string
+    label:
+      en: Idempotency key
+      nl: Idempotentiesleutel
+    description:
+      en: Stable key that prevents duplicate email messages from workflow retries.
+      nl: Stabiele sleutel die dubbele e-mailberichten door workflowretries voorkomt.
+    help:
+      en: Leave empty to use the current workflow instance and node ID. Set a custom key only when repeated executions should
+        intentionally resolve to the same queued email.
+      nl: Laat leeg om de huidige workflowinstance en node-ID te gebruiken. Gebruik alleen een aangepaste sleutel wanneer
+        herhaalde uitvoeringen bewust naar dezelfde klaargezette e-mail moeten verwijzen.

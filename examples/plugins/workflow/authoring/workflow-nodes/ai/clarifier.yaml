@@ -1,0 +1,276 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: aiClarifier
+category: AI
+label:
+  nl: AI clarifier
+  en: AI clarifier
+description:
+  nl: Bepaalt een vervolgvraag voor ontbrekende intake-informatie.
+  en: Determines a follow-up question for missing intake information.
+configFields:
+  - key: promptProfile
+    valueType: string
+    label:
+      nl: Prompt profile
+      en: Prompt profile
+    description:
+      nl: Promptprofiel dat de vervolgvraagstrategie bepaalt.
+      en: Prompt profile that determines the follow-up question strategy.
+    help:
+      nl: Kies een profiel dat past bij het intakeproces en de ontbrekende velden waarover de AI een vraag moet formuleren.
+      en: Choose a profile that fits the intake process and the missing fields the AI should ask about.
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/ai/prompt-profiles/options
+    render:
+      component: Select
+  - key: questionStrategy
+    valueType: string
+    label:
+      nl: Strategie
+      en: Strategy
+    description:
+      nl: Bepaalt hoe de clarifier de volgende vraag kiest.
+      en: Determines how the clarifier chooses the next question.
+    help:
+      nl: De huidige strategie kiest één beste vervolgvraag voor het meest relevante ontbrekende veld of veldgroep.
+      en: The current strategy chooses one best follow-up question for the most relevant missing field or field group.
+    defaultValue: single_best_question
+    options:
+      type: static
+      items:
+        - value: single_best_question
+          label:
+            nl: Single best question
+            en: Single best question
+    render:
+      component: Select
+  - key: maxQuestions
+    valueType: number
+    label:
+      nl: Max vragen
+      en: Max questions
+    description:
+      nl: Maximum aantal vragen dat deze node als output mag voorstellen.
+      en: Maximum number of questions this node may propose as output.
+    help:
+      nl: De standaard is één vraag, zodat berichten kort blijven en makkelijk in een conversatielus passen.
+      en: The default is one question, keeping messages short and easy to use in a conversation loop.
+    defaultValue: 1
+    validation:
+      min: 1
+    render:
+      component: NumberInput
+  - key: preferMissingRequiredFields
+    valueType: boolean
+    label:
+      nl: Geef verplichte ontbrekende velden voorrang
+      en: Prefer missing required fields
+    description:
+      nl: Geeft ontbrekende verplichte velden prioriteit boven optionele velden.
+      en: Gives missing required fields priority over optional fields.
+    help:
+      nl: Laat dit aan wanneer de workflow pas verder mag na verplichte intake-informatie.
+      en: Leave this enabled when the workflow should only continue after required intake information is collected.
+    defaultValue: true
+    render:
+      component: Switch
+  - key: allowUrgencyQuestionFirst
+    valueType: boolean
+    label:
+      nl: Laat urgentievragen voorrang krijgen
+      en: Allow urgency questions first
+    description:
+      nl: Staat toe dat een urgentiegerelateerde vraag vóór andere ontbrekende velden komt.
+      en: Allows an urgency-related question to come before other missing fields.
+    help:
+      nl: Gebruik dit voor onderhouds- of serviceflows waar veiligheids- of spoedsignalen eerst moeten worden verduidelijkt.
+      en: Use this for maintenance or service flows where safety or urgency signals should be clarified first.
+    defaultValue: true
+    render:
+      component: Switch
+  - key: outputParameters
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    label:
+      nl: Outputs
+      en: Outputs
+    description:
+      nl: Outputvelden voor berichtopbouw of vervolgbeslissingen.
+      en: Output fields for message composition or follow-up decisions.
+    help:
+      nl: Deze parameters bepalen welke waarden downstream nodes kunnen gebruiken, zoals vraagtekst, doelveld en reden.
+      en: These parameters define which values downstream nodes can use, such as question text, target field, and reason.
+    defaultValue:
+      - id: clarifier-text
+        key: questionText
+        label: Vraagtekst
+        type: textarea
+        required: false
+      - id: clarifier-target
+        key: targetField
+        label: Doelveld
+        type: text
+        required: false
+      - id: clarifier-type
+        key: questionType
+        label: Vraagtype
+        type: text
+        required: false
+      - id: clarifier-reason
+        key: reason
+        label: Reden
+        type: textarea
+        required: false
+    item:
+      key: parameter
+      valueType: object
+      description:
+        nl: Eén outputparameter die door de clarifier beschikbaar wordt gemaakt.
+        en: One output parameter exposed by the clarifier.
+      help:
+        nl: Pas deze lijst alleen aan als downstream nodes andere outputvelden nodig hebben.
+        en: Change this list only when downstream nodes need different output fields.
+      children:
+        - key: id
+          valueType: string
+          label:
+            nl: Interne ID
+            en: Internal ID
+          description:
+            nl: Optionele stabiele sleutel voor deze parameter.
+            en: Optional stable identifier for this parameter.
+          help:
+            nl: Gebruik een stabiele ID om bestaande mappings herkenbaar te houden wanneer labels wijzigen.
+            en: Use a stable ID to keep existing mappings recognizable when labels change.
+          render:
+            component: Input
+        - key: key
+          valueType: string
+          label:
+            nl: Sleutel
+            en: Key
+          description:
+            nl: Technische sleutel waaronder deze parameter in de output verschijnt.
+            en: Technical key under which this parameter appears in the output.
+          help:
+            nl: Downstream variabelen verwijzen naar deze sleutel, bijvoorbeeld `output.questionText`.
+            en: Downstream variables refer to this key, for example `output.questionText`.
+          render:
+            component: Input
+        - key: label
+          valueType: string
+          label:
+            nl: Label
+            en: Label
+          description:
+            nl: Menselijk leesbare naam van de parameter.
+            en: Human-readable name of the parameter.
+          help:
+            nl: Dit label helpt auteurs het outputveld te herkennen in de designer.
+            en: This label helps authors recognize the output field in the designer.
+          render:
+            component: Input
+        - key: type
+          valueType: string
+          label:
+            nl: Type
+            en: Type
+          description:
+            nl: Waardetype van deze outputparameter.
+            en: Value type of this output parameter.
+          help:
+            nl: Kies het type dat past bij de waarde die downstream nodes moeten gebruiken.
+            en: Choose the type that matches the value downstream nodes should consume.
+          defaultValue: text
+          options:
+            type: static
+            items:
+              - value: text
+                label:
+                  nl: Tekst
+                  en: Text
+              - value: textarea
+                label:
+                  nl: Lange tekst
+                  en: Long text
+              - value: number
+                label:
+                  nl: Getal
+                  en: Number
+              - value: boolean
+                label:
+                  nl: Ja/nee
+                  en: Boolean
+              - value: date
+                label:
+                  nl: Datum
+                  en: Date
+              - value: object
+                label:
+                  nl: Object
+                  en: Object
+              - value: array
+                label:
+                  nl: Lijst
+                  en: Array
+          render:
+            component: Select
+        - key: required
+          valueType: boolean
+          label:
+            nl: Verplicht
+            en: Required
+          description:
+            nl: Geeft aan of deze outputparameter verwacht wordt gevuld te zijn.
+            en: Indicates whether this output parameter is expected to be filled.
+          help:
+            nl: Dit documenteert de outputverwachting; het maakt geen extra runtimevalidatie aan.
+            en: This documents the output expectation; it does not add extra runtime validation.
+          defaultValue: false
+          render:
+            component: Switch
+        - key: semanticTypeKey
+          valueType: string
+          label:
+            nl: Semantisch type
+            en: Semantic type
+          description:
+            nl: Optioneel semantisch type voor variabele-compatibiliteit.
+            en: Optional semantic type for variable compatibility.
+          help:
+            nl: Vul dit alleen in wanneer variabelepickers of mappings een specifiek semantisch type moeten herkennen.
+            en: Fill this only when variable pickers or mappings should recognize a specific semantic type.
+          render:
+            component: Input
+        - key: description
+          valueType: string
+          label:
+            nl: Beschrijving
+            en: Description
+          description:
+            nl: Korte uitleg van wat deze outputparameter betekent.
+            en: Short explanation of what this output parameter means.
+          help:
+            nl: Gebruik dit om downstream auteurs duidelijk te maken wanneer ze dit veld moeten gebruiken.
+            en: Use this to tell downstream authors when they should use this field.
+          render:
+            component: InputMultiline
+            props:
+              rows: 2
+        - key: placeholder
+          valueType: string
+          label:
+            nl: Placeholder
+            en: Placeholder
+          description:
+            nl: Voorbeeldtekst voor de invoer van deze parameterdefinitie.
+            en: Example text for editing this parameter definition.
+          help:
+            nl: Dit helpt alleen bij authoring en verandert de outputwaarde niet.
+            en: This only helps authoring and does not change the output value.
+          render:
+            component: Input

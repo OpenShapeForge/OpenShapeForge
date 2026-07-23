@@ -1,0 +1,39 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: RowAccessBadGroup
+title: Row Access Bad Group
+description: Test fixture — group.column matches no field or belongsTo foreignKey (authoring fail-closed). Not part of the shipped slice.
+language: en
+displayTemplate: "{{title}}"
+filterField: title
+labels:
+  en: Row Access Bad Group
+  nl: Row Access Bad Group
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+    group:
+      column: org_unit_id
+fields:
+  - key: title
+    valueType: string
+    required: true
+    label:
+      en: Title
+      nl: Titel
+    persisted:
+      column: title
+      storageClass: core

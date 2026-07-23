@@ -1,0 +1,14 @@
+# Authoring layers, applied in order (Kustomize-style base + overlays).
+# Overlays may add files and patch entities from earlier layers with
+# `kind: entityPatch`; catalogs/*.yaml merge across layers automatically.
+# Plugins extend the compiler with generators, platform tables, and their
+# own authoring layers (see packages/compiler/src/plugins.ts).
+layers:
+  - packages/compiler/config/authoring
+plugins:
+  - ./examples/plugins/entity-docs.ts
+  # Workflow node catalogs: contributes the platform workflow catalog tables,
+  # emits the api-side workflow artifacts (web-side ones only when apps/web
+  # exists), and ships its own authoring layer (workflow-nodes/** plus a
+  # Relation entityPatch). See examples/plugins/workflow/index.ts.
+  - ./examples/plugins/workflow/index.ts

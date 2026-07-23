@@ -1,0 +1,95 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: condition
+category: flow
+label:
+  nl: Conditie
+  en: Condition
+description:
+  nl: Vertakt de workflow op basis van conditieregels.
+  en: Branches the workflow based on condition rules.
+configFields:
+  - key: branches
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    label:
+      nl: Paden
+      en: Branches
+    description:
+      nl: Iedere regel levert een eigen output handle op in het canvas.
+      en: Each row creates its own output handle on the canvas.
+    help:
+      nl: Gebruik deze lijst om vrije condities aan uitgaande paden te koppelen.
+      en: Use this list to attach free-form conditions to outgoing branches.
+    item:
+      key: branch
+      valueType: object
+      description:
+        en: One conditional branch row.
+        nl: Eén conditioneel pad.
+      help:
+        en: Each row defines one outgoing branch with its own label and condition.
+        nl: Elke regel definieert één uitgaand pad met een eigen label en conditie.
+      children:
+        - key: label
+          valueType: string
+          label:
+            nl: Label
+            en: Label
+          description:
+            nl: Leesbaar label dat op het canvas naast de output handle verschijnt.
+            en: Readable label shown on the canvas next to the output handle.
+          help:
+            nl: Gebruik een korte functionele naam die direct duidelijk maakt waar dit pad voor staat.
+            en: Use a short functional name that makes the purpose of this branch obvious.
+          placeholder:
+            nl: bijv. Goedgekeurd
+            en: e.g. Approved
+          validation:
+            required: true
+          render:
+            component: Input
+        - key: when
+          valueType: object
+          semanticType: condition
+          label:
+            nl: Voorwaarde
+            en: Condition
+          description:
+            nl: Vrije conditie met een linker- en rechteroperand.
+            en: Free condition with a left and right operand.
+          help:
+            nl: Gebruik deze builder om eigen regels en groepen samen te stellen.
+            en: Use this builder to compose your own rules and groups.
+          validation:
+            required: true
+          render:
+            component: ConditionBuilder
+            props:
+              mode: free
+              defaultPath: ""
+    defaultValue:
+      - id: approved
+        label: Goedgekeurd
+        when:
+          kind: rule
+          operator: equals
+          left:
+            kind: path
+            path: ""
+          right:
+            kind: literal
+            value: approved
+      - id: rejected
+        label: Afgewezen
+        when:
+          kind: rule
+          operator: equals
+          left:
+            kind: path
+            path: ""
+          right:
+            kind: literal
+            value: rejected

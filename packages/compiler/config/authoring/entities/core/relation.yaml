@@ -1,0 +1,325 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Relation
+title: Relation
+description:
+  en: Canonical ERP/CRM relation aggregate for the platform.
+  nl: Canonieke ERP/CRM-relatie-aggregate voor het platform.
+language: en
+displayTemplate: "{{displayName}}"
+filterField: displayName
+labels:
+  en: Relation
+  nl: Relatie
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+      - Relaties.All.ReadWrite
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: displayName
+    valueType: string
+    required: true
+    label:
+      en: Display name
+      nl: Weergavenaam
+    description:
+      en: Shared human-readable label of the relation aggregate, used across lists, tasks, and integrations.
+      nl: Gedeelde menselijk leesbare aanduiding van de relatie-aggregate, gebruikt in lijsten, taken en koppelingen.
+    validation:
+      minLength:
+        value: 1
+        message:
+          en: Name is required
+          nl: Naam is verplicht
+      maxLength:
+        value: 200
+        message:
+          en: Name must be at most 200 characters
+          nl: Naam mag maximaal 200 tekens zijn
+    persisted:
+      column: display_name
+      storageClass: core
+  - key: relationType
+    valueType: string
+    required: true
+    label:
+      en: Relation type
+      nl: Relatietype
+    description:
+      en: Compact cross-sector classification such as person, organization, or group.
+      nl: Compacte sectoroverstijgende classificatie zoals persoon, organisatie of groep.
+    persisted:
+      column: relation_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: RELATIESOORT
+        clearable: false
+  - key: relationSubType
+    valueType: string
+    required: false
+    label:
+      en: Relation subtype
+      nl: Relatiesubtype
+    description:
+      en: More specific cross-sector classification for the relation.
+      nl: Meer specifieke sectoroverstijgende classificatie van de relatie.
+    validation:
+      maxLength: 100
+    persisted:
+      column: relation_sub_type
+      storageClass: core
+  - key: preferredContactChannel
+    valueType: string
+    required: false
+    label:
+      en: Preferred contact channel
+      nl: Voorkeurskanaal
+    description:
+      en: Preferred communication channel for contacting this relation at a high level.
+      nl: Voorkeurskanaal om deze relatie op hoofdlijnen te benaderen.
+    validation:
+      maxLength: 50
+    persisted:
+      column: preferred_contact_channel
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: COMMUNICATIEKANAAL
+        clearable: true
+  - key: status
+    valueType: string
+    required: false
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the relation.
+      nl: Levenscyclusstatus van de relatie.
+    validation:
+      maxLength: 50
+    persisted:
+      column: status
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the relation in a connected source or sector context.
+      nl: Functionele of zakelijke code van de relatie in een gekoppelde bron- of sectorcontext.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+  - key: address
+    valueType: string
+    required: false
+    label:
+      en: Address
+      nl: Adres
+    description:
+      en: Primary address of the relation.
+      nl: Primair adres van de relatie.
+    persisted:
+      column: address
+      storageClass: core
+    render:
+      component: AddressAutocomplete
+      props:
+        provider: bag
+        country: NL
+  - key: location
+    valueType: string
+    required: false
+    label:
+      en: Location
+      nl: Locatie
+    description:
+      en: Geographic location of the relation.
+      nl: Geografische locatie van de relatie.
+    persisted:
+      column: location
+      storageClass: core
+    render:
+      component: MapPicker
+      props:
+        defaultZoom: 13
+        defaultCenter:
+          - 52.0907
+          - 5.1214
+        geocodeProvider: nominatim
+  - key: notes
+    valueType: string
+    required: false
+    label:
+      en: Notes
+      nl: Notities
+    description:
+      en: Free text notes about this relation.
+      nl: Vrije tekst notities over deze relatie.
+    persisted:
+      column: notes
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+relationships:
+  - key: relationGroup
+    kind: belongsTo
+    target: RelationGroup
+    foreignKey: relation_group_id
+    label:
+      en: Relation group
+      nl: Relatiegroep
+ui:
+  routes:
+    list:
+      en: /relations
+      nl: /relaties
+    detail:
+      en: /relations/:id
+      nl: /relaties/:id
+    create:
+      en: /relations/create
+      nl: /relaties/aanmaken
+    edit:
+      en: /relations/:id/edit
+      nl: /relaties/:id/bewerken
+    delete:
+      en: /relations/:id/delete
+      nl: /relaties/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Relations
+        nl: Relaties
+      columns:
+        - key: displayName
+          sortable: true
+        - key: relationType
+          sortable: true
+        - key: status
+          sortable: true
+      defaultSort:
+        key: displayName
+        direction: asc
+      rowLink:
+        en: /relations/:id
+        nl: /relaties/:id
+    detail:
+      header:
+        title: "{{displayName}}"
+        subtitle: "{{relationType}}"
+        badges:
+          - relationType
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Basics
+                nl: Basisgegevens
+              fields:
+                - displayName
+                - relationType
+                - relationSubType
+                - preferredContactChannel
+                - status
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+            - title:
+                en: Location
+                nl: Locatie
+              fields:
+                - address
+                - location
+            - title:
+                en: Notes
+                nl: Notities
+              fields:
+                - notes
+    form:
+      variants:
+        create:
+          title:
+            en: Create relation
+            nl: Relatie aanmaken
+          groups:
+            - title:
+                en: Basics
+                nl: Basisgegevens
+              fields:
+                - displayName
+                - relationType
+                - relationSubType
+                - preferredContactChannel
+                - status
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+            - title:
+                en: Location
+                nl: Locatie
+              fields:
+                - address
+                - location
+            - title:
+                en: Notes
+                nl: Notities
+              fields:
+                - notes
+        edit:
+          extends: create
+          title:
+            en: Edit relation
+            nl: Relatie bewerken

@@ -1,0 +1,26 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: case.provideInput
+category: integrations
+label:
+  nl: Zaakinput leveren
+  en: Provide case input
+description:
+  nl: Levert input aan een wachtende zaak-workflow.
+  en: Provides input to a waiting case workflow.
+configFields:
+  - key: input
+    valueType: object
+    label:
+      nl: Inputpayload
+      en: Input payload
+    description:
+      nl: Waarden die naar de wachtende zaak-workflow worden gestuurd.
+      en: Values sent to the waiting case workflow.
+    help:
+      nl: Gebruik dit in een orchestrator nadat een lopende zaak om input heeft gevraagd. De payload wordt naar de actieve
+        continuation van die zaak gestuurd en moet de sleutels bevatten waar de case.requestInput-node op wacht.
+      en: Use this in an orchestrator after a running case has requested input. The payload is sent to that case's active
+        continuation and must contain the keys the case.requestInput node is waiting for.
+    render:
+      component: JsonEditor

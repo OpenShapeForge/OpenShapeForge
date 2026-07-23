@@ -1,0 +1,155 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: timer
+category: flow
+label:
+  nl: Timer
+  en: Timer
+description:
+  nl: Pauzeert de workflow tot een duur of moment is bereikt.
+  en: Pauses the workflow until a duration or timestamp is reached.
+configFields:
+  - key: mode
+    valueType: string
+    label:
+      nl: Wachttype
+      en: Wait type
+    description:
+      nl: Kies of de timer wacht op een relatieve duur of op een vast moment.
+      en: Choose whether the timer waits for a relative duration or a fixed moment.
+    help:
+      nl: Gebruik een relatieve duur voor standaard wachttijden. Gebruik een vast moment als de workflow tot een concrete
+        datum en tijd moet pauzeren.
+      en: Use a relative duration for standard waiting periods. Use a fixed moment when the workflow must pause until a
+        concrete date and time.
+    defaultValue: duration
+    validation:
+      required: true
+    render:
+      component: ReferenceSelect
+      props:
+        clearable: false
+    options:
+      type: static
+      items:
+        - value: duration
+          label:
+            nl: Relatieve duur
+            en: Relative duration
+        - value: until
+          label:
+            nl: Vast moment
+            en: Fixed moment
+  - key: durationAmount
+    valueType: integer
+    label:
+      nl: Aantal
+      en: Amount
+    description:
+      nl: Hoeveel eenheden de timer moet wachten.
+      en: How many units the timer should wait.
+    help:
+      nl: Samen met de eenheid vormt dit de uiteindelijke wachttijd, bijvoorbeeld 3 dagen of 12 uur.
+      en: Together with the unit this forms the final wait time, for example 3 days or 12 hours.
+    defaultValue: 1
+    validation:
+      required: true
+      min:
+        value: 1
+        message:
+          nl: Aantal moet minimaal 1 zijn.
+          en: Amount must be at least 1.
+    render:
+      component: NumberInput
+      props:
+        min: 1
+        step: 1
+    visibility:
+      logic: and
+      conditions:
+        - field: mode
+          operator: eq
+          value: duration
+  - key: durationUnit
+    valueType: string
+    label:
+      nl: Eenheid
+      en: Unit
+    description:
+      en: Unit used for `durationAmount` when the timer is configured as a relative duration.
+      nl: Eenheid die voor `durationAmount` wordt gebruikt wanneer de timer als relatieve duur is geconfigureerd.
+    help:
+      nl: Bepaalt of het aantal gelezen wordt als minuten, uren of dagen.
+      en: Determines whether the amount is interpreted as minutes, hours, or days.
+    defaultValue: days
+    validation:
+      required: true
+    render:
+      component: ReferenceSelect
+      props:
+        clearable: false
+    options:
+      type: static
+      items:
+        - value: minutes
+          label:
+            nl: Minuten
+            en: Minutes
+        - value: hours
+          label:
+            nl: Uren
+            en: Hours
+        - value: days
+          label:
+            nl: Dagen
+            en: Days
+    visibility:
+      logic: and
+      conditions:
+        - field: mode
+          operator: eq
+          value: duration
+  - key: untilAt
+    valueType: datetime
+    label:
+      nl: Wachten tot
+      en: Wait until
+    description:
+      nl: Exact moment waarop de workflow verder mag.
+      en: Exact moment when the workflow may continue.
+    help:
+      nl: Gebruik dit voor deadlines of vaste aftrapmomenten.
+      en: Use this for deadlines or fixed release moments.
+    validation:
+      required: true
+    render:
+      component: DateTimePicker
+    visibility:
+      logic: and
+      conditions:
+        - field: mode
+          operator: eq
+          value: until
+  - key: skipWeekends
+    valueType: boolean
+    label:
+      nl: Weekend overslaan
+      en: Skip weekends
+    description:
+      nl: Alleen relevant wanneer de timer in dagen rekent.
+      en: Only relevant when the timer is measured in days.
+    help:
+      nl: Als dit aan staat, tellen zaterdag en zondag niet mee in de wachttijd.
+      en: When enabled, Saturday and Sunday are excluded from the wait period.
+    defaultValue: false
+    render:
+      component: Switch
+    visibility:
+      logic: and
+      conditions:
+        - field: mode
+          operator: eq
+          value: duration
+        - field: durationUnit
+          operator: eq
+          value: days

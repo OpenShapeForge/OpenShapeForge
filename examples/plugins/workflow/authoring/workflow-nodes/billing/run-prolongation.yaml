@@ -1,0 +1,148 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: billing.runProlongation
+category: Facturatie
+label:
+  en: Run billing prolongation
+  nl: Facturatie-prolongatie uitvoeren
+description:
+  en: |
+    Execute the prolongation engine over agreements selected by a condition-builder filter.
+    Supports prolongation, void, and reissue (TWK) modes. Financial artifacts produced by this node are
+    immutable — retries replay completed BillingRunItems and resume unfinished ones; corrections must use
+    mode = reissue. Output handles let workflows route on completed/partial/noWork/tenantLocked/configError/failed.
+  nl: |
+    Voert de prolongatiemotor uit over overeenkomsten die door een condition-builder-filter worden geselecteerd.
+    Ondersteunt modi prolongatie, storneren en hercreatie (TWK). Financiële artefacten die door deze node worden
+    geproduceerd zijn onveranderlijk — herhalingen spelen afgeronde BillingRunItems opnieuw af en hervatten
+    onvoltooide items; correcties moeten via modus = reissue. Uitgangshandvatten laten workflows routeren op
+    completed/partial/noWork/tenantLocked/configError/failed.
+configFields:
+  - key: mode
+    valueType: string
+    required: true
+    label:
+      en: Mode
+      nl: Modus
+    description:
+      en: Operating mode — prolongation (default), void (storneren), or reissue for TWK corrections.
+      nl: Modus — prolongatie (standaard), storneren, of hercreatie voor TWK-correcties.
+    help:
+      en: The bridge only accepts `prolongation`, `void`, or `reissue`; anything else falls back to `prolongation`. Pick `reissue` for correction flows rather than trying to mutate existing financial artifacts.
+      nl: De bridge accepteert alleen `prolongation`, `void` of `reissue`; alles daarbuiten valt terug op `prolongation`. Kies `reissue` voor correctieflows in plaats van bestaande financiële artefacten te proberen muteren.
+    defaultValue: prolongation
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: BILLINGRUNMODE
+        clearable: false
+  - key: billUpToDate
+    valueType: string
+    required: true
+    label:
+      en: Bill up to date
+      nl: Factureren tot en met
+    description:
+      en: ISO date or {{variable}}. Inclusive boundary — agreements whose schedule.nextProlongationDate is on or before this
+        date are eligible.
+      nl: ISO-datum of {{variabele}}. Inclusieve bovengrens — overeenkomsten waarvan schema.volgendeProlongatiedatum op of
+        voor deze datum ligt komen in aanmerking.
+    help:
+      en: This is required by the bridge and is usually supplied from a trigger field such as `{{input.billUpToDate}}` in the synthetic billing seed. Missing it routes the node to `configError`.
+      nl: Dit is verplicht voor de bridge en wordt meestal geleverd vanuit een triggerveld zoals `{{input.billUpToDate}}` in de synthetic billing-seed. Ontbreekt dit, dan routeert de node naar `configError`.
+    semanticType: variableTemplate
+    runtime:
+      required: true
+  - key: agreementFilter
+    valueType: object
+    required: false
+    label:
+      en: Agreement filter
+      nl: Overeenkomstenfilter
+    description:
+      en: Optional condition-builder expression that further restricts the eligible sub-agreement set (master agreements are
+        always excluded). Empty selects all due sub-agreements.
+      nl: Optionele condition-builder-expressie die de in aanmerking komende subovereenkomsten verder beperkt
+        (master-overeenkomsten worden altijd uitgesloten). Leeg selecteert alle vervallen subovereenkomsten.
+    help:
+      en: This filter is passed straight into the billing engine as `agreementFilter`. In the synthetic seed it is used to keep the run on active rent agreements only.
+      nl: Dit filter wordt rechtstreeks als `agreementFilter` aan de billing-engine doorgegeven. In de synthetic seed wordt het gebruikt om de run te beperken tot actieve huurovereenkomsten.
+    semanticType: condition
+  - key: dryRun
+    valueType: boolean
+    required: false
+    label:
+      en: Dry run
+      nl: Proefrun
+    description:
+      en: When true, the run plans and computes but does not persist invoices, GL postings, payer collection items, or
+        schedule cursor advances.
+      nl: Indien true plant en berekent de run wel maar worden facturen, grootboekposten, debiteurensplits en cursor-updates
+        niet opgeslagen.
+    help:
+      en: |
+        In dry-run mode the bridge still returns `completed`, but the summary is intentionally reduced and marked with
+        `dryRun: true` because no financial write-side effects were committed.
+      nl: |
+        In dry-run-modus geeft de bridge nog steeds `completed` terug, maar de samenvatting is bewust kleiner en gemarkeerd
+        met `dryRun: true` omdat er geen financiële write-side-effects zijn vastgelegd.
+    defaultValue: false
+  - key: onItemFailure
+    valueType: string
+    required: false
+    label:
+      en: On item failure
+      nl: Bij item-mislukking
+    description:
+      en: How to react to per-agreement failures — "continue" (default; finish remaining agreements and route on
+        partial/completed) or "halt" (stop the run on the first failure and route on failed).
+      nl: Hoe te reageren op mislukking per overeenkomst — "continue" (standaard; verwerk overige overeenkomsten en routeer op
+        partial/completed) of "halt" (stop de run bij de eerste mislukking en routeer op failed).
+    help:
+      en: The bridge forwards this straight into the run request as `continue` or `halt`. Use `halt` only when a single failing agreement should block the entire billing run.
+      nl: De bridge geeft dit direct door in de run-request als `continue` of `halt`. Gebruik `halt` alleen wanneer één falende overeenkomst de hele billing-run moet blokkeren.
+    defaultValue: continue
+    render:
+      component: ReferenceSelect
+      props:
+        clearable: false
+        items:
+          - value: continue
+            label:
+              en: Continue
+              nl: Doorgaan
+          - value: halt
+            label:
+              en: Halt
+              nl: Stoppen
+  - key: maxAgreementsPerWorker
+    valueType: number
+    required: false
+    label:
+      en: Max agreements per worker
+      nl: Max overeenkomsten per worker
+    description:
+      en: Soft sharding hint passed to the planner. Defaults to 200.
+      nl: Zachte sharding-hint voor de planner. Standaard 200.
+    help:
+      en: This does not change billing rules; it is only a workload-sizing hint for the planner and worker fan-out.
+      nl: Dit verandert de billing-regels niet; het is alleen een workload-sizing-hint voor de planner en worker-fanout.
+    defaultValue: 200
+    validation:
+      min: 1
+      max: 10000
+  - key: idempotencyKey
+    valueType: string
+    required: false
+    label:
+      en: Idempotency key (override)
+      nl: Idempotentiesleutel (override)
+    description:
+      en: Optional override. When omitted, the engine derives a stable key from (workflowInstance, nodeId, mode, billUpToDate,
+        agreementFilter snapshot). Replays of the same key resolve to the same BillingRun.
+      nl: Optionele override. Bij weglaten leidt de engine een stabiele sleutel af uit (workflowInstance, nodeId, modus,
+        bill-up-to datum, agreementFilter-snapshot). Herhalingen met dezelfde sleutel vinden dezelfde BillingRun terug.
+    help:
+      en: Leave this empty unless you need multiple workflow instances to intentionally collapse onto the same billing run identity. Normally the derived key is what protects replays and retries from duplicating runs.
+      nl: Laat dit leeg tenzij meerdere workflow-instances expres op dezelfde billing-run-identiteit moeten uitkomen. Normaal gesproken is juist de afgeleide sleutel wat replays en retries tegen duplicatie beschermt.
+    semanticType: variableTemplate

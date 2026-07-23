@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-phase0/authorization-config.schema.json",
+  "title": "Authorization Config Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind"],
+
+  "$defs": {
+    "authorizationGroupNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "realmRoles": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "subGroups": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/authorizationGroupNode" }
+        }
+      }
+    }
+  },
+
+  "properties": {
+    "schemaVersion": { "type": "integer", "enum": [1, 2] },
+    "kind": { "type": "string", "const": "authorizationConfig" },
+
+    "realm": {
+      "type": "object",
+      "description": "Realm-level settings written directly to realm-export.json.",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "displayName": { "type": "string", "minLength": 1 },
+        "enabled": { "type": "boolean" },
+        "sslRequired": { "type": "string", "enum": ["none", "external", "all"] },
+        "loginTheme": { "type": "string", "minLength": 1 },
+        "accountTheme": { "type": "string", "minLength": 1 },
+        "adminTheme": { "type": "string", "minLength": 1 },
+        "emailTheme": { "type": "string", "minLength": 1 },
+        "registrationAllowed": { "type": "boolean" },
+        "loginWithEmailAllowed": { "type": "boolean" },
+        "duplicateEmailsAllowed": { "type": "boolean" },
+        "resetPasswordAllowed": { "type": "boolean" },
+        "editUsernameAllowed": { "type": "boolean" },
+        "bruteForceProtected": { "type": "boolean" },
+        "organizationsEnabled": { "type": "boolean" },
+        "accessTokenLifespan": { "type": "integer", "minimum": 1 },
+        "ssoSessionIdleTimeout": { "type": "integer", "minimum": 1 },
+        "ssoSessionMaxLifespan": { "type": "integer", "minimum": 1 },
+        "events": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "adminEnabled": { "type": "boolean" },
+            "listeners": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+
+    "keycloak": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "client": {
+          "type": "string",
+          "description": "Legacy (schemaVersion 1): the entity-role client. Prefer `entityRoleClient`.",
+          "minLength": 1
+        },
+        "entityRoleClient": {
+          "type": "string",
+          "description": "Keycloak client ID that receives the compiler-generated entity client roles.",
+          "minLength": 1
+        },
+        "realm": {
+          "type": "object",
+          "description": "Legacy (schemaVersion 1): realm-level admin events config. Prefer top-level `realm`.",
+          "additionalProperties": false,
+          "properties": {
+            "eventsEnabled": { "type": "boolean" },
+            "adminEventsEnabled": { "type": "boolean" },
+            "eventsListeners": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "realmRoles": {
+          "type": "object",
+          "description": "Legacy (schemaVersion 1): realm role composites. Prefer top-level `realmRoles`.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["description", "includes"],
+            "properties": {
+              "description": { "type": "string" },
+              "includes": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "minItems": 1
+              }
+            }
+          }
+        },
+        "clients": {
+          "type": "array",
+          "description": "Clients to emit into realm-export.json. Shape (protocolMappers, redirectUris, defaults) comes from the generator.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "kind": { "type": "string", "enum": ["gateway", "bearerOnly", "serviceAccount"] },
+              "name": { "type": "string" },
+              "secret": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+
+    "realmRoles": {
+      "type": "object",
+      "description": "Realm-level roles. Composites can be explicit per-client or wildcard-expanded from entity-derived roles.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "description": { "type": "string" },
+          "composite": { "type": "boolean" },
+          "attributes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          },
+          "composites": {
+            "type": "object",
+            "description": "Per-client composite role mappings.",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          },
+          "includes": {
+            "type": "array",
+            "description": "Wildcard patterns (e.g. '*:full') expanded over entity-derived roles at generate time.",
+            "items": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+
+    "clientRoles": {
+      "type": "object",
+      "description": "Hand-authored client roles per clientId. Merged with entity-derived roles at generate time.",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "groups": {
+      "type": "array",
+      "description": "Keycloak group hierarchy for dev/demo. Paths in the export are built as /segment/segment.",
+      "items": { "$ref": "#/$defs/authorizationGroupNode" }
+    },
+
+    "users": {
+      "type": "array",
+      "description": "Dev test users. Password is plain-text; suitable only for development realms.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["username", "password"],
+        "properties": {
+          "username": { "type": "string", "minLength": 1 },
+          "email": { "type": "string" },
+          "firstName": { "type": "string" },
+          "lastName": { "type": "string" },
+          "password": { "type": "string", "minLength": 1 },
+          "tid": { "type": "string", "description": "Tenant id; surfaced on the `tid` and `organization` claims." },
+          "realmRoles": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "groups": {
+            "type": "array",
+            "description": "Keycloak group paths; must match emitted group `path` values.",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "clientRoles": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          },
+          "enabled": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

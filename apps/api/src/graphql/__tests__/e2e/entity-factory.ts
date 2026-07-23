@@ -1,0 +1,157 @@
+/**
+ * Manifest-driven entity derivation for the e2e suite: which entities exist,
+ * how their GraphQL fields map to columns, and how to create valid rows
+ * (recursively satisfying required foreign keys). Mirrors the engine's own
+ * column rules so the suite can never drift from the API.
+ */
+import { expect } from "bun:test";
+import { randomUUID } from "node:crypto";
+import { getGeneratedCrudTables } from "../../generated-crud.js";
+import {
+  createdRows,
+  expectData,
+  seed,
+  type GeneratedTable,
+  type Identity,
+} from "./harness.js";
+
+export type Column = GeneratedTable["columns"][number];
+
+export const tables = getGeneratedCrudTables().filter((table) => table.source?.graphql);
+export const tablesByTypeName = new Map(
+  tables.map((table) => [table.source!.graphql!.typeName, table]),
+);
+export const tablesByName = new Map(tables.map((table) => [table.name, table]));
+
+export function fieldName(column: Column): string {
+  return (
+    column.sourceField ??
+    column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase())
+  );
+}
+
+export function isMutableColumn(column: Column): boolean {
+  return (
+    !column.primaryKey &&
+    column.generated !== "identity" &&
+    column.name !== "tenant_id" &&
+    column.name !== "created_at" &&
+    column.name !== "updated_at"
+  );
+}
+
+/** FK column name -> target table name (e.g. relation_group_id -> erp.relation_groups). */
+export function foreignKeyTargets(table: GeneratedTable): Map<string, string> {
+  // relationshipStatus is present in manifest.json but not in the engine's
+  // narrowed source type — it only declares the graphql block it needs.
+  const source = table.source as
+    | { relationshipStatus?: { emittedReferences?: string[] } }
+    | undefined;
+  const emitted = source?.relationshipStatus?.emittedReferences ?? [];
+  const map = new Map<string, string>();
+  for (const reference of emitted) {
+    const match = /^(.+?)->(.+?)\.(.+?)\.(.+)$/.exec(reference);
+    if (match) {
+      map.set(match[1]!, `${match[2]}.${match[3]}`);
+    }
+  }
+  return map;
+}
+
+export function sampleValue(column: Column, marker: string): unknown {
+  switch (column.type) {
+    case "text":
+      return `e2e-${marker}-${fieldName(column)}`;
+    case "integer":
+    case "bigint":
+      return 7;
+    case "numeric":
+      return 7.5;
+    case "boolean":
+      return true;
+    case "uuid":
+      return randomUUID();
+    case "date":
+      return "2026-01-02";
+    case "timestamptz":
+      return "2026-01-02T03:04:05.000Z";
+    case "jsonb":
+      return {};
+    default:
+      return `e2e-${marker}`;
+  }
+}
+
+/**
+ * Creates a row for `table`, recursively creating rows for any REQUIRED
+ * foreign-key columns first. Returns the new row's id and tracks it for
+ * cleanup.
+ */
+export async function createRow(
+  table: GeneratedTable,
+  identity: Identity,
+  overrides: Record<string, unknown> = {},
+  depth = 0,
+): Promise<string> {
+  if (depth > 5) {
+    throw new Error(`FK dependency chain too deep while creating ${table.name}`);
+  }
+  const graphql = table.source!.graphql!;
+  const fkTargets = foreignKeyTargets(table);
+  const input: Record<string, unknown> = {};
+
+  for (const column of table.columns) {
+    if (!isMutableColumn(column)) continue;
+    const field = fieldName(column);
+    if (field in overrides) {
+      input[field] = overrides[field];
+      continue;
+    }
+    const fkTarget = fkTargets.get(column.name);
+    if (fkTarget) {
+      if (column.required) {
+        const targetTable = tablesByName.get(fkTarget);
+        if (!targetTable) {
+          throw new Error(
+            `Required FK ${table.name}.${column.name} targets unknown table ${fkTarget}`,
+          );
+        }
+        input[field] = await createRow(targetTable, identity, {}, depth + 1);
+      }
+      continue; // optional FKs stay unset unless overridden
+    }
+    if (column.required) {
+      input[field] = sampleValue(column, seed);
+    }
+  }
+
+  const data = await expectData(
+    identity,
+    `mutation($input: Create${graphql.typeName}Input!) {
+       ${graphql.createMutationName}(input: $input) { id }
+     }`,
+    { input },
+  );
+  const id = data[graphql.createMutationName]?.id as string;
+  expect(id).toBeTruthy();
+  createdRows.push({ table, id, identity });
+  return id;
+}
+
+/** Stop tracking a row the test already deleted itself. */
+export function untrackRow(id: string) {
+  const index = createdRows.findIndex((row) => row.id === id);
+  if (index >= 0) {
+    createdRows.splice(index, 1);
+  }
+}
+
+export function textColumnFor(
+  table: GeneratedTable,
+  preferredField?: string,
+): Column | undefined {
+  const mutableText = table.columns.filter(
+    (column) => isMutableColumn(column) && column.type === "text",
+  );
+  return mutableText.find((column) => fieldName(column) === preferredField) ?? mutableText[0];
+}

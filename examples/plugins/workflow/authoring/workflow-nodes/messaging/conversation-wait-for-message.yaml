@@ -1,0 +1,112 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: conversation.waitForMessage
+category: Messaging
+label:
+  en: Wait for message
+  nl: Wacht op bericht
+description:
+  en: Pause the workflow until the customer sends a new message in the same conversation.
+  nl: Pauzeer de workflow tot de klant een nieuw bericht stuurt in dezelfde conversatie.
+configFields:
+  - key: conversationId
+    valueType: string
+    semanticType: conversationId
+    label:
+      en: Conversation ID
+      nl: Conversatie-ID
+    description:
+      en: Conversation to watch for the next inbound customer message.
+      nl: Conversatie waarin op het volgende inkomende klantbericht wordt gewacht.
+    help:
+      en: Usually this is the active conversation from workflow context. The wait listens for a new inbound message in this
+        same conversation; it does not open or switch conversations.
+      nl: Meestal is dit de actieve conversatie uit de workflowcontext. De wachtstap luistert naar een nieuw inkomend bericht
+        in dezelfde conversatie; hij opent of wisselt geen conversaties.
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: insertText
+  - key: waitToken
+    valueType: string
+    label:
+      en: Wait token
+      nl: Wachttoken
+    description:
+      en: Stable token used to register and resume this wait.
+      nl: Stabiele token waarmee deze wachtstap wordt geregistreerd en hervat.
+    help:
+      en: Leave empty to use the current workflow instance and node ID. Set this only when repeated visits need a deliberate
+        custom token.
+      nl: Laat leeg om de huidige workflowinstance en node-ID te gebruiken. Vul dit alleen in wanneer herhaalde bezoeken een
+        bewust aangepaste token nodig hebben.
+  - key: timeoutMs
+    valueType: number
+    label:
+      en: Timeout (ms)
+      nl: Timeout (ms)
+    description:
+      en: Maximum time to wait for an inbound message.
+      nl: Maximale tijd om op een inkomend bericht te wachten.
+    help:
+      en: The default is ten minutes. A value of 0 registers a wait without a timeout timestamp; otherwise the timeout path
+        can be used when no matching message arrives in time.
+      nl: De standaard is tien minuten. Een waarde van 0 registreert een wachtstap zonder timeout-tijdstip; anders kan het
+        timeout-pad worden gebruikt wanneer geen passend bericht op tijd binnenkomt.
+    defaultValue: 600000
+    validation:
+      required: true
+      min: 0
+    render:
+      component: NumberInput
+  - key: bufferConfig
+    valueType: object
+    label:
+      en: Buffer configuration
+      nl: Bufferconfiguratie
+    description:
+      en: Optional limits for message buffering around the wait.
+      nl: Optionele limieten voor berichtbuffering rond de wachtstap.
+    help:
+      en: The current bridge registers the wait against platform events and flushes accumulated replies before waiting. Keep
+        these values bounded for future buffering behavior.
+      nl: De huidige bridge registreert de wachtstap op platformevents en verzendt verzamelde antwoorden voordat hij wacht.
+        Houd deze waarden begrensd voor toekomstig buffergedrag.
+    defaultValue:
+      maxMessages: 50
+      maxWaitMs: 0
+    children:
+      - key: maxMessages
+        valueType: number
+        label:
+          en: Max messages
+          nl: Max berichten
+        description:
+          en: Maximum number of messages that may be considered for a buffered wait.
+          nl: Maximumaantal berichten dat voor een gebufferde wachtstap kan meetellen.
+        help:
+          en: Keep this high enough for short bursts but low enough to avoid unbounded message handling.
+          nl: Houd dit hoog genoeg voor korte pieken maar laag genoeg om onbegrensde berichtverwerking te voorkomen.
+        defaultValue: 50
+        validation:
+          min: 1
+        render:
+          component: NumberInput
+      - key: maxWaitMs
+        valueType: number
+        label:
+          en: Wait buffer (ms)
+          nl: Wachtbuffer (ms)
+        description:
+          en: Extra buffer duration after the first matching message.
+          nl: Extra buffertijd na het eerste passende bericht.
+        help:
+          en: The default 0 means resume as soon as a matching inbound message is available. Increase only when a flow is
+            designed to collect a short burst of customer messages.
+          nl: De standaard 0 betekent hervatten zodra een passend inkomend bericht beschikbaar is. Verhoog dit alleen wanneer
+            een flow bewust een korte reeks klantberichten verzamelt.
+        defaultValue: 0
+        validation:
+          min: 0
+        render:
+          component: NumberInput

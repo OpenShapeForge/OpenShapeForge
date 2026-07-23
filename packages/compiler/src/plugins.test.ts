@@ -1,0 +1,126 @@
+import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { loadActivePlatformManifest } from "./active-manifest.js";
+import { collectAllArtifacts } from "./index.js";
+import { mergePluginPlatformTables } from "./plugins.js";
+import type { PlatformSchemaManifest } from "./schema.js";
+
+const repoRoot = resolve(import.meta.dir, "../../..");
+
+describe("compiler plugins", () => {
+  test("collectAllArtifacts runs configured plugins deterministically", async () => {
+    const first = await collectAllArtifacts(repoRoot);
+    const second = await collectAllArtifacts(repoRoot);
+
+    const docs = first.groups.plugins.find((entry) => entry.name === "entity-docs");
+    expect(docs).toBeTruthy();
+    expect(docs!.artifacts.map((artifact) => artifact.path)).toEqual([
+      "docs/entities.generated.md",
+    ]);
+    expect(docs!.artifacts[0]!.contents).toContain("## Relation (`erp.relations`)");
+    expect(first.ownedPaths.files).toContain("docs/entities.generated.md");
+
+    expect(second.all.map((a) => [a.path, a.contents])).toEqual(
+      first.all.map((a) => [a.path, a.contents]),
+    );
+  });
+
+  test("plugin context exposes compiled entity contracts", async () => {
+    const { groups } = await collectAllArtifacts(repoRoot);
+    // The docs artifact is contract/manifest-driven; every generatedCrud
+    // entity must appear exactly once.
+    const docs = groups.plugins.find((entry) => entry.name === "entity-docs")!;
+    const headings = docs.artifacts[0]!.contents.match(/^## /gm) ?? [];
+    const crudTables = groups.db
+      .filter((artifact) => artifact.path.endsWith("manifest.json"))
+      .flatMap((artifact) =>
+        (JSON.parse(artifact.contents) as { tables: { generatedCrud?: boolean; source?: object }[] }).tables.filter(
+          (table) => table.generatedCrud && table.source,
+        ),
+      );
+    expect(headings.length).toBe(crudTables.length);
+  });
+
+  test("workflow plugin emits api workflow artifacts deterministically", async () => {
+    const first = await collectAllArtifacts(repoRoot);
+    const second = await collectAllArtifacts(repoRoot);
+
+    const workflow = first.groups.plugins.find((entry) => entry.name === "workflow");
+    expect(workflow).toBeTruthy();
+
+    const paths = workflow!.artifacts.map((artifact) => artifact.path);
+    expect(paths).toContain("apps/api/src/generated/workflow/node-catalog.seed.json");
+    expect(paths).toContain("apps/api/src/generated/workflow/node-catalog.ts");
+    expect(paths).toContain(
+      "apps/api/src/generated/workflow/entity-workflow-nodes.generated.json",
+    );
+
+    // Web-side artifacts (contract, designer registries, seeds) only exist
+    // when apps/web does — in a data-layer + API repo everything is api-side.
+    if (!existsSync(join(repoRoot, "apps/web"))) {
+      expect(paths.every((path) => path.startsWith("apps/api/"))).toBe(true);
+    }
+
+    // Double-run determinism, byte for byte.
+    const secondWorkflow = second.groups.plugins.find((entry) => entry.name === "workflow");
+    expect(secondWorkflow?.artifacts).toEqual(workflow!.artifacts);
+
+    // The node-catalog seed carries the standard catalog with a stable checksum.
+    const seed = JSON.parse(
+      workflow!.artifacts.find((artifact) =>
+        artifact.path.endsWith("node-catalog.seed.json"),
+      )!.contents,
+    ) as { checksum: string; catalog: string; entries: unknown[] };
+    expect(seed.catalog).toBe("standard");
+    expect(seed.checksum).toMatch(/^[0-9a-f]{64}$/);
+    expect(seed.entries.length).toBeGreaterThan(0);
+
+    // The plugin's authoring layer patches Relation back into workflow-node
+    // generation (entityPatch), so the entity bridge index must list it.
+    const bridge = JSON.parse(
+      workflow!.artifacts.find((artifact) =>
+        artifact.path.endsWith("entity-workflow-nodes.generated.json"),
+      )!.contents,
+    ) as { type: string }[];
+    expect(bridge.map((entry) => entry.type)).toContain("entity.core.relation.create");
+
+    // Its generated root is gated by the shared stale/orphan checks.
+    expect(first.ownedPaths.roots).toContain("apps/api/src/generated/workflow");
+  });
+
+  test("workflow plugin contributes the platform workflow catalog tables", async () => {
+    const manifest = await loadActivePlatformManifest(repoRoot);
+    const tableNames = manifest.tables.map((table) => `${table.schema}.${table.name}`);
+    expect(tableNames).toContain("platform.workflow_node_catalog_entries");
+    expect(tableNames).toContain("platform.entity_trigger_registry");
+    expect(tableNames).toContain("platform.entity_field_suggestions");
+
+    const catalogTable = manifest.tables.find(
+      (table) => table.schema === "platform" && table.name === "workflow_node_catalog_entries",
+    )!;
+    expect(catalogTable.tenantScoped).toBe(false);
+    expect(catalogTable.generatedCrud).toBe(false);
+    expect(catalogTable.columns.map((column) => column.name)).toContain("catalog_checksum");
+  });
+
+  test("plugin platform-table collisions are rejected", () => {
+    const manifest = {
+      tables: [{ schema: "platform", name: "schema_migrations" }],
+    } as unknown as PlatformSchemaManifest;
+    expect(() =>
+      mergePluginPlatformTables(
+        manifest,
+        [
+          {
+            name: "bad-plugin",
+            contributePlatformTables: () => [
+              { schema: "platform", name: "schema_migrations" } as never,
+            ],
+          },
+        ],
+        { repoRoot, authoringDir: "", webPresent: false },
+      ),
+    ).toThrow(/already exists/);
+  });
+});

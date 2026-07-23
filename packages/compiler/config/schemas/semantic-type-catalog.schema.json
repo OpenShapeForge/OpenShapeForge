@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-phase0/semantic-type-catalog.schema.json",
+  "title": "Semantic Type Catalog Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "types"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "kind": { "type": "string", "const": "semanticTypeCatalog" },
+    "types": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["label", "valueType"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["entityId"] },
+          "label": { "type": "object" },
+          "pluralLabel": { "type": "object" },
+          "valueType": { "type": "string" },
+          "validation": { "type": "object" },
+          "options": {
+            "$ref": "core-entity.schema.json#/$defs/field/properties/options"
+          },
+          "lookup": {
+            "type": "object",
+            "required": ["provider"],
+            "additionalProperties": false,
+            "properties": {
+              "provider": { "type": "string" },
+              "remoteUrl": { "type": "string" },
+              "searchParam": { "type": "string" },
+              "filters": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": ["string", "number", "boolean"]
+                }
+              }
+            }
+          },
+          "render": {
+            "type": "object",
+            "properties": {
+              "display": { "type": "string" },
+              "input": { "type": "string" }
+            }
+          },
+          "format": { "type": "string" },
+          "icon": { "type": "string" },
+          "props": { "type": "object" },
+          "classification": {
+            "type": "object",
+            "properties": {
+              "sensitivity": {
+                "type": "string",
+                "enum": ["public", "internal", "confidential", "pii", "bsn"]
+              },
+              "category": { "type": "string" }
+            }
+          },
+          "retention": {
+            "$ref": "core-entity.schema.json#/$defs/retentionPolicy"
+          },
+          "audit": { "type": "boolean" },
+          "hints": {
+            "type": "object",
+            "properties": {
+              "aiInstructions": { "type": "string" },
+              "sourceHint": { "type": "string" },
+              "requirements": { "type": "string" }
+            }
+          },
+          "entity": { "type": "string" },
+          "listUrl": { "type": "string" },
+          "displayTemplate": { "type": "string" },
+          "filterField": { "type": "string" }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "kind": { "const": "entityId" } },
+              "required": ["kind"]
+            },
+            "then": {
+              "required": ["entity", "listUrl", "icon"],
+              "properties": {
+                "entity": {
+                  "type": "string",
+                  "description": "Kebab-case slug of the entity this type identifies. Must match the entity slug used by the workflow designer's core-entity-options route.",
+                  "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+                },
+                "listUrl": {
+                  "type": "string",
+                  "description": "Canonical workflow-designer options URL.",
+                  "pattern": "^/api/workflow/designer/core-entity-options\\?entity=[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

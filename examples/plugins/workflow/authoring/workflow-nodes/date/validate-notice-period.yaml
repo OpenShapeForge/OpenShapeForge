@@ -1,0 +1,70 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: date.validateNoticePeriod
+category: Datum
+label:
+  en: Validate notice period
+  nl: Opzegtermijn valideren
+description:
+  en: Validates whether a requested end date satisfies a configurable minimum notice period.
+  nl: Controleert of een gewenste einddatum voldoet aan een configureerbare minimale opzegtermijn.
+configFields:
+  - key: desiredEndDate
+    valueType: string
+    required: true
+    label:
+      en: Requested end date
+      nl: Gewenste einddatum
+    description:
+      en: ISO date, Dutch date, or workflow variable containing the requested tenancy end date.
+      nl: ISO-datum, Nederlandse datum of workflowvariabele met de gewenste einddatum.
+    help:
+      en: This field is required. If it is empty the node returns `missing`; if it cannot be parsed as a real date the node returns `configError`.
+      nl: Dit veld is verplicht. Als het leeg is geeft de node `missing` terug; als het niet als echte datum geparsed kan worden geeft de node `configError` terug.
+    semanticType: variableTemplate
+    render:
+      component: Input
+  - key: receivedDate
+    valueType: string
+    required: false
+    label:
+      en: Received date
+      nl: Ontvangstdatum
+    description:
+      en: Optional ISO date or workflow variable. Defaults to today when omitted.
+      nl: Optionele ISO-datum of workflowvariabele. Standaard vandaag wanneer leeg.
+    help:
+      en: The bridge parses this with the same ISO/Dutch date logic as `desiredEndDate`. When it is missing, the current UTC date is used as the receipt date.
+      nl: De bridge parseert dit met dezelfde ISO/Nederlandse datumlogica als `desiredEndDate`. Als het ontbreekt, wordt de huidige UTC-datum als ontvangstdatum gebruikt.
+    semanticType: variableTemplate
+    render:
+      component: Input
+  - key: minNoticeMonths
+    valueType: number
+    required: false
+    label:
+      en: Minimum notice in months
+      nl: Minimale opzegtermijn in maanden
+    description:
+      en: Number of calendar months that must fit between received date and requested end date.
+      nl: Aantal kalendermaanden tussen ontvangst en gewenste einddatum.
+    help:
+      en: The minimum allowed end date is calculated by adding this many calendar months to `receivedDate`, keeping month-end behavior consistent when months have different lengths.
+      nl: De minimale toegestane einddatum wordt berekend door zoveel kalendermaanden bij `receivedDate` op te tellen, met consistente maandgrenslogica wanneer maanden verschillende lengtes hebben.
+    defaultValue: 1
+    validation:
+      min: 0
+      max: 24
+  - key: requireMonthEnd
+    valueType: boolean
+    required: false
+    label:
+      en: Require month end
+      nl: Maandeinde verplicht
+    description:
+      en: When enabled, the requested end date must be the last day of a calendar month.
+      nl: Wanneer ingeschakeld moet de gewenste einddatum op de laatste dag van een kalendermaand vallen.
+    help:
+      en: If this is on and the requested date is not month-end, the node returns `invalid` with reason `desired_end_date_not_month_end`.
+      nl: Als dit aan staat en de gevraagde datum niet op maandultimo valt, geeft de node `invalid` terug met reden `desired_end_date_not_month_end`.
+    defaultValue: false

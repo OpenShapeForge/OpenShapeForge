@@ -1,0 +1,722 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-phase0/compiled-entity-contract.schema.json",
+  "title": "Compiled Entity Contract Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "kind",
+    "entity",
+    "storage",
+    "model",
+    "graphql",
+    "views",
+    "canonical",
+    "profiles"
+  ],
+  "properties": {
+    "contractVersion": { "type": "integer", "const": 1 },
+    "kind": { "type": "string", "const": "compiledEntityContract" },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "module", "title", "domains"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "module": { "type": "string" },
+        "title": { "type": "string" },
+        "description": {
+          "oneOf": [
+            { "type": "string" },
+            { "$ref": "core-entity.schema.json#/$defs/localizedText" }
+          ]
+        },
+        "labels": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+        "domains": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          }
+        },
+        "displayTemplate": { "type": "string", "minLength": 1 },
+        "filterField": { "type": "string", "minLength": 1 }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["table", "columns"],
+      "properties": {
+        "table": { "type": "string" },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field", "column", "type", "nullable", "storageClass"],
+            "properties": {
+              "field": { "type": "string" },
+              "column": { "type": "string" },
+              "type": { "type": "string" },
+              "nullable": { "type": "boolean" },
+              "storageClass": {
+                "type": "string",
+                "enum": ["core", "profile"]
+              },
+              "profile": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fields", "relationships"],
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": { "$ref": "core-entity.schema.json#/$defs/field" }
+        },
+        "relationships": {
+          "type": "array",
+          "items": { "$ref": "core-entity.schema.json#/$defs/relationship" }
+        }
+      }
+    },
+    "graphql": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["typeName", "fields", "queries", "mutations"],
+      "properties": {
+        "typeName": { "type": "string" },
+        "description": { "type": "string" },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type"],
+            "properties": {
+              "name": { "type": "string" },
+              "type": { "type": "string" },
+              "source": {
+                "type": "string",
+                "enum": ["core", "profile"]
+              }
+            }
+          }
+        },
+        "relationships": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "type", "resolve"],
+            "properties": {
+              "name": { "type": "string" },
+              "target": { "type": "string" },
+              "type": { "type": "string" },
+              "resolve": {
+                "type": "string",
+                "enum": ["hasMany", "belongsTo", "manyToMany"]
+              },
+              "foreignKey": { "type": "string" },
+              "via": { "type": "string" }
+            }
+          }
+        },
+        "profileTypes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["typeName", "fieldName", "fields"],
+            "properties": {
+              "typeName": { "type": "string" },
+              "fieldName": { "type": "string" },
+              "description": { "type": "string" },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name", "type"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "type": { "type": "string" },
+                    "column": { "type": "string" },
+                    "mappedFrom": { "type": "string" },
+                    "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+                    "semanticType": { "type": "string" },
+                    "render": { "$ref": "#/$defs/compiledViewRender" },
+                    "displayRender": { "$ref": "#/$defs/compiledViewRender" },
+                    "validation": { "type": "object" },
+                    "classification": {
+                      "oneOf": [
+                        { "type": "string" },
+                        { "type": "object" }
+                      ]
+                    },
+                    "retention": { "type": "object" },
+                    "audit": { "type": "boolean" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "queries": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["single", "list"],
+          "properties": {
+            "single": {
+              "type": "object",
+              "required": ["name", "args"],
+              "properties": {
+                "name": { "type": "string" },
+                "args": { "type": "array", "items": { "type": "object" } }
+              }
+            },
+            "list": {
+              "type": "object",
+              "required": ["name", "args"],
+              "properties": {
+                "name": { "type": "string" },
+                "args": { "type": "array", "items": { "type": "object" } }
+              }
+            }
+          }
+        },
+        "mutations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["create", "update", "delete"],
+          "properties": {
+            "create": { "type": "object" },
+            "update": { "type": "object" },
+            "delete": { "type": "object" }
+          }
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "entity": {
+          "$ref": "core-entity.schema.json#/$defs/retentionPolicy"
+        },
+        "policies": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "core-entity.schema.json#/$defs/retentionPolicy"
+          }
+        }
+      }
+    },
+    "hooks": {
+      "$ref": "core-entity.schema.json#/properties/hooks"
+    },
+    "permissions": {
+      "$ref": "core-entity.schema.json#/properties/permissions"
+    },
+    "authorization": {
+      "type": "object",
+      "description": "Compiled RBAC authorization metadata."
+    },
+    "views": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/compiledViewContext"
+      }
+    },
+    "canonical": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contexts"],
+      "properties": {
+        "contexts": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/canonicalCompilerContext"
+          }
+        }
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/compiledProfile"
+      }
+    }
+  },
+  "$defs": {
+    "localizedTextOrString": {
+      "oneOf": [
+        { "type": "string" },
+        { "$ref": "core-entity.schema.json#/$defs/localizedText" }
+      ]
+    },
+    "compiledViewRender": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component"],
+      "properties": {
+        "component": { "type": "string" },
+        "props": { "type": "object" }
+      }
+    },
+    "compiledFieldEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": {
+        "key": { "type": "string" },
+        "renderOverride": { "$ref": "#/$defs/compiledViewRender" },
+        "fieldDisplayMode": { "type": "string", "enum": ["hidden"] }
+      }
+    },
+    "compiledRelationshipUsage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["render", "name"],
+      "properties": {
+        "render": { "$ref": "#/$defs/compiledViewRender" },
+        "name": { "type": "string" },
+        "via": { "type": "string" },
+        "view": { "type": "string" },
+        "overrides": { "type": "object" }
+      }
+    },
+    "compiledViewGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+        "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+        "icon": { "type": "string" },
+        "render": { "$ref": "#/$defs/compiledViewRender" },
+        "fields": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              { "$ref": "#/$defs/compiledFieldEntry" }
+            ]
+          }
+        },
+        "relationships": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/compiledRelationshipUsage" }
+        },
+        "relationship": { "$ref": "#/$defs/compiledRelationshipUsage" },
+        "groups": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/compiledViewGroup" }
+        }
+      }
+    },
+    "formFieldDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "valueType", "label"],
+      "properties": {
+        "key": { "type": "string" },
+        "valueType": { "type": "string" },
+        "cardinality": { "type": "string", "enum": ["single", "collection"] },
+        "semanticType": { "type": "string" },
+        "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+        "required": { "type": "boolean" },
+        "description": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+        "options": { "type": "object" },
+        "render": { "type": "object" },
+        "validation": { "type": "object" },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/formFieldDefinition" } },
+        "item": { "$ref": "#/$defs/formFieldDefinition" }
+      }
+    },
+    "compiledViewAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": {
+        "key": { "type": "string" },
+        "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+        "description": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+        "tone": { "type": "string", "enum": ["primary", "default", "destructive"] },
+        "icon": { "type": "string" },
+        "visibleWhen": { "type": "object" },
+        "disabledWhen": { "type": "object" },
+        "disabledMessage": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+        "formFields": { "type": "array", "items": { "$ref": "#/$defs/formFieldDefinition" } },
+        "actionRef": { "type": "string" },
+        "route": { "type": "string" },
+        "mutation": { "type": "string" },
+        "targetRef": { "type": "string" },
+        "surface": { "type": "string", "enum": ["modal", "sheet", "inline"] },
+        "inputRef": { "type": "string" },
+        "payload": { "type": "object" },
+        "confirm": { "$ref": "core-entity.schema.json#/$defs/localizedText" }
+      }
+    },
+    "compiledViewContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["page", "routes", "presentations"],
+      "properties": {
+        "page": { "$ref": "#/$defs/compiledViewRender" },
+        "routes": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/localizedTextOrString" }
+        },
+        "actionDefinitions": {
+          "type": "object",
+          "additionalProperties": { "type": "object" }
+        },
+        "presentations": {
+          "type": "object",
+          "additionalProperties": { "type": "object" }
+        },
+        "list": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "kind": { "type": "string", "enum": ["page", "embedded"] },
+            "type": { "type": "string", "const": "list" },
+            "render": { "$ref": "#/$defs/compiledViewRender" },
+            "search": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["render"],
+              "properties": {
+                "render": { "$ref": "#/$defs/compiledViewRender" },
+                "placeholder": { "$ref": "core-entity.schema.json#/$defs/localizedText" }
+              }
+            },
+            "filterBar": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["render", "filters"],
+              "properties": {
+                "render": { "$ref": "#/$defs/compiledViewRender" },
+                "filters": {
+                  "type": "array",
+                  "items": { "type": "object" }
+                }
+              }
+            },
+            "title": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+            "subtitle": {
+              "oneOf": [
+                { "type": "string" },
+                { "$ref": "core-entity.schema.json#/$defs/localizedText" }
+              ]
+            },
+            "columns": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["key"],
+                "properties": {
+                  "key": { "type": "string" },
+                  "sortable": { "type": "boolean" }
+                }
+              }
+            },
+            "defaultSort": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "key": { "type": "string" },
+                "direction": { "type": "string", "enum": ["asc", "desc"] }
+              }
+            },
+            "rowLink": { "$ref": "#/$defs/localizedTextOrString" },
+            "pageSize": { "type": "integer" },
+            "emptyState": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+            "itemAction": { "type": "object" },
+            "actions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/compiledViewAction" }
+            },
+            "rowActions": {
+              "type": "array",
+              "items": { "type": "object" }
+            }
+          }
+        },
+        "detail": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "kind": { "type": "string", "const": "page" },
+            "type": { "type": "string", "const": "detail" },
+            "render": { "$ref": "#/$defs/compiledViewRender" },
+            "header": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["render", "title"],
+              "properties": {
+                "render": { "$ref": "#/$defs/compiledViewRender" },
+                "title": { "type": "string" },
+                "subtitle": { "type": "string" },
+                "badges": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["render", "items"],
+                  "properties": {
+                    "render": { "$ref": "#/$defs/compiledViewRender" },
+                    "items": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            },
+            "actions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/compiledViewAction" }
+            },
+            "groups": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["render", "items"],
+              "properties": {
+                "render": { "$ref": "#/$defs/compiledViewRender" },
+                "items": {
+                  "type": "array",
+                  "items": { "$ref": "#/$defs/compiledViewGroup" }
+                }
+              }
+            }
+          }
+        },
+        "form": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "kind": { "type": "string", "const": "page" },
+            "type": { "type": "string", "const": "form" },
+            "actions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/compiledViewAction" }
+            },
+            "variants": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["title", "groups", "submit"],
+                "properties": {
+                  "title": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+                  "extends": { "type": "string" },
+                  "groups": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/compiledViewGroup" }
+                  },
+                  "fieldOverrides": { "type": "object" },
+                  "submit": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["render", "label"],
+                    "properties": {
+                      "render": { "$ref": "#/$defs/compiledViewRender" },
+                      "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" }
+                    }
+                  }
+                }
+              }
+            },
+            "variableSources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["key", "resolver"],
+                "properties": {
+                  "key": { "type": "string" },
+                  "resolver": {
+                    "type": "string",
+                    "enum": ["entityFields", "templateParameters", "workflowGraphVariables"]
+                  },
+                  "params": { "type": "object" }
+                }
+              }
+            }
+          }
+        },
+        "workspace": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "kind": { "type": "string", "const": "page" },
+            "type": { "type": "string", "const": "workspace" },
+            "title": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+            "subtitle": {
+              "oneOf": [
+                { "type": "string" },
+                { "$ref": "core-entity.schema.json#/$defs/localizedText" }
+              ]
+            },
+            "selectionParam": { "type": "string" },
+            "defaultSelectionSource": {
+              "type": "string",
+              "enum": ["firstRow", "none"]
+            },
+            "actions": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/compiledViewAction" }
+            },
+            "layout": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["variant"],
+              "properties": {
+                "variant": {
+                  "type": "string",
+                  "enum": [
+                    "body",
+                    "page-header-body",
+                    "sidebar-body",
+                    "page-header-list-body",
+                    "page-header-list-body-related",
+                    "sidebar-page-body",
+                    "sidebar-page-header-list-body",
+                    "sidebar-page-header-list-body-related"
+                  ]
+                }
+              }
+            },
+            "slots": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["list", "body"],
+              "properties": {
+                "sidebar": { "$ref": "#/$defs/compiledWorkspaceGroupSlot" },
+                "list": { "$ref": "#/$defs/compiledWorkspacePresentationSlot" },
+                "body": { "$ref": "#/$defs/compiledWorkspacePresentationSlot" },
+                "related": { "$ref": "#/$defs/compiledWorkspaceGroupSlot" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "compiledWorkspacePaneSizing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultWidth": { "type": "number" },
+        "minWidth": { "type": "number" },
+        "maxWidth": { "type": "number" },
+        "weight": { "type": "number" },
+        "resizable": { "type": "boolean" }
+      }
+    },
+    "compiledWorkspacePresentationSlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["presentation"],
+      "properties": {
+        "defaultWidth": { "type": "number" },
+        "minWidth": { "type": "number" },
+        "maxWidth": { "type": "number" },
+        "weight": { "type": "number" },
+        "resizable": { "type": "boolean" },
+        "presentation": { "type": "string" }
+      }
+    },
+    "compiledWorkspaceGroupSlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["groups"],
+      "properties": {
+        "defaultWidth": { "type": "number" },
+        "minWidth": { "type": "number" },
+        "maxWidth": { "type": "number" },
+        "weight": { "type": "number" },
+        "resizable": { "type": "boolean" },
+        "title": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+        "groups": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/compiledViewGroup" }
+        }
+      }
+    },
+    "canonicalCompilerContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fields", "presentations"],
+      "properties": {
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "$ref": "https://openshapeforge.example/canonical-field.schema.json"
+            }
+          }
+        },
+        "presentations": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "https://openshapeforge.example/canonical-presentation.schema.json"
+          }
+        }
+      }
+    },
+    "compiledProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entityName", "profileTable", "mapping"],
+      "properties": {
+        "entityName": { "type": "string" },
+        "profileTable": { "type": "string" },
+        "displayTemplate": { "type": "string", "minLength": 1 },
+        "filterField": { "type": "string", "minLength": 1 },
+        "thirdPartyApi": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["purpose", "entityName", "endpoints"],
+          "properties": {
+            "purpose": { "type": "string" },
+            "entityName": { "type": "string" },
+            "endpoints": {
+              "type": "object",
+              "additionalProperties": { "type": "object" }
+            }
+          }
+        },
+        "mapping": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["identity", "fieldMappings"],
+          "properties": {
+            "identity": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["source", "target"],
+              "properties": {
+                "source": { "type": "string" },
+                "target": { "type": "string" }
+              }
+            },
+            "fieldMappings": {
+              "type": "array",
+              "items": { "type": "object" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

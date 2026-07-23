@@ -1,0 +1,12 @@
+{
+  "name": "@openshapeforge/example-plugin-workflow",
+  "version": "0.1.0",
+  "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "type": "module",
+  "description": "Example compiler plugin: workflow node catalogs (generators + platform tables + authoring layer).",
+  "module": "index.ts",
+  "dependencies": {
+    "yaml": "^2.8.3"
+  }
+}

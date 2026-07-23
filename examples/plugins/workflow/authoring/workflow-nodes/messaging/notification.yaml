@@ -1,0 +1,285 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: notificatieSend
+category: Messaging
+label:
+  nl: Notificatie
+  en: Notification
+description:
+  nl: Stuurt een interne notificatie met optionele acties.
+  en: Sends an internal notification with optional actions.
+configFields:
+  - key: target
+    valueType: object
+    label:
+      nl: Doel
+      en: Target
+    description:
+      nl: Kies welke ERP-relatie de runtime notificatie ontvangt.
+      en: Choose which ERP relation receives the runtime notification.
+    help:
+      nl: Bij publiceren bewaart de workflow alleen de gekozen relatie-ID. Tijdens uitvoering gebruikt openshapeforge-realtime dit
+        doel om de notificatie naar de juiste sessie te sturen. Je kunt ook een dynamische variabele kiezen als de
+        ontvanger pas eerder in de workflow bekend wordt.
+      en: Publishing stores only the selected relation ID. At runtime openshapeforge-realtime uses this target to deliver the
+        notification to the matching session. You can also choose a dynamic variable when the recipient is only known
+        earlier in the workflow.
+    children:
+      - key: userId
+        valueType: string
+        label:
+          nl: Relatie
+          en: Relation
+        description:
+          nl: De ERP-relatie die de notificatie ontvangt.
+          en: The ERP relation who receives the notification.
+        help:
+          nl: Zoek op naam en kies de relatie uit ERP. De workflow slaat de relatie-ID op, niet de zichtbare naam. Kies een
+            dynamische variabele als een eerdere node de relatie-ID levert.
+          en: Search by name and choose the relation from ERP. The workflow stores the relation ID, not the visible name. Choose a
+            dynamic variable when an upstream node provides the relation ID.
+        placeholder:
+          nl: Zoek ERP-relatie of kies variabele
+          en: Search ERP relation or choose variable
+        validation:
+          required: true
+        options:
+          type: remote
+          remoteUrl: /api/workflow/designer/core-entity-options?entity=relation
+        render:
+          component: OptionVariablePicker
+          props:
+            remoteSearchParam: search
+            searchPlaceholder: Zoek relatie of variabele
+            emptyMessage: Geen relaties of variabelen gevonden.
+            optionSectionLabel: ERP-relaties
+            variableSectionLabel: Dynamische relatie-ID
+            selectionSync: notificationRelationTarget
+  - key: templateSlug
+    valueType: string
+    label:
+      nl: Template
+      en: Template
+    description:
+      nl: Kies de ERP-notificatietemplate voor de in-app of e-mailnotificatie.
+      en: Choose the ERP notification template for the in-app or email notification.
+    help:
+      nl: De template bepaalt de titel, tekst, taalvarianten en eventuele e-mailvariant. De workflow slaat de template-slug
+        op; tijdens uitvoering worden de parameterbindingen hieronder ingevuld en gebruikt om de uiteindelijke
+        notificatie te renderen.
+      en: The template defines the title, body, language variants, and optional email variant. The workflow stores the
+        template slug; at runtime the parameter bindings below are resolved and used to render the final notification.
+    options:
+      type: remote
+      remoteUrl: /api/templates/options
+    render:
+      component: Select
+  - key: parameterBindings
+    valueType: object
+    label:
+      nl: Parameter bindings
+      en: Parameter bindings
+    description:
+      nl: Koppel elke templateparameter aan een vaste waarde of aan een dynamische waarde uit de workflow.
+      en: Bind each template parameter to a fixed value or to a dynamic value from the workflow.
+    help:
+      nl: Deze velden verschijnen pas nadat je een notificatietemplate kiest. Elke binding wordt tijdens uitvoering opgelost
+        en in de ERP-template geplaatst. Ontbrekende verplichte bindingen zorgen ervoor dat publiceren of valideren een
+        fout toont.
+      en: These fields appear after selecting a notification template. Each binding is resolved at runtime and inserted into
+        the ERP template. Missing required bindings are reported during validation or publishing.
+    defaultValue: {}
+    render:
+      component: NotificationTemplateVariablesEditor
+  - key: whatsappTemplateId
+    valueType: string
+    label:
+      en: WhatsApp template
+      nl: WhatsApp template
+    description:
+      en: Optional approved WhatsApp template to send alongside the runtime notification.
+      nl: Optionele goedgekeurde WhatsApp-template om naast de runtime notificatie te versturen.
+    help:
+      nl: Gebruik dit alleen wanneer de ontvanger ook via WhatsApp een bericht moet krijgen. De lijst komt uit Messaging en
+        bevat alleen templates die daar bekend zijn. WhatsApp vereist vooraf goedgekeurde templates; vrije tekst wordt
+        hier niet verzonden.
+      en: Use this only when the recipient should also receive a WhatsApp message. The list comes from Messaging and contains
+        only templates known there. WhatsApp requires pre-approved templates; free-form text is not sent here.
+    options:
+      type: remote
+      remoteUrl: /api/messaging/whatsapp-templates/options
+    render:
+      component: Select
+  - key: whatsappParameterBindings
+    valueType: object
+    label:
+      nl: WhatsApp parameter bindings
+      en: WhatsApp parameter bindings
+    description:
+      nl: Koppel elke WhatsApp-templateparameter aan een vaste of dynamische workflowwaarde.
+      en: Bind each WhatsApp template parameter to a fixed or dynamic workflow value.
+    help:
+      nl: WhatsApp-templates bevatten genummerde of benoemde placeholders. Deze bindingen vullen die placeholders tijdens
+        uitvoering. Laat optionele waarden leeg als de template dat toestaat; verplichte ontbrekende waarden blokkeren
+        validatie.
+      en: WhatsApp templates contain numbered or named placeholders. These bindings fill those placeholders at runtime. Leave
+        optional values empty when the template allows it; missing required values block validation.
+    defaultValue: {}
+    render:
+      component: NotificationTemplateVariablesEditor
+  - key: actions
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    label:
+      nl: Acties
+      en: Actions
+    description:
+      nl: Optionele knoppen die op de notificatiekaart verschijnen.
+      en: Optional buttons shown on the notification card.
+    help:
+      nl: Elke actie wordt een knop voor de gebruiker en krijgt een eigen output-verbinding op de node. Gebruik een herkenbaar
+        label; vul een stabiele actie-ID in als vervolgstappen, rapportage of tests dezelfde knop blijvend moeten
+        herkennen.
+      en: Each action becomes a user-facing button and gets its own output connection on the node. Use a clear label; set a
+        stable action ID when follow-up steps, reporting, or tests need to keep recognizing the same button.
+    defaultValue: []
+    item:
+      key: action
+      valueType: object
+      description:
+        nl: Een notificatieactie die als knop wordt getoond.
+        en: One notification action shown as a button.
+      help:
+        nl: Elke actie krijgt een eigen output-handle op de node. Gebruik acties alleen voor keuzes die de ontvanger bewust
+          kan maken vanuit de notificatie.
+        en: Each action gets its own output handle on the node. Use actions only for choices the recipient can deliberately
+          make from the notification.
+      children:
+        - key: id
+          valueType: string
+          label:
+            nl: Actie-ID
+            en: Action ID
+          description:
+            nl: Optionele stabiele sleutel voor deze actie en de bijbehorende output-handle.
+            en: Optional stable key for this action and its corresponding output handle.
+          help:
+            nl: Laat leeg als de runtime een sleutel uit het label mag afleiden. Vul een stabiele ID in wanneer vervolgstappen
+              of tests naar dezelfde output-handle moeten blijven verwijzen.
+            en: Leave empty when the runtime may derive a key from the label. Enter a stable ID when follow-up steps or tests
+              must keep referring to the same output handle.
+          placeholder:
+            nl: bijv. open_taak
+            en: e.g. open_task
+          render:
+            component: Input
+        - key: label
+          valueType: string
+          required: true
+          label:
+            nl: Label
+            en: Label
+          description:
+            nl: Tekst die op de notificatiekaart wordt getoond.
+            en: Text shown on the notification card.
+          help:
+            nl: Kies een kort werkwoordelijk label dat duidelijk maakt wat de knop doet voor de ontvanger.
+            en: Choose a short action-oriented label that makes clear what the button does for the recipient.
+          render:
+            component: Input
+        - key: icon
+          valueType: string
+          label:
+            nl: Icoon
+            en: Icon
+          description:
+            nl: Optionele lucide-icoonnaam, bijvoorbeeld ArrowRight of CheckCircle2.
+            en: Optional lucide icon name, for example ArrowRight or CheckCircle2.
+          help:
+            nl: Gebruik alleen een bestaande lucide-naam. Laat leeg wanneer tekst of emoji voldoende is.
+            en: Use only an existing lucide name. Leave empty when text or emoji is enough.
+          render:
+            component: Input
+        - key: emoji
+          valueType: string
+          label:
+            nl: Emoji
+            en: Emoji
+          description:
+            nl: Optionele emoji als compact alternatief voor een icoon.
+            en: Optional emoji as a compact alternative to an icon.
+          help:
+            nl: Gebruik spaarzaam en alleen wanneer de emoji de actie sneller herkenbaar maakt.
+            en: Use sparingly and only when the emoji makes the action easier to recognize.
+          render:
+            component: Input
+  - key: entityRef
+    valueType: object
+    label:
+      nl: Entiteitsreferentie
+      en: Entity reference
+    description:
+      nl: Optionele verwijzing naar het record waar deze notificatie over gaat.
+      en: Optional reference to the record this notification is about.
+    help:
+      nl: Vul dit in als de notificatie de gebruiker naar een taak, zaak, relatie of ander record moet brengen. De entiteit
+        bepaalt het type record; de instantie-ID bepaalt welk specifieke record wordt geopend.
+      en: Fill this when the notification should take the user to a task, case, relation, or another record. The entity
+        identifies the record type; the instance ID identifies the specific record to open.
+    children:
+      - key: entity
+        valueType: string
+        label:
+          nl: Entiteit
+          en: Entity
+        description:
+          nl: Het type record waar deze notificatie naar verwijst.
+          en: The record type this notification links to.
+        help:
+          nl: Kies bijvoorbeeld taak, zaak of relatie. Deze keuze bepaalt welke route de notificatie gebruikt wanneer de gebruiker
+            doorklikt.
+          en: Choose for example task, case, or relation. This determines which route the notification uses when the user opens
+            it.
+        options:
+          type: remote
+          remoteUrl: /api/workflow/designer/trigger-options/entities
+        render:
+          component: EntityTriggerEntityPicker
+      - key: domain
+        valueType: string
+        label:
+          nl: Domein
+          en: Domain
+        description:
+          nl: Verborgen technisch domein van de gekozen entiteit.
+          en: Hidden technical domain of the selected entity.
+        help:
+          nl: Dit veld wordt door de entiteitpicker gesynchroniseerd en blijft verborgen voor auteurs. Pas het niet handmatig
+            aan.
+          en: This field is synchronized by the entity picker and stays hidden from authors. Do not edit it manually.
+        defaultValue: ""
+        readOnly: true
+        visibility:
+          conditions:
+            - field: __trigger_internal_hidden__
+              operator: eq
+              value: true
+        render:
+          component: Input
+      - key: instanceId
+        valueType: string
+        label:
+          nl: Instantie-ID
+          en: Instance ID
+        description:
+          nl: De ID van het specifieke record waar de notificatie naartoe linkt.
+          en: The ID of the specific record the notification links to.
+        help:
+          nl: Kies meestal een dynamische variabele, bijvoorbeeld de taak-ID of zaak-ID uit een eerdere node. Samen met de
+            entiteit hierboven vormt dit de klikbare verwijzing in de notificatie.
+          en: Usually choose a dynamic variable, for example the task ID or case ID from an upstream node. Together with the
+            entity above, this creates the clickable reference in the notification.
+        render:
+          component: OptionVariablePicker

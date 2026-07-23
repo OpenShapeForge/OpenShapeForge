@@ -1,0 +1,390 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: createCase
+category: integrations
+label:
+  nl: Zaak aanmaken
+  en: Create case
+description:
+  nl: Maakt een zaak aan en start de gekoppelde zaak-workflow.
+  en: Creates a case and starts the linked case workflow.
+configFields:
+  - key: caseTemplateId
+    valueType: string
+    semanticType: caseTemplateId
+    label:
+      nl: Zaaksjabloon
+      en: Case template
+    description:
+      nl: Selecteer het zaaksjabloon dat na het aanmaken gestart wordt.
+      en: Select the case template that will be started after creation.
+    help:
+      nl: De runtime zoekt de gepubliceerde workflow die bij dit zaaksjabloon hoort.
+      en: The runtime resolves the published workflow linked to this case template.
+    validation:
+      required: true
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/core-entity-options?entity=case-template
+    render:
+      component: OptionVariablePicker
+      props:
+        clearable: true
+        expectedSemanticType: caseTemplateId
+        valueMode: insertText
+        hideVariables: true
+        optionSectionLabel: Zaaksjablonen
+        selectionSync: publishedWorkflow
+  - key: definitionId
+    valueType: string
+    semanticType: workflowDefinitionId
+    label:
+      nl: Legacy runtime-workflow
+      en: Legacy runtime workflow
+    description:
+      nl: Verborgen directe workflowdefinitie-id voor oudere configuraties.
+      en: Hidden direct workflow definition id for older configurations.
+    help:
+      nl: Gebruik bij nieuwe configuratie het zaaksjabloon. Dit veld blijft verborgen zodat bestaande workflows leesbaar blijven.
+      en: Use the case template for new configuration. This field remains hidden so existing workflows stay readable.
+    render:
+      component: Input
+    workflowInspector:
+      displayMode: hidden
+  - key: caseValues
+    valueType: object
+    label:
+      nl: Nieuwe zaak
+      en: New case
+    description:
+      nl: Waarden waarmee de nieuwe zaak wordt aangemaakt.
+      en: Values used to create the new case.
+    help:
+      nl: Deze waarden worden opgeslagen op de ERP-zaak voordat de gekoppelde zaak-workflow start. Laat velden leeg wanneer
+        de geselecteerde zaak-workflow of runtime defaults ze moet bepalen.
+      en: These values are stored on the ERP case before the linked case workflow starts. Leave fields empty when the selected
+        case workflow or runtime defaults should determine them.
+    children:
+      - key: title
+        valueType: string
+        label:
+          en: Title
+          nl: Titel
+        description:
+          nl: De zichtbare titel van de nieuwe zaak.
+          en: The visible title of the new case.
+        help:
+          nl: Gebruik een korte, klant- of medewerkerleesbare titel. Als dit leeg blijft gebruikt de runtime de naam van de
+            gestarte workflow als fallback.
+          en: Use a short title readable by customers or employees. If left empty, the runtime falls back to the started
+            workflow name.
+      - key: description
+        valueType: string
+        label:
+          en: Description
+          nl: Beschrijving
+        description:
+          nl: Aanvullende omschrijving die op de nieuwe zaak wordt vastgelegd.
+          en: Additional description stored on the new case.
+        help:
+          nl: Gebruik dit voor compacte context over waarom de zaak is aangemaakt. Bewaar grote dossiers of documenten in
+            gekoppelde entiteiten, niet in dit tekstveld.
+          en: Use this for compact context about why the case was created. Store large dossiers or documents in linked
+            entities, not in this text field.
+      - key: category
+        valueType: string
+        label:
+          en: Category
+          nl: Categorie
+        description:
+          nl: De functionele zaakcategorie voor rapportage en filtering.
+          en: The functional case category for reporting and filtering.
+        help:
+          nl: Kies een waarde uit CASECATEGORY. Deze categorie verandert niet welke workflow wordt gestart, maar helpt ERP
+            lijsten, filters en dashboards de zaak te ordenen.
+          en: Choose a value from CASECATEGORY. This category does not change which workflow starts, but helps ERP lists,
+            filters, and dashboards organize the case.
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASECATEGORY
+      - key: caseType
+        valueType: string
+        label:
+          en: Case type
+          nl: Zaaktype
+        description:
+          nl: Het primaire type van de nieuwe zaak.
+          en: The primary type of the new case.
+        help:
+          nl: Kies een waarde uit CASETYPE die past bij het proces. Als dit leeg blijft gebruikt de runtime een algemene
+            workflow-case fallback.
+          en: Choose a CASETYPE value that matches the process. If left empty, the runtime uses a generic workflow-case
+            fallback.
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASETYPE
+      - key: caseSubType
+        valueType: string
+        label:
+          en: Case subtype
+          nl: Zaaksubtype
+        description:
+          nl: Optionele nadere indeling binnen het gekozen zaaktype.
+          en: Optional further classification within the selected case type.
+        help:
+          nl: Gebruik dit alleen wanneer het subtype later nodig is voor rapportage, routering of medewerkercontext. Laat het
+            leeg als het zaaktype al specifiek genoeg is.
+          en: Use this only when the subtype is needed later for reporting, routing, or employee context. Leave it empty when
+            the case type is already specific enough.
+      - key: priority
+        valueType: string
+        label:
+          en: Priority
+          nl: Prioriteit
+        description:
+          nl: De prioriteit waarmee de nieuwe zaak in ERP wordt aangemaakt.
+          en: The priority used when creating the new case in ERP.
+        help:
+          nl: Kies een waarde uit CASEPRIORITY. De prioriteit kan worden gebruikt voor sortering, werkvoorraad en SLA-logica,
+            maar start geen andere workflow.
+          en: Choose a CASEPRIORITY value. Priority can be used for sorting, work queues, and SLA logic, but does not start a
+            different workflow.
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEPRIORITY
+  - key: processValues
+    valueType: object
+    label:
+      nl: Nieuw proces
+      en: New process
+    description:
+      nl: Waarden waarmee het bijbehorende proces wordt aangemaakt. Het proces wordt automatisch aan de nieuwe zaak gekoppeld.
+      en: Values used to create the linked process. The process is automatically linked to the new case.
+    help:
+      nl: De runtime maakt een hoofdproces aan voor de zaak en koppelt daar de zaakstappen aan. Deze velden vullen alleen de
+        proceskop; de zaakstapstructuur komt uit de gepubliceerde zaak-workflow.
+      en: The runtime creates a main process for the case and links case steps under it. These fields only populate the
+        process header; the case-step structure comes from the published case workflow.
+    children:
+      - key: name
+        valueType: string
+        label:
+          en: Name
+          nl: Naam
+        description:
+          nl: De naam van het hoofdproces dat bij de nieuwe zaak hoort.
+          en: The name of the main process linked to the new case.
+        help:
+          nl: Gebruik een medewerkerleesbare naam. Als dit leeg blijft leidt de runtime een procesnaam af van de zaaktitel.
+          en: Use an employee-readable name. If left empty, the runtime derives a process name from the case title.
+      - key: description
+        valueType: string
+        label:
+          en: Description
+          nl: Beschrijving
+        description:
+          nl: Aanvullende omschrijving voor het gekoppelde proces.
+          en: Additional description for the linked process.
+        help:
+          nl: Gebruik dit voor procescontext die medewerkers helpt bij uitvoering. De zaakbeschrijving blijft het primaire
+            zaakoverzicht.
+          en: Use this for process context that helps employees execute the work. The case description remains the primary
+            case summary.
+      - key: processType
+        valueType: string
+        label:
+          en: Process type
+          nl: Procestype
+        description:
+          nl: Het type van het hoofdproces dat onder de zaak wordt aangemaakt.
+          en: The type of the main process created under the case.
+        help:
+          nl: Kies een waarde uit PROCESSTYPE. Als dit leeg blijft gebruikt de runtime het algemene procestype voor zaken.
+          en: Choose a PROCESSTYPE value. If left empty, the runtime uses the generic process type for cases.
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: PROCESSTYPE
+      - key: priority
+        valueType: string
+        label:
+          en: Priority
+          nl: Prioriteit
+        description:
+          nl: De prioriteit van het gekoppelde hoofdproces.
+          en: The priority of the linked main process.
+        help:
+          nl: Kies een waarde uit CASEPRIORITY wanneer het proces een eigen prioriteit nodig heeft. Als dit leeg blijft kan
+            de runtime de zaakprioriteit gebruiken.
+          en: Choose a CASEPRIORITY value when the process needs its own priority. If left empty, the runtime can use the case
+            priority.
+        render:
+          component: ReferenceSelect
+          props:
+            referentieGroep: CASEPRIORITY
+  - key: waitForCompletion
+    valueType: boolean
+    label:
+      nl: Wacht op voltooiing
+      en: Wait for completion
+    description:
+      nl: Laat de parent workflow wachten totdat de zaak-workflow een terminal pad bereikt.
+      en: Let the parent workflow wait until the case workflow reaches a terminal path.
+    help:
+      nl: Laat dit meestal aan. De node gebruikt de terminale paden van de child-workflow als uitgangen; zonder wachten kan
+        de parent niet betrouwbaar op child-output routeren.
+      en: Usually leave this enabled. The node uses the child workflow's terminal paths as exits; without waiting, the parent
+        cannot reliably route on child output.
+    defaultValue: true
+    render:
+      component: Switch
+  - key: definitionName
+    valueType: string
+    label:
+      nl: Interne workflownaam
+      en: Internal workflow name
+    description:
+      nl: Gesynchroniseerde naam van de geselecteerde gepubliceerde zaak-workflow.
+      en: Synchronized name of the selected published case workflow.
+    help:
+      nl: Dit verborgen veld wordt door de designer gevuld voor labels, output en traceerbaarheid. Bewerk het niet los van
+        definitionId.
+      en: This hidden field is filled by the designer for labels, output, and traceability. Do not edit it separately from
+        definitionId.
+    defaultValue: ""
+    readOnly: true
+    workflowInspector: &hiddenWorkflowInspector
+      displayMode: hidden
+    render:
+      component: Input
+  - key: publishedVersion
+    valueType: string
+    label:
+      nl: Interne versie
+      en: Internal version
+    description:
+      nl: Gesynchroniseerde gepubliceerde versie van de geselecteerde zaak-workflow.
+      en: Synchronized published version of the selected case workflow.
+    help:
+      nl: Dit verborgen veld hoort bij de workflowselectie en zorgt dat de designer de gekozen gepubliceerde versie kan
+        tonen en bewaren.
+      en: This hidden field belongs to the workflow selection and lets the designer display and store the selected published
+        version.
+    defaultValue: ""
+    readOnly: true
+    workflowInspector: *hiddenWorkflowInspector
+    render:
+      component: Input
+  - key: terminalPaths
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    label:
+      nl: Interne terminale paden
+      en: Internal terminal paths
+    description:
+      nl: Gesynchroniseerde eindpaden van de geselecteerde zaak-workflow.
+      en: Synchronized terminal paths of the selected case workflow.
+    help:
+      nl: De designer gebruikt deze verborgen lijst om connectors te maken voor elk eindpad van de child-workflow. De inhoud
+        komt uit gepubliceerde end-nodes en moet niet handmatig worden gewijzigd.
+      en: The designer uses this hidden list to create connectors for each child workflow end path. The content comes from
+        published end nodes and should not be edited manually.
+    defaultValue: []
+    workflowInspector: *hiddenWorkflowInspector
+    item:
+      key: terminalPath
+      valueType: object
+      description:
+        nl: Eén eindpad van de geselecteerde zaak-workflow.
+        en: One terminal path of the selected case workflow.
+      help:
+        nl: Elke entry vertegenwoordigt een end-node in de child-workflow en bepaalt een mogelijke uitgang op deze node.
+        en: Each entry represents an end node in the child workflow and determines one possible exit on this node.
+      children:
+        - key: endNodeId
+          valueType: string
+          label:
+            nl: Eindnode ID
+            en: End node ID
+          description:
+            nl: Technische node-id van de end-node in de child-workflow.
+            en: Technical node id of the end node in the child workflow.
+          help:
+            nl: Deze id wordt gebruikt als connector-handle en moet overeenkomen met de gepubliceerde child-workflow.
+            en: This id is used as the connector handle and must match the published child workflow.
+        - key: endLabel
+          valueType: string
+          label:
+            nl: Padlabel
+            en: Path label
+          description:
+            nl: Leesbaar label voor het terminale pad.
+            en: Human-readable label for the terminal path.
+          help:
+            nl: Dit label verschijnt op de connector zodat auteurs zien welk eindpad van de child-workflow wordt gevolgd.
+            en: This label appears on the connector so authors can see which child workflow end path is followed.
+        - key: outputs
+          valueType: object
+          cardinality:
+            min: 0
+            max: "unbounded"
+          description:
+            nl: Outputvelden die de child-workflow op dit eindpad publiceert.
+            en: Output fields published by the child workflow on this terminal path.
+          help:
+            nl: Deze velden worden als typed output beschikbaar voor downstream nodes wanneer dit eindpad voltooit.
+            en: These fields become typed output for downstream nodes when this terminal path completes.
+          item:
+            key: output
+            valueType: object
+            description:
+              nl: Eén gepubliceerd outputveld van het terminale pad.
+              en: One published output field from the terminal path.
+            help:
+              nl: De entry is een samenvatting van het outputveld op de end-node van de child-workflow.
+              en: The entry summarizes an output field on the child workflow's end node.
+            children:
+              - key: key
+                valueType: string
+                label:
+                  nl: Sleutel
+                  en: Key
+                description:
+                  nl: De technische outputkey.
+                  en: The technical output key.
+                help:
+                  nl: Downstream variabelen verwijzen naar deze key wanneer zij child-output lezen.
+                  en: Downstream variables refer to this key when reading child output.
+              - key: label
+                valueType: string
+                label:
+                  nl: Label
+                  en: Label
+                description:
+                  nl: Leesbare naam van het outputveld.
+                  en: Human-readable name of the output field.
+                help:
+                  nl: Dit label helpt auteurs het veld te herkennen in de variabelezoeker.
+                  en: This label helps authors recognize the field in the variable picker.
+              - key: semanticType
+                valueType: string
+                label:
+                  nl: Semantisch type
+                  en: Semantic type
+                description:
+                  nl: Optioneel semantisch type van het outputveld.
+                  en: Optional semantic type of the output field.
+                help:
+                  nl: Het semantische type filtert passende variabelen en bewaart de betekenis van ids, datums en andere
+                    domeinwaarden.
+                  en: The semantic type filters compatible variables and preserves the meaning of ids, dates, and other
+                    domain values.
+    render:
+      component: JsonFieldEditor
+      props:
+        rows: 8

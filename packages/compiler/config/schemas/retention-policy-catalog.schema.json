@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-phase0/retention-policy-catalog.schema.json",
+  "title": "Retention Policy Catalog Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "policies"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "kind": { "type": "string", "const": "retentionPolicyCatalog" },
+    "policies": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "core-entity.schema.json#/$defs/retentionPolicy"
+      }
+    }
+  }
+}

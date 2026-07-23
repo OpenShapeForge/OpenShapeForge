@@ -1,0 +1,70 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: case.requestInput
+category: integrations
+label:
+  nl: Zaakinput vragen
+  en: Request case input
+description:
+  nl: Vraagt extra input voor een zaak-workflow.
+  en: Requests additional input for a case workflow.
+configFields:
+  - key: instructions
+    valueType: string
+    label:
+      nl: Instructie
+      en: Instruction
+    description:
+      nl: Kanaalneutrale vraag of context die de orchestrator kan gebruiken om de klant om input te vragen.
+      en: Channel-neutral question or context the orchestrator can use to ask the customer for input.
+    help:
+      nl: Schrijf hier wat nog ontbreekt om de zaak verder te behandelen. De tekst is geen kanaalspecifiek bericht; de
+        orchestrator gebruikt deze instructie om via WhatsApp, e-mail of een medewerkerpad de juiste vraag te stellen.
+      en: Write what is still missing to continue the case. This is not a channel-specific message; the orchestrator uses it
+        to ask the right question through WhatsApp, email, or a handover path.
+    validation:
+      required: true
+    render:
+      component: Textarea
+      props:
+        rows: 3
+  - key: formFields
+    valueType: object
+    cardinality:
+      min: 1
+      max: "unbounded"
+    semanticType: fieldDefinition
+    validation:
+      minItems: 1
+    label:
+      nl: Benodigde input
+      en: Required input
+    description:
+      nl: Definieer welke velden de zaak nodig heeft voordat deze node kan hervatten.
+      en: Define which fields the case needs before this node can resume.
+    help:
+      nl: Elk veld wordt onderdeel van het wachtcontract voor de zaak. Houd de sleutels stabiel, want case.provideInput en
+        downstream nodes lezen de aangeleverde waarden op basis van deze veldkeys.
+      en: Each field becomes part of the case wait contract. Keep keys stable because case.provideInput and downstream nodes
+        read the provided values by these field keys.
+    authoring:
+      profile: workflowInputField
+  - key: timeoutMs
+    valueType: number
+    label:
+      nl: Timeout (ms)
+      en: Timeout (ms)
+    description:
+      nl: Hoe lang de zaak op input wacht voordat het timeout-pad beschikbaar wordt.
+      en: How long the case waits for input before the timeout path becomes available.
+    help:
+      nl: Gebruik 0 om geen timeout-pad te tonen. Een positieve waarde voegt een Timeout-connector toe; de runtime laat de
+        zaak wachten tot input wordt geleverd of de ingestelde duur is verstreken.
+      en: Use 0 to hide the timeout path. A positive value adds a Timeout connector; the runtime keeps the case waiting until
+        input is provided or the configured duration has elapsed.
+    defaultValue: 600000
+    validation:
+      min:
+        value: 0
+    render:
+      component: NumberInput

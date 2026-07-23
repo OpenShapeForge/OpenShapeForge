@@ -1,0 +1,87 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: survey.persistAnswers
+category: Vragenlijst
+label:
+  en: Persist survey answers
+  nl: Antwoorden opslaan
+description:
+  en: Turn extractParameters output into SurveyAnswer records. Creates a ResearchResult if none is provided.
+  nl: Zet de output van extractParameters om in SurveyAnswer-records. Maakt indien nodig een ResearchResult aan.
+configFields:
+  - key: extractedValues
+    valueType: object
+    required: true
+    label:
+      en: Extracted values
+      nl: Geëxtraheerde waarden
+    description:
+      en: Output of the upstream ai.extractParameters node — object keyed by Field.key.
+      nl: Output van de upstream ai.extractParameters-node — object met de Field.key als sleutel.
+    help:
+      en: The persister reads this by configured field key and creates SurveyAnswer rows only for usable extracted entries; skipped keys are reported back in the node output.
+      nl: De persister leest dit per geconfigureerde veldsleutel uit en maakt alleen voor bruikbare extracted entries SurveyAnswer-rijen aan; overgeslagen sleutels worden teruggerapporteerd in de node-output.
+  - key: surveyId
+    valueType: string
+    required: true
+    label:
+      en: Survey
+      nl: Vragenlijst
+    description:
+      en: The Survey whose answers are being persisted. Typically the pass-through from the picker node.
+      nl: De Vragenlijst waarvan de antwoorden worden opgeslagen. Doorgaans de pass-through van de picker-node.
+    help:
+      en: In the intended flow this comes directly from `survey.pickQuestionnaire`, so the same questionnaire that produced the extraction field definitions is also the one that receives the stored answers.
+      nl: In de bedoelde flow komt dit direct uit `survey.pickQuestionnaire`, zodat dezelfde vragenlijst die de extractievelddefinities opleverde ook de opgeslagen antwoorden ontvangt.
+    semanticType: surveyId
+  - key: questionIdByKey
+    valueType: object
+    required: true
+    label:
+      en: Question id map
+      nl: Vraag-id-mapping
+    description:
+      en: Map from Field key to SurveyQuestion id. Typically the pass-through from the picker node.
+      nl: Mapping van Field-sleutel naar SurveyQuestion-id. Doorgaans de pass-through van de picker-node.
+    help:
+      en: This is the join table between extracted field keys and real survey question ids. Pass through the picker output unchanged unless you are intentionally remapping questions.
+      nl: Dit is de koppeltabel tussen extracted field keys en echte survey-vraag-id's. Geef de picker-output ongewijzigd door tenzij je bewust vragen aan het remappen bent.
+  - key: respondentRelationId
+    valueType: string
+    required: true
+    label:
+      en: Respondent
+      nl: Respondent
+    description:
+      en: Relation id of the respondent whose answers are being persisted.
+      nl: Relatie-id van de respondent wiens antwoorden worden opgeslagen.
+    help:
+      en: This scopes the created answers to one respondent relation. The node does not infer it from the survey; you must supply it explicitly from earlier workflow context.
+      nl: Dit koppelt de aangemaakte antwoorden aan één respondent-relatie. De node leidt dit niet uit de vragenlijst af; je moet het expliciet vanuit eerdere workflowcontext aanleveren.
+    semanticType: relationId
+  - key: researchAssignmentId
+    valueType: string
+    required: false
+    label:
+      en: Research assignment
+      nl: Onderzoeksopdracht
+    description:
+      en: Optional — if set, any newly created ResearchResult is linked to this assignment.
+      nl: Optioneel — indien ingevuld wordt een nieuw aangemaakte ResearchResult gekoppeld aan deze opdracht.
+    help:
+      en: Only matters when the node has to create a new `ResearchResult`. If you already pass `researchResultId`, this acts as secondary context rather than the primary target.
+      nl: Is alleen van belang wanneer de node een nieuw `ResearchResult` moet aanmaken. Als je al een `researchResultId` doorgeeft, werkt dit als secundaire context in plaats van als primair doel.
+    semanticType: researchAssignmentId
+  - key: researchResultId
+    valueType: string
+    required: false
+    label:
+      en: Research result
+      nl: Onderzoeksresultaat
+    description:
+      en: Optional — if set, answers are linked to this existing ResearchResult. Otherwise the node creates a new one.
+      nl: Optioneel — indien ingevuld worden antwoorden gekoppeld aan dit bestaande ResearchResult. Anders maakt de node een nieuwe aan.
+    help:
+      en: Use this when the workflow is adding answers into an already existing research result. Leave it empty when this node should create the result container itself.
+      nl: Gebruik dit wanneer de workflow antwoorden aan een al bestaand research result moet toevoegen. Laat het leeg wanneer deze node de result-container zelf moet aanmaken.
+    semanticType: researchResultId

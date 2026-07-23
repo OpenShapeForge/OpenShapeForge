@@ -1,0 +1,60 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: end
+category: flow
+label:
+  nl: Einde
+  en: End
+description:
+  nl: Beëindigt de workflow en publiceert outputvelden.
+  en: Ends the workflow and publishes output fields.
+configFields:
+  - key: fields
+    valueType: object
+    semanticType: fieldDefinition
+    cardinality:
+      min: 1
+      max: "unbounded"
+    label:
+      nl: Outputvelden
+      en: Output fields
+    description:
+      nl: Definieer welke publieke velden deze workflow via deze eindnode retourneert.
+      en: Define which public fields this workflow returns through this end node.
+    help:
+      nl: Elk veld gebruikt het canonieke compiler-field contract. De authored waarde staat in field.value.
+      en: Each field uses the canonical compiler field contract. The authored runtime value lives in field.value.
+    authoring:
+      profile: workflowOutputField
+    defaultValue:
+      - key: status
+        valueType: string
+        semanticType: string
+        cardinality:
+          min: 1
+          max: 1
+        label:
+          nl: Status
+          en: Status
+        description:
+          nl: Publieke workflowstatus die deze eindnode retourneert.
+          en: Public workflow status returned by this end node.
+        options:
+          type: static
+          items:
+            - value: success
+              label:
+                nl: Succesvol
+                en: Successful
+            - value: failure
+              label:
+                nl: Mislukt
+                en: Failed
+        value: success
+        authoring:
+          profile: workflowOutputField
+          pinned: true
+          locked: true
+          singleton: true
+          visibleProperties:
+            - value

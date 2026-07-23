@@ -1,0 +1,161 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: workflow.startDefinition
+category: integrations
+label:
+  nl: Workflow starten
+  en: Start workflow
+description:
+  nl: Start een andere gepubliceerde workflowdefinitie.
+  en: Starts another published workflow definition.
+configFields:
+  - key: definitionId
+    valueType: string
+    label:
+      nl: Workflowdefinitie
+      en: Workflow definition
+    description:
+      nl: Welke gepubliceerde workflow als nieuwe instance wordt gestart (naast deze workflow). Daarna stel je de
+        startvariabelen en eventueel de entiteit in voor die child-run.
+      en: Which published workflow to start as a new instance (alongside this run). Then configure its start variables and
+        optional entity for that child run.
+    help:
+      nl: De child-run wordt los gestart en gebruikt de gekozen gepubliceerde definitie. Gebruik een subWorkflow-node wanneer
+        de parent expliciet moet wachten op terminale child-output.
+      en: The child run starts separately and uses the selected published definition. Use a subWorkflow node when the parent
+        must explicitly wait for terminal child output.
+    validation:
+      required: true
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/published-workflows/options
+    render:
+      component: OptionVariablePicker
+      props:
+        clearable: true
+        expectedSemanticType: workflowDefinitionId
+        selectionSync: publishedWorkflow
+        optionSectionLabel: Gepubliceerde workflows
+        variableSectionLabel: Dynamische variabelen
+  - key: workflowKeyExpr
+    valueType: string
+    label:
+      nl: Workflow key expressie
+      en: Workflow key expression
+    description:
+      nl: Optioneel. Expressie uit de variabelezoeker (bijv. {{nodes.trigger.output.requestId}}) die wordt geëvalueerd en
+        opgeslagen bij de gestarte workflow-instance (trigger metadata), en op deze node als output beschikbaar is. De
+        technische Restate-workflow key blijft tenant:uuid; dit veld is je logische sleutel voor traceerbaarheid en
+        rapportage.
+      en: Optional. Expression from the variable picker (e.g. {{nodes.trigger.output.requestId}}) evaluated and stored on the
+        started workflow instance (trigger metadata), and exposed on this node’s output. The technical Restate workflow
+        key stays tenant:uuid; this is your logical key for traceability and reporting.
+    help:
+      nl: Gebruik een stabiele domeinsleutel wanneer latere rapportage of idempotente analyse de child-run aan een externe
+        aanvraag, conversatie of zaak moet koppelen.
+      en: Use a stable domain key when later reporting or idempotency analysis must link the child run to an external request,
+        conversation, or case.
+    placeholder:
+      nl: bijv. {{nodes.trigger_turn.output.conversationId}}
+      en: e.g. {{nodes.trigger_turn.output.conversationId}}
+    render:
+      component: Input
+  - key: entityType
+    valueType: string
+    label:
+      nl: Entiteitstype
+      en: Entity type
+    description:
+      nl: Welk soort zaak of domeinobject de gestarte workflow moet representeren (bijv. customer-care-session of een intern
+        vastgelegd type). Dat wordt meegegeven bij de start zodat koppelingen en messaging weten waar deze run bij
+        hoort. Laat leeg om het entiteitstype van deze (parent) workflow over te nemen.
+      en: What kind of case or domain object the started workflow should be tied to (e.g. customer-care-session or your
+        internal type). Passed on start so integrations know what this run is about. Leave empty to inherit the parent
+        workflow’s entity type.
+    help:
+      nl: Vul dit alleen in als de child-run aan een ander soort object hoort dan de parent. Messaging- en case-integraties
+        gebruiken deze metadata om runtime-relaties te leggen.
+      en: Fill this only when the child run belongs to a different object type than the parent. Messaging and case
+        integrations use this metadata to create runtime links.
+    placeholder:
+      nl: bijv. customer-care-session
+      en: e.g. customer-care-session
+    render:
+      component: Input
+  - key: entityId
+    valueType: string
+    label:
+      nl: Entiteit-ID
+      en: Entity ID
+    description:
+      nl: De unieke sleutel van dat object (bijv. conversatie-id of zaak-id). Zo wordt de child-run aan dezelfde case of
+        hetzelfde gesprek gekoppeld als de parent wanneer dat nodig is. Laat leeg om de entity-id van deze workflow over
+        te nemen.
+      en: The unique id of that object (e.g. conversation or case id). Links the child run to the same case or conversation as
+        the parent when needed. Leave empty to inherit this workflow’s entity id.
+    help:
+      nl: Gebruik een variabele uit de trigger of een eerdere node wanneer de koppeling pas tijdens uitvoering bekend is.
+        Laat leeg om de parent entity-id door te geven.
+      en: Use a variable from the trigger or an earlier node when the link is only known at runtime. Leave empty to pass
+        through the parent entity id.
+    placeholder:
+      nl: bijv. {{nodes.trigger_turn.output.conversationId}}
+      en: e.g. {{nodes.trigger_turn.output.conversationId}}
+    render:
+      component: Input
+  - key: entityUri
+    valueType: string
+    label:
+      nl: Entiteit-URI
+      en: Entity URI
+    description:
+      nl: Een stabiel pad of canonieke URI voor die entiteit (bijv. conversations/… of een intern resourcepad). Integraties
+        kunnen hiermee naar hetzelfde object verwijzen. Laat leeg om de entity-uri van deze workflow over te nemen.
+      en: A stable path or canonical URI for that entity (e.g. conversations/… or an internal resource path). Integrations use
+        it to point at the same object. Leave empty to inherit this workflow’s entity URI.
+    help:
+      nl: Gebruik dit voor leesbare of canonieke resourcepaden naast de technische entityId. Houd de URI stabiel zodat
+        logs, notificaties en integraties naar hetzelfde object blijven verwijzen.
+      en: Use this for readable or canonical resource paths alongside the technical entityId. Keep the URI stable so logs,
+        notifications, and integrations keep pointing to the same object.
+    placeholder:
+      nl: bijv. conversations/{{nodes.trigger_turn.output.conversationId}}
+      en: e.g. conversations/{{nodes.trigger_turn.output.conversationId}}
+    render:
+      component: Input
+  - key: definitionName
+    valueType: string
+    label:
+      nl: Interne workflownaam
+      en: Internal workflow name
+    description:
+      nl: Gesynchroniseerde naam van de geselecteerde gepubliceerde workflow.
+      en: Synchronized name of the selected published workflow.
+    help:
+      nl: Dit verborgen veld wordt door de designer bijgewerkt op basis van definitionId en is bedoeld voor labels en
+        traceerbaarheid.
+      en: This hidden field is updated by the designer from definitionId and is used for labels and traceability.
+    defaultValue: ""
+    readOnly: true
+    workflowInspector: &hiddenWorkflowInspector
+      displayMode: hidden
+    render:
+      component: Input
+  - key: publishedVersion
+    valueType: string
+    label:
+      nl: Interne versie
+      en: Internal version
+    description:
+      nl: Gesynchroniseerde gepubliceerde versie van de geselecteerde workflow.
+      en: Synchronized published version of the selected workflow.
+    help:
+      nl: Dit verborgen veld hoort bij de workflowselectie. De runtime start de actuele gepubliceerde definitie; deze waarde
+        helpt de designer de selectie te tonen.
+      en: This hidden field belongs to the workflow selection. The runtime starts the current published definition; this value
+        helps the designer display the selection.
+    defaultValue: ""
+    readOnly: true
+    workflowInspector: *hiddenWorkflowInspector
+    render:
+      component: Input

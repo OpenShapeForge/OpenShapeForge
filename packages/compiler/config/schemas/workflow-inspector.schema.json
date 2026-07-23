@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-common/workflow-inspector.schema.json",
+  "title": "Workflow Inspector Metadata Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "objectPresentation": {
+      "type": "string",
+      "enum": ["inlineChildren"]
+    },
+    "displayMode": {
+      "type": "string",
+      "enum": ["hidden", "display", "readOnly"]
+    }
+  }
+}

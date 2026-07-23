@@ -1,0 +1,48 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: RowAccessOwnerRestricted
+title: Row Access Owner Restricted
+description: Test fixture — owner axis with empty:restricted (NULL-owner rows hidden). Not shipped.
+language: en
+displayTemplate: "{{title}}"
+filterField: title
+labels:
+  en: Row Access Owner Restricted
+  nl: Row Access Owner Restricted
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: restricted
+    owner:
+      column: owner_id
+      session: app.current_user_id
+fields:
+  - key: title
+    valueType: string
+    required: true
+    label:
+      en: Title
+      nl: Titel
+    persisted:
+      column: title
+      storageClass: core
+relationships:
+  - key: owner
+    kind: belongsTo
+    target: RowAccessOwnerTarget
+    foreignKey: owner_id
+    label:
+      en: Owner
+      nl: Eigenaar

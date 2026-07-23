@@ -1,0 +1,20 @@
+node_modules/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+dist/
+build/
+.next/
+coverage/
+
+# Compiler-generated artifacts (recreate with `bun run generate`)
+apps/api/src/generated/db/
+apps/api/src/generated/workflow/
+keycloak/*-realm.json
+cookies.txt
+.authoring-build/
+.e2e-report/
+.perf-report/
+docs/entities.generated.md

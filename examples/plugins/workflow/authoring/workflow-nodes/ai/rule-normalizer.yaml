@@ -1,0 +1,296 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: ruleNormalizer
+category: AI
+label:
+  nl: Rule normalizer
+  en: Rule normalizer
+description:
+  nl: Normaliseert AI-output naar referentiedata en reviewvelden.
+  en: Normalizes AI output to reference data and review fields.
+configFields:
+  - key: policyMode
+    valueType: string
+    label:
+      nl: Policy mode
+      en: Policy mode
+    description:
+      nl: Bepaalt waar de normalisatiepolicy vandaan komt.
+      en: Determines where the normalization policy comes from.
+    help:
+      nl: De huidige modus gebruikt de embedded policy uit deze nodeconfiguratie.
+      en: The current mode uses the embedded policy from this node configuration.
+    defaultValue: embedded
+    options:
+      type: static
+      items:
+        - value: embedded
+          label:
+            nl: Embedded
+            en: Embedded
+    render:
+      component: Select
+  - key: policy
+    valueType: object
+    label:
+      nl: Policy editor
+      en: Policy editor
+    description:
+      nl: Bewerk de embedded policy als gestructureerd JSON-object.
+      en: Edit the embedded policy as a structured JSON object.
+    help:
+      nl: Deze policy bevat verplichte velden, reviewdrempels, mappings en regels waarmee AI-output naar codes en reviewstatus wordt genormaliseerd.
+      en: This policy contains required fields, review thresholds, mappings, and rules used to normalize AI output into codes and review status.
+    defaultValue:
+      version: 1
+      requiredFields:
+        - locatie
+        - defectsoort
+      reviewThreshold: 0.75
+      forceReviewOnSpoedDoubt: true
+      forceReviewIfMissingFields: true
+      defaultPriority: normaal
+      mappings:
+        - type: room_synonym
+          from: wc
+          to: TOI
+        - type: room_synonym
+          from: toilet
+          to: TOI
+        - type: room_synonym
+          from: badkamer
+          to: BAD
+        - type: room_synonym
+          from: keuken
+          to: KEU
+        - type: defect_keyword
+          from: lekt
+          to: LEK
+        - type: defect_keyword
+          from: storing
+          to: STO
+      rules:
+        - id: spoed-bij-veiligheid
+          type: urgency
+          if:
+            containsAnySignals:
+              - gaslucht
+              - brandlucht
+              - vonken
+              - kortsluiting
+          then:
+            priority: spoed
+            reviewRequired: true
+            reason: Veiligheidsrisico
+    render:
+      component: JsonFieldEditor
+  - key: outputParameters
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    label:
+      nl: Outputs
+      en: Outputs
+    description:
+      nl: Outputvelden voor prioriteit, review en genormaliseerde codes.
+      en: Output fields for priority, review, and normalized codes.
+    help:
+      nl: Deze parameters bepalen welke genormaliseerde waarden downstream nodes kunnen gebruiken.
+      en: These parameters define which normalized values downstream nodes can use.
+    defaultValue:
+      - id: normalize-object
+        key: normalized
+        label: Genormaliseerd
+        valueType: object
+        required: false
+      - id: normalize-priority
+        key: priority
+        label: Prioriteit
+        type: text
+        required: false
+      - id: normalize-review
+        key: reviewRequired
+        label: Review vereist
+        valueType: boolean
+        required: false
+      - id: normalize-missing
+        key: missingFields
+        label: Ontbrekende velden
+        valueType: object
+        cardinality:
+          min: 0
+          max: "unbounded"
+        required: false
+      - id: normalize-reasons
+        key: reasons
+        label: Redenen
+        valueType: object
+        cardinality:
+          min: 0
+          max: "unbounded"
+        required: false
+      - id: normalize-specialism
+        key: specialismeCode
+        label: Specialisme
+        type: text
+        required: false
+      - id: normalize-executor
+        key: uitvoerendeType
+        label: Uitvoerende type
+        type: text
+        required: false
+      - id: normalize-next-step
+        key: nextStep
+        label: Volgende stap
+        type: text
+        required: false
+    item:
+      key: parameter
+      valueType: object
+      description:
+        nl: Eén outputparameter die door de rule normalizer beschikbaar wordt gemaakt.
+        en: One output parameter exposed by the rule normalizer.
+      help:
+        nl: Pas deze lijst alleen aan wanneer vervolgstappen andere genormaliseerde outputvelden nodig hebben.
+        en: Change this list only when downstream steps need different normalized output fields.
+      children:
+        - key: id
+          valueType: string
+          label:
+            nl: Interne ID
+            en: Internal ID
+          description:
+            nl: Optionele stabiele sleutel voor deze parameter.
+            en: Optional stable identifier for this parameter.
+          help:
+            nl: Gebruik een stabiele ID om bestaande mappings herkenbaar te houden wanneer labels wijzigen.
+            en: Use a stable ID to keep existing mappings recognizable when labels change.
+          render:
+            component: Input
+        - key: key
+          valueType: string
+          label:
+            nl: Sleutel
+            en: Key
+          description:
+            nl: Technische sleutel waaronder deze parameter in de output verschijnt.
+            en: Technical key under which this parameter appears in the output.
+          help:
+            nl: Downstream variabelen verwijzen naar deze sleutel, bijvoorbeeld `output.priority`.
+            en: Downstream variables refer to this key, for example `output.priority`.
+          render:
+            component: Input
+        - key: label
+          valueType: string
+          label:
+            nl: Label
+            en: Label
+          description:
+            nl: Menselijk leesbare naam van de parameter.
+            en: Human-readable name of the parameter.
+          help:
+            nl: Dit label helpt auteurs het outputveld te herkennen in de designer.
+            en: This label helps authors recognize the output field in the designer.
+          render:
+            component: Input
+        - key: type
+          valueType: string
+          label:
+            nl: Type
+            en: Type
+          description:
+            nl: Waardetype van deze outputparameter.
+            en: Value type of this output parameter.
+          help:
+            nl: Kies het type dat past bij de genormaliseerde waarde die vervolgstappen moeten gebruiken.
+            en: Choose the type that matches the normalized value downstream steps should consume.
+          defaultValue: text
+          options:
+            type: static
+            items:
+              - value: text
+                label:
+                  nl: Tekst
+                  en: Text
+              - value: textarea
+                label:
+                  nl: Lange tekst
+                  en: Long text
+              - value: number
+                label:
+                  nl: Getal
+                  en: Number
+              - value: boolean
+                label:
+                  nl: Ja/nee
+                  en: Boolean
+              - value: date
+                label:
+                  nl: Datum
+                  en: Date
+              - value: object
+                label:
+                  nl: Object
+                  en: Object
+              - value: array
+                label:
+                  nl: Lijst
+                  en: Array
+          render:
+            component: Select
+        - key: required
+          valueType: boolean
+          label:
+            nl: Verplicht
+            en: Required
+          description:
+            nl: Geeft aan of deze outputparameter verwacht wordt gevuld te zijn.
+            en: Indicates whether this output parameter is expected to be filled.
+          help:
+            nl: Dit documenteert de outputverwachting; het maakt geen extra runtimevalidatie aan.
+            en: This documents the output expectation; it does not add extra runtime validation.
+          defaultValue: false
+          render:
+            component: Switch
+        - key: semanticTypeKey
+          valueType: string
+          label:
+            nl: Semantisch type
+            en: Semantic type
+          description:
+            nl: Optioneel semantisch type voor variabele-compatibiliteit.
+            en: Optional semantic type for variable compatibility.
+          help:
+            nl: Vul dit alleen in wanneer variabelepickers of mappings een specifiek semantisch type moeten herkennen.
+            en: Fill this only when variable pickers or mappings should recognize a specific semantic type.
+          render:
+            component: Input
+        - key: description
+          valueType: string
+          label:
+            nl: Beschrijving
+            en: Description
+          description:
+            nl: Korte uitleg van wat deze outputparameter betekent.
+            en: Short explanation of what this output parameter means.
+          help:
+            nl: Gebruik dit om downstream auteurs duidelijk te maken wanneer ze dit veld moeten gebruiken.
+            en: Use this to tell downstream authors when they should use this field.
+          render:
+            component: InputMultiline
+            props:
+              rows: 2
+        - key: placeholder
+          valueType: string
+          label:
+            nl: Placeholder
+            en: Placeholder
+          description:
+            nl: Voorbeeldtekst voor de invoer van deze parameterdefinitie.
+            en: Example text for editing this parameter definition.
+          help:
+            nl: Dit helpt alleen bij authoring en verandert de outputwaarde niet.
+            en: This only helps authoring and does not change the output value.
+          render:
+            component: Input

@@ -1,0 +1,25 @@
+schemaVersion: 1
+kind: transformCatalog
+
+transforms:
+  refCode:
+    type: cast
+    input: referenceObject
+    output: string
+    description: Extract the referentiedata code from a reference object.
+
+  toNumber:
+    type: cast
+    input: stringOrNumber
+    output: number
+    description: Convert a numeric string or numeric value to a number.
+
+  preferNameThenCodeThenId:
+    type: fallbackChain
+    input: object
+    output: string
+    description: Select the best available human-readable identifier.
+    candidates:
+      - naam
+      - code
+      - id

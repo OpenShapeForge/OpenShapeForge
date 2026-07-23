@@ -1,0 +1,244 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: subWorkflow
+category: Workflow
+label:
+  en: Sub-workflow
+  nl: Sub-workflow
+description:
+  en: Start a published child workflow and expose its terminal paths as connectors.
+  nl: Start een gepubliceerde child workflow en expose de terminale paden als connectors.
+configFields:
+  - key: definitionId
+    valueType: string
+    semanticType: workflowDefinitionId
+    label:
+      en: Choose workflow
+      nl: Kies workflow
+    description:
+      en: Published child workflow to start from this node.
+      nl: Gepubliceerde child-workflow die vanuit deze node wordt gestart.
+    help:
+      nl: De runtime start deze workflow als child instance van de huidige workflow en gebruikt terminale paden voor de
+        uitgangen. Kies alleen workflows waarvan het startcontract via mappings wordt gevuld.
+      en: The runtime starts this workflow as a child instance of the current workflow and uses terminal paths for exits.
+        Choose only workflows whose start contract is filled through mappings.
+    validation:
+      required: true
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/published-workflows/options
+    render:
+      component: OptionVariablePicker
+      props:
+        clearable: true
+        selectionSync: publishedWorkflow
+        optionSectionLabel: Gepubliceerde workflows
+  - key: waitForCompletion
+    valueType: boolean
+    label:
+      en: Wait for completion
+      nl: Wacht op voltooiing
+    description:
+      en: Wait until the child workflow reaches a terminal state before continuing.
+      nl: Wacht tot de child-workflow een terminale status bereikt voordat de parent doorgaat.
+    help:
+      nl: De subWorkflow-node is bedoeld voor child-output en terminale routing, dus wachten hoort normaal aan te staan.
+        Zonder wachten is downstream child-output niet betrouwbaar beschikbaar.
+      en: The subWorkflow node is intended for child output and terminal routing, so waiting should normally stay enabled.
+        Without waiting, downstream child output is not reliably available.
+    defaultValue: true
+    render:
+      component: Switch
+  - key: definitionName
+    valueType: string
+    description:
+      en: Hidden synchronized name of the selected child workflow.
+      nl: Verborgen gesynchroniseerde naam van de gekozen child-workflow.
+    help:
+      nl: De designer vult dit op basis van definitionId voor labels, output en traceerbaarheid.
+      en: The designer fills this from definitionId for labels, output, and traceability.
+    defaultValue: ""
+    readOnly: true
+    workflowInspector:
+      displayMode: hidden
+  - key: publishedVersion
+    valueType: string
+    description:
+      en: Hidden synchronized published version of the selected child workflow.
+      nl: Verborgen gesynchroniseerde gepubliceerde versie van de gekozen child-workflow.
+    help:
+      nl: Dit veld hoort bij de workflowselectie en bewaart welke gepubliceerde metadata in de designer is gebruikt.
+      en: This field belongs to the workflow selection and stores which published metadata the designer used.
+    defaultValue: ""
+    readOnly: true
+    workflowInspector:
+      displayMode: hidden
+  - key: candidateDefinitionIds
+    valueType: string
+    cardinality:
+      min: 0
+      max: "unbounded"
+    defaultValue: []
+    readOnly: true
+    description:
+      en: Hidden candidate workflow ids considered by the workflow picker.
+      nl: Verborgen kandidaat-workflow-id's die door de workflowkiezer zijn overwogen.
+    help:
+      nl: Dit veld ondersteunt designer-synchronisatie wanneer een keuze uit meerdere gepubliceerde definities komt. Het is
+        geen runtime-invoer voor auteurs.
+      en: This field supports designer synchronization when a choice comes from multiple published definitions. It is not
+        author-facing runtime input.
+    workflowInspector:
+      displayMode: hidden
+    item:
+      key: definitionId
+      valueType: string
+      description:
+        en: One candidate published workflow definition id.
+        nl: Eén kandidaat-id van een gepubliceerde workflowdefinitie.
+      help:
+        nl: De entry wordt gebruikt voor interne selectie- en synchronisatiecontrole in de designer.
+        en: The entry is used for internal selection and synchronization checks in the designer.
+  - key: unmatchedRouteTargetNodeId
+    valueType: string
+    defaultValue: ""
+    readOnly: true
+    description:
+      en: Hidden node id used when a route target could not be matched to a terminal path.
+      nl: Verborgen node-id voor een route target dat niet aan een terminaal pad kon worden gekoppeld.
+    help:
+      nl: De designer bewaart dit om route-herstel en validatie mogelijk te maken wanneer gepubliceerde terminale paden zijn
+        gewijzigd.
+      en: The designer stores this to support route recovery and validation when published terminal paths have changed.
+    workflowInspector:
+      displayMode: hidden
+  - key: mappingParameters
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    defaultValue: []
+    description:
+      en: Input mappings passed into the child workflow context.
+      nl: Inputmappings die aan de context van de child-workflow worden meegegeven.
+    help:
+      nl: Elke mapping schrijft een waarde naar de startcontext van de child. Gebruik dit om parent trigger-, node- of
+        processwaarden expliciet naar het child-contract te brengen.
+      en: Each mapping writes a value into the child's start context. Use this to explicitly pass parent trigger, node, or
+        process values into the child contract.
+    workflowInspector:
+      displayMode: hidden
+    item:
+      key: mappingParameter
+      valueType: object
+      description:
+        en: One child-context input mapping.
+        nl: Eén inputmapping naar de child-context.
+      help:
+        nl: De mapping bevat de child-key en bronwaarde. De runtime lost de bron op wanneer de child-workflow wordt gestart.
+        en: The mapping contains the child key and source value. The runtime resolves the source when the child workflow
+          starts.
+  - key: mappingParametersByDefinitionId
+    valueType: object
+    defaultValue: {}
+    description:
+      en: Hidden mapping drafts keyed by candidate child workflow id.
+      nl: Verborgen mappingdrafts per kandidaat child-workflow-id.
+    help:
+      nl: Dit bewaart mappings voor meerdere mogelijke child-definities zodat wisselen in de picker geen invoer verliest.
+        De runtime gebruikt de mappings van de daadwerkelijk gekozen definitie.
+      en: This stores mappings for multiple possible child definitions so changing the picker does not lose input. The runtime
+        uses mappings for the actually selected definition.
+    workflowInspector:
+      displayMode: hidden
+  - key: processVariableMappings
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    defaultValue: []
+    description:
+      en: Initial process-variable values passed to the child workflow.
+      nl: Initiële process-variable waarden die aan de child-workflow worden meegegeven.
+    help:
+      nl: Gebruik dit voor waarden die in het child-proces als process.* contract moeten bestaan. Houd de keys gelijk aan de
+        process variables die de child-definitie declareert.
+      en: Use this for values that must exist in the child process as the process.* contract. Keep keys aligned with the
+        process variables declared by the child definition.
+    workflowInspector:
+      displayMode: hidden
+    item:
+      key: processVariableMapping
+      valueType: object
+      description:
+        en: One initial child process-variable mapping.
+        nl: Eén initiële mapping voor een child process variable.
+      help:
+        nl: De mapping koppelt een child process-variable key aan een parentwaarde of expressie.
+        en: The mapping links one child process-variable key to a parent value or expression.
+  - key: terminalPaths
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    label:
+      en: Internal terminal paths
+      nl: Interne terminale paden
+    description:
+      en: Synchronized terminal paths of the selected child workflow.
+      nl: Gesynchroniseerde terminale paden van de gekozen child-workflow.
+    help:
+      nl: De designer gebruikt deze verborgen lijst om connectors en outputvelden te maken. De inhoud komt uit de
+        gepubliceerde end-nodes van de child-workflow.
+      en: The designer uses this hidden list to create connectors and output fields. The content comes from the published end
+        nodes of the child workflow.
+    defaultValue: []
+    workflowInspector:
+      displayMode: hidden
+    item:
+      key: terminalPath
+      valueType: object
+      description:
+        en: One terminal path of the selected child workflow.
+        nl: Eén terminaal pad van de gekozen child-workflow.
+      help:
+        nl: Elke entry bepaalt een mogelijke uitgang van deze subWorkflow-node.
+        en: Each entry determines one possible exit of this subWorkflow node.
+      children:
+        - key: endNodeId
+          valueType: string
+          description:
+            en: Technical id of the child workflow end node.
+            nl: Technische id van de end-node in de child-workflow.
+          help:
+            nl: Deze id wordt gebruikt als connector-handle en moet overeenkomen met de gepubliceerde child-definitie.
+            en: This id is used as the connector handle and must match the published child definition.
+        - key: endLabel
+          valueType: string
+          description:
+            en: Human-readable label of the terminal path.
+            nl: Leesbaar label van het terminale pad.
+          help:
+            nl: Dit label verschijnt op de connector voor het child-eindpad.
+            en: This label appears on the connector for the child end path.
+        - key: outputs
+          valueType: object
+          cardinality:
+            min: 0
+            max: "unbounded"
+          description:
+            en: Output fields published by the child workflow on this terminal path.
+            nl: Outputvelden die de child-workflow op dit terminale pad publiceert.
+          help:
+            nl: Deze outputvelden worden beschikbaar voor downstream nodes wanneer dit specifieke eindpad voltooit.
+            en: These output fields become available to downstream nodes when this specific end path completes.
+          item:
+            key: output
+            valueType: object
+            description:
+              en: One published child output field.
+              nl: Eén gepubliceerd outputveld van de child-workflow.
+            help:
+              nl: De entry is een compacte samenvatting van een end-node outputveld.
+              en: The entry is a compact summary of an end-node output field.

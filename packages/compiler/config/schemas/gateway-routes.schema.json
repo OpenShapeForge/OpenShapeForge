@@ -1,0 +1,154 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "gateway-routes.schema.json",
+  "title": "Gateway Routes Catalog",
+  "description": "Authoring shape for the central apisix routes catalog. Compiled into infra/apisix/local/apisix.yaml by the apisix generator. One environment-agnostic base file — env-specific differences are Kustomize/Helm overlay material, not catalog material.",
+  "type": "object",
+  "required": ["routes"],
+  "additionalProperties": false,
+  "properties": {
+    "routes": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/route" }
+    }
+  },
+  "definitions": {
+    "route": {
+      "type": "object",
+      "required": ["id", "uri"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "uri": { "type": "string", "minLength": 1 },
+        "priority": { "type": "integer" },
+        "upstream": { "$ref": "#/definitions/upstream" },
+        "plugins": { "$ref": "#/definitions/plugins" }
+      }
+    },
+    "upstream": {
+      "type": "object",
+      "required": ["host", "port"],
+      "additionalProperties": false,
+      "properties": {
+        "host": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "retries": { "type": "integer", "minimum": 0 },
+        "keepalivePool": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idleTimeout": { "type": "integer", "minimum": 0 },
+            "size": { "type": "integer", "minimum": 1 },
+            "requests": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    },
+    "plugins": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "proxyRewrite": { "$ref": "#/definitions/proxyRewrite" },
+        "rateLimit": { "$ref": "#/definitions/rateLimit" },
+        "kafkaLogger": { "$ref": "#/definitions/kafkaLogger" },
+        "serverlessPreFunction": { "$ref": "#/definitions/serverlessPreFunction" },
+        "jwt": { "$ref": "#/definitions/jwt" }
+      }
+    },
+    "proxyRewrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["uri"] },
+        { "required": ["regexUri"] }
+      ],
+      "properties": {
+        "uri": { "type": "string" },
+        "regexUri": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "rateLimit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "window", "key"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 1 },
+        "window": { "type": "integer", "minimum": 1 },
+        "key": { "type": "string" },
+        "keyType": { "type": "string", "default": "var_combination" },
+        "rejectedCode": { "type": "integer" },
+        "rejectedMsg": { "type": "string" },
+        "policy": { "type": "string" },
+        "allowDegradation": { "type": "boolean" },
+        "filterMethods": {
+          "description": "HTTP methods to apply rate limiting to. Compiles to limit-count's _meta.filter request_method clause.",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "kafkaLogger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["topic", "sourceService"],
+      "properties": {
+        "brokers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["host", "port"],
+            "additionalProperties": false,
+            "properties": {
+              "host": { "type": "string" },
+              "port": { "type": "integer" }
+            }
+          }
+        },
+        "topic": { "type": "string" },
+        "producerType": { "type": "string", "default": "async" },
+        "batchMaxSize": { "type": "integer" },
+        "bufferDuration": { "type": "integer" },
+        "includeReqBody": { "type": "boolean" },
+        "maxReqBodyBytes": { "type": "integer" },
+        "includeRespBody": { "type": "boolean" },
+        "maxRespBodyBytes": { "type": "integer" },
+        "sourceService": { "type": "string" },
+        "captureEntityHeaders": {
+          "description": "Whether to include $upstream_http_x_event_type and $upstream_http_x_event_domain in the log_format.",
+          "type": "boolean",
+          "default": false
+        },
+        "captureRespBody": {
+          "description": "Whether to include resp_body in the log_format.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "serverlessPreFunction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phase", "functions"],
+      "properties": {
+        "phase": { "type": "string" },
+        "functions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "jwt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["clientId"],
+      "properties": {
+        "clientId": { "type": "string" }
+      }
+    }
+  }
+}

@@ -1,0 +1,300 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-phase0/view.schema.json",
+  "title": "View Definition Schema",
+  "type": "object",
+  "required": ["schemaVersion", "kind", "entity", "routes", "presentations"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "kind": { "type": "string", "const": "view" },
+    "entity": { "type": "string" },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "entity": { "type": "string" },
+          "profile": { "type": "string" }
+        }
+      }
+    },
+    "routes": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string" },
+          { "type": "object" }
+        ]
+      }
+    },
+    "groupSets": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "$ref": "#/$defs/viewGroup" }
+      }
+    },
+    "presentations": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string", "enum": ["page", "embedded"] },
+          "type": { "type": "string", "enum": ["list", "detail", "form", "summary", "cards", "workspace"] },
+          "itemAction": { "type": "object" },
+          "actions": {
+            "type": "array",
+            "items": { "type": "object" }
+          },
+          "rowActions": {
+            "type": "array",
+            "items": { "type": "object" }
+          }
+        },
+        "patternProperties": {
+          "^(?!kind$|type$|itemAction$|actions$|rowActions$).+$": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "type": { "const": "workspace" }
+              },
+              "required": ["type"]
+            },
+            "then": {
+              "patternProperties": {
+                "^(?!kind$|type$|itemAction$|actions$|rowActions$).+$": {
+                  "$ref": "#/$defs/workspacePresentationContext"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "localizedText": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "object" }
+      ]
+    },
+    "workspacePaneSizing": {
+      "type": "object",
+      "properties": {
+        "defaultWidth": { "type": "number" },
+        "minWidth": { "type": "number" },
+        "maxWidth": { "type": "number" },
+        "weight": { "type": "number" },
+        "resizable": { "type": "boolean" }
+      }
+    },
+    "workspacePresentationSlot": {
+      "allOf": [
+        { "$ref": "#/$defs/workspacePaneSizing" },
+        {
+          "type": "object",
+          "properties": {
+            "presentation": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "workspaceGroupSlot": {
+      "allOf": [
+        { "$ref": "#/$defs/workspacePaneSizing" },
+        {
+          "type": "object",
+          "properties": {
+            "title": { "$ref": "#/$defs/localizedText" },
+            "groups": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/viewGroup" }
+            },
+            "groupsFrom": { "type": "string" },
+            "groupOverrides": {
+              "type": "object",
+              "additionalProperties": { "$ref": "#/$defs/viewGroupOverride" }
+            }
+          }
+        }
+      ]
+    },
+    "workspaceSlots": {
+      "type": "object",
+      "properties": {
+        "sidebar": { "$ref": "#/$defs/workspaceGroupSlot" },
+        "list": { "$ref": "#/$defs/workspacePresentationSlot" },
+        "body": { "$ref": "#/$defs/workspacePresentationSlot" },
+        "related": { "$ref": "#/$defs/workspaceGroupSlot" }
+      },
+      "required": ["list", "body"]
+    },
+    "workspacePresentationContext": {
+      "type": "object",
+      "properties": {
+        "title": { "$ref": "#/$defs/localizedText" },
+        "subtitle": { "$ref": "#/$defs/localizedText" },
+        "render": { "type": "string" },
+        "selectionParam": { "type": "string" },
+        "defaultSelectionSource": { "type": "string", "enum": ["firstRow", "none"] },
+        "layout": {
+          "type": "object",
+          "properties": {
+            "variant": {
+              "type": "string",
+              "enum": [
+                "body",
+                "page-header-body",
+                "sidebar-body",
+                "page-header-list-body",
+                "page-header-list-body-related",
+                "sidebar-page-body",
+                "sidebar-page-header-list-body",
+                "sidebar-page-header-list-body-related"
+              ]
+            }
+          }
+        },
+        "slots": { "$ref": "#/$defs/workspaceSlots" }
+      },
+      "required": ["slots"],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "layout": {
+                "properties": {
+                  "variant": {
+                    "enum": ["sidebar-body", "sidebar-page-body", "sidebar-page-header-list-body", "sidebar-page-header-list-body-related"]
+                  }
+                },
+                "required": ["variant"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "slots": {
+                "required": ["sidebar"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "layout": {
+                "properties": {
+                  "variant": {
+                    "enum": ["page-header-list-body-related", "sidebar-page-header-list-body-related"]
+                  }
+                },
+                "required": ["variant"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "slots": {
+                "required": ["related"]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "viewGroupOverride": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "object" },
+        "label": { "type": "object" },
+        "render": { "type": "string" },
+        "relationship": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "object" }
+          ]
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "properties": {
+                  "key": { "type": "string" },
+                  "render": { "type": "string" },
+                  "fieldDisplayMode": { "type": "string", "enum": ["hidden"] }
+                }
+              }
+            ]
+          }
+        },
+        "relationships": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "groups": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/viewGroup" }
+        },
+        "groupsFrom": { "type": "string" },
+        "groupOverrides": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/viewGroupOverride" }
+        }
+      }
+    },
+    "viewGroup": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "object" },
+        "label": { "type": "object" },
+        "render": { "type": "string" },
+        "relationship": {
+          "oneOf": [
+            { "type": "string" },
+            { "type": "object" }
+          ]
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "properties": {
+                  "key": { "type": "string" },
+                  "render": { "type": "string" },
+                  "fieldDisplayMode": { "type": "string", "enum": ["hidden"] }
+                }
+              }
+            ]
+          }
+        },
+        "relationships": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "groups": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/viewGroup" }
+        },
+        "groupsFrom": { "type": "string" },
+        "groupOverrides": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/viewGroupOverride" }
+        }
+      }
+    }
+  }
+}

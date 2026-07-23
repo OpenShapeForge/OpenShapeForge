@@ -1,0 +1,211 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: RelationGroup
+title: Relation Group
+description: A group that bundles multiple relations together.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Relation Group
+  nl: Relatiegroep
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+      - Relaties.All.ReadWrite
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Name of the relation group.
+      nl: Naam van de relatiegroep.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description of the relation group.
+      nl: Optionele omschrijving van de relatiegroep.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: status
+    valueType: string
+    required: false
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the relation group.
+      nl: Levenscyclusstatus van de relatiegroep.
+    validation:
+      maxLength: 50
+    persisted:
+      column: status
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional code of the group in an external context.
+      nl: Functionele code van de groep in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: members
+    kind: hasMany
+    target: Relation
+    foreignKey: relation_group_id
+    label:
+      en: Members
+      nl: Leden
+ui:
+  routes:
+    list:
+      en: /relation-groups
+      nl: /relatiegroepen
+    detail:
+      en: /relation-groups/:id
+      nl: /relatiegroepen/:id
+    create:
+      en: /relation-groups/create
+      nl: /relatiegroepen/aanmaken
+    edit:
+      en: /relation-groups/:id/edit
+      nl: /relatiegroepen/:id/bewerken
+    delete:
+      en: /relation-groups/:id/delete
+      nl: /relatiegroepen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Relation Groups
+        nl: Relatiegroepen
+      columns:
+        - key: name
+          sortable: true
+      defaultSort:
+        key: name
+        direction: asc
+      rowLink:
+        en: /relation-groups/:id
+        nl: /relatiegroepen/:id
+    detail:
+      header:
+        title: "{{name}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: General
+                nl: Algemeen
+              fields:
+                - name
+                - status
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+        - id: members
+          label:
+            en: Members
+            nl: Leden
+          relationship: members
+    form:
+      variants:
+        create:
+          title:
+            en: Create relation group
+            nl: Relatiegroep aanmaken
+          groups:
+            - title:
+                en: General
+                nl: Algemeen
+              fields:
+                - name
+                - status
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+        edit:
+          extends: create
+          title:
+            en: Edit relation group
+            nl: Relatiegroep bewerken

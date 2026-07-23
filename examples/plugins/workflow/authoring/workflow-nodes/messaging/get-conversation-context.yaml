@@ -1,0 +1,587 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: messaging.getConversationContext
+category: Messaging
+label:
+  en: Get conversation context
+  nl: Haal conversatiecontext op
+description:
+  en: Load recent messaging context and expose selected fields as workflow output.
+  nl: Haal recente messaging-context op en expose geselecteerde velden als workflow-output.
+configFields:
+  - key: conversationId
+    valueType: string
+    semanticType: conversationId
+    label:
+      en: Conversation ID
+      nl: Conversatie-ID
+    description:
+      en: Existing conversation to read context from.
+      nl: Bestaande conversatie waaruit context wordt gelezen.
+    help:
+      en: Usually this comes from workflow context. The node returns found false when no conversation ID is available or the
+        conversation cannot be found for the current tenant.
+      nl: Meestal komt dit uit de workflowcontext. De node geeft found false terug wanneer geen conversatie-ID beschikbaar is
+        of de conversatie niet gevonden wordt binnen de huidige tenant.
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: insertText
+  - key: limit
+    valueType: integer
+    label:
+      en: Message limit
+      nl: Aantal berichten
+    description:
+      en: Maximum number of recent conversation messages to load.
+      nl: Maximumaantal recente conversatieberichten dat wordt opgehaald.
+    help:
+      en: The value is bounded between 1 and 100. Use the smallest limit that gives enough transcript context for later AI or
+        routing nodes.
+      nl: De waarde is begrensd tussen 1 en 100. Gebruik de kleinste limiet die genoeg transcriptcontext geeft voor latere AI-
+        of routingnodes.
+    defaultValue: 30
+    validation:
+      required: true
+      min: 1
+      max: 100
+    render:
+      component: NumberInput
+      props:
+        min: 1
+        max: 100
+        step: 1
+  - key: outputParameters
+    valueType: object
+    label:
+      en: Output fields
+      nl: Outputvelden
+    description:
+      en: Select which conversation context fields should be exposed as node output.
+      nl: Kies welke conversatiecontextvelden als node-output beschikbaar worden.
+    help:
+      en: Enable the fields you want to show as typed node outputs in the designer. The current bridge still loads the
+        conversation plus recent messages and returns the standard context payload either way.
+      nl: Zet de velden aan die je als getypte node-outputs in de designer wilt tonen. De huidige bridge laadt sowieso de
+        conversatie plus recente berichten en geeft de standaard contextpayload in beide gevallen terug.
+    defaultValue: {}
+    children:
+      - key: lifecycleState
+        valueType: boolean
+        label: { en: Lifecycle state, nl: Lifecycle-status }
+        description:
+          en: Include whether the conversation is open or closed.
+          nl: Neem op of de conversatie open of gesloten is.
+        help:
+          en: Use this when later routing depends on the current conversation status.
+          nl: Gebruik dit wanneer latere routing afhankelijk is van de huidige conversatiestatus.
+      - key: automationMode
+        valueType: boolean
+        label: { en: Automation mode, nl: Automation mode }
+        description:
+          en: Include whether AI is autonomous, paused, or assisting.
+          nl: Neem op of AI autonoom werkt, gepauzeerd is of ondersteunt.
+        help:
+          en: Use this to branch on AI or employee handling state.
+          nl: Gebruik dit om te vertakken op AI- of medewerkerafhandeling.
+      - key: routingTargetType
+        valueType: boolean
+        label: { en: Routing target, nl: Routingdoel }
+        description:
+          en: Include whether the conversation is unrouted, queued, or assigned.
+          nl: Neem op of de conversatie niet gerouteerd, gequeued of toegewezen is.
+        help:
+          en: Use this when a later node needs to know how the inbox currently routes the conversation.
+          nl: Gebruik dit wanneer een latere node moet weten hoe de inbox de conversatie momenteel routeert.
+      - key: channel
+        valueType: boolean
+        label: { en: Channel, nl: Kanaal }
+        description:
+          en: Include the conversation channel, such as WhatsApp or email.
+          nl: Neem het conversatiekanaal op, zoals WhatsApp of e-mail.
+        help:
+          en: Use this before channel-specific branching or provider-safe message selection.
+          nl: Gebruik dit vóór kanaalspecifieke vertakkingen of provider-veilige berichtkeuzes.
+      - key: phone
+        valueType: boolean
+        label: { en: Phone, nl: Telefoon }
+        description:
+          en: Include the phone number from the conversation context.
+          nl: Neem het telefoonnummer uit de conversatiecontext op.
+        help:
+          en: This is most useful for WhatsApp flows that need the known customer phone number.
+          nl: Dit is vooral nuttig voor WhatsApp-flows die het bekende klanttelefoonnummer nodig hebben.
+      - key: mailboxId
+        valueType: boolean
+        label: { en: Mailbox ID, nl: Mailbox-ID }
+        description:
+          en: Include the mailbox ID for email conversations.
+          nl: Neem de mailbox-ID voor e-mailconversaties op.
+        help:
+          en: Use this only when downstream email handling needs the mailbox context.
+          nl: Gebruik dit alleen wanneer latere e-mailafhandeling de mailboxcontext nodig heeft.
+      - key: threadKey
+        valueType: boolean
+        label: { en: Thread key, nl: Threadsleutel }
+        description:
+          en: Include the technical email thread key.
+          nl: Neem de technische e-mailthreadsleutel op.
+        help:
+          en: Use this for email-thread continuity or diagnostics; it is not a customer-facing value.
+          nl: Gebruik dit voor e-mailthreadcontinuiteit of diagnose; het is geen klantgerichte waarde.
+      - key: subject
+        valueType: boolean
+        label: { en: Subject, nl: Onderwerp }
+        description:
+          en: Include the conversation subject.
+          nl: Neem het onderwerp van de conversatie op.
+        help:
+          en: This is especially useful for email flows and handover summaries.
+          nl: Dit is vooral nuttig voor e-mailflows en overdrachtssamenvattingen.
+      - key: relationId
+        valueType: boolean
+        label: { en: Relation ID, nl: Relatie ID }
+        description:
+          en: Include the linked relation ID when known.
+          nl: Neem de gekoppelde relatie-ID op wanneer die bekend is.
+        help:
+          en: Use this after identification when later nodes need renter or relation context.
+          nl: Gebruik dit na identificatie wanneer latere nodes huurder- of relatiecontext nodig hebben.
+      - key: identityAssurance
+        valueType: boolean
+        label: { en: Identity assurance, nl: Identificatiecontext }
+        description:
+          en: Include the full identity assurance object from the conversation read model.
+          nl: Neem het volledige identity-assurance-object uit het conversation read model op.
+        help:
+          en: Use this when downstream logic needs more than just the assurance level.
+          nl: Gebruik dit wanneer vervolglogica meer nodig heeft dan alleen het identificatieniveau.
+      - key: identityAssuranceLevel
+        valueType: boolean
+        label: { en: Identity assurance level, nl: Identificatieniveau }
+        description:
+          en: Include the current highest identity assurance level.
+          nl: Neem het huidige hoogste identificatieniveau op.
+        help:
+          en: Use this to decide whether additional identity checks are needed.
+          nl: Gebruik dit om te bepalen of extra identificatiecontroles nodig zijn.
+      - key: identityAssuranceMethods
+        valueType: boolean
+        label: { en: Identity methods, nl: Identificatiemethodes }
+        description:
+          en: Include the methods used to establish identity assurance.
+          nl: Neem de methodes op waarmee identificatiezekerheid is vastgesteld.
+        help:
+          en: Use this for audit context or to avoid asking for the same proof again.
+          nl: Gebruik dit voor auditcontext of om niet opnieuw om hetzelfde bewijs te vragen.
+      - key: identityAssuranceVerifiedAt
+        valueType: boolean
+        label: { en: Verified at, nl: Gecontroleerd op }
+        description:
+          en: Include when the identity assurance was established.
+          nl: Neem op wanneer de identificatiezekerheid is vastgesteld.
+        help:
+          en: Use this when time since verification matters for routing or compliance.
+          nl: Gebruik dit wanneer de tijd sinds verificatie relevant is voor routing of compliance.
+      - key: identityAssuranceExpiresAt
+        valueType: boolean
+        label: { en: Valid until, nl: Geldig tot }
+        description:
+          en: Include when the identity assurance expires.
+          nl: Neem op wanneer de identificatiezekerheid verloopt.
+        help:
+          en: Use this to decide whether an existing verification can still be trusted.
+          nl: Gebruik dit om te bepalen of een bestaande verificatie nog vertrouwd kan worden.
+      - key: workflowInstanceId
+        valueType: boolean
+        label: { en: Workflow instance, nl: Workflow-instance }
+        description:
+          en: Include the workflow instance currently linked to the conversation.
+          nl: Neem de workflowinstance op die momenteel aan de conversatie is gekoppeld.
+        help:
+          en: Use this for handover context or when correlating conversation state to workflow state.
+          nl: Gebruik dit voor overdrachtscontext of om conversatiestatus aan workflowstatus te koppelen.
+      - key: windowOpen
+        valueType: boolean
+        label: { en: Open freeform window, nl: Vrij venster open }
+        description:
+          en: Include whether the free-form messaging window is open.
+          nl: Neem op of het vrije messagingvenster open is.
+        help:
+          en: Use this before choosing free-form replies versus approved templates.
+          nl: Gebruik dit voordat je kiest tussen vrije antwoorden en goedgekeurde templates.
+      - key: windowTemplateOnly
+        valueType: boolean
+        label: { en: Templates only, nl: Alleen templates mogelijk }
+        description:
+          en: Include whether only template messages may be sent.
+          nl: Neem op of alleen templateberichten verzonden mogen worden.
+        help:
+          en: Use this for provider-safe WhatsApp routing when the free-form window is closed.
+          nl: Gebruik dit voor provider-veilige WhatsApp-routing wanneer het vrije venster gesloten is.
+      - key: windowExpiringSoon
+        valueType: boolean
+        label: { en: Freeform window expiring soon, nl: Vrij venster verloopt bijna }
+        description:
+          en: Include whether the free-form messaging window is close to expiring.
+          nl: Neem op of het vrije messagingvenster bijna verloopt.
+        help:
+          en: Use this to avoid starting a free-form exchange that may expire before completion.
+          nl: Gebruik dit om te voorkomen dat een vrije uitwisseling start die mogelijk verloopt voordat die klaar is.
+      - key: aiAssistantName
+        valueType: boolean
+        label: { en: AI assistant name, nl: AI-assistentnaam }
+        description:
+          en: Include the assistant name used in this conversation.
+          nl: Neem de assistentnaam op die in deze conversatie wordt gebruikt.
+        help:
+          en: Use this when generated messages should refer to the configured assistant identity.
+          nl: Gebruik dit wanneer gegenereerde berichten naar de ingestelde assistentidentiteit moeten verwijzen.
+      - key: messagesText
+        valueType: boolean
+        label: { en: Messages, nl: Berichten }
+        description:
+          en: Include the fetched recent messages combined into transcript text.
+          nl: Neem de opgehaalde recente berichten op als samengevoegde transcripttekst.
+        help:
+          en: Use this for AI extraction, summaries, or routing that needs the fetched recent customer and outbound assistant messages.
+          nl: Gebruik dit voor AI-extractie, samenvattingen of routing die de opgehaalde recente klant- en uitgaande assistentberichten nodig heeft.
+      - key: latestInboundMessageId
+        valueType: boolean
+        label: { en: Latest inbound message ID, nl: Laatste inkomende bericht-ID }
+        description:
+          en: Include the most recent fetched inbound message ID.
+          nl: Neem de meest recente opgehaalde inkomende bericht-ID op.
+        help:
+          en: Use this when a later node needs to react to or reference the latest customer message.
+          nl: Gebruik dit wanneer een latere node op het laatste klantbericht moet reageren of ernaar moet verwijzen.
+      - key: visibleMessageCount
+        valueType: boolean
+        label: { en: Visible message count, nl: Aantal zichtbare berichten }
+        description:
+          en: Include how many fetched recent messages were loaded into the context window.
+          nl: Neem op hoeveel opgehaalde recente berichten in het contextvenster zijn geladen.
+        help:
+          en: Use this for guards that depend on how much recent transcript was loaded for this node.
+          nl: Gebruik dit voor controles die afhangen van hoeveel recent transcript voor deze node is geladen.
+      - key: inboundVisibleMessageCount
+        valueType: boolean
+        label: { en: Inbound visible message count, nl: Aantal zichtbare inkomende berichten }
+        description:
+          en: Include how many fetched recent messages are inbound customer messages.
+          nl: Neem op hoeveel opgehaalde recente berichten inkomende klantberichten zijn.
+        help:
+          en: Use this to distinguish customer input from outbound workflow messages.
+          nl: Gebruik dit om klantinput te onderscheiden van uitgaande workflowberichten.
+      - key: hasVisibleOutbound
+        valueType: boolean
+        label: { en: Has visible outbound message, nl: Zichtbaar uitgaand bericht aanwezig }
+        description:
+          en: Include whether the fetched recent message window contains any outbound message.
+          nl: Neem op of het opgehaalde recente berichtenvenster een uitgaand bericht bevat.
+        help:
+          en: Use this to detect whether the recent fetched transcript already contains an outbound reply.
+          nl: Gebruik dit om te bepalen of het recent opgehaalde transcript al een uitgaand antwoord bevat.
+
+outputFields:
+  - key: lifecycleState
+    valueType: string
+    readOnly: true
+    label: { en: Lifecycle state, nl: Lifecycle-status }
+    description:
+      en: Whether the conversation is open or closed.
+      nl: Of de conversatie open of gesloten is.
+    help:
+      en: This comes from `readModel.lifecycleState` when present and otherwise falls back to the conversation status. Use it when later routing should react differently to open versus closed threads.
+      nl: Dit komt uit `readModel.lifecycleState` als die aanwezig is en valt anders terug op de conversatiestatus. Gebruik dit wanneer vervolgrouting anders moet reageren op open versus gesloten threads.
+    render: { component: Input }
+  - key: automationMode
+    valueType: string
+    readOnly: true
+    label: { en: Automation mode, nl: Automation mode }
+    description:
+      en: Whether AI is autonomous, paused, or assisting an operator.
+      nl: Of AI autonoom werkt, gepauzeerd is, of een medewerker ondersteunt.
+    help:
+      en: This comes from the conversation read model and falls back to `human` when nothing is set. Use it when the workflow should behave differently for autonomous AI, paused AI, or medewerker-gestuurde afhandeling.
+      nl: Dit komt uit het conversation read model en valt terug op `human` als er niets is gezet. Gebruik dit wanneer de workflow anders moet reageren op autonome AI, gepauzeerde AI of medewerker-gestuurde afhandeling.
+    render: { component: Input }
+  - key: routingTargetType
+    valueType: string
+    readOnly: true
+    label: { en: Routing target, nl: Routingdoel }
+    description:
+      en: Whether the conversation is unrouted, queued, or assigned to a user.
+      nl: Of het gesprek niet gerouteerd is, naar een wachtrij staat, of naar een gebruiker staat.
+    help:
+      en: This comes from the conversation read model and falls back to `none`. Use it when later steps need to know whether the inbox still treats the thread as unassigned, queued, or already picked up by a user.
+      nl: Dit komt uit het conversation read model en valt terug op `none`. Gebruik dit wanneer vervolgstappen moeten weten of de inbox de thread nog als niet toegewezen, in een wachtrij of al opgepakt door een gebruiker ziet.
+    render: { component: Input }
+  - key: channel
+    valueType: string
+    readOnly: true
+    label: { en: Channel, nl: Kanaal }
+    description:
+      en: Conversation channel.
+      nl: Kanaal van de conversatie.
+    help:
+      en: This is the actual channel on the conversation row, currently WhatsApp or email. Use it before channel-specific branching or when later nodes must choose provider-safe behavior.
+      nl: Dit is het echte kanaal op de conversatieregel, nu WhatsApp of e-mail. Gebruik dit vóór kanaalspecifieke vertakkingen of wanneer latere nodes provider-veilige keuzes moeten maken.
+    options:
+      type: static
+      items:
+        - value: whatsapp
+          label: { en: WhatsApp, nl: WhatsApp }
+        - value: email
+          label: { en: Email, nl: E-mail }
+    render: { component: Input }
+  - key: phone
+    valueType: string
+    semanticType: phone
+    readOnly: true
+    label: { en: Phone, nl: Telefoon }
+    description:
+      en: Phone number linked to the conversation.
+      nl: Telefoonnummer gekoppeld aan de conversatie.
+    help:
+      en: The bridge first checks `contactPhone`, `phone`, and `whatsappPhone` on the read model, then falls back to `workflowContext.phone`. Use it when later steps need the known conversation phone number without re-reading the full context object.
+      nl: De bridge kijkt eerst naar `contactPhone`, `phone` en `whatsappPhone` in het read model en valt daarna terug op `workflowContext.phone`. Gebruik dit wanneer vervolgstappen het bekende conversatietelefoonnummer nodig hebben zonder opnieuw het volledige contextobject te lezen.
+    render: { component: Input }
+  - key: mailboxId
+    valueType: string
+    readOnly: true
+    label: { en: Mailbox ID, nl: Mailbox-ID }
+    description:
+      en: Mailbox ID for email conversations.
+      nl: Mailbox-ID voor e-mailconversaties.
+    help:
+      en: This is only meaningful for email threads. Use it when downstream email handling needs to know which mailbox owns the conversation.
+      nl: Dit is alleen zinvol voor e-mailthreads. Gebruik dit wanneer downstream e-mailafhandeling moet weten bij welke mailbox de conversatie hoort.
+    render: { component: Input }
+  - key: threadKey
+    valueType: string
+    readOnly: true
+    label: { en: Thread key, nl: Threadsleutel }
+    description:
+      en: Technical thread key for email conversations.
+      nl: Technische threadsleutel voor e-mailconversaties.
+    help:
+      en: This is a technical continuity key for email conversations, not customer-facing copy. Use it for correlation or diagnostics when a later step needs to stay on the same email thread.
+      nl: Dit is een technische continuïteitssleutel voor e-mailconversaties, geen klantgerichte tekst. Gebruik dit voor correlatie of diagnose wanneer een vervolgstap op dezelfde e-mailthread moet blijven.
+    render: { component: Input }
+  - key: subject
+    valueType: string
+    readOnly: true
+    label: { en: Subject, nl: Onderwerp }
+    description:
+      en: Conversation subject, especially relevant for email.
+      nl: Onderwerp van de conversatie, vooral relevant voor e-mail.
+    help:
+      en: This comes straight from the conversation row. It is mainly useful for email flows, summaries, or handover copy where a medewerker should see the thread subject.
+      nl: Dit komt rechtstreeks uit de conversatieregel. Het is vooral nuttig voor e-mailflows, samenvattingen of overdrachtstekst waarbij een medewerker het threadonderwerp moet zien.
+    render: { component: Input }
+  - key: relationId
+    valueType: string
+    semanticType: relationId
+    readOnly: true
+    label: { en: Relation ID, nl: Relatie ID }
+    description:
+      en: Linked relation ID when known.
+      nl: Gekoppelde relatie-ID indien bekend.
+    help:
+      en: The bridge checks `relationId` and then `contactRelationId` in the read model. In the seeded WAO orchestrator this value is used to decide whether a contactmoment can be linked to a known relation.
+      nl: De bridge controleert `relationId` en daarna `contactRelationId` in het read model. In de seeded WAO-orchestrator wordt deze waarde gebruikt om te beslissen of een contactmoment aan een bekende relatie kan worden gekoppeld.
+    render: { component: Input }
+  - key: identityAssurance
+    valueType: object
+    readOnly: true
+    label: { en: Identity assurance, nl: Identificatiecontext }
+    description:
+      en: The current identity assurance level and verification methods on the conversation.
+      nl: Het actuele identificatieniveau en de gebruikte verificatiemethodes op de conversatie.
+    help:
+      en: This is the full `identityAssurance` object from the conversation read model. Use it when later logic needs the raw structure instead of only the split-out level, methods, or timestamps.
+      nl: Dit is het volledige `identityAssurance`-object uit het conversation read model. Gebruik dit wanneer vervolglogica de ruwe structuur nodig heeft en niet alleen het uitgesplitste niveau, de methodes of de timestamps.
+  - key: identityAssuranceLevel
+    valueType: string
+    readOnly: true
+    label: { en: Identity assurance level, nl: Identificatieniveau }
+    description:
+      en: The highest current assurance level, for example address or iban.
+      nl: Het hoogste actuele identificatieniveau, bijvoorbeeld address of iban.
+    help:
+      en: This reads `identityAssurance.level` and falls back to `none`. Use it when you only need the current trust level and do not want to inspect the full assurance object.
+      nl: Dit leest `identityAssurance.level` en valt terug op `none`. Gebruik dit wanneer je alleen het huidige vertrouwensniveau nodig hebt en niet het volledige assurance-object wilt uitpluizen.
+    options:
+      type: static
+      items:
+        - value: none
+          label: { en: None, nl: Geen }
+        - value: contact
+          label: { en: Contact, nl: Contact }
+        - value: address
+          label: { en: Address, nl: Adres }
+        - value: iban
+          label: { en: IBAN, nl: IBAN }
+        - value: verified_identity
+          label: { en: Verified identity, nl: Geverifieerde identiteit }
+        - value: manual
+          label: { en: Manually confirmed, nl: Handmatig bevestigd }
+    render: { component: Input }
+  - key: identityAssuranceMethods
+    valueType: string
+    cardinality:
+      min: 0
+      max: "unbounded"
+    item:
+      key: method
+      valueType: string
+      description:
+        en: One verification method recorded on the identity assurance object.
+        nl: Een verificatiemethode die op het identity-assurance-object is vastgelegd.
+      help:
+        en: Each list item is one raw method value from `identityAssurance.methods`, for example a method used to reach the current assurance level.
+        nl: Elk lijstitem is een ruwe methodewaarde uit `identityAssurance.methods`, bijvoorbeeld een methode die is gebruikt om het huidige assurance-niveau te bereiken.
+    readOnly: true
+    label: { en: Identity methods, nl: Identificatiemethodes }
+    description:
+      en: The verification methods used to reach the level.
+      nl: De verificatiemethodes waarmee het niveau is bereikt.
+    help:
+      en: This is the `identityAssurance.methods` array when present, otherwise an empty list. Use it for audit context or to avoid asking for bewijs that was already supplied through another method.
+      nl: Dit is de `identityAssurance.methods`-array als die aanwezig is, anders een lege lijst. Gebruik dit voor auditcontext of om geen bewijs opnieuw te vragen dat al via een andere methode is geleverd.
+  - key: identityAssuranceVerifiedAt
+    valueType: string
+    readOnly: true
+    label: { en: Verified at, nl: Gecontroleerd op }
+    description:
+      en: Timestamp when the assurance level was established.
+      nl: Moment waarop het identificatieniveau is vastgesteld.
+    help:
+      en: This comes from `identityAssurance.verifiedAt`. Use it when the age of the verification matters for routing, compliance, or whether a new check is needed.
+      nl: Dit komt uit `identityAssurance.verifiedAt`. Gebruik dit wanneer de leeftijd van de verificatie relevant is voor routing, compliance of de vraag of een nieuwe check nodig is.
+    render: { component: Input }
+  - key: identityAssuranceExpiresAt
+    valueType: string
+    readOnly: true
+    label: { en: Valid until, nl: Geldig tot }
+    description:
+      en: Timestamp when the assurance level expires, if configured.
+      nl: Moment waarop het identificatieniveau verloopt, indien ingesteld.
+    help:
+      en: This comes from `identityAssurance.expiresAt`. Use it when the workflow should treat an older verification as no longer trustworthy after its configured expiry.
+      nl: Dit komt uit `identityAssurance.expiresAt`. Gebruik dit wanneer de workflow een oudere verificatie na de ingestelde verloopdatum niet meer als betrouwbaar moet zien.
+    render: { component: Input }
+  - key: workflowInstanceId
+    valueType: string
+    readOnly: true
+    label: { en: Workflow instance, nl: Workflow-instance }
+    description:
+      en: Linked workflow instance on this conversation, when present.
+      nl: Gekoppelde workflow-instance op deze conversatie, indien aanwezig.
+    help:
+      en: This is the workflow instance currently linked on the conversation row. Use it for handover context or when a later step needs to correlate messaging state with workflow state.
+      nl: Dit is de workflow-instance die nu aan de conversatieregel hangt. Gebruik dit voor overdrachtscontext of wanneer een vervolgstap messaging-status aan workflowstatus moet koppelen.
+    render: { component: Input }
+  - key: windowOpen
+    valueType: boolean
+    readOnly: true
+    label: { en: Open freeform window, nl: Vrij venster open }
+    description:
+      en: Whether the freeform messaging window is still open.
+      nl: Of het vrije messaging-venster nog open is.
+    help:
+      en: This is derived from the stored window-expiry timestamp and the current time. Use it before sending free-form WhatsApp replies that would stop being allowed once the customer care window closes.
+      nl: Dit wordt afgeleid uit de opgeslagen window-expiry-timestamp en de huidige tijd. Gebruik dit vóór het sturen van vrije WhatsApp-antwoorden die niet meer zijn toegestaan zodra het klantcontactvenster sluit.
+    render: { component: Switch }
+  - key: windowTemplateOnly
+    valueType: boolean
+    readOnly: true
+    label: { en: Templates only, nl: Alleen templates mogelijk }
+    description:
+      en: Whether only templates may be sent.
+      nl: Of alleen templates verstuurd mogen worden.
+    help:
+      en: This is the inverse of an open free-form window in the current bridge. Use it when later messaging steps must switch to approved templates instead of plain free-form copy.
+      nl: Dit is in de huidige bridge het omgekeerde van een open vrij venster. Gebruik dit wanneer latere messaging-stappen moeten overschakelen naar goedgekeurde templates in plaats van gewone vrije tekst.
+    render: { component: Switch }
+  - key: windowExpiringSoon
+    valueType: boolean
+    readOnly: true
+    label: { en: Freeform window expiring soon, nl: Vrij venster verloopt bijna }
+    description:
+      en: Whether the freeform messaging window is about to expire.
+      nl: Of het vrije messaging-venster bijna verloopt.
+    help:
+      en: This is true only while the free-form window is still open and within the bridge's expiring-soon threshold. Use it to avoid starting a back-and-forth that may outlive the remaining customer care window.
+      nl: Dit is alleen true zolang het vrije venster nog open is en binnen de expiring-soon-drempel van de bridge valt. Gebruik dit om geen gesprek heen en weer te starten dat langer kan duren dan het resterende klantcontactvenster.
+    render: { component: Switch }
+  - key: aiAssistantName
+    valueType: string
+    readOnly: true
+    label: { en: AI assistant name, nl: AI-assistentnaam }
+    description:
+      en: Name the AI assistant uses in this conversation.
+      nl: Naam waarmee de AI-assistent zich in deze conversatie voorstelt.
+    help:
+      en: This is loaded separately from the conversation itself and reflects the configured assistant name the runtime should use. Use it when generated replies or summaries should mention the assistant consistently.
+      nl: Dit wordt los van de conversatie zelf geladen en weerspiegelt de geconfigureerde assistentnaam die de runtime moet gebruiken. Gebruik dit wanneer gegenereerde antwoorden of samenvattingen de assistent consequent moeten noemen.
+    render: { component: Input }
+  - key: messagesText
+    valueType: string
+    readOnly: true
+    label: { en: Messages, nl: Berichten }
+    description:
+      en: Recent fetched messages combined into text.
+      nl: Recente opgehaalde berichten samengevoegd tot tekst.
+    help:
+      en: This is the formatted transcript text built from the fetched recent messages, capped by the configured message limit. The bridge labels inbound rows as `customer` and outbound rows as `assistant`.
+      nl: Dit is de geformatteerde transcripttekst die wordt opgebouwd uit de opgehaalde recente berichten, begrensd door de ingestelde berichtlimiet. De bridge labelt inkomende regels als `customer` en uitgaande regels als `assistant`.
+    render:
+      component: Textarea
+      props:
+        rows: 3
+  - key: latestInboundMessageId
+    valueType: string
+    readOnly: true
+    label: { en: Latest inbound message ID, nl: Laatste inkomende bericht-ID }
+    description:
+      en: Technical identifier of the most recent fetched inbound message in the context.
+      nl: Technische sleutel van het meest recente opgehaalde inkomende bericht in de context.
+    help:
+      en: This is the ID of the most recent fetched inbound message, or `null` when the loaded window contains no inbound message at all. Use it when a later node must react to or correlate with the last customer message.
+      nl: Dit is de ID van het meest recente opgehaalde inkomende bericht, of `null` wanneer het geladen venster helemaal geen inkomend bericht bevat. Gebruik dit wanneer een latere node op het laatste klantbericht moet reageren of ermee moet correleren.
+    render: { component: Input }
+  - key: visibleMessageCount
+    valueType: number
+    readOnly: true
+    label: { en: Visible message count, nl: Aantal zichtbare berichten }
+    description:
+      en: Number of fetched recent messages in the context window.
+      nl: Aantal opgehaalde recente berichten in het contextvenster.
+    help:
+      en: This is simply the number of messages returned by the context query after the configured limit is applied. Use it when routing depends on whether there is already enough recent transcript to work with.
+      nl: Dit is simpelweg het aantal berichten dat de contextquery teruggeeft nadat de ingestelde limiet is toegepast. Gebruik dit wanneer routing ervan afhangt of er al genoeg recent transcript is om mee te werken.
+    render: { component: NumberInput }
+  - key: inboundVisibleMessageCount
+    valueType: number
+    readOnly: true
+    label: { en: Inbound visible message count, nl: Aantal zichtbare inkomende berichten }
+    description:
+      en: Number of inbound messages in the fetched recent context window.
+      nl: Aantal inkomende berichten in het opgehaalde recente contextvenster.
+    help:
+      en: This counts only fetched inbound messages. Use it when the workflow should distinguish customer input volume from its own outbound messaging.
+      nl: Dit telt alleen de opgehaalde inkomende berichten. Gebruik dit wanneer de workflow het volume aan klantinput moet onderscheiden van zijn eigen uitgaande messaging.
+    render: { component: NumberInput }
+  - key: hasVisibleOutbound
+    valueType: boolean
+    readOnly: true
+    label: { en: Has visible outbound message, nl: Zichtbaar uitgaand bericht aanwezig }
+    description:
+      en: Whether the fetched recent context window already contains an outbound message.
+      nl: Of het opgehaalde recente contextvenster al een uitgaand bericht bevat.
+    help:
+      en: This becomes true as soon as any fetched message has outbound direction. Use it when a later step needs to know whether the recent transcript already includes an outbound reply.
+      nl: Dit wordt true zodra een opgehaald bericht een uitgaande richting heeft. Gebruik dit wanneer een vervolgstap moet weten of het recente transcript al een uitgaand antwoord bevat.
+    render: { component: Switch }

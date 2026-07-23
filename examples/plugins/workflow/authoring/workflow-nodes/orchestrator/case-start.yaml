@@ -1,0 +1,132 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: case.start
+category: Zaak
+label:
+  en: Start case
+  nl: Start zaak
+description:
+  en: Start a case from a router intent or a fixed case template.
+  nl: Start een zaak vanuit een router-intent of vast zaaksjabloon.
+configFields:
+  - key: caseTemplateId
+    valueType: string
+    semanticType: caseTemplateId
+    label:
+      en: Case template
+      nl: Zaaksjabloon
+    description:
+      en: Fixed case template to start when no router intent supplies one.
+      nl: Vast zaaksjabloon om te starten wanneer er geen router-intent een sjabloon aanlevert.
+    help:
+      nl: De runtime zoekt de gepubliceerde zaak-workflow die aan dit sjabloon is gekoppeld. Router-output heeft voorrang;
+        dit veld is de vaste fallback voor deze node.
+      en: The runtime resolves the published case workflow linked to this template. Router output takes precedence; this
+        field is the fixed fallback for this node.
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/core-entity-options?entity=case-template
+    render:
+      component: OptionVariablePicker
+      props:
+        clearable: true
+        expectedSemanticType: caseTemplateId
+        valueMode: insertText
+        optionSectionLabel: Zaaksjablonen
+        variableSectionLabel: Dynamische variabelen
+  - key: definitionId
+    valueType: string
+    semanticType: workflowDefinitionId
+    label:
+      en: Legacy runtime workflow
+      nl: Legacy runtime-workflow
+    description:
+      en: Hidden direct workflow definition id used by legacy router mappings.
+      nl: Verborgen directe workflowdefinitie-id voor legacy router-mappings.
+    help:
+      nl: Gebruik bij nieuwe configuratie het zaaksjabloon. Dit veld blijft verborgen zodat bestaande routerconfiguraties
+        die nog een workflowId leveren niet breken.
+      en: Use the case template for new configuration. This field stays hidden so existing router configurations that still
+        provide a workflowId keep working.
+    render:
+      component: Input
+    workflowInspector:
+      displayMode: hidden
+  - key: conversationId
+    valueType: string
+    semanticType: conversationId
+    label:
+      en: Conversation ID
+      nl: Conversatie-ID
+    description:
+      en: Conversation to link to the started case workflow.
+      nl: Conversatie die aan de gestarte zaak-workflow wordt gekoppeld.
+    help:
+      nl: Laat leeg om de conversatie uit de parent workflowcontext over te nemen. Vul alleen een variabele in wanneer deze
+        node expliciet een andere conversatie moet koppelen.
+      en: Leave empty to inherit the conversation from the parent workflow context. Fill a variable only when this node must
+        explicitly link a different conversation.
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: insertText
+  - key: timeoutMs
+    valueType: number
+    label:
+      en: Timeout (ms)
+      nl: Timeout (ms)
+    description:
+      en: Maximum wait duration when the orchestrator waits for the case to complete.
+      nl: Maximale wachttijd wanneer de orchestrator op afronding van de zaak wacht.
+    help:
+      nl: Dit hoort bij het wachtgedrag van de orchestrator. Kies een waarde die past bij de kanaalflow; de onderliggende
+        zaak kan langer doorlopen als waitForCompletion uit staat.
+      en: This belongs to the orchestrator wait behavior. Choose a value that fits the channel flow; the underlying case can
+        continue longer when waitForCompletion is disabled.
+    defaultValue: 600000
+    validation:
+      min: 0
+    render:
+      component: NumberInput
+  - key: waitForCompletion
+    valueType: boolean
+    label:
+      en: Wait for case completion
+      nl: Wacht op zaakafronding
+    description:
+      en: When enabled, the orchestrator waits until the case workflow completes. Disable this when the case must continue independently after the orchestrator stops.
+      nl: Als dit aan staat wacht de orchestrator tot de zaak-workflow klaar is. Zet dit uit als de zaak zelfstandig moet doorlopen nadat de orchestrator stopt.
+    help:
+      nl: Laat dit aan wanneer latere orchestrator-nodes child-output of terminale paden nodig hebben. Zet het alleen uit
+        voor fire-and-forget handoff waarbij de zaak zelfstandig verder loopt.
+      en: Leave this enabled when later orchestrator nodes need child output or terminal paths. Disable it only for
+        fire-and-forget handoff where the case continues independently.
+    defaultValue: true
+    render:
+      component: Switch
+      props:
+        clearable: false
+  - key: definitionName
+    valueType: string
+    description:
+      en: Hidden synchronized name of the resolved case workflow.
+      nl: Verborgen gesynchroniseerde naam van de opgeloste zaak-workflow.
+    help:
+      nl: De designer/runtimemetadata gebruikt dit voor traceerbaarheid. Het is geen authoringveld.
+      en: Designer/runtime metadata uses this for traceability. It is not an authoring field.
+    defaultValue: ""
+    readOnly: true
+    workflowInspector:
+      displayMode: hidden
+  - key: publishedVersion
+    valueType: string
+    description:
+      en: Hidden synchronized published version of the resolved case workflow.
+      nl: Verborgen gesynchroniseerde gepubliceerde versie van de opgeloste zaak-workflow.
+    help:
+      nl: Dit bewaart welke gepubliceerde versie in de designercontext is geselecteerd of opgelost.
+      en: This stores which published version is selected or resolved in designer context.
+    defaultValue: ""
+    readOnly: true
+    workflowInspector:
+      displayMode: hidden

@@ -1,0 +1,28 @@
+OpenShapeForge API {{ .Chart.AppVersion }} deployed as {{ include "openshapeforge-api.fullname" . }}.
+
+{{- if .Values.migration.enabled }}
+
+Schema migrations ran as a pre-upgrade Job
+({{ include "openshapeforge-api.fullname" . }}-migrate) using the privileged
+database URL. Check it if the API pods are not ready:
+
+  kubectl logs -n {{ .Release.Namespace }} job/{{ include "openshapeforge-api.fullname" . }}-migrate
+{{- end }}
+
+Reach the API inside the cluster at:
+
+  http://{{ include "openshapeforge-api.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}/api/graphql
+
+Port-forward to try it locally:
+
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "openshapeforge-api.fullname" . }} 3001:{{ .Values.service.port }}
+  curl http://127.0.0.1:3001/api/health
+
+{{- if eq (default "" .Values.auth.bearer.audience) "" }}
+
+WARNING: auth.bearer.audience is empty. With NODE_ENV=production the API will
+refuse to start until a bearer audience and a strong internal context secret
+are configured. Set auth.bearer.{jwksUri,issuer,audience} and provide
+OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET (via database.existingSecret or
+auth.internalContextSecret).
+{{- end }}

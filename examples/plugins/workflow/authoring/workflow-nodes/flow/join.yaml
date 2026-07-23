@@ -1,0 +1,212 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: join
+category: flow
+label:
+  nl: Samenvoegen
+  en: Join
+description:
+  nl: Voegt meerdere workflowtakken samen.
+  en: Joins multiple workflow branches.
+configFields:
+  - key: waitMode
+    valueType: string
+    label:
+      nl: Wacht op
+      en: Wait for
+    description:
+      nl: Bepaalt wanneer het samenvoegpunt verder gaat.
+      en: Determines when the join releases the workflow.
+    help:
+      nl: "Eerste resultaat: zodra één tak klaar is. Alle takken: pas wanneer iedere binnenkomende tak voltooid is. N van M:
+        na een ingesteld aantal voltooide takken. Specifieke takken: alleen wachten op door jou geselecteerde
+        upstream-knopen."
+      en: "First result: as soon as one branch finishes. All branches: only after every incoming branch completes. N of M:
+        after a configured number of branches complete. Specific branches: only wait for the upstream nodes you select."
+    defaultValue: first_result
+    validation:
+      required: true
+    render:
+      component: ReferenceSelect
+      props:
+        clearable: false
+    options:
+      type: static
+      items:
+        - value: first_result
+          label:
+            nl: Eerste resultaat
+            en: First result
+        - value: all
+          label:
+            nl: Alle takken
+            en: All branches
+        - value: n_of_m
+          label:
+            nl: N van M takken
+            en: N of M branches
+        - value: specific_nodes
+          label:
+            nl: Specifieke takken
+            en: Specific branches
+  - key: requiredCount
+    valueType: integer
+    label:
+      nl: Aantal vereiste takken
+      en: Required branches
+    description:
+      nl: Hoeveel takken voltooid moeten zijn voordat het samenvoegpunt vrijgeeft.
+      en: How many branches must complete before the join releases.
+    help:
+      en: Only used in authoring when `waitMode` is `n_of_m`. Store here how many incoming branches should count as enough before the join may continue.
+      nl: Wordt in authoring alleen gebruikt wanneer `waitMode` `n_of_m` is. Leg hier vast hoeveel binnenkomende takken genoeg moeten zijn voordat de join verder mag.
+    defaultValue: 1
+    validation:
+      required: true
+      min:
+        value: 1
+        message:
+          nl: Aantal moet minimaal 1 zijn.
+          en: Count must be at least 1.
+    render:
+      component: NumberInput
+      props:
+        min: 1
+        step: 1
+    visibility:
+      logic: and
+      conditions:
+        - field: waitMode
+          operator: eq
+          value: n_of_m
+  - key: expectedSourceNodeIds
+    valueType: string
+    cardinality:
+      min: 0
+      max: "unbounded"
+    label:
+      nl: Wacht op takken
+      en: Wait for branches
+    description:
+      nl: Selecteer welke upstream-knopen voltooid moeten zijn voordat het samenvoegpunt vrijgeeft.
+      en: Pick which upstream nodes must complete before the join releases.
+    help:
+      nl: De lijst toont de directe voorgangers van dit samenvoegpunt. Geef knopen unieke namen om verwarring te voorkomen.
+      en: The list shows the direct predecessors of this join. Give the upstream nodes unique names to avoid confusion.
+    defaultValue: []
+    validation:
+      required: true
+    item:
+      key: nodeId
+      valueType: string
+      description:
+        en: One upstream node id that this join should wait for.
+        nl: Eén upstream-node-id waarop deze join moet wachten.
+      help:
+        en: The inspector fills this from the currently connected upstream branches and stores node ids under the hood while showing human-readable labels to the author.
+        nl: De inspector vult dit vanuit de momenteel verbonden upstream-takken en slaat onder water node-id's op terwijl de auteur leesbare labels ziet.
+    render:
+      component: JoinExpectedBranches
+    options:
+      type: static
+      items: []
+    visibility:
+      logic: and
+      conditions:
+        - field: waitMode
+          operator: eq
+          value: specific_nodes
+  - key: timeoutAmount
+    valueType: integer
+    label:
+      nl: Timeout (aantal)
+      en: Timeout (amount)
+    description:
+      nl: Optioneel. Vanaf de eerste binnenkomende tak vrijgegeven via de timeout-uitgang.
+      en: Optional. Counted from the first arriving branch; releases via the timeout output.
+    help:
+      nl: Laat leeg of op 0 om geen timeout te gebruiken. Combineer met een eenheid om de wachttijd vast te stellen.
+      en: Leave blank or set to 0 to disable. Combine with a unit to define the wait time.
+    render:
+      component: NumberInput
+      props:
+        min: 0
+        step: 1
+    visibility:
+      logic: and
+      conditions:
+        - field: waitMode
+          operator: neq
+          value: first_result
+  - key: timeoutUnit
+    valueType: string
+    label:
+      nl: Timeout-eenheid
+      en: Timeout unit
+    description:
+      en: Time unit paired with `timeoutAmount` in the authored join configuration.
+      nl: Tijdseenheid die in de authored join-configuratie samen met `timeoutAmount` wordt gebruikt.
+    help:
+      en: Only relevant when a timeout amount is configured. In this repo I could verify the authored shape and the extra `timeout` handle in the designer, but not a seeded runtime execution path for join timeouts yet.
+      nl: Alleen relevant wanneer een timeout-aantal is ingevuld. In deze repo kon ik de authored vorm en de extra `timeout`-handle in de designer verifiëren, maar nog geen seeded runtime-uitvoeringspad voor join-timeouts.
+    defaultValue: minutes
+    render:
+      component: ReferenceSelect
+      props:
+        clearable: false
+    options:
+      type: static
+      items:
+        - value: minutes
+          label:
+            nl: Minuten
+            en: Minutes
+        - value: hours
+          label:
+            nl: Uren
+            en: Hours
+        - value: days
+          label:
+            nl: Dagen
+            en: Days
+    visibility:
+      logic: and
+      conditions:
+        - field: waitMode
+          operator: neq
+          value: first_result
+  - key: remainingBranches
+    valueType: string
+    label:
+      nl: Resterende takken
+      en: Remaining branches
+    description:
+      nl: Wat te doen met takken die nog lopen wanneer het samenvoegpunt vrijgeeft.
+      en: What to do with branches still running when the join releases.
+    help:
+      nl: "Annuleren: lopende takken worden gestopt. Loslaten: ze blijven doorlopen, maar beïnvloeden de hoofdflow niet meer."
+      en: "Cancel: still-running branches are stopped. Detach: they keep running but no longer influence the main flow."
+    defaultValue: abandon
+    validation:
+      required: true
+    render:
+      component: ReferenceSelect
+      props:
+        clearable: false
+    options:
+      type: static
+      items:
+        - value: abandon
+          label:
+            nl: Annuleren
+            en: Cancel
+        - value: detach
+          label:
+            nl: Loslaten
+            en: Detach
+    visibility:
+      logic: and
+      conditions:
+        - field: waitMode
+          operator: neq
+          value: all

@@ -1,0 +1,52 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: message.react
+category: Messaging
+label:
+  nl: Reactie op bericht
+  en: Message reaction
+description:
+  nl: Plaatst een emoji-reactie op een bestaand bericht.
+  en: Adds an emoji reaction to an existing message.
+configFields:
+  - key: messageId
+    valueType: string
+    label:
+      nl: Bericht-ID
+      en: Message ID
+    description:
+      nl: Het bestaande WhatsApp-bericht waarop gereageerd wordt.
+      en: The existing WhatsApp message to react to.
+    help:
+      nl: Kies meestal de ID van het laatste inkomende WhatsApp-bericht uit de workflowcontext. Deze node maakt geen nieuw
+        bericht aan; hij stuurt alleen een providerreactie op het opgegeven bericht.
+      en: Usually choose the ID of the latest inbound WhatsApp message from workflow context. This node does not create a new
+        message; it only sends a provider reaction to the specified message.
+    validation:
+      required: true
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: insertText
+  - key: emoji
+    valueType: string
+    label:
+      nl: Emoji
+      en: Emoji
+    description:
+      nl: Emoji die als WhatsApp-reactie wordt verstuurd.
+      en: Emoji sent as the WhatsApp reaction.
+    help:
+      nl: Vul een enkele emoji in die de provider als reactie accepteert. Gebruik dit voor compacte bevestigingen, niet voor
+        inhoudelijke antwoorden.
+      en: Enter a single emoji accepted by the provider as a reaction. Use this for compact acknowledgements, not for
+        substantive replies.
+    validation:
+      required: true
+      minLength:
+        value: 1
+        message:
+          nl: Vul een emoji in.
+          en: Enter an emoji.
+    render:
+      component: Input

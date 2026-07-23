@@ -1,0 +1,1156 @@
+schemaVersion: 1
+kind: coreReferentiedataCatalog
+
+groepen:
+  RELATIESOORT:
+    description: Kerncodetabel voor de compacte classificatie van relaties.
+    items:
+      - value: person
+        label: { nl: Persoon, en: Person, fr: Personne }
+      - value: organization
+        label: { nl: Organisatie, en: Organization, fr: Organisation }
+      - value: group
+        label: { nl: Groep, en: Group, fr: Groupe }
+  COMMUNICATIETYPE:
+    description: Kerncodetabel voor functionele communicatiedoelen en berichttypen.
+    items:
+      - value: appointment_reminder
+        label: { nl: Afspraakherinnering, en: Appointment reminder, fr: Rappel de rendez-vous }
+      - value: service_update
+        label: { nl: Service-update, en: Service update, fr: Mise à jour du service }
+      - value: billing
+        label: { nl: Facturatie, en: Billing, fr: Facturation }
+      - value: formal_correspondence
+        label: { nl: Formele correspondentie, en: Formal correspondence, fr: Correspondance formelle }
+      - value: marketing
+        label: { nl: Marketing, en: Marketing, fr: Marketing }
+
+  COMMUNICATIEKANAAL:
+    description: Kerncodetabel voor voorkeurkanalen binnen communicatie.
+    items:
+      - value: email
+        label: { nl: E-mail, en: Email, fr: E-mail }
+      - value: whatsapp
+        label: { nl: WhatsApp, en: WhatsApp, fr: WhatsApp }
+      - value: sms
+        label: { nl: Sms, en: SMS, fr: SMS }
+      - value: phone
+        label: { nl: Telefoon, en: Phone, fr: Téléphone }
+      - value: post
+        label: { nl: Post, en: Post, fr: Courrier }
+      - value: in_app
+        label: { nl: In-app, en: In-app, fr: In-app }
+
+  COMMUNICATIEVOORKEURSCOPE:
+    description: Kerncodetabel voor het toepassingsniveau van communicatievoorkeuren.
+    items:
+      - value: relation
+        label: { nl: Relatie, en: Relation, fr: Relation }
+      - value: contact_detail
+        label: { nl: Contactgegeven, en: Contact detail, fr: Détail de contact }
+      - value: tenant
+        label: { nl: Tenantstandaard, en: Tenant default, fr: Défaut du locataire }
+
+  COMMUNICATIEVOORKEURSTATUS:
+    description: Kerncodetabel voor de levenscyclus van communicatievoorkeuren.
+    items:
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: pending
+        label: { nl: In afwachting, en: Pending, fr: En attente }
+      - value: revoked
+        label: { nl: Ingetrokken, en: Revoked, fr: Révoqué }
+      - value: expired
+        label: { nl: Verlopen, en: Expired, fr: Expiré }
+
+  CONTACTGEGEVENSOORT:
+    description: Kerncodetabel voor het soort contactgegeven.
+    items:
+      - value: email
+        label: { nl: E-mail, en: E-mail, fr: E-mail }
+      - value: phone
+        label: { nl: Telefoon, en: Phone, fr: Téléphone }
+      - value: mobile
+        label: { nl: Mobiel, en: Mobile, fr: Mobile }
+      - value: website
+        label: { nl: Website, en: Website, fr: Site web }
+
+  CONTACTGEGEVENTOESTEMMINGSSTATUS:
+    description: Kerncodetabel voor de toestemmingsstatus van een contactgegeven.
+    items:
+      - value: granted
+        label: { nl: Toegestaan, en: Granted, fr: Accordé }
+      - value: denied
+        label: { nl: Geweigerd, en: Denied, fr: Refusé }
+      - value: pending
+        label: { nl: In afwachting, en: Pending, fr: En attente }
+      - value: revoked
+        label: { nl: Ingetrokken, en: Revoked, fr: Révoqué }
+      - value: expired
+        label: { nl: Verlopen, en: Expired, fr: Expiré }
+      - value: unknown
+        label: { nl: Onbekend, en: Unknown, fr: Inconnu }
+
+  MESSAGINGKANAAL:
+    description: Kerncodetabel voor uitgaande messaging-kanalen.
+    items:
+      - value: in_app
+        label: { nl: In-app, en: In-app, fr: In-app }
+      - value: email
+        label: { nl: E-mail, en: Email, fr: E-mail }
+
+  MESSAGINGLOCALE:
+    description: Kerncodetabel voor ondersteunde talen in messaging-templates.
+    items:
+      - value: nl
+        label: { nl: Nederlands, en: Dutch, fr: Néerlandais }
+      - value: en
+        label: { nl: Engels, en: English, fr: Anglais }
+      - value: de
+        label: { nl: Duits, en: German, fr: Allemand }
+      - value: fr
+        label: { nl: Frans, en: French, fr: Français }
+
+  MISTRAL_CHAT_MODEL:
+    description: Kerncodetabel voor ondersteunde Mistral chatmodellen in workflow-AI nodes.
+    items:
+      - value: mistral-large-latest
+        label: { nl: Mistral Large, en: Mistral Large, fr: Mistral Large }
+      - value: mistral-medium-latest
+        label: { nl: Mistral Medium, en: Mistral Medium, fr: Mistral Medium }
+      - value: mistral-small-latest
+        label: { nl: Mistral Small, en: Mistral Small, fr: Mistral Small }
+
+  NOTIFICATIECATEGORIE:
+    description: Kerncodetabel voor functionele notificatiecategorieen.
+    items:
+      - value: appointment_reminder
+        label: { nl: Afspraakherinnering, en: Appointment reminder, fr: Rappel de rendez-vous }
+      - value: service_update
+        label: { nl: Service-update, en: Service update, fr: Mise à jour du service }
+      - value: maintenance_update
+        label: { nl: Onderhoudsupdate, en: Maintenance update, fr: Mise à jour de maintenance }
+      - value: case_update
+        label: { nl: Dossierupdate, en: Case update, fr: Mise à jour du dossier }
+      - value: billing
+        label: { nl: Facturatie, en: Billing, fr: Facturation }
+
+  NOTIFICATIEVOORKEURSCOPE:
+    description: Kerncodetabel voor het toepassingsniveau van notificatievoorkeuren.
+    items:
+      - value: relation
+        label: { nl: Relatie, en: Relation, fr: Relation }
+      - value: account
+        label: { nl: Account, en: Account, fr: Compte }
+      - value: tenant
+        label: { nl: Tenant, en: Tenant, fr: Locataire }
+
+  PREFERENCEOWNERSCOPE:
+    description: Kerncodetabel voor de eigenaarsscope van generieke preferences.
+    items:
+      - value: account
+        label: { nl: Account, en: Account, fr: Compte }
+      - value: relation
+        label: { nl: Relatie, en: Relation, fr: Relation }
+      - value: tenant
+        label: { nl: Tenant, en: Tenant, fr: Locataire }
+
+  NOTIFICATIETEMPLATESTATUS:
+    description: Kerncodetabel voor de levenscyclus van notificatietemplates.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft, fr: Brouillon }
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: archived
+        label: { nl: Gearchiveerd, en: Archived, fr: Archivé }
+
+  TEMPLATEBODYFORMAAT:
+    description: Kerncodetabel voor de renderindeling van een templatebody.
+    items:
+      - value: text
+        label: { nl: Tekst, en: Text, fr: Texte }
+      - value: html
+        label: { nl: HTML, en: HTML, fr: HTML }
+      - value: rich_text
+        label: { nl: Rich text, en: Rich text, fr: Texte enrichi }
+
+  TAAKTYPE:
+    description: Kerncodetabel voor functionele taaktypen.
+    items:
+      - value: follow_up
+        label: { nl: Opvolging, en: Follow-up, fr: Suivi }
+      - value: review
+        label: { nl: Beoordeling, en: Review, fr: Examen }
+      - value: intake
+        label: { nl: Intake, en: Intake, fr: Accueil }
+      - value: approval
+        label: { nl: Goedkeuring, en: Approval, fr: Approbation }
+
+  TAAKSTATUS:
+    description: Kerncodetabel voor de levenscyclus van een taak.
+    items:
+      - value: concept
+        label: { nl: Concept, en: Draft, fr: Brouillon }
+      - value: open
+        label: { nl: Open, en: Open, fr: Ouvert }
+      - value: in_progress
+        label: { nl: In uitvoering, en: In progress, fr: En cours }
+      - value: completed
+        label: { nl: Afgerond, en: Completed, fr: Complété }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled, fr: Annulé }
+
+  APPOINTMENTREQUESTSTATUS:
+    description: Kerncodetabel voor de levenscyclus van een afspraakverzoek.
+    items:
+      - value: open
+        label: { nl: Open, en: Open, fr: Ouvert }
+      - value: in_progress
+        label: { nl: In behandeling, en: In progress, fr: En cours }
+      - value: completed
+        label: { nl: Afgerond, en: Completed, fr: Complété }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled, fr: Annulé }
+
+  TAAKPRIORITEIT:
+    description: Kerncodetabel voor de relatieve urgentie van een taak.
+    items:
+      - value: low
+        label: { nl: Laag, en: Low, fr: Faible }
+      - value: normal
+        label: { nl: Normaal, en: Normal, fr: Normal }
+      - value: high
+        label: { nl: Hoog, en: High, fr: Élevé }
+      - value: urgent
+        label: { nl: Urgent, en: Urgent, fr: Urgent }
+
+  SUPPORTSTATUS:
+    description: Kerncodetabel voor de levenscyclus van een supportverzoek.
+    items:
+      - value: open
+        label: { nl: Open, en: Open, fr: Ouvert }
+      - value: in_progress
+        label: { nl: In behandeling, en: In progress, fr: En cours }
+      - value: waiting
+        label: { nl: Wachtend, en: Waiting, fr: En attente }
+      - value: resolved
+        label: { nl: Opgelost, en: Resolved, fr: Résolu }
+      - value: closed
+        label: { nl: Gesloten, en: Closed, fr: Fermé }
+
+  SUPPORTPRIORITEIT:
+    description: Kerncodetabel voor de relatieve urgentie van een supportverzoek.
+    items:
+      - value: low
+        label: { nl: Laag, en: Low, fr: Faible }
+      - value: normal
+        label: { nl: Normaal, en: Normal, fr: Normal }
+      - value: high
+        label: { nl: Hoog, en: High, fr: Élevé }
+      - value: critical
+        label: { nl: Kritiek, en: Critical, fr: Critique }
+
+  SUPPORTCATEGORIE:
+    description: Kerncodetabel voor functionele categorieen van supportverzoeken.
+    items:
+      - value: bug
+        label: { nl: Bug, en: Bug, fr: Bug }
+      - value: question
+        label: { nl: Vraag, en: Question, fr: Question }
+      - value: feature
+        label: { nl: Functieverzoek, en: Feature request, fr: Demande de fonctionnalité }
+      - value: data
+        label: { nl: Data, en: Data, fr: Données }
+      - value: access
+        label: { nl: Toegang, en: Access, fr: Accès }
+      - value: performance
+        label: { nl: Prestaties, en: Performance, fr: Performance }
+      - value: other
+        label: { nl: Overig, en: Other, fr: Autre }
+
+  COMMENTBRON:
+    description: Kerncodetabel voor de herkomst van een opmerking (mens, AI-node of systeem).
+    items:
+      - value: human
+        label: { nl: Mens, en: Human, fr: Humain }
+      - value: ai_node
+        label: { nl: AI-node, en: AI node, fr: Nœud AI }
+      - value: system
+        label: { nl: Systeem, en: System, fr: Système }
+
+  TRIAGESENTIMENT:
+    description: Kerncodetabel voor de door AI-triage ingeschatte toon van een supportverzoek.
+    items:
+      - value: positive
+        label: { nl: Positief, en: Positive, fr: Positif }
+      - value: neutral
+        label: { nl: Neutraal, en: Neutral, fr: Neutre }
+      - value: negative
+        label: { nl: Negatief, en: Negative, fr: Négatif }
+      - value: frustrated
+        label: { nl: Gefrustreerd, en: Frustrated, fr: Frustré }
+
+  TRIAGEURGENTIE:
+    description: Kerncodetabel voor de door AI-triage ingeschatte urgentie van een supportverzoek.
+    items:
+      - value: low
+        label: { nl: Laag, en: Low, fr: Faible }
+      - value: medium
+        label: { nl: Middel, en: Medium, fr: Moyen }
+      - value: high
+        label: { nl: Hoog, en: High, fr: Élevé }
+
+  CASECATEGORY:
+    description: Kerncodetabel voor functionele categorieen van zaken.
+    items:
+      - value: service_request
+        label: { nl: Serviceverzoek, en: Service request, fr: Demande de service }
+      - value: complaint
+        label: { nl: Klacht, en: Complaint, fr: Plainte }
+      - value: intake
+        label: { nl: Intake, en: Intake, fr: Accueil }
+      - value: incident
+        label: { nl: Incident, en: Incident, fr: Incident }
+      - value: change_request
+        label: { nl: Wijzigingsverzoek, en: Change request, fr: Demande de modification }
+      - value: guidance
+        label: { nl: Begeleiding, en: Guidance, fr: Accompagnement }
+
+  CASETYPE:
+    description: Kerncodetabel voor hoofdtypen van zaken.
+    items:
+      - value: general_service
+        label: { nl: Algemene servicezaak, en: General service case, fr: Cas de service général }
+      - value: rental_termination
+        label: { nl: Huuropzegging, en: Rental termination, fr: Résiliation de location }
+      - value: housing_support
+        label: { nl: Woonondersteuning, en: Housing support, fr: Soutien au logement }
+      - value: maintenance_case
+        label: { nl: Onderhoudszaak, en: Maintenance case, fr: Cas de maintenance }
+      - value: allocation_case
+        label: { nl: Toewijzingszaak, en: Allocation case, fr: Cas d'allocation }
+      - value: complaint_case
+        label: { nl: Klachtenzaak, en: Complaint case, fr: Cas de plainte }
+      - value: objection_case
+        label: { nl: Bezwaarzaak, en: Objection case, fr: Cas d'objection }
+      - value: enforcement_case
+        label: { nl: Handhavingszaak, en: Enforcement case, fr: Cas d'exécution }
+
+  CASESTATUS:
+    description: Kerncodetabel voor de levenscyclus van een zaak.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft, fr: Brouillon }
+      - value: intake
+        label: { nl: Intake, en: Intake, fr: Accueil }
+      - value: in_progress
+        label: { nl: In behandeling, en: In progress, fr: En cours }
+      - value: waiting_customer
+        label: { nl: Wacht op klant, en: Waiting for customer, fr: En attente du client }
+      - value: waiting_partner
+        label: { nl: Wacht op partner, en: Waiting for partner, fr: En attente du partenaire }
+      - value: on_hold
+        label: { nl: Gepauzeerd, en: On hold, fr: Suspendu }
+      - value: resolved
+        label: { nl: Opgelost, en: Resolved, fr: Résolu }
+      - value: closed
+        label: { nl: Gesloten, en: Closed, fr: Fermé }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled, fr: Annulé }
+
+  CASEPRIORITY:
+    description: Kerncodetabel voor de prioriteit van een zaak.
+    items:
+      - value: low
+        label: { nl: Laag, en: Low, fr: Faible }
+      - value: normal
+        label: { nl: Normaal, en: Normal, fr: Normal }
+      - value: high
+        label: { nl: Hoog, en: High, fr: Élevé }
+      - value: urgent
+        label: { nl: Urgent, en: Urgent, fr: Urgent }
+      - value: crisis
+        label: { nl: Crisis, en: Crisis, fr: Crise }
+
+  CASEORIGINCHANNEL:
+    description: Kerncodetabel voor herkomstkanalen van zaken.
+    items:
+      - value: portal
+        label: { nl: Portaal, en: Portal, fr: Portail }
+      - value: email
+        label: { nl: E-mail, en: Email, fr: E-mail }
+      - value: phone
+        label: { nl: Telefoon, en: Phone, fr: Téléphone }
+      - value: whatsapp
+        label: { nl: WhatsApp, en: WhatsApp, fr: WhatsApp }
+      - value: chat
+        label: { nl: Chat, en: Chat, fr: Chat }
+      - value: letter
+        label: { nl: Brief, en: Letter, fr: Lettre }
+      - value: office
+        label: { nl: Balie, en: Front desk, fr: Accueil }
+      - value: workflow
+        label: { nl: Workflow, en: Workflow, fr: Workflow }
+      - value: api
+        label: { nl: API, en: API, fr: API }
+
+  CASECONFIDENTIALITY:
+    description: Kerncodetabel voor vertrouwelijkheid van zaken.
+    items:
+      - value: public
+        label: { nl: Openbaar, en: Public, fr: Public }
+      - value: internal
+        label: { nl: Intern, en: Internal, fr: Interne }
+      - value: confidential
+        label: { nl: Vertrouwelijk, en: Confidential, fr: Confidentiel }
+      - value: strictly_confidential
+        label: { nl: Zeer vertrouwelijk, en: Strictly confidential, fr: Très confidentiel }
+
+  CASEROUTINGSTATUS:
+    description: Kerncodetabel voor de routerings- en behandelfase van een zaak.
+    items:
+      - value: new
+        label: { nl: Nieuw, en: New, fr: Nouveau }
+      - value: triage
+        label: { nl: Triage, en: Triage, fr: Triage }
+      - value: queued
+        label: { nl: In wachtrij, en: Queued, fr: En file d'attente }
+      - value: routed
+        label: { nl: Gerouteerd, en: Routed, fr: Acheminé }
+      - value: assigned
+        label: { nl: Toegewezen, en: Assigned, fr: Assigné }
+      - value: waiting
+        label: { nl: Wachtend, en: Waiting, fr: En attente }
+      - value: escalated
+        label: { nl: Geescaleerd, en: Escalated, fr: Escaladé }
+      - value: completed
+        label: { nl: Afgerond, en: Completed, fr: Complété }
+
+  CASEWAITINGREASON:
+    description: Kerncodetabel voor redenen waarom een zaak tijdelijk wacht.
+    items:
+      - value: customer_response
+        label: { nl: Reactie van klant, en: Customer response, fr: Réponse du client }
+      - value: partner_response
+        label: { nl: Reactie van partner, en: Partner response, fr: Réponse du partenaire }
+      - value: approval
+        label: { nl: Goedkeuring, en: Approval, fr: Approbation }
+      - value: external_dependency
+        label: { nl: Externe afhankelijkheid, en: External dependency, fr: Dépendance externe }
+      - value: scheduled_follow_up
+        label: { nl: Geplande opvolging, en: Scheduled follow-up, fr: Suivi prévu }
+      - value: intake_information
+        label: { nl: Aanvullende intakeinformatie, en: Intake information, fr: Informations d'accueil }
+
+  CASEBREACHSTATE:
+    description: Kerncodetabel voor SLA-risico en breach-status van een zaak.
+    items:
+      - value: on_track
+        label: { nl: Op schema, en: On track, fr: Sur la bonne voie }
+      - value: warning
+        label: { nl: Waarschuwing, en: Warning, fr: Avertissement }
+      - value: at_risk
+        label: { nl: Risico, en: At risk, fr: À risque }
+      - value: breached
+        label: { nl: Overschreden, en: Breached, fr: Violé }
+      - value: recovered
+        label: { nl: Hersteld, en: Recovered, fr: Rétabli }
+
+  CASEACTORTYPE:
+    description: Kerncodetabel voor typen actoren op zaakgebeurtenissen.
+    items:
+      - value: account
+        label: { nl: Account, en: Account, fr: Compte }
+      - value: relation
+        label: { nl: Relatie, en: Relation, fr: Relation }
+      - value: system
+        label: { nl: Systeem, en: System, fr: Système }
+      - value: workflow
+        label: { nl: Workflow, en: Workflow, fr: Workflow }
+      - value: integration
+        label: { nl: Integratie, en: Integration, fr: Intégration }
+
+  CASESTATUSEVENTSOURCE:
+    description: Kerncodetabel voor bronnen van zaakstatusgebeurtenissen.
+    items:
+      - value: manual
+        label: { nl: Handmatig, en: Manual, fr: Manuel }
+      - value: workflow
+        label: { nl: Workflow, en: Workflow, fr: Workflow }
+      - value: routing
+        label: { nl: Routering, en: Routing, fr: Acheminement }
+      - value: sla
+        label: { nl: SLA, en: SLA, fr: SLA }
+      - value: portal
+        label: { nl: Portaal, en: Portal, fr: Portail }
+      - value: import
+        label: { nl: Import, en: Import, fr: Importation }
+      - value: ai
+        label: { nl: AI, en: AI, fr: IA }
+
+  CASEPARTYROLE:
+    description: Kerncodetabel voor rollen van betrokkenen bij een zaak.
+    items:
+      - value: initiator
+        label: { nl: Initiator, en: Initiator, fr: Initiateur }
+      - value: subject
+        label: { nl: Onderwerp, en: Subject, fr: Sujet }
+      - value: representative
+        label: { nl: Vertegenwoordiger, en: Representative, fr: Représentant }
+      - value: owner
+        label: { nl: Eigenaar, en: Owner, fr: Propriétaire }
+      - value: assignee
+        label: { nl: Behandelaar, en: Assignee, fr: Assigné }
+      - value: supplier
+        label: { nl: Leverancier, en: Supplier, fr: Fournisseur }
+      - value: partner
+        label: { nl: Ketenpartner, en: Partner, fr: Partenaire }
+      - value: observer
+        label: { nl: Volger, en: Observer, fr: Observateur }
+      - value: approver
+        label: { nl: Autorisator, en: Approver, fr: Approbateur }
+
+  CASEOBJECTTYPE:
+    description: Kerncodetabel voor typen gekoppelde objecten bij een zaak.
+    items:
+      - value: relation
+        label: { nl: Relatie, en: Relation, fr: Relation }
+      - value: agreement
+        label: { nl: Overeenkomst, en: Agreement, fr: Accord }
+      - value: unit
+        label: { nl: Eenheid, en: Unit, fr: Unité }
+      - value: maintenance_request
+        label: { nl: Onderhoudsverzoek, en: Maintenance request, fr: Demande de maintenance }
+      - value: invoice
+        label: { nl: Factuur, en: Invoice, fr: Facture }
+      - value: project
+        label: { nl: Project, en: Project, fr: Projet }
+      - value: document
+        label: { nl: Document, en: Document, fr: Document }
+      - value: task
+        label: { nl: Taak, en: Task, fr: Tâche }
+      - value: appointment
+        label: { nl: Afspraak, en: Appointment, fr: Rendez-vous }
+
+  PROCESSTYPE:
+    description: Kerncodetabel voor hoofdtypen van businessprocessen rondom zaken en dossiers.
+    items:
+      - value: complaint_handling
+        label: { nl: Klachtbehandeling, en: Complaint handling, fr: Traitement des plaintes }
+      - value: service_request
+        label: { nl: Serviceverzoekbehandeling, en: Service request handling, fr: Traitement des demandes de service }
+      - value: maintenance_follow_up
+        label: { nl: Onderhoudsopvolging, en: Maintenance follow-up, fr: Suivi de maintenance }
+      - value: objection_handling
+        label: { nl: Bezwaarafhandeling, en: Objection handling, fr: Traitement des objections }
+      - value: enforcement
+        label: { nl: Handhaving, en: Enforcement, fr: Application }
+      - value: intake_and_assessment
+        label: { nl: Intake en beoordeling, en: Intake and assessment, fr: Accueil et évaluation }
+
+  PROCESSSTATUS:
+    description: Kerncodetabel voor de levenscyclus van een businessproces.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft, fr: Brouillon }
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: waiting
+        label: { nl: Wachtend, en: Waiting, fr: En attente }
+      - value: escalated
+        label: { nl: Geescaleerd, en: Escalated, fr: Escaladé }
+      - value: completed
+        label: { nl: Afgerond, en: Completed, fr: Complété }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled, fr: Annulé }
+
+  PROCESSSTEPTYPE:
+    description: Kerncodetabel voor businessstappen binnen een proces.
+    items:
+      - value: intake
+        label: { nl: Intake, en: Intake, fr: Accueil }
+      - value: qualification
+        label: { nl: Kwalificatie, en: Qualification, fr: Qualification }
+      - value: triage
+        label: { nl: Triage, en: Triage, fr: Triage }
+      - value: research
+        label: { nl: Onderzoek, en: Research, fr: Recherche }
+      - value: waiting_for_input
+        label: { nl: Wachten op input, en: Waiting for input, fr: En attente d'entrée }
+      - value: review
+        label: { nl: Beoordeling, en: Review, fr: Examen }
+      - value: decision
+        label: { nl: Besluit, en: Decision, fr: Décision }
+      - value: communication
+        label: { nl: Communicatie, en: Communication, fr: Communication }
+      - value: closure
+        label: { nl: Afsluiting, en: Closure, fr: Fermeture }
+
+  CASETEMPLATESTATUS:
+    description: Kerncodetabel voor de levenscyclus van zaaksjablonen.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft, fr: Brouillon }
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: deprecated
+        label: { nl: Verouderd, en: Deprecated, fr: Obsolète }
+      - value: archived
+        label: { nl: Gearchiveerd, en: Archived, fr: Archivé }
+
+  PROCESSTEMPLATESTATUS:
+    description: Legacy alias for CASETEMPLATESTATUS.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft, fr: Brouillon }
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: deprecated
+        label: { nl: Verouderd, en: Deprecated, fr: Obsolète }
+      - value: archived
+        label: { nl: Gearchiveerd, en: Archived, fr: Archivé }
+
+  PROCESSSTEPSTATUS:
+    description: Kerncodetabel voor de levenscyclus van een processtap.
+    items:
+      - value: pending
+        label: { nl: Wachtend, en: Pending, fr: En attente }
+      - value: ready
+        label: { nl: Klaar om te starten, en: Ready, fr: Prêt }
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: in_progress
+        label: { nl: In behandeling, en: In progress, fr: En cours }
+      - value: running
+        label: { nl: Lopend, en: Running, fr: En cours }
+      - value: open
+        label: { nl: Open, en: Open, fr: Ouvert }
+      - value: waiting
+        label: { nl: Wachtend op input, en: Waiting, fr: En attente }
+      - value: awaiting_approval
+        label: { nl: Wacht op goedkeuring, en: Awaiting approval, fr: En attente d'approbation }
+      - value: awaiting_attention
+        label: { nl: Wacht op aandacht, en: Awaiting attention, fr: En attente d'attention }
+      - value: completed
+        label: { nl: Afgerond, en: Completed, fr: Complété }
+      - value: done
+        label: { nl: Klaar, en: Done, fr: Terminé }
+      - value: closed
+        label: { nl: Gesloten, en: Closed, fr: Fermé }
+      - value: afgerond
+        label: { nl: Afgerond, en: Completed, fr: Complété }
+      - value: skipped
+        label: { nl: Overgeslagen, en: Skipped, fr: Ignoré }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled, fr: Annulé }
+
+  CASESTEPEXECUTIONSTYLE:
+    description: Kerncodetabel voor de uitvoeringsstijl van acties binnen een zaakstap.
+    items:
+      - value: sequential
+        label: { nl: Sequentieel, en: Sequential, fr: Séquentiel }
+      - value: parallel_wait_all
+        label: { nl: Parallel - wacht op alles, en: Parallel - wait for all, fr: Parallèle - attendre tout }
+      - value: parallel_wait_one
+        label: { nl: Parallel - wacht op één, en: Parallel - wait for one, fr: Parallèle - attendre une action }
+
+  CASESTEPCOMPLETIONMODE:
+    description: Kerncodetabel voor automatische of handmatige zaakstapafronding.
+    items:
+      - value: automatic
+        label: { nl: Automatisch, en: Automatic, fr: Automatique }
+      - value: manual_approval
+        label: { nl: Handmatige goedkeuring, en: Manual approval, fr: Approbation manuelle }
+
+  CASESTEPACTIONKIND:
+    description: Kerncodetabel voor typen acties binnen een zaakstap.
+    items:
+      - value: task
+        label: { nl: Taak, en: Task, fr: Tâche }
+      - value: workflow
+        label: { nl: Workflow, en: Workflow, fr: Workflow }
+
+  CASESTEPACTIONSTARTMODE:
+    description: Kerncodetabel voor hoe zaakstapacties gestart worden.
+    items:
+      - value: auto
+        label: { nl: Automatisch, en: Automatic, fr: Automatique }
+      - value: manual
+        label: { nl: Handmatig, en: Manual, fr: Manuel }
+
+  CASESTEPACTIONSTATUS:
+    description: Kerncodetabel voor de levenscyclus van zaakstapacties.
+    items:
+      - value: pending
+        label: { nl: Wachtend, en: Pending, fr: En attente }
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: completed
+        label: { nl: Afgerond, en: Completed, fr: Complété }
+      - value: failed
+        label: { nl: Mislukt, en: Failed, fr: Échoué }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled, fr: Annulé }
+
+  DOSSIERTYPE:
+    description: Kerncodetabel voor hoofdtypen van dossiers.
+    items:
+      - value: case_file
+        label: { nl: Zaakdossier, en: Case file, fr: Dossier de cas }
+      - value: relation_file
+        label: { nl: Relatiedossier, en: Relation file, fr: Dossier de relation }
+      - value: unit_file
+        label: { nl: Eenheidsdossier, en: Unit file, fr: Dossier d'unité }
+      - value: project_file
+        label: { nl: Projectdossier, en: Project file, fr: Dossier de projet }
+      - value: complaint_file
+        label: { nl: Klachtendossier, en: Complaint file, fr: Dossier de plainte }
+      - value: personnel_file
+        label: { nl: Medewerkersdossier, en: Personnel file, fr: Dossier personnel }
+
+  DOSSIERSTATUS:
+    description: Kerncodetabel voor de levenscyclus van een dossier.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft, fr: Brouillon }
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: archived
+        label: { nl: Gearchiveerd, en: Archived, fr: Archivé }
+      - value: closed
+        label: { nl: Gesloten, en: Closed, fr: Fermé }
+      - value: suspended
+        label: { nl: Opgeschort, en: Suspended, fr: Suspendu }
+
+  DOSSIERCONFIDENTIALITY:
+    description: Kerncodetabel voor vertrouwelijkheid van dossiers.
+    items:
+      - value: internal
+        label: { nl: Intern, en: Internal, fr: Interne }
+      - value: confidential
+        label: { nl: Vertrouwelijk, en: Confidential, fr: Confidentiel }
+      - value: strictly_confidential
+        label: { nl: Zeer vertrouwelijk, en: Strictly confidential, fr: Très confidentiel }
+
+  DOSSIERARCHIEFSTATUS:
+    description: Kerncodetabel voor archiefstatus van dossiers.
+    items:
+      - value: open
+        label: { nl: Open, en: Open, fr: Ouvert }
+      - value: nominated
+        label: { nl: Genomineerd, en: Nominated, fr: Nominé }
+      - value: archived
+        label: { nl: Gearchiveerd, en: Archived, fr: Archivé }
+      - value: scheduled_for_destruction
+        label: { nl: Gepland voor vernietiging, en: Scheduled for destruction, fr: Programmé pour destruction }
+      - value: destroyed
+        label: { nl: Vernietigd, en: Destroyed, fr: Détruit }
+
+  DOCUMENTTYPE:
+    description: Kerncodetabel voor hoofdtypen van documenten.
+    items:
+      - value: incoming_mail
+        label: { nl: Inkomende post, en: Incoming mail, fr: Courrier entrant }
+      - value: outgoing_mail
+        label: { nl: Uitgaande post, en: Outgoing mail, fr: Courrier sortant }
+      - value: note
+        label: { nl: Notitie, en: Note, fr: Note }
+      - value: decision
+        label: { nl: Besluit, en: Decision, fr: Décision }
+      - value: attachment
+        label: { nl: Bijlage, en: Attachment, fr: Pièce jointe }
+      - value: form
+        label: { nl: Formulier, en: Form, fr: Formulaire }
+      - value: evidence
+        label: { nl: Bewijsstuk, en: Evidence, fr: Preuve }
+      - value: contract
+        label: { nl: Contract, en: Contract, fr: Contrat }
+      - value: report
+        label: { nl: Rapport, en: Report, fr: Rapport }
+
+  DOCUMENTSTATUS:
+    description: Kerncodetabel voor de levenscyclus van documenten.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft, fr: Brouillon }
+      - value: registered
+        label: { nl: Geregistreerd, en: Registered, fr: Enregistré }
+      - value: final
+        label: { nl: Definitief, en: Final, fr: Définitif }
+      - value: published
+        label: { nl: Gepubliceerd, en: Published, fr: Publié }
+      - value: archived
+        label: { nl: Gearchiveerd, en: Archived, fr: Archivé }
+
+  DOCUMENTCONFIDENTIALITY:
+    description: Kerncodetabel voor vertrouwelijkheid van documenten.
+    items:
+      - value: internal
+        label: { nl: Intern, en: Internal, fr: Interne }
+      - value: confidential
+        label: { nl: Vertrouwelijk, en: Confidential, fr: Confidentiel }
+      - value: strictly_confidential
+        label: { nl: Zeer vertrouwelijk, en: Strictly confidential, fr: Très confidentiel }
+
+  DOCUMENTVERSIONSTATUS:
+    description: Kerncodetabel voor de levenscyclus van documentversies.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft, fr: Brouillon }
+      - value: final
+        label: { nl: Definitief, en: Final, fr: Définitif }
+      - value: superseded
+        label: { nl: Vervangen, en: Superseded, fr: Remplacé }
+      - value: withdrawn
+        label: { nl: Ingetrokken, en: Withdrawn, fr: Retiré }
+
+  WORKQUEUETYPE:
+    description: Kerncodetabel voor typen werkqueues.
+    items:
+      - value: intake
+        label: { nl: Intake, en: Intake, fr: Accueil }
+      - value: service_backoffice
+        label: { nl: Service backoffice, en: Service backoffice, fr: Service backoffice }
+      - value: specialist
+        label: { nl: Specialistisch, en: Specialist, fr: Spécialiste }
+      - value: complaints
+        label: { nl: Klachten, en: Complaints, fr: Plaintes }
+      - value: governance
+        label: { nl: Bestuur en regie, en: Governance, fr: Gouvernance }
+
+  WORKQUEUESTATUS:
+    description: Kerncodetabel voor de levenscyclus van werkqueues.
+    items:
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: paused
+        label: { nl: Gepauzeerd, en: Paused, fr: En pause }
+      - value: archived
+        label: { nl: Gearchiveerd, en: Archived, fr: Archivé }
+
+  WORKQUEUESTRATEGY:
+    description: Kerncodetabel voor toewijzingsstrategien van werkqueues.
+    items:
+      - value: round_robin
+        label: { nl: Om-en-om, en: Round robin, fr: Tournante }
+      - value: manual
+        label: { nl: Handmatig, en: Manual, fr: Manuel }
+      - value: skill_based
+        label: { nl: Skill-based, en: Skill based, fr: Basé sur les compétences }
+      - value: priority_based
+        label: { nl: Prioriteitsgestuurd, en: Priority based, fr: Basé sur la priorité }
+      - value: workload_based
+        label: { nl: Werkdrukgestuurd, en: Workload based, fr: Basé sur la charge de travail }
+
+  ASSIGNMENTSTATUS:
+    description: Kerncodetabel voor de levenscyclus van behandeltoewijzingen.
+    items:
+      - value: queued
+        label: { nl: In wachtrij, en: Queued, fr: En file d'attente }
+      - value: offered
+        label: { nl: Aangeboden, en: Offered, fr: Proposé }
+      - value: accepted
+        label: { nl: Geaccepteerd, en: Accepted, fr: Accepté }
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: released
+        label: { nl: Vrijgegeven, en: Released, fr: Libéré }
+      - value: completed
+        label: { nl: Afgerond, en: Completed, fr: Complété }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled, fr: Annulé }
+
+  SLAPOLICYSTATUS:
+    description: Kerncodetabel voor de levenscyclus van SLA-beleid.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft, fr: Brouillon }
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: archived
+        label: { nl: Gearchiveerd, en: Archived, fr: Archivé }
+
+  SLAPOLICYTARGETENTITY:
+    description: Kerncodetabel voor het doelobject van SLA-beleid.
+    items:
+      - value: case
+        label: { nl: Zaak, en: Case, fr: Cas }
+      - value: dossier
+        label: { nl: Dossier, en: Dossier, fr: Dossier }
+
+  MILESTONETYPE:
+    description: Kerncodetabel voor typen mijlpalen in behandeling.
+    items:
+      - value: first_response
+        label: { nl: Eerste reactie, en: First response, fr: Première réponse }
+      - value: triage
+        label: { nl: Triage, en: Triage, fr: Triage }
+      - value: review
+        label: { nl: Beoordeling, en: Review, fr: Examen }
+      - value: decision
+        label: { nl: Besluitvorming, en: Decision, fr: Décision }
+      - value: resolution
+        label: { nl: Oplossing, en: Resolution, fr: Résolution }
+      - value: closure
+        label: { nl: Afsluiting, en: Closure, fr: Fermeture }
+
+  MILESTONESTATUS:
+    description: Kerncodetabel voor de levenscyclus van mijlpalen.
+    items:
+      - value: pending
+        label: { nl: Wachtend, en: Pending, fr: En attente }
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: paused
+        label: { nl: Gepauzeerd, en: Paused, fr: En pause }
+      - value: completed
+        label: { nl: Afgerond, en: Completed, fr: Complété }
+      - value: breached
+        label: { nl: Overschreden, en: Breached, fr: Violé }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled, fr: Annulé }
+
+  AGREEMENTTYPE:
+    description: Kerncodetabel voor hoofdtypen van overeenkomsten binnen contractmanagement.
+    items:
+      - value: lease
+        label: { nl: Huur, en: Lease, fr: Location }
+      - value: service
+        label: { nl: Service, en: Service, fr: Service }
+      - value: sale
+        label: { nl: Koop, en: Sale, fr: Vente }
+      - value: employment
+        label: { nl: Arbeid, en: Employment, fr: Emploi }
+      - value: registration
+        label: { nl: Inschrijving, en: Registration, fr: Enregistrement }
+      - value: maintenance
+        label: { nl: Onderhoud, en: Maintenance, fr: Maintenance }
+      - value: monitoring
+        label: { nl: Monitoring, en: Monitoring, fr: Surveillance }
+
+  AGREEMENTROLE:
+    description: Hierarchical role of an agreement — master agreements are non-billable umbrellas, sub agreements are billable contracts hanging under a master.
+    items:
+      - value: master
+        label: { nl: Hoofdovereenkomst, en: Master agreement }
+      - value: sub
+        label: { nl: Subovereenkomst, en: Sub agreement }
+
+  AGREEMENTSTATUS:
+    description: Kerncodetabel voor de levenscyclus van overeenkomsten.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft, fr: Brouillon }
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: pending
+        label: { nl: In afwachting, en: Pending, fr: En attente }
+      - value: ended
+        label: { nl: Beëindigd, en: Ended, fr: Terminé }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled, fr: Annulé }
+
+  BILLINGRUNSTATUS:
+    description: Lifecycle status of a BillingRun — durable run ledger for prolongation/void/reissue executions.
+    items:
+      - value: queued
+        label: { nl: In wachtrij, en: Queued }
+      - value: running
+        label: { nl: Wordt uitgevoerd, en: Running }
+      - value: completed
+        label: { nl: Afgerond, en: Completed }
+      - value: partial
+        label: { nl: Deels mislukt, en: Partial }
+      - value: failed
+        label: { nl: Mislukt, en: Failed }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled }
+
+  BILLINGRUNMODE:
+    description: Operating mode of a billing run.
+    items:
+      - value: prolongation
+        label: { nl: Prolongatie, en: Prolongation }
+      - value: void
+        label: { nl: Storneren, en: Void }
+      - value: reissue
+        label: { nl: Hercreatie (TWK), en: Reissue (TWK) }
+
+  BILLINGRUNITEMSTATUS:
+    description: Per-agreement/per-period idempotency ledger status inside a BillingRun.
+    items:
+      - value: planned
+        label: { nl: Gepland, en: Planned }
+      - value: locked
+        label: { nl: Vergrendeld, en: Locked }
+      - value: completed
+        label: { nl: Afgerond, en: Completed }
+      - value: skipped
+        label: { nl: Overgeslagen, en: Skipped }
+      - value: failed
+        label: { nl: Mislukt, en: Failed }
+
+  TENANTSETTINGVALUETYPE:
+    description: Kerncodetabel voor de gegevensvorm van tenantinstellingen.
+    items:
+      - value: string
+        label: { nl: Tekst, en: String, fr: Texte }
+      - value: json
+        label: { nl: JSON, en: JSON, fr: JSON }
+
+  TENANTSTATUS:
+    description: Kerncodetabel voor de levenscyclus van tenants.
+    items:
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: inactive
+        label: { nl: Inactief, en: Inactive, fr: Inactif }
+      - value: suspended
+        label: { nl: Opgeschort, en: Suspended, fr: Suspendu }
+
+  SURVEYKIND:
+    description: Classification of surveys.
+    items:
+      - value: customer_satisfaction
+        label: { nl: Klanttevredenheid, en: Customer satisfaction }
+      - value: nps
+        label: { nl: NPS, en: NPS }
+      - value: internal_audit
+        label: { nl: Interne audit, en: Internal audit }
+      - value: benchmark
+        label: { nl: Benchmark, en: Benchmark }
+      - value: other
+        label: { nl: Overig, en: Other }
+
+  SURVEYSTATUS:
+    description: Lifecycle status of a survey.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft }
+      - value: active
+        label: { nl: Actief, en: Active }
+      - value: closed
+        label: { nl: Gesloten, en: Closed }
+      - value: archived
+        label: { nl: Gearchiveerd, en: Archived }
+
+  SURVEYQUESTIONKIND:
+    description: Types of survey questions.
+    items:
+      - value: open
+        label: { nl: Open vraag, en: Open question }
+      - value: yes_no
+        label: { nl: Ja/nee, en: Yes/no }
+      - value: multiple_choice
+        label: { nl: Meerkeuze, en: Multiple choice }
+      - value: option
+        label: { nl: Optie, en: Option }
+      - value: nps
+        label: { nl: NPS, en: NPS }
+      - value: numeric_scale
+        label: { nl: Cijferschaal, en: Numeric scale }
+
+  SURVEYQUESTIONSUBJECT:
+    description: Thematic subjects for survey questions.
+    items:
+      - value: service
+        label: { nl: Service, en: Service }
+      - value: condition
+        label: { nl: Staat, en: Condition }
+      - value: communication
+        label: { nl: Communicatie, en: Communication }
+      - value: environment
+        label: { nl: Omgeving, en: Environment }
+      - value: general
+        label: { nl: Algemeen, en: General }
+
+  SURVEYQUESTIONORIGIN:
+    description: Origin standards for survey questions.
+    items:
+      - value: kwh
+        label: { nl: KWH-keurmerk, en: KWH quality mark }
+      - value: aedes_benchmark
+        label: { nl: Aedes benchmark, en: Aedes benchmark }
+      - value: custom
+        label: { nl: Eigen vraag, en: Custom question }
+
+  QUALITYMEASUREMENTKIND:
+    description: Classification of quality measurement requests.
+    items:
+      - value: post_service
+        label: { nl: Na service, en: Post service }
+      - value: post_maintenance
+        label: { nl: Na onderhoud, en: Post maintenance }
+      - value: periodic
+        label: { nl: Periodiek, en: Periodic }
+      - value: exit_survey
+        label: { nl: Vertrekonderzoek, en: Exit survey }
+      - value: intake_survey
+        label: { nl: Instroomonderzoek, en: Intake survey }
+      - value: other
+        label: { nl: Overig, en: Other }
+
+  QUALITYMEASUREMENTSTATUS:
+    description: Lifecycle status of a quality measurement request.
+    items:
+      - value: requested
+        label: { nl: Aangevraagd, en: Requested }
+      - value: in_progress
+        label: { nl: In uitvoering, en: In progress }
+      - value: completed
+        label: { nl: Afgerond, en: Completed }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled }
+
+  ASSESSMENTSCALE:
+    description: Scales and methods used to measure quality responses.
+    items:
+      - value: likert
+        label: { nl: Likertschaal, en: Likert scale }
+      - value: positive_negative
+        label: { nl: Positief/negatief, en: Positive/negative }
+      - value: numeric_1_10
+        label: { nl: Rapportcijfer 1-10, en: Score 1-10 }
+      - value: nps_0_10
+        label: { nl: NPS 0-10, en: NPS 0-10 }
+
+  RESULTRESPONSE:
+    description: Response completeness of quality measurement results.
+    items:
+      - value: fully_completed
+        label: { nl: Volledig ingevuld, en: Fully completed }
+      - value: partially_completed
+        label: { nl: Deels ingevuld, en: Partially completed }
+      - value: completed_with_followup
+        label: { nl: Ingevuld met verzoek opvolging, en: Completed with follow-up request }
+      - value: no_response
+        label: { nl: Niet gereageerd, en: No response }
+
+  RESEARCHASSIGNMENTKIND:
+    description: Classification of research assignments.
+    items:
+      - value: survey
+        label: { nl: Enquête, en: Survey }
+      - value: interview
+        label: { nl: Interview, en: Interview }
+      - value: observation
+        label: { nl: Observatie, en: Observation }
+      - value: other
+        label: { nl: Overig, en: Other }
+
+  RESEARCHSTATUS:
+    description: Lifecycle status of a research assignment.
+    items:
+      - value: created
+        label: { nl: Aangemaakt, en: Created }
+      - value: survey_sent
+        label: { nl: Enquête verstuurd, en: Survey sent }
+      - value: reminder_sent
+        label: { nl: Reminder verstuurd, en: Reminder sent }
+      - value: responses_received
+        label: { nl: Antwoorden ontvangen, en: Responses received }
+      - value: no_response
+        label: { nl: Geen antwoord ontvangen, en: No response received }
+      - value: completed
+        label: { nl: Afgerond, en: Completed }

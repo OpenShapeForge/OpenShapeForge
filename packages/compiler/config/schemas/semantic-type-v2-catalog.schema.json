@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-phase1/semantic-type-v2-catalog.schema.json",
+  "title": "Semantic Type V2 Catalog Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "types"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "kind": { "type": "string", "const": "semanticTypeCatalog" },
+    "types": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "valueType"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["scalar", "entityId", "entity", "object"] },
+          "label": { "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json#/$defs/localizedText" },
+          "pluralLabel": { "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json#/$defs/localizedText" },
+          "valueType": {
+            "type": "string",
+            "enum": ["string", "integer", "number", "boolean", "date", "datetime", "object"]
+          },
+          "cardinality": { "type": "string", "enum": ["single", "collection"] },
+          "validation": { "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json#/$defs/validation" },
+          "options": { "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json#/$defs/fieldOptions" },
+          "render": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "display": { "type": "string" },
+              "input": { "type": "string" }
+            }
+          },
+          "format": { "type": "string" },
+          "icon": { "type": "string" },
+          "props": { "type": "object" },
+          "classification": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["sensitivity"],
+            "properties": {
+              "sensitivity": {
+                "type": "string",
+                "enum": ["public", "internal", "confidential", "pii", "bsn"]
+              },
+              "category": { "type": "string" }
+            }
+          },
+          "retention": { "type": "object" },
+          "audit": { "type": "boolean" },
+          "hints": { "type": "object" },
+          "entity": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+          },
+          "listUrl": { "type": "string" },
+          "displayTemplate": { "type": "string" },
+          "filterField": { "type": "string" },
+          "children": {
+            "type": "array",
+            "items": { "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json" }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": { "kind": { "const": "entityId" } },
+              "required": ["kind"]
+            },
+            "then": {
+              "required": ["entity", "listUrl", "icon"],
+              "properties": {
+                "valueType": { "const": "string" },
+                "listUrl": {
+                  "pattern": "^/api/workflow/designer/core-entity-options\\?entity=[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": { "kind": { "enum": ["entity", "object"] } },
+              "required": ["kind"]
+            },
+            "then": {
+              "required": ["children"],
+              "properties": { "valueType": { "const": "object" } }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

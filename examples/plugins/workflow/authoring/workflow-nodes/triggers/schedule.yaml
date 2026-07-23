@@ -1,0 +1,65 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: triggerSchedule
+category: triggers
+label:
+  nl: Planning
+  en: Schedule
+description:
+  nl: Start de workflow automatisch volgens een schema.
+  en: Starts the workflow automatically on a schedule.
+configFields:
+  - key: cron
+    valueType: string
+    label:
+      nl: Planning
+      en: Schedule
+    description:
+      nl: Kies wanneer deze workflow automatisch moet starten.
+      en: Choose when this workflow should start automatically.
+    help:
+      nl: De technische planning wordt automatisch opgebouwd. Alleen bij een afwijkend schema hoef je zelf iets aan te passen.
+      en: The technical schedule is generated automatically. You only need to edit it yourself for unusual cases.
+    validation:
+      required: true
+    render:
+      component: ScheduleTriggerBuilder
+  - key: timezone
+    valueType: string
+    label:
+      nl: Lokale tijd
+      en: Local time
+    description:
+      nl: Hiermee bepalen we wat bijvoorbeeld 09:00 precies betekent.
+      en: This determines what a time like 09:00 means exactly.
+    help:
+      en: The schedule worker stores and compares the cron together with this timezone, so changing it changes when the same cron expression actually fires.
+      nl: De schedule-worker slaat de cron samen met deze timezone op en vergelijkt die ook zo, dus een wijziging verandert wanneer dezelfde cron-expressie werkelijk afgaat.
+    defaultValue: Europe/Amsterdam
+    validation:
+      required: true
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/trigger-options/timezones
+    render:
+      component: ReferenceSelect
+      props:
+        clearable: false
+  - key: mappingParameters
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    semanticType: fieldDefinition
+    label:
+      nl: Startvariabelen
+      en: Start variables
+    description:
+      nl: Definieer welke velden deze planning als startvariabelen aan de workflow meegeeft.
+      en: Define which fields this schedule passes into the workflow as start variables.
+    help:
+      nl: Deze velden worden beschikbaar onder de payload van de planningstrigger.
+      en: These fields become available under the schedule trigger payload.
+    defaultValue: []
+    authoring:
+      profile: workflowStartVariable

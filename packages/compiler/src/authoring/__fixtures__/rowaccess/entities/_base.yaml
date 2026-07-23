@@ -1,0 +1,120 @@
+schemaVersion: 1
+kind: baseEntity
+entity: BaseEntity
+title: Base Entity
+description: |
+  Canonical meta-field set automatically merged into every core entity and
+  context-full entity at load time. Author-declared duplicates of these fields
+  raise a compile error (strict-replace semantics).
+
+  The semanticType for `id` is auto-derived per entity (`<entityCamelCase>Id`),
+  so individual entities never need to redeclare `id` to attach their own
+  semantic type catalog entry.
+
+  `tenant_id` is not part of this base. It is conditionally injected by the
+  backend manifest only when an entity declares an `authorization` block
+  (tenant-scoped). Adding it here would create unwanted tenant_id columns on
+  non-tenant tables.
+language: en
+fields:
+  - key: id
+    valueType: string
+    required: true
+    readOnly: true
+    label:
+      en: ID
+      nl: Id
+    description:
+      en: Canonical internal identifier.
+      nl: Canonieke interne identifier.
+    persisted:
+      column: id
+      storageClass: core
+    validation:
+      format: uuid
+  - key: createdAt
+    valueType: datetime
+    required: true
+    readOnly: true
+    label:
+      en: Created at
+      nl: Aangemaakt op
+    description:
+      en: Timestamp at which the record was created.
+      nl: Tijdstip waarop het record is aangemaakt.
+    persisted:
+      column: created_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+  - key: updatedAt
+    valueType: datetime
+    required: true
+    readOnly: true
+    label:
+      en: Updated at
+      nl: Bijgewerkt op
+    description:
+      en: Timestamp at which the record was last updated.
+      nl: Tijdstip waarop het record voor het laatst is bijgewerkt.
+    persisted:
+      column: updated_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+  - key: externalId
+    valueType: string
+    required: false
+    label:
+      en: External ID
+      nl: Externe id
+    description:
+      en: Primary identifier of the record in a connected source system or sector profile.
+      nl: Primaire identificatie van het record in een gekoppeld bronsysteem of sectorprofiel.
+    validation:
+      maxLength: 200
+    persisted:
+      column: external_id
+      storageClass: core
+  - key: sourceAuthority
+    valueType: string
+    required: false
+    label:
+      en: Source authority
+      nl: Gegevensbeheerder
+    description:
+      en: Identifier or label of the authority or data steward responsible for the external identification.
+      nl: Identificatie of label van de bronhouder of gegevensbeheerder die verantwoordelijk is voor de externe identificatie.
+    validation:
+      maxLength: 200
+    persisted:
+      column: source_authority
+      storageClass: core
+  - key: sourceOrganization
+    valueType: string
+    required: false
+    label:
+      en: Source organization
+      nl: Bronorganisatie
+    description:
+      en: Identifier or label of the external organization that owns or issued the source record.
+      nl: Identificatie of label van de externe organisatie die het bronrecord beheert of heeft uitgegeven.
+    validation:
+      maxLength: 200
+    persisted:
+      column: source_organization
+      storageClass: core
+  - key: sourceAdministration
+    valueType: string
+    required: false
+    label:
+      en: Source administration
+      nl: Bronadministratie
+    description:
+      en: Identifier or label of the administration or sub-ledger within the source organization.
+      nl: Identificatie of label van de administratie of subadministratie binnen de bronorganisatie.
+    validation:
+      maxLength: 200
+    persisted:
+      column: source_administration
+      storageClass: core

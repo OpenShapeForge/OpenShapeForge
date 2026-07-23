@@ -1,0 +1,24 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: survey.pickQuestionnaire
+category: Vragenlijst
+label:
+  en: Pick questionnaire
+  nl: Vragenlijst kiezen
+description:
+  en: Load a Survey and emit its questions as a Field[] ready for ai.extractParameters. Also emits a questionIdByKey map for the downstream persister.
+  nl: Laadt een Vragenlijst en geeft de vragen als Field[] door aan ai.extractParameters. Levert ook een questionIdByKey map voor de downstream persister.
+configFields:
+  - key: surveyId
+    valueType: string
+    required: true
+    label:
+      en: Survey
+      nl: Vragenlijst
+    description:
+      en: Reference to the Survey to run. Typically a static pick or a variable from upstream.
+      nl: Referentie naar de Vragenlijst. Doorgaans een vaste keuze of een variabele uit een eerdere node.
+    help:
+      en: The node loads this survey and emits both `fieldDefinitions` for `ai.extractParameters` and `questionIdByKey` for `survey.persistAnswers`, so downstream nodes should stay on the same questionnaire.
+      nl: De node laadt deze vragenlijst en emitteert zowel `fieldDefinitions` voor `ai.extractParameters` als `questionIdByKey` voor `survey.persistAnswers`, dus downstream nodes moeten op dezelfde vragenlijst blijven werken.
+    semanticType: surveyId

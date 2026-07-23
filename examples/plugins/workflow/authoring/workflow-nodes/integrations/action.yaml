@@ -1,0 +1,51 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: action
+category: integrations
+label:
+  nl: Action
+  en: Action
+description:
+  nl: Voert een backend-action uit vanuit de workflow.
+  en: Runs a backend action from the workflow.
+configFields:
+  - key: actionKey
+    valueType: string
+    label:
+      nl: Action
+      en: Action
+    description:
+      nl: Kies welke backend-capability door deze action-node wordt uitgevoerd.
+      en: Choose which backend capability this action node should execute.
+    help:
+      nl: De keuze komt uit de backend action-catalogus. Na selectie synchroniseert de designer de bijbehorende
+        invoer- en outputvelden, zodat de runtime dezelfde capability met dezelfde contractvelden uitvoert.
+      en: The choice comes from the backend action catalog. After selection, the designer synchronizes the matching input
+        and output fields so the runtime executes the same capability with the same contract fields.
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/action-definitions/options
+    render:
+      component: ActionDefinitionSelect
+      props:
+        selectionSync: actionDefinition
+  - key: actionConfigFields
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    semanticType: fieldDefinition
+    label:
+      nl: Action-invoer
+      en: Action inputs
+    description:
+      nl: De invoervelden voor de geselecteerde action worden direct vanuit de backendcatalogus gerenderd.
+      en: The input fields for the selected action are rendered directly from the backend catalog.
+    help:
+      nl: Deze velden horen bij de gekozen actionKey. Vul vaste waarden of workflowvariabelen in volgens het contract van
+        de action; verander de veldstructuur niet handmatig buiten de catalogus om.
+      en: These fields belong to the selected actionKey. Fill fixed values or workflow variables according to the action
+        contract; do not manually change the field structure outside the catalog.
+    defaultValue: []
+    render:
+      component: ActionInputFieldsEditor

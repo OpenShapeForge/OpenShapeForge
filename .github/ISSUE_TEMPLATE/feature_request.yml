@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose an enhancement to the platform.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What are you trying to do that is hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: >
+        What would you add or change? If it touches the authoring vocabulary,
+        the compiler, or generated output, sketch the shape.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - authoring vocabulary (entities / rowAccess / catalogs)
+        - compiler / codegen
+        - GraphQL API / CRUD engine
+        - migrations
+        - auth / RLS
+        - plugins / layers / host-repo consumption
+        - testing / tooling
+        - docs
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

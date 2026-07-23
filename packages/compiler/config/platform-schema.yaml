@@ -1,0 +1,90 @@
+version: 1
+description: "Greenfield platform schema foundation for apps/api."
+
+relationshipRegister: []
+
+tables:
+  - schema: platform
+    name: schema_migrations
+    tenantScoped: false
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: version, type: text, primaryKey: true }
+      - { name: checksum, type: text, required: true }
+      - { name: applied_at, type: timestamptz, required: true, default: now() }
+      - { name: applied_by, type: text }
+
+  # Global, tenant-agnostic workflow-node catalog. Compiler-generated platform
+  # config (identical for every tenant) — NOT tenant data, so tenantScoped:false
+  # (no tenant_id, no RLS). One row per workflow node type, serving three
+  # projections: the API standard-node catalog, the designer palette, and the
+  # designer detail (config/output fields).
+
+  - schema: platform
+    name: entity_events
+    tenantScoped: true
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: aggregate_type, type: text, required: true }
+      - { name: aggregate_id, type: text, required: true }
+      - { name: event_type, type: text, required: true }
+      - { name: payload, type: jsonb, required: true, default: "'{}'::jsonb" }
+      - { name: sequence, type: bigint, required: true, generated: identity }
+      - { name: occurred_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - name: entity_events_tenant_sequence_idx
+        columns: [tenant_id, sequence]
+      - name: entity_events_tenant_aggregate_sequence_idx
+        columns: [tenant_id, aggregate_type, aggregate_id, sequence]
+
+  # Org-unit hierarchy for group-predicated RLS (authorization.rowAccess.group).
+  # Both tables are tenantScoped (get {table}_tenant_isolation automatically) and
+  # carry NO rowScope — they are the resolution substrate a user must be able to
+  # read within its own tenant to expand its groups at session setup. Tenant
+  # isolation is the correct and sufficient boundary.
+  - schema: platform
+    name: org_unit
+    tenantScoped: true
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      # Nullable → roots. Self-referential FK to platform.org_unit(id); RESTRICT
+      # so a parent cannot be deleted while children reference it (the closure
+      # trigger relies on reparent/remove-first — see the versioned migration).
+      - { name: parent_id, type: uuid, references: { schema: platform, table: org_unit, column: id, onDelete: RESTRICT } }
+      - { name: name, type: text, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - name: org_unit_tenant_parent_idx
+        columns: [tenant_id, parent_id]
+
+  # Transitive-closure table maintained by the org_unit trigger (versioned
+  # migration). Self-row (u,u,0) per unit; (a,d,k) for every ancestor a of d at
+  # distance k. descendants(x) = SELECT descendant_id WHERE ancestor_id = x;
+  # ancestors(x) = SELECT ancestor_id WHERE descendant_id = x.
+  - schema: platform
+    name: org_unit_closure
+    tenantScoped: true
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: ancestor_id, type: uuid, required: true }
+      - { name: descendant_id, type: uuid, required: true }
+      - { name: depth, type: integer, required: true }
+    indexes:
+      - name: org_unit_closure_ancestor_idx
+        columns: [tenant_id, ancestor_id]
+      - name: org_unit_closure_descendant_idx
+        columns: [tenant_id, descendant_id]
+      - name: org_unit_closure_edge_uk
+        columns: [tenant_id, ancestor_id, descendant_id]
+        unique: true

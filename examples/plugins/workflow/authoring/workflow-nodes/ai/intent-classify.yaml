@@ -1,0 +1,164 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: intent.classify
+category: AI
+label:
+  nl: Intent classificeren
+  en: Classify intent
+description:
+  nl: Classificeert context als een van de geconfigureerde intents.
+  en: Classifies context as one of the configured intents.
+configFields:
+  - key: context
+    valueType: string
+    label:
+      nl: Context
+      en: Context
+    description:
+      nl: Wat moet de AI classificeren. Meestal een variabele met berichten of een tekst.
+      en: What the AI should classify. Typically a variable with messages or text.
+    help:
+      nl: Voeg de actuele vraag, berichten of samenvatting toe. De AI kiest op basis hiervan één intent of de fallback.
+      en: Add the current question, messages, or summary. The AI uses this to choose one intent or the fallback.
+    placeholder:
+      nl: Typ vrije tekst en/of voeg variabelen toe met {{...}}
+      en: Type free text and/or insert variables with {{...}}
+    validation:
+      required: true
+    render:
+      component: Textarea
+      props:
+        rows: 5
+  - key: intents
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    label:
+      nl: Intents
+      en: Intents
+    description:
+      nl: Elke intent wordt een uitgaand pad op het canvas. De AI kiest de best passende intent.
+      en: Each intent becomes an outgoing branch on the canvas. The AI picks the best-fitting one.
+    help:
+      nl: Geef de AI duidelijke beschrijvingen. Voorbeelden helpen om grensgevallen goed te classificeren.
+      en: Give the AI clear descriptions. Examples help classify edge cases correctly.
+    validation:
+      required: true
+      minLength:
+        value: 2
+        message:
+          nl: Definieer minimaal twee intents — anders is er niks te classificeren.
+          en: Define at least two intents — otherwise there's nothing to classify.
+    item:
+      key: intent
+      valueType: object
+      description:
+        nl: Eén intent die als afzonderlijke uitgaande route op de node verschijnt.
+        en: One intent that appears as a separate outgoing route on the node.
+      help:
+        nl: De runtime gebruikt de beschrijving en voorbeelden om de beste match te kiezen. De sleutel wordt stabiel afgeleid voor canvas-edges.
+        en: The runtime uses the description and examples to pick the best match. The key is derived stably for canvas edges.
+      children:
+        - key: label
+          valueType: string
+          label:
+            nl: Label
+            en: Label
+          description:
+            nl: Leesbaar label, verschijnt naast de output handle op het canvas. De technische sleutel wordt hieruit afgeleid.
+            en: Readable label, shown next to the output handle on the canvas. The technical key is derived from it.
+          help:
+            nl: Hernoemen verandert de zichtbare handle; bestaande edges blijven via de opgeslagen technische sleutel gekoppeld.
+            en: Renaming changes the visible handle; existing edges stay connected through the stored technical key.
+          placeholder:
+            nl: bijv. Kennisbank-vraag
+            en: e.g. KB question
+          validation:
+            required: true
+          render:
+            component: Input
+        - key: description
+          valueType: string
+          label:
+            nl: Beschrijving voor AI
+            en: Description for AI
+          description:
+            nl: Uitleg die de AI gebruikt om te bepalen of de context bij deze intent past.
+            en: Explanation the AI uses to decide whether the context matches this intent.
+          help:
+            nl: Beschrijf wat wel en niet onder deze intent valt, vooral bij overlappende klantvragen.
+            en: Describe what does and does not belong to this intent, especially for overlapping customer questions.
+          placeholder:
+            nl: bijv. De huurder stelt een algemene vraag…
+            en: e.g. The user asks a general question…
+          validation:
+            required: true
+          render:
+            component: Textarea
+            props:
+              rows: 2
+        - key: examples
+          valueType: string
+          label:
+            nl: Voorbeelden (optioneel)
+            en: Examples (optional)
+          description:
+            nl: Voorbeeld-berichten die onder deze intent vallen. Helpt grensgevallen.
+            en: Example messages that fall under this intent. Helps with edge cases.
+          help:
+            nl: Gebruik korte, realistische voorbeelden. Dit veld is optioneel maar helpt bij vergelijkbare intents.
+            en: Use short, realistic examples. This field is optional but helps when intents are similar.
+          render:
+            component: Textarea
+            props:
+              rows: 2
+        - key: workflowIds
+          valueType: string
+          cardinality:
+            min: 0
+            max: "unbounded"
+          semanticType: caseTemplateId
+          label:
+            nl: Zaken
+            en: Cases
+          description:
+            nl: Selecteer één of meerdere zaaksjablonen. Bij een match laat de AI in een tweede stap kiezen welk sjabloon
+              het beste bij het bericht past; het gekozen sjabloon-ID verschijnt in de output.
+            en: Pick one or more case templates. On a match the AI runs a second step to choose which template best fits the
+              message; the selected template ID appears in the output.
+          help:
+            nl: Laat leeg als deze intent alleen routeert. Vul zaaksjablonen in wanneer een vervolgstap de gekozen zaak nodig heeft.
+            en: Leave empty when this intent only routes. Add case templates when a downstream step needs the chosen case.
+          options:
+            type: remote
+            remoteUrl: /api/workflow/designer/core-entity-options?entity=case-template
+          render:
+            component: AiRemoteMultiSelect
+            props:
+              placeholder:
+                nl: Geen zaaksjabloon gekoppeld
+                en: No case template linked
+              searchPlaceholder:
+                nl: Zoek een zaaksjabloon…
+                en: Search a case template…
+              emptyMessage:
+                nl: Geen zaaksjablonen gevonden.
+                en: No case templates found.
+              allowDynamicVariables: false
+  - key: timeoutMs
+    valueType: number
+    label:
+      nl: Timeout (ms)
+      en: Timeout (ms)
+    description:
+      nl: Maximale wachttijd voor de classificatie.
+      en: Maximum time to wait for the classification.
+    help:
+      nl: Als classificatie of workflow-keuze niet op tijd klaar is, moet de workflow via zijn foutafhandeling verder.
+      en: If classification or workflow selection does not finish in time, the workflow must continue through its error handling.
+    defaultValue: 60000
+    validation:
+      required: true
+      min:
+        value: 1000

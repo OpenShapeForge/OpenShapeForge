@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-phase0/entity-mapping.schema.json",
+  "title": "Entity Mapping Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "profile",
+    "sourceEntity",
+    "targetEntity"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "kind": { "type": "string", "const": "entityMapping" },
+    "profile": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "sourceEntity": { "type": "string" },
+    "targetEntity": { "type": "string" },
+    "identityMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "target"],
+      "properties": {
+        "source": { "type": "string" },
+        "target": { "type": "string" },
+        "notes": { "type": "string" }
+      }
+    },
+    "fieldMappings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "target", "mappingType"],
+        "properties": {
+          "source": { "type": "string" },
+          "target": { "type": "string" },
+          "transform": { "type": "string" },
+          "mappingType": {
+            "type": "string",
+            "enum": ["direct", "fallback", "derived"]
+          },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "profileExtensions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "reason"],
+        "properties": {
+          "field": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}
+

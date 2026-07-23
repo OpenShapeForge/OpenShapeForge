@@ -1,0 +1,325 @@
+schemaVersion: 1
+kind: componentCatalog
+
+# ── Default component per field type ──
+# Used when a field does not specify a `render.component`.
+defaults:
+  string:
+    label:
+      nl: Tekst
+      en: Text
+    component: Input
+  integer:
+    label:
+      nl: Geheel getal
+      en: Integer
+    component: NumberInput
+  number:
+    label:
+      nl: Getal
+      en: Number
+    component: NumberInput
+  boolean:
+    label:
+      nl: Ja/nee
+      en: Yes/no
+    component: Switch
+  object:
+    label:
+      nl: JSON-object
+      en: JSON object
+    component: JsonFieldEditor
+  collection:
+    label:
+      nl: JSON-lijst
+      en: JSON array
+    component: JsonFieldEditor
+  date:
+    label:
+      nl: Datum
+      en: Date
+    component: DatePicker
+  datetime:
+    label:
+      nl: Datum en tijd
+      en: Date and time
+    component: DateTimePicker
+# ── Default component per view element ──
+# Used when a view does not specify a `render.component` for that element.
+viewDefaults:
+  page:
+    component: PageShell
+  header:
+    component: PageHeader
+  list:
+    component: DataTable
+  search:
+    component: SearchInput
+  filterBar:
+    component: FilterBar
+  tabs:
+    component: TabBar
+  section:
+    component: SectionCard
+  form:
+    component: FormSection
+  badges:
+    component: BadgeList
+  submitButton:
+    component: SubmitButton
+  relationshipTab:
+    component: RelationshipPanel
+
+# ── Component definitions ──
+# Every component used in field rendering OR view rendering.
+components:
+
+  # ── View-level components ──
+
+  PageShell:
+    kind: view
+    description: Root wrapper for a page. Renders title and children.
+    props:
+      - title
+
+  PageHeader:
+    kind: view
+    description: Entity header with title template, subtitle, and badges.
+    props:
+      - titleTemplate
+      - subtitleTemplate
+      - badges
+      - data
+
+  DataTable:
+    kind: view
+    description: Sortable data table with columns, row click, and pagination.
+    props:
+      - columns
+      - rows
+      - onRowClick
+      - defaultSort
+      - loading
+
+  SearchInput:
+    kind: view
+    description: Search input field.
+    props:
+      - value
+      - onChange
+      - placeholder
+
+  FilterBar:
+    kind: view
+    description: Row of filter controls.
+    props:
+      - filters
+      - values
+      - onChange
+
+  TabBar:
+    kind: view
+    description: Tab navigation wrapper with tab content.
+    props:
+      - tabs
+      - activeTab
+      - onTabChange
+      - children
+
+  SectionCard:
+    kind: view
+    description: Card with title and field list.
+    props:
+      - title
+      - children
+
+  FormSection:
+    kind: view
+    description: Fieldset wrapper for a group of form fields.
+    props:
+      - title
+      - children
+
+  BadgeList:
+    kind: view
+    description: Horizontal list of badges.
+    props:
+      - items
+
+  SubmitButton:
+    kind: view
+    description: Form submit button.
+    props:
+      - label
+
+  RelationshipPanel:
+    kind: relationship
+    description: Panel showing related entities.
+    props:
+      - relationship
+      - parentId
+      - emptyLabel
+
+  # ── Field-level components ──
+
+  Input:
+    kind: field
+    description: Standard single-line text input.
+    props:
+      - placeholder
+      - maxLength
+
+  TextDisplay:
+    kind: field
+    description: Read-only text display.
+    props: []
+
+  FieldDefinitionView:
+    kind: field
+    description: Read-only display for single field definitions and field-definition lists.
+    props: []
+
+  NumberInput:
+    kind: field
+    description: Numeric input with optional min/max and unit display.
+    props:
+      - min
+      - max
+      - unit
+      - currency
+
+  Switch:
+    kind: field
+    description: Boolean toggle switch.
+    props: []
+
+  ReferenceSelect:
+    kind: field
+    description: Dropdown select for referentiedata values.
+    props:
+      - referentieGroep
+      - clearable
+      - searchable
+
+  DatePicker:
+    kind: field
+    description: Date picker.
+    props:
+      - minDate
+      - maxDate
+
+  DateTimePicker:
+    kind: field
+    description: Date and time picker.
+    props:
+      - minDate
+      - maxDate
+
+  Textarea:
+    kind: field
+    description: Multi-line text input.
+    props:
+      - placeholder
+      - maxLength
+      - rows
+
+  JsonFieldEditor:
+    kind: field
+    description: JSON editor for structured object and array values.
+    props:
+      - rows
+
+  ConditionBuilder:
+    kind: field
+    description: Structured builder for canonical conditions and condition groups.
+    props:
+      - mode
+      - leftSourceField
+      - defaultPath
+
+  MapPicker:
+    kind: field
+    description: Map-based location picker for addresses and coordinates.
+    props:
+      - defaultZoom
+      - defaultCenter
+      - geocodeProvider
+
+  AddressAutocomplete:
+    kind: field
+    description: Address lookup with autocomplete via BAG or other provider.
+    props:
+      - provider
+      - country
+
+  FileUpload:
+    kind: field
+    description: File upload with drag and drop.
+    props:
+      - accept
+      - maxSizeMb
+      - multiple
+
+  RichTextEditor:
+    kind: field
+    description: Rich text editor for formatted content.
+    props:
+      - toolbar
+      - maxLength
+
+  MoneyInput:
+    kind: field
+    description: Currency-aware numeric input with formatting.
+    props:
+      - currency
+
+  AreaInput:
+    kind: field
+    description: Area input with m² formatting.
+    props:
+      - unit
+
+  RelationPicker:
+    kind: field
+    description: Search and pick a relation from the system.
+    props:
+      - entityType
+      - displayField
+      - searchFields
+
+  UnitPicker:
+    kind: field
+    description: Search and pick a unit/eenheid from the system.
+    props:
+      - displayField
+      - searchFields
+
+  # ── Custom view components ──
+  BsnDisplay:
+    kind: field
+    description: Formatted BSN display with XXX.XX.XXX pattern.
+    props:
+      - value
+
+  FormDefinitionDisplay:
+    kind: field
+    description: Read-only preview renderer for structured form definitions.
+    props:
+      - value
+
+  WoonsituatiePanel:
+    kind: custom
+    description: Custom panel showing living situation details for a person.
+    props:
+      - parentId
+
+  InkomensOverzicht:
+    kind: custom
+    description: Custom income overview panel with totals.
+    props:
+      - parentId
+
+  NaturalPersonInboxBaseline:
+    kind: custom
+    description: Mock natural-person workspace baseline using the inbox layout and relations datascreen.
+    props: []

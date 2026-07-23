@@ -1,0 +1,41 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: split
+category: flow
+label:
+  nl: Splitsing
+  en: Split
+description:
+  nl: Splitst de workflow in meerdere takken.
+  en: Splits the workflow into multiple branches.
+configFields:
+  - key: mode
+    valueType: string
+    label:
+      nl: Uitvoermodus
+      en: Execution mode
+    description:
+      nl: Bepaalt of de takken tegelijk of na elkaar starten.
+      en: Determines whether the branches start at the same time or one after another.
+    help:
+      nl: Parallel start alle takken tegelijk. Sequentieel doorloopt de takken één voor één in de volgorde waarin ze in de
+        canvas zijn aangemaakt.
+      en: Parallel starts every branch at once. Sequential walks the branches one at a time in canvas-creation order.
+    defaultValue: parallel
+    validation:
+      required: true
+    render:
+      component: ReferenceSelect
+      props:
+        clearable: false
+    options:
+      type: static
+      items:
+        - value: parallel
+          label:
+            nl: Parallel
+            en: Parallel
+        - value: sequential
+          label:
+            nl: Sequentieel
+            en: Sequential

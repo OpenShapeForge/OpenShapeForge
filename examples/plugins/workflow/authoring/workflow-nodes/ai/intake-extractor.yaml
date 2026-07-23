@@ -1,0 +1,457 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: aiIntakeExtractor
+category: AI
+label:
+  nl: AI intake extractor
+  en: AI intake extractor
+description:
+  nl: Analyseert vrije onderhoudsinput en maakt concept-output.
+  en: Analyzes free-form maintenance input and creates draft output.
+configFields:
+  - key: promptProfile
+    valueType: string
+    label:
+      nl: Prompt profile
+      en: Prompt profile
+    description:
+      nl: Promptprofiel dat de extractiestrategie bepaalt.
+      en: Prompt profile that determines the extraction strategy.
+    help:
+      nl: Kies een profiel dat past bij het soort onderhoudsintake en de gewenste domeintaal.
+      en: Choose a profile that matches the maintenance intake type and desired domain wording.
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/ai/prompt-profiles/options
+    render:
+      component: Select
+  - key: outputMode
+    valueType: string
+    label:
+      nl: Output mode
+      en: Output mode
+    description:
+      nl: Bepaalt in welke vorm de intake-output wordt opgebouwd.
+      en: Determines the shape used for the intake output.
+    help:
+      nl: De huidige modus is gestructureerde output, zodat vervolgstappen vaste velden kunnen gebruiken.
+      en: The current mode is structured output so downstream steps can use stable fields.
+    defaultValue: structured
+    options:
+      type: static
+      items:
+        - value: structured
+          label:
+            nl: Structured
+            en: Structured
+    render:
+      component: Select
+  - key: extractFields
+    valueType: string
+    cardinality:
+      min: 0
+      max: "unbounded"
+    label:
+      nl: Velden extraheren
+      en: Extract fields
+    description:
+      nl: Kies welke intakevelden de AI uit de broninput moet halen.
+      en: Choose which intake fields the AI should extract from the source input.
+    help:
+      nl: Deze selectie stuurt welke onderhoudsgegevens de extractor uit berichten, bijlagen en context probeert te halen.
+      en: This selection controls which maintenance data the extractor tries to read from messages, attachments, and context.
+    defaultValue:
+      - locatie
+      - bouwkundigElement
+      - defectsoort
+      - oorzaak
+      - urgentie
+      - categorie
+    item:
+      key: field
+      valueType: string
+      label:
+        nl: Veld
+        en: Field
+      description:
+        nl: Eén intakeveld dat uit de broninput moet worden gehaald.
+        en: One intake field to extract from the source input.
+      help:
+        nl: Kies een veld uit de ondersteunde onderhoudsintakevelden; de volgorde verandert de betekenis niet.
+        en: Choose one of the supported maintenance intake fields; ordering does not change the meaning.
+      options:
+        type: static
+        items:
+          - value: locatie
+            label:
+              nl: Locatie
+              en: Location
+          - value: bouwkundigElement
+            label:
+              nl: Bouwkundig element
+              en: Building element
+          - value: defectsoort
+            label:
+              nl: Defectsoort
+              en: Defect type
+          - value: oorzaak
+            label:
+              nl: Oorzaak
+              en: Cause
+          - value: urgentie
+            label:
+              nl: Urgentie
+              en: Urgency
+          - value: categorie
+            label:
+              nl: Categorie
+              en: Category
+      render:
+        component: Select
+  - key: includeReasoningSummary
+    valueType: boolean
+    label:
+      nl: Voeg reasoning summary toe
+      en: Include reasoning summary
+    description:
+      nl: Voegt een korte redeneringssamenvatting toe aan de output.
+      en: Adds a short reasoning summary to the output.
+    help:
+      nl: Gebruik dit voor review of diagnose. Beslissingen moeten op gestructureerde outputvelden blijven leunen.
+      en: Use this for review or diagnostics. Decisions should still rely on structured output fields.
+    defaultValue: true
+    render:
+      component: Switch
+  - key: inputSources
+    valueType: object
+    label:
+      nl: Bronnen
+      en: Sources
+    description:
+      nl: Maak expliciet welke messaging- en relatiecontext deze node gebruikt voor de intake-analyse.
+      en: Make explicit which messaging and relation context this node uses for the intake analysis.
+    help:
+      nl: Deze node haalt berichttekst, bijlagen en volledige conversatiecontext op uit de messaging-conversatie van de
+        huidige zaakcontext. Relatiecontext betekent hier alleen de expliciet opgegeven relationId en entityUri, die als
+        ruwe tekst aan de analyse worden toegevoegd.
+      en: This node fetches message text, attachments, and full conversation context from the messaging conversation of the
+        current case context. Relation context here only means the explicitly provided relationId and entityUri, which
+        are added to the analysis as raw text.
+    children:
+      - key: messages
+        valueType: boolean
+        label:
+          nl: Berichttekst meenemen
+          en: Include message text
+        description:
+          nl: Voegt directe intake-tekst toe die al in de workflowcontext staat (bijv. uit een eerdere node).
+          en: Includes direct intake text already present in workflow context (e.g. from an upstream node).
+        help:
+          nl: Dit gebruikt eerst al aanwezige tekst in de workflow-context. Als conversatiecontext aan staat, wordt
+            messaging-tekst uit de huidige zaakcontext daarnaast opgehaald.
+          en: This first uses text already present in workflow context. If conversation context is enabled, messaging text from
+            the current case context is fetched in addition.
+        defaultValue: true
+        render:
+          component: Switch
+      - key: attachments
+        valueType: boolean
+        label:
+          nl: Bijlagen en beschrijvingen meenemen
+          en: Include attachments and descriptions
+        description:
+          nl: Voegt media-beschrijvingen en transcripties uit messaging toe aan de brontekst.
+          en: Adds media descriptions and transcriptions from messaging to the source text.
+        help:
+          nl: Hiervoor is een messaging-conversatie in de zaakcontext nodig. Zonder conversatie in context kunnen er geen
+            messaging-bijlagen worden opgehaald.
+          en: This requires a messaging conversation in the case context. Without one, no messaging attachments can be fetched.
+        defaultValue: true
+        render:
+          component: Switch
+      - key: conversationContext
+        valueType: boolean
+        label:
+          nl: Volledige conversatiecontext ophalen
+          en: Fetch full conversation context
+        description:
+          nl: Haalt de recente messaging-conversatie van de huidige zaakcontext op en voegt die toe aan de brontekst.
+          en: Fetches the recent messaging conversation from the current case context and adds it to the source text.
+        help:
+          nl: Gebruik dit als de extractor niet alleen het laatste bericht, maar de hele relevante context moet meenemen.
+          en: Use this when the extractor should consider the full relevant conversation, not just the latest message.
+        defaultValue: true
+        render:
+          component: Switch
+      - key: knownEntityContext
+        valueType: boolean
+        label:
+          nl: Relatie / entiteit context meenemen
+          en: Include relation / entity context
+        description:
+          nl: Voegt relationId en entityUri toe als extra context voor de analyse.
+          en: Adds relationId and entityUri as extra context for the analysis.
+        help:
+          nl: Dit is dus geen verborgen lookup. Het zijn alleen de expliciet opgegeven URI-variabelen hieronder, als ruwe tekst
+            voor extra context.
+          en: This is not a hidden lookup. It only uses the explicitly provided URI variables below as raw text for extra context.
+        defaultValue: true
+        render:
+          component: Switch
+      - key: relationId
+        valueType: string
+        semanticType: relationId
+        label:
+          nl: Relatie ID
+          en: Relation ID
+        description:
+          nl: Workflowvariabele met de relatie-ID waarop deze intake betrekking heeft.
+          en: Workflow variable with the relation ID this intake belongs to.
+        help:
+          nl: Kies via de variabelezoeker een upstream relatie-ID (bijv. output van de handmatige trigger of een contextnode).
+          en: Pick a relation ID via the variable picker (e.g. manual trigger or context node output).
+        defaultValue: ""
+        visibility:
+          logic: and
+          conditions:
+            - field: inputSources.knownEntityContext
+              operator: eq
+              value: true
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: insertText
+            expectedValueType: string
+      - key: entityUri
+        valueType: string
+        label:
+          nl: Entiteit URI
+          en: Entity URI
+        description:
+          nl: Workflowvariabele met de hoofdentiteit van deze intake, bijvoorbeeld een onderhoudsverzoek.
+          en: Workflow variable with the main entity for this intake, for example a maintenance request.
+        help:
+          nl: Kies via de variabelezoeker een upstream entiteit-URI indien nodig.
+          en: Pick an entity URI via the variable picker when needed.
+        defaultValue: ""
+        visibility:
+          logic: and
+          conditions:
+            - field: inputSources.knownEntityContext
+              operator: eq
+              value: true
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: insertText
+            expectedValueType: string
+  - key: outputParameters
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    label:
+      nl: Outputs
+      en: Outputs
+    description:
+      nl: Outputvelden die beschikbaar worden voor vervolgstappen.
+      en: Output fields that become available to downstream steps.
+    help:
+      nl: Deze parameters beschrijven de vaste output die vervolgstappen kunnen mappen, zoals samenvatting, suggesties en missing fields.
+      en: These parameters describe the stable output downstream steps can map, such as summary, suggestions, and missing fields.
+    defaultValue:
+      - id: extract-summary
+        key: summary
+        label: Samenvatting
+        type: textarea
+        required: false
+      - id: extract-concept-ledo
+        key: conceptLedo
+        label: Concept LEDO
+        valueType: object
+        required: false
+      - id: extract-category
+        key: categorieSuggestie
+        label: Categorie suggestie
+        type: text
+        required: false
+      - id: extract-urgency
+        key: urgentieSuggestie
+        label: Urgentie suggestie
+        type: text
+        required: false
+      - id: extract-confidence
+        key: confidence
+        label: Confidence
+        valueType: number
+        required: false
+      - id: extract-missing
+        key: missingFields
+        label: Ontbrekende velden
+        valueType: object
+        cardinality:
+          min: 0
+          max: "unbounded"
+        required: false
+      - id: extract-signals
+        key: signals
+        label: Signalen
+        valueType: object
+        cardinality:
+          min: 0
+          max: "unbounded"
+        required: false
+      - id: extract-reasoning
+        key: reasoningSummary
+        label: Redenering
+        type: textarea
+        required: false
+    item:
+      key: parameter
+      valueType: object
+      description:
+        nl: Eén outputparameter die door de intake extractor beschikbaar wordt gemaakt.
+        en: One output parameter exposed by the intake extractor.
+      help:
+        nl: Pas deze lijst alleen aan wanneer vervolgstappen andere outputvelden nodig hebben.
+        en: Change this list only when downstream steps need different output fields.
+      children:
+        - key: id
+          valueType: string
+          label:
+            nl: Interne ID
+            en: Internal ID
+          description:
+            nl: Optionele stabiele sleutel voor deze parameter.
+            en: Optional stable identifier for this parameter.
+          help:
+            nl: Gebruik een stabiele ID om bestaande mappings herkenbaar te houden wanneer labels wijzigen.
+            en: Use a stable ID to keep existing mappings recognizable when labels change.
+          render:
+            component: Input
+        - key: key
+          valueType: string
+          label:
+            nl: Sleutel
+            en: Key
+          description:
+            nl: Technische sleutel waaronder deze parameter in de output verschijnt.
+            en: Technical key under which this parameter appears in the output.
+          help:
+            nl: Downstream variabelen verwijzen naar deze sleutel, bijvoorbeeld `output.summary`.
+            en: Downstream variables refer to this key, for example `output.summary`.
+          render:
+            component: Input
+        - key: label
+          valueType: string
+          label:
+            nl: Label
+            en: Label
+          description:
+            nl: Menselijk leesbare naam van de parameter.
+            en: Human-readable name of the parameter.
+          help:
+            nl: Dit label helpt auteurs het outputveld te herkennen in de designer.
+            en: This label helps authors recognize the output field in the designer.
+          render:
+            component: Input
+        - key: type
+          valueType: string
+          label:
+            nl: Type
+            en: Type
+          description:
+            nl: Waardetype van deze outputparameter.
+            en: Value type of this output parameter.
+          help:
+            nl: Kies het type dat past bij de waarde die vervolgstappen moeten gebruiken.
+            en: Choose the type that matches the value downstream steps should consume.
+          defaultValue: text
+          options:
+            type: static
+            items:
+              - value: text
+                label:
+                  nl: Tekst
+                  en: Text
+              - value: textarea
+                label:
+                  nl: Lange tekst
+                  en: Long text
+              - value: number
+                label:
+                  nl: Getal
+                  en: Number
+              - value: boolean
+                label:
+                  nl: Ja/nee
+                  en: Boolean
+              - value: date
+                label:
+                  nl: Datum
+                  en: Date
+              - value: object
+                label:
+                  nl: Object
+                  en: Object
+              - value: array
+                label:
+                  nl: Lijst
+                  en: Array
+          render:
+            component: Select
+        - key: required
+          valueType: boolean
+          label:
+            nl: Verplicht
+            en: Required
+          description:
+            nl: Geeft aan of deze outputparameter verwacht wordt gevuld te zijn.
+            en: Indicates whether this output parameter is expected to be filled.
+          help:
+            nl: Dit documenteert de outputverwachting; het maakt geen extra runtimevalidatie aan.
+            en: This documents the output expectation; it does not add extra runtime validation.
+          defaultValue: false
+          render:
+            component: Switch
+        - key: semanticTypeKey
+          valueType: string
+          label:
+            nl: Semantisch type
+            en: Semantic type
+          description:
+            nl: Optioneel semantisch type voor variabele-compatibiliteit.
+            en: Optional semantic type for variable compatibility.
+          help:
+            nl: Vul dit alleen in wanneer variabelepickers of mappings een specifiek semantisch type moeten herkennen.
+            en: Fill this only when variable pickers or mappings should recognize a specific semantic type.
+          render:
+            component: Input
+        - key: description
+          valueType: string
+          label:
+            nl: Beschrijving
+            en: Description
+          description:
+            nl: Korte uitleg van wat deze outputparameter betekent.
+            en: Short explanation of what this output parameter means.
+          help:
+            nl: Gebruik dit om downstream auteurs duidelijk te maken wanneer ze dit veld moeten gebruiken.
+            en: Use this to tell downstream authors when they should use this field.
+          render:
+            component: InputMultiline
+            props:
+              rows: 2
+        - key: placeholder
+          valueType: string
+          label:
+            nl: Placeholder
+            en: Placeholder
+          description:
+            nl: Voorbeeldtekst voor de invoer van deze parameterdefinitie.
+            en: Example text for editing this parameter definition.
+          help:
+            nl: Dit helpt alleen bij authoring en verandert de outputwaarde niet.
+            en: This only helps authoring and does not change the output value.
+          render:
+            component: Input

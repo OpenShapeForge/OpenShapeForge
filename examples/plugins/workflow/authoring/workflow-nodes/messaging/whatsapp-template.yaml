@@ -1,0 +1,171 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: message.whatsappTemplate
+category: Messaging
+label:
+  en: Send WhatsApp template
+  nl: Stuur WhatsApp-template
+description:
+  en: Start a new WhatsApp message with an approved template.
+  nl: Start een nieuw WhatsApp-bericht met een goedgekeurde template.
+configFields:
+  - key: conversationId
+    valueType: string
+    semanticType: conversationId
+    label:
+      en: Conversation ID
+      nl: Conversatie-ID
+    description:
+      en: Existing conversation where the template message is queued.
+      nl: Bestaande conversatie waarin het templatebericht wordt klaargezet.
+    help:
+      en: Usually this comes from workflow context. The runtime requires a conversation because templates are queued as
+        conversation messages and provider delivery commands.
+      nl: Meestal komt dit uit de workflowcontext. De runtime vereist een conversatie omdat templates als conversatieberichten
+        en provider-verzendopdrachten worden klaargezet.
+  - key: phoneNumber
+    valueType: string
+    semanticType: phone
+    label:
+      en: Phone number
+      nl: Telefoonnummer
+    description:
+      en: Recipient phone number for the WhatsApp template.
+      nl: Telefoonnummer van de ontvanger van de WhatsApp-template.
+    help:
+      en: Provide the customer phone number or let the runtime fall back to the conversation read model. This node does not
+        look up unrelated conversations by phone number.
+      nl: Geef het klanttelefoonnummer op of laat de runtime terugvallen op het conversation read model. Deze node zoekt geen
+        andere conversaties op basis van telefoonnummer.
+    validation:
+      required: true
+    render:
+      component: Input
+    runtime:
+      aliases:
+        - phone
+  - key: templateId
+    valueType: string
+    label:
+      en: Template
+      nl: Template
+    description:
+      en: Approved WhatsApp template to queue.
+      nl: Goedgekeurde WhatsApp-template die wordt klaargezet.
+    help:
+      en: Select a template known to Messaging. This path is for provider-approved templates, especially when free-form
+        WhatsApp text is not allowed by the conversation window.
+      nl: Kies een template die in Messaging bekend is. Dit pad is voor provider-goedgekeurde templates, vooral wanneer vrije
+        WhatsApp-tekst niet is toegestaan door het conversatievenster.
+    validation:
+      required: true
+    options:
+      type: remote
+      remoteUrl: /api/messaging/whatsapp-templates/options
+    render:
+      component: Select
+    runtime:
+      aliases:
+        - templateName
+        - name
+  - key: parameters
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    label:
+      en: Template parameters
+      nl: Template-parameters
+    description:
+      en: Parameter values passed to the WhatsApp template.
+      nl: Parameterwaarden die aan de WhatsApp-template worden meegegeven.
+    help:
+      en: Add one entry per template placeholder. Values can include workflow variables and are stored in the delivery
+        command payload.
+      nl: Voeg een regel toe per templateplaceholder. Waarden mogen workflowvariabelen bevatten en worden opgeslagen in de
+        verzendopdrachtpayload.
+    defaultValue: []
+    item:
+      key: parameter
+      valueType: object
+      description:
+        en: One WhatsApp template parameter binding.
+        nl: Een WhatsApp-templateparameterbinding.
+      help:
+        en: Each item maps a template parameter key to the value that should be sent for it.
+        nl: Elke regel koppelt een templateparametersleutel aan de waarde die daarvoor verzonden moet worden.
+      children:
+        - key: key
+          valueType: string
+          label:
+            en: Parameter key
+            nl: Parametersleutel
+          description:
+            en: Name or number of the template placeholder.
+            nl: Naam of nummer van de templateplaceholder.
+          help:
+            en: Use the key expected by the approved WhatsApp template, such as 1 or customerName.
+            nl: Gebruik de sleutel die de goedgekeurde WhatsApp-template verwacht, zoals 1 of customerName.
+          validation:
+            required: true
+        - key: value
+          valueType: string
+          semanticType: variableTemplate
+          label:
+            en: Parameter value
+            nl: Parameterwaarde
+          description:
+            en: Value rendered into the template placeholder.
+            nl: Waarde die in de templateplaceholder wordt geplaatst.
+          help:
+            en: Enter fixed text or insert workflow variables. The resolved value is sent as part of the template delivery
+              payload.
+            nl: Vul vaste tekst in of voeg workflowvariabelen toe. De opgeloste waarde wordt als onderdeel van de
+              template-verzendpayload verstuurd.
+          validation:
+            required: true
+    runtime:
+      aliases:
+        - templateParameters
+  - key: language
+    valueType: string
+    defaultValue: nl
+    label:
+      en: Language
+      nl: Taal
+    description:
+      en: Language code used for the WhatsApp template.
+      nl: Taalcode die voor de WhatsApp-template wordt gebruikt.
+    help:
+      en: Defaults to nl. Keep this aligned with the approved language variant of the selected template.
+      nl: Standaard nl. Houd dit gelijk aan de goedgekeurde taalvariant van de gekozen template.
+  - key: bodyPreview
+    valueType: string
+    semanticType: variableTemplate
+    label:
+      en: Body preview
+      nl: Berichtvoorbeeld
+    description:
+      en: Local preview text stored on the queued conversation message.
+      nl: Lokale voorbeeldtekst die op het klaargezette conversatiebericht wordt opgeslagen.
+    help:
+      en: This is the body shown in the conversation while the provider command is pending. It does not replace the approved
+        provider template content.
+      nl: Dit is de tekst die in de conversatie zichtbaar is terwijl de provideropdracht klaarstaat. Het vervangt de
+        goedgekeurde providertemplate-inhoud niet.
+    runtime:
+      aliases:
+        - body
+  - key: idempotencyKey
+    valueType: string
+    label:
+      en: Idempotency key
+      nl: Idempotentiesleutel
+    description:
+      en: Stable key that prevents duplicate template messages from retries.
+      nl: Stabiele sleutel die dubbele templateberichten door retries voorkomt.
+    help:
+      en: Leave empty to use the current workflow instance and node ID. Use a custom key only when repeated executions should
+        intentionally resolve to the same queued template.
+      nl: Laat leeg om de huidige workflowinstance en node-ID te gebruiken. Gebruik alleen een aangepaste sleutel wanneer
+        herhaalde uitvoeringen bewust naar dezelfde klaargezette template moeten verwijzen.

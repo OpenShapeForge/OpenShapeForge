@@ -1,0 +1,397 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: flow.requestInput
+category: Flow
+label:
+  en: Wait for input
+  nl: Wacht op input
+description:
+  en: Pause the workflow step and use an internal flow to collect required input.
+  nl: Pauzeer de workflowstap en gebruik een interne flow om benodigde input op te halen.
+configFields:
+  - key: instructions
+    valueType: string
+    required: true
+    label:
+      en: Instruction
+      nl: Instructie
+    description:
+      en: Working instruction passed into the internal collection subflow so it knows which information still needs to be collected.
+      nl: Werkinstructie die wordt doorgegeven aan de interne ophaalsubflow zodat die weet welke informatie nog verzameld moet worden.
+    help:
+      en: This becomes the subflow's main guidance and is also mirrored as `inputLabel` in the child workflow context. Be explicit about what may already be known and what should only be asked when still missing.
+      nl: Dit wordt de hoofd-aanwijzing van de subflow en wordt ook als `inputLabel` in de child-workflowcontext gezet. Wees concreet over wat al bekend mag zijn en wat alleen gevraagd moet worden als het nog ontbreekt.
+    render:
+      component: Textarea
+      props:
+        rows: 4
+  - key: promptBody
+    valueType: string
+    required: false
+    label:
+      en: Message to ask
+      nl: Vraagbericht
+    description:
+      en: Optional exact message sent by the input subflow. Leave empty to let the input subflow derive a follow-up question.
+      nl: Optioneel exact bericht dat de input-subflow verstuurt. Laat leeg als de input-subflow zelf een vervolgvraag moet bepalen.
+    help:
+      en: Use this when the child collection flow must send an exact customer-facing message body. Leave it empty when the child flow should determine its own follow-up question.
+      nl: Gebruik dit wanneer de child-collectieflow een exact klantgericht bericht moet versturen. Laat het leeg wanneer de child-flow zelf de vervolgvraag moet bepalen.
+    render:
+      component: Textarea
+      props:
+        rows: 5
+  - key: fieldDefinitions
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    semanticType: fieldDefinition
+    authoring:
+      profile: workflowInputField
+    label:
+      en: Required input
+      nl: Benodigde input
+    description:
+      en: Field definitions that describe which values the collection subflow should return to this node.
+      nl: Velddefinities die beschrijven welke waarden de ophaalsubflow naar deze node moet teruggeven.
+    help:
+      en: These fields are flattened into the child workflow context as `fieldDefinitions`, `fieldDefinitionsByKey`, and `replyFieldDefinition`. In the seeded huuropzegging flows this is how process variables like `gewensteEinddatum` and `nieuwAdres` are requested and mapped back.
+      nl: Deze velden worden uitgeklapt naar de child-workflowcontext als `fieldDefinitions`, `fieldDefinitionsByKey` en `replyFieldDefinition`. In de seeded huuropzegging-flows worden zo procesvariabelen zoals `gewensteEinddatum` en `nieuwAdres` opgevraagd en terug gemapt.
+    defaultValue: []
+  - key: inputRenderer
+    valueType: object
+    required: false
+    label:
+      en: Input renderer
+      nl: Input-renderer
+    description:
+      en: Channel-specific rendering preferences for the internal collection workflow.
+      nl: Kanaalspecifieke weergavevoorkeuren voor de interne input-ophaalflow.
+    help:
+      en: Configure WhatsApp Flow here when multiple structured fields should be collected as a native WhatsApp form. Without a Flow ID, the collection workflow falls back to the existing message, button, or list reply behavior.
+      nl: Configureer hier WhatsApp Flow wanneer meerdere gestructureerde velden als native WhatsApp-formulier moeten worden opgehaald. Zonder Flow-ID valt de collectieflow terug op het bestaande bericht-, knop- of lijstgedrag.
+    children:
+      - key: preferred
+        valueType: string
+        defaultValue: auto
+        label:
+          en: Preferred renderer
+          nl: Voorkeursrenderer
+        render:
+          component: Select
+          props:
+            options:
+              - value: auto
+                label: Auto
+              - value: message_reply
+                label: Message reply
+              - value: whatsapp_flow
+                label: WhatsApp Flow
+      - key: whatsappFlow
+        valueType: object
+        label:
+          en: WhatsApp Flow
+          nl: WhatsApp Flow
+        children:
+          - key: enabled
+            valueType: boolean
+            defaultValue: true
+            label:
+              en: Enabled
+              nl: Ingeschakeld
+          - key: flowId
+            valueType: string
+            label:
+              en: Meta Flow ID
+              nl: Meta Flow-ID
+            description:
+              en: Published Meta WhatsApp Flow ID used for multi-field request-input prompts.
+              nl: Gepubliceerde Meta WhatsApp Flow-ID voor request-input prompts met meerdere velden.
+          - key: flowCta
+            valueType: string
+            defaultValue: Invullen
+            label:
+              en: CTA label
+              nl: CTA-label
+          - key: mode
+            valueType: string
+            defaultValue: published
+            label:
+              en: Mode
+              nl: Modus
+            render:
+              component: Select
+              props:
+                options:
+                  - value: published
+                    label: Published
+                  - value: draft
+                    label: Draft
+          - key: flowAction
+            valueType: string
+            defaultValue: navigate
+            label:
+              en: Flow action
+              nl: Flow-actie
+            render:
+              component: Select
+              props:
+                options:
+                  - value: navigate
+                    label: Navigate
+          - key: startScreen
+            valueType: string
+            defaultValue: REQUEST_INPUT
+            label:
+              en: Start screen
+              nl: Startscherm
+          - key: initialData
+            valueType: object
+            variables: whole
+            label:
+              en: Initial data
+              nl: Initiële data
+            render:
+              component: JsonEditor
+  - key: collectionWorkflow
+    valueType: object
+    required: true
+    label:
+      en: Internal input collection flow
+      nl: Interne input-ophaalflow
+    description:
+      en: Internal published workflow that is started as the child collector for this request.
+      nl: Interne gepubliceerde workflow die als child-collector voor deze aanvraag wordt gestart.
+    help:
+      en: At runtime the bridge first resolves `definitionId`; if that is empty it falls back to `definitionName`, `definitionRefName`, and finally `Get user input`. If no published child workflow can be resolved, this node routes to `timeout` with `MISSING_COLLECTION_WORKFLOW`.
+      nl: Tijdens runtime probeert de bridge eerst `definitionId`; als dat leeg is valt hij terug op `definitionName`, `definitionRefName` en uiteindelijk `Get user input`. Als er geen gepubliceerde child-workflow kan worden gevonden, routeert deze node naar `timeout` met `MISSING_COLLECTION_WORKFLOW`.
+    readOnly: true
+    visibility:
+      conditions:
+        - field: __request_input_internal_hidden__
+          operator: eq
+          value: true
+    children:
+      - key: mode
+        valueType: string
+        required: true
+        defaultValue: subflow
+        readOnly: true
+        description:
+          en: Internal execution mode for the collector workflow.
+          nl: Interne uitvoeringsmodus voor de collector-workflow.
+        help:
+          en: |
+            Internal mode flag for the generated child-workflow reference. The web normalizer keeps it at `subflow`, and I
+            did not find a backend branch that changes behavior based on this field today.
+          nl: |
+            Interne mode-vlag voor de gegenereerde child-workflowverwijzing. De web-normalizer houdt dit op `subflow`, en ik
+            heb vandaag geen backend-branch gevonden die het gedrag op basis van dit veld verandert.
+        visibility:
+          conditions:
+            - field: __request_input_internal_hidden__
+              operator: eq
+              value: true
+      - key: definitionId
+        valueType: string
+        semanticType: workflowDefinitionId
+        readOnly: true
+        description:
+          en: Direct workflow definition id of the published collector workflow.
+          nl: Direct workflow-definition-id van de gepubliceerde collector-workflow.
+        help:
+          en: This is the strongest lookup key and is what the bridge uses first when starting or reattaching to the child collection workflow.
+          nl: Dit is de sterkste lookup-sleutel en die gebruikt de bridge als eerste bij het starten of terugvinden van de child-collectieworkflow.
+        visibility:
+          conditions:
+            - field: __request_input_internal_hidden__
+              operator: eq
+              value: true
+      - key: definitionName
+        valueType: string
+        readOnly: true
+        description:
+          en: Human-readable name of the collector workflow.
+          nl: Leesbare naam van de collector-workflow.
+        help:
+          en: Used as a fallback lookup when `definitionId` is empty and kept here so the designer and runtime can stay aligned on which published workflow this node expects.
+          nl: Wordt gebruikt als fallback-lookup wanneer `definitionId` leeg is en staat hier zodat designer en runtime dezelfde gepubliceerde workflow blijven bedoelen.
+        visibility:
+          conditions:
+            - field: __request_input_internal_hidden__
+              operator: eq
+              value: true
+      - key: definitionRefName
+        valueType: string
+        readOnly: true
+        description:
+          en: Secondary reference name for the collector workflow.
+          nl: Secundaire referentienaam voor de collector-workflow.
+        help:
+          en: The bridge includes this in the fallback name search together with `definitionName` and the default `Get user input` seed name.
+          nl: De bridge neemt deze mee in de fallback-zoekactie samen met `definitionName` en de standaard seednaam `Get user input`.
+        visibility:
+          conditions:
+            - field: __request_input_internal_hidden__
+              operator: eq
+              value: true
+      - key: waitForCompletion
+        valueType: boolean
+        defaultValue: true
+        readOnly: true
+        description:
+          en: Internal flag that the parent node waits until the child collector finishes.
+          nl: Interne vlag dat de parent-node wacht tot de child-collector klaar is.
+        help:
+          en: |
+            System-managed flag on the stored child-workflow reference. The web normalizer keeps it true, but the current
+            backend bridge already waits for the child result regardless of this field's value.
+          nl: |
+            Systeembeheerde vlag op de opgeslagen child-workflowverwijzing. De web-normalizer houdt deze op true, maar de
+            huidige backend-bridge wacht sowieso al op het child-resultaat ongeacht de waarde van dit veld.
+        visibility:
+          conditions:
+            - field: __request_input_internal_hidden__
+              operator: eq
+              value: true
+  - key: suggestedWorkflows
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    variables: whole
+    label:
+      en: Suggested workflows
+      nl: Voorgestelde workflows
+    description:
+      en: Optional workflow suggestions passed through to the collection child context.
+      nl: Optionele workflowsuggesties die worden doorgegeven aan de child-collectiecontext.
+    help:
+      en: The backend bridge copies this array into the child context as `suggestedWorkflows` when it is present. Use it only for collection or handover flows that explicitly read suggested follow-up workflows.
+      nl: De backend-bridge kopieert deze array naar de child-context als `suggestedWorkflows` wanneer die aanwezig is. Gebruik dit alleen voor collectie- of handover-flows die expliciet voorgestelde vervolgworkflows uitlezen.
+    render:
+      component: OptionVariablePicker
+      props:
+        clearable: true
+        valueMode: insertText
+    item:
+      key: suggestedWorkflow
+      valueType: object
+      description:
+        en: One suggested workflow entry forwarded to the child collector context.
+        nl: Een voorgesteld workflow-item dat wordt doorgestuurd naar de child-collectorcontext.
+      help:
+        en: Keep this shape aligned with router and handover suggested-workflow output.
+        nl: Houd deze vorm gelijk aan de suggested-workflow-output van router en overdracht.
+      children:
+        - key: workflowDefinitionId
+          valueType: string
+          semanticType: workflowDefinitionId
+          label:
+            en: Workflow definition ID
+            nl: Workflowdefinitie-ID
+          description:
+            en: Definition ID of the suggested published workflow.
+            nl: Definitie-ID van de voorgestelde gepubliceerde workflow.
+          help:
+            en: Use the published workflow definition ID here when the suggestion should point to one concrete workflow without name-based lookup.
+            nl: Gebruik hier de definitie-ID van de gepubliceerde workflow wanneer het voorstel naar een concrete workflow moet wijzen zonder naamgebaseerde lookup.
+        - key: workflowDefinitionName
+          valueType: string
+          label:
+            en: Workflow name
+            nl: Workflownaam
+          description:
+            en: Human-readable name of the suggested workflow.
+            nl: Leesbare naam van de voorgestelde workflow.
+          help:
+            en: This is display-oriented metadata for the suggestion and helps employees or downstream logic understand which workflow is being proposed.
+            nl: Dit is weergavegerichte metadata voor het voorstel en helpt medewerkers of vervolglogica te begrijpen welke workflow wordt voorgesteld.
+        - key: publishedVersion
+          valueType: integer
+          label:
+            en: Published version
+            nl: Gepubliceerde versie
+          description:
+            en: Published version number of the suggested workflow.
+            nl: Gepubliceerd versienummer van de voorgestelde workflow.
+          help:
+            en: Keep this in sync with the definition the suggestion refers to so downstream consumers can show or compare the exact published version.
+            nl: Houd dit gelijk aan de definitie waar het voorstel naar verwijst zodat downstream consumers de exacte gepubliceerde versie kunnen tonen of vergelijken.
+        - key: label
+          valueType: string
+          label:
+            en: Label
+            nl: Label
+          description:
+            en: Short display label for this suggested workflow.
+            nl: Kort weergavelabel voor deze voorgestelde workflow.
+          help:
+            en: Use a short name that is easy to show in a handover or follow-up suggestion list.
+            nl: Gebruik een korte naam die makkelijk te tonen is in een overdracht of lijst met vervolgvoorstellen.
+        - key: confidence
+          valueType: number
+          label:
+            en: Confidence
+            nl: Zekerheid
+          description:
+            en: Confidence score attached to this workflow suggestion.
+            nl: Zekerheidsscore die aan dit workflowvoorstel hangt.
+          help:
+            en: Use this when upstream logic ranks suggestions numerically. The current request-input node stores the value but does not interpret the score itself.
+            nl: Gebruik dit wanneer eerdere logica voorstellen numeriek rangschikt. De huidige request-input-node slaat de waarde op maar interpreteert de score zelf niet.
+        - key: reason
+          valueType: string
+          label:
+            en: Reason
+            nl: Reden
+          description:
+            en: Explanation for why this workflow was suggested.
+            nl: Uitleg waarom deze workflow is voorgesteld.
+          help:
+            en: Fill this with the short rationale from the upstream router or suggestion logic so the next step can explain the proposal.
+            nl: Vul dit met de korte motivatie uit de eerdere router- of suggestielogica zodat de volgende stap het voorstel kan toelichten.
+        - key: rank
+          valueType: integer
+          label:
+            en: Rank
+            nl: Rang
+          description:
+            en: Relative ordering of this workflow suggestion.
+            nl: Relatieve volgorde van dit workflowvoorstel.
+          help:
+            en: Lower or earlier rank values can be used by upstream suggestion logic to mark the preferred order. This node only carries the value through.
+            nl: Lagere of eerdere rangwaarden kunnen door eerdere suggestielogica worden gebruikt om de voorkeursvolgorde aan te geven. Deze node geeft de waarde alleen door.
+  - key: conversationId
+    valueType: string
+    semanticType: conversationId
+    label:
+      en: Conversation ID
+      nl: Conversatie-ID
+    description:
+      en: Conversation that the collector subflow should bind to.
+      nl: Conversatie waaraan de collector-subflow gekoppeld moet worden.
+    help:
+      en: When omitted, the bridge tries to inherit `conversationId` from the parent workflow context. If a conversation is available, the child instance is started against `messaging.conversation` so messaging-aware waits and follow-ups stay attached to the same thread.
+      nl: Als je dit leeg laat, probeert de bridge `conversationId` uit de parent-workflowcontext over te nemen. Als er een conversatie beschikbaar is, wordt de child-instance gestart tegen `messaging.conversation` zodat messaging-aware waits en vervolgstappen aan dezelfde thread blijven hangen.
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: insertText
+  - key: timeoutMs
+    valueType: number
+    defaultValue: 600000
+    validation:
+      min: 0
+    label:
+      en: Timeout (ms)
+      nl: Timeout (ms)
+    description:
+      en: Timeout value forwarded into the collection child workflow context.
+      nl: Timeoutwaarde die wordt doorgegeven aan de context van de child-collectieworkflow.
+    help:
+      en: The bridge stores this as `timeoutMs` for the child flow and the web node adds a `timeout` output handle whenever this value is greater than zero. In seeded case flows this is typically one week (`604800000`).
+      nl: De bridge zet dit als `timeoutMs` in de child-flowcontext en de webnode voegt een `timeout`-output handle toe zodra deze waarde groter is dan nul. In seeded case-flows is dit meestal een week (`604800000`).
+    render:
+      component: NumberInput

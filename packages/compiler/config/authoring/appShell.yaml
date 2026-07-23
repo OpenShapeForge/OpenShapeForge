@@ -1,0 +1,22 @@
+schemaVersion: 1
+kind: appShell
+
+shell:
+  component: AppLayout
+  title: OpenShapeForge
+
+navigation:
+  component: SidebarNav
+  sidebarItems:
+    - key: data
+      label: { en: Data, nl: Data }
+      children:
+        - key: relations
+          label: { en: Relations, nl: Relaties }
+          icon: AddressBookTabs
+          entity: relation
+
+        - key: relation-groups
+          label: { en: Relation groups, nl: Relatiegroepen }
+          icon: UsersThree
+          entity: relation-group

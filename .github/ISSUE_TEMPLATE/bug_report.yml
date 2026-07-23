@@ -1,0 +1,64 @@
+name: Bug report
+description: Report a defect in the compiler, generated API, migrations, or auth.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Do not use this form for security
+        vulnerabilities** — see [SECURITY.md](../../SECURITY.md) and report
+        privately instead. Scrub any secrets and local paths from output you paste.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you observe, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: >
+        Minimal steps — the entity YAML / authoring change, the command, or the
+        GraphQL request. A failing gate output helps.
+      placeholder: |
+        1. Add entity ... / run `bun run generate`
+        2. `bun run db:migrate`
+        3. Query ... → error
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - compiler / codegen
+        - generated schema / RLS
+        - GraphQL API / CRUD engine
+        - migrations / drift
+        - auth (bearer / trusted-context)
+        - plugins / layers
+        - tests / gates
+        - docs
+        - other
+    validations:
+      required: true
+  - type: textarea
+    id: gate-output
+    attributes:
+      label: Relevant gate / test output
+      description: Output of the failing gate or test (secrets and local paths removed).
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Commit / version
+      description: The commit SHA or version you tested.
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, bun version (`bun --version`), Postgres version, anything relevant.

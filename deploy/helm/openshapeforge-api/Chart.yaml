@@ -1,0 +1,17 @@
+apiVersion: v2
+name: openshapeforge-api
+description: >-
+  OpenShapeForge API — a generated GraphQL CRUD service with Postgres row-level
+  security. Deploys the API and runs schema migrations as a pre-upgrade Job.
+  Brings your own external Postgres and Keycloak (OIDC issuer).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - openshapeforge
+  - graphql
+  - postgres
+  - rls
+home: https://github.com/OpenShapeForge/OpenShapeForge
+sources:
+  - https://github.com/OpenShapeForge/OpenShapeForge

@@ -1,0 +1,758 @@
+schemaVersion: 2
+kind: authorizationConfig
+
+# Keycloak realm-export.json is generated from this file. One file authors:
+# - realm settings (sslRequired, token lifespans, etc.)
+# - realm roles (composite, including per-client mappings)
+# - clients (just names + bearerOnly flag; all other client shape is a hardcoded
+#   generator default — see generators/keycloak.ts)
+# - groups (optional hierarchy; user membership via `users[].groups` paths)
+# - users (dev test accounts; plain passwords OK in dev)
+#
+# Entity-derived client roles (natural-person:read, etc.) are STILL appended on
+# top of the entityRoleClient by the generator, based on entity YAML auth blocks.
+
+realm:
+  name: openshapeforge-dev
+  displayName: OpenShapeForge
+  enabled: true
+  sslRequired: none
+  registrationAllowed: false
+  loginWithEmailAllowed: true
+  duplicateEmailsAllowed: false
+  resetPasswordAllowed: false
+  editUsernameAllowed: false
+  bruteForceProtected: false
+  organizationsEnabled: true
+  accessTokenLifespan: 900
+  ssoSessionIdleTimeout: 28800
+  ssoSessionMaxLifespan: 86400
+
+  events:
+    enabled: true
+    adminEnabled: true
+    listeners:
+      - jboss-logging
+
+keycloak:
+  # The client that receives entity-derived roles (natural-person:read, etc.)
+  # generated from entity YAML authorization blocks.
+  entityRoleClient: erp-provider
+
+  # Clients to create in the realm. Each is either:
+  #   gateway        — interactive login client (redirectUris, protocolMappers)
+  #   bearerOnly     — resource server that only validates tokens
+  #   serviceAccount — client credentials flow only
+  # Protocol mappers, secrets, redirectUris, webOrigins etc. are hardcoded
+  # defaults in the generator.
+  clients:
+    - id: openshapeforge-gateway
+      kind: gateway
+      name: OpenShapeForge API Gateway
+      secret: dev-secret
+
+    - id: erp-provider
+      kind: bearerOnly
+      name: ERP Provider — entity scopes
+      secret: erp-provider-secret
+
+    - id: openshapeforge-support
+      kind: bearerOnly
+
+    - id: openshapeforge-audit
+      kind: bearerOnly
+
+    - id: openshapeforge-timeline
+      kind: bearerOnly
+      name: OpenShapeForge Timeline Service
+      secret: openshapeforge-timeline-secret
+
+    - id: openshapeforge-knowledge-base
+      kind: bearerOnly
+      name: OpenShapeForge Knowledge Base
+
+    - id: seed-service
+      kind: serviceAccount
+      name: Seed Service Account
+      secret: seed-service-secret
+
+    - id: openshapeforge-messaging
+      kind: bearerOnly
+
+    - id: openshapeforge-realtime
+      kind: bearerOnly
+
+    - id: openshapeforge-auth-api
+      kind: serviceAccount
+      name: OpenShapeForge Auth API Service
+      secret: openshapeforge-auth-api-secret
+
+# Realm-level roles. `composites` is an explicit per-client role list;
+# `includes` is a wildcard-expansion pattern over entity-derived composite roles
+# (e.g. "*:full" expands to natural-person:full + relation:full + …).
+#
+# Cross-tenant platform admin (formerly `system-admin`) is granted via Keycloak's
+# built-in `realm-management.realm-admin` client role — assigned per user under
+# `users[].clientRoles` below.
+realmRoles:
+  directie:
+    description: "Directie: global read/write/approve on all resources"
+    composites:
+      erp-provider:
+        - General.All.ReadWrite
+        - CaseFile.All.ReadWrite
+        - Energy.All.ReadWrite
+        - Finance.All.ReadWrite
+        - Quality.All.ReadWrite
+        - Maintenance.All.ReadWrite
+        - Organization.All.ReadWrite
+        - Agreements.All.ReadWrite
+        - ProjectDevelopment.All.ReadWrite
+        - Relations.All.ReadWrite
+        - RealEstate.All.ReadWrite
+        - HousingAllocation.All.ReadWrite
+        - Cases.All.ReadWrite
+        - Relations.Bsn.Read
+      openshapeforge-support:
+        - Support.Issues.All
+      openshapeforge-audit:
+        - Audit.Logs.All
+        - Audit.Settings.Manage
+      openshapeforge-timeline:
+        - Timeline.Events.ReadAll
+        - Timeline.All
+      openshapeforge-knowledge-base:
+        - KnowledgeBase.All
+      openshapeforge-auth-api:
+        - Organization.Employees.ReadWrite
+        - Organization.EmployeeRoles.ReadWrite
+        - Organization.Positions.ReadWrite
+        - Relations.RelationGroups.ReadWrite
+      openshapeforge-messaging:
+        - Messaging.OptIn.Read
+        - Messaging.OptIn.Write
+        - Messaging.Send
+        - Messaging.Read
+        - Messaging.Admin
+        - Messaging.Conversation.ReadAll
+        - Messaging.Conversation.ViewQueue
+        - Messaging.Conversation.Assign
+        - Messaging.Conversation.Reassign
+
+  vastgoedbeheerder:
+    description: "Vastgoedbeheer: full access to the real estate module"
+    composites:
+      erp-provider:
+        - RealEstate.All.ReadWrite
+        - General.All.Read
+        - Relations.All.Read
+        - Maintenance.All.ReadWrite
+        - Energy.All.ReadWrite
+        - Quality.All.ReadWrite
+        - Cases.All.ReadWrite
+      openshapeforge-support:
+        - Support.Issues.ReadAll
+        - Support.Issues.Comment
+        - Support.Issues.Manage
+      openshapeforge-audit:
+        - Audit.Logs.ReadAll
+      openshapeforge-timeline:
+        - Timeline.Events.Read
+      openshapeforge-knowledge-base:
+        - KnowledgeBase.Articles.Read
+      openshapeforge-messaging:
+        - Messaging.OptIn.Read
+        - Messaging.Read
+        - Messaging.Conversation.ViewQueue
+
+  wijkbeheerder:
+    description: "Wijkbeheer: read/write access to area units and read access to agreements"
+    composites:
+      erp-provider:
+        - RealEstate.All.ReadWrite
+        - Maintenance.All.ReadWrite
+        - Agreements.All.Read
+        - Relations.All.Read
+        - General.All.Read
+        - Quality.All.Read
+        - Cases.All.ReadWrite
+      openshapeforge-support:
+        - Support.Issues.ReadAll
+        - Support.Issues.Comment
+      openshapeforge-audit:
+        - Audit.Logs.ReadOwn
+      openshapeforge-timeline:
+        - Timeline.Events.Read
+      openshapeforge-knowledge-base:
+        - KnowledgeBase.Articles.Read
+      openshapeforge-messaging:
+        - Messaging.OptIn.Read
+        - Messaging.Conversation.ViewQueue
+
+  verhuurconsulent:
+    description: "Verhuur: read access to real estate and manage lease agreements"
+    composites:
+      erp-provider:
+        - RealEstate.All.Read
+        - General.All.Read
+        - Relations.All.ReadWrite
+        - Agreements.All.ReadWrite
+        - HousingAllocation.All.ReadWrite
+        - Finance.All.Read
+        - Cases.All.Read
+      openshapeforge-support:
+        - Support.Issues.ReadOwn
+        - Support.Issues.Create
+      openshapeforge-audit:
+        - Audit.Logs.ReadOwn
+      openshapeforge-timeline:
+        - Timeline.Events.Read
+      openshapeforge-knowledge-base:
+        - KnowledgeBase.Articles.Read
+      openshapeforge-messaging:
+        - Messaging.OptIn.Read
+        - Messaging.OptIn.Write
+        - Messaging.Conversation.ViewQueue
+
+# Client roles that aren't entity-derived (i.e., module-level roles referenced
+# by realmRoles composites above). Compiler-emitted entity roles
+# (e.g. natural-person:read) are MERGED with these at generate time.
+  controller:
+    description: "Controller: full Finance plus read access across the company"
+    composites:
+      erp-provider:
+        - Finance.All.ReadWrite
+        - General.All.Read
+        - Relations.All.Read
+        - Agreements.All.Read
+        - RealEstate.All.Read
+        - Maintenance.All.Read
+        - ProjectDevelopment.All.Read
+        - Organization.All.Read
+        - CaseFile.All.Read
+        - Energy.All.Read
+        - Quality.All.Read
+      openshapeforge-support:
+        - Support.Issues.ReadAll
+        - Support.Issues.Comment
+      openshapeforge-audit:
+        - Audit.Logs.ReadAll
+      openshapeforge-timeline:
+        - Timeline.Events.Read
+      openshapeforge-knowledge-base:
+        - KnowledgeBase.Articles.Read
+
+
+  bookkeeper:
+    description: "Bookkeeper: full Finance with read on relations and contracts"
+    composites:
+      erp-provider:
+        - Finance.All.ReadWrite
+        - General.All.Read
+        - Relations.All.Read
+        - Agreements.All.Read
+      openshapeforge-support:
+        - Support.Issues.ReadOwn
+        - Support.Issues.Create
+      openshapeforge-audit:
+        - Audit.Logs.ReadOwn
+      openshapeforge-timeline:
+        - Timeline.Events.Read
+      openshapeforge-knowledge-base:
+        - KnowledgeBase.Articles.Read
+
+
+  accounts-payable:
+    description: "AP clerk: scoped to purchase invoices, payments, suppliers, mandates"
+    composites:
+      erp-provider:
+        # NOTE: Finance.PurchaseInvoices.ReadWrite was originally listed
+        # here as a forward-looking placeholder for a PurchaseInvoice entity.
+        # Keycloak's strict composite-role validation rejects references to
+        # client roles that don't exist, so the placeholder is removed until
+        # the PurchaseInvoice entity is actually authored. Re-add when it lands.
+        - Finance.PurchaseOrders.ReadWrite
+        - Finance.PurchaseOrderLines.ReadWrite
+        - Finance.Creditors.ReadWrite
+        - Finance.PaymentOrders.ReadWrite
+        - Finance.BankStatements.Read
+        - Finance.BankStatementLines.Read
+        - Finance.BankReconciliations.ReadWrite
+        - Relations.All.Read
+        - General.All.Read
+        - Agreements.All.Read
+      openshapeforge-support:
+        - Support.Issues.ReadOwn
+        - Support.Issues.Create
+      openshapeforge-audit:
+        - Audit.Logs.ReadOwn
+      openshapeforge-timeline:
+        - Timeline.Events.Read
+      openshapeforge-knowledge-base:
+        - KnowledgeBase.Articles.Read
+
+
+  accounts-receivable:
+    description: "AR clerk: scoped to sales invoices, collections, debtors, mandates"
+    composites:
+      erp-provider:
+        - Finance.Invoices.ReadWrite
+        - Finance.InvoiceLines.ReadWrite
+        - Finance.InvoiceVatBuckets.Read
+        - Finance.InvoicePayments.ReadWrite
+        - Finance.InvoiceCollectionItems.ReadWrite
+        - Finance.Debtors.ReadWrite
+        - Finance.DirectDebitMandates.ReadWrite
+        - Finance.DirectDebitOrders.ReadWrite
+        - Finance.PaymentPlans.ReadWrite
+        - Finance.PaymentPlanInstalments.ReadWrite
+        - Finance.BankStatements.Read
+        - Finance.BankStatementLines.Read
+        - Finance.BankReconciliations.ReadWrite
+        - Finance.MandateReference.Read
+        - Relations.All.Read
+        - General.All.Read
+        - Agreements.All.Read
+      openshapeforge-support:
+        - Support.Issues.ReadOwn
+        - Support.Issues.Create
+      openshapeforge-audit:
+        - Audit.Logs.ReadOwn
+      openshapeforge-timeline:
+        - Timeline.Events.Read
+      openshapeforge-knowledge-base:
+        - KnowledgeBase.Articles.Read
+
+
+  procurement:
+    description: "Procurement: purchase orders, quotes, supplier read"
+    composites:
+      erp-provider:
+        - Finance.PurchaseOrders.ReadWrite
+        - Finance.PurchaseOrderLines.ReadWrite
+        - Finance.Quotes.ReadWrite
+        - Finance.QuoteLines.ReadWrite
+        - Finance.Creditors.Read
+        - Maintenance.All.Read
+        - Relations.All.Read
+        - General.All.Read
+      openshapeforge-support:
+        - Support.Issues.ReadOwn
+        - Support.Issues.Create
+      openshapeforge-audit:
+        - Audit.Logs.ReadOwn
+      openshapeforge-timeline:
+        - Timeline.Events.Read
+      openshapeforge-knowledge-base:
+        - KnowledgeBase.Articles.Read
+
+
+  maintenance-coordinator:
+    description: "Maintenance coordinator: full maintenance, read real estate and relations, manage purchase orders"
+    composites:
+      erp-provider:
+        - Maintenance.All.ReadWrite
+        - RealEstate.All.Read
+        - Relations.All.Read
+        - General.All.Read
+        - Finance.PurchaseOrders.ReadWrite
+        - Finance.PurchaseOrderLines.ReadWrite
+        - Finance.Quotes.Read
+      openshapeforge-support:
+        - Support.Issues.ReadOwn
+        - Support.Issues.Create
+      openshapeforge-audit:
+        - Audit.Logs.ReadOwn
+      openshapeforge-timeline:
+        - Timeline.Events.Read
+      openshapeforge-knowledge-base:
+        - KnowledgeBase.Articles.Read
+
+
+  hr-manager:
+    description: "HR manager: full organization, employment-agreement read, employee compensation visibility"
+    composites:
+      erp-provider:
+        - Organization.All.ReadWrite
+        - Organization.Compensation.Read
+        - Relations.All.Read
+        - Agreements.All.Read
+        - General.All.Read
+      openshapeforge-support:
+        - Support.Issues.ReadOwn
+        - Support.Issues.Create
+      openshapeforge-audit:
+        - Audit.Logs.ReadOwn
+      openshapeforge-timeline:
+        - Timeline.Events.Read
+      openshapeforge-knowledge-base:
+        - KnowledgeBase.Articles.Read
+
+
+  project-manager:
+    description: "Project manager: full project development, read budgets/POs/relations, manage maintenance"
+    composites:
+      erp-provider:
+        - ProjectDevelopment.All.ReadWrite
+        - Finance.Budgets.Read
+        - Finance.BudgetLines.Read
+        - Finance.PurchaseOrders.Read
+        - Finance.PurchaseOrderLines.Read
+        - Maintenance.All.Read
+        - Relations.All.Read
+        - General.All.Read
+      openshapeforge-support:
+        - Support.Issues.ReadOwn
+        - Support.Issues.Create
+      openshapeforge-audit:
+        - Audit.Logs.ReadOwn
+      openshapeforge-timeline:
+        - Timeline.Events.Read
+      openshapeforge-knowledge-base:
+        - KnowledgeBase.Articles.Read
+
+# Client roles that aren't entity-derived (i.e., module-level roles referenced
+# by realmRoles composites above). Compiler-emitted entity roles
+# (e.g. natural-person:read) are MERGED with these at generate time.
+
+clientRoles:
+  erp-provider:
+    - General.All.ReadWrite
+    - General.All.Read
+    - CaseFile.All.ReadWrite
+    - Energy.All.ReadWrite
+    - Finance.All.ReadWrite
+    - Finance.All.Read
+    - Quality.All.ReadWrite
+    - Quality.All.Read
+    - Maintenance.All.ReadWrite
+    - Organization.All.ReadWrite
+    - Agreements.All.ReadWrite
+    - Agreements.All.Read
+    - ProjectDevelopment.All.ReadWrite
+    - Relations.All.ReadWrite
+    - Relations.All.Read
+    - RealEstate.All.ReadWrite
+    - RealEstate.All.Read
+    - HousingAllocation.All.ReadWrite
+    - Cases.All.ReadWrite
+    - Cases.All.Read
+    - Relations.Bsn.Read
+    - CaseFile.All.Read
+    - Energy.All.Read
+    - Maintenance.All.Read
+    - Organization.All.Read
+    - ProjectDevelopment.All.Read
+    - HousingAllocation.All.Read
+    - Finance.MandateReference.Read
+    - Finance.CreditLimit.Read
+    - Organization.Compensation.Read
+    - CaseFile.ProcessRoles.Read
+    - CaseFile.ProcessRoles.ReadWrite
+    - Energy.EnergyPerformanceMeasurements.Read
+    - Energy.EnergyPerformanceMeasurements.ReadWrite
+    - Energy.EnergyPerformances.Read
+    - Energy.EnergyPerformances.ReadWrite
+    - Energy.MonitorIntervals.Read
+    - Energy.MonitorIntervals.ReadWrite
+    - Energy.MonitorLogEntries.Read
+    - Energy.MonitorLogEntries.ReadWrite
+    - Energy.MonitorLogs.Read
+    - Energy.MonitorLogs.ReadWrite
+    - Energy.MonitorMeasurements.Read
+    - Energy.MonitorMeasurements.ReadWrite
+    - Energy.MonitorReadings.Read
+    - Energy.MonitorReadings.ReadWrite
+    - Finance.BankReconciliations.Read
+    - Finance.BankStatementLines.ReadWrite
+    - Finance.BankStatements.ReadWrite
+    - Finance.BudgetLines.ReadWrite
+    - Finance.Budgets.ReadWrite
+    - Finance.CostDimensions.Read
+    - Finance.CostDimensions.ReadWrite
+    - Finance.Debtors.Read
+    - Finance.DirectDebitMandates.Read
+    - Finance.DirectDebitOrders.Read
+    - Finance.FiscalPeriods.Read
+    - Finance.FiscalPeriods.ReadWrite
+    - Finance.FiscalYears.Read
+    - Finance.FiscalYears.ReadWrite
+    - Finance.InvoiceCollectionItems.Read
+    - Finance.InvoiceLines.Read
+    - Finance.InvoicePayments.Read
+    - Finance.InvoiceSequences.Read
+    - Finance.InvoiceSequences.ReadWrite
+    - Finance.InvoiceVatBuckets.ReadWrite
+    - Finance.Invoices.Read
+    - Finance.LedgerAccounts.Read
+    - Finance.LedgerAccounts.ReadWrite
+    - Finance.LedgerPostingLines.Read
+    - Finance.LedgerPostingLines.ReadWrite
+    - Finance.LedgerPostings.Read
+    - Finance.LedgerPostings.ReadWrite
+    - Finance.PaymentMethods.Read
+    - Finance.PaymentMethods.ReadWrite
+    - Finance.PaymentOrders.Read
+    - Finance.PaymentPlanInstalments.Read
+    - Finance.PaymentPlans.Read
+    - Finance.PeriodBalances.Read
+    - Finance.PeriodBalances.ReadWrite
+    - Finance.PriceAdjustments.Read
+    - Finance.PriceAdjustments.ReadWrite
+    - Finance.QuoteLines.Read
+    - Finance.VatRates.Read
+    - Finance.VatRates.ReadWrite
+    - Finance.VatReturns.Read
+    - Finance.VatReturns.ReadWrite
+    - Quality.ConditionAssessments.Read
+    - Quality.ConditionAssessments.ReadWrite
+    - Maintenance.InspectionReports.Read
+    - Maintenance.InspectionReports.ReadWrite
+    - Maintenance.MaintenanceOrderParties.Read
+    - Maintenance.MaintenanceOrderParties.ReadWrite
+    - Maintenance.MaintenanceOrders.Read
+    - Maintenance.MaintenanceOrders.ReadWrite
+    - Maintenance.MaintenanceRequestSettlements.Read
+    - Maintenance.MaintenanceRequestSettlements.ReadWrite
+    - Maintenance.MaintenanceRequests.Read
+    - Maintenance.MaintenanceRequests.ReadWrite
+    - Maintenance.MaintenanceSpendings.Read
+    - Maintenance.MaintenanceSpendings.ReadWrite
+    - Maintenance.MaintenanceTaskCalculations.Read
+    - Maintenance.MaintenanceTaskCalculations.ReadWrite
+    - Maintenance.MaintenanceTasks.Read
+    - Maintenance.MaintenanceTasks.ReadWrite
+    - Maintenance.StandardPrices.Read
+    - Maintenance.StandardPrices.ReadWrite
+    - Maintenance.Warranties.Read
+    - Maintenance.Warranties.ReadWrite
+    - Organization.EmployeeBudgets.Read
+    - Organization.EmployeeBudgets.ReadWrite
+    - Organization.EmployeeRoles.Read
+    - Organization.EmployeeRoles.ReadWrite
+    - Organization.Employees.Read
+    - Organization.Employees.ReadWrite
+    - Organization.OrgUnits.Read
+    - Organization.OrgUnits.ReadWrite
+    - Organization.Positions.Read
+    - Organization.Positions.ReadWrite
+    - Organization.TimeEntries.Read
+    - Organization.TimeEntries.ReadWrite
+    - Organization.Vacancies.Read
+    - Organization.Vacancies.ReadWrite
+    - Agreements.AgreementComponentCumulatives.Read
+    - Agreements.AgreementComponentCumulatives.ReadWrite
+    - Agreements.AgreementComponentTypes.Read
+    - Agreements.AgreementComponentTypes.ReadWrite
+    - Agreements.AgreementComponents.Read
+    - Agreements.AgreementComponents.ReadWrite
+    - Agreements.AgreementLinks.Read
+    - Agreements.AgreementLinks.ReadWrite
+    - Agreements.AgreementParties.Read
+    - Agreements.AgreementParties.ReadWrite
+    - ProjectDevelopment.ProjectBudgetLines.Read
+    - ProjectDevelopment.ProjectBudgetLines.ReadWrite
+    - ProjectDevelopment.ProjectObjectives.Read
+    - ProjectDevelopment.ProjectObjectives.ReadWrite
+    - ProjectDevelopment.ProjectOrders.Read
+    - ProjectDevelopment.ProjectOrders.ReadWrite
+    - ProjectDevelopment.ProjectPhaseDecisions.Read
+    - ProjectDevelopment.ProjectPhaseDecisions.ReadWrite
+    - ProjectDevelopment.ProjectPhases.Read
+    - ProjectDevelopment.ProjectPhases.ReadWrite
+    - ProjectDevelopment.ProjectRoles.Read
+    - ProjectDevelopment.ProjectRoles.ReadWrite
+    - ProjectDevelopment.ProjectSpendings.Read
+    - ProjectDevelopment.ProjectSpendings.ReadWrite
+    - ProjectDevelopment.ProjectTasks.Read
+    - ProjectDevelopment.ProjectTasks.ReadWrite
+    - ProjectDevelopment.Projects.Read
+    - ProjectDevelopment.Projects.ReadWrite
+    - Relations.Alerts.Read
+    - Relations.Alerts.ReadWrite
+    - Relations.AppointmentOptions.Read
+    - Relations.AppointmentOptions.ReadWrite
+    - Relations.AppointmentRequests.Read
+    - Relations.AppointmentRequests.ReadWrite
+    - Relations.SupplierRoles.Read
+    - Relations.SupplierRoles.ReadWrite
+    - RealEstate.AdminRegions.Read
+    - RealEstate.AdminRegions.ReadWrite
+    - RealEstate.Areas.Read
+    - RealEstate.Areas.ReadWrite
+    - RealEstate.AssetConditions.Read
+    - RealEstate.AssetConditions.ReadWrite
+    - RealEstate.AssetGroups.Read
+    - RealEstate.AssetGroups.ReadWrite
+    - RealEstate.Assets.Read
+    - RealEstate.Assets.ReadWrite
+    - RealEstate.BuildingParts.Read
+    - RealEstate.BuildingParts.ReadWrite
+    - RealEstate.Buildings.Read
+    - RealEstate.Buildings.ReadWrite
+    - RealEstate.Encumbrances.Read
+    - RealEstate.Encumbrances.ReadWrite
+    - RealEstate.Points.Read
+    - RealEstate.Points.ReadWrite
+    - RealEstate.Spaces.Read
+    - RealEstate.Spaces.ReadWrite
+    - RealEstate.Valuations.Read
+    - RealEstate.Valuations.ReadWrite
+    - Audit.Logs.All
+    - Audit.Logs.ReadAll
+    - Audit.Logs.ReadOwn
+    - Audit.Settings.Manage
+    - Finance.BankReconciliations.ReadWrite
+    - Finance.BankStatementLines.Read
+    - Finance.BankStatements.Read
+    - Finance.BudgetLines.Read
+    - Finance.Budgets.Read
+    - Finance.Creditors.Read
+    - Finance.Creditors.ReadWrite
+    - Finance.Debtors.ReadWrite
+    - Finance.DirectDebitMandates.ReadWrite
+    - Finance.DirectDebitOrders.ReadWrite
+    - Finance.InvoiceCollectionItems.ReadWrite
+    - Finance.InvoiceLines.ReadWrite
+    - Finance.InvoicePayments.ReadWrite
+    - Finance.InvoiceVatBuckets.Read
+    - Finance.Invoices.ReadWrite
+    - Finance.PaymentOrders.ReadWrite
+    - Finance.PaymentPlanInstalments.ReadWrite
+    - Finance.PaymentPlans.ReadWrite
+    - Finance.PurchaseInvoices.ReadWrite
+    - Finance.PurchaseOrderLines.Read
+    - Finance.PurchaseOrderLines.ReadWrite
+    - Finance.PurchaseOrders.Read
+    - Finance.PurchaseOrders.ReadWrite
+    - Finance.QuoteLines.ReadWrite
+    - Finance.Quotes.Read
+    - Finance.Quotes.ReadWrite
+    - KnowledgeBase.Articles.Read
+    - Messaging.Conversation.Assign
+    - Messaging.Conversation.ReadAll
+    - Messaging.Conversation.Reassign
+    - Messaging.Conversation.ViewQueue
+    - Messaging.OptIn.Read
+    - Messaging.OptIn.Write
+    - Organization.EmployeeRoles.ReadWrite
+    - Organization.Employees.ReadWrite
+    - Organization.Positions.ReadWrite
+    - Relations.RelationGroups.ReadWrite
+    - Support.Issues.All
+    - Support.Issues.Comment
+    - Support.Issues.Create
+    - Support.Issues.Manage
+    - Support.Issues.ReadAll
+    - Support.Issues.ReadOwn
+    - Timeline.Events.Read
+    - Timeline.Events.ReadAll
+  openshapeforge-support:
+    - Support.Issues.All
+    - Support.Issues.ReadAll
+    - Support.Issues.ReadOwn
+    - Support.Issues.Create
+    - Support.Issues.Comment
+    - Support.Issues.Manage
+  openshapeforge-audit:
+    - Audit.Logs.All
+    - Audit.Logs.ReadAll
+    - Audit.Logs.ReadOwn
+    - Audit.Settings.Manage
+  openshapeforge-timeline:
+    - Timeline.Events.ReadAll
+    - Timeline.Events.Read
+    - Timeline.All
+  openshapeforge-knowledge-base:
+    - KnowledgeBase.All
+    - KnowledgeBase.Articles.Read
+  openshapeforge-auth-api:
+    - Organization.Employees.ReadWrite
+    - Organization.EmployeeRoles.ReadWrite
+    - Organization.Positions.ReadWrite
+    - Relations.RelationGroups.ReadWrite
+  openshapeforge-messaging:
+    - Messaging.OptIn.Read
+    - Messaging.OptIn.Write
+    - Messaging.Send
+    - Messaging.Read
+    - Messaging.Admin
+    - Messaging.Conversation.ReadAll
+    - Messaging.Conversation.ViewQueue
+    - Messaging.Conversation.Assign
+    - Messaging.Conversation.Reassign
+
+# Demo Keycloak groups (organizational). Paths must match `users[].groups`.
+groups:
+  - name: openshapeforge-demo
+    subGroups:
+      - name: tenant-acme
+        subGroups:
+          - name: role-directie
+          - name: role-vastgoedbeheer
+          - name: role-wijkbeheer
+          - name: role-verhuur
+          - name: role-zonder-app-toegang
+      - name: tenant-beta
+        subGroups:
+          - name: role-verhuur
+
+# Dev test accounts. Passwords plain text — FINE for dev, NOT for prod.
+# `tid` is the tenant attribute; mapped to `tid` and `organization` OIDC claims
+# by the gateway client's protocol mappers (hardcoded in generator).
+users:
+  - username: acme-directie
+    email: directie@acme.example.com
+    firstName: Diana
+    lastName: Bestuur
+    password: test
+    tid: 11111111-1111-4111-8111-111111111111
+    realmRoles: [directie]
+    groups: [/openshapeforge-demo/tenant-acme/role-directie]
+    clientRoles:
+      realm-management: [realm-admin]
+
+  - username: acme-vastgoedbeheerder
+    email: vastgoed@acme.example.com
+    firstName: Vincent
+    lastName: Beheer
+    password: test
+    tid: 11111111-1111-4111-8111-111111111111
+    realmRoles: [vastgoedbeheerder]
+    groups: [/openshapeforge-demo/tenant-acme/role-vastgoedbeheer]
+
+  - username: acme-wijkbeheerder
+    email: wijk@acme.example.com
+    firstName: Willem
+    lastName: Wijk
+    password: test
+    tid: 11111111-1111-4111-8111-111111111111
+    realmRoles: [wijkbeheerder]
+    groups: [/openshapeforge-demo/tenant-acme/role-wijkbeheer]
+
+  - username: acme-verhuurconsulent
+    email: verhuur@acme.example.com
+    firstName: Eva
+    lastName: Verhuur
+    password: test
+    tid: 11111111-1111-4111-8111-111111111111
+    realmRoles: [verhuurconsulent]
+    groups: [/openshapeforge-demo/tenant-acme/role-verhuur]
+
+  - username: acme-noaccess
+    email: noaccess@acme.example.com
+    firstName: Nico
+    lastName: Geenrol
+    password: test
+    tid: 11111111-1111-4111-8111-111111111111
+    realmRoles: []
+    groups: [/openshapeforge-demo/tenant-acme/role-zonder-app-toegang]
+
+  - username: beta-verhuurconsulent
+    email: verhuur@beta.example.com
+    firstName: Bart
+    lastName: Verhuur
+    password: test
+    tid: 33333333-3333-4333-8333-333333333333
+    realmRoles: [verhuurconsulent]
+    groups: [/openshapeforge-demo/tenant-beta/role-verhuur]

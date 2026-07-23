@@ -1,0 +1,48 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: RowAccessBadSession
+title: Row Access Bad Session
+description: Test fixture — owner.session is not app.current_user_id (must fail closed, §B.1). Not shipped.
+language: en
+displayTemplate: "{{title}}"
+filterField: title
+labels:
+  en: Row Access Bad Session
+  nl: Row Access Bad Session
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+    owner:
+      column: owner_id
+      session: app.current_account_id
+fields:
+  - key: title
+    valueType: string
+    required: true
+    label:
+      en: Title
+      nl: Titel
+    persisted:
+      column: title
+      storageClass: core
+relationships:
+  - key: owner
+    kind: belongsTo
+    target: RowAccessOwnerTarget
+    foreignKey: owner_id
+    label:
+      en: Owner
+      nl: Eigenaar

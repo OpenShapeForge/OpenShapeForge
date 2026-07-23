@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-phase0/workflow-node.schema.json",
+  "title": "Workflow Node Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "nodeType",
+    "category",
+    "label",
+    "configFields"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "kind": {
+      "type": "string",
+      "const": "workflowNode"
+    },
+    "nodeType": {
+      "type": "string",
+      "pattern": "^[a-z][a-zA-Z0-9]*(\\.[a-zA-Z][a-zA-Z0-9]*)?$",
+      "description": "Workflow node type, e.g. ai.extractParameters or legacy designer names such as triggerManual."
+    },
+    "category": {
+      "type": "string",
+      "minLength": 1
+    },
+    "label": {
+      "$ref": "https://openshapeforge.example/schema-phase0/core-entity.schema.json#/$defs/localizedText"
+    },
+    "description": {
+      "$ref": "https://openshapeforge.example/schema-phase0/core-entity.schema.json#/$defs/localizedText"
+    },
+    "configFields": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json"
+      }
+    },
+    "outputFields": {
+      "type": "array",
+      "minItems": 0,
+      "description": "Optional workflow output fields exposed by this node for variable suggestions and downstream condition builders.",
+      "items": {
+        "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json"
+      }
+    }
+  }
+}

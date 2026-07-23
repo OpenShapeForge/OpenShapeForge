@@ -1,0 +1,29 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: triggerManual
+category: triggers
+label:
+  nl: Handmatige start
+  en: Manual start
+description:
+  nl: Start de workflow handmatig met optionele startvariabelen.
+  en: Starts the workflow manually with optional start variables.
+configFields:
+  - key: inputParameters
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    semanticType: fieldDefinition
+    label:
+      nl: Startvariabelen
+      en: Start variables
+    description:
+      nl: Deze velden zijn beschikbaar zodra de workflow handmatig wordt gestart.
+      en: These fields become available as soon as the workflow is started manually.
+    help:
+      nl: Definieer hier de invoer die een gebruiker of systeem moet meegeven bij het starten van de workflow.
+      en: Define the input a user or system must provide when starting the workflow.
+    defaultValue: []
+    authoring:
+      profile: workflowStartVariable

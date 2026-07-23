@@ -1,0 +1,226 @@
+schemaVersion: 1
+kind: fieldAuthoringProfileCatalog
+profiles:
+  fullFieldDefinition:
+    label:
+      nl: Volledige velddefinitie
+      en: Full field definition
+    description:
+      nl: Algemene velddefinitie met het volledige veldcontract.
+      en: General field definition with the full field contract.
+    keyBehavior: hiddenGeneratedStable
+    excludedFieldTypes: []
+    typePickerUsage: internalSchema
+    controls:
+      label: true
+      description: true
+      type: combined
+      cardinality: false
+      sortable: false
+      shape: true
+      options: true
+      render: false
+      aiHint: true
+      defaultValue: true
+      value: false
+      validation: true
+      layout: true
+      persistence: true
+
+  workflowInputField:
+    label:
+      nl: Workflow-inputveld
+      en: Workflow input field
+    description:
+      nl: Velddefinitie voor input die een workflow moet verzamelen of ontvangen.
+      en: Field definition for input a workflow must collect or receive.
+    keyBehavior: hiddenGeneratedStable
+    excludedFieldTypes: []
+    typePickerUsage: requestInput
+    controls:
+      label: true
+      description: true
+      type: combined
+      cardinality: false
+      sortable: false
+      shape: true
+      options: true
+      render: false
+      aiHint: true
+      defaultValue: true
+      value: false
+      validation: true
+      layout: false
+      persistence: false
+
+  workflowStartVariable:
+    label:
+      nl: Workflow-startvariabele
+      en: Workflow start variable
+    description:
+      nl: Velddefinitie voor data die bij het starten van een workflow beschikbaar is.
+      en: Field definition for data available when a workflow starts.
+    keyBehavior: hiddenGeneratedStable
+    excludedFieldTypes: []
+    typePickerUsage: requestInput
+    controls:
+      label: true
+      description: true
+      type: combined
+      cardinality: false
+      sortable: false
+      shape: true
+      options: true
+      render: false
+      aiHint: true
+      defaultValue: true
+      value: false
+      validation: true
+      layout: false
+      persistence: false
+
+  workflowOutputField:
+    label:
+      nl: Workflow-outputveld
+      en: Workflow output field
+    description:
+      nl: Velddefinitie voor publieke output die een eindnode teruggeeft.
+      en: Field definition for public output returned by an end node.
+    keyBehavior: hiddenGeneratedStable
+    excludedFieldTypes: []
+    typePickerUsage: requestInput
+    controls:
+      label: true
+      description: true
+      type: combined
+      cardinality: false
+      sortable: false
+      shape: true
+      options: true
+      render: false
+      aiHint: true
+      defaultValue: false
+      value: true
+      validation: true
+      layout: false
+      persistence: false
+    lockedVisibleProperties:
+      - value
+    valueAuthoring:
+      label:
+        nl: Waarde
+        en: Value
+      description:
+        nl: Runtime-waarde of expressie die deze workflow via dit outputveld teruggeeft.
+        en: Runtime value or expression this workflow returns through this output field.
+      component: OutputFieldValueEditor
+
+  workflowProcessVariable:
+    label:
+      nl: Procesvariabele
+      en: Process variable
+    description:
+      nl: Compacte velddefinitie voor workflowstatus; initializers staan buiten de definitie.
+      en: Compact field definition for workflow state; initializers live outside the definition.
+    keyBehavior: hiddenGeneratedStable
+    excludedFieldTypes: []
+    typePickerUsage: workflowConfig
+    controls:
+      label: true
+      description: true
+      type: combined
+      cardinality: false
+      sortable: false
+      shape: true
+      options: false
+      render: false
+      aiHint: true
+      defaultValue: false
+      value: false
+      validation: true
+      layout: false
+      persistence: false
+
+  runtimeNotificationParameter:
+    label:
+      nl: Runtime-notificatieparameter
+      en: Runtime notification parameter
+    description:
+      nl: Compacte scalar parameter voor templates en notificaties.
+      en: Compact scalar parameter for templates and notifications.
+    keyBehavior: hiddenGeneratedStable
+    excludedFieldTypes:
+      - object
+      - collection
+      - fieldDefinitionCollection
+    typePickerUsage: requestInput
+    controls:
+      label: true
+      description: true
+      type: combined
+      cardinality: false
+      sortable: false
+      shape: false
+      options: false
+      render: false
+      aiHint: true
+      defaultValue: false
+      value: false
+      validation: true
+      layout: false
+      persistence: false
+
+  formDefinitionField:
+    label:
+      nl: Formulierveld
+      en: Form definition field
+    description:
+      nl: Velddefinitie voor formulierbouwers met layout- en renderinstellingen.
+      en: Field definition for form builders with layout and render settings.
+    keyBehavior: hiddenGeneratedStable
+    excludedFieldTypes: []
+    typePickerUsage: internalSchema
+    controls:
+      label: true
+      description: true
+      type: combined
+      cardinality: false
+      sortable: false
+      shape: true
+      options: true
+      render: false
+      aiHint: true
+      defaultValue: true
+      value: false
+      validation: true
+      layout: true
+      persistence: false
+
+  templateParameter:
+    label:
+      nl: Templateparameter
+      en: Template parameter
+    description:
+      nl: Scalar parameter voor template-interpolatie.
+      en: Scalar parameter for template interpolation.
+    keyBehavior: hiddenGeneratedStable
+    excludedFieldTypes:
+      - object
+      - collection
+      - fieldDefinitionCollection
+    typePickerUsage: requestInput
+    controls:
+      label: true
+      description: true
+      type: combined
+      cardinality: false
+      sortable: false
+      shape: false
+      options: false
+      render: false
+      aiHint: true
+      defaultValue: false
+      value: false
+      validation: true
+      layout: false
+      persistence: false

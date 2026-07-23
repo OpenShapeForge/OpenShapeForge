@@ -1,0 +1,305 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: router
+category: AI
+label:
+  en: Router
+  nl: Router
+description:
+  en: Classify the provided context as one configured intent.
+  nl: Classificeer de meegegeven context als één geconfigureerde intent.
+configFields:
+  - key: context
+    valueType: string
+    semanticType: variableTemplate
+    label:
+      en: Context
+      nl: Context
+    description:
+      en: Text or variables the router classifies into one configured intent.
+      nl: Tekst of variabelen die de router classificeert naar één ingestelde intent.
+    help:
+      nl: Geef de actuele klantvraag en relevante gesprek- of zaakcontext mee. De router kiest precies één intent uit de
+        lijst hieronder of valt terug op de fallback-routing.
+      en: Provide the current customer request and relevant conversation or case context. The router chooses exactly one
+        intent from the list below or falls back to fallback routing.
+    validation:
+      required: true
+    render:
+      component: Textarea
+      props:
+        rows: 5
+  - key: currentMessageId
+    valueType: string
+    semanticType: variableTemplate
+    label:
+      en: Current message ID
+      nl: Actueel bericht-ID
+    description:
+      en: Hidden inbound message id used to scope durable router classification per customer turn.
+      nl: Verborgen inkomend bericht-ID waarmee de duurzame routerclassificatie per klantbeurt wordt gescoped.
+    help:
+      nl: Vul dit met het actuele inbound bericht wanneer een router na een conversatiewacht opnieuw kan draaien. Zo krijgt
+        elk klantbericht een eigen LLM-classificatie terwijl Restate-replay binnen dezelfde beurt idempotent blijft.
+      en: Fill this with the current inbound message when a router can rerun after a conversation wait. This gives every
+        customer message its own LLM classification while Restate replay within the same turn stays idempotent.
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: insertText
+    workflowInspector:
+      displayMode: hidden
+  - key: intents
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    label:
+      en: Intents
+      nl: Intents
+    description:
+      en: Candidate intents the router may select.
+      nl: Kandidaat-intents die de router mag kiezen.
+    help:
+      nl: Elke intent beschrijft een herkenbare klantbedoeling en kan een zaak starten via een zaaksjabloon. Houd keys
+        stabiel, want edges en runtime-output verwijzen ernaar.
+      en: Each intent describes a recognizable customer goal and can start a case through a case template. Keep keys stable
+        because edges and runtime output refer to them.
+    defaultValue: []
+    item:
+      key: intent
+      valueType: object
+      description:
+        en: One routeable customer intent.
+        nl: Eén routeerbare klantintentie.
+      help:
+        nl: De runtime gebruikt de key, AI-beschrijving, optionele sjabloonkoppeling en mappings om het vervolgpad te
+          bepalen.
+        en: The runtime uses the key, AI description, optional template link, and mappings to determine the next path.
+      children:
+        - key: key
+          valueType: string
+          label:
+            en: Key
+            nl: Sleutel
+          description:
+            en: Stable technical key for this intent and its output handle.
+            nl: Stabiele technische sleutel voor deze intent en de output-handle.
+          help:
+            nl: Wijzig deze key niet nadat edges of tests erop vertrouwen. De router zet selectedIntent op deze waarde.
+            en: Do not change this key after edges or tests depend on it. The router sets selectedIntent to this value.
+        - key: caseTemplateId
+          valueType: string
+          semanticType: caseTemplateId
+          label:
+            en: Handling
+            nl: Afhandeling
+          description:
+            en: Case template to start when this intent is selected.
+            nl: Zaaksjabloon dat wordt gestart wanneer deze intent wordt gekozen.
+          help:
+            nl: De designer synchroniseert de gekoppelde workflowmetadata en start-inputmappings. Tijdens uitvoering gebruikt
+              case.start dit sjabloon om de juiste gepubliceerde zaak-workflow te starten.
+            en: The designer synchronizes linked workflow metadata and start-input mappings. At runtime, case.start uses this
+              template to start the correct published case workflow.
+          options:
+            type: remote
+            remoteUrl: /api/workflow/designer/core-entity-options?entity=case-template
+          render:
+            component: OptionVariablePicker
+            props:
+              clearable: true
+              expectedSemanticType: caseTemplateId
+              valueMode: insertText
+              syncIntentWorkflowDefaults: true
+              optionSectionLabel: Start zaak met zaaksjabloon
+        - key: workflowId
+          valueType: string
+          semanticType: workflowDefinitionId
+          workflowInspector:
+            displayMode: hidden
+          label:
+            en: Legacy workflow
+            nl: Legacy workflow
+          description:
+            en: Hidden legacy workflow id synchronized from older handling choices.
+            nl: Verborgen legacy workflow-id die uit oudere afhandelingskeuzes is gesynchroniseerd.
+          help:
+            nl: Nieuwe configuratie hoort via caseTemplateId te lopen. Dit veld blijft bestaan zodat oude routerdefinities
+              met directe workflowkoppelingen nog te lezen zijn.
+            en: New configuration should go through caseTemplateId. This field remains so older router definitions with
+              direct workflow links can still be read.
+        - key: label
+          valueType: string
+          label:
+            en: Label
+            nl: Label
+          description:
+            en: Human-readable name for this intent.
+            nl: Leesbare naam voor deze intent.
+          help:
+            nl: Gebruik een korte naam die medewerkers herkennen. Deze naam kan in router-output en designerlabels
+              verschijnen.
+            en: Use a short name employees recognize. This name can appear in router output and designer labels.
+          validation:
+            required: true
+          render:
+            component: Input
+        - key: description
+          valueType: string
+          label:
+            en: Description for AI
+            nl: Beschrijving voor AI
+          description:
+            en: Classification guidance that tells the router when this intent applies.
+            nl: Classificatie-instructie die de router vertelt wanneer deze intent past.
+          help:
+            nl: Beschrijf de klantbedoeling functioneel en precies. Vermeld onderscheidende signalen, maar verander hier
+              geen downstream zaaklogica.
+            en: Describe the customer goal functionally and precisely. Mention distinguishing signals, but do not change
+              downstream case logic here.
+          validation:
+            required: true
+          render:
+            component: Textarea
+            props:
+              rows: 2
+        - key: caseValues
+          valueType: object
+          label:
+            en: Case attributes
+            nl: Zaak-attributen
+          description:
+            en: Case values passed into the started case for this intent.
+            nl: Zaakwaarden die voor deze intent aan de gestarte zaak worden meegegeven.
+          help:
+            nl: Gebruik dit voor compacte startcontext zoals oorsprong, prioriteit of relatie-id. De waarden worden
+              samengevoegd met mappingParameters en doorgegeven aan case.start.
+            en: Use this for compact start context such as origin, priority, or relation id. The values are merged with
+              mappingParameters and passed to case.start.
+        - key: examples
+          valueType: string
+          label:
+            en: Examples
+            nl: Voorbeelden
+          description:
+            en: Example utterances or situations for this intent.
+            nl: Voorbeelduitspraken of situaties voor deze intent.
+          help:
+            nl: Voeg korte voorbeelden toe die de router helpen het verschil met andere intents te leren. Voorbeelden zijn
+              hulptekst voor classificatie, geen runtime-output.
+            en: Add short examples that help the router distinguish this intent from others. Examples guide classification;
+              they are not runtime output.
+          render:
+            component: Textarea
+            props:
+              rows: 2
+        - key: definitionName
+          valueType: string
+          description:
+            en: Hidden synchronized name of the linked case workflow.
+            nl: Verborgen gesynchroniseerde naam van de gekoppelde zaak-workflow.
+          help:
+            nl: Dit veld wordt door de designer gevuld wanneer een afhandeling wordt gekozen en is bedoeld voor labels en
+              traceerbaarheid.
+            en: This field is filled by the designer when handling is selected and is used for labels and traceability.
+          defaultValue: ""
+          readOnly: true
+          workflowInspector:
+            displayMode: hidden
+        - key: publishedVersion
+          valueType: string
+          description:
+            en: Hidden synchronized published version of the linked case workflow.
+            nl: Verborgen gesynchroniseerde gepubliceerde versie van de gekoppelde zaak-workflow.
+          help:
+            nl: Dit veld bewaart gepubliceerde workflowmetadata voor de geselecteerde afhandeling.
+            en: This field stores published workflow metadata for the selected handling.
+          defaultValue: ""
+          readOnly: true
+          workflowInspector:
+            displayMode: hidden
+        - key: mappingParameters
+          valueType: object
+          cardinality:
+            min: 0
+            max: "unbounded"
+          defaultValue: []
+          description:
+            en: Hidden start-input mappings for the linked case workflow.
+            nl: Verborgen start-inputmappings voor de gekoppelde zaak-workflow.
+          help:
+            nl: De designer bouwt deze mappings uit de startvelden van de gekozen workflow. De runtime gebruikt ze om
+              routercontext naar de case-context te schrijven.
+            en: The designer builds these mappings from the selected workflow's start fields. The runtime uses them to write
+              router context into the case context.
+          workflowInspector:
+            displayMode: hidden
+          item:
+            key: mappingParameter
+            valueType: object
+            description:
+              en: One hidden start-input mapping for this intent.
+              nl: Eén verborgen start-inputmapping voor deze intent.
+            help:
+              nl: De mapping koppelt een child-inputkey aan een vaste waarde of workflowvariabele.
+              en: The mapping links one child input key to a fixed value or workflow variable.
+        - key: terminalPaths
+          valueType: object
+          cardinality:
+            min: 0
+            max: "unbounded"
+          defaultValue: []
+          description:
+            en: Hidden terminal paths for the linked case workflow.
+            nl: Verborgen terminale paden van de gekoppelde zaak-workflow.
+          help:
+            nl: Deze metadata laat de designer en vervolglogica weten welke eindpaden de gekoppelde case kan publiceren.
+            en: This metadata lets the designer and follow-up logic know which end paths the linked case can publish.
+          workflowInspector:
+            displayMode: hidden
+          item:
+            key: terminalPath
+            valueType: object
+            description:
+              en: One hidden terminal path for the linked case workflow.
+              nl: Eén verborgen terminaal pad van de gekoppelde zaak-workflow.
+            help:
+              nl: De entry komt uit een gepubliceerde end-node van de gekoppelde workflow.
+              en: The entry comes from a published end node of the linked workflow.
+  - key: timeoutMs
+    valueType: number
+    label:
+      en: Timeout (ms)
+      nl: Timeout (ms)
+    description:
+      en: Maximum time allowed for router classification.
+      nl: Maximale tijd voor routerclassificatie.
+    help:
+      nl: Kies een bovengrens die past bij de kanaalervaring. De waarde hoort bij routerbesluitvorming, niet bij de duur van
+        een eventueel gestarte zaak.
+      en: Choose an upper bound that fits the channel experience. The value belongs to router decisioning, not to the duration
+        of any started case.
+    defaultValue: 60000
+    validation:
+      min: 1000
+    render:
+      component: NumberInput
+  - key: enablePendingCaseRouting
+    valueType: boolean
+    label:
+      en: Route pending cases first
+      nl: Routeer lopende zaken eerst
+    description:
+      en: Check for an open conversation wait before classifying a new intent.
+      nl: Controleer eerst of deze conversatie al op een open zaak-wachtstand hoort voordat een nieuwe intent wordt gekozen.
+    help:
+      nl: Zet dit aan voor messaging-orchestrators die antwoorden op lopende zaken moeten herkennen. De runtime zoekt eerst
+        een open case.requestInput-wachtstand voor dezelfde conversatie en routeert daarna pas nieuwe intents.
+      en: Enable this for messaging orchestrators that must recognize replies to running cases. The runtime first looks for
+        an open case.requestInput wait for the same conversation before routing new intents.
+    defaultValue: false
+    render:
+      component: Switch
+      props:
+        clearable: false

@@ -1,0 +1,79 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: triggerWebhook
+category: triggers
+label:
+  nl: Webhook
+  en: Webhook
+description:
+  nl: Start de workflow via een webhook-call.
+  en: Starts the workflow from a webhook call.
+configFields:
+  - key: inputParameters
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    semanticType: fieldDefinition
+    label:
+      nl: Webhook payloadvelden
+      en: Webhook payload fields
+    description:
+      nl: Definieer welke payloadvelden dit webhook-event aan de workflow meegeeft.
+      en: Define which payload fields this webhook event passes into the workflow.
+    help:
+      nl: Deze velden worden beschikbaar als `payload` op de webhook-trigger.
+      en: These fields become available as `payload` on the webhook trigger.
+    defaultValue: []
+    authoring:
+      profile: workflowStartVariable
+  - key: idempotencyKeyExpr
+    valueType: string
+    label:
+      nl: Idempotency key expressie
+      en: Idempotency key expression
+    description:
+      nl: Optionele expressie om dubbele webhook-calls als dezelfde start te herkennen.
+      en: Optional expression used to detect duplicate webhook calls as the same start.
+    help:
+      nl: Gebruik bijvoorbeeld `{{trigger.payload.requestId}}` als een extern systeem een stabiele sleutel meestuurt.
+      en: Use something like `{{trigger.payload.requestId}}` when an external system sends a stable key.
+    defaultValue: ""
+    render:
+      component: Input
+  - key: path
+    valueType: string
+    label:
+      nl: Interne webhook-route
+      en: Internal webhook route
+    description:
+      en: Internal API path that receives webhook starts for this workflow definition.
+      nl: Intern API-pad dat webhook-starts voor deze workflowdefinitie ontvangt.
+    help:
+      en: The web node fixes this to `/api/workflow/triggers/webhook/:definitionId`. It is hidden because the endpoint shape is platform-owned, not author-configurable per workflow.
+      nl: De webnode zet dit vast op `/api/workflow/triggers/webhook/:definitionId`. Dit staat verborgen omdat de endpoint-vorm platform-owned is en niet per workflow door de auteur wordt ingesteld.
+    defaultValue: /api/workflow/triggers/webhook/:definitionId
+    readOnly: true
+    visibility: &a219
+      conditions:
+        - field: __trigger_internal_hidden__
+          operator: eq
+          value: true
+    render:
+      component: Input
+  - key: method
+    valueType: string
+    label:
+      nl: Interne webhook-methode
+      en: Internal webhook method
+    description:
+      en: HTTP method expected by the internal webhook trigger endpoint.
+      nl: HTTP-methode die door het interne webhook-trigger-endpoint wordt verwacht.
+    help:
+      en: Fixed to `POST` by the web definition. It is stored as internal metadata, not as a user-tunable behavior switch.
+      nl: Wordt door de web-definitie op `POST` vastgezet. Het wordt opgeslagen als interne metadata, niet als door de gebruiker instelbare gedragsknop.
+    defaultValue: POST
+    readOnly: true
+    visibility: *a219
+    render:
+      component: Input

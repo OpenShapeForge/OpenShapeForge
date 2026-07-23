@@ -1,0 +1,193 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: message.reply
+category: Messaging
+label:
+  en: Reply message
+  nl: Antwoordbericht
+description:
+  en: Send a reply in an existing conversation without choosing a channel in the workflow canvas.
+  nl: Stuur een antwoord in een bestaande conversatie zonder dat het workflowcanvas een kanaal kiest.
+configFields:
+  - key: conversationId
+    valueType: string
+    semanticType: conversationId
+    label:
+      en: Conversation ID
+      nl: Conversatie-ID
+    description:
+      en: Existing conversation that receives the reply.
+      nl: Bestaande conversatie die het antwoord ontvangt.
+    help:
+      en: Usually this is resolved from workflow context. The reply is queued on the same conversation and fails for missing,
+        unknown, or closed conversations.
+      nl: Meestal wordt dit uit de workflowcontext gehaald. Het antwoord wordt op dezelfde conversatie klaargezet en faalt
+        bij ontbrekende, onbekende of gesloten conversaties.
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: insertText
+  - key: body
+    valueType: string
+    semanticType: variableTemplate
+    label:
+      en: Message
+      nl: Bericht
+    description:
+      en: Reply text to add to the workflow reply accumulator.
+      nl: Antwoordtekst die aan de workflow-antwoordbuffer wordt toegevoegd.
+    help:
+      en: This supports workflow variables and must resolve to text of at most 4000 characters unless a field definition is
+        used as fallback. For WhatsApp, free-form replies are only allowed while the reply window is safely open.
+      nl: Dit ondersteunt workflowvariabelen en moet naar tekst van maximaal 4000 tekens oplossen, tenzij een velddefinitie
+        als fallback wordt gebruikt. Voor WhatsApp mag vrije tekst alleen wanneer het antwoordvenster veilig open is.
+    render:
+      component: Textarea
+      props:
+        rows: 4
+    runtime:
+      aliases:
+        - messageBody
+        - text
+  - key: fieldDefinition
+    valueType: object
+    semanticType: fieldDefinition
+    variables: whole
+    label:
+      en: Field definition
+      nl: Velddefinitie
+    description:
+      en: Optional field definition used as structured follow-up context.
+      nl: Optionele velddefinitie die als gestructureerde vervolgvraagcontext wordt gebruikt.
+    help:
+      en: Select a field-definition variable when the reply asks the customer for a specific value. If message text is empty,
+        the field label or description can be used as fallback reply text.
+      nl: Kies een velddefinitievariabele wanneer het antwoord de klant om een specifieke waarde vraagt. Als de berichttekst
+        leeg is, kan het veldlabel of de beschrijving als fallback-antwoordtekst worden gebruikt.
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: insertText
+        expectedSemanticType: fieldDefinition
+        variableSectionLabel: Velddefinities
+    runtime:
+      aliases:
+        - followUpField
+  - key: fieldDefinitions
+    valueType: object
+    semanticType: fieldDefinition
+    cardinality:
+      min: 0
+      max: "unbounded"
+    variables: whole
+    label:
+      en: Field definitions
+      nl: Velddefinities
+    description:
+      en: Optional field definitions for multi-field renderers such as WhatsApp Flow.
+      nl: Optionele velddefinities voor multi-field renderers zoals WhatsApp Flow.
+    help:
+      en: Use this with WhatsApp Flow when a reply asks for multiple structured values. Existing single-field button/list behavior still uses `fieldDefinition`.
+      nl: Gebruik dit met WhatsApp Flow wanneer een antwoord om meerdere gestructureerde waarden vraagt. Bestaand knop-/lijstgedrag voor één veld blijft `fieldDefinition` gebruiken.
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: insertText
+        expectedSemanticType: fieldDefinition
+        variableSectionLabel: Velddefinities
+  - key: whatsappFlow
+    valueType: object
+    variables: whole
+    label:
+      en: WhatsApp Flow
+      nl: WhatsApp Flow
+    description:
+      en: Optional WhatsApp Flow configuration used when this reply is sent on WhatsApp and multiple field definitions are present.
+      nl: Optionele WhatsApp Flow-configuratie die wordt gebruikt wanneer dit antwoord via WhatsApp wordt verstuurd en meerdere velddefinities aanwezig zijn.
+    help:
+      en: Leave `flowId` empty to keep current text/button/list behavior. A configured Flow is used only for WhatsApp replies with more than one field definition.
+      nl: Laat `flowId` leeg om het huidige tekst-/knop-/lijstgedrag te behouden. Een geconfigureerde Flow wordt alleen gebruikt voor WhatsApp-antwoorden met meer dan één velddefinitie.
+    children:
+      - key: enabled
+        valueType: boolean
+        defaultValue: true
+        label:
+          en: Enabled
+          nl: Ingeschakeld
+      - key: flowId
+        valueType: string
+        label:
+          en: Meta Flow ID
+          nl: Meta Flow-ID
+      - key: flowCta
+        valueType: string
+        defaultValue: Invullen
+        label:
+          en: CTA label
+          nl: CTA-label
+      - key: mode
+        valueType: string
+        defaultValue: published
+        label:
+          en: Mode
+          nl: Modus
+      - key: flowAction
+        valueType: string
+        defaultValue: navigate
+        label:
+          en: Flow action
+          nl: Flow-actie
+      - key: startScreen
+        valueType: string
+        defaultValue: REQUEST_INPUT
+        label:
+          en: Start screen
+          nl: Startscherm
+      - key: initialData
+        valueType: object
+        variables: whole
+        label:
+          en: Initial data
+          nl: Initiële data
+        render:
+          component: JsonEditor
+  - key: replyToMessageId
+    valueType: string
+    label:
+      en: Reply to message ID
+      nl: Antwoord-op-bericht-ID
+    description:
+      en: Optional message ID that this reply should reference.
+      nl: Optionele bericht-ID waar dit antwoord naar verwijst.
+    help:
+      en: Leave empty to use the initial inbound message from workflow context when available. This is stored in delivery
+        payload metadata for providers that support threaded replies.
+      nl: Laat leeg om waar mogelijk het initiële inkomende bericht uit de workflowcontext te gebruiken. Dit wordt opgeslagen
+        in verzendmetadata voor providers die threaded replies ondersteunen.
+  - key: idempotencyKey
+    valueType: string
+    label:
+      en: Idempotency key
+      nl: Idempotentiesleutel
+    description:
+      en: Stable key that prevents duplicate reply segments from retries.
+      nl: Stabiele sleutel die dubbele antwoordsegmenten door retries voorkomt.
+    help:
+      en: Leave empty to use the current workflow instance and node ID. Use a custom key only when repeated executions should
+        intentionally resolve to the same reply segment.
+      nl: Laat leeg om de huidige workflowinstance en node-ID te gebruiken. Gebruik alleen een aangepaste sleutel wanneer
+        herhaalde uitvoeringen bewust naar hetzelfde antwoordsegment moeten verwijzen.
+  - key: flushImmediately
+    valueType: boolean
+    label:
+      en: Flush immediately
+      nl: Direct verzenden
+    description:
+      en: Exceptional escape hatch. Normal process runs flush reply accumulators at wait or end boundaries.
+      nl: Uitzonderingspad. Normale processen verzenden verzamelde antwoorden bij wacht- of eindgrenzen.
+    help:
+      en: Keep this off for normal flows so adjacent reply nodes can be combined and flushed at wait or end boundaries. Turn
+        it on only when this node must queue a provider message immediately.
+      nl: Laat dit uit voor normale flows zodat opeenvolgende antwoordnodes kunnen worden gecombineerd en bij wacht- of
+        eindgrenzen worden verzonden. Zet dit alleen aan wanneer deze node direct een providerbericht moet klaarzetten.
+    defaultValue: false

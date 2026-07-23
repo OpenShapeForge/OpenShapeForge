@@ -1,0 +1,29 @@
+{
+  "name": "@openshapeforge/api",
+  "version": "0.1.0",
+  "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "db:migrate": "bun src/db/migrate.ts",
+    "db:migration:new": "bun src/db/migrations/new-migration.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:e2e": "bun test src/graphql/__tests__",
+    "test:migrations": "bun test src/db"
+  },
+  "dependencies": {
+    "@openshapeforge/auth": "workspace:*",
+    "fastify": "^5.8.2",
+    "graphql": "^16.13.2",
+    "graphql-yoga": "^5.21.0",
+    "kysely": "^0.28.8",
+    "kysely-postgres-js": "3.0.0",
+    "postgres": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.5",
+    "typescript": "^5.9.0"
+  }
+}

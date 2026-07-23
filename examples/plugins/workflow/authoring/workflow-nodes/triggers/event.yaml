@@ -1,0 +1,89 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: triggerEvent
+category: Triggers
+label:
+  en: Events
+  nl: Events
+description:
+  en: Start the workflow when a specific bus event is published. Choose the event from the catalog, pick which payload fields become start variables, then add an optional filter on the payload.
+  nl: Start de workflow zodra een geselecteerde bus event verschijnt. Kies de event uit de catalogus, selecteer welke payloadvelden als startvariabelen beschikbaar moeten zijn en voeg eventueel een filter toe.
+configFields:
+  - key: topic
+    valueType: string
+    label:
+      en: Event
+      nl: Event
+    description:
+      en: Pick a topic + event type from the catalog. The picker writes both `topic` and `eventType` so the runtime can match incoming events.
+      nl: Kies een topic + event type uit de catalogus. De picker zet zowel `topic` als `eventType` zodat de runtime inkomende events kan matchen.
+    help:
+      en: Treat this as the canonical event selection. The hidden `eventType` field is derived from the same picker choice and should stay in sync with it. As shipped today, the options endpoint returns an empty list until the event catalog is populated.
+      nl: Zie dit als de canonieke eventkeuze. Het verborgen `eventType`-veld wordt uit dezelfde pickerkeuze afgeleid en moet daarmee in sync blijven. Op dit moment geeft het options-endpoint nog een lege lijst terug totdat de eventcatalogus is gevuld.
+    validation:
+      required: true
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/trigger-options/events
+    render:
+      component: EventTriggerEventPicker
+  - key: eventType
+    valueType: string
+    label:
+      en: Event type
+      nl: Event type
+    description:
+      en: Set automatically by the event picker; not edited directly.
+      nl: Wordt automatisch gezet door de event-picker; niet handmatig bewerkbaar.
+    help:
+      en: This is stored separately because the authored config keeps both values, even though authors pick a single catalog entry. I did not find a proven end-to-end event-start producer using this field yet.
+      nl: Dit wordt apart opgeslagen omdat de authored config beide waarden bewaart, ook al kiest de auteur maar één catalogusitem. Ik heb nog geen bewezen end-to-end event-start-producer gevonden die dit veld al gebruikt.
+    validation:
+      required: true
+    render:
+      component: HiddenField
+  - key: selectedPayloadFields
+    valueType: string
+    label:
+      en: Start variables
+      nl: Startvariabelen
+    description:
+      en: Pick which payload fields the workflow exposes as flat start variables. The leaf name becomes the variable key (e.g. `payload.phone` → `{{trigger.phone}}`).
+      nl: Kies welke payloadvelden de workflow als startvariabele beschikbaar krijgt. De laatste naam in het pad wordt de variabele (bijv. `payload.phone` → `{{trigger.phone}}`).
+    help:
+      en: These fields do not filter the event. They only control which payload values are surfaced as workflow start variables and output fields. Today the metadata route returns no selectable fields until event metadata is implemented.
+      nl: Deze velden filteren het event niet. Ze bepalen alleen welke payloadwaarden als workflow-startvariabelen en outputvelden zichtbaar worden. Op dit moment geeft de metadata-route nog geen selecteerbare velden terug totdat eventmetadata is geïmplementeerd.
+    defaultValue: []
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/trigger-options/event-filter-fields
+    render:
+      component: EventPayloadFieldSelector
+    cardinality:
+      min: 0
+      max: "unbounded"
+    item:
+      key: fieldPath
+      valueType: string
+      description:
+        en: One payload path to expose as a start variable.
+        nl: Eén payloadpad dat als startvariabele beschikbaar wordt gemaakt.
+      help:
+        en: The runtime output uses the final segment of this path as the variable key and label fallback, so avoid selecting multiple paths with the same leaf name.
+        nl: De runtime-output gebruikt het laatste segment van dit pad als variabelesleutel en fallback-label, dus vermijd meerdere paden met dezelfde bladnaam.
+  - key: filterCondition
+    valueType: object
+    label:
+      en: Filter
+      nl: Filter
+    description:
+      en: Optional condition that must be true for the workflow to start. Build it from fields on the selected event's payload.
+      nl: Optionele voorwaarde die waar moet zijn voordat de workflow start. Bouw hem op basis van velden uit de payload van de gekozen event.
+    help:
+      en: Use this to reject events before the workflow starts. It is separate from `selectedPayloadFields`, which only controls what data becomes visible inside the workflow. Today the same metadata endpoint still returns an empty field list.
+      nl: Gebruik dit om events af te wijzen voordat de workflow start. Dit staat los van `selectedPayloadFields`, dat alleen bepaalt welke data binnen de workflow zichtbaar wordt. Op dit moment geeft datzelfde metadata-endpoint nog een lege veldlijst terug.
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/trigger-options/event-filter-fields
+    render:
+      component: EventTriggerConditionBuilder

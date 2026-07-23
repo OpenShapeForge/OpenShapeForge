@@ -1,0 +1,31 @@
+{
+  "name": "openshapeforge",
+  "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "examples/plugins/*"
+  ],
+  "packageManager": "bun@1.3.4",
+  "engines": {
+    "node": ">=22.12.0",
+    "bun": ">=1.3.0"
+  },
+  "scripts": {
+    "generate": "bun run --cwd packages/compiler generate",
+    "check:authoring-local": "bun scripts/check-authoring-local.mjs",
+    "check:generated": "bun scripts/check-generated-artifacts.mjs",
+    "check:notices": "bun scripts/gen-third-party-notices.ts --check",
+    "typecheck:compiler": "bun run --cwd packages/compiler typecheck",
+    "typecheck:api": "bun run --cwd apps/api typecheck",
+    "test:compiler": "bun test packages/compiler",
+    "db:migrate": "bun run --cwd apps/api db:migrate",
+    "db:migration:new": "bun run --cwd apps/api db:migration:new",
+    "dev:api": "bun run --cwd apps/api dev",
+    "test:e2e": "bun run --cwd apps/api test:e2e",
+    "test:e2e:report": "bun scripts/render-e2e-report.ts",
+    "test:perf": "bun scripts/run-perf.ts",
+    "notices": "bun scripts/gen-third-party-notices.ts"
+  }
+}

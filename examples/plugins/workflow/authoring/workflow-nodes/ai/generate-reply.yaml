@@ -1,0 +1,100 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: ai.generateReply
+category: AI
+label:
+  en: Generate AI reply
+  nl: AI-antwoord genereren
+description:
+  en: Generate a short free-text customer reply from a system prompt and user prompt.
+  nl: Genereer een kort vrij tekstantwoord voor de klant op basis van een systeemprompt en gebruikersprompt.
+configFields:
+  - key: systemPrompt
+    valueType: string
+    semanticType: variableTemplate
+    label:
+      en: System prompt
+      nl: Systeemprompt
+    description:
+      en: Persona and tone instructions for the AI.
+      nl: Persona- en tooninstructies voor de AI.
+    help:
+      en: Use this for stable instructions such as role, tone, language, and constraints. Variables may be inserted with template syntax.
+      nl: Gebruik dit voor vaste instructies zoals rol, toon, taal en randvoorwaarden. Variabelen kunnen met templatesyntax worden ingevoegd.
+    validation:
+      required: true
+      maxLength: 8000
+    render:
+      component: VariableTemplateInput
+      props:
+        rows: 6
+        maxLength: 8000
+  - key: userPrompt
+    valueType: string
+    semanticType: variableTemplate
+    label:
+      en: User prompt
+      nl: Gebruikersprompt
+    description:
+      en: The concrete request and context for this run.
+      nl: De concrete opdracht en context voor deze run.
+    help:
+      en: This prompt must contain the actual message or workflow context the reply should be based on. The runtime also accepts the legacy alias `prompt`.
+      nl: Deze prompt moet het actuele bericht of de workflowcontext bevatten waarop het antwoord gebaseerd is. De runtime accepteert ook de legacy alias `prompt`.
+    validation:
+      required: true
+      maxLength: 8000
+    render:
+      component: VariableTemplateInput
+      props:
+        rows: 6
+        maxLength: 8000
+    runtime:
+      aliases:
+        - prompt
+  - key: temperature
+    valueType: number
+    label:
+      en: Temperature
+      nl: Temperatuur
+    description:
+      en: Controls variation in the generated reply.
+      nl: Bepaalt hoeveel variatie het gegenereerde antwoord krijgt.
+    help:
+      en: Keep this low for predictable customer-service text. Higher values can make wording less consistent.
+      nl: Houd dit laag voor voorspelbare klantservicetekst. Hogere waarden kunnen de formulering minder consistent maken.
+    defaultValue: 0.5
+    validation:
+      required: true
+      min: 0
+      max: 1
+  - key: maxTokens
+    valueType: number
+    label:
+      en: Max tokens
+      nl: Maximaal aantal tokens
+    description:
+      en: Maximum length budget for the generated reply.
+      nl: Maximale lengtebudget voor het gegenereerde antwoord.
+    help:
+      en: The AI provider may stop once this limit is reached. Use a value that fits the expected reply length.
+      nl: De AI-provider kan stoppen zodra deze limiet is bereikt. Kies een waarde die past bij de verwachte antwoordlengte.
+    defaultValue: 400
+    validation:
+      required: true
+      min: 50
+  - key: timeoutMs
+    valueType: number
+    label:
+      en: Timeout (ms)
+      nl: Timeout (ms)
+    description:
+      en: Maximum wait time for the AI reply call.
+      nl: Maximale wachttijd voor de AI-antwoordaanroep.
+    help:
+      en: If the provider does not respond in time, the workflow node fails through the normal runtime error path.
+      nl: Als de provider niet op tijd reageert, faalt de workflow-node via het normale runtime-foutpad.
+    defaultValue: 30000
+    validation:
+      required: true
+      min: 1000

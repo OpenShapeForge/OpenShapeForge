@@ -1,0 +1,208 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: flow.userInput
+category: flow
+label:
+  nl: Gebruikersinvoer
+  en: User input
+description:
+  nl: Toont een formulier aan de gebruiker en pauzeert tot invullen.
+  en: Shows a form to the user and waits for completion.
+configFields:
+  - key: formFields
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    semanticType: fieldDefinition
+    label:
+      nl: Formuliervelden
+      en: Form fields
+    authoring:
+      profile: workflowInputField
+    description:
+      en: Field definitions rendered in the user-facing form while this node is waiting.
+      nl: Velddefinities die in het gebruikersformulier worden getoond terwijl deze node wacht.
+    help:
+      en: These same field definitions are exposed back as read-only output fields after the form is submitted, so downstream nodes can read the captured values by field key.
+      nl: Dezezelfde velddefinities worden na het indienen ook weer als read-only outputvelden aangeboden, zodat downstream nodes de vastgelegde waarden per veldsleutel kunnen uitlezen.
+  - key: actions
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    required: true
+    validation:
+      minItems: 1
+    label:
+      nl: Acties
+      en: Actions
+    description:
+      en: Buttons the user can choose from while the form is open.
+      nl: Knoppen waaruit de gebruiker kan kiezen terwijl het formulier open staat.
+    help:
+      en: Each action becomes its own output handle as `action:<key>`. The node requires at least one action because the workflow can only resume through one of these buttons or through a configured timeout.
+      nl: Elke actie wordt een eigen output handle als `action:<key>`. De node vereist minimaal één actie omdat de workflow alleen via een van deze knoppen of via een ingestelde timeout kan hervatten.
+    item:
+      key: actionItem
+      valueType: object
+      description:
+        en: One actionable button definition for the waiting form.
+        nl: Eén definitie van een actieknop voor het wachtende formulier.
+      help:
+        en: This object controls both what the user sees and which output handle the workflow emits when that button is chosen.
+        nl: Dit object bepaalt zowel wat de gebruiker ziet als welke output handle de workflow emitteert wanneer op die knop wordt gekozen.
+      children:
+        - key: key
+          valueType: string
+          required: true
+          validation:
+            pattern: ^[a-z][a-z0-9-]*$
+          label:
+            nl: Sleutel
+            en: Key
+          description:
+            en: Stable technical id for this action.
+            nl: Stabiele technische id voor deze actie.
+          help:
+            en: The workflow resumes on handle `action:<key>`, so changing this changes routing. Keep it short and stable once downstream edges exist.
+            nl: De workflow hervat op handle `action:<key>`, dus een wijziging verandert de routering. Houd deze kort en stabiel zodra downstream-edges bestaan.
+          render:
+            component: Input
+        - key: label
+          valueType: string
+          required: true
+          localized: true
+          label:
+            nl: Knop-label
+            en: Button label
+          description:
+            en: Text shown on the action button.
+            nl: Tekst die op de actieknop wordt getoond.
+          help:
+            en: This is what users click. Keep it task-oriented and distinct from the other actions in the same form.
+            nl: Dit is wat gebruikers aanklikken. Houd het taakgericht en duidelijk verschillend van de andere acties in hetzelfde formulier.
+          render:
+            component: Input
+        - key: description
+          valueType: string
+          required: false
+          localized: true
+          label:
+            nl: Hulptekst
+            en: Helper text
+          description:
+            en: Optional extra explanation attached to this action.
+            nl: Optionele extra uitleg bij deze actie.
+          help:
+            en: Use this when the button label alone is too terse. Keep it aligned with the actual effect of the action, because it sets user expectation before the workflow resumes.
+            nl: Gebruik dit als het knoplabel op zichzelf te kort is. Laat het precies aansluiten op het echte effect van de actie, omdat dit de verwachting van de gebruiker zet voordat de workflow hervat.
+          render:
+            component: Input
+        - key: icon
+          valueType: string
+          required: false
+          label:
+            nl: Icoon
+            en: Icon
+          description:
+            en: Optional icon shown next to the button label.
+            nl: Optioneel icoon dat naast het knoplabel wordt getoond.
+          help:
+            en: This is visual only; it does not affect routing or validation.
+            nl: Dit is alleen visueel; het beïnvloedt de routering of validatie niet.
+          render:
+            component: IconPicker
+        - key: tone
+          valueType: string
+          required: false
+          defaultValue: default
+          label:
+            nl: Uitstraling
+            en: Tone
+          description:
+            en: Visual emphasis of the button.
+            nl: Visuele nadruk van de knop.
+          help:
+            en: In the UI this maps to button variants such as primary, outline/default, and destructive. Use destructive only when the action really represents a risky or irreversible choice.
+            nl: In de UI wordt dit gemapt op button-varianten zoals primary, outline/default en destructive. Gebruik destructive alleen als de actie echt een risicovolle of onomkeerbare keuze is.
+          options:
+            type: static
+            items:
+              - value: primary
+                label:
+                  nl: Primair
+                  en: Primary
+              - value: default
+                label:
+                  nl: Standaard
+                  en: Default
+              - value: destructive
+                label:
+                  nl: Destructief
+                  en: Destructive
+          render:
+            component: ReferenceSelect
+            props:
+              clearable: false
+        - key: visibleWhen
+          valueType: object
+          required: false
+          label:
+            nl: Zichtbaar wanneer
+            en: Visible when
+          description:
+            en: Optional condition that decides whether this action is shown at all.
+            nl: Optionele conditie die bepaalt of deze actie überhaupt zichtbaar is.
+          help:
+            en: Use this to hide actions that do not apply in the current state. Hidden actions do not give the user a path to resume on that handle.
+            nl: Gebruik dit om acties te verbergen die in de huidige toestand niet van toepassing zijn. Verborgen acties geven de gebruiker geen route om op die handle te hervatten.
+          render:
+            component: VisibilityConditionBuilder
+        - key: disabledWhen
+          valueType: object
+          required: false
+          label:
+            nl: Uitgeschakeld wanneer
+            en: Disabled when
+          description:
+            en: Optional condition that keeps the action visible but not clickable.
+            nl: Optionele conditie die de actie zichtbaar houdt maar niet klikbaar maakt.
+          help:
+            en: Use this when the user should see that an action exists but is not available yet. Pair it with `disabledMessage` so the reason is clear.
+            nl: Gebruik dit wanneer de gebruiker moet zien dat de actie bestaat maar nog niet beschikbaar is. Combineer dit met `disabledMessage` zodat de reden duidelijk is.
+          render:
+            component: VisibilityConditionBuilder
+        - key: disabledMessage
+          valueType: string
+          required: false
+          localized: true
+          label:
+            nl: Bericht bij uitgeschakeld
+            en: Disabled tooltip
+          description:
+            en: Explanation shown when a disabled action is hovered or focused.
+            nl: Uitleg die wordt getoond wanneer een uitgeschakelde actie wordt gehovord of gefocust.
+          help:
+            en: This should explain why the action is unavailable right now, not restate the button label.
+            nl: Dit moet uitleggen waarom de actie nu niet beschikbaar is, niet alleen het knoplabel herhalen.
+          render:
+            component: Input
+  - key: timeout
+    valueType: string
+    required: false
+    label:
+      nl: Time-out
+      en: Timeout
+    description:
+      nl: Optionele time-out zoals 24h of 7d.
+      en: Optional timeout such as 24h or 7d.
+    help:
+      en: When set, this node also exposes a `timeout` output handle. Leave empty when the form should wait indefinitely for a user choice.
+      nl: Als dit is ingevuld, krijgt deze node ook een `timeout`-output handle. Laat dit leeg als het formulier onbeperkt op een gebruikerskeuze moet wachten.
+    placeholder:
+      nl: bijv. 24h, 7d
+      en: e.g. 24h, 7d
+    defaultValue: ""
+    render:
+      component: Input

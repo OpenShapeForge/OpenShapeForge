@@ -1,0 +1,7 @@
+{
+  "generatedArtifact": {
+    "path": "packages/compiler/config/referentiedata/core-by-groep.json",
+    "note": "Generated snapshot of the core referentiedata catalog (config/authoring/catalogs/core-referentiedata.yaml). Regenerate with `bun run generate`."
+  },
+  "extraOutputs": []
+}

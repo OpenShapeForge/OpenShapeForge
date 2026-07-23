@@ -1,0 +1,166 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: triggerEntity
+category: triggers
+label:
+  nl: Entiteit-event
+  en: Entity event
+description:
+  nl: Start de workflow op basis van een entiteit-event.
+  en: Starts the workflow from an entity event.
+configFields:
+  - key: entity
+    valueType: string
+    label:
+      nl: Entiteit
+      en: Entity
+    description:
+      nl: De entiteit waarop deze trigger moet luisteren, bijvoorbeeld Factuur of Werkorder.
+      en: The entity this trigger should listen to, for example Invoice or Workorder.
+    help:
+      en: The picker also supplies the matching internal `domain`. Together those two fields must match the ERP event envelope so the workflow can subscribe to the correct `entity.mutations` events.
+      nl: De picker levert ook het bijpassende interne `domain`. Samen moeten die twee velden overeenkomen met de ERP-event-envelope zodat de workflow op de juiste `entity.mutations`-events kan abonneren.
+    validation:
+      required: true
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/trigger-options/entities
+    render:
+      component: EntityTriggerEntityPicker
+  - key: domain
+    valueType: string
+    label:
+      nl: Domein
+      en: Domain
+    description:
+      en: Internal ERP domain paired with the selected entity.
+      nl: Intern ERP-domein dat hoort bij de geselecteerde entiteit.
+    help:
+      en: This is hidden because authors pick an entity, not a free-form domain. The web picker writes both values so the runtime can match the exact event envelope.
+      nl: Dit is verborgen omdat auteurs een entiteit kiezen, niet handmatig een domein. De web-picker schrijft beide waarden zodat de runtime exact op de event-envelope kan matchen.
+    defaultValue: ""
+    readOnly: true
+    visibility: &a219
+      conditions:
+        - field: __trigger_internal_hidden__
+          operator: eq
+          value: true
+    render:
+      component: Input
+  - key: eventType
+    valueType: string
+    label:
+      nl: Eventtype
+      en: Event type
+    description:
+      nl: Kies op welk soort entiteit-event de workflow moet starten.
+      en: Choose which kind of entity event should start the workflow.
+    help:
+      en: The web node normalizes this to one of `created`, `updated`, or `deleted`, with `updated` as fallback.
+      nl: De webnode normaliseert dit naar een van `created`, `updated` of `deleted`, met `updated` als fallback.
+    defaultValue: updated
+    validation:
+      required: true
+    render:
+      component: ReferenceSelect
+      props:
+        clearable: false
+    options:
+      type: static
+      items:
+        - value: created
+          label:
+            nl: Aangemaakt
+            en: Created
+        - value: updated
+          label:
+            nl: Bijgewerkt
+            en: Updated
+        - value: deleted
+          label:
+            nl: Verwijderd
+            en: Deleted
+  - key: filterCondition
+    valueType: object
+    label:
+      nl: Filterexpressie
+      en: Filter expression
+    description:
+      nl: Optionele voorwaarde die bepaalt welke entiteit-events de workflow mogen starten.
+      en: Optional condition that determines which entity events are allowed to start the workflow.
+    help:
+      nl: Gebruik dit om events te filteren voordat de workflow start. Laat leeg om alle events van dit type toe te laten.
+      en: Use this to filter events before the workflow starts. Leave empty to allow all events of this type.
+    defaultValue:
+      kind: group
+      mode: all
+      conditions: []
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/trigger-options/entity-filter-fields
+    render:
+      component: EntityTriggerConditionBuilder
+  - key: inputParameters
+    valueType: object
+    cardinality:
+      min: 0
+      max: "unbounded"
+    semanticType: fieldDefinition
+    label:
+      nl: Payloadvelden
+      en: Payload fields
+    description:
+      nl: Beschrijf welke payloadvelden de workflow als startvariabelen krijgt nadat een event is toegelaten.
+      en: Describe which payload fields the workflow receives as start variables after an event has been allowed through.
+    help:
+      nl: Deze velden filteren geen events; ze leggen alleen vast welke data in de workflow beschikbaar is.
+      en: These fields do not filter events; they only define which data is available inside the workflow.
+    defaultValue: []
+    authoring:
+      profile: workflowStartVariable
+  - key: idempotencyKeyExpr
+    valueType: string
+    label:
+      nl: Idempotency key expressie
+      en: Idempotency key expression
+    description:
+      en: Reserved expression field for duplicate-detection semantics on entity-trigger starts.
+      nl: Gereserveerd expressieveld voor duplicate-detection-semantiek bij entity-trigger-starts.
+    help:
+      en: The current web node stores and normalizes this string, but I did not find a proven API/runtime consumer that evaluates it for `triggerEntity` starts yet.
+      nl: De huidige webnode slaat deze string op en normaliseert hem, maar ik heb nog geen bewezen API/runtime-consumer gevonden die hem al evalueert voor `triggerEntity`-starts.
+    defaultValue: ""
+    render:
+      component: Input
+  - key: path
+    valueType: string
+    label:
+      nl: Interne entity-route
+      en: Internal entity route
+    description:
+      en: Internal transport address associated with entity mutation events.
+      nl: Interne transportlocatie die hoort bij entity-mutation-events.
+    help:
+      en: The web node fixes this to `bus://entity.mutations`; treat it as hidden system metadata rather than an author-controlled runtime setting.
+      nl: De webnode zet dit vast op `bus://entity.mutations`; zie dit als verborgen systeemmetadata en niet als een door de auteur bestuurbare runtime-instelling.
+    defaultValue: bus://entity.mutations
+    readOnly: true
+    visibility: *a219
+    render:
+      component: Input
+  - key: method
+    valueType: string
+    label:
+      nl: Interne entity-methode
+      en: Internal entity method
+    description:
+      en: Internal dispatch method recorded alongside the entity trigger metadata.
+      nl: Interne dispatch-methode die naast de entity-triggermetadata wordt vastgelegd.
+    help:
+      en: Fixed to `POST` by the web node. I did not find a separate author-facing behavior switch behind this field.
+      nl: Wordt door de webnode op `POST` vastgezet. Ik heb geen aparte auteur-gedreven gedragsknop achter dit veld gevonden.
+    defaultValue: POST
+    readOnly: true
+    visibility: *a219
+    render:
+      component: Input

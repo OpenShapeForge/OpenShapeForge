@@ -1,0 +1,3033 @@
+{
+  "RELATIESOORT": [
+    {
+      "value": "person",
+      "label": {
+        "nl": "Persoon",
+        "en": "Person"
+      }
+    },
+    {
+      "value": "organization",
+      "label": {
+        "nl": "Organisatie",
+        "en": "Organization"
+      }
+    },
+    {
+      "value": "group",
+      "label": {
+        "nl": "Groep",
+        "en": "Group"
+      }
+    }
+  ],
+  "COMMUNICATIETYPE": [
+    {
+      "value": "appointment_reminder",
+      "label": {
+        "nl": "Afspraakherinnering",
+        "en": "Appointment reminder"
+      }
+    },
+    {
+      "value": "service_update",
+      "label": {
+        "nl": "Service-update",
+        "en": "Service update"
+      }
+    },
+    {
+      "value": "billing",
+      "label": {
+        "nl": "Facturatie",
+        "en": "Billing"
+      }
+    },
+    {
+      "value": "formal_correspondence",
+      "label": {
+        "nl": "Formele correspondentie",
+        "en": "Formal correspondence"
+      }
+    },
+    {
+      "value": "marketing",
+      "label": {
+        "nl": "Marketing",
+        "en": "Marketing"
+      }
+    }
+  ],
+  "COMMUNICATIEKANAAL": [
+    {
+      "value": "email",
+      "label": {
+        "nl": "E-mail",
+        "en": "Email"
+      }
+    },
+    {
+      "value": "whatsapp",
+      "label": {
+        "nl": "WhatsApp",
+        "en": "WhatsApp"
+      }
+    },
+    {
+      "value": "sms",
+      "label": {
+        "nl": "Sms",
+        "en": "SMS"
+      }
+    },
+    {
+      "value": "phone",
+      "label": {
+        "nl": "Telefoon",
+        "en": "Phone"
+      }
+    },
+    {
+      "value": "post",
+      "label": {
+        "nl": "Post",
+        "en": "Post"
+      }
+    },
+    {
+      "value": "in_app",
+      "label": {
+        "nl": "In-app",
+        "en": "In-app"
+      }
+    }
+  ],
+  "COMMUNICATIEVOORKEURSCOPE": [
+    {
+      "value": "relation",
+      "label": {
+        "nl": "Relatie",
+        "en": "Relation"
+      }
+    },
+    {
+      "value": "contact_detail",
+      "label": {
+        "nl": "Contactgegeven",
+        "en": "Contact detail"
+      }
+    },
+    {
+      "value": "tenant",
+      "label": {
+        "nl": "Tenantstandaard",
+        "en": "Tenant default"
+      }
+    }
+  ],
+  "COMMUNICATIEVOORKEURSTATUS": [
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "pending",
+      "label": {
+        "nl": "In afwachting",
+        "en": "Pending"
+      }
+    },
+    {
+      "value": "revoked",
+      "label": {
+        "nl": "Ingetrokken",
+        "en": "Revoked"
+      }
+    },
+    {
+      "value": "expired",
+      "label": {
+        "nl": "Verlopen",
+        "en": "Expired"
+      }
+    }
+  ],
+  "CONTACTGEGEVENSOORT": [
+    {
+      "value": "email",
+      "label": {
+        "nl": "E-mail",
+        "en": "E-mail"
+      }
+    },
+    {
+      "value": "phone",
+      "label": {
+        "nl": "Telefoon",
+        "en": "Phone"
+      }
+    },
+    {
+      "value": "mobile",
+      "label": {
+        "nl": "Mobiel",
+        "en": "Mobile"
+      }
+    },
+    {
+      "value": "website",
+      "label": {
+        "nl": "Website",
+        "en": "Website"
+      }
+    }
+  ],
+  "CONTACTGEGEVENTOESTEMMINGSSTATUS": [
+    {
+      "value": "granted",
+      "label": {
+        "nl": "Toegestaan",
+        "en": "Granted"
+      }
+    },
+    {
+      "value": "denied",
+      "label": {
+        "nl": "Geweigerd",
+        "en": "Denied"
+      }
+    },
+    {
+      "value": "pending",
+      "label": {
+        "nl": "In afwachting",
+        "en": "Pending"
+      }
+    },
+    {
+      "value": "revoked",
+      "label": {
+        "nl": "Ingetrokken",
+        "en": "Revoked"
+      }
+    },
+    {
+      "value": "expired",
+      "label": {
+        "nl": "Verlopen",
+        "en": "Expired"
+      }
+    },
+    {
+      "value": "unknown",
+      "label": {
+        "nl": "Onbekend",
+        "en": "Unknown"
+      }
+    }
+  ],
+  "MESSAGINGKANAAL": [
+    {
+      "value": "in_app",
+      "label": {
+        "nl": "In-app",
+        "en": "In-app"
+      }
+    },
+    {
+      "value": "email",
+      "label": {
+        "nl": "E-mail",
+        "en": "Email"
+      }
+    }
+  ],
+  "MESSAGINGLOCALE": [
+    {
+      "value": "nl",
+      "label": {
+        "nl": "Nederlands",
+        "en": "Dutch"
+      }
+    },
+    {
+      "value": "en",
+      "label": {
+        "nl": "Engels",
+        "en": "English"
+      }
+    },
+    {
+      "value": "de",
+      "label": {
+        "nl": "Duits",
+        "en": "German"
+      }
+    },
+    {
+      "value": "fr",
+      "label": {
+        "nl": "Frans",
+        "en": "French"
+      }
+    }
+  ],
+  "MISTRAL_CHAT_MODEL": [
+    {
+      "value": "mistral-large-latest",
+      "label": {
+        "nl": "Mistral Large",
+        "en": "Mistral Large"
+      }
+    },
+    {
+      "value": "mistral-medium-latest",
+      "label": {
+        "nl": "Mistral Medium",
+        "en": "Mistral Medium"
+      }
+    },
+    {
+      "value": "mistral-small-latest",
+      "label": {
+        "nl": "Mistral Small",
+        "en": "Mistral Small"
+      }
+    }
+  ],
+  "NOTIFICATIECATEGORIE": [
+    {
+      "value": "appointment_reminder",
+      "label": {
+        "nl": "Afspraakherinnering",
+        "en": "Appointment reminder"
+      }
+    },
+    {
+      "value": "service_update",
+      "label": {
+        "nl": "Service-update",
+        "en": "Service update"
+      }
+    },
+    {
+      "value": "maintenance_update",
+      "label": {
+        "nl": "Onderhoudsupdate",
+        "en": "Maintenance update"
+      }
+    },
+    {
+      "value": "case_update",
+      "label": {
+        "nl": "Dossierupdate",
+        "en": "Case update"
+      }
+    },
+    {
+      "value": "billing",
+      "label": {
+        "nl": "Facturatie",
+        "en": "Billing"
+      }
+    }
+  ],
+  "NOTIFICATIEVOORKEURSCOPE": [
+    {
+      "value": "relation",
+      "label": {
+        "nl": "Relatie",
+        "en": "Relation"
+      }
+    },
+    {
+      "value": "account",
+      "label": {
+        "nl": "Account",
+        "en": "Account"
+      }
+    },
+    {
+      "value": "tenant",
+      "label": {
+        "nl": "Tenant",
+        "en": "Tenant"
+      }
+    }
+  ],
+  "PREFERENCEOWNERSCOPE": [
+    {
+      "value": "account",
+      "label": {
+        "nl": "Account",
+        "en": "Account"
+      }
+    },
+    {
+      "value": "relation",
+      "label": {
+        "nl": "Relatie",
+        "en": "Relation"
+      }
+    },
+    {
+      "value": "tenant",
+      "label": {
+        "nl": "Tenant",
+        "en": "Tenant"
+      }
+    }
+  ],
+  "NOTIFICATIETEMPLATESTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "archived",
+      "label": {
+        "nl": "Gearchiveerd",
+        "en": "Archived"
+      }
+    }
+  ],
+  "TEMPLATEBODYFORMAAT": [
+    {
+      "value": "text",
+      "label": {
+        "nl": "Tekst",
+        "en": "Text"
+      }
+    },
+    {
+      "value": "html",
+      "label": {
+        "nl": "HTML",
+        "en": "HTML"
+      }
+    },
+    {
+      "value": "rich_text",
+      "label": {
+        "nl": "Rich text",
+        "en": "Rich text"
+      }
+    }
+  ],
+  "TAAKTYPE": [
+    {
+      "value": "follow_up",
+      "label": {
+        "nl": "Opvolging",
+        "en": "Follow-up"
+      }
+    },
+    {
+      "value": "review",
+      "label": {
+        "nl": "Beoordeling",
+        "en": "Review"
+      }
+    },
+    {
+      "value": "intake",
+      "label": {
+        "nl": "Intake",
+        "en": "Intake"
+      }
+    },
+    {
+      "value": "approval",
+      "label": {
+        "nl": "Goedkeuring",
+        "en": "Approval"
+      }
+    }
+  ],
+  "TAAKSTATUS": [
+    {
+      "value": "concept",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "open",
+      "label": {
+        "nl": "Open",
+        "en": "Open"
+      }
+    },
+    {
+      "value": "in_progress",
+      "label": {
+        "nl": "In uitvoering",
+        "en": "In progress"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "APPOINTMENTREQUESTSTATUS": [
+    {
+      "value": "open",
+      "label": {
+        "nl": "Open",
+        "en": "Open"
+      }
+    },
+    {
+      "value": "in_progress",
+      "label": {
+        "nl": "In behandeling",
+        "en": "In progress"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "TAAKPRIORITEIT": [
+    {
+      "value": "low",
+      "label": {
+        "nl": "Laag",
+        "en": "Low"
+      }
+    },
+    {
+      "value": "normal",
+      "label": {
+        "nl": "Normaal",
+        "en": "Normal"
+      }
+    },
+    {
+      "value": "high",
+      "label": {
+        "nl": "Hoog",
+        "en": "High"
+      }
+    },
+    {
+      "value": "urgent",
+      "label": {
+        "nl": "Urgent",
+        "en": "Urgent"
+      }
+    }
+  ],
+  "SUPPORTSTATUS": [
+    {
+      "value": "open",
+      "label": {
+        "nl": "Open",
+        "en": "Open"
+      }
+    },
+    {
+      "value": "in_progress",
+      "label": {
+        "nl": "In behandeling",
+        "en": "In progress"
+      }
+    },
+    {
+      "value": "waiting",
+      "label": {
+        "nl": "Wachtend",
+        "en": "Waiting"
+      }
+    },
+    {
+      "value": "resolved",
+      "label": {
+        "nl": "Opgelost",
+        "en": "Resolved"
+      }
+    },
+    {
+      "value": "closed",
+      "label": {
+        "nl": "Gesloten",
+        "en": "Closed"
+      }
+    }
+  ],
+  "SUPPORTPRIORITEIT": [
+    {
+      "value": "low",
+      "label": {
+        "nl": "Laag",
+        "en": "Low"
+      }
+    },
+    {
+      "value": "normal",
+      "label": {
+        "nl": "Normaal",
+        "en": "Normal"
+      }
+    },
+    {
+      "value": "high",
+      "label": {
+        "nl": "Hoog",
+        "en": "High"
+      }
+    },
+    {
+      "value": "critical",
+      "label": {
+        "nl": "Kritiek",
+        "en": "Critical"
+      }
+    }
+  ],
+  "SUPPORTCATEGORIE": [
+    {
+      "value": "bug",
+      "label": {
+        "nl": "Bug",
+        "en": "Bug"
+      }
+    },
+    {
+      "value": "question",
+      "label": {
+        "nl": "Vraag",
+        "en": "Question"
+      }
+    },
+    {
+      "value": "feature",
+      "label": {
+        "nl": "Functieverzoek",
+        "en": "Feature request"
+      }
+    },
+    {
+      "value": "data",
+      "label": {
+        "nl": "Data",
+        "en": "Data"
+      }
+    },
+    {
+      "value": "access",
+      "label": {
+        "nl": "Toegang",
+        "en": "Access"
+      }
+    },
+    {
+      "value": "performance",
+      "label": {
+        "nl": "Prestaties",
+        "en": "Performance"
+      }
+    },
+    {
+      "value": "other",
+      "label": {
+        "nl": "Overig",
+        "en": "Other"
+      }
+    }
+  ],
+  "COMMENTBRON": [
+    {
+      "value": "human",
+      "label": {
+        "nl": "Mens",
+        "en": "Human"
+      }
+    },
+    {
+      "value": "ai_node",
+      "label": {
+        "nl": "AI-node",
+        "en": "AI node"
+      }
+    },
+    {
+      "value": "system",
+      "label": {
+        "nl": "Systeem",
+        "en": "System"
+      }
+    }
+  ],
+  "TRIAGESENTIMENT": [
+    {
+      "value": "positive",
+      "label": {
+        "nl": "Positief",
+        "en": "Positive"
+      }
+    },
+    {
+      "value": "neutral",
+      "label": {
+        "nl": "Neutraal",
+        "en": "Neutral"
+      }
+    },
+    {
+      "value": "negative",
+      "label": {
+        "nl": "Negatief",
+        "en": "Negative"
+      }
+    },
+    {
+      "value": "frustrated",
+      "label": {
+        "nl": "Gefrustreerd",
+        "en": "Frustrated"
+      }
+    }
+  ],
+  "TRIAGEURGENTIE": [
+    {
+      "value": "low",
+      "label": {
+        "nl": "Laag",
+        "en": "Low"
+      }
+    },
+    {
+      "value": "medium",
+      "label": {
+        "nl": "Middel",
+        "en": "Medium"
+      }
+    },
+    {
+      "value": "high",
+      "label": {
+        "nl": "Hoog",
+        "en": "High"
+      }
+    }
+  ],
+  "CASECATEGORY": [
+    {
+      "value": "service_request",
+      "label": {
+        "nl": "Serviceverzoek",
+        "en": "Service request"
+      }
+    },
+    {
+      "value": "complaint",
+      "label": {
+        "nl": "Klacht",
+        "en": "Complaint"
+      }
+    },
+    {
+      "value": "intake",
+      "label": {
+        "nl": "Intake",
+        "en": "Intake"
+      }
+    },
+    {
+      "value": "incident",
+      "label": {
+        "nl": "Incident",
+        "en": "Incident"
+      }
+    },
+    {
+      "value": "change_request",
+      "label": {
+        "nl": "Wijzigingsverzoek",
+        "en": "Change request"
+      }
+    },
+    {
+      "value": "guidance",
+      "label": {
+        "nl": "Begeleiding",
+        "en": "Guidance"
+      }
+    }
+  ],
+  "CASETYPE": [
+    {
+      "value": "general_service",
+      "label": {
+        "nl": "Algemene servicezaak",
+        "en": "General service case"
+      }
+    },
+    {
+      "value": "rental_termination",
+      "label": {
+        "nl": "Huuropzegging",
+        "en": "Rental termination"
+      }
+    },
+    {
+      "value": "housing_support",
+      "label": {
+        "nl": "Woonondersteuning",
+        "en": "Housing support"
+      }
+    },
+    {
+      "value": "maintenance_case",
+      "label": {
+        "nl": "Onderhoudszaak",
+        "en": "Maintenance case"
+      }
+    },
+    {
+      "value": "allocation_case",
+      "label": {
+        "nl": "Toewijzingszaak",
+        "en": "Allocation case"
+      }
+    },
+    {
+      "value": "complaint_case",
+      "label": {
+        "nl": "Klachtenzaak",
+        "en": "Complaint case"
+      }
+    },
+    {
+      "value": "objection_case",
+      "label": {
+        "nl": "Bezwaarzaak",
+        "en": "Objection case"
+      }
+    },
+    {
+      "value": "enforcement_case",
+      "label": {
+        "nl": "Handhavingszaak",
+        "en": "Enforcement case"
+      }
+    }
+  ],
+  "CASESTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "intake",
+      "label": {
+        "nl": "Intake",
+        "en": "Intake"
+      }
+    },
+    {
+      "value": "in_progress",
+      "label": {
+        "nl": "In behandeling",
+        "en": "In progress"
+      }
+    },
+    {
+      "value": "waiting_customer",
+      "label": {
+        "nl": "Wacht op klant",
+        "en": "Waiting for customer"
+      }
+    },
+    {
+      "value": "waiting_partner",
+      "label": {
+        "nl": "Wacht op partner",
+        "en": "Waiting for partner"
+      }
+    },
+    {
+      "value": "on_hold",
+      "label": {
+        "nl": "Gepauzeerd",
+        "en": "On hold"
+      }
+    },
+    {
+      "value": "resolved",
+      "label": {
+        "nl": "Opgelost",
+        "en": "Resolved"
+      }
+    },
+    {
+      "value": "closed",
+      "label": {
+        "nl": "Gesloten",
+        "en": "Closed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "CASEPRIORITY": [
+    {
+      "value": "low",
+      "label": {
+        "nl": "Laag",
+        "en": "Low"
+      }
+    },
+    {
+      "value": "normal",
+      "label": {
+        "nl": "Normaal",
+        "en": "Normal"
+      }
+    },
+    {
+      "value": "high",
+      "label": {
+        "nl": "Hoog",
+        "en": "High"
+      }
+    },
+    {
+      "value": "urgent",
+      "label": {
+        "nl": "Urgent",
+        "en": "Urgent"
+      }
+    },
+    {
+      "value": "crisis",
+      "label": {
+        "nl": "Crisis",
+        "en": "Crisis"
+      }
+    }
+  ],
+  "CASEORIGINCHANNEL": [
+    {
+      "value": "portal",
+      "label": {
+        "nl": "Portaal",
+        "en": "Portal"
+      }
+    },
+    {
+      "value": "email",
+      "label": {
+        "nl": "E-mail",
+        "en": "Email"
+      }
+    },
+    {
+      "value": "phone",
+      "label": {
+        "nl": "Telefoon",
+        "en": "Phone"
+      }
+    },
+    {
+      "value": "whatsapp",
+      "label": {
+        "nl": "WhatsApp",
+        "en": "WhatsApp"
+      }
+    },
+    {
+      "value": "chat",
+      "label": {
+        "nl": "Chat",
+        "en": "Chat"
+      }
+    },
+    {
+      "value": "letter",
+      "label": {
+        "nl": "Brief",
+        "en": "Letter"
+      }
+    },
+    {
+      "value": "office",
+      "label": {
+        "nl": "Balie",
+        "en": "Front desk"
+      }
+    },
+    {
+      "value": "workflow",
+      "label": {
+        "nl": "Workflow",
+        "en": "Workflow"
+      }
+    },
+    {
+      "value": "api",
+      "label": {
+        "nl": "API",
+        "en": "API"
+      }
+    }
+  ],
+  "CASECONFIDENTIALITY": [
+    {
+      "value": "public",
+      "label": {
+        "nl": "Openbaar",
+        "en": "Public"
+      }
+    },
+    {
+      "value": "internal",
+      "label": {
+        "nl": "Intern",
+        "en": "Internal"
+      }
+    },
+    {
+      "value": "confidential",
+      "label": {
+        "nl": "Vertrouwelijk",
+        "en": "Confidential"
+      }
+    },
+    {
+      "value": "strictly_confidential",
+      "label": {
+        "nl": "Zeer vertrouwelijk",
+        "en": "Strictly confidential"
+      }
+    }
+  ],
+  "CASEROUTINGSTATUS": [
+    {
+      "value": "new",
+      "label": {
+        "nl": "Nieuw",
+        "en": "New"
+      }
+    },
+    {
+      "value": "triage",
+      "label": {
+        "nl": "Triage",
+        "en": "Triage"
+      }
+    },
+    {
+      "value": "queued",
+      "label": {
+        "nl": "In wachtrij",
+        "en": "Queued"
+      }
+    },
+    {
+      "value": "routed",
+      "label": {
+        "nl": "Gerouteerd",
+        "en": "Routed"
+      }
+    },
+    {
+      "value": "assigned",
+      "label": {
+        "nl": "Toegewezen",
+        "en": "Assigned"
+      }
+    },
+    {
+      "value": "waiting",
+      "label": {
+        "nl": "Wachtend",
+        "en": "Waiting"
+      }
+    },
+    {
+      "value": "escalated",
+      "label": {
+        "nl": "Geescaleerd",
+        "en": "Escalated"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    }
+  ],
+  "CASEWAITINGREASON": [
+    {
+      "value": "customer_response",
+      "label": {
+        "nl": "Reactie van klant",
+        "en": "Customer response"
+      }
+    },
+    {
+      "value": "partner_response",
+      "label": {
+        "nl": "Reactie van partner",
+        "en": "Partner response"
+      }
+    },
+    {
+      "value": "approval",
+      "label": {
+        "nl": "Goedkeuring",
+        "en": "Approval"
+      }
+    },
+    {
+      "value": "external_dependency",
+      "label": {
+        "nl": "Externe afhankelijkheid",
+        "en": "External dependency"
+      }
+    },
+    {
+      "value": "scheduled_follow_up",
+      "label": {
+        "nl": "Geplande opvolging",
+        "en": "Scheduled follow-up"
+      }
+    },
+    {
+      "value": "intake_information",
+      "label": {
+        "nl": "Aanvullende intakeinformatie",
+        "en": "Intake information"
+      }
+    }
+  ],
+  "CASEBREACHSTATE": [
+    {
+      "value": "on_track",
+      "label": {
+        "nl": "Op schema",
+        "en": "On track"
+      }
+    },
+    {
+      "value": "warning",
+      "label": {
+        "nl": "Waarschuwing",
+        "en": "Warning"
+      }
+    },
+    {
+      "value": "at_risk",
+      "label": {
+        "nl": "Risico",
+        "en": "At risk"
+      }
+    },
+    {
+      "value": "breached",
+      "label": {
+        "nl": "Overschreden",
+        "en": "Breached"
+      }
+    },
+    {
+      "value": "recovered",
+      "label": {
+        "nl": "Hersteld",
+        "en": "Recovered"
+      }
+    }
+  ],
+  "CASEACTORTYPE": [
+    {
+      "value": "account",
+      "label": {
+        "nl": "Account",
+        "en": "Account"
+      }
+    },
+    {
+      "value": "relation",
+      "label": {
+        "nl": "Relatie",
+        "en": "Relation"
+      }
+    },
+    {
+      "value": "system",
+      "label": {
+        "nl": "Systeem",
+        "en": "System"
+      }
+    },
+    {
+      "value": "workflow",
+      "label": {
+        "nl": "Workflow",
+        "en": "Workflow"
+      }
+    },
+    {
+      "value": "integration",
+      "label": {
+        "nl": "Integratie",
+        "en": "Integration"
+      }
+    }
+  ],
+  "CASESTATUSEVENTSOURCE": [
+    {
+      "value": "manual",
+      "label": {
+        "nl": "Handmatig",
+        "en": "Manual"
+      }
+    },
+    {
+      "value": "workflow",
+      "label": {
+        "nl": "Workflow",
+        "en": "Workflow"
+      }
+    },
+    {
+      "value": "routing",
+      "label": {
+        "nl": "Routering",
+        "en": "Routing"
+      }
+    },
+    {
+      "value": "sla",
+      "label": {
+        "nl": "SLA",
+        "en": "SLA"
+      }
+    },
+    {
+      "value": "portal",
+      "label": {
+        "nl": "Portaal",
+        "en": "Portal"
+      }
+    },
+    {
+      "value": "import",
+      "label": {
+        "nl": "Import",
+        "en": "Import"
+      }
+    },
+    {
+      "value": "ai",
+      "label": {
+        "nl": "AI",
+        "en": "AI"
+      }
+    }
+  ],
+  "CASEPARTYROLE": [
+    {
+      "value": "initiator",
+      "label": {
+        "nl": "Initiator",
+        "en": "Initiator"
+      }
+    },
+    {
+      "value": "subject",
+      "label": {
+        "nl": "Onderwerp",
+        "en": "Subject"
+      }
+    },
+    {
+      "value": "representative",
+      "label": {
+        "nl": "Vertegenwoordiger",
+        "en": "Representative"
+      }
+    },
+    {
+      "value": "owner",
+      "label": {
+        "nl": "Eigenaar",
+        "en": "Owner"
+      }
+    },
+    {
+      "value": "assignee",
+      "label": {
+        "nl": "Behandelaar",
+        "en": "Assignee"
+      }
+    },
+    {
+      "value": "supplier",
+      "label": {
+        "nl": "Leverancier",
+        "en": "Supplier"
+      }
+    },
+    {
+      "value": "partner",
+      "label": {
+        "nl": "Ketenpartner",
+        "en": "Partner"
+      }
+    },
+    {
+      "value": "observer",
+      "label": {
+        "nl": "Volger",
+        "en": "Observer"
+      }
+    },
+    {
+      "value": "approver",
+      "label": {
+        "nl": "Autorisator",
+        "en": "Approver"
+      }
+    }
+  ],
+  "CASEOBJECTTYPE": [
+    {
+      "value": "relation",
+      "label": {
+        "nl": "Relatie",
+        "en": "Relation"
+      }
+    },
+    {
+      "value": "agreement",
+      "label": {
+        "nl": "Overeenkomst",
+        "en": "Agreement"
+      }
+    },
+    {
+      "value": "unit",
+      "label": {
+        "nl": "Eenheid",
+        "en": "Unit"
+      }
+    },
+    {
+      "value": "maintenance_request",
+      "label": {
+        "nl": "Onderhoudsverzoek",
+        "en": "Maintenance request"
+      }
+    },
+    {
+      "value": "invoice",
+      "label": {
+        "nl": "Factuur",
+        "en": "Invoice"
+      }
+    },
+    {
+      "value": "project",
+      "label": {
+        "nl": "Project",
+        "en": "Project"
+      }
+    },
+    {
+      "value": "document",
+      "label": {
+        "nl": "Document",
+        "en": "Document"
+      }
+    },
+    {
+      "value": "task",
+      "label": {
+        "nl": "Taak",
+        "en": "Task"
+      }
+    },
+    {
+      "value": "appointment",
+      "label": {
+        "nl": "Afspraak",
+        "en": "Appointment"
+      }
+    }
+  ],
+  "PROCESSTYPE": [
+    {
+      "value": "complaint_handling",
+      "label": {
+        "nl": "Klachtbehandeling",
+        "en": "Complaint handling"
+      }
+    },
+    {
+      "value": "service_request",
+      "label": {
+        "nl": "Serviceverzoekbehandeling",
+        "en": "Service request handling"
+      }
+    },
+    {
+      "value": "maintenance_follow_up",
+      "label": {
+        "nl": "Onderhoudsopvolging",
+        "en": "Maintenance follow-up"
+      }
+    },
+    {
+      "value": "objection_handling",
+      "label": {
+        "nl": "Bezwaarafhandeling",
+        "en": "Objection handling"
+      }
+    },
+    {
+      "value": "enforcement",
+      "label": {
+        "nl": "Handhaving",
+        "en": "Enforcement"
+      }
+    },
+    {
+      "value": "intake_and_assessment",
+      "label": {
+        "nl": "Intake en beoordeling",
+        "en": "Intake and assessment"
+      }
+    }
+  ],
+  "PROCESSSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "waiting",
+      "label": {
+        "nl": "Wachtend",
+        "en": "Waiting"
+      }
+    },
+    {
+      "value": "escalated",
+      "label": {
+        "nl": "Geescaleerd",
+        "en": "Escalated"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "PROCESSSTEPTYPE": [
+    {
+      "value": "intake",
+      "label": {
+        "nl": "Intake",
+        "en": "Intake"
+      }
+    },
+    {
+      "value": "qualification",
+      "label": {
+        "nl": "Kwalificatie",
+        "en": "Qualification"
+      }
+    },
+    {
+      "value": "triage",
+      "label": {
+        "nl": "Triage",
+        "en": "Triage"
+      }
+    },
+    {
+      "value": "research",
+      "label": {
+        "nl": "Onderzoek",
+        "en": "Research"
+      }
+    },
+    {
+      "value": "waiting_for_input",
+      "label": {
+        "nl": "Wachten op input",
+        "en": "Waiting for input"
+      }
+    },
+    {
+      "value": "review",
+      "label": {
+        "nl": "Beoordeling",
+        "en": "Review"
+      }
+    },
+    {
+      "value": "decision",
+      "label": {
+        "nl": "Besluit",
+        "en": "Decision"
+      }
+    },
+    {
+      "value": "communication",
+      "label": {
+        "nl": "Communicatie",
+        "en": "Communication"
+      }
+    },
+    {
+      "value": "closure",
+      "label": {
+        "nl": "Afsluiting",
+        "en": "Closure"
+      }
+    }
+  ],
+  "CASETEMPLATESTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "deprecated",
+      "label": {
+        "nl": "Verouderd",
+        "en": "Deprecated"
+      }
+    },
+    {
+      "value": "archived",
+      "label": {
+        "nl": "Gearchiveerd",
+        "en": "Archived"
+      }
+    }
+  ],
+  "PROCESSTEMPLATESTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "deprecated",
+      "label": {
+        "nl": "Verouderd",
+        "en": "Deprecated"
+      }
+    },
+    {
+      "value": "archived",
+      "label": {
+        "nl": "Gearchiveerd",
+        "en": "Archived"
+      }
+    }
+  ],
+  "PROCESSSTEPSTATUS": [
+    {
+      "value": "pending",
+      "label": {
+        "nl": "Wachtend",
+        "en": "Pending"
+      }
+    },
+    {
+      "value": "ready",
+      "label": {
+        "nl": "Klaar om te starten",
+        "en": "Ready"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "in_progress",
+      "label": {
+        "nl": "In behandeling",
+        "en": "In progress"
+      }
+    },
+    {
+      "value": "running",
+      "label": {
+        "nl": "Lopend",
+        "en": "Running"
+      }
+    },
+    {
+      "value": "open",
+      "label": {
+        "nl": "Open",
+        "en": "Open"
+      }
+    },
+    {
+      "value": "waiting",
+      "label": {
+        "nl": "Wachtend op input",
+        "en": "Waiting"
+      }
+    },
+    {
+      "value": "awaiting_approval",
+      "label": {
+        "nl": "Wacht op goedkeuring",
+        "en": "Awaiting approval"
+      }
+    },
+    {
+      "value": "awaiting_attention",
+      "label": {
+        "nl": "Wacht op aandacht",
+        "en": "Awaiting attention"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "done",
+      "label": {
+        "nl": "Klaar",
+        "en": "Done"
+      }
+    },
+    {
+      "value": "closed",
+      "label": {
+        "nl": "Gesloten",
+        "en": "Closed"
+      }
+    },
+    {
+      "value": "afgerond",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "skipped",
+      "label": {
+        "nl": "Overgeslagen",
+        "en": "Skipped"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "CASESTEPEXECUTIONSTYLE": [
+    {
+      "value": "sequential",
+      "label": {
+        "nl": "Sequentieel",
+        "en": "Sequential"
+      }
+    },
+    {
+      "value": "parallel_wait_all",
+      "label": {
+        "nl": "Parallel - wacht op alles",
+        "en": "Parallel - wait for all"
+      }
+    },
+    {
+      "value": "parallel_wait_one",
+      "label": {
+        "nl": "Parallel - wacht op één",
+        "en": "Parallel - wait for one"
+      }
+    }
+  ],
+  "CASESTEPCOMPLETIONMODE": [
+    {
+      "value": "automatic",
+      "label": {
+        "nl": "Automatisch",
+        "en": "Automatic"
+      }
+    },
+    {
+      "value": "manual_approval",
+      "label": {
+        "nl": "Handmatige goedkeuring",
+        "en": "Manual approval"
+      }
+    }
+  ],
+  "CASESTEPACTIONKIND": [
+    {
+      "value": "task",
+      "label": {
+        "nl": "Taak",
+        "en": "Task"
+      }
+    },
+    {
+      "value": "workflow",
+      "label": {
+        "nl": "Workflow",
+        "en": "Workflow"
+      }
+    }
+  ],
+  "CASESTEPACTIONSTARTMODE": [
+    {
+      "value": "auto",
+      "label": {
+        "nl": "Automatisch",
+        "en": "Automatic"
+      }
+    },
+    {
+      "value": "manual",
+      "label": {
+        "nl": "Handmatig",
+        "en": "Manual"
+      }
+    }
+  ],
+  "CASESTEPACTIONSTATUS": [
+    {
+      "value": "pending",
+      "label": {
+        "nl": "Wachtend",
+        "en": "Pending"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "failed",
+      "label": {
+        "nl": "Mislukt",
+        "en": "Failed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "DOSSIERTYPE": [
+    {
+      "value": "case_file",
+      "label": {
+        "nl": "Zaakdossier",
+        "en": "Case file"
+      }
+    },
+    {
+      "value": "relation_file",
+      "label": {
+        "nl": "Relatiedossier",
+        "en": "Relation file"
+      }
+    },
+    {
+      "value": "unit_file",
+      "label": {
+        "nl": "Eenheidsdossier",
+        "en": "Unit file"
+      }
+    },
+    {
+      "value": "project_file",
+      "label": {
+        "nl": "Projectdossier",
+        "en": "Project file"
+      }
+    },
+    {
+      "value": "complaint_file",
+      "label": {
+        "nl": "Klachtendossier",
+        "en": "Complaint file"
+      }
+    },
+    {
+      "value": "personnel_file",
+      "label": {
+        "nl": "Medewerkersdossier",
+        "en": "Personnel file"
+      }
+    }
+  ],
+  "DOSSIERSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "archived",
+      "label": {
+        "nl": "Gearchiveerd",
+        "en": "Archived"
+      }
+    },
+    {
+      "value": "closed",
+      "label": {
+        "nl": "Gesloten",
+        "en": "Closed"
+      }
+    },
+    {
+      "value": "suspended",
+      "label": {
+        "nl": "Opgeschort",
+        "en": "Suspended"
+      }
+    }
+  ],
+  "DOSSIERCONFIDENTIALITY": [
+    {
+      "value": "internal",
+      "label": {
+        "nl": "Intern",
+        "en": "Internal"
+      }
+    },
+    {
+      "value": "confidential",
+      "label": {
+        "nl": "Vertrouwelijk",
+        "en": "Confidential"
+      }
+    },
+    {
+      "value": "strictly_confidential",
+      "label": {
+        "nl": "Zeer vertrouwelijk",
+        "en": "Strictly confidential"
+      }
+    }
+  ],
+  "DOSSIERARCHIEFSTATUS": [
+    {
+      "value": "open",
+      "label": {
+        "nl": "Open",
+        "en": "Open"
+      }
+    },
+    {
+      "value": "nominated",
+      "label": {
+        "nl": "Genomineerd",
+        "en": "Nominated"
+      }
+    },
+    {
+      "value": "archived",
+      "label": {
+        "nl": "Gearchiveerd",
+        "en": "Archived"
+      }
+    },
+    {
+      "value": "scheduled_for_destruction",
+      "label": {
+        "nl": "Gepland voor vernietiging",
+        "en": "Scheduled for destruction"
+      }
+    },
+    {
+      "value": "destroyed",
+      "label": {
+        "nl": "Vernietigd",
+        "en": "Destroyed"
+      }
+    }
+  ],
+  "DOCUMENTTYPE": [
+    {
+      "value": "incoming_mail",
+      "label": {
+        "nl": "Inkomende post",
+        "en": "Incoming mail"
+      }
+    },
+    {
+      "value": "outgoing_mail",
+      "label": {
+        "nl": "Uitgaande post",
+        "en": "Outgoing mail"
+      }
+    },
+    {
+      "value": "note",
+      "label": {
+        "nl": "Notitie",
+        "en": "Note"
+      }
+    },
+    {
+      "value": "decision",
+      "label": {
+        "nl": "Besluit",
+        "en": "Decision"
+      }
+    },
+    {
+      "value": "attachment",
+      "label": {
+        "nl": "Bijlage",
+        "en": "Attachment"
+      }
+    },
+    {
+      "value": "form",
+      "label": {
+        "nl": "Formulier",
+        "en": "Form"
+      }
+    },
+    {
+      "value": "evidence",
+      "label": {
+        "nl": "Bewijsstuk",
+        "en": "Evidence"
+      }
+    },
+    {
+      "value": "contract",
+      "label": {
+        "nl": "Contract",
+        "en": "Contract"
+      }
+    },
+    {
+      "value": "report",
+      "label": {
+        "nl": "Rapport",
+        "en": "Report"
+      }
+    }
+  ],
+  "DOCUMENTSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "registered",
+      "label": {
+        "nl": "Geregistreerd",
+        "en": "Registered"
+      }
+    },
+    {
+      "value": "final",
+      "label": {
+        "nl": "Definitief",
+        "en": "Final"
+      }
+    },
+    {
+      "value": "published",
+      "label": {
+        "nl": "Gepubliceerd",
+        "en": "Published"
+      }
+    },
+    {
+      "value": "archived",
+      "label": {
+        "nl": "Gearchiveerd",
+        "en": "Archived"
+      }
+    }
+  ],
+  "DOCUMENTCONFIDENTIALITY": [
+    {
+      "value": "internal",
+      "label": {
+        "nl": "Intern",
+        "en": "Internal"
+      }
+    },
+    {
+      "value": "confidential",
+      "label": {
+        "nl": "Vertrouwelijk",
+        "en": "Confidential"
+      }
+    },
+    {
+      "value": "strictly_confidential",
+      "label": {
+        "nl": "Zeer vertrouwelijk",
+        "en": "Strictly confidential"
+      }
+    }
+  ],
+  "DOCUMENTVERSIONSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "final",
+      "label": {
+        "nl": "Definitief",
+        "en": "Final"
+      }
+    },
+    {
+      "value": "superseded",
+      "label": {
+        "nl": "Vervangen",
+        "en": "Superseded"
+      }
+    },
+    {
+      "value": "withdrawn",
+      "label": {
+        "nl": "Ingetrokken",
+        "en": "Withdrawn"
+      }
+    }
+  ],
+  "WORKQUEUETYPE": [
+    {
+      "value": "intake",
+      "label": {
+        "nl": "Intake",
+        "en": "Intake"
+      }
+    },
+    {
+      "value": "service_backoffice",
+      "label": {
+        "nl": "Service backoffice",
+        "en": "Service backoffice"
+      }
+    },
+    {
+      "value": "specialist",
+      "label": {
+        "nl": "Specialistisch",
+        "en": "Specialist"
+      }
+    },
+    {
+      "value": "complaints",
+      "label": {
+        "nl": "Klachten",
+        "en": "Complaints"
+      }
+    },
+    {
+      "value": "governance",
+      "label": {
+        "nl": "Bestuur en regie",
+        "en": "Governance"
+      }
+    }
+  ],
+  "WORKQUEUESTATUS": [
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "paused",
+      "label": {
+        "nl": "Gepauzeerd",
+        "en": "Paused"
+      }
+    },
+    {
+      "value": "archived",
+      "label": {
+        "nl": "Gearchiveerd",
+        "en": "Archived"
+      }
+    }
+  ],
+  "WORKQUEUESTRATEGY": [
+    {
+      "value": "round_robin",
+      "label": {
+        "nl": "Om-en-om",
+        "en": "Round robin"
+      }
+    },
+    {
+      "value": "manual",
+      "label": {
+        "nl": "Handmatig",
+        "en": "Manual"
+      }
+    },
+    {
+      "value": "skill_based",
+      "label": {
+        "nl": "Skill-based",
+        "en": "Skill based"
+      }
+    },
+    {
+      "value": "priority_based",
+      "label": {
+        "nl": "Prioriteitsgestuurd",
+        "en": "Priority based"
+      }
+    },
+    {
+      "value": "workload_based",
+      "label": {
+        "nl": "Werkdrukgestuurd",
+        "en": "Workload based"
+      }
+    }
+  ],
+  "ASSIGNMENTSTATUS": [
+    {
+      "value": "queued",
+      "label": {
+        "nl": "In wachtrij",
+        "en": "Queued"
+      }
+    },
+    {
+      "value": "offered",
+      "label": {
+        "nl": "Aangeboden",
+        "en": "Offered"
+      }
+    },
+    {
+      "value": "accepted",
+      "label": {
+        "nl": "Geaccepteerd",
+        "en": "Accepted"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "released",
+      "label": {
+        "nl": "Vrijgegeven",
+        "en": "Released"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "SLAPOLICYSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "archived",
+      "label": {
+        "nl": "Gearchiveerd",
+        "en": "Archived"
+      }
+    }
+  ],
+  "SLAPOLICYTARGETENTITY": [
+    {
+      "value": "case",
+      "label": {
+        "nl": "Zaak",
+        "en": "Case"
+      }
+    },
+    {
+      "value": "dossier",
+      "label": {
+        "nl": "Dossier",
+        "en": "Dossier"
+      }
+    }
+  ],
+  "MILESTONETYPE": [
+    {
+      "value": "first_response",
+      "label": {
+        "nl": "Eerste reactie",
+        "en": "First response"
+      }
+    },
+    {
+      "value": "triage",
+      "label": {
+        "nl": "Triage",
+        "en": "Triage"
+      }
+    },
+    {
+      "value": "review",
+      "label": {
+        "nl": "Beoordeling",
+        "en": "Review"
+      }
+    },
+    {
+      "value": "decision",
+      "label": {
+        "nl": "Besluitvorming",
+        "en": "Decision"
+      }
+    },
+    {
+      "value": "resolution",
+      "label": {
+        "nl": "Oplossing",
+        "en": "Resolution"
+      }
+    },
+    {
+      "value": "closure",
+      "label": {
+        "nl": "Afsluiting",
+        "en": "Closure"
+      }
+    }
+  ],
+  "MILESTONESTATUS": [
+    {
+      "value": "pending",
+      "label": {
+        "nl": "Wachtend",
+        "en": "Pending"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "paused",
+      "label": {
+        "nl": "Gepauzeerd",
+        "en": "Paused"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "breached",
+      "label": {
+        "nl": "Overschreden",
+        "en": "Breached"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "AGREEMENTTYPE": [
+    {
+      "value": "lease",
+      "label": {
+        "nl": "Huur",
+        "en": "Lease"
+      }
+    },
+    {
+      "value": "service",
+      "label": {
+        "nl": "Service",
+        "en": "Service"
+      }
+    },
+    {
+      "value": "sale",
+      "label": {
+        "nl": "Koop",
+        "en": "Sale"
+      }
+    },
+    {
+      "value": "employment",
+      "label": {
+        "nl": "Arbeid",
+        "en": "Employment"
+      }
+    },
+    {
+      "value": "registration",
+      "label": {
+        "nl": "Inschrijving",
+        "en": "Registration"
+      }
+    },
+    {
+      "value": "maintenance",
+      "label": {
+        "nl": "Onderhoud",
+        "en": "Maintenance"
+      }
+    },
+    {
+      "value": "monitoring",
+      "label": {
+        "nl": "Monitoring",
+        "en": "Monitoring"
+      }
+    }
+  ],
+  "AGREEMENTROLE": [
+    {
+      "value": "master",
+      "label": {
+        "nl": "Hoofdovereenkomst",
+        "en": "Master agreement"
+      }
+    },
+    {
+      "value": "sub",
+      "label": {
+        "nl": "Subovereenkomst",
+        "en": "Sub agreement"
+      }
+    }
+  ],
+  "AGREEMENTSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "pending",
+      "label": {
+        "nl": "In afwachting",
+        "en": "Pending"
+      }
+    },
+    {
+      "value": "ended",
+      "label": {
+        "nl": "Beëindigd",
+        "en": "Ended"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "BILLINGRUNSTATUS": [
+    {
+      "value": "queued",
+      "label": {
+        "nl": "In wachtrij",
+        "en": "Queued"
+      }
+    },
+    {
+      "value": "running",
+      "label": {
+        "nl": "Wordt uitgevoerd",
+        "en": "Running"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "partial",
+      "label": {
+        "nl": "Deels mislukt",
+        "en": "Partial"
+      }
+    },
+    {
+      "value": "failed",
+      "label": {
+        "nl": "Mislukt",
+        "en": "Failed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "BILLINGRUNMODE": [
+    {
+      "value": "prolongation",
+      "label": {
+        "nl": "Prolongatie",
+        "en": "Prolongation"
+      }
+    },
+    {
+      "value": "void",
+      "label": {
+        "nl": "Storneren",
+        "en": "Void"
+      }
+    },
+    {
+      "value": "reissue",
+      "label": {
+        "nl": "Hercreatie (TWK)",
+        "en": "Reissue (TWK)"
+      }
+    }
+  ],
+  "BILLINGRUNITEMSTATUS": [
+    {
+      "value": "planned",
+      "label": {
+        "nl": "Gepland",
+        "en": "Planned"
+      }
+    },
+    {
+      "value": "locked",
+      "label": {
+        "nl": "Vergrendeld",
+        "en": "Locked"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "skipped",
+      "label": {
+        "nl": "Overgeslagen",
+        "en": "Skipped"
+      }
+    },
+    {
+      "value": "failed",
+      "label": {
+        "nl": "Mislukt",
+        "en": "Failed"
+      }
+    }
+  ],
+  "TENANTSETTINGVALUETYPE": [
+    {
+      "value": "string",
+      "label": {
+        "nl": "Tekst",
+        "en": "String"
+      }
+    },
+    {
+      "value": "json",
+      "label": {
+        "nl": "JSON",
+        "en": "JSON"
+      }
+    }
+  ],
+  "TENANTSTATUS": [
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "inactive",
+      "label": {
+        "nl": "Inactief",
+        "en": "Inactive"
+      }
+    },
+    {
+      "value": "suspended",
+      "label": {
+        "nl": "Opgeschort",
+        "en": "Suspended"
+      }
+    }
+  ],
+  "SURVEYKIND": [
+    {
+      "value": "customer_satisfaction",
+      "label": {
+        "nl": "Klanttevredenheid",
+        "en": "Customer satisfaction"
+      }
+    },
+    {
+      "value": "nps",
+      "label": {
+        "nl": "NPS",
+        "en": "NPS"
+      }
+    },
+    {
+      "value": "internal_audit",
+      "label": {
+        "nl": "Interne audit",
+        "en": "Internal audit"
+      }
+    },
+    {
+      "value": "benchmark",
+      "label": {
+        "nl": "Benchmark",
+        "en": "Benchmark"
+      }
+    },
+    {
+      "value": "other",
+      "label": {
+        "nl": "Overig",
+        "en": "Other"
+      }
+    }
+  ],
+  "SURVEYSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "closed",
+      "label": {
+        "nl": "Gesloten",
+        "en": "Closed"
+      }
+    },
+    {
+      "value": "archived",
+      "label": {
+        "nl": "Gearchiveerd",
+        "en": "Archived"
+      }
+    }
+  ],
+  "SURVEYQUESTIONKIND": [
+    {
+      "value": "open",
+      "label": {
+        "nl": "Open vraag",
+        "en": "Open question"
+      }
+    },
+    {
+      "value": "yes_no",
+      "label": {
+        "nl": "Ja/nee",
+        "en": "Yes/no"
+      }
+    },
+    {
+      "value": "multiple_choice",
+      "label": {
+        "nl": "Meerkeuze",
+        "en": "Multiple choice"
+      }
+    },
+    {
+      "value": "option",
+      "label": {
+        "nl": "Optie",
+        "en": "Option"
+      }
+    },
+    {
+      "value": "nps",
+      "label": {
+        "nl": "NPS",
+        "en": "NPS"
+      }
+    },
+    {
+      "value": "numeric_scale",
+      "label": {
+        "nl": "Cijferschaal",
+        "en": "Numeric scale"
+      }
+    }
+  ],
+  "SURVEYQUESTIONSUBJECT": [
+    {
+      "value": "service",
+      "label": {
+        "nl": "Service",
+        "en": "Service"
+      }
+    },
+    {
+      "value": "condition",
+      "label": {
+        "nl": "Staat",
+        "en": "Condition"
+      }
+    },
+    {
+      "value": "communication",
+      "label": {
+        "nl": "Communicatie",
+        "en": "Communication"
+      }
+    },
+    {
+      "value": "environment",
+      "label": {
+        "nl": "Omgeving",
+        "en": "Environment"
+      }
+    },
+    {
+      "value": "general",
+      "label": {
+        "nl": "Algemeen",
+        "en": "General"
+      }
+    }
+  ],
+  "SURVEYQUESTIONORIGIN": [
+    {
+      "value": "kwh",
+      "label": {
+        "nl": "KWH-keurmerk",
+        "en": "KWH quality mark"
+      }
+    },
+    {
+      "value": "aedes_benchmark",
+      "label": {
+        "nl": "Aedes benchmark",
+        "en": "Aedes benchmark"
+      }
+    },
+    {
+      "value": "custom",
+      "label": {
+        "nl": "Eigen vraag",
+        "en": "Custom question"
+      }
+    }
+  ],
+  "QUALITYMEASUREMENTKIND": [
+    {
+      "value": "post_service",
+      "label": {
+        "nl": "Na service",
+        "en": "Post service"
+      }
+    },
+    {
+      "value": "post_maintenance",
+      "label": {
+        "nl": "Na onderhoud",
+        "en": "Post maintenance"
+      }
+    },
+    {
+      "value": "periodic",
+      "label": {
+        "nl": "Periodiek",
+        "en": "Periodic"
+      }
+    },
+    {
+      "value": "exit_survey",
+      "label": {
+        "nl": "Vertrekonderzoek",
+        "en": "Exit survey"
+      }
+    },
+    {
+      "value": "intake_survey",
+      "label": {
+        "nl": "Instroomonderzoek",
+        "en": "Intake survey"
+      }
+    },
+    {
+      "value": "other",
+      "label": {
+        "nl": "Overig",
+        "en": "Other"
+      }
+    }
+  ],
+  "QUALITYMEASUREMENTSTATUS": [
+    {
+      "value": "requested",
+      "label": {
+        "nl": "Aangevraagd",
+        "en": "Requested"
+      }
+    },
+    {
+      "value": "in_progress",
+      "label": {
+        "nl": "In uitvoering",
+        "en": "In progress"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "ASSESSMENTSCALE": [
+    {
+      "value": "likert",
+      "label": {
+        "nl": "Likertschaal",
+        "en": "Likert scale"
+      }
+    },
+    {
+      "value": "positive_negative",
+      "label": {
+        "nl": "Positief/negatief",
+        "en": "Positive/negative"
+      }
+    },
+    {
+      "value": "numeric_1_10",
+      "label": {
+        "nl": "Rapportcijfer 1-10",
+        "en": "Score 1-10"
+      }
+    },
+    {
+      "value": "nps_0_10",
+      "label": {
+        "nl": "NPS 0-10",
+        "en": "NPS 0-10"
+      }
+    }
+  ],
+  "RESULTRESPONSE": [
+    {
+      "value": "fully_completed",
+      "label": {
+        "nl": "Volledig ingevuld",
+        "en": "Fully completed"
+      }
+    },
+    {
+      "value": "partially_completed",
+      "label": {
+        "nl": "Deels ingevuld",
+        "en": "Partially completed"
+      }
+    },
+    {
+      "value": "completed_with_followup",
+      "label": {
+        "nl": "Ingevuld met verzoek opvolging",
+        "en": "Completed with follow-up request"
+      }
+    },
+    {
+      "value": "no_response",
+      "label": {
+        "nl": "Niet gereageerd",
+        "en": "No response"
+      }
+    }
+  ],
+  "RESEARCHASSIGNMENTKIND": [
+    {
+      "value": "survey",
+      "label": {
+        "nl": "Enquête",
+        "en": "Survey"
+      }
+    },
+    {
+      "value": "interview",
+      "label": {
+        "nl": "Interview",
+        "en": "Interview"
+      }
+    },
+    {
+      "value": "observation",
+      "label": {
+        "nl": "Observatie",
+        "en": "Observation"
+      }
+    },
+    {
+      "value": "other",
+      "label": {
+        "nl": "Overig",
+        "en": "Other"
+      }
+    }
+  ],
+  "RESEARCHSTATUS": [
+    {
+      "value": "created",
+      "label": {
+        "nl": "Aangemaakt",
+        "en": "Created"
+      }
+    },
+    {
+      "value": "survey_sent",
+      "label": {
+        "nl": "Enquête verstuurd",
+        "en": "Survey sent"
+      }
+    },
+    {
+      "value": "reminder_sent",
+      "label": {
+        "nl": "Reminder verstuurd",
+        "en": "Reminder sent"
+      }
+    },
+    {
+      "value": "responses_received",
+      "label": {
+        "nl": "Antwoorden ontvangen",
+        "en": "Responses received"
+      }
+    },
+    {
+      "value": "no_response",
+      "label": {
+        "nl": "Geen antwoord ontvangen",
+        "en": "No response received"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    }
+  ]
+}

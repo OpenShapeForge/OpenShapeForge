@@ -1,0 +1,19 @@
+# Keep the build context small and reproducible. Note: the build runs
+# `bun run generate`, so generated artifacts are intentionally excluded and
+# recreated inside the image. Do NOT exclude packages/compiler/config,
+# examples/plugins (the workflow plugin is a registered workspace member), or
+# authoring.config.yaml — the compiler needs them at build time.
+.git
+node_modules
+**/node_modules
+.env
+.env.*
+!.env.example
+apps/api/src/generated/
+keycloak/*-realm.json
+.authoring-build/
+.e2e-report/
+.perf-report/
+docs/entities.generated.md
+*.log
+.DS_Store

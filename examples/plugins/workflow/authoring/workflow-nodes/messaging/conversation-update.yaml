@@ -1,0 +1,233 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: conversation.update
+category: Messaging
+label:
+  en: Update conversation
+  nl: Conversatie bijwerken
+description:
+  en: Update fields on an existing conversation.
+  nl: Werk velden van een bestaande conversatie bij.
+configFields:
+  - key: conversationId
+    valueType: string
+    semanticType: conversationId
+    label:
+      en: Conversation ID
+      nl: Conversatie-ID
+    description:
+      en: Existing conversation whose read model or status should be updated.
+      nl: Bestaande conversatie waarvan read model of status wordt bijgewerkt.
+    help:
+      en: Usually this comes from workflow context. The node updates only the addressed conversation in the current tenant
+        and fails when no conversation ID can be resolved.
+      nl: Meestal komt dit uit de workflowcontext. De node werkt alleen de opgegeven conversatie binnen de huidige tenant bij
+        en faalt wanneer geen conversatie-ID kan worden bepaald.
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: insertText
+  - key: values
+    valueType: object
+    label:
+      en: Values
+      nl: Waarden
+    description:
+      en: Conversation read-model fields to patch.
+      nl: Conversatie-read-modelvelden die worden bijgewerkt.
+    help:
+      en: Only filled keys are written. lifecycleState also updates the conversation status; identity assurance is preserved
+        when the existing level is stronger than the incoming value.
+      nl: Alleen ingevulde sleutels worden geschreven. lifecycleState werkt ook de conversatiestatus bij; identity assurance
+        blijft behouden wanneer het bestaande niveau sterker is dan de nieuwe waarde.
+    defaultValue: {}
+    children:
+      - key: lifecycleState
+        valueType: string
+        label:
+          en: Lifecycle state
+          nl: Lifecycle-status
+        description:
+          en: Conversation lifecycle state to store, such as open or closed.
+          nl: Lifecycle-status voor de conversatie, zoals open of closed.
+        help:
+          en: When set, this also updates the status column on the conversation. Use values that the messaging inbox already
+            understands.
+          nl: Wanneer dit is ingevuld, wordt ook de statuskolom van de conversatie bijgewerkt. Gebruik waarden die de
+            messaging-inbox al begrijpt.
+      - key: automationMode
+        valueType: string
+        label:
+          en: Automation mode
+          nl: Automation mode
+        description:
+          en: Automation state shown in the conversation read model.
+          nl: Automatiseringsstatus die in het conversation read model wordt getoond.
+        help:
+          en: Use this to mark whether AI is autonomous, paused, or assisting. It does not itself start or stop a worker.
+          nl: Gebruik dit om vast te leggen of AI autonoom werkt, gepauzeerd is of ondersteunt. Dit start of stopt zelf geen
+            worker.
+      - key: routingTargetType
+        valueType: string
+        label:
+          en: Routing target
+          nl: Routingdoel
+        description:
+          en: Routing target type recorded for inbox filtering.
+          nl: Routingdoeltype dat voor inboxfiltering wordt vastgelegd.
+        help:
+          en: Set this together with queue or assignment fields when a previous step has routed the conversation. This field
+            is read-model metadata only.
+          nl: Vul dit samen met queue- of toewijzingsvelden in wanneer een eerdere stap de conversatie heeft gerouteerd. Dit
+            veld is alleen read-modelmetadata.
+      - key: relationId
+        valueType: string
+        semanticType: relationId
+        label:
+          en: Relation ID
+          nl: Relatie-ID
+        description:
+          en: Relation linked to the conversation.
+          nl: Relatie die aan de conversatie is gekoppeld.
+        help:
+          en: Store the relation UUID after identification or lookup. The node records the ID in the read model; it does not
+            perform relation matching.
+          nl: Sla de relatie-UUID op na identificatie of lookup. De node legt de ID vast in het read model; hij voert geen
+            relatiematching uit.
+      - key: caseId
+        valueType: string
+        semanticType: caseId
+        label:
+          en: Case ID
+          nl: Zaak-ID
+        description:
+          en: Case linked to the conversation context.
+          nl: Zaak die aan de conversatiecontext is gekoppeld.
+        help:
+          en: Use a case ID from an upstream case or workflow node. This patches read-model context and does not create a
+            separate conversation-case link by itself.
+          nl: Gebruik een zaak-ID uit een eerdere zaak- of workflownode. Dit werkt read-modelcontext bij en maakt zelf geen
+            aparte conversatie-zaaklink.
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: insertText
+      - key: contactmomentUri
+        valueType: string
+        label:
+          en: Contact moment URI
+          nl: Contactmoment-URI
+        description:
+          en: URI of the contact moment created for this conversation.
+          nl: URI van het contactmoment dat voor deze conversatie is gemaakt.
+        help:
+          en: Store the canonical contact moment reference from an upstream create step so later workflow nodes and inbox
+            views can reuse it.
+          nl: Sla de canonieke contactmomentreferentie uit een eerdere aanmaakstap op zodat latere workflownodes en
+            inboxweergaven die kunnen hergebruiken.
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: insertText
+      - key: agreementId
+        valueType: string
+        semanticType: agreementId
+        label:
+          en: Agreement ID
+          nl: Overeenkomst-ID
+        description:
+          en: Agreement associated with the conversation.
+          nl: Overeenkomst die bij de conversatie hoort.
+        help:
+          en: Use this after an agreement has been selected or inferred. The field is stored as context and does not validate
+            the agreement record.
+          nl: Gebruik dit nadat een overeenkomst is gekozen of afgeleid. Het veld wordt als context opgeslagen en valideert
+            het overeenkomstrecord niet.
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: insertText
+      - key: agreementPartyId
+        valueType: string
+        semanticType: agreementPartyId
+        label:
+          en: Agreement party ID
+          nl: Overeenkomstpartij-ID
+        description:
+          en: Agreement party associated with the conversation.
+          nl: Overeenkomstpartij die bij de conversatie hoort.
+        help:
+          en: Set this when later workflow logic needs the specific party under an agreement, not just the agreement itself.
+          nl: Vul dit in wanneer latere workflowlogica de specifieke partij onder een overeenkomst nodig heeft, niet alleen
+            de overeenkomst zelf.
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: insertText
+      - key: eenheidId
+        valueType: string
+        semanticType: eenheidId
+        label:
+          en: Eenheid ID
+          nl: Eenheid-ID
+        description:
+          en: Housing unit associated with the conversation.
+          nl: Eenheid die bij de conversatie hoort.
+        help:
+          en: Use a unit ID from identification, agreement, or repair-object lookup so follow-up steps can keep the property
+            context.
+          nl: Gebruik een eenheid-ID uit identificatie, overeenkomst of reparatieobjectlookup zodat vervolgstappen de
+            vastgoedcontext behouden.
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: insertText
+      - key: repairObjectId
+        valueType: string
+        label:
+          en: Repair object ID
+          nl: Reparatieobject-ID
+        description:
+          en: Specific repair object selected for the conversation.
+          nl: Specifiek reparatieobject dat voor de conversatie is gekozen.
+        help:
+          en: Store the object ID returned by repair intake or classification. This is context for later repair handling, not
+            a repair order by itself.
+          nl: Sla de object-ID op uit reparatie-intake of classificatie. Dit is context voor latere reparatieafhandeling, geen
+            reparatieopdracht op zichzelf.
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: insertText
+      - key: repairObjectType
+        valueType: string
+        label:
+          en: Repair object type
+          nl: Reparatieobjecttype
+        description:
+          en: Type of the selected repair object.
+          nl: Type van het gekozen reparatieobject.
+        help:
+          en: Keep this aligned with the repair object source so downstream routing can distinguish objects such as unit,
+            building part, or installation.
+          nl: Houd dit gelijk aan de bron van het reparatieobject zodat vervolgrouting objecten zoals eenheid, bouwdeel of
+            installatie kan onderscheiden.
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: insertText
+      - key: repairObjectCode
+        valueType: string
+        label:
+          en: Repair object code
+          nl: Reparatieobjectcode
+        description:
+          en: Human or source-system code for the selected repair object.
+          nl: Menselijke of bronsysteemcode van het gekozen reparatieobject.
+        help:
+          en: Use this for display or handover context when the source provides a stable code alongside the object ID.
+          nl: Gebruik dit voor weergave of overdrachtscontext wanneer de bron naast de object-ID een stabiele code levert.
+        render:
+          component: OptionVariablePicker
+          props:
+            valueMode: insertText

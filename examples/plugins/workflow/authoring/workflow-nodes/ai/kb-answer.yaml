@@ -1,0 +1,91 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: kb.answer
+category: AI
+label:
+  nl: Kennisbank-antwoord
+  en: Knowledge-base answer
+description:
+  nl: Laat AI een kennisbankantwoord formuleren.
+  en: Lets AI formulate a knowledge-base answer.
+configFields:
+  - key: knowledgeProfile
+    valueType: string
+    label:
+      nl: Kennisbank
+      en: Knowledge base
+    description:
+      nl: Welke kennisbank moet doorzocht worden.
+      en: Which knowledge base should be searched.
+    help:
+      nl: Kies de publieke huurderkennisbank voor klantantwoorden en de interne medewerkerskennisbank voor medewerkercontext.
+      en: Choose the public tenant knowledge base for customer replies and the internal employee knowledge base for employee context.
+    options:
+      type: static
+      items:
+        - value: tenant
+          label:
+            nl: Huurder-KB (publiek)
+            en: Tenant KB (public)
+        - value: employee
+          label:
+            nl: Medewerker-KB (intern)
+            en: Employee KB (internal)
+    validation:
+      required: true
+    render:
+      component: Select
+  - key: context
+    valueType: string
+    label:
+      nl: Context
+      en: Context
+    description:
+      nl: Wat de AI als achtergrond moet meekrijgen. Meestal een variabele met berichten (bijv. uit 'Haal conversatiecontext
+        op') of een stuk tekst.
+      en: What the AI should use as background. Typically a variable with messages (e.g. from 'Get conversation context') or a
+        piece of text.
+    help:
+      nl: Voeg de vraag en relevante conversatiecontext toe. Dit veld bepaalt waar het kennisbankantwoord inhoudelijk over gaat.
+      en: Add the question and relevant conversation context. This field determines what the knowledge-base answer is about.
+    placeholder:
+      nl: Typ vrije tekst en/of voeg variabelen toe met {{...}}
+      en: Type free text and/or insert variables with {{...}}
+    validation:
+      required: true
+    render:
+      component: Textarea
+      props:
+        rows: 5
+  - key: maxSearches
+    valueType: number
+    label:
+      nl: Max KB-zoekpogingen
+      en: Max KB searches
+    description:
+      nl: Hoe vaak de AI maximaal de kennisbank mag doorzoeken voor één antwoord.
+      en: How many times the AI may search the KB for a single answer.
+    help:
+      nl: Een hogere waarde geeft de AI meer zoekpogingen, maar kan de stap trager maken.
+      en: A higher value gives the AI more search attempts, but can make the step slower.
+    defaultValue: 2
+    validation:
+      required: true
+      min:
+        value: 1
+  - key: timeoutMs
+    valueType: number
+    label:
+      nl: Timeout (ms)
+      en: Timeout (ms)
+    description:
+      nl: Maximale wachttijd voor het antwoord.
+      en: Maximum time to wait for the answer.
+    help:
+      nl: Als de kennisbank- of AI-aanroep niet op tijd klaar is, moet de workflow via zijn foutafhandeling verder.
+      en: If the knowledge-base or AI call does not finish in time, the workflow must continue through its error handling.
+    defaultValue: 120000
+    validation:
+      required: true
+      min:
+        value: 1000

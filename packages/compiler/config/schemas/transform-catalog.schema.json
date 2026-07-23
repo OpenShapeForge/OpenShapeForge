@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-phase0/transform-catalog.schema.json",
+  "title": "Transform Catalog Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "kind", "transforms"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "kind": { "type": "string", "const": "transformCatalog" },
+    "transforms": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "input", "output", "description"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["enumMap", "cast", "fallbackChain"]
+          },
+          "description": { "type": "string" },
+          "input": { "type": "string" },
+          "output": { "type": "string" },
+          "mappings": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "candidates": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}
+

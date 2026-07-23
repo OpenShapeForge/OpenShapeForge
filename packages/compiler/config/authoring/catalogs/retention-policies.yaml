@@ -1,0 +1,121 @@
+schemaVersion: 1
+kind: retentionPolicyCatalog
+
+policies:
+  records-archive-7y:
+    title:
+      en: Records archive for seven years
+      nl: Archiveren van records gedurende zeven jaar
+    mode: inline
+    scope: record
+    jurisdiction: NL
+    legalBasis:
+      type: statutory_obligation
+      reference: "Records and fiscal retention baseline"
+    duration:
+      minimum: P7Y
+      default: P7Y
+    disposition:
+      action: archive
+      review:
+        required: true
+        queue: records-review
+    holds:
+      suspendDestruction: true
+    tenantOverride:
+      allowExtension: true
+      allowShortening: false
+
+  case-delete-7y:
+    title:
+      en: Delete case seven years after closure
+      nl: Verwijder zaak zeven jaar na afsluiting
+    mode: inline
+    scope: record
+    jurisdiction: EU
+    legalBasis:
+      type: legitimate_interest
+      reference: "Operational case retention"
+    duration:
+      default: P7Y
+      maximum: P10Y
+    disposition:
+      action: delete
+      review:
+        required: true
+        queue: privacy-review
+    holds:
+      suspendDestruction: true
+    tenantOverride:
+      allowExtension: true
+      allowShortening: true
+
+  contact-moment-delete-2y:
+    title:
+      en: Delete contact moments after two years
+      nl: Verwijder contactmomenten na twee jaar
+    mode: inline
+    scope: record
+    jurisdiction: EU
+    legalBasis:
+      type: legitimate_interest
+      reference: "Customer interaction retention"
+    duration:
+      default: P2Y
+      maximum: P5Y
+    disposition:
+      action: delete
+      review: false
+    holds:
+      suspendDestruction: true
+    tenantOverride:
+      allowExtension: true
+      allowShortening: true
+
+  quality-retain-7y:
+    title:
+      en: Retain quality measurement data for seven years
+      nl: Bewaar kwaliteitsmetingsgegevens zeven jaar
+    mode: inline
+    scope: record
+    jurisdiction: NL
+    legalBasis:
+      type: legitimate_interest
+      reference: "Quality measurement and survey data retention"
+    duration:
+      default: P7Y
+      maximum: P10Y
+    disposition:
+      action: archive
+      review:
+        required: true
+        queue: quality-review
+    holds:
+      suspendDestruction: true
+    tenantOverride:
+      allowExtension: true
+      allowShortening: true
+
+  payment-detail-retain-7y:
+    title:
+      en: Retain payment detail for seven years
+      nl: Bewaar betaalgegevens zeven jaar
+    mode: inline
+    scope: record
+    jurisdiction: NL
+    legalBasis:
+      type: statutory_obligation
+      reference: "Financial evidence retention"
+    duration:
+      minimum: P7Y
+      default: P7Y
+    disposition:
+      action: archive
+      review:
+        required: true
+        queue: finance-review
+    holds:
+      suspendDestruction: true
+    tenantOverride:
+      allowExtension: true
+      allowShortening: false

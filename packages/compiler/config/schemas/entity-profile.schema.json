@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-phase0/entity-profile.schema.json",
+  "title": "Entity Profile Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "profile",
+    "entity",
+    "extends",
+    "language"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "kind": { "type": "string", "const": "entityProfile" },
+    "profile": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "entity": { "type": "string", "minLength": 1 },
+    "extends": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
+    "title": { "type": "string" },
+    "description": {
+      "oneOf": [
+        { "type": "string" },
+        { "$ref": "core-entity.schema.json#/$defs/localizedText" }
+      ]
+    },
+    "language": { "type": "string", "enum": ["en", "nl"] },
+    "domains": {
+      "type": "array",
+      "description": "Optional domain tags for standalone context entities or profile-scoped authoring.",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*$"
+      }
+    },
+    "retention": {
+      "$ref": "core-entity.schema.json#/$defs/retentionPolicy"
+    },
+    "displayTemplate": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical human-readable template for an instance of this profile entity, e.g. '{{code}}' or '{{naam}}'. Placeholders reference entity field keys. If absent, the core entity's displayTemplate is used."
+    },
+    "filterField": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Field key used when filtering a list of this profile entity by free-text input (typeahead in pickers). If absent, the core entity's filterField is used."
+    },
+    "fields": {
+      "type": "array",
+      "items": { "$ref": "core-entity.schema.json#/$defs/field" }
+    },
+    "relationships": {
+      "type": "array",
+      "items": { "$ref": "core-entity.schema.json#/$defs/relationship" }
+    },
+    "authorization": {
+      "type": "object",
+      "description": "Profile-level RBAC authorization. Defines the role required to access this profile's fields.",
+      "additionalProperties": false,
+      "required": ["roles"],
+      "properties": {
+        "roles": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "read": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "thirdPartyApi": {
+          "type": "object",
+          "description": "REST API definition for third-party coupling only. Not used internally.",
+          "additionalProperties": false,
+          "properties": {
+            "purpose": { "type": "string" },
+            "entityName": { "type": "string" },
+            "endpoints": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["method", "endpoint"],
+                "properties": {
+                  "method": { "type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+                  "endpoint": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "description": "Sector-specific view definitions. Build-time generated into frontend components, type-switched at runtime.",
+      "additionalProperties": false,
+      "properties": {
+        "routes": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              { "type": "string" },
+              { "$ref": "core-entity.schema.json#/$defs/localizedText" }
+            ]
+          }
+        },
+        "presentations": { "$ref": "core-entity.schema.json#/$defs/presentations" }
+      }
+    },
+    "workflow": {
+      "$ref": "core-entity.schema.json#/properties/workflow"
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "profileTable": { "type": "string" }
+      }
+    }
+  }
+}

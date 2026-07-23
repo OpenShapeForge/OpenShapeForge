@@ -1,0 +1,274 @@
+schemaVersion: 1
+kind: workflowNode
+nodeType: ai.extractParameters
+category: AI
+label:
+  en: Extract parameters from conversation
+  nl: Parameters uit conversatie halen
+description:
+  en: One synchronous LLM call — extract configured fields from context. No waiting; use the complete and incomplete handles to loop with reply + wait-for-message.
+  nl: Eén synchrone LLM-stap — extraheer geconfigureerde velden uit context. Geen wachten; gebruik de uitgangen compleet en onvolledig om te loopen met antwoord + wacht op bericht.
+configFields:
+  - key: promptProfile
+    valueType: string
+    label:
+      en: Prompt profile
+      nl: Prompt profile
+    description:
+      en: Prompt profile that controls extraction instructions and domain wording.
+      nl: Promptprofiel dat de extractie-instructies en domeintaal bepaalt.
+    help:
+      en: The profile is passed to the extraction prompt and follow-up planner. Keep it aligned with the domain of the fields being extracted.
+      nl: Het profiel wordt meegegeven aan de extractieprompt en vervolgvraagplanner. Houd dit afgestemd op het domein van de velden die worden geëxtraheerd.
+    defaultValue: generic_parameter_extraction
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/ai/prompt-profiles/options
+  - key: extractionMode
+    valueType: string
+    label:
+      en: Extraction mode
+      nl: Extractiemodus
+    description:
+      en: Use deterministic recognition, or let AI fill missing values when an AI provider is configured.
+      nl: Gebruik deterministische herkenning, of laat AI ontbrekende waarden aanvullen wanneer een AI-provider is geconfigureerd.
+    help:
+      en: Deterministic mode only uses local recognition. AI modes call the configured provider to extract values or fill gaps.
+      nl: Deterministische modus gebruikt alleen lokale herkenning. AI-modi roepen de geconfigureerde provider aan om waarden te extraheren of gaten te vullen.
+    defaultValue: deterministic_then_llm
+    options:
+      type: static
+      items:
+        - value: deterministic_only
+          label:
+            en: Deterministic
+            nl: Deterministisch
+        - value: deterministic_then_llm
+          label:
+            en: Deterministic + AI gaps
+            nl: Deterministisch + AI voor gaten
+        - value: llm_only
+          label:
+            en: AI only
+            nl: Alleen AI
+  - key: promptVariables
+    valueType: object
+    label:
+      en: Prompt parameters
+      nl: Promptparameters
+    description:
+      en: Fields required by the selected prompt profile.
+      nl: Velden die horen bij het gekozen promptprofiel.
+    help:
+      en: Use this for profile-specific inputs such as instructions or field definitions supplied by an upstream node.
+      nl: Gebruik dit voor profielspecifieke invoer zoals instructies of velddefinities uit een eerdere node.
+    defaultValue: {}
+  - key: context
+    valueType: string
+    label:
+      en: Context
+      nl: Context
+    description:
+      en: Text or variable the LLM should read (e.g. conversation messages).
+      nl: Tekst of variabele die de LLM als bron gebruikt (bijv. conversatieberichten).
+    help:
+      en: This is treated as source text, not trusted instructions. Include the current conversation or other text the extractor should inspect.
+      nl: Dit wordt behandeld als brontekst, niet als vertrouwde instructies. Voeg de huidige conversatie of andere tekst toe die de extractor moet lezen.
+    placeholder:
+      en: Type free text and/or insert variables with {{...}}
+      nl: Typ vrije tekst en/of voeg variabelen toe met {{...}}
+    validation:
+      required: true
+  - key: fieldDefinitions
+    valueType: object
+    label:
+      en: Fields to extract
+      nl: Velden om te extraheren
+    description:
+      en: Same field definitions as ‘Collect parameters’; this node fills them in one LLM call and routes on complete/incomplete.
+      nl: Zelfde velddefinities als bij ‘Parameters uitvragen’; deze node vult ze in één LLM-stap en routeert op compleet/onvolledig.
+    help:
+      en: Define the keys, labels, types, and required flags that become the extraction contract and node output fields.
+      nl: Definieer de sleutels, labels, types en verplicht-vlaggen die samen het extractiecontract en de node-outputvelden vormen.
+    defaultValue: []
+    authoring:
+      profile: workflowInputField
+    cardinality:
+      min: 0
+      max: "unbounded"
+    semanticType: fieldDefinition
+  - key: followUpStrategy
+    valueType: string
+    label:
+      en: Follow-up strategy
+      nl: Vervolgvraagstrategie
+    description:
+      en: Chooses how the node proposes a follow-up question when required fields are still missing.
+      nl: Bepaalt hoe de node een vervolgvraag voorstelt wanneer verplichte velden nog ontbreken.
+    help:
+      en: Use all-missing for a complete prompt, single-best for a shorter conversational loop, or none when another node handles follow-up.
+      nl: Gebruik alle ontbrekende velden voor een volledige vraag, één beste vraag voor een kortere conversatielus, of geen als een andere node opvolging afhandelt.
+    defaultValue: list_missing_fields
+    options:
+      type: static
+      items:
+        - value: list_missing_fields
+          label:
+            en: Ask all missing required fields
+            nl: Vraag alle ontbrekende verplichte velden
+        - value: single_best_question
+          label:
+            en: Single best question
+            nl: Eén beste vraag
+        - value: none
+          label:
+            en: No follow-up question
+            nl: Geen vervolgvraag
+  - key: preferMissingRequiredFields
+    valueType: boolean
+    label:
+      en: Prefer missing required fields
+      nl: Geef verplichte ontbrekende velden voorrang
+    description:
+      en: Prioritizes required fields when planning the next follow-up question.
+      nl: Geeft verplichte velden voorrang bij het plannen van de volgende vervolgvraag.
+    help:
+      en: Leave this enabled for intake flows that must collect required data before continuing.
+      nl: Laat dit aan voor intakeflows die verplichte gegevens moeten verzamelen voordat ze doorgaan.
+    defaultValue: true
+  - key: maxFollowUpAttempts
+    valueType: number
+    label:
+      en: Max follow-ups before handover
+      nl: Max. vervolgvragen tot handover
+    description:
+      en: After this many relevant follow-up questions, the node routes to handover when required fields are still missing.
+      nl: Na dit aantal relevante vervolgvragen routeert de node naar handover als er nog verplichte velden ontbreken.
+    help:
+      en: Counts relevant follow-up attempts for this extraction loop. The handover route is used when required values remain missing after the limit.
+      nl: Telt relevante vervolgvragen binnen deze extractielus. De handover-route wordt gebruikt als verplichte waarden na de limiet ontbreken.
+    defaultValue: 3
+    validation:
+      required: true
+      min: 1
+      max: 10
+  - key: includeReasoningSummary
+    valueType: boolean
+    label:
+      en: Include reasoning summary
+      nl: Voeg reasoning summary toe
+    description:
+      en: Requests a short reasoning summary in the extraction output.
+      nl: Vraagt om een korte redeneringssamenvatting in de extractie-output.
+    help:
+      en: Enable this for diagnostics or review screens. Do not depend on it for decisions that need structured fields.
+      nl: Zet dit aan voor diagnose of reviewschermen. Gebruik gestructureerde velden voor beslissingen, niet deze samenvatting.
+    defaultValue: false
+  - key: model
+    valueType: string
+    label:
+      en: Model
+      nl: Model
+    description:
+      en: Optional AI model. Empty uses the tenant or environment default.
+      nl: Optioneel AI-model. Leeg gebruikt de tenant- of omgevingsdefault.
+    help:
+      en: Only applies when the selected extraction mode uses AI. Leave empty unless this node needs a specific provider model.
+      nl: Alleen van toepassing wanneer de gekozen extractiemodus AI gebruikt. Laat leeg tenzij deze node een specifiek providermodel nodig heeft.
+    defaultValue: ""
+    options:
+      type: referentiedata
+      referentieGroep: MISTRAL_CHAT_MODEL
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MISTRAL_CHAT_MODEL
+        clearable: true
+        searchable: true
+    visibility:
+      conditions:
+        - field: extractionMode
+          operator: neq
+          value: deterministic_only
+  - key: followUpModel
+    valueType: string
+    label:
+      en: Follow-up model
+      nl: Vervolgvraagmodel
+    description:
+      en: Optional AI model for follow-up question planning. Empty uses the follow-up environment default.
+      nl: Optioneel AI-model voor het plannen van vervolgvragen. Leeg gebruikt de omgevingsdefault voor vervolgvragen.
+    help:
+      en: Only affects follow-up question planning after extraction. Leave empty to use the smaller follow-up default.
+      nl: Alleen van toepassing op het plannen van vervolgvragen na extractie. Laat leeg om de kleinere vervolgvraagdefault te gebruiken.
+    defaultValue: ""
+    options:
+      type: referentiedata
+      referentieGroep: MISTRAL_CHAT_MODEL
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MISTRAL_CHAT_MODEL
+        clearable: true
+        searchable: true
+    visibility:
+      conditions:
+        - field: extractionMode
+          operator: neq
+          value: deterministic_only
+  - key: temperature
+    valueType: number
+    label:
+      en: Temperature
+      nl: Temperatuur
+    description:
+      en: Creativity of AI extraction. Low is usually correct for extraction.
+      nl: Creativiteit van AI-extractie. Voor extractie is laag meestal correct.
+    help:
+      en: Use low values for factual extraction so repeated runs stay consistent.
+      nl: Gebruik lage waarden voor feitelijke extractie zodat herhaalde runs consistent blijven.
+    defaultValue: 0.1
+    validation:
+      required: true
+      min: 0
+      max: 1
+    visibility:
+      conditions:
+        - field: extractionMode
+          operator: neq
+          value: deterministic_only
+  - key: maxTokens
+    valueType: number
+    label:
+      en: Max tokens
+      nl: Maximaal aantal tokens
+    description:
+      en: Maximum response budget for the AI extraction call.
+      nl: Maximaal antwoordbudget voor de AI-extractieaanroep.
+    help:
+      en: Increase only when the configured fields or reasoning output need a larger JSON response.
+      nl: Verhoog dit alleen wanneer de geconfigureerde velden of redeneringsoutput een groter JSON-antwoord nodig hebben.
+    defaultValue: 800
+    validation:
+      required: true
+      min: 50
+    visibility:
+      conditions:
+        - field: extractionMode
+          operator: neq
+          value: deterministic_only
+  - key: timeoutMs
+    valueType: number
+    label:
+      en: Timeout (ms)
+      nl: Timeout (ms)
+    description:
+      en: Maximum wait time for the extraction call.
+      nl: Maximale wachttijd voor de extractie-aanroep.
+    help:
+      en: Applies to AI extraction and follow-up planning calls. Timeouts fail the node through the runtime error path.
+      nl: Geldt voor AI-extractie en vervolgvraagplanning. Timeouts laten de node falen via het runtime-foutpad.
+    defaultValue: 120000
+    validation:
+      required: true
+      min: 1000

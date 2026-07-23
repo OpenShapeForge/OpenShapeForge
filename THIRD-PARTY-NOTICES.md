@@ -4,13 +4,13 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 97 packages.
+Regenerate with `bun run notices`. 101 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 78 |
+| MIT | 82 |
 | ISC | 6 |
 | BlueOak-1.0.0 | 5 |
 | BSD-3-Clause | 4 |
@@ -31,6 +31,22 @@ Regenerate with `bun run notices`. 97 packages.
 ### @envelop/types@5.2.1
 - License: **MIT** — https://github.com/n1ru4l/envelop.git
 - Author: Dotan Simha <dotansimha@gmail.com>
+
+### @escape.tech/graphql-armor-cost-limit@2.4.3
+- License: **MIT** — https://github.com/Escape-Technologies/graphql-armor
+- Author: Escape Technologies SAS
+
+### @escape.tech/graphql-armor-max-aliases@2.6.2
+- License: **MIT** — https://github.com/Escape-Technologies/graphql-armor
+- Author: Escape Technologies SAS
+
+### @escape.tech/graphql-armor-max-depth@2.4.2
+- License: **MIT** — https://github.com/Escape-Technologies/graphql-armor
+- Author: Escape Technologies SAS
+
+### @escape.tech/graphql-armor-types@0.7.0
+- License: **MIT** — https://github.com/Escape-Technologies/graphql-armor
+- Author: Escape Technologies SAS
 
 ### @fastify/ajv-compiler@4.0.5
 - License: **MIT** — https://github.com/fastify/ajv-compiler#readme

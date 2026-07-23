@@ -69,10 +69,23 @@ type Store = {
   keycloakToken: Promise<string | null> | null;
 };
 
+/**
+ * Roles held by the default e2e identities. Function-level authorization
+ * (#94) now gates every generated operation, so the CRUD/security suites must
+ * present a role that grants read+write on the shipped entities. The three
+ * core entities (relation, contact-detail, relation-group) all authorize
+ * writes with `Relaties.All.ReadWrite`; that role also appears in each
+ * entity's read list, so it satisfies every operation. Field-level redaction
+ * (#96/#101) treats it as a write grant, so classified columns stay visible to
+ * these identities. The dedicated authorization suite uses narrower roles to
+ * prove enforcement.
+ */
+export const E2E_READWRITE_ROLES = ["Relaties.All.ReadWrite"];
+
 const store: Store = ((globalThis as Record<string, any>).__openshapeforgeE2E ??= {
   seed: randomUUID().slice(0, 8),
-  tenantA: { tenantId: randomUUID(), userId: randomUUID(), roles: [] },
-  tenantB: { tenantId: randomUUID(), userId: randomUUID(), roles: [] },
+  tenantA: { tenantId: randomUUID(), userId: randomUUID(), roles: [...E2E_READWRITE_ROLES] },
+  tenantB: { tenantId: randomUUID(), userId: randomUUID(), roles: [...E2E_READWRITE_ROLES] },
   capturedRequests: [],
   capturedEventReads: [],
   createdRows: [],

@@ -33,7 +33,20 @@ type GeneratedCrudTable = {
        */
       defaultSort?: { field: string; direction: "asc" | "desc" };
     };
+    /**
+     * Compiled per-operation authorization roles, carried from the authoring
+     * `authorization.roles` block. The GraphQL layer enforces these
+     * function-level (#94): a session whose roles do not intersect the set
+     * required for an operation is rejected with FORBIDDEN before the DB call.
+     */
+    authorization?: GeneratedCrudAuthorization;
   };
+};
+
+export type GeneratedCrudOperation = "read" | "create" | "update" | "delete";
+
+export type GeneratedCrudAuthorization = {
+  roles: Record<GeneratedCrudOperation, string[]>;
 };
 
 type GeneratedCrudColumn = {
@@ -43,6 +56,12 @@ type GeneratedCrudColumn = {
   primaryKey: boolean;
   generated: string | null;
   sourceField?: string;
+  /**
+   * Data-classification tier (pii/bsn/confidential) propagated from the
+   * authoring field. Present only for restricting tiers; used to redact the
+   * column from readers who lack a write grant on the entity (#96/#101).
+   */
+  classification?: "confidential" | "pii" | "bsn";
 };
 
 export type GeneratedCrudRelationship = {

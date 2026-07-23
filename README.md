@@ -63,5 +63,7 @@ internal deployments by companies, non-profits, or other institutions —
 requires a commercial license from BatterAI B.V.**
 
 Each released version automatically and irrevocably converts to the
-[Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) four years
-after its publication. See [LICENSE](LICENSE) for the exact terms.
+[GNU AGPLv3](https://www.gnu.org/licenses/agpl-3.0.html) four years after its
+publication, so converted versions remain copyleft: derivatives — including
+hosted network services — must publish their source. See [LICENSE](LICENSE)
+for the exact terms.

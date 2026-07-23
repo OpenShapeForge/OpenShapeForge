@@ -121,7 +121,7 @@ plugins included, and fails on any byte drift. Study the two examples under
 
 This project is source-available under the Business Source License 1.1 (see
 `LICENSE`); any production use requires a separate commercial license from
-BatterAI B.V., and each version converts to the Apache License 2.0 four years
+BatterAI B.V., and each version converts to the GNU AGPLv3 four years
 after its publication. By submitting a contribution you agree that it is
 licensed under the project's license (inbound = outbound), that you grant
 BatterAI B.V. the right to license your contribution under other terms

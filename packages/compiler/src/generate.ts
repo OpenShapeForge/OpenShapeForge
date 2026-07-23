@@ -258,7 +258,11 @@ function renderIndexSql(
 ): string {
   const cols = index.columns.map(quoteIdent).join(", ");
   const keyword = index.unique ? "CREATE UNIQUE INDEX" : "CREATE INDEX";
-  const head = `${keyword} IF NOT EXISTS ${quoteIdent(index.name)} ON ${tableIdent(table)} (${cols})`;
+  // Stabilize over-length names so two distinct index names sharing their
+  // first 63 bytes do not collapse into one after Postgres truncation (which
+  // would make `CREATE INDEX IF NOT EXISTS` silently skip the second).
+  const indexName = stableIdentifier(index.name);
+  const head = `${keyword} IF NOT EXISTS ${quoteIdent(indexName)} ON ${tableIdent(table)} (${cols})`;
   return index.where ? `${head} WHERE ${index.where};` : `${head};`;
 }
 
@@ -407,7 +411,11 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
     table: table.name,
     tenantScoped: table.tenantScoped,
     domainInternal: table.domainInternal === true,
-    generatedCrud: table.generatedCrud !== false && table.domainInternal !== true,
+    // Fail-closed: a table is CRUD-exposed only when it opts in explicitly
+    // with `generatedCrud: true`. A table that omits the flag (or is
+    // domain-internal) is not exposed, so a forgotten opt-out on a new
+    // sensitive table cannot silently advertise it as CRUD-generated.
+    generatedCrud: table.generatedCrud === true && table.domainInternal !== true,
     primaryKey:
       table.columns.find((column) => column.primaryKey)?.name ?? null,
     columns: table.columns.map((column) => ({

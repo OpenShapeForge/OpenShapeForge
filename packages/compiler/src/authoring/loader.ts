@@ -422,7 +422,11 @@ function loadRetentionPolicies(authoringDir: string): Record<string, RetentionPo
 
 function listDirs(dirPath: string): string[] {
   if (!existsSync(dirPath)) return [];
+  // Sort so directory iteration (and thus catalog merge precedence in
+  // loadSemanticTypes / loadSemanticTypeCatalogSources) is deterministic
+  // regardless of filesystem readdir order across machines or rebuilt trees.
   return readdirSync(dirPath, { withFileTypes: true })
     .filter((d) => d.isDirectory())
-    .map((d) => d.name);
+    .map((d) => d.name)
+    .sort((a, b) => a.localeCompare(b));
 }

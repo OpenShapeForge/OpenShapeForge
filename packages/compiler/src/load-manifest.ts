@@ -29,6 +29,29 @@ const retentionActions = new Set<RetentionAction>([
   "delete",
 ]);
 
+const onDeleteActions = new Set(["CASCADE", "RESTRICT", "SET NULL"]);
+
+/**
+ * `column.default` and `index.where` are the only two manifest fields that
+ * reach raw SQL DDL as expressions rather than quoted literals/identifiers
+ * (see generate.ts renderColumnSql / renderIndexSql). The base manifest and
+ * the authoring compiler only ever emit a small, known set of safe forms
+ * (`now()`, `gen_random_uuid()`, quoted literals, `IS NOT NULL` predicates).
+ * Reject anything carrying a statement terminator or comment introducer so a
+ * malformed value fails the build instead of silently injecting DDL/DML into
+ * the generated schema.sql that later runs against a privileged role.
+ */
+function assertSqlExpression(value: unknown, label: string): asserts value is string {
+  if (typeof value !== "string") {
+    throw new Error(`${label} must be a string.`);
+  }
+  if (/;|--|\/\*|\*\//.test(value)) {
+    throw new Error(
+      `${label} must not contain a statement terminator or comment; got ${JSON.stringify(value)}.`,
+    );
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -330,6 +353,9 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
       if (column.generated !== undefined && column.generated !== "identity") {
         throw new Error(`${currentTableKey}.${column.name} has unsupported generated mode.`);
       }
+      if (column.default !== undefined) {
+        assertSqlExpression(column.default, `${currentTableKey}.${column.name}.default`);
+      }
       if (column.references !== undefined) {
         if (!isRecord(column.references)) {
           throw new Error(`${currentTableKey}.${column.name}.references must be an object.`);
@@ -337,6 +363,15 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
         assertIdentifier(column.references.schema, `${currentTableKey}.${column.name}.references.schema`);
         assertIdentifier(column.references.table, `${currentTableKey}.${column.name}.references.table`);
         assertIdentifier(column.references.column, `${currentTableKey}.${column.name}.references.column`);
+        if (
+          column.references.onDelete !== undefined &&
+          (typeof column.references.onDelete !== "string" ||
+            !onDeleteActions.has(column.references.onDelete))
+        ) {
+          throw new Error(
+            `${currentTableKey}.${column.name}.references.onDelete must be one of CASCADE, RESTRICT, SET NULL.`,
+          );
+        }
       }
     }
     tableColumns.set(currentTableKey, columnNames);
@@ -376,6 +411,9 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
           throw new Error(
             `${currentTableKey}.indexes[${indexIndex}].unique must be a boolean.`,
           );
+        }
+        if (index.where !== undefined) {
+          assertSqlExpression(index.where, `${currentTableKey}.indexes[${indexIndex}].where`);
         }
       }
     }

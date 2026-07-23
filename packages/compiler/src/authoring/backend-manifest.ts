@@ -381,20 +381,36 @@ function parseIsoDuration(value: unknown) {
 }
 
 function retentionAction(policy: RetentionPolicy | undefined): RetentionAction {
-  switch (policy?.disposition?.action) {
+  const action = policy?.disposition?.action;
+  switch (action) {
+    // No disposition authored: fall back to the conservative, non-destructive
+    // archive disposition.
+    case undefined:
+    // `review` (queue for a human decision) has no distinct runtime
+    // RetentionAction; hold the data by archiving until the review resolves.
+    case "review":
+      return "archive";
     case "archive":
       return "archive";
     case "delete":
       return "delete";
+    // anonymize / mask / cryptoDelete all reduce to the coarse "redact"
+    // disposition the runtime manifest carries. The finer authored intent is
+    // recorded on the source contract; it is intentionally not distinguished
+    // here.
     case "anonymize":
     case "mask":
     case "cryptoDelete":
       return "redact";
     case "keep":
       return "retain";
-    case "review":
     default:
-      return "archive";
+      // An unrecognized action string is a misauthored policy. Fail the build
+      // instead of silently reinterpreting it as archive.
+      throw new Error(
+        `Unknown retention disposition action ${JSON.stringify(action)}; ` +
+          "expected one of keep, archive, delete, anonymize, mask, cryptoDelete, review.",
+      );
   }
 }
 

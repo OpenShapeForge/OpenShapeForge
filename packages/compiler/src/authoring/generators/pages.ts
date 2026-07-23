@@ -2268,11 +2268,20 @@ function buildSelectionSet(
 
 function renderSelectionTree(tree: Map<string, Map<any, any>>): string {
   return [...tree.entries()]
-    .map(([field, children]) => (
-      children.size > 0
+    .map(([field, children]) => {
+      // Defense-in-depth: every selection token is a validated authoring field
+      // key, relationship name, or a compiler-fixed subfield (id/asMap/count/
+      // *Aggregate). Assert the GraphQL-safe shape before it is interpolated
+      // raw into the operation string built by buildDetailQuery/buildListQuery —
+      // a regression must fail the build, not emit a token that restructures the
+      // selection set.
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) {
+        throw new Error(`pages: unsafe GraphQL selection field ${JSON.stringify(field)}`);
+      }
+      return children.size > 0
         ? `${field} { ${renderSelectionTree(children)} }`
-        : field
-    ))
+        : field;
+    })
     .join(" ");
 }
 

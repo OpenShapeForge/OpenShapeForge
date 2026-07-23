@@ -28,7 +28,7 @@ services:
       - service-net
 
   keycloak-db:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     container_name: openshapeforge-keycloak-db
     restart: unless-stopped
     environment:

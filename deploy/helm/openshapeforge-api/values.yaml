@@ -74,6 +74,41 @@ migration:
     limits:
       memory: 512Mi
 
+# --- Network isolation (optional) --------------------------------------------
+# The migrate Job runs with the PRIVILEGED database URL (CREATE ROLE / DDL). It
+# shares the API's selector labels, so this policy scopes egress for BOTH the
+# API and the migrate Job to Postgres (plus DNS). Enable it, and set
+# egress.database to your Postgres endpoint, to limit the blast radius of a
+# compromised migrate pod. Requires a CNI that enforces NetworkPolicy.
+networkPolicy:
+  enabled: false
+  egress:
+    # Restrict egress to the Postgres port only.
+    databasePort: 5432
+    # NetworkPolicyPeer entries identifying the database (recommended). Example:
+    #   database:
+    #     - ipBlock:
+    #         cidr: 10.0.0.5/32
+    # Empty => allow the database port to any destination (port-only scoping).
+    database: []
+    # Permit DNS lookups (needed to resolve the Postgres/OIDC hostnames).
+    allowDNS: true
+    # Selector for the DNS server. Empty => any destination on port 53.
+    # Typical kube-dns example:
+    #   dnsSelector:
+    #     - namespaceSelector: {}
+    #       podSelector:
+    #         matchLabels:
+    #           k8s-app: kube-dns
+    dnsSelector: []
+    # Additional raw egress rules appended verbatim (e.g. OIDC/JWKS host).
+    extra: []
+  ingress:
+    # Off by default; when disabled the policy only constrains egress.
+    enabled: false
+    # NetworkPolicyPeer entries allowed to reach the API's targetPort.
+    from: []
+
 # --- Service -----------------------------------------------------------------
 service:
   type: ClusterIP

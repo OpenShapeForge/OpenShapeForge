@@ -69,16 +69,43 @@ service:
   targetPort: 3001
 
 # --- Ingress (optional) ------------------------------------------------------
+# SECURITY: the API serves OIDC bearer tokens and signed internal-context
+# headers carrying tenant/auth data — never expose it over plaintext HTTP.
+# When you enable the ingress you MUST terminate TLS. Do it here (recommended)
+# or at an upstream LB/mesh; if you rely on an upstream terminator, set
+# tls.required=false to silence the guard below and accept that responsibility.
 ingress:
   enabled: false
   className: ""
+  # Force HTTP->HTTPS redirect by default. On ingress-nginx these annotations
+  # make the controller 308-redirect plaintext requests to HTTPS. Merge with
+  # your own annotations; drop/override them for a controller with different
+  # keys (e.g. Traefik, GKE, AWS ALB).
+  sslRedirect: true
+  # Uncomment and point at your cert-manager ClusterIssuer to have certificates
+  # provisioned automatically; the tls block below is then filled in for you by
+  # cert-manager writing to the referenced secret.
+  # certManagerClusterIssuer: letsencrypt-prod
+  certManagerClusterIssuer: ""
   annotations: {}
   hosts:
     - host: openshapeforge-api.local
       paths:
         - path: /
           pathType: Prefix
-  tls: []
+  # TLS termination. Populate this (or set certManagerClusterIssuer above) before
+  # enabling ingress in production. Example:
+  #   tls:
+  #     hosts:
+  #       - openshapeforge-api.example.com
+  #     secretName: openshapeforge-api-tls
+  tls:
+    # Fail the render if the ingress is enabled with no TLS and no upstream
+    # terminator, so the API is never silently served over plaintext HTTP.
+    # Set to false ONLY when TLS is terminated upstream (LB/mesh).
+    required: true
+    hosts: []
+    secretName: ""
 
 # --- Workload ----------------------------------------------------------------
 resources:
@@ -125,10 +152,23 @@ podSecurityContext:
 
 securityContext:
   allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: false
+  # The image is a static Bun app that reads generated artifacts baked at build
+  # time via module-relative reads, so it needs no writable code paths. The root
+  # filesystem is read-only; the only writable location is a /tmp emptyDir (see
+  # tmpDir below), which Bun uses for runtime scratch.
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL
+
+# Writable scratch mount for the read-only-root containers (API + migrate Job).
+# With readOnlyRootFilesystem: true the container filesystem is immutable except
+# for this emptyDir mounted at /tmp, which Bun uses for temporary files. Disable
+# it only if you also set securityContext.readOnlyRootFilesystem: false.
+tmpDir:
+  enabled: true
+  # sizeLimit caps the emptyDir so scratch writes can't exhaust node memory/disk.
+  sizeLimit: 64Mi
 
 serviceAccount:
   create: true

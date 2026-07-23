@@ -12,14 +12,17 @@
 # role — see docs/api.md and SECURITY.md for the production posture.
 
 # --- builder: install workspace deps + generate artifacts --------------------
-FROM oven/bun:1.3.4 AS builder
+# Pin base images by digest, not just the mutable :1.3.4 tag, so a repushed or
+# compromised upstream tag cannot silently alter the build. Refresh the digest
+# together with the tag (e.g. via Renovate/Dependabot).
+FROM oven/bun:1.3.4@sha256:7608db4aeb44f1fe8169cc8ec7055376b3013557b106407ccf092b00e426407d AS builder
 WORKDIR /app
 COPY . .
 RUN bun install --frozen-lockfile
 RUN bun run generate
 
 # --- runtime -----------------------------------------------------------------
-FROM oven/bun:1.3.4 AS runtime
+FROM oven/bun:1.3.4@sha256:7608db4aeb44f1fe8169cc8ec7055376b3013557b106407ccf092b00e426407d AS runtime
 ENV NODE_ENV=production \
     PORT=3001 \
     HOST=0.0.0.0

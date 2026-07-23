@@ -1,22 +1,48 @@
 {{- if .Values.ingress.enabled -}}
 {{- $fullName := include "openshapeforge-api.fullname" . -}}
+{{- $tls := .Values.ingress.tls | default dict -}}
+{{- $hasTls := or $tls.secretName $tls.hosts .Values.ingress.certManagerClusterIssuer -}}
+{{- if and (not $hasTls) $tls.required -}}
+{{- fail "ingress.enabled is true but no TLS is configured. Set ingress.tls.secretName (+ ingress.tls.hosts) or ingress.certManagerClusterIssuer so the API is not served over plaintext HTTP. If TLS is terminated upstream (LB/mesh), set ingress.tls.required=false to accept that responsibility." -}}
+{{- end -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ $fullName }}
   labels:
     {{- include "openshapeforge-api.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
   annotations:
+    {{- if .Values.ingress.sslRedirect }}
+    # Redirect plaintext HTTP to HTTPS (ingress-nginx keys). Override in
+    # ingress.annotations for controllers that use different keys.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    {{- end }}
+    {{- with .Values.ingress.certManagerClusterIssuer }}
+    cert-manager.io/cluster-issuer: {{ . | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- end }}
 spec:
   {{- with .Values.ingress.className }}
   ingressClassName: {{ . }}
   {{- end }}
-  {{- with .Values.ingress.tls }}
+  {{- if $hasTls }}
   tls:
-    {{- toYaml . | nindent 4 }}
+    - hosts:
+        {{- if $tls.hosts }}
+        {{- toYaml $tls.hosts | nindent 8 }}
+        {{- else }}
+        {{- range .Values.ingress.hosts }}
+        - {{ .host | quote }}
+        {{- end }}
+        {{- end }}
+      {{- with $tls.secretName }}
+      secretName: {{ . | quote }}
+      {{- else }}
+      secretName: {{ printf "%s-tls" $fullName | quote }}
+      {{- end }}
   {{- end }}
   rules:
     {{- range .Values.ingress.hosts }}

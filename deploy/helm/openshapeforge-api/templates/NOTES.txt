@@ -26,3 +26,15 @@ are configured. Set auth.bearer.{jwksUri,issuer,audience} and provide
 OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET (via database.existingSecret or
 auth.internalContextSecret).
 {{- end }}
+
+{{- if .Values.ingress.enabled }}
+{{- $tls := .Values.ingress.tls | default dict }}
+{{- if and (not (or $tls.secretName $tls.hosts .Values.ingress.certManagerClusterIssuer)) (not $tls.required) }}
+
+WARNING: ingress.enabled is true but ingress.tls is not configured and
+ingress.tls.required is false. TLS is assumed to be terminated upstream
+(load balancer / service mesh). If that is NOT the case, the API is served
+over plaintext HTTP and bearer tokens / internal-context headers can be
+captured on the wire. Configure ingress.tls or ingress.certManagerClusterIssuer.
+{{- end }}
+{{- end }}

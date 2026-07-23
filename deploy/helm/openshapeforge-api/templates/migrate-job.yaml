@@ -53,6 +53,19 @@ spec:
                   key: DATABASE_URL
           resources:
             {{- toYaml .Values.migration.resources | nindent 12 }}
+          {{- if .Values.tmpDir.enabled }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          {{- end }}
+      {{- if .Values.tmpDir.enabled }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            {{- with .Values.tmpDir.sizeLimit }}
+            sizeLimit: {{ . }}
+            {{- end }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

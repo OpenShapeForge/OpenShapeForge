@@ -107,6 +107,19 @@ function quoteIdent(value: string): string {
 }
 
 /**
+ * Normalize a SQL default expression for drift comparison. The manifest records
+ * the verbatim authoring default (e.g. `now()`, `'{}'::jsonb`) while Postgres
+ * re-serializes information_schema.column_default in its own canonical form.
+ * For the scalar defaults this schema uses those forms coincide; we still trim
+ * surrounding whitespace so cosmetic differences never register as drift.
+ */
+function normalizeDefault(value: string | null | undefined): string | null {
+  if (value === undefined || value === null) return null;
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+
+/**
  * ADD COLUMN DDL for a manifest column. The column definition mirrors
  * packages/compiler/src/generate.ts renderColumnSql exactly: type, identity,
  * primary key, not null, default. The manifest type doubles as the SQL type
@@ -154,7 +167,7 @@ type ManifestSchemaDiff = {
  * Non-additive:
  * - required no-default non-identity column missing on a table WITH rows;
  * - DB column absent from the manifest;
- * - column type, nullability, or identity mismatch;
+ * - column type, nullability, identity, or (manifest-declared) default mismatch;
  * - DB table (in a covered schema, not in nonManifestManagedTables) absent
  *   from the manifest;
  * - manifest column type with no known information_schema mapping.
@@ -187,8 +200,9 @@ async function diffManifestAgainstDatabase(
       data_type: string;
       is_nullable: string;
       is_identity: string;
+      column_default: string | null;
     }>`
-      select table_schema, table_name, column_name, data_type, is_nullable, is_identity
+      select table_schema, table_name, column_name, data_type, is_nullable, is_identity, column_default
       from information_schema.columns
       where table_schema in (${sql.join(schemas)})
       order by table_schema, table_name, ordinal_position
@@ -200,7 +214,10 @@ async function diffManifestAgainstDatabase(
   );
   const liveColumnsByTable = new Map<
     string,
-    Map<string, { dataType: string; isNullable: string; isIdentity: string }>
+    Map<
+      string,
+      { dataType: string; isNullable: string; isIdentity: string; columnDefault: string | null }
+    >
   >();
   for (const row of liveColumns) {
     const tableName = `${row.table_schema}.${row.table_name}`;
@@ -213,6 +230,7 @@ async function diffManifestAgainstDatabase(
       dataType: row.data_type,
       isNullable: row.is_nullable,
       isIdentity: row.is_identity,
+      columnDefault: row.column_default,
     });
   }
 
@@ -285,6 +303,21 @@ async function diffManifestAgainstDatabase(
         nonAdditive.push(
           `${table.name}.${column.name}: identity mismatch — manifest says ${expectedIdentity ? "identity" : "not identity"}, database column is ${liveIdentity ? "identity" : "not identity"}`,
         );
+      }
+      // Default drift. Only checked when the manifest declares a default, so a
+      // DB-side implicit default the manifest never asserts never trips this.
+      // The roll-forward cannot ALTER a default in place (schema.sql is
+      // CREATE ... IF NOT EXISTS only), so a changed default is surfaced as a
+      // non-additive difference that hard-errors with remediation instructions
+      // rather than silently persisting the stale default.
+      if (column.default !== undefined) {
+        const expectedDefault = normalizeDefault(column.default);
+        const liveDefault = normalizeDefault(liveColumn.columnDefault);
+        if (expectedDefault !== liveDefault) {
+          nonAdditive.push(
+            `${table.name}.${column.name}: default mismatch — manifest expects DEFAULT ${expectedDefault ?? "(none)"}, database column has ${liveDefault ? `DEFAULT ${liveDefault}` : "no default"}`,
+          );
+        }
       }
     }
 

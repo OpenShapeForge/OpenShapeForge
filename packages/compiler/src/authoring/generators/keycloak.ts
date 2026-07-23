@@ -77,12 +77,18 @@ interface KeycloakUser {
   email?: string;
   firstName?: string;
   lastName?: string;
-  credentials: { type: "password"; value: string; temporary: false }[];
+  credentials?: { type: "password"; value: string; temporary: false }[];
   attributes?: Record<string, string[]>;
   realmRoles?: string[];
   /** Group paths; realm import resolves membership by path. */
   groups?: string[];
   clientRoles?: Record<string, string[]>;
+  /**
+   * Marks this user as the service account of the named client. The realm
+   * import binds it to that client (instead of treating it as a login user)
+   * and applies its `clientRoles` to the service account.
+   */
+  serviceAccountClientId?: string;
 }
 
 interface KeycloakGroup {
@@ -713,6 +719,25 @@ export function generateKeycloakRealmArtifacts(
     clientRoles: normalizeClientRoleMap(u.clientRoles),
   }));
 
+  // Service-account client-role grants. Keycloak's realm import binds a client's
+  // service account through a synthetic `service-account-<clientId>` user that
+  // sets `serviceAccountClientId`; its `clientRoles` become the service
+  // account's role mappings. These are NOT entity-derived roles (e.g.
+  // realm-management/manage-realm), so they are emitted verbatim.
+  const serviceAccountUsers: KeycloakUser[] = clientDefs
+    .filter(
+      (c) =>
+        c.kind === "serviceAccount" &&
+        c.serviceAccountClientRoles &&
+        Object.keys(c.serviceAccountClientRoles).length > 0,
+    )
+    .map((c) => ({
+      username: `service-account-${c.id}`,
+      enabled: true,
+      serviceAccountClientId: c.id,
+      clientRoles: c.serviceAccountClientRoles,
+    }));
+
   const realmCfg = authConfig.realm ?? {};
   const legacyEvents = authConfig.keycloak?.realm;
   const realm: KeycloakRealmExport = {
@@ -743,7 +768,7 @@ export function generateKeycloakRealmArtifacts(
       client: clientRolesOut,
     },
     ...(groupsOut ? { groups: groupsOut } : {}),
-    users,
+    users: [...users, ...serviceAccountUsers],
   };
 
   // JSON.parse(JSON.stringify(...)) drops undefined keys for stable output.

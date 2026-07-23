@@ -472,6 +472,15 @@ export interface AuthorizationClient {
    * forbidden. Ignored for other kinds.
    */
   webOrigins?: string[];
+  /**
+   * Client roles granted to this client's own service account
+   * (`serviceAccount` kind only). Emitted as a synthetic
+   * `service-account-<id>` user carrying `serviceAccountClientId` so the
+   * realm import wires the mappings. Used to grant the auth-api service
+   * account the `realm-management` capabilities the SPI admin endpoints
+   * require (e.g. `{ "realm-management": ["manage-realm"] }`).
+   */
+  serviceAccountClientRoles?: Record<string, string[]>;
 }
 
 /** Nested Keycloak group tree; `path` in the export is `/parent/child`. */

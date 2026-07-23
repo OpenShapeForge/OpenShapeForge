@@ -141,6 +141,15 @@
                 "type": "array",
                 "description": "Explicit CORS web-origin allow-list for gateway clients. Wildcards ('*') are forbidden.",
                 "items": { "type": "string", "minLength": 1, "not": { "pattern": "\\*" } }
+              },
+              "serviceAccountClientRoles": {
+                "type": "object",
+                "description": "Client roles granted to this client's own service account (serviceAccount kind only), keyed by clientId. Emitted as a synthetic service-account-<id> user in the realm export.",
+                "additionalProperties": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 },
+                  "minItems": 1
+                }
               }
             }
           }

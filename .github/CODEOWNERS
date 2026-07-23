@@ -1,0 +1,3 @@
+# Default reviewers for all changes. External contributions come in as PRs
+# from forks and are auto-assigned here for review.
+* @SvenHamers

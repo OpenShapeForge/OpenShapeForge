@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Relationship traversal per generated entity: belongsTo resolution and
  * hasMany lists with aggregate counts, derived from the manifest's

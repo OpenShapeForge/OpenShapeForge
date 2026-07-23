@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import {

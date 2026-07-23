@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Unit tests for checkGeneratedSchemaDrift against a throwaway scratch
  * database. The scratch DB is created and dropped through the admin URL on

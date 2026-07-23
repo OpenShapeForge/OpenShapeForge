@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { readFile } from "node:fs/promises";
 import YAML from "yaml";
 import type {

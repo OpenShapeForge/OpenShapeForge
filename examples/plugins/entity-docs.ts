@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Example compiler plugin: emits a markdown overview of every generated
  * entity. Demonstrates the plugin contract — pure, manifest/contract-driven

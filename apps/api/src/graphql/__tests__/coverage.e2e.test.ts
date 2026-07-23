@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Sanity backstop: the suite is derived from the same manifest the API
  * serves, so this can only fail if that derivation breaks.

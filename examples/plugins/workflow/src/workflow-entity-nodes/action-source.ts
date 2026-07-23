@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 import type { Field } from "../../../../../packages/compiler/src/authoring/types.js";
 import type { WorkflowAction } from "./types.js";
 import { ACTION_ICON_NAMES } from "./types.js";

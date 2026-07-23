@@ -9,6 +9,17 @@
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
+    <licenses>
+        <license>
+            <name>Business Source License 1.1</name>
+            <url>https://mariadb.com/bsl11/</url>
+            <distribution>repo</distribution>
+            <comments>SPDX-License-Identifier: BUSL-1.1. Source-available;
+                production use requires a commercial license from BatterAI B.V.
+                See the LICENSE file at the repository root.</comments>
+        </license>
+    </licenses>
+
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>

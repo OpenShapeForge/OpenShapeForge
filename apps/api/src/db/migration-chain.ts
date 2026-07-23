@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * The ordered migration chain, shared by the db:migrate CLI (migrate.ts,
  * which adds the advisory lock + lock_timeout around it) and the migration

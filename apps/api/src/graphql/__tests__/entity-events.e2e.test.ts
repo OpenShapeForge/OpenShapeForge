@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Entity-event journal behavior per generated entity: every mutation appends
  * exactly one created/updated/deleted event (in-transaction, into

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
 import { createDatabaseRuntime, readMigrateDatabaseUrl } from "./connection.js";
 import { runMigrationChain } from "./migration-chain.js";

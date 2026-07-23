@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Main compilation orchestrator for entity contracts.
  *

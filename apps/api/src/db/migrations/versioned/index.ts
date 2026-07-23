@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Explicit, ordered registry of versioned bespoke migrations.
  *

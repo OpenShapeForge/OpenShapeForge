@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Manifest-driven k6 performance suite for the generated GraphQL CRUD API.
  *

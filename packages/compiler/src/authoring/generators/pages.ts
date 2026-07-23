@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * View-driven page generator — produces Next.js list pages, detail pages, and
  * create/edit forms from compiled entity contracts and view contexts.

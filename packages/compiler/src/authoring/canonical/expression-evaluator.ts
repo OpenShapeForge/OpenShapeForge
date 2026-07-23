@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 // Source file for the shared canonical expression evaluator.
 // This file is copied verbatim into consumer repos by the workflow-contract generator.
 // Keep it self-contained — no imports outside the generated canonical-condition module.

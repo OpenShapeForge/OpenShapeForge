@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Runs the manifest-driven k6 performance suite against a running API and
  * renders a self-contained HTML report.

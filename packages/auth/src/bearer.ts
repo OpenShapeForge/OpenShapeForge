@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { createRemoteJWKSet, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from "jose";
 import { parseAuthIdentity } from "./claims.js";
 import type { AuthIdentity } from "./types.js";

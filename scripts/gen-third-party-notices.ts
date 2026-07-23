@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Regenerates THIRD-PARTY-NOTICES.md from the installed dependency tree.
  *

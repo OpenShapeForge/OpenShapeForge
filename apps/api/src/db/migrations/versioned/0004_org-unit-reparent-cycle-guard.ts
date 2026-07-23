@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { sql, type Kysely } from "kysely";
 import type { VersionedMigration } from "../versioned-runner.js";
 

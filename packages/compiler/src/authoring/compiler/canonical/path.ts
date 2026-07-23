@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Canonical path parsing and construction — transforms raw path strings
  * (e.g. "business.name") into structured CanonicalPath objects with

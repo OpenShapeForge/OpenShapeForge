@@ -17,6 +17,8 @@
     "check:authoring-local": "bun scripts/check-authoring-local.mjs",
     "check:generated": "bun scripts/check-generated-artifacts.mjs",
     "check:notices": "bun scripts/gen-third-party-notices.ts --check",
+    "check:license": "bun scripts/check-license-headers.mjs",
+    "license:headers": "bun scripts/add-license-headers.mjs",
     "typecheck:compiler": "bun run --cwd packages/compiler typecheck",
     "typecheck:api": "bun run --cwd apps/api typecheck",
     "test:compiler": "bun test packages/compiler",

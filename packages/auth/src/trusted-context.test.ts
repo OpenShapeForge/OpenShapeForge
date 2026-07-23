@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import {
   TRUSTED_CONTEXT_MAX_AGE_MS,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Bootstrap DDL for platform.schema_migrations — the single ledger used by
  * both the generated-schema roll-forward migration and the versioned bespoke

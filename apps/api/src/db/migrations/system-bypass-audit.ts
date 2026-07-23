@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../connection.js";
 

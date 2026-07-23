@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 import { createHash } from "node:crypto";
 import type { CoreEntity, Field } from "../../../../../packages/compiler/src/authoring/types.js";
 import { pluralize } from "../../../../../packages/compiler/src/authoring/compiler/helpers.js";

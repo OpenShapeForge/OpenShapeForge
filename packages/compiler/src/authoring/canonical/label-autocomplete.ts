@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 // Source file for the shared label-rule autocomplete helper.
 // This file is copied (with the field-contract import path rewritten per target)
 // into consumer repos by the workflow-contract generator. Keep the logic

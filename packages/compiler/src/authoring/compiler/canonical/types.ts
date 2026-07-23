@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Canonical type definitions — all type aliases, interfaces, and union types
  * used by the canonical compiler kernel.

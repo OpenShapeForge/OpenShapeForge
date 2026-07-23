@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import { resolveListFallbackField } from "./pages.js";
 import type { CompiledEntityContract } from "../types/compiled.js";

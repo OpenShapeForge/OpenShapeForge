@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Entity-to-canonical bridge — transforms compiled entity contracts into
  * canonical compiler kernels. Converts compiled fields, profile types,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import manifest from "../generated/db/manifest.json" with { type: "json" };
 import { GraphQLError } from "graphql";
 import { sql } from "kysely";

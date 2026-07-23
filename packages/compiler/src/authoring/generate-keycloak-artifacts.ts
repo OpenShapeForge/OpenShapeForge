@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Loads authoring entities + authorization.yaml from disk and emits the
  * Keycloak realm-export JSON. Mirrors the shape of `generate-ui-artifacts.ts`

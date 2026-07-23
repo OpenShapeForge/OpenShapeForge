@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import { validateTimelineIncludes } from "./index.js";
 import type {

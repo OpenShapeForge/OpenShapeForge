@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Loads YAML authoring files from disk into a LoadedArtifacts bundle.
  *

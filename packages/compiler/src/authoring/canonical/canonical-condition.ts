@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 // Source file for canonical condition / expression TypeScript types.
 // This file is copied verbatim into consumer repos by the workflow-contract generator.
 // Keep it self-contained — no imports.

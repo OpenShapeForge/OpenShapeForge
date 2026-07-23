@@ -11,7 +11,6 @@ export function buildActionSource(input: {
   definitionName: string;
   nodeType: string;
   entityLabels: { en: string; nl: string };
-  supportedErrorRoutes: GeneratedEntityErrorRouteDefinition[];
   readableFields: Field[];
   defaultSort?: { field: string; direction: "asc" | "desc" };
 }) {
@@ -21,7 +20,6 @@ export function buildActionSource(input: {
     definitionName,
     nodeType,
     entityLabels,
-    supportedErrorRoutes,
     readableFields,
     defaultSort,
   } = input;

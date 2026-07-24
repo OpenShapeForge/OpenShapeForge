@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { AuthIdentity, TrustedContextHeaderNames } from "./types.js";
 

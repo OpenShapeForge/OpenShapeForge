@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Pure unit tests for assertProductionEnv. No database or network — every case
  * passes a fabricated env object, so these run fast and hermetically.

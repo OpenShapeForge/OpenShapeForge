@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Keycloak `openshapeforge-dev-realm.json` generator.
  *

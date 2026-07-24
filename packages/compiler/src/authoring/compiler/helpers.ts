@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 // ── Naming & pluralization helpers ──
 import type { Field } from "../types.js";
 

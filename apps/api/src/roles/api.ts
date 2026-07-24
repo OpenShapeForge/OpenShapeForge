@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * API role: fastify server hosting the GraphQL endpoint at /api/graphql.
  *

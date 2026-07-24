@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Workflow contract artifact generator — produces shared TypeScript type definitions
  * and data files consumed by the workflow engine, canonical renderer, and frontend.

@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 import type { CoreEntity, Field, SemanticTypeDefinition } from "../../../../../packages/compiler/src/authoring/types.js";
 import type { WorkflowActionConfig, WorkflowActionEntry } from "./types.js";
 import { ACTION_ORDER } from "./types.js";

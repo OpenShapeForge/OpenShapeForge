@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * End-to-end proof of the generated CRUD surface against a running API.
  *

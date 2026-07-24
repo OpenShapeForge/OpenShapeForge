@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Canonical normalization — transforms loose input shapes into strict canonical
  * structures. Handles fields, field references, conditions, actions, and

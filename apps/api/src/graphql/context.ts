@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { resolveSessionContext } from "../auth/identity.js";
 import type { SessionScope } from "../auth/trusted-context.js";

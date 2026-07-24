@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import { generateArtifacts } from "./generate.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";

@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Shared view/presentation normalization used by both semantic checks and the
  * view compiler, extracted to eliminate duplication between those two stages.

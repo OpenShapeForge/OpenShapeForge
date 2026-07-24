@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Migration-evolution tests. Every scenario runs the real migration chain
  * (app helpers -> system bypass audit -> versioned -> generated roll-forward)

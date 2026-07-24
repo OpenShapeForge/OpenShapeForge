@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * §D.2 / §F — closure trigger proof. The trigger on platform.org_unit maintains
  * platform.org_unit_closure atomically with each org_unit write. We run the full

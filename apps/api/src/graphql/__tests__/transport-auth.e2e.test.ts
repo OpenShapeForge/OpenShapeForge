@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Entity-independent transport and authentication behavior: the public
  * health query, fail-closed bearer verification, and a real Keycloak

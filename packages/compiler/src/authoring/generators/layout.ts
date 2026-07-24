@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * App shell layout generator — produces the root Next.js layout with sidebar
  * navigation, the generated route group layout, and the home page.

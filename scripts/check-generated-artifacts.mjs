@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+// SPDX-License-Identifier: BUSL-1.1
 
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";

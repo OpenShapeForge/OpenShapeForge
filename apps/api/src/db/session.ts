@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";

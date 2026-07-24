@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Layered authoring resolution — Kustomize-style bases and overlays.
  *

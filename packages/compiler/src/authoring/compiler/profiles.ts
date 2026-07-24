@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Profile compiler — compiles profile-specific configuration for context extensions
  * (e.g., sector standards, third-party API projections).

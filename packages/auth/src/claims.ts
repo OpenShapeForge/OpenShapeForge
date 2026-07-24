@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { decodeJwt } from "jose";
 import type { AuthIdentity, AuthProfile } from "./types.js";
 

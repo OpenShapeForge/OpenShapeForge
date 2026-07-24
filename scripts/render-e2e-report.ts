@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Runs the manifest-driven GraphQL e2e suite and renders a human-readable,
  * self-contained HTML report.

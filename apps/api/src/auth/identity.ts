@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { createBearerVerifier, type BearerVerifier } from "@openshapeforge/auth";
 import {
   readTrustedSessionContext,

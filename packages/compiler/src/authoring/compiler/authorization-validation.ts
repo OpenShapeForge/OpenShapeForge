@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Authorization reference validation — cross-checks role names referenced in
  * compiled entity authorizations against the realm vocabulary declared in

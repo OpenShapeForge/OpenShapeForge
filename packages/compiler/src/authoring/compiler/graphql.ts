@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * GraphQL schema compiler — builds type definitions, queries, mutations, and filters
  * from the compiled entity model.

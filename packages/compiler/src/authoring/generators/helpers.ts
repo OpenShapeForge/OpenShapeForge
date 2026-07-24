@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * EJS template rendering helper and shared utility functions used by all generators.
  *

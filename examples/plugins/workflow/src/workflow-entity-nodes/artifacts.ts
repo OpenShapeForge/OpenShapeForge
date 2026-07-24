@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 import { generatedCrudDeniedEntitySlugs } from "../../../../../packages/compiler/src/active-manifest.js";
 import type { CoreEntity } from "../../../../../packages/compiler/src/authoring/types.js";
 import type { WorkflowEntityGenerationOptions, RuntimeRegistryEntry, DesignerLazyRegistryEntry, DesignerDetailRegistryEntry, RendererEntityFieldSuggestionEntry } from "./types.js";

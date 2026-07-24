@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Security behavior per generated entity: unauthenticated rejection and
  * cross-tenant RLS isolation — other tenants see nothing, cannot delete,

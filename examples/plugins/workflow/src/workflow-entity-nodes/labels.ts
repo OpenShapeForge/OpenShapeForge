@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 import type { WorkflowAction } from "./types.js";
 
 export function getActionLabel(entityLabels: { en: string; nl: string }, action: WorkflowAction) {

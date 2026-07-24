@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * View compiler — transforms UI presentation definitions into CompiledViewContext objects.
  *

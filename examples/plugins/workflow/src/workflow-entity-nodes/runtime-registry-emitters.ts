@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 import { createHash } from "node:crypto";
 import type { DesignerDetailRegistryEntry, DesignerLazyRegistryEntry, RuntimeRegistryEntry } from "./types.js";
 

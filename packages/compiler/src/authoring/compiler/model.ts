@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Model field compiler — resolves YAML field definitions into CompiledField objects.
  *

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Single source of truth for filesystem paths owned by `bun run generate`.
  *

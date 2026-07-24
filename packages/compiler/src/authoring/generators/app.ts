@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Barrel re-export for app-level generators — layout and view-driven page generation.
  *

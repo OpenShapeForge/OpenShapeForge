@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Authorization sub-compiler — transforms YAML authorization declarations into
  * compiled authorization metadata.

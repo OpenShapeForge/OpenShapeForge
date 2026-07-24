@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Manifest-driven entity derivation for the e2e suite: which entities exist,
  * how their GraphQL fields map to columns, and how to create valid rows

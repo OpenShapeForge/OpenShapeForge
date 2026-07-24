@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Regression guard for the security finding: the app must connect as a
  * NON-superuser role so `FORCE ROW LEVEL SECURITY` is actually enforced by

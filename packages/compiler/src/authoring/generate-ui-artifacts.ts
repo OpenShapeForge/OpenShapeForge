@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";

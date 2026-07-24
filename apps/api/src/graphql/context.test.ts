@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * §F.3 — F5 fix: the runtime `scope` must thread end-to-end.
  *

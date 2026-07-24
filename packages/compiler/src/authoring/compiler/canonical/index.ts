@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 export * from "./types.js";
 export { parseCanonicalPath, createCanonicalPath } from "./path.js";
 export {

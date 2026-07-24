@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Relationship compiler — aggregates relationship declarations from core entity
  * and all profiles into a unified list.

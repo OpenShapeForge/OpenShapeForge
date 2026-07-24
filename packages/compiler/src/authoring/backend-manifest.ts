@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { join, relative } from "node:path";
 import { compile } from "./compiler/index.js";
 import type { CompiledEntityContract } from "./types/compiled.js";

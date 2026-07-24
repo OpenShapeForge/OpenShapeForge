@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Shared harness for the manifest-driven GraphQL e2e suite.
  *

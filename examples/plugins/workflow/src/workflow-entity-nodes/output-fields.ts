@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 import type { Field } from "../../../../../packages/compiler/src/authoring/types.js";
 import { UNBOUNDED_CARDINALITY } from "./types.js";
 import { toKebabCase, toOutputField } from "./utils.js";

@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 import type { LocalizedText } from "./common.js";
 
 export interface NavItem {

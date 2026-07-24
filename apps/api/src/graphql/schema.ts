@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Minimal GraphQL schema for the generated-entity CRUD runtime.
  *

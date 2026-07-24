@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Core CRUD lifecycle per generated entity: create/get, filtered lists,
  * cursor pagination, sorting, updates, and deletes — all derived from the

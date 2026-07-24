@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 import type { Field, LocalizedText } from "../../../../../packages/compiler/src/authoring/types.js";
 import { getReferentieItemsForGroep } from "../../../../../packages/compiler/src/authoring/referentiedata/resolve-referentiedata-options.js";
 

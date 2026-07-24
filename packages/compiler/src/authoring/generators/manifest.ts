@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Entity manifest + dynamic route generator — produces a cross-entity manifest
  * that maps URL slugs to entity configs/actions, and 4 dynamic Next.js route

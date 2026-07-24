@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Storage compiler — maps entity fields to SQL column definitions.
  *

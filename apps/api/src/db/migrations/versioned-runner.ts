@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Versioned bespoke migrations: an explicit, ordered registry of hand-written
  * schema transformations, applied between the platform baseline migrations

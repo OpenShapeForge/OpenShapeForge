@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import { resolveStorageColumns } from "./storage.js";
 import type { Field, EntityProfile, Relationship } from "../types.js";

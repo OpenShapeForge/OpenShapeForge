@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Preflight: the e2e suite is manifest-driven, so running it against a
  * database whose generated schema is behind the bundled manifest produces

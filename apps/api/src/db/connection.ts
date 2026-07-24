@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { SQL } from "bun";
 import { Kysely } from "kysely";
 import { PostgresJSDialect } from "kysely-postgres-js";

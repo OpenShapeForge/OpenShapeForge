@@ -1,4 +1,5 @@
 // @ts-nocheck
+// SPDX-License-Identifier: BUSL-1.1
 export * from "./common.js";
 export * from "./authoring.js";
 export * from "./views.js";

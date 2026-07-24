@@ -15,14 +15,14 @@ hand-written engines — never the generated output.
 
 ```sh
 bun install
+cp apps/api/.env.example apps/api/.env   # required before db:migrate/dev:api; defaults match the compose stack
 docker compose -f docker-compose.local.yml up -d --build
 bun run generate       # compile authoring YAML into generated artifacts
 bun run db:migrate     # create/roll-forward the schema
 bun run dev:api        # http://127.0.0.1:3001/api/graphql (GraphiQL in dev)
 ```
 
-Copy `apps/api/.env.example` to `apps/api/.env` first; the defaults match the compose
-stack. `bun scripts/e2e-crud-proof.ts` is a live smoke test of the running API.
+`bun scripts/e2e-crud-proof.ts` is a live smoke test of the running API.
 
 ## The golden rule: never edit generated artifacts
 

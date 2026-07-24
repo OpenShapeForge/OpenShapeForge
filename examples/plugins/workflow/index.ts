@@ -1,8 +1,9 @@
 /**
  * Example compiler plugin: workflow node catalogs.
  *
- * Extracted from the compiler core, where these generators sat dormant behind
- * the web-gated UI path. The plugin owns the whole workflow surface:
+ * This packages the workflow generators as a standalone plugin instead of a
+ * built-in compiler feature; they run behind the web-gated UI path. The plugin
+ * owns the whole workflow surface:
  *
  * - `contributePlatformTables` brings back the three global (tenant-agnostic)
  *   workflow catalog tables the generators seed:
@@ -60,9 +61,8 @@ function toServicePath(oldCompilerPath: string): string | null {
 }
 
 /**
- * The three workflow catalog tables, restored verbatim from the platform
- * schema this repo shipped before the web layer was stripped (git 437751a^).
- * Global, tenant-agnostic compiler-generated platform config — NOT tenant
+ * The three workflow catalog tables the plugin contributes to the platform
+ * schema. Global, tenant-agnostic compiler-generated platform config — NOT tenant
  * data, so tenantScoped: false (no tenant_id, no RLS), and domainInternal so
  * no generated CRUD/GraphQL surface is emitted for them.
  */

@@ -53,8 +53,8 @@ export function buildSyntheticBelongsToIdFields(
 
     const targetEntity = entityRegistry.get(relationship.target);
     if (!targetEntity) {
-      // Plugin-extraction adaptation: this repo is a slice of the upstream
-      // catalog, so a belongsTo may target an entity that is not present
+      // The authored entity catalog may be partial, so a belongsTo can target
+      // an entity that is not present in this repo
       // (e.g. ContactDetail → RelationRole). The core backend compiler
       // tolerates that (skippedReferences); do the same here instead of
       // failing the whole workflow generation — no synthetic <key>Id picker

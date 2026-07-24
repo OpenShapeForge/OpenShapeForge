@@ -110,8 +110,8 @@ CI immediately. Plugins are held to the same contract.
   data layer, referentiedata snapshot, Keycloak realm, and plugin artifacts
   only. See [consuming.md](consuming.md#re-enabling-web-generation).
 - **Entity events have no consumers yet.** Mutations append journal rows in
-  `platform.entity_events`; the outbox/realtime fanout of the upstream service
-  was intentionally removed, and no GraphQL query exposes the journal. See
+  `platform.entity_events`; no outbox/realtime fanout ships in this repo, and
+  no GraphQL query exposes the journal. See
   [api.md](api.md#the-entity-event-journal).
 - **Entity hooks** (`hooks:` in entity YAML — before/after
   create/update/delete) are parsed and carried on the compiled contract, but

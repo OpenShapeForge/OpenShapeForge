@@ -155,9 +155,9 @@ single-query name (e.g. `relation`), `aggregate_id` = the row id, and payload
 `{ table, schema, operation }`. Reads append nothing; failed cross-tenant
 mutations journal nothing (the e2e suite asserts all of this).
 
-**What does not exist yet:** there are **no consumers** — the upstream
-outbox enqueue, realtime dirty-marker projection, and cross-replica fanout
-were deliberately removed from this runtime. There is also **no API query**
+**What does not exist yet:** there are **no consumers** — no outbox enqueue,
+realtime dirty-marker projection, or cross-replica fanout ships in this
+runtime. There is also **no API query**
 over the journal; `listEntityEvents` exists in code and is used by the e2e
 suite reading Postgres directly through the same RLS session layer. The
 journal is append-only by design (`test:perf` runs accumulate rows).

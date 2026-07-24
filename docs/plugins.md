@@ -135,9 +135,10 @@ reference for this repo (gitignored; recreate with `bun run generate`).
 ## Shipped example 2: `workflow`
 
 `examples/plugins/workflow/` — a package-style plugin that exercises every
-extension point at once. It is the workflow node-catalog machinery
-**extracted from the compiler core**, where these generators previously sat
-dormant behind the web-gated UI path (removed from core at git `437751a^`).
+extension point at once. It packages the workflow node-catalog machinery
+**as a standalone plugin** rather than as a built-in compiler feature: the
+generators live in the plugin and run behind the web-gated UI path, so the
+compiler core stays focused on the data layer.
 
 **Contributed platform tables** (`contributePlatformTables`) — three global,
 tenant-agnostic catalog tables (`tenantScoped: false`, `domainInternal:

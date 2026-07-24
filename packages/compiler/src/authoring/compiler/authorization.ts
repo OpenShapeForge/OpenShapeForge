@@ -177,6 +177,18 @@ export function buildAuthorization(
     //      authors don't declare an explicit field shadowing the relationship).
     // Catches typos and stops generation before SQL emits a broken policy.
     const validateAxisColumn = (col: string, axis: "owner" | "group") => {
+      // Strict identifier allowlist BEFORE any downstream SQL emission. The
+      // owner/group column is emitted verbatim into RLS predicates via
+      // quoteIdent(); reject anything outside plain lowercase snake_case so a
+      // hostile name cannot inject into or restructure the row-security policy.
+      if (!/^[a-z_][a-z0-9_]*$/.test(col)) {
+        throw new AuthorizationCompileError(
+          coreEntity.entity,
+          `authorization.rowAccess.${axis}.column "${col}" is not a valid column identifier — ` +
+            `it must match /^[a-z_][a-z0-9_]*$/ (lowercase letters, digits, and underscores; not starting with a digit). ` +
+            `This value is emitted into generated RLS policies and cannot contain other characters.`,
+        );
+      }
       const persistedField = allAuthoringFields.find(
         (f) => f.persisted?.column === col,
       );

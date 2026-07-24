@@ -31,7 +31,13 @@ function tsGeneratedHeader(source: string): string {
 }
 
 function quoteIdent(value: string): string {
-  return `"${value}"`;
+  // Double any embedded double-quote so a hostile or malformed identifier
+  // cannot break out of the quoted-identifier syntax (mirrors quoteSqlString's
+  // single-quote doubling). This is the belt to storage.ts's suspenders: the
+  // authoring-layer allowlist (validateColumnIdentifier) is the primary guard,
+  // but escaping here keeps every emitted identifier well-formed regardless of
+  // caller.
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 function quoteSqlString(value: string): string {

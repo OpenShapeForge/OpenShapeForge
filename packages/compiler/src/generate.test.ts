@@ -50,6 +50,35 @@ describe("platform schema generator", () => {
     );
   });
 
+  it("escapes embedded double-quotes in quoted identifiers", () => {
+    // Defense-in-depth: even if a hostile identifier reaches the generator
+    // (the primary guard is the authoring-layer allowlist), quoteIdent must
+    // double embedded double-quotes so the emitted SQL stays well-formed and
+    // cannot break out of the quoted-identifier syntax.
+    const hostileManifest: PlatformSchemaManifest = {
+      version: 1,
+      tables: [
+        {
+          schema: "erp",
+          name: "cases",
+          tenantScoped: false,
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true },
+            { name: 'a"b', type: "text" },
+          ],
+        },
+      ],
+    };
+
+    const sql = generateArtifacts(hostileManifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql"),
+    )?.contents;
+
+    // The double-quote inside the identifier is doubled, not passed through raw.
+    expect(sql).toContain('"a""b"');
+    expect(sql).not.toContain('"a"b"');
+  });
+
   it("emits Kysely DB types without old service surfaces", () => {
     const types = generateArtifacts(manifest).find((artifact) =>
       artifact.path.endsWith("types.ts"),

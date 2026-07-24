@@ -5,6 +5,15 @@ export type DbSessionScope = "tenant" | "group" | "self";
 
 const MAX_SESSION_GROUPS = 256;
 
+// Closure expansion of the direct set (capped at MAX_SESSION_GROUPS) can
+// legitimately grow far beyond it: a shallow-but-wide org tree turns one
+// assigned root into its entire subtree. Cap each expanded set so a
+// pathological hierarchy cannot inflate the `app.user_groups{,_ancestors}`
+// GUCs (and the `= ANY(...)` array every group-scoped RLS check evaluates)
+// without bound. Sized well above the direct cap to leave room for genuine
+// expansion while still bounding GUC size and per-query cost.
+const MAX_EXPANDED_SESSION_GROUPS = 4096;
+
 export type DbSessionInput = {
   tenantId?: string | null;
   userId?: string | null;
@@ -58,6 +67,14 @@ function normalizeGroups(groups: readonly string[] | null | undefined): readonly
     );
   }
   return uuids;
+}
+
+function assertExpandedGroupsWithinCap(expanded: readonly string[], label: string) {
+  if (expanded.length > MAX_EXPANDED_SESSION_GROUPS) {
+    throw new Error(
+      `Database session expanded to ${expanded.length}+ org units for ${label}; cap is ${MAX_EXPANDED_SESSION_GROUPS}. Assign a narrower org unit than a shallow, very wide subtree root.`,
+    );
+  }
 }
 
 function normalizeScope(scope: DbSessionScope | null | undefined): DbSessionScope {
@@ -117,21 +134,27 @@ export async function applyDbSession<TDatabase>(
     // validated UUID (normalizeGroups), so no escaping is required.
     const directLiteral = `{${exact.join(",")}}`;
 
+    // Fetch one row beyond the cap so an over-large expansion is detected
+    // without materializing the entire pathological subtree into JS.
     const descendantsResult = await sql<{ id: string }>`
       select distinct descendant_id as id
       from platform.org_unit_closure
       where tenant_id = ${session.tenantId}::uuid
         and ancestor_id = any(${directLiteral}::uuid[])
+      limit ${MAX_EXPANDED_SESSION_GROUPS + 1}
     `.execute(trx);
     descendants = descendantsResult.rows.map((row) => row.id);
+    assertExpandedGroupsWithinCap(descendants, "app.user_groups (descendants)");
 
     const ancestorsResult = await sql<{ id: string }>`
       select distinct ancestor_id as id
       from platform.org_unit_closure
       where tenant_id = ${session.tenantId}::uuid
         and descendant_id = any(${directLiteral}::uuid[])
+      limit ${MAX_EXPANDED_SESSION_GROUPS + 1}
     `.execute(trx);
     ancestors = ancestorsResult.rows.map((row) => row.id);
+    assertExpandedGroupsWithinCap(ancestors, "app.user_groups_ancestors (ancestors)");
   }
 
   await sql`select set_config('app.user_groups', ${descendants.join(",")}, true)`.execute(trx);

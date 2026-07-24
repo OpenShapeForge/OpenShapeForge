@@ -445,7 +445,32 @@ export interface AuthorizationClient {
   id: string;
   kind: "gateway" | "bearerOnly" | "serviceAccount";
   name?: string;
+  /**
+   * Client secret. To keep real credentials out of the committed config it may
+   * be an env reference of the form `${env:VAR_NAME}` (optionally with a
+   * `${env:VAR_NAME:-fallback}` default), which is resolved at generate time.
+   * A literal secret is only permitted on a dev realm — use `devSecret` for
+   * that so its dev-only nature is explicit. Generation fails if a non-dev
+   * realm carries a literal (unreferenced) secret.
+   */
   secret?: string;
+  /**
+   * Dev-only literal client secret. Only honored when the realm is a
+   * development realm (see isDevRealm in generators/keycloak.ts); generation
+   * fails if a non-dev realm still carries a devSecret. Keeps the docker-compose
+   * dev stack working without shipping a usable credential to production.
+   */
+  devSecret?: string;
+  /**
+   * Explicit redirect-URI allow-list for a gateway (standard-flow) client.
+   * Required for gateway clients; "*" is forbidden. Ignored for other kinds.
+   */
+  redirectUris?: string[];
+  /**
+   * Explicit web-origin (CORS) allow-list for a gateway client. "*" is
+   * forbidden. Ignored for other kinds.
+   */
+  webOrigins?: string[];
 }
 
 /** Nested Keycloak group tree; `path` in the export is `/parent/child`. */

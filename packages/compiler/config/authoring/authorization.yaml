@@ -43,18 +43,35 @@ keycloak:
   #   gateway        — interactive login client (redirectUris, protocolMappers)
   #   bearerOnly     — resource server that only validates tokens
   #   serviceAccount — client credentials flow only
-  # Protocol mappers, secrets, redirectUris, webOrigins etc. are hardcoded
-  # defaults in the generator.
+  # Protocol mappers and non-security defaults come from the generator.
+  # SECURITY: gateway redirectUris/webOrigins are an explicit allow-list here —
+  # never "*" (the generator refuses wildcards and standard-flow gateways with
+  # no concrete redirectUris). Secrets use `devSecret` (dev-only literal, valid
+  # only on this dev realm) or a `${env:VAR}` reference resolved at generate
+  # time; a non-dev realm carrying a literal/dev secret fails generation.
   clients:
     - id: openshapeforge-gateway
       kind: gateway
       name: OpenShapeForge API Gateway
-      secret: dev-secret
+      # Dev-only credential — never reuse outside local development. A real
+      # deployment authors its own gateway with a `${env:...}` secret.
+      devSecret: dev-secret
+      # Concrete local-dev redirect URIs / CORS origins for the docker-compose
+      # stack (API :3001, Keycloak account console :8181, and a dev SPA on
+      # :3000). A non-dev realm must supply its own real hostnames here.
+      redirectUris:
+        - http://localhost:3000/*
+        - http://localhost:3001/*
+        - http://localhost:8181/realms/openshapeforge-dev/account/*
+      webOrigins:
+        - http://localhost:3000
+        - http://localhost:3001
+        - http://localhost:8181
 
     - id: erp-provider
       kind: bearerOnly
       name: ERP Provider — entity scopes
-      secret: erp-provider-secret
+      devSecret: erp-provider-secret
 
     - id: openshapeforge-support
       kind: bearerOnly
@@ -65,7 +82,7 @@ keycloak:
     - id: openshapeforge-timeline
       kind: bearerOnly
       name: OpenShapeForge Timeline Service
-      secret: openshapeforge-timeline-secret
+      devSecret: openshapeforge-timeline-secret
 
     - id: openshapeforge-knowledge-base
       kind: bearerOnly
@@ -74,7 +91,7 @@ keycloak:
     - id: seed-service
       kind: serviceAccount
       name: Seed Service Account
-      secret: seed-service-secret
+      devSecret: seed-service-secret
 
     - id: openshapeforge-messaging
       kind: bearerOnly
@@ -85,7 +102,7 @@ keycloak:
     - id: openshapeforge-auth-api
       kind: serviceAccount
       name: OpenShapeForge Auth API Service
-      secret: openshapeforge-auth-api-secret
+      devSecret: openshapeforge-auth-api-secret
 
 # Realm-level roles. `composites` is an explicit per-client role list;
 # `includes` is a wildcard-expansion pattern over entity-derived composite roles

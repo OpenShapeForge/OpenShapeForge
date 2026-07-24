@@ -51,6 +51,20 @@ spec:
                 secretKeyRef:
                   name: {{ include "openshapeforge-api.secretName" . }}
                   key: DATABASE_URL
+            # Password the restricted role is provisioned with (first creation
+            # only). Required because NODE_ENV=production; must match the
+            # password inside DATABASE_URL.
+            - name: OPENSHAPEFORGE_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openshapeforge-api.secretName" . }}
+                  key: OPENSHAPEFORGE_APP_PASSWORD
+            {{- if .Values.database.appPasswordRotate }}
+            # One-shot rotation: set database.appPasswordRotate=true for a single
+            # upgrade to reset the existing role's password to the value above.
+            - name: OPENSHAPEFORGE_APP_PASSWORD_ROTATE
+              value: "1"
+            {{- end }}
           resources:
             {{- toYaml .Values.migration.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}

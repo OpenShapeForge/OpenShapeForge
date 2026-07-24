@@ -30,11 +30,23 @@ fullnameOverride: ""
 database:
   # If set, all secret env is read from this existing Secret. It must contain
   # keys: DATABASE_URL, OPENSHAPEFORGE_MIGRATE_DATABASE_URL,
-  # OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET.
+  # OPENSHAPEFORGE_APP_PASSWORD, OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET.
   existingSecret: ""
   # Used only when existingSecret is empty (chart-managed Secret):
   url: "" # postgres://openshapeforge_app:<pw>@<host>:5432/openshapeforge  (restricted role)
   migrateUrl: "" # postgres://openshapeforge:<pw>@<host>:5432/openshapeforge  (privileged role)
+  # Password for the restricted openshapeforge_app role. The pre-upgrade migrate
+  # Job provisions the role with this value ON FIRST CREATION ONLY (it never
+  # force-resets an existing role's password), so it MUST equal <pw> in
+  # database.url above. Required in production (NODE_ENV=production is always
+  # set): a strong, randomized secret — the migrate Job refuses to run if unset
+  # or left at the dev default. To rotate an already-provisioned role, set the
+  # new value here AND appPasswordRotate=true for one upgrade (update
+  # database.url in lockstep).
+  appPassword: ""
+  # Set to true for a SINGLE upgrade to rotate the restricted role's password to
+  # database.appPassword. Leave false for routine upgrades.
+  appPasswordRotate: false
 
 # --- Authentication (OIDC / Keycloak) ----------------------------------------
 # Non-secret bearer verification config. Audience is REQUIRED in production.

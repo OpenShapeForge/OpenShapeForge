@@ -19,10 +19,22 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
  * CREATE ROLE is CLUSTER-WIDE, so the role survives across the throwaway
  * scratch databases used by migrations.test.ts. Everything here is therefore
  * fully idempotent:
- *   - the role is created only if pg_roles has no such row;
- *   - ALTER ROLE ... PASSWORD / NOSUPERUSER / NOBYPASSRLS re-asserts the
- *     intended attributes every run (defensive against manual tampering);
+ *   - the role is created only if pg_roles has no such row, and its password
+ *     is set only at that point (never force-reset on later runs);
+ *   - ALTER ROLE ... NOSUPERUSER / NOBYPASSRLS re-asserts the load-bearing RLS
+ *     attributes every run (defensive against manual tampering);
  *   - GRANT and ALTER DEFAULT PRIVILEGES are naturally idempotent.
+ *
+ * PASSWORD OWNERSHIP
+ * ------------------
+ * The password is OPERATOR-OWNED, not source-owned. It is read from
+ * OPENSHAPEFORGE_APP_PASSWORD (see {@link readAppRolePassword}) and must stay
+ * consistent with the password in the runtime DATABASE_URL. It is applied only
+ * on first creation of the role; migrations do NOT overwrite an existing role's
+ * password on every run (that would clobber an operator-chosen credential and
+ * force a downgrade to a known value). To rotate, set
+ * OPENSHAPEFORGE_APP_PASSWORD_ROTATE=1 for a single migrate run alongside the
+ * new OPENSHAPEFORGE_APP_PASSWORD (and update DATABASE_URL in lockstep).
  *
  * The GRANT ON ALL … statements only cover objects that EXIST at grant time,
  * so `applyAppRoleGrants` (the ON ALL sweep) must run AFTER the generated
@@ -33,9 +45,66 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
  * automatically on every migrate.
  */
 
-/** The restricted runtime role and its dev password. */
+/** The restricted runtime role. */
 export const APP_ROLE = "openshapeforge_app";
-const APP_ROLE_PASSWORD = "openshapeforge_app";
+
+/**
+ * The local-dev-only default password for {@link APP_ROLE}. It matches the
+ * DATABASE_URL in apps/api/.env.example and the RLS/migration scratch tests so
+ * local work is frictionless. It is NEVER accepted in production —
+ * {@link readAppRolePassword} fails closed there.
+ */
+export const DEV_APP_ROLE_PASSWORD_DEFAULT = "openshapeforge_app";
+
+/**
+ * Resolve the password to provision {@link APP_ROLE} with. Operator-owned: it
+ * must match the password embedded in the runtime DATABASE_URL.
+ *
+ * Fails closed in production (mirrors config/production-guard.ts): when
+ * NODE_ENV === 'production', OPENSHAPEFORGE_APP_PASSWORD must be set to a
+ * non-empty value that is NOT the public dev default. Outside production it
+ * falls back to the dev default so local dev and the scratch-DB tests keep
+ * working without extra configuration.
+ *
+ * The dev default is never silently used in production, so the role's
+ * credential can never collapse to a source-published constant equal to the
+ * role name.
+ */
+export function readAppRolePassword(env: NodeJS.ProcessEnv = process.env): string {
+  const password = env.OPENSHAPEFORGE_APP_PASSWORD;
+
+  if (env.NODE_ENV === "production") {
+    if (!password) {
+      throw new Error(
+        "OPENSHAPEFORGE_APP_PASSWORD is required in production. It provisions the " +
+          "restricted, RLS-enforcing runtime role and must match the password in " +
+          "DATABASE_URL. Set a strong, randomized secret (never the dev default).",
+      );
+    }
+    if (password === DEV_APP_ROLE_PASSWORD_DEFAULT) {
+      throw new Error(
+        "OPENSHAPEFORGE_APP_PASSWORD is still the public dev default " +
+          `('${DEV_APP_ROLE_PASSWORD_DEFAULT}'). This is a known, source-published ` +
+          "credential for the RLS-enforcing runtime role. Set a strong, randomized secret.",
+      );
+    }
+    return password;
+  }
+
+  return password || DEV_APP_ROLE_PASSWORD_DEFAULT;
+}
+
+/**
+ * Whether this migrate run should ROTATE the existing role's password. Off by
+ * default: the password is set only at role creation, so an operator-chosen
+ * credential is never clobbered on a routine `helm upgrade`. Set
+ * OPENSHAPEFORGE_APP_PASSWORD_ROTATE=1 (with the new OPENSHAPEFORGE_APP_PASSWORD,
+ * and DATABASE_URL updated in lockstep) for a single run to rotate.
+ */
+function shouldRotateAppRolePassword(env: NodeJS.ProcessEnv = process.env): boolean {
+  const flag = env.OPENSHAPEFORGE_APP_PASSWORD_ROTATE;
+  return flag === "1" || flag === "true";
+}
 
 /**
  * Schemas the app role needs USAGE on. `app` holds the RLS helper functions;
@@ -51,25 +120,36 @@ const APP_SCHEMAS = ["app", "erp", "platform"] as const;
  * {@link applyAppRoleGrants} after the generated schema to sweep table grants.
  */
 export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
-  // 1. Create the role if absent, then re-assert its attributes idempotently.
+  const appRolePassword = readAppRolePassword();
+
+  // 1. Create the role if absent. The password (operator-owned, must match
+  //    DATABASE_URL) is set ONLY here, at first creation — never force-reset on
+  //    later runs, so a routine migrate can't clobber an operator-chosen
+  //    credential or downgrade it to a known value.
   //    NOSUPERUSER + NOBYPASSRLS are the load-bearing attributes for RLS.
   await sql`
     do $$
     begin
       if not exists (select 1 from pg_roles where rolname = ${sql.lit(APP_ROLE)}) then
         create role ${sql.ref(APP_ROLE)}
-          login password ${sql.lit(APP_ROLE_PASSWORD)}
+          login password ${sql.lit(appRolePassword)}
           nosuperuser nobypassrls;
       end if;
     end
     $$;
   `.execute(db);
 
-  // Re-assert password + attributes every run so a tampered or legacy role is
-  // repaired. Separate statements (not inside the DO guard) keep them running
-  // even when the role already existed.
-  await sql`alter role ${sql.ref(APP_ROLE)} login password ${sql.lit(APP_ROLE_PASSWORD)}`.execute(db);
-  await sql`alter role ${sql.ref(APP_ROLE)} nosuperuser nobypassrls`.execute(db);
+  // Re-assert the load-bearing RLS attributes every run so a tampered or legacy
+  // role is repaired. These are NOT secrets, so re-asserting them is safe.
+  // LOGIN is re-asserted too (a NOLOGIN role would break the runtime pool).
+  await sql`alter role ${sql.ref(APP_ROLE)} login nosuperuser nobypassrls`.execute(db);
+
+  // Rotate the password ONLY when explicitly requested for this run. This is
+  // the sole path that overwrites an existing role's password; the default
+  // (unset flag) leaves an operator-set credential untouched.
+  if (shouldRotateAppRolePassword()) {
+    await sql`alter role ${sql.ref(APP_ROLE)} login password ${sql.lit(appRolePassword)}`.execute(db);
+  }
 
   // 2. Grant USAGE on every schema that exists.
   for (const schema of APP_SCHEMAS) {

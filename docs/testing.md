@@ -14,7 +14,29 @@ bun run test:e2e                # manifest-driven GraphQL e2e suite (needs Postg
 bun run test:e2e:report         # same suite + HTML report
 bun run --cwd apps/api test:migrations   # migrator vs throwaway scratch DBs
 bun run test:perf               # k6 load suite (needs k6 + a running API)
+bun run scan:dependencies       # OSV-Scanner scan of the root bun.lock
 ```
+
+## Dependency vulnerability scan
+
+`bun run scan:dependencies` runs the pinned OSV-Scanner `2.3.8` binary against
+the repository's root `bun.lock`, including the complete Bun workspace graph.
+The wrapper downloads the platform-specific release only after verifying its
+SHA-256 checksum, then prints the package, version, advisory, CVSS, source, and
+fixed-version fields when findings exist. It uses the OSV database over HTTPS
+and does not require secrets.
+
+The gate threshold is any known OSV vulnerability, including advisories without
+a CVSS severity (`--all-vulns`). Exit codes are preserved from OSV-Scanner:
+
+- `0`: packages were scanned and no vulnerabilities or findings matched.
+- `1`: at least one vulnerability or finding matched the threshold.
+- `127`: scanner error; `128`: no packages were found; `129`–`255`: other
+  non-result errors. Wrapper/setup failures use `2`.
+
+The scan must be run against the current lockfile before dependency changes are
+merged. OSV-Scanner's `bun.lock` support is the reason this gate does not use
+`bun pm scan`.
 
 **`check:generated`** (`scripts/check-generated-artifacts.mjs`):
 

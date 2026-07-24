@@ -140,6 +140,29 @@ function normalizeLimit(limit?: number | null) {
   return Math.max(1, Math.min(Math.trunc(limit as number), 200));
 }
 
+/**
+ * Upper bound on the decoded pagination offset. The cursor is an opaque,
+ * client-craftable base64url integer that flows straight into SQL `OFFSET`;
+ * Postgres must still generate and discard `OFFSET` rows, so an unbounded
+ * offset is a cheap-to-send, expensive-to-serve deep-scan amplification.
+ * Cap it so page cost stays bounded. Configurable via
+ * OPENSHAPEFORGE_GENERATED_CRUD_MAX_OFFSET for deployments that legitimately
+ * page very deep.
+ */
+const DEFAULT_MAX_OFFSET = 100_000;
+
+function maxOffset() {
+  const raw = process.env.OPENSHAPEFORGE_GENERATED_CRUD_MAX_OFFSET;
+  if (raw === undefined || raw === "") {
+    return DEFAULT_MAX_OFFSET;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return DEFAULT_MAX_OFFSET;
+  }
+  return parsed;
+}
+
 function decodeOffsetCursor(cursor?: string | null) {
   if (!cursor) {
     return 0;
@@ -150,6 +173,13 @@ function decodeOffsetCursor(cursor?: string | null) {
   );
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw generatedCrudError("Invalid generated CRUD cursor.", "BAD_USER_INPUT");
+  }
+  if (parsed > maxOffset()) {
+    throw generatedCrudError(
+      "Generated CRUD cursor exceeds the maximum allowed offset. Narrow the " +
+        "result set with a filter or sort instead of paging arbitrarily deep.",
+      "BAD_USER_INPUT",
+    );
   }
   return parsed;
 }
@@ -239,7 +269,16 @@ function buildSortExpression(
   sort?: { field?: string | null; direction?: string | null } | null,
 ) {
   const fields = fieldColumnMap(table);
-  const requested = sort?.field ? fields.get(sort.field) : undefined;
+  let requested: GeneratedCrudColumn | undefined;
+  if (sort?.field) {
+    requested = fields.get(sort.field);
+    if (!requested) {
+      throw generatedCrudError(
+        `Unknown generated CRUD sort field ${sort.field} for ${table.name}.`,
+        "BAD_USER_INPUT",
+      );
+    }
+  }
   const column = requested ?? table.columns.find((item) => item.name === table.primaryKey);
   if (!column) {
     throw generatedCrudError(

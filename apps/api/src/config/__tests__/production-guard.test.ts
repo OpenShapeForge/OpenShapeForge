@@ -92,4 +92,43 @@ describe("assertProductionEnv", () => {
     } as NodeJS.ProcessEnv;
     expect(() => assertProductionEnv(env)).not.toThrow();
   });
+
+  test("production throws when the context secret is short and guessable", () => {
+    // Non-default but weak (e.g. 'changeme123') must not pass just because it
+    // clears the dev-default check — it is the sole trust proof for the
+    // trusted-context path.
+    const env = safeProdEnv();
+    env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = "changeme123";
+    expect(() => assertProductionEnv(env)).toThrow(
+      /OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET is too short/,
+    );
+  });
+
+  test("production throws when the context secret has too little variety", () => {
+    // Long enough but almost no distinct characters — low entropy.
+    const env = safeProdEnv();
+    env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = "a".repeat(40);
+    expect(() => assertProductionEnv(env)).toThrow(
+      /OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET has too little variety/,
+    );
+  });
+
+  test("context-secret minimum length is configurable via env", () => {
+    // A 20-char secret passes the default 32 floor only when the operator
+    // explicitly lowers the minimum.
+    const twentyChars = "abcdefghij0123456789";
+    const base = {
+      NODE_ENV: "production",
+      OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET: twentyChars,
+    } as NodeJS.ProcessEnv;
+    expect(() => assertProductionEnv(base)).toThrow(
+      /OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET is too short/,
+    );
+    expect(() =>
+      assertProductionEnv({
+        ...base,
+        OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET_MIN_LENGTH: "16",
+      } as NodeJS.ProcessEnv),
+    ).not.toThrow();
+  });
 });

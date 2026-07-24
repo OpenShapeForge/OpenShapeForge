@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * §F.2 — authorization.rowAccess → TableDefinition.rowScope translation and the
  * fail-closed compile guards (§B.1, §C.1, §C.2).

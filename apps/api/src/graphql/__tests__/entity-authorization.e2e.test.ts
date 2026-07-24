@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Function-level (operation/role) authorization on generated resolvers (#94)
  * and field-level data-classification protection (#96/#101).

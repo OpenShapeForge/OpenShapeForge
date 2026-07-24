@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 /**
  * Runtime function-level and field-level authorization for generated entities.
  *

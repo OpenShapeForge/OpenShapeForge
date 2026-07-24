@@ -150,7 +150,14 @@ function buildResolvedConfigTypes(entries: WorkflowNodeConfigAuthoring[]): strin
       const runtime = field.runtime && typeof field.runtime === "object"
         ? field.runtime as { required?: unknown }
         : null;
-      const guaranteedValue = runtime?.required === true ||
+      // A field's resolved value is guaranteed present when it is declared
+      // required in any of the ways the authoring schema allows (top-level
+      // `required`, `validation.required`, or `runtime.required`) or when a
+      // non-null default is supplied. Only `runtime.required` was previously
+      // honored, so genuinely-required fields were mis-emitted as optional.
+      const guaranteedValue = field.required === true ||
+        field.validation?.required === true ||
+        runtime?.required === true ||
         (field.defaultValue !== undefined && field.defaultValue !== null);
       const optional = guaranteedValue ? "" : "?";
       const nullable = guaranteedValue ? "" : " | null";

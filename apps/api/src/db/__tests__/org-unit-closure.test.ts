@@ -186,11 +186,73 @@ describe("org_unit closure trigger", () => {
             const tenantA = randomUUID();
             const tenantB = randomUUID();
             const unit = randomUUID();
+            const unitB = randomUUID();
+            const childA = randomUUID();
+            const ghost = randomUUID();
             await sql`select set_config('app.tenant_id', ${tenantA}, false)`.execute(conn);
             await sql`
               insert into platform.org_unit (id, tenant_id, parent_id, name)
               values (${unit}::uuid, ${tenantA}::uuid, null, ${"root"})
             `.execute(conn);
+            // A root in tenant B, referenced from tenant A below.
+            await sql`
+              insert into platform.org_unit (id, tenant_id, parent_id, name)
+              values (${unitB}::uuid, ${tenantB}::uuid, null, ${"root-b"})
+            `.execute(conn);
+
+            // ── INSERT with a cross-tenant parent must be rejected ──
+            // parent_id references tenant B's root; the FK passes (id exists)
+            // but the trigger's same-tenant-parent guard aborts the write
+            // rather than silently creating a phantom root (issue #15).
+            const crossMsg = await expectRejects(
+              sql`
+                insert into platform.org_unit (id, tenant_id, parent_id, name)
+                values (${childA}::uuid, ${tenantA}::uuid, ${unitB}::uuid, ${"child-a"})
+              `.execute(conn),
+            );
+            expect(crossMsg.toLowerCase()).toContain("cross-tenant");
+            // Nothing was written for the rejected node.
+            const orphan = await sql<{ n: number }>`
+              select count(*)::int as n from platform.org_unit_closure
+              where tenant_id = ${tenantA}::uuid and descendant_id = ${childA}::uuid
+            `.execute(conn);
+            expect(orphan.rows[0]?.n).toBe(0);
+
+            // ── INSERT with a parent that exists in no tenant is rejected ──
+            const ghostMsg = await expectRejects(
+              sql`
+                insert into platform.org_unit (id, tenant_id, parent_id, name)
+                values (${childA}::uuid, ${tenantA}::uuid, ${ghost}::uuid, ${"child-a"})
+              `.execute(conn),
+            );
+            // A nonexistent id trips the self-referential FK first; if it ever
+            // reaches the trigger, the same-tenant-parent guard catches it.
+            const ghostLower = ghostMsg.toLowerCase();
+            expect(
+              ghostLower.includes("foreign key") ||
+                ghostLower.includes("cross-tenant or nonexistent"),
+            ).toBe(true);
+
+            // ── REPARENT onto a cross-tenant parent must be rejected ──
+            // Give tenant A a real child first, then try to reparent it under
+            // tenant B's root.
+            await sql`
+              insert into platform.org_unit (id, tenant_id, parent_id, name)
+              values (${childA}::uuid, ${tenantA}::uuid, ${unit}::uuid, ${"child-a"})
+            `.execute(conn);
+            const reparentMsg = await expectRejects(
+              sql`update platform.org_unit set parent_id = ${unitB}::uuid where id = ${childA}::uuid`.execute(
+                conn,
+              ),
+            );
+            expect(reparentMsg.toLowerCase()).toContain("cross-tenant");
+            // The child still hangs under its original tenant-A parent.
+            const stillUnderA = await sql<{ depth: number }>`
+              select depth from platform.org_unit_closure
+              where tenant_id = ${tenantA}::uuid and ancestor_id = ${unit}::uuid and descendant_id = ${childA}::uuid
+            `.execute(conn);
+            expect(stillUnderA.rows[0]?.depth).toBe(1);
+
             // Mutating tenant_id must be rejected by the trigger's immutability
             // assertion (NEW.tenant_id <> OLD.tenant_id).
             const msg = await expectRejects(

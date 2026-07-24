@@ -44,11 +44,11 @@ Only persisted fields produce columns. Core and profile fields share one storage
 Most complex sub-compiler. Normalizes single- vs multi-context view shapes via `../view-normalization.js` and emits route info per presentation type.
 
 ### `authorization.ts`
-- Returns `undefined` when the entity has no `authorization` block.
-- Derives entity slug as kebab-case (`NaturalPerson` → `natural-person`).
-- Defaults missing CRUD roles to `${slug}:create|update|delete`.
-- Auto-derives field-level read roles for sensitive classifications: `pii`, `bsn`, `confidential`.
-- Composite roles (`${slug}:manage`/`${slug}:full`) are intentionally no longer emitted; `${slug}:pii` field-level read roles are derived only when sensitive classifications exist.
+- Fail-closed: throws `AuthorizationCompileError` when the entity has no `authorization` block (entities without one are denied at runtime).
+- Derives entity slug as kebab-case (`NaturalPerson` → `natural-person`); the slug is an internal artifact key only, never a granted role name.
+- No CRUD role defaulting: every op (`read`/`create`/`update`/`delete`) must list at least one role explicitly, or compilation throws. There are no `${slug}:*` fallbacks.
+- Field-level roles are explicit-only. Roles marked on a field's `authorization` are copied verbatim; there is no classification-based (`pii`/`bsn`/`confidential`) auto-derivation — a synthesized role nobody could be granted was removed.
+- Composite roles (`${slug}:manage`/`${slug}:full`/`${slug}:pii`) are intentionally no longer emitted.
 
 ### `canonical/`
 Transforms the compiler's own outputs (model, graphql, views) into a self-contained workflow-ready kernel: path-based field refs, condition expressions, form layouts. See `canonical/index.ts` for entry point.

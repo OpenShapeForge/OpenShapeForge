@@ -4,13 +4,13 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 102 packages.
+Regenerate with `bun run notices`. 99 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 83 |
+| MIT | 80 |
 | ISC | 6 |
 | BlueOak-1.0.0 | 5 |
 | BSD-3-Clause | 4 |
@@ -122,9 +122,6 @@ Regenerate with `bun run notices`. 102 packages.
 
 ### @types/ejs@3.1.5
 - License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/ejs
-
-### @types/node@20.19.43
-- License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node
 
 ### @types/node@26.1.1
 - License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node
@@ -264,10 +261,6 @@ Regenerate with `bun run notices`. 102 packages.
 - License: **MIT** — https://github.com/epoberezkin/json-schema-traverse#readme
 - Author: Evgeny Poberezkin
 
-### kysely@0.28.17
-- License: **MIT** — https://kysely.dev
-- Author: Sami Koskimäki <sami@jakso.me>
-
 ### kysely@0.29.4
 - License: **MIT** — https://kysely.dev
 - Author: Sami Koskimäki <sami@jakso.me>
@@ -401,9 +394,6 @@ Regenerate with `bun run notices`. 102 packages.
 - Author: Microsoft Corp.
 
 ### undici-types@8.3.0
-- License: **MIT** — https://undici.nodejs.org
-
-### undici-types@6.21.0
 - License: **MIT** — https://undici.nodejs.org
 
 ### urlpattern-polyfill@10.1.0
@@ -728,7 +718,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ```
 </details>
 
-<details><summary>@types/bun@1.3.14, @types/ejs@3.1.5, @types/node@20.19.43, @types/node@26.1.1</summary>
+<details><summary>@types/bun@1.3.14, @types/ejs@3.1.5, @types/node@26.1.1</summary>
 
 ```
 MIT License
@@ -1584,7 +1574,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>kysely@0.28.17, kysely@0.29.4</summary>
+<details><summary>kysely@0.29.4</summary>
 
 ```
 The MIT License (MIT)
@@ -2375,7 +2365,7 @@ END OF TERMS AND CONDITIONS
 ```
 </details>
 
-<details><summary>undici-types@8.3.0, undici-types@6.21.0</summary>
+<details><summary>undici-types@8.3.0</summary>
 
 ```
 MIT License

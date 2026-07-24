@@ -458,6 +458,7 @@ describe("platform schema generator", () => {
           schema: "messaging",
           name: "mail_accounts",
           tenantScoped: true,
+          generatedCrud: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -515,6 +516,7 @@ describe("platform schema generator", () => {
           schema: "erp",
           name: "label_rules",
           tenantScoped: true,
+          generatedCrud: true,
           columns: [
             { name: "id", type: "uuid", primaryKey: true },
             { name: "tenant_id", type: "uuid", required: true },
@@ -983,5 +985,167 @@ tables:
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("rejects a column default that carries a statement terminator", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: platform
+    name: reference_codes
+    tenantScoped: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: "gen_random_uuid(); DROP TABLE users; --" }
+`,
+      "utf8",
+    );
+
+    try {
+      await expect(loadManifest(path)).rejects.toThrow(/default must not contain/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an unknown foreign-key onDelete action", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: platform
+    name: parents
+    tenantScoped: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+  - schema: platform
+    name: children
+    tenantScoped: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: parent_id, type: uuid, references: { schema: platform, table: parents, column: id, onDelete: "CASCADE; DROP SCHEMA erp CASCADE" } }
+`,
+      "utf8",
+    );
+
+    try {
+      await expect(loadManifest(path)).rejects.toThrow(/onDelete must be one of/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an index WHERE predicate that carries a statement terminator", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: platform
+    name: reference_codes
+    tenantScoped: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: code, type: text }
+    indexes:
+      - name: reference_codes_code_idx
+        columns: [code]
+        where: "1=1); DROP TABLE audit; --"
+`,
+      "utf8",
+    );
+
+    try {
+      await expect(loadManifest(path)).rejects.toThrow(/where must not contain/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("only marks tables generatedCrud when they opt in explicitly", () => {
+    const optInManifest: PlatformSchemaManifest = {
+      version: 1,
+      tables: [
+        {
+          schema: "erp",
+          name: "exposed",
+          tenantScoped: true,
+          generatedCrud: true,
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true },
+            { name: "tenant_id", type: "uuid", required: true },
+          ],
+        },
+        {
+          schema: "erp",
+          name: "omitted",
+          tenantScoped: true,
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true },
+            { name: "tenant_id", type: "uuid", required: true },
+          ],
+        },
+      ],
+    };
+    const json = generateArtifacts(optInManifest).find((artifact) =>
+      artifact.path.endsWith("manifest.json"),
+    )?.contents;
+    if (!json) {
+      throw new Error("manifest.json artifact not found");
+    }
+    const parsed = JSON.parse(json) as {
+      tables: Array<{ table: string; generatedCrud: boolean }>;
+    };
+    const byName = new Map(parsed.tables.map((t) => [t.table, t.generatedCrud]));
+    expect(byName.get("exposed")).toBe(true);
+    expect(byName.get("omitted")).toBe(false);
+  });
+
+  it("hash-stabilizes over-length index names so they cannot collide after truncation", () => {
+    const longColumnA = `assignee_${"a".repeat(60)}`;
+    const longColumnB = `assignee_${"a".repeat(59)}b`;
+    const longManifest: PlatformSchemaManifest = {
+      version: 1,
+      tables: [
+        {
+          schema: "erp",
+          name: "cases",
+          tenantScoped: true,
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true },
+            { name: "tenant_id", type: "uuid", required: true },
+            { name: longColumnA, type: "uuid" },
+            { name: longColumnB, type: "uuid" },
+          ],
+          indexes: [
+            { name: `cases_tenant_${longColumnA}_idx`, columns: ["tenant_id", longColumnA] },
+            { name: `cases_tenant_${longColumnB}_idx`, columns: ["tenant_id", longColumnB] },
+          ],
+        },
+      ],
+    };
+    const sql = generateArtifacts(longManifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql"),
+    )?.contents;
+    if (!sql) {
+      throw new Error("schema.sql artifact not found");
+    }
+    const emittedNames = [...sql.matchAll(/CREATE INDEX IF NOT EXISTS "([^"]+)"/g)].map(
+      (match) => match[1] ?? "",
+    );
+    // Every emitted index name is within Postgres's 63-byte identifier limit.
+    for (const name of emittedNames) {
+      expect(name.length).toBeLessThanOrEqual(63);
+    }
+    // The two over-length names remain distinct after stabilization.
+    expect(new Set(emittedNames).size).toBe(emittedNames.length);
   });
 });

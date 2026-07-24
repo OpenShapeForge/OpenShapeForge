@@ -424,6 +424,10 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
       required: column.required === true || column.primaryKey === true,
       primaryKey: column.primaryKey === true,
       generated: column.generated ?? null,
+      // Verbatim SQL default so the roll-forward migrator can detect default
+      // drift (a changed default is otherwise invisible: it does not alter
+      // information_schema.data_type/nullability/identity).
+      ...(column.default === undefined ? {} : { default: column.default }),
       ...(column.sourceField === undefined ? {} : { sourceField: column.sourceField }),
     })),
     ...(table.retention === undefined ? {} : { retention: table.retention }),

@@ -177,6 +177,60 @@ describe("org_unit closure trigger", () => {
   );
 
   test(
+    "reparent into own descendant raises a clear cycle error, not an opaque unique violation",
+    async () => {
+      await withScratchDb(async (name) => {
+        await withDb(scratchAdminUrl(name), async (db) => {
+          await db.connection().execute((conn) => runMigrationChain(conn));
+          await db.connection().execute(async (conn) => {
+            const tenant = randomUUID();
+            const R = randomUUID(); // root
+            const C = randomUUID(); // child of R
+            const G = randomUUID(); // grandchild (child of C)
+            await sql`select set_config('app.tenant_id', ${tenant}, false)`.execute(conn);
+
+            const insertUnit = async (id: string, parent: string | null) => {
+              await sql`
+                insert into platform.org_unit (id, tenant_id, parent_id, name)
+                values (${id}::uuid, ${tenant}::uuid, ${parent}::uuid, ${`unit-${id.slice(0, 4)}`})
+              `.execute(conn);
+            };
+            await insertUnit(R, null);
+            await insertUnit(C, R);
+            await insertUnit(G, C);
+
+            // Moving R under its own grandchild G would make R its own
+            // ancestor. The guard must abort with an explicit cycle error
+            // rather than the opaque org_unit_closure_edge_uk unique violation.
+            const msg = await expectRejects(
+              sql`update platform.org_unit set parent_id = ${G}::uuid where id = ${R}::uuid`.execute(
+                conn,
+              ),
+            );
+            const lower = msg.toLowerCase();
+            expect(lower).toContain("cycle");
+            expect(lower).not.toContain("duplicate key");
+
+            // The rejected move left the closure untouched: R still roots the
+            // chain (R→C depth 1, R→G depth 2) and G is not an ancestor of R.
+            const depth = async (a: string, d: string): Promise<number | null> => {
+              const r = await sql<{ depth: number }>`
+                select depth from platform.org_unit_closure
+                where tenant_id = ${tenant}::uuid and ancestor_id = ${a}::uuid and descendant_id = ${d}::uuid
+              `.execute(conn);
+              return r.rows[0]?.depth ?? null;
+            };
+            expect(await depth(R, C)).toBe(1);
+            expect(await depth(R, G)).toBe(2);
+            expect(await depth(G, R)).toBeNull();
+          });
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
     "trigger rejects cross-tenant parent_id / tenant mutation on update",
     async () => {
       await withScratchDb(async (name) => {

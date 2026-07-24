@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 
 export type DbSessionScope = "tenant" | "group" | "self";
@@ -237,6 +238,12 @@ export async function withSystemSession<TDatabase, TResult>(
     throw new Error("withSystemSession requires a non-empty reason for audit logging.");
   }
 
+  // A per-invocation audit id. Keying start/end on this uuid (the table PK)
+  // instead of (actor_subject, started_at) keeps two concurrent same-actor
+  // bypass sessions that begin in the same millisecond from sharing — and
+  // cross-contaminating — an audit row. It also makes the failure-path
+  // `on conflict (id)` below meaningful (the PK is the conflict target).
+  const auditId = randomUUID();
   const startedAt = new Date().toISOString();
   let endedAt: string | undefined;
   let succeeded = false;
@@ -253,9 +260,9 @@ export async function withSystemSession<TDatabase, TResult>(
 
       await sql`
         insert into platform.system_bypass_audit
-          (actor_subject, reason, started_at, tenant_id)
+          (id, actor_subject, reason, started_at, tenant_id)
         values
-          (${input.actorSubject}, ${input.reason}, ${startedAt}, ${input.tenantId ?? null})
+          (${auditId}, ${input.actorSubject}, ${input.reason}, ${startedAt}, ${input.tenantId ?? null})
       `.execute(trx);
 
       const result = await callback(trx);
@@ -265,8 +272,7 @@ export async function withSystemSession<TDatabase, TResult>(
       await sql`
         update platform.system_bypass_audit
           set ended_at = ${endedAt}, succeeded = true
-          where actor_subject = ${input.actorSubject}
-            and started_at = ${startedAt}
+          where id = ${auditId}
       `.execute(trx);
 
       return result;
@@ -277,10 +283,10 @@ export async function withSystemSession<TDatabase, TResult>(
       try {
         await sql`
           insert into platform.system_bypass_audit
-            (actor_subject, reason, started_at, ended_at, succeeded, tenant_id)
+            (id, actor_subject, reason, started_at, ended_at, succeeded, tenant_id)
           values
-            (${input.actorSubject}, ${input.reason}, ${startedAt}, ${endedAt}, false, ${input.tenantId ?? null})
-          on conflict do nothing
+            (${auditId}, ${input.actorSubject}, ${input.reason}, ${startedAt}, ${endedAt}, false, ${input.tenantId ?? null})
+          on conflict (id) do nothing
         `.execute(db);
       } catch {
         // best effort — if even the audit insert fails (DB down), we have

@@ -157,12 +157,14 @@ describe("generated schema migration", () => {
         expect(first.checksum).toBe(manifest.checksum);
         expect(first.rollForward).toBeUndefined();
         // Phase 2 ships the org-unit closure trigger as a versioned migration,
-        // and 0003 hardens it against a cross-tenant/nonexistent parent_id, so a
-        // fresh install applies both in order. The list mirrors the registry in
+        // 0003 hardens it against a cross-tenant/nonexistent parent_id and 0004
+        // hardens its reparent branch with a cycle guard, so a fresh install
+        // applies all three in order. The list mirrors the registry in
         // migrations/versioned/index.ts.
         expect(first.versionedApplied).toEqual([
           "0002_org-unit-closure-trigger",
           "0003_org-unit-parent-tenant-guard",
+          "0004_org-unit-reparent-cycle-guard",
         ]);
 
         await withDb(url, async (db) => {
@@ -302,6 +304,43 @@ describe("generated schema migration", () => {
           expect(
             await columnExists(db, "erp", "relations", "display_name"),
           ).toBe(true);
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "changed column default is non-additive drift and hard-errors without rolling forward",
+    async () => {
+      await withScratchDb(async (url) => {
+        await runChain(url);
+
+        await withDb(url, async (db) => {
+          // The manifest declares erp.relations.created_at DEFAULT now(); drift
+          // it in the database to a different (but valid) default. The
+          // roll-forward cannot ALTER a default in place, so it must surface
+          // this as non-additive rather than silently keeping the stale one.
+          await sql`
+            alter table erp.relations alter column created_at set default now() - interval '1 day'
+          `.execute(db);
+          await sql`
+            update platform.schema_migrations
+            set checksum = ${"simulated-old"}
+            where version = ${generatedSchemaMigrationVersion}
+          `.execute(db);
+        });
+
+        const message = await expectRejects(runChain(url));
+        expect(message).toContain("erp.relations.created_at");
+        expect(message.toLowerCase()).toContain("default mismatch");
+        expect(message).toContain("db:migration:new");
+
+        // The failed run must not roll the checksum forward.
+        await withDb(url, async (db) => {
+          expect(
+            await recordedChecksum(db, generatedSchemaMigrationVersion),
+          ).toBe("simulated-old");
         });
       });
     },

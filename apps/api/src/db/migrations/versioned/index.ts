@@ -14,10 +14,12 @@
 import type { VersionedMigration } from "../versioned-runner.js";
 // migration-registry:imports — `bun run db:migration:new` inserts imports below this line.
 import m0003OrgUnitParentTenantGuard from "./0003_org-unit-parent-tenant-guard.js";
+import m0004OrgUnitReparentCycleGuard from "./0004_org-unit-reparent-cycle-guard.js";
 import m0002OrgUnitClosureTrigger from "./0002_org-unit-closure-trigger.js";
 
 export const versionedMigrations: VersionedMigration[] = [
   m0002OrgUnitClosureTrigger,
   m0003OrgUnitParentTenantGuard,
+  m0004OrgUnitReparentCycleGuard,
   // migration-registry:entries — `bun run db:migration:new` inserts entries above this line.
 ];

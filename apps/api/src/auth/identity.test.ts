@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { __resetSessionResolverForTests, resolveSessionContext } from "./identity.js";

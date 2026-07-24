@@ -516,7 +516,6 @@ function compileRetention(
   }
   const duration = parsedDuration ?? { years: 7 };
 
-  const entityName = candidate.contract.entity.name;
   const strategy = entityRetention.startsFrom?.strategy;
   const startFields = [
     ...(entityRetention.startsFrom?.fields ?? []),

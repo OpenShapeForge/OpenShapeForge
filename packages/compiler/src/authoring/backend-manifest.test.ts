@@ -254,12 +254,13 @@ describe("retention compilation fail-closed guards (M-07)", () => {
     const manifest = compileFixtures(["rowaccess-retention-ok"]);
     const table = tableByName(manifest, "row_access_retention_oks");
     expect(table?.retention).toEqual({
-      clock: { column: "created_at" },
+      clock: { column: "created_at", type: "timestamptz" },
       rules: [
         {
           id: "rowaccess_retention_ok_retention",
           after: { years: 3 },
           action: "delete",
+          disposition: "delete",
           reason: "Test fixture retention",
         },
       ],

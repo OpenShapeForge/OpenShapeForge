@@ -18,10 +18,10 @@ import type { EntityManifestEntry } from "../entity-manifest";
 // `.ts` config bases. These fields start null and are populated on first
 // resolve.
 const entry: EntityManifestEntry = {
-  entityName: "<%= entry.entityName %>",
-  authoringEntitySlug: "<%= entry.entitySlug %>",
-  entityType: "<%= entry.entityType %>",
-  realtimeResourceType: "<%= entry.realtimeResourceType %>",
+  entityName: <%- JSON.stringify(entry.entityName) %>,
+  authoringEntitySlug: <%- JSON.stringify(entry.entitySlug) %>,
+  entityType: <%- JSON.stringify(entry.entityType) %>,
+  realtimeResourceType: <%- JSON.stringify(entry.realtimeResourceType) %>,
   domains: <%- JSON.stringify(entry.domains) %>,
   routes: <%- JSON.stringify(entry.routes) %>,
   listConfigs: null,

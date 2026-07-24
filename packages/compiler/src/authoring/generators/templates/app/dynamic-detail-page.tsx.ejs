@@ -89,7 +89,7 @@ async function DetailContent({
     typeof config.pathnameTemplate === "string"
       ? config.pathnameTemplate
       : config.pathnameTemplate?.[lang] ?? config.pathnameTemplate?.en ?? "/";
-  const pathname = pathnameTemplate.replace(":id", id);
+  const pathname = pathnameTemplate.replace(/:id/g, () => id);
 
   let loadError: string | null = null;
   let entity: Record<string, unknown> | null = null;

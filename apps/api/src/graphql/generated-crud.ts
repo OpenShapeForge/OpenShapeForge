@@ -535,6 +535,7 @@ export async function listGeneratedEntityRelation(
   session: DbSessionInput,
   input: {
     parent: GeneratedEntityRow;
+    parentTable: GeneratedCrudTable;
     relationship: GeneratedCrudRelationship;
     targetTable: GeneratedCrudTable;
     limit?: number | null;
@@ -556,7 +557,8 @@ export async function listGeneratedEntityRelation(
     });
   }
 
-  const parentId = input.parent.id;
+  const parentPrimaryKey = input.parentTable.primaryKey;
+  const parentId = parentPrimaryKey == null ? null : input.parent[parentPrimaryKey];
   if (parentId == null) {
     return { rows: [], nextCursor: null, totalCount: 0 };
   }

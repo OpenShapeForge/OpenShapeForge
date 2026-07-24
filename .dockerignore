@@ -8,7 +8,10 @@ node_modules
 **/node_modules
 .env
 .env.*
-!.env.example
+.env.example
+# .env.example is documentation for local dev only; nothing in the build reads
+# it. Keep it out of the image so no credential-shaped file (even with dev
+# defaults) ships in the published runtime container.
 apps/api/src/generated/
 keycloak/*-realm.json
 .authoring-build/

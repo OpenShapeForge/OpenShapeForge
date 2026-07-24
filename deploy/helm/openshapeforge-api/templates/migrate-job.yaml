@@ -36,6 +36,8 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           # Roll forward the generated schema + apply versioned migrations,
           # provisioning the restricted app role. Runs as the privileged role.
+          # This pod carries the privileged DB URL; enable networkPolicy (see
+          # values.yaml) to scope its egress to Postgres and isolate it.
           command: ["bun", "apps/api/src/db/migrate.ts"]
           env:
             {{- include "openshapeforge-api.commonEnv" . | nindent 12 }}

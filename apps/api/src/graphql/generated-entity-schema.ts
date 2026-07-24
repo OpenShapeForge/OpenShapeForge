@@ -246,6 +246,7 @@ const queryResolvers = Object.fromEntries(
           },
           context: GraphqlContext,
         ) => {
+          const db = requireGeneratedDb(context);
           assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
           assertClassifiedQueryFieldsAllowed(
             table.columns,
@@ -255,7 +256,6 @@ const queryResolvers = Object.fromEntries(
             args.filter,
             args.sort,
           );
-          const db = requireGeneratedDb(context);
           const result = await listGeneratedEntities(db, context.session, {
             table: table.name,
             ...(args.first === undefined ? {} : { limit: args.first }),

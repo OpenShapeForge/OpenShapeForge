@@ -1,8 +1,6 @@
 // @ts-nocheck
 import { generatedCrudDeniedEntitySlugs } from "../../../../../packages/compiler/src/active-manifest.js";
 import type { CoreEntity } from "../../../../../packages/compiler/src/authoring/types.js";
-import { pluralize, uncapitalize } from "../../../../../packages/compiler/src/authoring/compiler/helpers.js";
-import { buildGeneratedEntityErrorRoutes } from "../generated-entity-error-routes.js";
 import type { WorkflowEntityGenerationOptions, RuntimeRegistryEntry, DesignerLazyRegistryEntry, DesignerDetailRegistryEntry, RendererEntityFieldSuggestionEntry } from "./types.js";
 import { loadWorkflowNodeEntities, loadWorkflowNodeSemanticTypes, resolveEntityIdSemanticTypeKey } from "./catalog.js";
 import { getActionDescription, getActionLabel } from "./labels.js";
@@ -14,7 +12,6 @@ import { buildSharedOutputParametersSource } from "./shared-output-parameters-so
 import { buildEntityTriggerRegistryEntry, buildEntityTriggerRegistrySeedJson } from "./trigger-registry.js";
 import { buildRelationshipOutputFields, buildSyntheticBelongsToIdFields, getEntityActionConfigs, resolveFieldSubset } from "./entity-field-resolution.js";
 import { buildDeleteOutputFields, buildListOutputFields, buildRecordIdField, buildWaitConditionField, buildWaitEventTypeField, buildWaitOutputFields, buildWaitTimeoutField } from "./output-fields.js";
-import { buildErrorOutputFields } from "./error-fields.js";
 import { cloneField, makeFieldOptional, resolveLocalizedLabel, toKebabCase, toOutputField, toRendererEntitySuggestionField, validateWorkflowReferentieGroepen } from "./utils.js";
 
 function collectWorkflowEntities(authoringDir: string, options: WorkflowEntityGenerationOptions): CoreEntity[] {
@@ -68,8 +65,6 @@ export function generateWorkflowEntityNodeArtifacts(
     const entityDir = toKebabCase(entity.entity);
     const moduleDir = toKebabCase(entity.module);
     const entityGraphqlName = entity.entity;
-    const entityGraphqlField = uncapitalize(entityGraphqlName);
-    const entityGraphqlListField = pluralize(entityGraphqlField);
     const entityKey = `${entity.module}.${entity.entity}`;
     const readableFields = resolveFieldSubset(entity.fields, enabledActions.flatMap((item) => item.config.readableFields ?? []), readableFallback);
     readableFields.push(...buildRelationshipOutputFields(entity, entityMap));
@@ -86,46 +81,19 @@ export function generateWorkflowEntityNodeArtifacts(
     const listOutputFields = buildListOutputFields(entityLabels, readableFields, toKebabCase(entity.entity));
     const deleteOutputFields = buildDeleteOutputFields(entityLabels, idField, entityIdSemanticType);
     const waitOutputFields = buildWaitOutputFields(entityLabels, idField, entityIdSemanticType, readableFields);
-    const errorOutputFields = buildErrorOutputFields();
 
     const listActionConfig = enabledActions.find((item) => item.action === "list")?.config;
     const listDefaultSort = listActionConfig && "defaultSort" in listActionConfig ? listActionConfig.defaultSort : undefined;
 
     enabledActions.forEach(({ action }) => {
       const nodeType = `entity.${moduleDir}.${entityDir}.${action}`;
-      const supportedErrorRoutes = buildGeneratedEntityErrorRoutes(entityLabels, action);
-      const defaultConfig = action === "wait"
-        ? { eventType: "updated", timeout: "" }
-        : action === "awaitAction"
-          ? { actions: [], timeout: "" }
-          : action === "create" || action === "update"
-            ? { values: {}, errorRoutes: [] }
-            : action === "list"
-              ? { limit: 25, errorRoutes: [], ...(listDefaultSort ? { sort: listDefaultSort } : {}) }
-              : { errorRoutes: [] };
+      // Only the API bridge routing index consumes runtimeEntries, and it keeps
+      // just type/module/entity/entityKey/action (buildWorkflowBridgeIndexJson).
+      // No error-route/field/graphql payload is emitted for entity nodes: the
+      // live handle model (shared/error-routes.ts) exposes only the success/
+      // list-count handles, so per-error `error__<id>` routes are not built.
       runtimeEntries.push({
         type: nodeType, module: moduleDir, entity: entityGraphqlName, entityKey: entityDir, action,
-        label: getActionLabel(entityLabels, action).nl,
-        description: getActionDescription(entityLabels, action).nl,
-        category: entityLabels.nl,
-        readableFields: readableFields.map(toOutputField),
-        writableFields: action === "update" ? writableFields.map(makeFieldOptional) : writableFields.map(cloneField),
-        recordIdField: buildRecordIdField(entityLabels, idField, entityIdSemanticType, entity.entity),
-        listOutputFields: buildListOutputFields(entityLabels, readableFields, toKebabCase(entity.entity)),
-        deleteOutputFields: buildDeleteOutputFields(entityLabels, idField, entityIdSemanticType),
-        errorOutputFields: buildErrorOutputFields(),
-        supportedErrorRoutes: supportedErrorRoutes.map((route) => ({
-          id: route.id, handleId: route.handleId, label: route.label.nl,
-          description: route.description.nl, matchCodes: route.matchCodes, matchStatusCodes: route.matchStatusCodes,
-        })),
-        defaultConfig,
-        graphql: {
-          singleQuery: action === "wait" || action === "awaitAction" ? "" : entityGraphqlField,
-          listQuery: action === "wait" || action === "awaitAction" ? "" : entityGraphqlListField,
-          createMutation: action === "wait" || action === "awaitAction" ? "" : `create${entityGraphqlName}`,
-          updateMutation: action === "wait" || action === "awaitAction" ? "" : `update${entityGraphqlName}`,
-          deleteMutation: action === "wait" || action === "awaitAction" ? "" : `delete${entityGraphqlName}`,
-        },
       });
       designerLazyEntries.push({
         type: nodeType, action,

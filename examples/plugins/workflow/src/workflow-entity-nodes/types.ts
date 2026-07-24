@@ -50,37 +50,15 @@ export const ACTION_ICON_NAMES: Record<WorkflowAction, string> = {
 
 export const UNBOUNDED_CARDINALITY = { min: 0, max: "unbounded" as const };
 
+// The only consumer is buildWorkflowBridgeIndexJson, which emits the API
+// bridge routing index. Entity nodes expose no error handles (see
+// shared/error-routes.ts), so no error-route/field/graphql payload is carried.
 export type RuntimeRegistryEntry = {
   type: string;
   module: string;
   entity: string;
   entityKey: string;
   action: WorkflowAction;
-  label: string;
-  description: string;
-  category: string;
-  readableFields: Field[];
-  writableFields: Field[];
-  recordIdField: Field;
-  listOutputFields: Field[];
-  deleteOutputFields: Field[];
-  errorOutputFields: Field[];
-  supportedErrorRoutes: Array<{
-    id: string;
-    handleId: string;
-    label: string;
-    description: string;
-    matchCodes: string[];
-    matchStatusCodes: number[];
-  }>;
-  defaultConfig: Record<string, unknown>;
-  graphql: {
-    singleQuery: string;
-    listQuery: string;
-    createMutation: string;
-    updateMutation: string;
-    deleteMutation: string;
-  };
 };
 
 export type DesignerLazyRegistryEntry = {

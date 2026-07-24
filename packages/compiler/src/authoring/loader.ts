@@ -52,6 +52,69 @@ function validateIdentifier(name: string, context: string): void {
   }
 }
 
+// Strict allowlists for authoring *content* identifiers (not filenames). These
+// mirror the config/schemas/*.json patterns (core-entity.schema.json: `entity`
+// and relationship `target` are `^[A-Z][A-Za-z0-9]*$`; `fieldKey` is
+// `^[a-z][A-Za-z0-9]*$`). The JSON schemas are not enforced at runtime (ajv is
+// declared but never wired), so these YAML-derived names would otherwise reach
+// codegen unvalidated: the entity name becomes an import path / string-literal
+// key in the entity manifest (entity-manifest.ts.ejs), and field keys are
+// interpolated raw into generated GraphQL operation strings (actions.ts.ejs,
+// pages.ts). Enforcing the patterns here — at load, before any generator runs —
+// fails closed so a hostile identifier (quotes, braces, backticks, ${},
+// whitespace, newlines) can never be spliced into generated TS/GraphQL/SQL.
+const ENTITY_NAME_PATTERN = /^[A-Z][A-Za-z0-9]*$/;
+const FIELD_KEY_PATTERN = /^[a-z][A-Za-z0-9]*$/;
+
+function validateContentIdentifier(
+  value: unknown,
+  pattern: RegExp,
+  what: string,
+  origin: string,
+): void {
+  if (typeof value !== "string" || !pattern.test(value)) {
+    throw new Error(
+      `Unsafe ${what} ${JSON.stringify(value)} in ${origin} — must match ${pattern}. ` +
+        `Authoring identifiers are emitted verbatim into generated code (GraphQL ` +
+        `queries, import paths, SQL) and cannot contain other characters.`,
+    );
+  }
+}
+
+/**
+ * Recursively validates every field `key` (including nested children/item/shape)
+ * against the strict field-key pattern.
+ */
+function validateFieldKeys(
+  fields: readonly { key?: unknown; children?: unknown; item?: unknown; shape?: unknown }[] | undefined,
+  origin: string,
+): void {
+  if (!Array.isArray(fields)) return;
+  for (const field of fields) {
+    if (!field || typeof field !== "object") continue;
+    validateContentIdentifier(field.key, FIELD_KEY_PATTERN, "field key", origin);
+    validateFieldKeys(field.children as never, origin);
+    if (field.item) validateFieldKeys([field.item] as never, origin);
+    validateFieldKeys(field.shape as never, origin);
+  }
+}
+
+/**
+ * Validates the entity name, every field key, and relationship key/target of a
+ * fully-merged core entity (after base-entity application) before it is returned
+ * to the compilers. Fails closed on any identifier that could break out of a
+ * generated code position. Exported for unit testing.
+ */
+export function validateEntityContentIdentifiers(coreEntity: CoreEntity, origin: string): void {
+  validateContentIdentifier(coreEntity.entity, ENTITY_NAME_PATTERN, "entity name", origin);
+  validateFieldKeys(coreEntity.fields, origin);
+  for (const rel of coreEntity.relationships ?? []) {
+    if (!rel || typeof rel !== "object") continue;
+    validateContentIdentifier((rel as { key?: unknown }).key, FIELD_KEY_PATTERN, "relationship key", origin);
+    validateContentIdentifier((rel as { target?: unknown }).target, ENTITY_NAME_PATTERN, "relationship target", origin);
+  }
+}
+
 function loadYaml<T>(filePath: string): T {
   if (!existsSync(filePath)) {
     throw new Error(`File not found: ${filePath}`);
@@ -148,6 +211,7 @@ export function loadEntity(
     kind: "core",
     path: corePath,
   });
+  validateEntityContentIdentifiers(coreEntity, corePath);
 
   // Scan for context partials (field extensions)
   const profiles: EntityProfile[] = [];
@@ -158,7 +222,11 @@ export function loadEntity(
   for (const contextName of listDirs(contextsDir)) {
     const partialPath = join(contextsDir, contextName, "partial", `${entityFileName}.yaml`);
     if (existsSync(partialPath)) {
-      profiles.push(loadYaml<EntityProfile>(partialPath));
+      const profile = loadYaml<EntityProfile>(partialPath);
+      // Profile field keys also flow into codegen (GraphQL profile sub-types,
+      // storage columns); validate them at load with the same strict pattern.
+      validateFieldKeys(profile.fields, partialPath);
+      profiles.push(profile);
     }
 
     const mappingPath = join(authoringDir, "mappings", contextName, `${entityFileName}.mapping.yaml`);
@@ -235,6 +303,7 @@ export function loadContextEntity(
     kind: "contextFull",
     path: fullPath,
   });
+  validateEntityContentIdentifiers(coreEntity, fullPath);
 
   // Transform catalog
   const catalogPath = join(authoringDir, "catalogs", "transforms.yaml");

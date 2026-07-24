@@ -13,7 +13,19 @@ export async function get<%= typeName %>(id: string, options?: { query?: string 
   // Build field selection from fields backed by generated CRUD. Computed
   // fields such as runtime labels are resolved through dedicated UI paths
   // until the generated API exposes matching object types/resolvers.
-  const renderFieldSelection = (f) => f.computedResolver === "labels" ? `${f.name} { asMap }` : f.name;
+  //
+  // Defense-in-depth: field names derive from authoring field keys that are
+  // validated against /^[a-z][A-Za-z0-9]*$/ at load (loader.ts). Assert the
+  // GraphQL-safe shape again here — these names are interpolated raw into the
+  // operation string below, so a regression must fail the build, not emit a
+  // key that could restructure the selection set or break the template literal.
+  const assertGqlName = (name) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+      throw new Error(`actions: unsafe GraphQL field name ${JSON.stringify(name)} for ${typeName}`);
+    }
+    return name;
+  };
+  const renderFieldSelection = (f) => f.computedResolver === "labels" ? `${assertGqlName(f.name)} { asMap }` : assertGqlName(f.name);
   const queryFields = gql.fields.filter((f) => !f.computedResolver);
   const listFields = queryFields.map(renderFieldSelection).join(" ");
   let detailFields = listFields;

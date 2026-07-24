@@ -42,7 +42,19 @@ type ShardLoader = () => Promise<{ default: EntityManifestEntry }>;
 // computed expression.
 const entityShardLoaders: Record<string, ShardLoader> = {
 <% for (const [slug, shardName] of slugMappings) { -%>
-  "<%- slug %>": () => import("./entity-manifests/<%- shardName %>"),
+<%
+  // Defense-in-depth: slug and shardName derive from validated authoring
+  // identifiers (entity name / authoring slug), but assert here too so a
+  // regression that let a metacharacter through cannot splice into the JS
+  // string-literal key or the static import specifier. Fail the build loudly.
+  if (!/^[a-z][a-z0-9-]*$/.test(slug)) {
+    throw new Error(`entity-manifest: unsafe slug ${JSON.stringify(slug)}`);
+  }
+  if (!/^[a-z][a-z0-9]*$/.test(shardName)) {
+    throw new Error(`entity-manifest: unsafe shard name ${JSON.stringify(shardName)}`);
+  }
+-%>
+  <%- JSON.stringify(slug) %>: () => import("./entity-manifests/<%- shardName %>"),
 <% } -%>
 };
 

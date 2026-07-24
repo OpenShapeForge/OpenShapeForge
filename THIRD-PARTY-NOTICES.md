@@ -87,11 +87,11 @@ Regenerate with `bun run notices`. 99 packages.
 ### @graphql-tools/schema@10.0.38
 - License: **MIT** — ardatan/graphql-tools
 
-### @graphql-tools/utils@11.2.2
+### @graphql-tools/utils@10.11.0
 - License: **MIT** — ardatan/graphql-tools
 - Author: Dotan Simha <dotansimha@gmail.com>
 
-### @graphql-tools/utils@10.11.0
+### @graphql-tools/utils@11.2.2
 - License: **MIT** — ardatan/graphql-tools
 - Author: Dotan Simha <dotansimha@gmail.com>
 
@@ -273,12 +273,12 @@ Regenerate with `bun run notices`. 99 packages.
 - License: **BSD-3-Clause** — https://github.com/fastify/light-my-request#readme
 - Author: Tomas Della Vedova - @delvedor (http://delved.org)
 
-### lru-cache@11.5.2
-- License: **BlueOak-1.0.0** — git+ssh://git@github.com/isaacs/node-lru-cache.git
-- Author: Isaac Z. Schlueter <i@izs.me>
-
 ### lru-cache@10.4.3
 - License: **ISC** — git://github.com/isaacs/node-lru-cache.git
+- Author: Isaac Z. Schlueter <i@izs.me>
+
+### lru-cache@11.5.2
+- License: **BlueOak-1.0.0** — git+ssh://git@github.com/isaacs/node-lru-cache.git
 - Author: Isaac Z. Schlueter <i@izs.me>
 
 ### minimatch@10.2.5
@@ -325,11 +325,11 @@ Regenerate with `bun run notices`. 99 packages.
 - License: **MIT** — https://github.com/davidmarkclements/quick-format#readme
 - Author: David Mark Clements
 
-### real-require@1.0.0
+### real-require@0.2.0
 - License: **MIT** — https://github.com/pinojs/real-require
 - Author: Paolo Insogna <shogun@cowtech.it>
 
-### real-require@0.2.0
+### real-require@1.0.0
 - License: **MIT** — https://github.com/pinojs/real-require
 - Author: Paolo Insogna <shogun@cowtech.it>
 
@@ -1666,6 +1666,27 @@ The complete list of contributors can be found at:
 ```
 </details>
 
+<details><summary>lru-cache@10.4.3</summary>
+
+```
+The ISC License
+
+Copyright (c) 2010-2023 Isaac Z. Schlueter and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
+IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+</details>
+
 <details><summary>lru-cache@11.5.2, minipass@7.1.3, path-scurry@2.0.2</summary>
 
 ```
@@ -1724,27 +1745,6 @@ No contributor can revoke this license.
 without any warranty or condition, and no contributor
 will be liable to anyone for any damages related to this
 software or this license, under any kind of legal claim.***
-```
-</details>
-
-<details><summary>lru-cache@10.4.3</summary>
-
-```
-The ISC License
-
-Copyright (c) 2010-2023 Isaac Z. Schlueter and Contributors
-
-Permission to use, copy, modify, and/or distribute this software for any
-purpose with or without fee is hereby granted, provided that the above
-copyright notice and this permission notice appear in all copies.
-
-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
-WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
-MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
-ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
-WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
-ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
-IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 </details>
 
@@ -1957,7 +1957,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>real-require@1.0.0, real-require@0.2.0</summary>
+<details><summary>real-require@0.2.0, real-require@1.0.0</summary>
 
 ```
 The MIT License (MIT)

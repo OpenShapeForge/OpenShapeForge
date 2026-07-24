@@ -122,7 +122,8 @@ for (const keyDir of readdirSync(storeRoot)) {
 }
 
 const pkgs = [...byKey.values()].sort((a, b) =>
-  `${a.name}`.toLowerCase().localeCompare(`${b.name}`.toLowerCase()),
+  `${a.name}`.toLowerCase().localeCompare(`${b.name}`.toLowerCase()) ||
+  a.version.localeCompare(b.version),
 );
 
 const byLicense = new Map<string, number>();

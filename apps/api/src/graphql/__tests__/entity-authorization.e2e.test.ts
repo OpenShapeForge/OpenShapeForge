@@ -168,6 +168,17 @@ for (const table of tables) {
           { filter: { [classifiedField]: probeValue } },
         );
         expect(result.errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
+
+        const fieldInResult = await gql(
+          reader,
+          "query($filter: " +
+            typeName +
+            "Filter) { " +
+            graphql.listQueryName +
+            "(filter: $filter, first: 1) { totalCount } }",
+          { filter: { [classifiedField + "In"]: [probeValue] } },
+        );
+        expect(fieldInResult.errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
       });
 
       test("read-only sort on a classified field is rejected before ordering can leak", async () => {

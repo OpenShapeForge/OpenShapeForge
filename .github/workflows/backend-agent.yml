@@ -9,4 +9,5 @@ jobs:
     if: github.event.label.name == 'backend-agent-work'
     runs-on: ubuntu-latest
     steps:
-      - run: echo "hello from backend agent (issue #${{ github.event.issue.number }})"
+      - run: |
+          echo "hello from backend agent (issue #${{ github.event.issue.number }})"

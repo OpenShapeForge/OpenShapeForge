@@ -57,7 +57,9 @@ jobs:
         run: bun run check:authoring-local
 
       - name: Check THIRD-PARTY-NOTICES is up to date
-        run: bun run check:notices
+        run: |
+          bun run notices
+          git diff --exit-code -- THIRD-PARTY-NOTICES.md
 
   keycloak-spi:
     name: Build Keycloak SPI (Maven)

@@ -19,6 +19,7 @@ export {
 export {
   TRUSTED_CONTEXT_HEADERS,
   TRUSTED_CONTEXT_MAX_AGE_MS,
+  TRUSTED_CONTEXT_MAX_CLOCK_SKEW_MS,
   applyTrustedContextHeaders,
   hasValidTrustedContextSignature,
   readTrustedContext,

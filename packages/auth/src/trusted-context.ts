@@ -13,6 +13,17 @@ export const TRUSTED_CONTEXT_HEADERS: TrustedContextHeaderNames = {
 export const TRUSTED_CONTEXT_MAX_AGE_MS = 5 * 60 * 1000;
 
 /**
+ * How far a signed timestamp may sit in the FUTURE and still be accepted. The
+ * freshness window is asymmetric: the past side spans the full replay window
+ * (legitimate latency between the signer and this verifier), but the future
+ * side allows only a small clock-skew tolerance. A symmetric abs() window
+ * would let a holder of the secret (or a captured bundle) pre-date a bundle up
+ * to the full window ahead of now, extending its usable lifetime; rejecting
+ * meaningfully future-dated timestamps closes that.
+ */
+export const TRUSTED_CONTEXT_MAX_CLOCK_SKEW_MS = 30 * 1000;
+
+/**
  * Payload version. v2 includes Keycloak group paths in the signed bundle so
  * an attacker cannot swap groups without invalidating the HMAC. v1 (without
  * groups) is no longer accepted — every producer in the workspace ships from
@@ -134,7 +145,12 @@ function verifySignature(
   if (!Number.isFinite(parsedTimestamp)) return false;
 
   const nowMs = options.nowMs ?? Date.now();
-  if (Math.abs(nowMs - parsedTimestamp) > TRUSTED_CONTEXT_MAX_AGE_MS) return false;
+  const ageMs = nowMs - parsedTimestamp;
+  // Reject stale bundles (older than the replay window) and meaningfully
+  // future-dated bundles (beyond a small clock-skew allowance). The window is
+  // deliberately asymmetric — see TRUSTED_CONTEXT_MAX_CLOCK_SKEW_MS.
+  if (ageMs > TRUSTED_CONTEXT_MAX_AGE_MS) return false;
+  if (ageMs < -TRUSTED_CONTEXT_MAX_CLOCK_SKEW_MS) return false;
 
   const expected = sign(
     secret,

@@ -10,6 +10,7 @@ import { describe, expect, it } from "bun:test";
 import { GraphQLError } from "graphql";
 import {
   assertOperationAllowed,
+  assertClassifiedQueryFieldsAllowed,
   canReadClassifiedColumns,
   redactRow,
 } from "./generated-authz.js";
@@ -126,5 +127,62 @@ describe("field-level data protection (#96/#101)", () => {
     const plainColumns = [{ name: "id" }, { name: "label" }];
     const result = redactRow(row, plainColumns, authorization, readOnly);
     expect(result).toBe(row);
+  });
+
+  describe("query-field protection", () => {
+    const queryColumns = [
+      { name: "id", sourceField: "id" },
+      { name: "public_label", sourceField: "publicLabel" },
+      { name: "secret_note", classification: "confidential" as const },
+      { name: "personal_email", sourceField: "emailAddress", classification: "pii" as const },
+    ];
+
+    const forbiddenQueries = [
+      ["a normal classified filter", { emailAddress: "jane@example.com" }, undefined],
+      ["a generated FieldIn classified filter", { emailAddressIn: ["jane@example.com"] }, undefined],
+      ["a classified sort", undefined, { field: "emailAddress", direction: "asc" }],
+      ["a snake-case mapped classified filter", { secretNote: "top-secret" }, undefined],
+    ] as const;
+
+    for (const [label, filter, sort] of forbiddenQueries) {
+      it(`rejects ${label} for a read-only reader`, () => {
+        expect(forbiddenCode(() =>
+          assertClassifiedQueryFieldsAllowed(
+            queryColumns,
+            authorization,
+            readOnly,
+            "ContactDetail",
+            filter,
+            sort,
+          ),
+        )).toBe("FORBIDDEN");
+      });
+    }
+
+    it("allows classified filters and sorting for a ReadWrite reader", () => {
+      expect(() =>
+        assertClassifiedQueryFieldsAllowed(
+          queryColumns,
+          authorization,
+          readWrite,
+          "ContactDetail",
+          { emailAddressIn: ["jane@example.com"] },
+          { field: "emailAddress", direction: "desc" },
+        ),
+      ).not.toThrow();
+    });
+
+    it("leaves unknown fields for generated CRUD to reject as BAD_USER_INPUT", () => {
+      expect(() =>
+        assertClassifiedQueryFieldsAllowed(
+          queryColumns,
+          authorization,
+          readOnly,
+          "ContactDetail",
+          { unknownField: "value" },
+          { field: "unknownSortField", direction: "asc" },
+        ),
+      ).not.toThrow();
+    });
   });
 });

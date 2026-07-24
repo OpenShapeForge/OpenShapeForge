@@ -31,7 +31,10 @@ import type {
 type Column = {
   name: string;
   classification?: "confidential" | "pii" | "bsn";
+  sourceField?: string;
 };
+
+type QuerySort = { field?: string | null; direction?: string | null } | null | undefined;
 
 type AuthzSession = {
   roles?: string[] | null;
@@ -41,6 +44,18 @@ function intersects(granted: readonly string[], required: readonly string[]): bo
   if (required.length === 0) return false;
   const grantedSet = new Set(granted);
   return required.some((role) => grantedSet.has(role));
+}
+
+function fieldNameForColumn(column: Column): string {
+  return column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase());
+}
+
+function classifiedColumnForField(
+  columns: readonly Column[],
+  field: string,
+): Column | undefined {
+  const filterField = field.endsWith("In") ? field.slice(0, -2) : field;
+  return columns.find((column) => fieldNameForColumn(column) === filterField);
 }
 
 /**
@@ -88,6 +103,38 @@ export function canReadClassifiedColumns(
     ...authorization.roles.delete,
   ];
   return intersects(session?.roles ?? [], writeRoles);
+}
+
+/**
+ * Prevent a reader who cannot see classified values from using them as an
+ * oracle through list filters or ordering. Unknown fields are intentionally
+ * ignored here so the existing generated CRUD validation can continue to
+ * report BAD_USER_INPUT for them.
+ */
+export function assertClassifiedQueryFieldsAllowed(
+  columns: readonly Column[],
+  authorization: GeneratedCrudAuthorization | undefined,
+  session: AuthzSession,
+  typeName: string,
+  filter?: Record<string, unknown> | null,
+  sort?: QuerySort,
+): void {
+  if (canReadClassifiedColumns(authorization, session)) return;
+
+  const requestedFields = [
+    ...Object.keys(filter ?? {}),
+    ...(sort?.field ? [sort.field] : []),
+  ];
+  const classifiedField = requestedFields
+    .map((field) => ({ field, column: classifiedColumnForField(columns, field) }))
+    .find(({ column }) => column?.classification);
+
+  if (!classifiedField?.column) return;
+  const { field } = classifiedField;
+  throw new GraphQLError(
+    `Not authorized to filter or sort by classified field "${field}" on ${typeName}.`,
+    { extensions: { code: "FORBIDDEN", status: 403 } },
+  );
 }
 
 /**

@@ -22,7 +22,7 @@ import {
   test,
   type Identity,
 } from "./e2e/harness.js";
-import { createRow, tables } from "./e2e/entity-factory.js";
+import { createRow, fieldName, sampleValue, tables } from "./e2e/entity-factory.js";
 
 registerSuiteLifecycle();
 
@@ -153,6 +153,32 @@ for (const table of tables) {
             expect(asWriter[graphql.singleQueryName][field]).not.toBeNull();
           }
         }
+      });
+
+      const classifiedColumn = classifiedColumns[0]!;
+      const classifiedField = fieldName(classifiedColumn);
+      const probeValue = sampleValue(classifiedColumn, "classified-query");
+
+      test("read-only filter on a classified field is rejected before totalCount can leak", async () => {
+        const result = await gql(
+          reader,
+          `query($filter: ${typeName}Filter) {
+             ${graphql.listQueryName}(filter: $filter, first: 1) { totalCount }
+           }`,
+          { filter: { [classifiedField]: probeValue } },
+        );
+        expect(result.errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
+      });
+
+      test("read-only sort on a classified field is rejected before ordering can leak", async () => {
+        const result = await gql(
+          reader,
+          `query($sort: ${typeName}Sort) {
+             ${graphql.listQueryName}(sort: $sort, first: 1) { totalCount }
+           }`,
+          { sort: { field: classifiedField, direction: "asc" } },
+        );
+        expect(result.errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
       });
     }
   });

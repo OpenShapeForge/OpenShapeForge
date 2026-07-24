@@ -12,6 +12,7 @@ import {
 } from "./generated-crud.js";
 import {
   assertOperationAllowed,
+  assertClassifiedQueryFieldsAllowed,
   redactRow,
 } from "./generated-authz.js";
 import type { GraphqlContext } from "./context.js";
@@ -245,8 +246,16 @@ const queryResolvers = Object.fromEntries(
           },
           context: GraphqlContext,
         ) => {
-          const db = requireGeneratedDb(context);
           assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
+          assertClassifiedQueryFieldsAllowed(
+            table.columns,
+            authorization,
+            context.session,
+            graphql.typeName,
+            args.filter,
+            args.sort,
+          );
+          const db = requireGeneratedDb(context);
           const result = await listGeneratedEntities(db, context.session, {
             table: table.name,
             ...(args.first === undefined ? {} : { limit: args.first }),

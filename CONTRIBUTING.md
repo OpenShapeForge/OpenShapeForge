@@ -38,6 +38,7 @@ flagged as drift by `check:generated`.
 ```sh
 bun run check:generated         # artifacts fresh + deterministic (double-run), no orphans
 bun run check:authoring-local   # authoring catalog compiles deterministically
+bun run check:ts-nocheck        # compiler/workflow @ts-nocheck baseline does not grow
 bun run check:notices           # THIRD-PARTY-NOTICES matches the installed deps
 bun run typecheck:compiler
 bun run typecheck:api

@@ -112,13 +112,18 @@ function textColumnFor(table) {
 // Trusted-context signing (mirrors @openshapeforge/auth applyTrustedContextHeaders)
 // ---------------------------------------------------------------------------
 
+// The generated CRUD layer enforces entity roles; sign and send the
+// normalized ReadWrite role so perf sessions can exercise the full CRUD path.
+const ROLES = "Relations.All.ReadWrite";
+
 function signedHeaders() {
   const timestamp = String(Date.now());
-  const payload = ["v2", timestamp, TENANT_ID, USER_ID, "", ""].join("\n");
+  const payload = ["v2", timestamp, TENANT_ID, USER_ID, ROLES, ""].join("\n");
   return {
     "content-type": "application/json",
     "x-tenant-id": TENANT_ID,
     "x-user-id": USER_ID,
+    "x-user-roles": ROLES,
     "x-openshapeforge-context-timestamp": timestamp,
     "x-openshapeforge-context-signature": crypto.hmac("sha256", SECRET, payload, "hex"),
   };

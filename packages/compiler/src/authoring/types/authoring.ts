@@ -226,6 +226,17 @@ export interface AuthoredEntityIndex {
   unique?: boolean;
 }
 
+export type RestOperationKey = "list" | "get" | "create" | "update" | "delete";
+
+export interface RestConfig {
+  /** Defaults to true when the `rest` block is present. */
+  enabled?: boolean;
+  /** URL segment without slashes; defaults to the entity's table name with `_` → `-`. */
+  basePath?: string;
+  /** Per-operation flags; each defaults to true when REST is enabled. */
+  operations?: Partial<Record<RestOperationKey, boolean>>;
+}
+
 export interface CoreEntity {
   schemaVersion: number;
   kind: "coreEntity";
@@ -276,6 +287,16 @@ export interface CoreEntity {
   permissions?: EntityPermissions;
   authorization?: AuthorizationConfig;
   ui?: UIDefinition;
+  /**
+   * Opt-in generated REST exposure for this entity. Absent or `false` means
+   * no REST routes are generated (fail closed, mirroring the generatedCrud
+   * allowlist). `true` enables every operation under a base path derived
+   * from the entity name (plural kebab-case, e.g. `RelationGroup` →
+   * `relation-groups`). The object form allows per-operation flags and a
+   * custom base path; `basePath` is emitted verbatim into route strings and
+   * OpenAPI paths, so the loader restricts it to `^[a-z][a-z0-9-]*$`.
+   */
+  rest?: boolean | RestConfig;
   workflow?: {
     nodes?: {
       actions?: {

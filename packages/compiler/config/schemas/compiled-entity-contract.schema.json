@@ -201,6 +201,29 @@
         }
       }
     },
+    "rest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basePath", "operations"],
+      "properties": {
+        "basePath": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "operations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["list", "get", "create", "update", "delete"],
+          "properties": {
+            "list": { "type": "boolean" },
+            "get": { "type": "boolean" },
+            "create": { "type": "boolean" },
+            "update": { "type": "boolean" },
+            "delete": { "type": "boolean" }
+          }
+        }
+      }
+    },
     "retention": {
       "type": "object",
       "additionalProperties": false,

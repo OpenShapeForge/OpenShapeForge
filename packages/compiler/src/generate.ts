@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { createHash } from "node:crypto";
+import { renderOpenApiSpec } from "./generate-openapi.js";
 import type {
   ColumnDefinition,
   GeneratedArtifact,
@@ -454,6 +455,7 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
         updateMutationName: table.source!.graphql!.updateMutationName,
         deleteMutationName: table.source!.graphql!.deleteMutationName,
       },
+      ...(table.source?.rest === undefined ? {} : { rest: table.source.rest }),
       fields: table.columns.map((column) => ({
         field: column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase()),
         column: column.name,
@@ -506,6 +508,10 @@ ${renderForeignKeySql(manifest)}
     {
       path: "apps/api/src/generated/db/manifest.json",
       contents: renderManifestJson(manifest, source),
+    },
+    {
+      path: "apps/api/src/generated/rest/openapi.json",
+      contents: renderOpenApiSpec(manifest, source),
     },
   ];
 }

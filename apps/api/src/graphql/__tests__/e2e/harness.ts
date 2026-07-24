@@ -61,6 +61,8 @@ type Store = {
   seed: string;
   tenantA: Identity;
   tenantB: Identity;
+  readOnly: Identity;
+  noRoles: Identity;
   capturedRequests: CapturedRequest[];
   capturedEventReads: CapturedEventRead[];
   createdRows: CreatedRow[];
@@ -69,10 +71,17 @@ type Store = {
   keycloakToken: Promise<string | null> | null;
 };
 
+// The generated CRUD layer enforces the entity role lists from the manifest
+// (Relations.* is the Keycloak-normalized spelling bearer tokens carry).
+// readOnly/noRoles reuse tenantA's tenant with fresh users so role denial is
+// isolated from RLS/tenant denial.
+const tenantAId = randomUUID();
 const store: Store = ((globalThis as Record<string, any>).__openshapeforgeE2E ??= {
   seed: randomUUID().slice(0, 8),
-  tenantA: { tenantId: randomUUID(), userId: randomUUID(), roles: [] },
-  tenantB: { tenantId: randomUUID(), userId: randomUUID(), roles: [] },
+  tenantA: { tenantId: tenantAId, userId: randomUUID(), roles: ["Relations.All.ReadWrite"] },
+  tenantB: { tenantId: randomUUID(), userId: randomUUID(), roles: ["Relations.All.ReadWrite"] },
+  readOnly: { tenantId: tenantAId, userId: randomUUID(), roles: ["Relations.All.Read"] },
+  noRoles: { tenantId: tenantAId, userId: randomUUID(), roles: [] },
   capturedRequests: [],
   capturedEventReads: [],
   createdRows: [],
@@ -84,6 +93,8 @@ const store: Store = ((globalThis as Record<string, any>).__openshapeforgeE2E ??
 export const seed = store.seed;
 export const tenantA = store.tenantA;
 export const tenantB = store.tenantB;
+export const readOnly = store.readOnly;
+export const noRoles = store.noRoles;
 export const createdRows = store.createdRows;
 export const remoteUrl = process.env.E2E_API_URL;
 

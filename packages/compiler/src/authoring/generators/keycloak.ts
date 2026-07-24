@@ -35,31 +35,15 @@ import type {
   AuthorizationRealmConfig,
   AuthorizationRealmRole,
 } from "../types/authoring.js";
+import { KEYCLOAK_ROLE_SEGMENT_RENAMES, normalizeKeycloakRoleName } from "../role-names.js";
 
 const DEFAULT_REALM_NAME = "openshapeforge-dev";
 export const KEYCLOAK_REALM_OUTPUT_PATH = "keycloak/openshapeforge-dev-realm.json";
 
-/**
- * Dutch→English module-name aliases used to translate entity-yaml roles
- * (e.g. `Vastgoed.All.Read`) into the realm-composite shape Keycloak imports
- * (`RealEstate.All.Read`). Exported so the access-control UI E2E oracle can
- * reuse the exact mapping without duplicating it.
- */
-export const KEYCLOAK_ROLE_SEGMENT_RENAMES: Record<string, string> = {
-  Algemeen: "General",
-  Dossier: "CaseFile",
-  Energie: "Energy",
-  Financien: "Finance",
-  Kwaliteit: "Quality",
-  Onderhoud: "Maintenance",
-  Organisatie: "Organization",
-  Overeenkomsten: "Agreements",
-  Projectontwikkeling: "ProjectDevelopment",
-  Relaties: "Relations",
-  Vastgoed: "RealEstate",
-  Woonruimteverdeling: "HousingAllocation",
-  Zaken: "Cases",
-};
+// Canonical rename table + normalizer live in ../role-names.ts so the
+// backend manifest's authorization bridge can share them; re-exported here to
+// keep existing import sites (UI oracle) working.
+export { KEYCLOAK_ROLE_SEGMENT_RENAMES, normalizeKeycloakRoleName };
 
 interface KeycloakRole {
   name: string;
@@ -155,18 +139,6 @@ interface KeycloakRealmExport {
   };
   groups?: KeycloakGroup[];
   users: KeycloakUser[];
-}
-
-/**
- * Translate a Dutch-segment role name (e.g. `Vastgoed.All.Read`) to its
- * Keycloak-canonical English form (`RealEstate.All.Read`). Exported for the
- * UI authorization oracle.
- */
-export function normalizeKeycloakRoleName(roleName: string): string {
-  return roleName
-    .split(".")
-    .map((segment) => KEYCLOAK_ROLE_SEGMENT_RENAMES[segment] ?? segment)
-    .join(".");
 }
 
 function normalizeKeycloakRoleNames(roleNames: string[]): string[] {

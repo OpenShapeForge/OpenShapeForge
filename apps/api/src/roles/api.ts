@@ -14,6 +14,8 @@ import {
   type GeneratedSchemaDriftResult,
 } from "../db/schema-drift.js";
 import { createGraphqlYoga } from "../graphql/yoga.js";
+import { headersFromFastify } from "../http/headers.js";
+import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
 
 /** Startup drift check must not delay readiness meaningfully. */
 const DRIFT_CHECK_TIMEOUT_MS = 5000;
@@ -95,26 +97,6 @@ async function enforceGeneratedSchemaFreshness(
     throw new Error(driftBanner(drift));
   }
   log.warn(driftBanner(drift));
-}
-
-function headersFromFastify(
-  headers: Record<string, string | string[] | undefined>,
-) {
-  const result = new Headers();
-
-  for (const [key, value] of Object.entries(headers)) {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        result.append(key, item);
-      }
-      continue;
-    }
-    if (value !== undefined) {
-      result.set(key, value);
-    }
-  }
-
-  return result;
 }
 
 function bodyFromFastify(method: string, body: unknown): BodyInit | undefined {
@@ -203,6 +185,11 @@ export function createApiApp(
       return reply.send(response);
     },
   });
+
+  registerGeneratedRestRoutes(
+    app,
+    databaseRuntime ? { db: databaseRuntime.db } : {},
+  );
 
   return app;
 }

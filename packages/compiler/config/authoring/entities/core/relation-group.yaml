@@ -12,6 +12,7 @@ labels:
   nl: Relatiegroep
 domains:
   - relations
+rest: true
 authorization:
   roles:
     read:

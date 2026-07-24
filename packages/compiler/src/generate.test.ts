@@ -1150,3 +1150,91 @@ tables:
     expect(new Set(emittedNames).size).toBe(emittedNames.length);
   });
 });
+
+describe("generated REST OpenAPI artifact", () => {
+  const restManifest: PlatformSchemaManifest = {
+    version: 1,
+    tables: [
+      {
+        schema: "erp",
+        name: "widgets",
+        tenantScoped: true,
+        generatedCrud: true,
+        columns: [
+          { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+          { name: "tenant_id", type: "uuid", required: true },
+          { name: "display_name", type: "text", required: true },
+          { name: "is_active", type: "boolean" },
+          { name: "created_at", type: "timestamptz", required: true },
+        ],
+        source: {
+          authoringEntityName: "Widget",
+          rest: {
+            basePath: "widgets",
+            operations: { list: true, get: true, create: true, update: true, delete: false },
+          },
+        },
+      },
+      {
+        schema: "erp",
+        name: "gadgets",
+        tenantScoped: true,
+        generatedCrud: true,
+        columns: [{ name: "id", type: "uuid", primaryKey: true }],
+        source: { authoringEntityName: "Gadget" },
+      },
+    ],
+  };
+
+  function openApiFor(input: PlatformSchemaManifest) {
+    const artifact = generateArtifacts(input).find((item) =>
+      item.path.endsWith("rest/openapi.json"),
+    );
+    expect(artifact?.path).toBe("apps/api/src/generated/rest/openapi.json");
+    return JSON.parse(artifact!.contents) as {
+      paths: Record<string, Record<string, unknown>>;
+      components: { schemas: Record<string, { properties?: Record<string, unknown>; required?: string[] }> };
+    };
+  }
+
+  it("emits versioned paths only for rest-enabled tables and enabled operations", () => {
+    const spec = openApiFor(restManifest);
+    expect(Object.keys(spec.paths)).toEqual([
+      "/api/rest/v1/widgets",
+      "/api/rest/v1/widgets/{id}",
+    ]);
+    const item = spec.paths["/api/rest/v1/widgets/{id}"]!;
+    expect(item.get).toBeDefined();
+    expect(item.patch).toBeDefined();
+    // operations.delete: false → no delete route advertised.
+    expect(item.delete).toBeUndefined();
+  });
+
+  it("derives camelCase field schemas from columns and excludes server-managed columns from the input schema", () => {
+    const spec = openApiFor(restManifest);
+    const widget = spec.components.schemas.Widget!;
+    expect(Object.keys(widget.properties ?? {})).toEqual([
+      "id",
+      "tenantId",
+      "displayName",
+      "isActive",
+      "createdAt",
+    ]);
+    expect(widget.required).toEqual(["id", "tenantId", "displayName", "createdAt"]);
+
+    const input = spec.components.schemas.WidgetInput!;
+    expect(Object.keys(input.properties ?? {})).toEqual(["displayName", "isActive"]);
+  });
+
+  it("always emits the artifact — with empty paths when no table opts in", () => {
+    const spec = openApiFor(manifest);
+    expect(spec.paths).toEqual({});
+  });
+
+  it("is deterministic: two renders are byte-identical", () => {
+    const render = () =>
+      generateArtifacts(restManifest).find((item) => item.path.endsWith("rest/openapi.json"))!
+        .contents;
+    expect(render()).toBe(render());
+  });
+});

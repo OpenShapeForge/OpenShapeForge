@@ -100,6 +100,30 @@ describe("validateEntityContentIdentifiers", () => {
       validateEntityContentIdentifiers(hostile, "hostile.yaml"),
     ).toThrow(/relationship target/);
   });
+
+  it("accepts a conforming rest basePath and the boolean/absent forms", () => {
+    const withBasePath = baseEntity();
+    withBasePath.rest = { basePath: "custom-widgets" };
+    expect(() =>
+      validateEntityContentIdentifiers(withBasePath, "test.yaml"),
+    ).not.toThrow();
+
+    const shorthand = baseEntity();
+    shorthand.rest = true;
+    expect(() =>
+      validateEntityContentIdentifiers(shorthand, "test.yaml"),
+    ).not.toThrow();
+  });
+
+  it("rejects a hostile rest basePath that would break out of a route/OpenAPI path", () => {
+    for (const hostile of ["a/../b", "widgets/{id}", 'x" onload="evil', "Upper"]) {
+      const entity = baseEntity();
+      entity.rest = { basePath: hostile };
+      expect(() =>
+        validateEntityContentIdentifiers(entity, "hostile.yaml"),
+      ).toThrow(/rest basePath/);
+    }
+  });
 });
 
 describe("loadEntity content validation (integration)", () => {

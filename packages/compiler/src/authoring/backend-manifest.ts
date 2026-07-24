@@ -29,6 +29,28 @@ import type {
   TableDefinition,
 } from "../schema.js";
 import type { CompiledAuthorization } from "./types/compiled.js";
+import { normalizeKeycloakRoleName } from "./role-names.js";
+
+/**
+ * Bridges the compiled per-operation role lists into the manifest as the
+ * deduplicated, sorted union of the authored names and their
+ * Keycloak-normalized forms. Bearer tokens carry the normalized (English)
+ * names from the generated realm; in-repo trusted-context signers send the
+ * authored (Dutch) names — emitting both lets the API enforce with a plain
+ * case-sensitive set intersection and no runtime rename table.
+ */
+function bridgeAuthorizationRoles(
+  roles: CompiledAuthorization["roles"],
+): NonNullable<NonNullable<TableDefinition["source"]>["authorization"]>["roles"] {
+  const union = (authored: string[]) =>
+    [...new Set([...authored, ...authored.map(normalizeKeycloakRoleName)])].sort();
+  return {
+    read: union(roles.read),
+    create: union(roles.create),
+    update: union(roles.update),
+    delete: union(roles.delete),
+  };
+}
 
 export type AuthoringBackendMode = "report" | "promote";
 
@@ -628,6 +650,7 @@ function detectCandidateCollisions(candidates: CompiledCandidate[], schemaByModu
     "GraphQL delete mutation": new Map(),
     "physical table": new Map(),
     "candidate slug": new Map(),
+    "REST base path": new Map(),
   };
 
   function record(bucket: string, key: string, candidate: CompiledCandidate) {
@@ -657,6 +680,10 @@ function detectCandidateCollisions(candidates: CompiledCandidate[], schemaByModu
       ? `core:${candidate.origin.slug}`
       : `${candidate.origin.context}:${candidate.origin.name}`;
     record("candidate slug", slugKey, candidate);
+
+    if (candidate.contract.rest) {
+      record("REST base path", candidate.contract.rest.basePath, candidate);
+    }
   }
 
   const failures: string[] = [];
@@ -738,6 +765,17 @@ export function compileAuthoringBackendManifest(
       (candidate.origin.kind === "core"
         ? generatedCrudAllowlist.has(candidateCrudKey)
         : contextGeneratedCrudAllowlist.has(candidateCrudKey)) && !domainInternal;
+    // Fail closed: an authored `rest:` block on an entity that is not
+    // generated-CRUD enabled (not allowlisted, or domain-internal) is a
+    // misconfiguration — REST routes delegate to the generated CRUD layer,
+    // so silently dropping the block would hide the authoring intent.
+    if (candidate.contract.rest && !generatedCrud) {
+      throw new Error(
+        `Entity ${describeCandidateOrigin(candidate)} declares a rest: block but is not ` +
+          `generated-CRUD enabled${domainInternal ? " (domain-internal)" : ""}. ` +
+          `Add it to the generated CRUD allowlist or remove the rest: block.`,
+      );
+    }
     const tenantScoped = candidate.contract.authorization !== undefined;
     const emittedReferences: string[] = [];
     const skippedReferences: string[] = [];
@@ -901,6 +939,10 @@ export function compileAuthoringBackendManifest(
             return defaultSort ? { defaultSort } : {};
           })(),
         },
+        ...(candidate.contract.rest ? { rest: candidate.contract.rest } : {}),
+        ...(candidate.contract.authorization
+          ? { authorization: { roles: bridgeAuthorizationRoles(candidate.contract.authorization.roles) } }
+          : {}),
         relationshipStatus: {
           emittedReferences,
           skippedReferences,

@@ -1,0 +1,34 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: RestCollision
+title: Rest Collision
+description: "Test fixture — claims the same REST base path as rest-custom to exercise the collision audit. Not part of the shipped slice."
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Rest Collision
+domains:
+  - relations
+rest:
+  basePath: custom-things
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+fields:
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+    persisted:
+      column: name
+      storageClass: core

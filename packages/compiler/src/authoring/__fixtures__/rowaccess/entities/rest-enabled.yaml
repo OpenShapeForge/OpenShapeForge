@@ -1,0 +1,33 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: RestEnabled
+title: Rest Enabled
+description: "Test fixture — generated REST exposure via the shorthand block. Not part of the shipped slice."
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Rest Enabled
+domains:
+  - relations
+rest: true
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+fields:
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+    persisted:
+      column: name
+      storageClass: core

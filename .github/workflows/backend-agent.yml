@@ -1,0 +1,12 @@
+name: Backend agent
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  backend-agent:
+    if: github.event.label.name == 'backend-agent-work'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "hello from backend agent (issue #${{ github.event.issue.number }})"

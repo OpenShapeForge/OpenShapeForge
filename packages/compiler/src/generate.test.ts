@@ -44,7 +44,12 @@ describe("platform schema generator", () => {
     expect(sql).toContain('CREATE SCHEMA IF NOT EXISTS "erp";');
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS "erp"."cases"');
     expect(sql).toContain('ALTER TABLE "erp"."cases" FORCE ROW LEVEL SECURITY;');
-    expect(sql).toContain("tenant_id = app.current_tenant()");
+    expect(sql).toContain(
+      'USING (app.bypass_rls() OR (tenant_id = app.current_tenant()))',
+    );
+    expect(sql).toContain(
+      'WITH CHECK (app.bypass_rls() OR (tenant_id = app.current_tenant()))',
+    );
     expect(sql).toContain(
       'CREATE INDEX IF NOT EXISTS "cases_tenant_title_idx" ON "erp"."cases" ("tenant_id", "title");',
     );
@@ -391,7 +396,7 @@ describe("platform schema generator", () => {
     );
   });
 
-  it("determinism: the 3 shipped entities emit plain {table}_tenant_isolation (no rowScope leaked)", () => {
+  it("determinism: the 3 shipped entities emit plain tenant-wide policies with bypass support", () => {
     // The committed generated schema.sql is the source of truth. The 3 shipped
     // entities declare rowAccess { enabled: true, empty: public } with no owner
     // and no group → deriveRowScope returns undefined → the emitter must take
@@ -413,12 +418,10 @@ describe("platform schema generator", () => {
       expect(schemaSql).not.toContain(
         `CREATE POLICY "${table}_row_scope" ON "erp"."${table}"`,
       );
+      expect(schemaSql).toContain(
+        `CREATE POLICY "${table}_tenant_isolation" ON "erp"."${table}"\n  USING (app.bypass_rls() OR (tenant_id = app.current_tenant()))\n  WITH CHECK (app.bypass_rls() OR (tenant_id = app.current_tenant()));`,
+      );
     }
-    // And no owner OR-NULL / user predicate leaked into these tables' USING
-    // clauses: the isolation policy is the bare tenant predicate.
-    expect(schemaSql).toContain(
-      'CREATE POLICY "relations_tenant_isolation" ON "erp"."relations"\n  USING (tenant_id = app.current_tenant())',
-    );
   });
 
   it("emits generated CRUD exposure metadata and closes domain internals", () => {

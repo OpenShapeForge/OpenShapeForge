@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   generateKeycloakRealmArtifacts,
   isDevRealm,
@@ -245,5 +247,86 @@ describe("generateKeycloakRealmArtifacts role-name collisions", () => {
     expect(() => generateKeycloakRealmArtifacts(contracts, config)).toThrow(
       /role-name collision/i,
     );
+  });
+});
+
+// A dev realm (name suffixed "-dev"), so authoring a literal client secret in
+// these fixtures is permitted by the generator's non-dev-realm secret guard.
+// The intent here is to verify synthetic service-account emission, not secret
+// hardening (which has dedicated coverage above).
+function baseConfig(): AuthorizationConfigFile {
+  return {
+    schemaVersion: 2,
+    kind: "authorizationConfig",
+    realm: { name: "test-realm-dev" },
+    keycloak: { entityRoleClient: "erp-provider", clients: [] },
+  };
+}
+
+function realmFrom(config: AuthorizationConfigFile) {
+  const artifacts = generateKeycloakRealmArtifacts([], config);
+  expect(artifacts).toHaveLength(1);
+  return JSON.parse(artifacts[0]!.contents) as {
+    users: Array<{
+      username: string;
+      serviceAccountClientId?: string;
+      clientRoles?: Record<string, string[]>;
+      credentials?: unknown;
+    }>;
+  };
+}
+
+describe("service-account client role grants", () => {
+  test("emits a synthetic service-account user carrying the realm-management role", () => {
+    const config = baseConfig();
+    config.keycloak.clients = [
+      {
+        id: "openshapeforge-auth-api",
+        kind: "serviceAccount",
+        name: "Auth API",
+        secret: "secret",
+        serviceAccountClientRoles: { "realm-management": ["manage-realm"] },
+      },
+    ];
+
+    const realm = realmFrom(config);
+    const svc = realm.users.find(
+      (u) => u.serviceAccountClientId === "openshapeforge-auth-api",
+    );
+    expect(svc).toBeDefined();
+    expect(svc!.username).toBe("service-account-openshapeforge-auth-api");
+    expect(svc!.clientRoles).toEqual({ "realm-management": ["manage-realm"] });
+    // Service accounts are not login users — they must carry no credentials.
+    expect(svc!.credentials).toBeUndefined();
+  });
+
+  test("does not emit a service-account user when no roles are granted", () => {
+    const config = baseConfig();
+    config.keycloak.clients = [
+      { id: "seed-service", kind: "serviceAccount", name: "Seed", secret: "s" },
+    ];
+
+    const realm = realmFrom(config);
+    expect(realm.users.some((u) => u.serviceAccountClientId)).toBe(false);
+  });
+});
+
+describe("generated dev realm", () => {
+  test("openshapeforge-auth-api service account holds realm-management manage-realm", () => {
+    const realmPath = join(
+      import.meta.dir,
+      "../../../../../keycloak/openshapeforge-dev-realm.json",
+    );
+    const realm = JSON.parse(readFileSync(realmPath, "utf8")) as {
+      users: Array<{
+        serviceAccountClientId?: string;
+        clientRoles?: Record<string, string[]>;
+      }>;
+    };
+    const svc = realm.users.find(
+      (u) => u.serviceAccountClientId === "openshapeforge-auth-api",
+    );
+    expect(svc).toBeDefined();
+    expect(svc!.clientRoles?.["realm-management"]).toContain("manage-realm");
   });
 });

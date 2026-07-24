@@ -103,6 +103,15 @@ keycloak:
       kind: serviceAccount
       name: OpenShapeForge Auth API Service
       devSecret: openshapeforge-auth-api-secret
+      # The identity-configuration SPI (OpenShapeForgeResource) manages realm
+      # organizations, groups, roles, and user role mappings, and its admin
+      # endpoints require the caller to hold realm-management `manage-realm`
+      # (Keycloak's realm-admin capability). Grant that role to this service
+      # account so its client-credentials token passes the SPI's authorization
+      # check instead of being rejected with 403.
+      serviceAccountClientRoles:
+        realm-management:
+          - manage-realm
 
 # Realm-level roles. `composites` is an explicit per-client role list;
 # `includes` is a wildcard-expansion pattern over entity-derived composite roles

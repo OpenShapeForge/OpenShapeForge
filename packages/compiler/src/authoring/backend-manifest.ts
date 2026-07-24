@@ -522,6 +522,15 @@ function compileRetention(
     ...(entityRetention.startsFrom?.fields ?? []),
     ...(entityRetention.startsFrom?.field ? [entityRetention.startsFrom.field] : []),
   ];
+  const strategyField =
+    startFields.length > 0
+      ? undefined
+      : strategy === "createdAt"
+        ? "createdAt"
+        : strategy === "updatedAt"
+          ? "updatedAt"
+          : undefined;
+  const clockFields = strategyField === undefined ? startFields : [strategyField];
 
   // #97: resolve the retention clock deterministically. A retention policy is
   // a statutory/GDPR erasure control — silently dropping a start field or
@@ -529,7 +538,7 @@ function compileRetention(
   // that compiles to nothing. So every declared start field must resolve to a
   // usable timestamp anchor (`timestamptz` or `date`); anything else is a hard
   // build error rather than a silent filter.
-  const clockColumns = startFields.map((fieldKey) => {
+  const clockColumns = clockFields.map((fieldKey) => {
     const column = columnsByField.get(fieldKey);
     if (!column) {
       throw new Error(
@@ -549,9 +558,7 @@ function compileRetention(
 
   const [clock, ...fallbacks] = clockColumns;
   if (!clock) {
-    // A start field is only meaningful with an explicit-field strategy; the
-    // `createdAt`/`updatedAt` strategies anchor on operational timestamps the
-    // storage layer always provides, so they need no declared field. But if a
+    // A start field is only meaningful with an explicit-field strategy. If a
     // policy declares no usable anchor at all, refuse to emit a clockless (and
     // therefore unenforceable) retention rule.
     if (strategy === "field" || strategy === "firstNonNull") {
@@ -569,11 +576,13 @@ function compileRetention(
   const disposition = policy?.disposition?.action;
   const review = retentionReview(policy);
   const legalHold = policy?.holds?.suspendDestruction === true;
-  const cryptoDeleteKey =
-    disposition === "cryptoDelete" &&
-    typeof policy?.legalBasis?.reference === "string"
-      ? policy.legalBasis.reference
-      : undefined;
+  const cryptoDeleteKey = policy?.disposition?.cryptoDelete?.keyReference;
+  if (disposition === "cryptoDelete" && (!cryptoDeleteKey || cryptoDeleteKey.trim().length === 0)) {
+    throw new Error(
+      `[${entityName}] retention.disposition.cryptoDelete.keyReference is required when ` +
+        `disposition.action is "cryptoDelete".`,
+    );
+  }
 
   return {
     clock: {
@@ -598,7 +607,7 @@ function compileRetention(
         ...(review === undefined ? {} : { review }),
         ...(disposition === "cryptoDelete"
           ? {
-              cryptoDelete: cryptoDeleteKey === undefined ? {} : { keyReference: cryptoDeleteKey },
+              cryptoDelete: { keyReference: cryptoDeleteKey as string },
             }
           : {}),
       },

@@ -178,7 +178,7 @@ Regenerate with `bun run notices`. 95 packages.
 - License: **MIT** — lukeed/dequal
 - Author: Luke Edwards
 
-### ejs@5.0.2
+### ejs@6.0.1
 - License: **Apache-2.0** — https://github.com/mde/ejs
 - Author: Matthew Eernisse <matthew.eernisse@gmail.com>
 
@@ -952,7 +952,7 @@ THE SOFTWARE.
 ```
 </details>
 
-<details><summary>ejs@5.0.2</summary>
+<details><summary>ejs@6.0.1</summary>
 
 ```
 Apache License

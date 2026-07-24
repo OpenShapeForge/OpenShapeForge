@@ -12,6 +12,12 @@ Report privately through GitHub's **[Private vulnerability reporting](https://gi
 (the "Report a vulnerability" button under the repository's **Security** tab).
 This keeps the report confidential until a fix is available.
 
+If Private vulnerability reporting is unavailable to you (for example, the
+button is not shown, or you cannot access it), email
+**security@openshapeforge.example** instead (maintainer: replace with the real
+monitored address before publishing). Do not include exploit details in a
+public issue.
+
 Please include:
 
 - a description of the vulnerability and its impact,
@@ -20,9 +26,10 @@ Please include:
 - steps to reproduce (a minimal request or entity config where possible),
 - the commit or version you tested.
 
-You will get an acknowledgement as soon as the report is triaged. Please allow
-reasonable time for a fix before any public disclosure; coordinated disclosure
-is appreciated.
+You will get an acknowledgement within 3 business days of a report being
+received, and an initial assessment of severity and next steps within 7
+business days. Please allow reasonable time for a fix before any public
+disclosure; coordinated disclosure is appreciated.
 
 ## Scope
 

@@ -55,9 +55,14 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-**[INSERT A CONTACT METHOD — e.g. a monitored email or a private GitHub contact]**.
-All complaints will be reviewed and investigated promptly and fairly.
+reported privately to the community leaders responsible for enforcement
+through GitHub's **[Private vulnerability reporting](https://github.com/OpenShapeForge/OpenShapeForge/security/advisories/new)**
+(the "Report a vulnerability" button under the repository's **Security** tab) —
+the same confidential channel described in [SECURITY.md](SECURITY.md) — or by
+email to **conduct@openshapeforge.example** (maintainer: replace with the real
+monitored address before publishing).
+All complaints will be reviewed and investigated promptly and fairly. Community
+leaders will acknowledge a report within 5 business days.
 
 All community leaders are obligated to respect the privacy and security of the
 reporter of any incident.

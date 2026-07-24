@@ -443,16 +443,36 @@ function compileRetention(
   if (!entityRetention) {
     return undefined;
   }
-  const policy =
-    entityRetention.mode === "policyRef" && entityRetention.policy
-      ? candidate.contract.retention?.policies?.[entityRetention.policy]
-      : entityRetention;
-  const duration =
-    parseIsoDuration(
-      typeof policy?.duration === "string"
-        ? policy.duration
-        : policy?.duration?.default ?? policy?.duration?.minimum ?? policy?.duration?.maximum,
-    ) ?? { years: 7 };
+  const entityName = candidate.contract.entity.name;
+  let policy: RetentionPolicy | undefined;
+  if (entityRetention.mode === "policyRef" && entityRetention.policy) {
+    policy = candidate.contract.retention?.policies?.[entityRetention.policy];
+    if (!policy) {
+      // GDPR-relevant: a broken policyRef must fail the build, not silently
+      // collapse to a default archive rule that masks the misconfiguration.
+      throw new Error(
+        `Entity "${entityName}" retention references unknown policy "${entityRetention.policy}". ` +
+          `Add it to catalogs/retention-policies.yaml or fix the policyRef.`,
+      );
+    }
+  } else {
+    policy = entityRetention;
+  }
+
+  const rawDuration =
+    typeof policy?.duration === "string"
+      ? policy.duration
+      : policy?.duration?.default ?? policy?.duration?.minimum ?? policy?.duration?.maximum;
+  const parsedDuration = parseIsoDuration(rawDuration);
+  if (typeof rawDuration === "string" && parsedDuration === undefined) {
+    // An authored duration that fails the strict ISO-8601 parser must fail the
+    // build rather than default to 7 years, which would mask the bad value.
+    throw new Error(
+      `Entity "${entityName}" retention has an unparseable ISO-8601 duration "${rawDuration}". ` +
+        `Use a duration matching the pattern P<n>Y<n>M<n>D (e.g. P7Y).`,
+    );
+  }
+  const duration = parsedDuration ?? { years: 7 };
 
   const startFields = [
     ...(entityRetention.startsFrom?.fields ?? []),

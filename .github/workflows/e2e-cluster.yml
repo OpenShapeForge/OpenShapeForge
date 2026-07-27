@@ -157,13 +157,19 @@ jobs:
           echo "::add-mask::$secret"
           echo "OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET=$secret" >> "$GITHUB_ENV"
 
+      # --timeout: bun's 5s default assumes a local database. Here every journal
+      # read crosses runner -> cluster API -> port-forward -> proxy -> database,
+      # and the suite runs ~3.5x slower than it does over a local tunnel; the
+      # event-journal specs tripped the default at exactly 5000ms. This is
+      # latency, not a slow query, so the budget is raised rather than the
+      # assertion loosened.
       - name: Run the e2e suite
         working-directory: apps/api
         env:
           NODE_ENV: test
           E2E_API_URL: ${{ inputs.api_url }}
           OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER: ${{ steps.cfg.outputs.issuer }}
-        run: bun test src/graphql/__tests__ src/rest/__tests__
+        run: bun test --timeout 30000 src/graphql/__tests__ src/rest/__tests__
 
       - name: Close the tunnel
         if: always()

@@ -1,0 +1,132 @@
+name: E2E against cluster
+
+# Runs the GraphQL + REST e2e suite against the DEPLOYED environment: the real
+# API behind its ingress, the real Keycloak, and the managed database.
+#
+# Manual dispatch only for now. It mutates the deployed database — the suite
+# creates rows and cleans them up afterwards — so it should be a decision, not
+# something that fires on every push.
+#
+# The suite runs as a Job INSIDE the cluster rather than on the runner, because
+# the database sits on a private network with no public endpoint and the harness
+# talks to it directly for verification and teardown. The Job manifest lives in
+# deploy/e2e-job.yaml so what runs against a live environment is reviewable.
+#
+# REQUIRED REPOSITORY SECRETS: the same Scaleway set the deploy workflow uses.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to run the suite FROM. Empty = the tag the API deployment is currently running."
+        required: false
+        type: string
+      api_url:
+        description: "URL the suite drives. Default exercises the public ingress and its certificate."
+        required: false
+        type: string
+        default: "https://api.openshapeforge.eu"
+
+concurrency:
+  group: e2e-cluster
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NAMESPACE: openshapeforge
+  RELEASE: openshapeforge
+  REGION: nl-ams
+
+jobs:
+  e2e:
+    name: e2e against the deployed cluster
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Scaleway CLI
+        run: |
+          curl -fsSL https://github.com/scaleway/scaleway-cli/releases/download/v2.51.0/scaleway-cli_2.51.0_linux_amd64 \
+            -o /usr/local/bin/scw
+          chmod +x /usr/local/bin/scw
+
+      - name: Fetch kubeconfig
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+        run: |
+          scw k8s kubeconfig install "${{ secrets.SCW_CLUSTER_ID }}" \
+            region=${{ env.REGION }} auth-method=copy-cli-token
+          kubectl get nodes
+
+      # Default to whatever is actually deployed. Running the suite from a
+      # different build than the one under test is a real way to chase a
+      # phantom failure, so it has to be deliberate.
+      - name: Resolve image tag and token issuer
+        id: cfg
+        run: |
+          tag="${{ inputs.image_tag }}"
+          if [ -z "$tag" ]; then
+            image=$(kubectl -n "$NAMESPACE" get deploy "${RELEASE}-openshapeforge-api" \
+              -o jsonpath='{.spec.template.spec.containers[0].image}')
+            tag="${image##*:}"
+            echo "no tag given; using the deployed one: $tag"
+          fi
+
+          # Token issuer for the harness: the in-cluster Service. Not the public
+          # hostname — see the comment in deploy/e2e-job.yaml.
+          realm=$(kubectl -n "$NAMESPACE" get deploy "${RELEASE}-openshapeforge-api" \
+            -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER")]}{.value}{end}' \
+            | sed -E 's#.*/realms/##')
+          if [ -z "$realm" ]; then
+            echo "::error::the API deployment has no bearer issuer configured; deploy with Keycloak enabled first"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "issuer=http://${RELEASE}-keycloak:8080/realms/${realm}" >> "$GITHUB_OUTPUT"
+          echo "realm: $realm"
+
+      - name: Run the suite
+        id: run
+        run: |
+          kubectl -n "$NAMESPACE" delete job e2e --ignore-not-found --wait=true
+
+          sed -e "s|__IMAGE_TAG__|${{ steps.cfg.outputs.tag }}|" \
+              -e "s|__E2E_API_URL__|${{ inputs.api_url }}|" \
+              -e "s|__TOKEN_ISSUER__|${{ steps.cfg.outputs.issuer }}|" \
+              deploy/e2e-job.yaml | kubectl apply -f -
+
+          # Poll for BOTH terminal conditions. `kubectl wait --for=complete`
+          # alone would sit until timeout on a failing suite and report a
+          # timeout instead of the failure.
+          for i in $(seq 1 120); do
+            complete=$(kubectl -n "$NAMESPACE" get job e2e -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null)
+            failed=$(kubectl -n "$NAMESPACE" get job e2e -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null)
+            [ "$complete" = "True" ] && { echo "result=passed" >> "$GITHUB_OUTPUT"; break; }
+            [ "$failed" = "True" ] && { echo "result=failed" >> "$GITHUB_OUTPUT"; break; }
+            sleep 10
+          done
+
+      # Always print the suite output — on failure it is the only place the
+      # failing assertions appear, and the Job is deleted below.
+      - name: Test output
+        if: always()
+        run: kubectl -n "$NAMESPACE" logs -l job-name=e2e --tail=-1 || true
+
+      - name: Clean up
+        if: always()
+        run: kubectl -n "$NAMESPACE" delete job e2e --ignore-not-found
+
+      - name: Fail the workflow if the suite failed
+        if: always()
+        run: |
+          case "${{ steps.run.outputs.result }}" in
+            passed) echo "e2e passed against the deployed cluster" ;;
+            failed) echo "::error::e2e failed — see the Test output step"; exit 1 ;;
+            *)      echo "::error::e2e did not reach a terminal state within 20m"; exit 1 ;;
+          esac

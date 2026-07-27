@@ -292,7 +292,7 @@ function renderTableSql(table: TableDefinition): string {
       );
     } else {
       const policyName = quoteIdent(`${table.name}_tenant_isolation`);
-      const tenantExpression = "tenant_id = app.current_tenant()";
+      const tenantExpression = "app.bypass_rls() OR (tenant_id = app.current_tenant())";
       lines.push(
         "",
         `ALTER TABLE ${tableIdent(table)} ENABLE ROW LEVEL SECURITY;`,

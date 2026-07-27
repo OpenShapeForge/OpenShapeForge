@@ -9,6 +9,7 @@ import { expect } from "bun:test";
 import {
   describe,
   getKeycloakToken,
+  getRolelessKeycloakToken,
   gql,
   registerSuiteLifecycle,
   seed,
@@ -24,6 +25,7 @@ import {
 
 registerSuiteLifecycle();
 const keycloakToken = await getKeycloakToken();
+const rolelessToken = await getRolelessKeycloakToken();
 
 describe("transport and authentication", () => {
   test("health responds without authentication", async () => {
@@ -86,6 +88,56 @@ describe("transport and authentication", () => {
         { bearer },
       );
       expect(deleted.data?.[graphql.deleteMutationName]).toBe(true);
+    },
+  );
+
+  // The counterpart to the test above, and the one that gives it meaning.
+  //
+  // A token carrying the right role being ACCEPTED does not prove the roles
+  // were read: an authorizer that ignored realm_access.roles and allowed
+  // everything would pass that test unchanged. Only a token that is valid,
+  // signed by the same issuer, from an enabled user — and must still be
+  // REFUSED — separates "roles are enforced" from "requests are waved through".
+  //
+  // The identity comes from Keycloak rather than a synthetic trusted-context
+  // header on purpose: the code path under test is the one that maps roles out
+  // of a JWT, which trusted-context headers bypass entirely.
+  test.skipIf(!rolelessToken)(
+    "a real Keycloak token with no realm roles is refused every operation",
+    async () => {
+      const table = tables[0]!;
+      const graphql = table.source!.graphql!;
+      const bearer = rolelessToken!;
+
+      const read = await gql(
+        null,
+        `{ ${graphql.listQueryName}(first: 1) { totalCount } }`,
+        undefined,
+        { bearer },
+      );
+      expect(read.errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
+
+      const input: Record<string, unknown> = {};
+      for (const column of table.columns) {
+        if (
+          isMutableColumn(column) &&
+          column.required &&
+          !foreignKeyTargets(table).has(column.name)
+        ) {
+          input[fieldName(column)] = sampleValue(column, `noaccess-${seed}`);
+        }
+      }
+      const created = await gql(
+        null,
+        `mutation($input: Create${graphql.typeName}Input!) {
+           ${graphql.createMutationName}(input: $input) { id }
+         }`,
+        { input },
+        { bearer },
+      );
+      expect(created.errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
+      // Nothing may be written on a refused mutation.
+      expect(created.data?.[graphql.createMutationName]).toBeFalsy();
     },
   );
 });

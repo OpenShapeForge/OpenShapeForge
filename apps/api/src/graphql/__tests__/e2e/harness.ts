@@ -70,6 +70,7 @@ type Store = {
   yoga: ReturnType<typeof createGraphqlYoga> | null;
   keycloakToken: Promise<string | null> | null;
   keycloakRolelessToken: Promise<string | null> | null;
+  keycloakTokens: Map<string, Promise<string | null>> | null;
 };
 
 /**
@@ -104,6 +105,7 @@ const store: Store = ((globalThis as Record<string, any>).__openshapeforgeE2E ??
   yoga: null,
   keycloakToken: null,
   keycloakRolelessToken: null,
+  keycloakTokens: null,
 } satisfies Store);
 
 export const seed = store.seed;
@@ -277,6 +279,20 @@ async function fetchKeycloakToken(
   } catch {
     return null;
   }
+}
+
+/**
+ * A token for any realm user, memoized per username so a spec can hold several
+ * identities at once without re-authenticating.
+ */
+export function keycloakTokenFor(username: string, password = "test"): Promise<string | null> {
+  store.keycloakTokens ??= new Map();
+  let token = store.keycloakTokens.get(username);
+  if (!token) {
+    token = fetchKeycloakToken(username, password);
+    store.keycloakTokens.set(username, token);
+  }
+  return token;
 }
 
 /** A token for a user that HOLDS realm roles (acme-directie by default). */

@@ -253,6 +253,38 @@ describe("authorization.roles → manifest source.authorization (#94)", () => {
   });
 });
 
+describe("retention compilation fail-closed guards (M-07)", () => {
+  it("throws (does not silently default to 7y) on an unresolved policyRef, naming the entity + key", () => {
+    expect(() => compileFixtures(["rowaccess-retention-badref"])).toThrow(
+      /Entity "RowAccessRetentionBadRef" retention references unknown policy "this-policy-does-not-exist"/,
+    );
+  });
+
+  it("throws (does not silently default to 7y) on an unparseable ISO-8601 duration, naming the entity + value", () => {
+    expect(() => compileFixtures(["rowaccess-retention-baddur"])).toThrow(
+      /Entity "RowAccessRetentionBadDuration" retention has an unparseable ISO-8601 duration "P1W"/,
+    );
+  });
+
+  it("compiles a legitimately authored inline retention into an exact rule (no bad-value masking)", () => {
+    const manifest = compileFixtures(["rowaccess-retention-ok"]);
+    const table = tableByName(manifest, "row_access_retention_oks");
+    expect(table?.retention).toEqual({
+      clock: { column: "created_at", type: "timestamptz" },
+      rules: [
+        {
+          id: "rowaccess_retention_ok_retention",
+          after: { years: 3 },
+          action: "delete",
+          disposition: "delete",
+          reason: "Test fixture retention",
+        },
+      ],
+      source: "authoring-entity-retention",
+    });
+  });
+});
+
 describe("field classification → column classification (#96/#101)", () => {
   it("propagates restricting sensitivities onto backing columns and drops internal/public", () => {
     const manifest = compileFixtures(["classified-field", "rowaccess-owner-target"]);
@@ -269,5 +301,36 @@ describe("field classification → column classification (#96/#101)", () => {
     // Operational columns are never classified.
     expect(byName.get("id")?.classification).toBeUndefined();
     expect(byName.get("tenant_id")?.classification).toBeUndefined();
+  });
+});
+
+describe("retention clock and crypto-delete compilation", () => {
+  it("resolves createdAt and updatedAt strategies to operational timestamptz columns", () => {
+    const manifest = compileFixtures([
+      "retention-created-at",
+      "retention-updated-at",
+    ]);
+    const createdAt = manifest.tables.find((table) => table.retention?.clock.column === "created_at");
+    const updatedAt = manifest.tables.find((table) => table.retention?.clock.column === "updated_at");
+
+    expect(createdAt?.retention?.clock).toEqual({ column: "created_at", type: "timestamptz" });
+    expect(updatedAt?.retention?.clock).toEqual({ column: "updated_at", type: "timestamptz" });
+  });
+
+  it("requires and propagates an authored crypto-delete key reference", () => {
+    const manifest = compileFixtures(["retention-crypto-valid"]);
+    const table = manifest.tables.find((entry) => entry.retention !== undefined);
+
+    expect(table?.retention?.rules[0]).toMatchObject({
+      disposition: "cryptoDelete",
+      reason: "Legal basis prose, not a key identifier.",
+      cryptoDelete: { keyReference: "retention-subject-key" },
+    });
+  });
+
+  it("fails closed when crypto-delete has no authored key reference", () => {
+    expect(() => compileFixtures(["retention-crypto-missing-key"])).toThrow(
+      /retention\.disposition\.cryptoDelete\.keyReference is required/,
+    );
   });
 });

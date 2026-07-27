@@ -95,25 +95,95 @@ export type RowScopePolicy = {
 
 export type RetentionAction = "retain" | "archive" | "redact" | "delete";
 
+/**
+ * The authored disposition action, preserved verbatim so a future retention
+ * executor can distinguish (e.g.) a crypto-erase from a value redaction — the
+ * coarse {@link RetentionAction} collapses several of these to `redact`.
+ */
+export type RetentionDisposition =
+  | "keep"
+  | "archive"
+  | "delete"
+  | "anonymize"
+  | "mask"
+  | "cryptoDelete"
+  | "review";
+
 export type RetentionDuration = {
   years?: number;
   months?: number;
   days?: number;
 };
 
+/**
+ * Human-review gate that must be cleared before a rule's disposition may run.
+ * Carried through so an executor can route records to the named queue instead
+ * of destroying them unattended.
+ */
+export type RetentionReviewGate = {
+  required: boolean;
+  queue?: string;
+};
+
 export type RetentionRuleDefinition = {
   id: string;
   after: RetentionDuration;
   action: RetentionAction;
+  /** Authored disposition before {@link RetentionAction} coarsening. */
+  disposition?: RetentionDisposition;
   reason?: string;
+  /** Human-review gate that must clear before this rule may act. */
+  review?: RetentionReviewGate;
+  /**
+   * Present when the disposition is `cryptoDelete`: the key an executor must
+   * destroy to render the record unrecoverable, rather than deleting rows.
+   */
+  cryptoDelete?: {
+    keyReference?: string;
+  };
+};
+
+/**
+ * Legal-hold / litigation-hold control plane. When `suspendDestruction` is
+ * true a retention executor MUST NOT run any destructive disposition for the
+ * table, regardless of clock expiry, until the hold is lifted.
+ */
+export type RetentionLegalHold = {
+  suspendDestruction: boolean;
+};
+
+/**
+ * Advisory metadata describing how a data-subject erasure request should
+ * cascade from this table to dependent PII. This is metadata only: no runtime
+ * enforcement exists yet (tracked as a follow-up). Downstream tooling and
+ * operators consume it to drive/verify ordered erasure.
+ */
+export type RetentionErasure = {
+  /** This table participates in subject-scoped erasure. */
+  subjectScoped?: boolean;
+  /** Columns that identify the data subject (e.g. relation_id). */
+  subjectColumns?: string[];
+  /** Dependent tables that must be erased when this subject is erased. */
+  cascades?: Array<{
+    schema: string;
+    table: string;
+    /** Column on the dependent table referencing this table. */
+    via: string;
+  }>;
 };
 
 export type RetentionDefinition = {
   clock: {
     column: string;
+    /** Column type of the clock anchor. `date` anchors are permitted. */
+    type?: "timestamptz" | "date";
     fallbackColumns?: string[];
   };
   rules: RetentionRuleDefinition[];
+  /** Legal hold that suspends all destructive dispositions while active. */
+  legalHold?: RetentionLegalHold;
+  /** Subject-erasure cascade metadata (advisory; no runtime enforcement yet). */
+  erasure?: RetentionErasure;
   source?: string;
 };
 

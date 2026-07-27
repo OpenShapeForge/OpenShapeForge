@@ -177,6 +177,9 @@ export interface RetentionPolicy {
       required?: boolean;
       queue?: string;
     };
+    cryptoDelete?: {
+      keyReference: string;
+    };
   };
   holds?: {
     suspendDestruction?: boolean;

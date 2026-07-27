@@ -11,6 +11,7 @@ Sub-compilers that turn `LoadedArtifacts` into a `CompiledEntityContract`. The o
 | `storage.ts` | `resolveStorageColumns()` — SQL columns from persisted core + profile fields |
 | `relationships.ts` | `resolveRelationships()` — aggregate relationships from core + profiles |
 | `graphql.ts` | `buildGraphQL()` — types, queries, mutations, filters |
+| `rest.ts` | `buildRest()` — opt-in REST exposure (base path + per-operation flags) |
 | `views.ts` | `buildViews()` — multi-context list/detail/form/summary presentations |
 | `profiles.ts` | `buildProfiles()` — per-profile mappings, projections, field extensions |
 | `authorization.ts` | `buildAuthorization()` — roles, composite roles, field-level policies |
@@ -25,10 +26,11 @@ Sub-compilers that turn `LoadedArtifacts` into a `CompiledEntityContract`. The o
 2. `resolveModelFields(coreFields, componentCatalog, semanticTypes)`
 3. `resolveRelationships(artifacts)`
 4. `buildGraphQL(coreEntity, profiles, relationships, componentCatalog, semanticTypes)`
-5. `buildViews(coreEntity, profiles, componentCatalog, viewDefinition?)`
-6. `buildProfiles(profiles, mappings)`
-7. `buildAuthorization(coreEntity, profiles, modelFields)` — must run after model so it sees compiled classifications
-8. `buildCanonicalCompilerKernel({ model, graphql, views })` — consumes earlier outputs, not raw artifacts
+5. `buildRest(coreEntity)` — order-independent; returns undefined unless the entity opts in via `rest:`
+6. `buildViews(coreEntity, profiles, componentCatalog, viewDefinition?)`
+7. `buildProfiles(profiles, mappings)`
+8. `buildAuthorization(coreEntity, profiles, modelFields)` — must run after model so it sees compiled classifications
+9. `buildCanonicalCompilerKernel({ model, graphql, views })` — consumes earlier outputs, not raw artifacts
 
 The result is assembled with table name, retention, hooks, permissions, and version metadata.
 

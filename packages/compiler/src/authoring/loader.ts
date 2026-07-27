@@ -66,6 +66,9 @@ function validateIdentifier(name: string, context: string): void {
 // whitespace, newlines) can never be spliced into generated TS/GraphQL/SQL.
 const ENTITY_NAME_PATTERN = /^[A-Z][A-Za-z0-9]*$/;
 const FIELD_KEY_PATTERN = /^[a-z][A-Za-z0-9]*$/;
+// rest.basePath is emitted verbatim into Fastify route strings and OpenAPI
+// paths, so it gets the same fail-closed treatment: lowercase kebab-case only.
+const REST_BASE_PATH_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 function validateContentIdentifier(
   value: unknown,
@@ -113,6 +116,13 @@ export function validateEntityContentIdentifiers(coreEntity: CoreEntity, origin:
     if (!rel || typeof rel !== "object") continue;
     validateContentIdentifier((rel as { key?: unknown }).key, FIELD_KEY_PATTERN, "relationship key", origin);
     validateContentIdentifier((rel as { target?: unknown }).target, ENTITY_NAME_PATTERN, "relationship target", origin);
+  }
+  if (
+    typeof coreEntity.rest === "object" &&
+    coreEntity.rest !== null &&
+    coreEntity.rest.basePath !== undefined
+  ) {
+    validateContentIdentifier(coreEntity.rest.basePath, REST_BASE_PATH_PATTERN, "rest basePath", origin);
   }
 }
 
@@ -292,6 +302,7 @@ export function loadContextEntity(
     fields: contextEntity.fields ?? [],
     relationships: contextEntity.relationships,
     workflow: contextEntity.workflow,
+    rest: (contextEntity as { rest?: CoreEntity["rest"] }).rest,
     // EntityProfile.authorization is typed for partial-profile field-level
     // extensions (ProfileAuthorizationConfig). A `full/` profile entity is a
     // standalone entity, so its YAML carries the wider AuthorizationConfig

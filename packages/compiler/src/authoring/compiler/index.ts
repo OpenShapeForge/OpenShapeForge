@@ -23,6 +23,7 @@ import { resolveStorageColumns } from "./storage.js";
 import { resolveModelFields } from "./model.js";
 import { resolveRelationships } from "./relationships.js";
 import { buildGraphQL } from "./graphql.js";
+import { buildRest } from "./rest.js";
 import { buildViews } from "./views.js";
 import { buildProfiles } from "./profiles.js";
 import { deriveTableName } from "./helpers.js";
@@ -87,6 +88,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   const modelFields = resolveModelFields(coreEntity.fields, componentCatalog, artifacts.semanticTypes);
   const relationships = resolveRelationships(artifacts);
   const graphql = buildGraphQL(coreEntity, profiles, relationships, componentCatalog, artifacts.semanticTypes);
+  const rest = buildRest(coreEntity);
   const views = buildViews(coreEntity, profiles, componentCatalog, artifacts.viewDefinition ?? undefined);
 
   validateTimelineIncludes(coreEntity.entity, relationships, views);
@@ -119,6 +121,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     storage: { table: tableName, columns },
     model: { fields: modelFields, relationships },
     graphql,
+    ...(rest ? { rest } : {}),
     retention: coreEntity.retention || Object.keys(artifacts.retentionPolicies).length > 0
       ? {
           ...(coreEntity.retention ? { entity: coreEntity.retention } : {}),

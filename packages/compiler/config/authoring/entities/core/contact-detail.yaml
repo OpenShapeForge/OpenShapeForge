@@ -12,6 +12,7 @@ labels:
   nl: Contactgegeven
 domains:
   - relations
+rest: true
 authorization:
   roles:
     read:

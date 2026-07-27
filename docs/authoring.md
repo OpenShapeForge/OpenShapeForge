@@ -112,6 +112,8 @@ ui:
 workflow:                    # opt-in to entity workflow nodes (consumed by
   nodes:                     # the workflow plugin; see plugins.md)
     actions: { create: true, getOne: true, list: true, update: true, delete: true }
+
+rest: true                   # opt-in generated REST exposure (see below)
 ```
 
 Notes on what the compiler does with this:
@@ -133,8 +135,48 @@ Notes on what the compiler does with this:
   `entityRoleClient`) exists in the generator but currently emits nothing for
   this repo's entities — see the caveat in
   [api.md](api.md#authentication--authorization).
-- The generic CRUD engine does **not** enforce the `authorization.roles`
-  lists at request time; see [api.md](api.md).
+- The generic CRUD engine **enforces** the `authorization.roles` lists at
+  request time, fail closed, for both GraphQL and REST: per operation the
+  session's roles must intersect the entity's list or the request is
+  `FORBIDDEN` (403) before any SQL runs. The compiler emits each list into
+  the manifest as the union of the authored names and their
+  Keycloak-normalized (Dutch → English) forms so bearer tokens and
+  trusted-context callers both match. See
+  [api.md](api.md#authentication--authorization).
+
+### `rest:` — generated REST exposure
+
+REST is **opt-in per entity** (fail closed, like the generated-CRUD
+allowlist). Absent or `false` means no REST routes. Two forms:
+
+```yaml
+rest: true                   # shorthand: all operations, derived basePath
+# — or —
+rest:
+  enabled: true              # default true when the block is present
+  basePath: relations        # optional; default = table name with _ → -
+                             # (RelationGroup → relation-groups); must match
+                             # ^[a-z][a-z0-9-]*$ (emitted verbatim into routes)
+  operations:                # each defaults to true when REST is enabled
+    list: true
+    get: true
+    create: true
+    update: true
+    delete: false
+```
+
+What the compiler does with it:
+
+- `buildRest()` (`authoring/compiler/rest.ts`) normalizes the block into the
+  contract's `rest` section; the backend manifest bridges it to
+  `source.rest` on the table, which drives the API's route registration
+  (see [api.md](api.md#the-generated-rest-surface)) and the generated
+  OpenAPI spec (`apps/api/src/generated/rest/openapi.json`).
+- **Compile error** if a rest-enabled entity is not in the generated-CRUD
+  allowlist or is `domainInternal` — REST delegates to the generated CRUD
+  engine, so the combination is a misconfiguration.
+- **Compile error** if two entities claim the same `basePath` (part of the
+  collision audit).
 
 ### Relationships
 

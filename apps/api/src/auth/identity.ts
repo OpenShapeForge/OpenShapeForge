@@ -89,6 +89,28 @@ export function __resetSessionResolverForTests(): void {
 const BEARER_AUTHORIZATION = /^Bearer\s+(.+)$/i;
 
 /**
+ * Effective roles for a bearer identity = realm roles ∪ every
+ * `resource_access` client's roles. Keycloak expands realm composites (e.g.
+ * `directie`) into per-client roles under `resource_access`, so entity roles
+ * like `Relations.All.ReadWrite` only exist there — realm_access alone would
+ * deny every generated-entity operation once role enforcement runs. Merging
+ * all clients is safe because the entity guard matches exact strings from
+ * the manifest, so unrelated built-ins (`account.manage-account`, …) are
+ * inert. Exported for unit testing.
+ */
+export function mergeIdentityRoles(identity: {
+  roles: readonly string[];
+  clientRoles?: Record<string, string[]> | undefined;
+}): string[] {
+  return [
+    ...new Set([
+      ...identity.roles,
+      ...Object.values(identity.clientRoles ?? {}).flat(),
+    ]),
+  ].sort();
+}
+
+/**
  * Resolves the canonical session context for a request.
  *
  * - If `Authorization: Bearer …` is present, it is the caller's explicit
@@ -133,12 +155,13 @@ export async function resolveSessionContext(
     try {
       const { identity } = await verifier(token);
       const groups = identity.groups ?? [];
+      const roles = mergeIdentityRoles(identity);
       return {
         tenantId: identity.tenantId,
         userId: identity.userId,
-        roles: identity.roles,
+        roles,
         groups,
-        scope: resolveScope(identity.roles, groups),
+        scope: resolveScope(roles, groups),
       };
     } catch (error) {
       console.warn(

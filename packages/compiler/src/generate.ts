@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { createHash } from "node:crypto";
+import { renderOpenApiSpec } from "./generate-openapi.js";
 import type {
   ColumnDefinition,
   GeneratedArtifact,
@@ -455,6 +456,7 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
         updateMutationName: table.source!.graphql!.updateMutationName,
         deleteMutationName: table.source!.graphql!.deleteMutationName,
       },
+      ...(table.source?.rest === undefined ? {} : { rest: table.source.rest }),
       // Per-operation authorization roles, surfaced for the runtime resolver's
       // fail-closed function-level authorization (#94).
       ...(table.source?.authorization
@@ -513,6 +515,10 @@ ${renderForeignKeySql(manifest)}
     {
       path: "apps/api/src/generated/db/manifest.json",
       contents: renderManifestJson(manifest, source),
+    },
+    {
+      path: "apps/api/src/generated/rest/openapi.json",
+      contents: renderOpenApiSpec(manifest, source),
     },
   ];
 }

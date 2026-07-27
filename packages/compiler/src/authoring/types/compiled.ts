@@ -35,6 +35,7 @@ import type {
   FieldMapping,
   FieldRelationship,
   FieldSuggestions,
+  RestOperationKey,
   ThirdPartyApiEndpoint,
 } from "./authoring.js";
 import type { CanonicalCompilerKernel } from "../compiler/canonical/index.js";
@@ -157,6 +158,17 @@ export interface GraphQLSection {
     update: { name: string; input: string };
     delete: { name: string; args: { name: string; type: string }[] };
   };
+}
+
+export interface RestSection {
+  /**
+   * URL segment without slashes (e.g. "relations", "relation-groups"). The
+   * runtime prefixes it with the versioned REST mount point (/api/rest/v1/).
+   * Validated at load time against ^[a-z][a-z0-9-]*$ because it is emitted
+   * verbatim into route strings and OpenAPI paths.
+   */
+  basePath: string;
+  operations: Record<RestOperationKey, boolean>;
 }
 
 export interface CompiledListView {
@@ -442,6 +454,8 @@ export interface CompiledEntityContract {
     relationships: CompiledRelationship[];
   };
   graphql: GraphQLSection;
+  /** Present only when the entity opts into generated REST exposure. */
+  rest?: RestSection;
   retention?: {
     entity?: RetentionPolicy;
     policies?: Record<string, RetentionPolicy>;

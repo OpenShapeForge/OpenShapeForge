@@ -16,6 +16,7 @@ type GeneratedCrudTable = {
   primaryKey: string | null;
   columns: GeneratedCrudColumn[];
   source?: {
+    authoringEntityName?: string;
     graphql?: {
       typeName: string;
       singleQueryName: string;
@@ -34,10 +35,25 @@ type GeneratedCrudTable = {
       defaultSort?: { field: string; direction: "asc" | "desc" };
     };
     /**
-     * Compiled per-operation authorization roles, carried from the authoring
-     * `authorization.roles` block. The GraphQL layer enforces these
-     * function-level (#94): a session whose roles do not intersect the set
-     * required for an operation is rejected with FORBIDDEN before the DB call.
+     * Opt-in generated REST exposure (entity YAML `rest:` block). When
+     * present, the REST route registration mounts Fastify routes under
+     * /api/rest/v1/{basePath} for each enabled operation.
+     */
+    rest?: {
+      basePath: string;
+      operations: {
+        list: boolean;
+        get: boolean;
+        create: boolean;
+        update: boolean;
+        delete: boolean;
+      };
+    };
+    /**
+     * Per-operation entity role allow-lists (authored + Keycloak-normalized
+     * union, compiler-emitted). Enforced fail-closed by
+     * requireEntityOperation before any SQL runs, so both the GraphQL
+     * resolvers and the REST routes are gated by construction (#94).
      */
     authorization?: GeneratedCrudAuthorization;
   };
@@ -86,6 +102,56 @@ const generatedCrudTables = new Map(
     .map((table) => [table.name, table]),
 );
 
+// Precomputed per-table, per-operation role allow-sets from the manifest's
+// source.authorization block. Membership checks are exact case-sensitive
+// string matches — the compiler already emitted both the authored (Dutch)
+// and Keycloak-normalized (English) spellings of every role.
+const entityRoleSets = new Map<string, Partial<Record<GeneratedCrudOperation, ReadonlySet<string>>>>(
+  [...generatedCrudTables.values()].map((table) => [
+    table.name,
+    Object.fromEntries(
+      Object.entries(table.source?.authorization?.roles ?? {}).map(
+        ([operation, roles]) => [operation, new Set(roles)],
+      ),
+    ) as Partial<Record<GeneratedCrudOperation, ReadonlySet<string>>>,
+  ]),
+);
+
+/**
+ * Fail-closed entity-level role gate, shared by every generated CRUD entry
+ * point and therefore by both the GraphQL resolvers and the REST routes.
+ * Runs before withDbSession — a forbidden operation opens no transaction and
+ * journals no entity events. The error message deliberately names only the
+ * entity and operation, never the allowed role list (no role enumeration).
+ */
+function requireEntityOperation(
+  table: GeneratedCrudTable,
+  operation: GeneratedCrudOperation,
+  session: DbSessionInput,
+): void {
+  const allowed = entityRoleSets.get(table.name)?.[operation];
+  if (!allowed || allowed.size === 0) {
+    // A generatedCrud table without role metadata means the manifest predates
+    // the authorization bridge (stale artifacts) — deny with distinct wording
+    // so operators recognize the regeneration bug instead of a policy denial.
+    throw new GraphQLError(
+      `Entity ${table.name} has no role metadata for ${operation}; access denied. ` +
+        `Regenerate artifacts with \`bun run generate\`.`,
+      { extensions: { code: "FORBIDDEN", status: 403 } },
+    );
+  }
+  const sessionRoles = session.roles ?? [];
+  if (!sessionRoles.some((role) => allowed.has(role))) {
+    throw new GraphQLError(
+      `Not authorized to ${operation} ${table.source?.authoringEntityName ?? table.name}.`,
+      { extensions: { code: "FORBIDDEN", status: 403 } },
+    );
+  }
+}
+
+/** Test-only direct handle on the guard (unit tests bypass the DB layer). */
+export const __requireEntityOperationForTests = requireEntityOperation;
+
 export function isGeneratedCrudTableReadable(name: string) {
   return generatedCrudTables.has(name);
 }
@@ -100,7 +166,16 @@ function generatedCrudError(message: string, code: string) {
   });
 }
 
-function readGeneratedCrudTable(name: string) {
+/**
+ * Resolves a table by name AND enforces the entity role gate for the
+ * requested operation. This is the only by-name table resolver, so every
+ * public CRUD entry point is role-checked by construction.
+ */
+function readGeneratedCrudTable(
+  name: string,
+  operation: GeneratedCrudOperation,
+  session: DbSessionInput,
+) {
   const table = generatedCrudTables.get(name);
   if (!table || !table.primaryKey) {
     throw generatedCrudError(
@@ -108,6 +183,7 @@ function readGeneratedCrudTable(name: string) {
       "GENERATED_CRUD_NOT_ENABLED",
     );
   }
+  requireEntityOperation(table, operation, session);
   return table;
 }
 
@@ -368,7 +444,7 @@ export async function listGeneratedEntities(
     sort?: { field?: string | null; direction?: string | null } | null;
   },
 ): Promise<GeneratedEntityConnection> {
-  const table = readGeneratedCrudTable(input.table);
+  const table = readGeneratedCrudTable(input.table, "read", session);
   return listGeneratedEntitiesForTable(db, session, table, input);
 }
 
@@ -380,8 +456,22 @@ export async function getGeneratedEntity(
     id: string;
   },
 ): Promise<GeneratedEntityRow | null> {
-  const table = readGeneratedCrudTable(input.table);
+  const table = readGeneratedCrudTable(input.table, "read", session);
+  return fetchGeneratedEntityRow(db, session, table, input.id);
+}
 
+/**
+ * Row fetch WITHOUT the role gate — callers must have already authorized the
+ * operation that led here (getGeneratedEntity gates "read"; the empty-body
+ * update path in updateGeneratedEntity gates "update", deliberately not
+ * requiring read on top).
+ */
+async function fetchGeneratedEntityRow(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  id: string,
+): Promise<GeneratedEntityRow | null> {
   return withDbSession(db, session, async (trx) => {
     const tenantWhere =
       table.tenantScoped
@@ -390,7 +480,7 @@ export async function getGeneratedEntity(
     const result = await sql<{ row: GeneratedEntityRow }>`
       select to_jsonb(row_source.*) as row
       from ${sql.id(table.schema, table.table)} as row_source
-      where ${sql.id("row_source", table.primaryKey!)}::text = ${input.id}
+      where ${sql.id("row_source", table.primaryKey!)}::text = ${id}
         ${tenantWhere}
       limit 1
     `.execute(trx);
@@ -440,7 +530,7 @@ export async function createGeneratedEntity(
     values: Record<string, unknown>;
   },
 ): Promise<GeneratedEntityRow> {
-  const table = readGeneratedCrudTable(input.table);
+  const table = readGeneratedCrudTable(input.table, "create", session);
   const values = normalizeWritableValues(table, input.values);
 
   return withDbSession(db, session, async (trx, dbSession) => {
@@ -481,7 +571,7 @@ export async function updateGeneratedEntity(
     values: Record<string, unknown>;
   },
 ): Promise<GeneratedEntityRow | null> {
-  const table = readGeneratedCrudTable(input.table);
+  const table = readGeneratedCrudTable(input.table, "update", session);
   const values = normalizeWritableValues(table, input.values);
   const updatedAt = table.columns.find((column) => column.name === "updated_at");
   const assignments = [...values.entries()].map(([column, value]) =>
@@ -492,7 +582,9 @@ export async function updateGeneratedEntity(
   }
 
   if (assignments.length === 0) {
-    return getGeneratedEntity(db, session, { table: table.name, id: input.id });
+    // Already authorized as an update above; an empty-body update must not
+    // additionally require the read role, so fetch without re-gating.
+    return fetchGeneratedEntityRow(db, session, table, input.id);
   }
 
   return withDbSession(db, session, async (trx) => {
@@ -526,7 +618,7 @@ export async function deleteGeneratedEntity(
     id: string;
   },
 ): Promise<boolean> {
-  const table = readGeneratedCrudTable(input.table);
+  const table = readGeneratedCrudTable(input.table, "delete", session);
 
   return withDbSession(db, session, async (trx) => {
     const tenantWhere =
@@ -561,6 +653,11 @@ export async function listGeneratedEntityRelation(
     limit?: number | null;
   },
 ): Promise<GeneratedEntityConnection> {
+  // Relationship traversal reads TARGET rows via the private list helper,
+  // bypassing readGeneratedCrudTable — gate the target's read roles here,
+  // before the degenerate empty-connection early-returns. The parent needs
+  // no check: its row was only obtainable through a read-gated query.
+  requireEntityOperation(input.targetTable, "read", session);
   const relationship = input.relationship;
   if (!relationship.foreignKey) {
     return { rows: [], nextCursor: null, totalCount: 0 };

@@ -238,21 +238,6 @@ describe("deriveRowScope unit guards (§C.1 emit-time fail-closed)", () => {
   });
 });
 
-describe("authorization.roles → manifest source.authorization (#94)", () => {
-  it("carries the compiled per-operation role lists into the table source", () => {
-    const manifest = compileFixtures(["rowaccess-owner-target"]);
-    const table = tableByName(manifest, "row_access_owner_targets");
-    expect(table?.source?.authorization).toEqual({
-      roles: {
-        read: ["Relaties.All.Read"],
-        create: ["Relaties.All.ReadWrite"],
-        update: ["Relaties.All.ReadWrite"],
-        delete: ["Relaties.All.ReadWrite"],
-      },
-    });
-  });
-});
-
 describe("retention compilation fail-closed guards (M-07)", () => {
   it("throws (does not silently default to 7y) on an unresolved policyRef, naming the entity + key", () => {
     expect(() => compileFixtures(["rowaccess-retention-badref"])).toThrow(
@@ -282,6 +267,103 @@ describe("retention compilation fail-closed guards (M-07)", () => {
       ],
       source: "authoring-entity-retention",
     });
+  });
+});
+
+describe("generated REST exposure (source.rest bridge)", () => {
+  function compileRestFixtures(
+    slugs: string[],
+    options: { generatedCrudAllowlist?: string[]; domainInternalEntities?: string[] } = {},
+  ): PlatformSchemaManifest {
+    return compileAuthoringBackendManifest(FIXTURE_DIR, {
+      mode: "promote",
+      entityAllowlist: slugs,
+      schemaByModule: { core: "erp" },
+      ...options,
+    });
+  }
+
+  it("emits source.rest for a rest-enabled, CRUD-allowlisted entity (shorthand → all operations)", () => {
+    const manifest = compileRestFixtures(["rest-enabled"], {
+      generatedCrudAllowlist: ["rest-enabled"],
+    });
+    const table = tableByName(manifest, "rest_enableds");
+    expect(table?.source?.rest).toEqual({
+      basePath: "rest-enableds",
+      operations: { list: true, get: true, create: true, update: true, delete: true },
+    });
+  });
+
+  it("carries a custom basePath and per-operation flags", () => {
+    const manifest = compileRestFixtures(["rest-custom"], {
+      generatedCrudAllowlist: ["rest-custom"],
+    });
+    const table = tableByName(manifest, "rest_customs");
+    expect(table?.source?.rest).toEqual({
+      basePath: "custom-things",
+      operations: { list: true, get: true, create: true, update: true, delete: false },
+    });
+  });
+
+  it("fails closed when a rest-enabled entity is not generated-CRUD allowlisted", () => {
+    expect(() => compileRestFixtures(["rest-enabled"])).toThrow(
+      /declares a rest: block but is not generated-CRUD enabled/,
+    );
+  });
+
+  it("fails closed when a rest-enabled entity is domain-internal", () => {
+    expect(() =>
+      compileRestFixtures(["rest-enabled"], {
+        generatedCrudAllowlist: ["rest-enabled"],
+        domainInternalEntities: ["rest-enabled"],
+      }),
+    ).toThrow(/domain-internal/);
+  });
+
+  it("rejects two entities claiming the same REST base path", () => {
+    expect(() =>
+      compileRestFixtures(["rest-custom", "rest-collision"], {
+        generatedCrudAllowlist: ["rest-custom", "rest-collision"],
+      }),
+    ).toThrow(/REST base path "custom-things"/);
+  });
+
+  it("does not emit source.rest for entities without a rest block", () => {
+    const manifest = compileFixtures(["rowaccess-owner-target"]);
+    const table = tableByName(manifest, "row_access_owner_targets");
+    expect(table?.source?.rest).toBeUndefined();
+  });
+});
+
+describe("entity authorization roles (source.authorization bridge, #94)", () => {
+  it("emits per-operation role lists as the sorted union of authored + Keycloak-normalized names", () => {
+    // Fixtures author Dutch names (Relaties.*); the bridge must add the
+    // normalized English twins (Relations.*) so bearer-token roles match.
+    const manifest = compileFixtures(["rowaccess-owner-target"]);
+    const table = tableByName(manifest, "row_access_owner_targets");
+    expect(table?.source?.authorization?.roles).toEqual({
+      read: ["Relaties.All.Read", "Relations.All.Read"],
+      create: ["Relaties.All.ReadWrite", "Relations.All.ReadWrite"],
+      update: ["Relaties.All.ReadWrite", "Relations.All.ReadWrite"],
+      delete: ["Relaties.All.ReadWrite", "Relations.All.ReadWrite"],
+    });
+  });
+
+  it("read lists with multiple authored roles stay deduplicated and sorted", () => {
+    const manifest = compileFixtures(["rowaccess-owner", "rowaccess-owner-target"]);
+    const table = tableByName(manifest, "row_access_owners");
+    const read = table?.source?.authorization?.roles.read ?? [];
+    expect(read.length).toBeGreaterThan(0);
+    expect(read).toEqual([...new Set(read)].sort());
+    expect(read).toContain("Relations.All.Read");
+  });
+
+  it("emits the block for every entity table (authorization is compile-mandatory)", () => {
+    const manifest = compileFixtures(["rowaccess-owner", "rowaccess-owner-target"]);
+    for (const table of manifest.tables) {
+      expect(table.source?.authorization?.roles.read.length).toBeGreaterThan(0);
+      expect(table.source?.authorization?.roles.create.length).toBeGreaterThan(0);
+    }
   });
 });
 

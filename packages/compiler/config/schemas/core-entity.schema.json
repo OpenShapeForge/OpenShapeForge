@@ -251,6 +251,34 @@
         }
       }
     },
+    "rest": {
+      "description": "Opt-in generated REST exposure. Absent or false means no REST routes (fail closed). `true` enables all operations under a derived base path; the object form allows per-operation flags and a custom basePath.",
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "basePath": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]*$"
+            },
+            "operations": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "list": { "type": "boolean" },
+                "get": { "type": "boolean" },
+                "create": { "type": "boolean" },
+                "update": { "type": "boolean" },
+                "delete": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      ]
+    },
     "workflow": {
       "type": "object",
       "description": "Workflow node generation settings for this entity.",

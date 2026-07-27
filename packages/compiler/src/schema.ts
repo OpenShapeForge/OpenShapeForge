@@ -270,18 +270,37 @@ export type TableSourceDefinition = {
      */
     defaultSort?: { field: string; direction: "asc" | "desc" };
   };
-  relationshipStatus?: {
-    emittedReferences: string[];
-    skippedReferences: string[];
-  };
-  retentionSource?: string;
   /**
-   * Compiled per-operation authorization roles for the entity, carried from the
-   * authoring `authorization.roles` block (via CompiledAuthorization). The
-   * runtime GraphQL layer enforces these BEFORE the DB call: a session whose
-   * roles do not intersect the required set for an operation is rejected with a
-   * FORBIDDEN error (issue #94). A caller must hold at least one listed role for
-   * the operation it invokes.
+   * Opt-in generated REST exposure for this table. Present only when the
+   * authoring entity declared a `rest:` block AND the table is generated-CRUD
+   * enabled — the backend manifest fails compilation on the mismatch. The
+   * API runtime registers Fastify routes under /api/rest/v1/{basePath} for
+   * each enabled operation, delegating to the same generated CRUD layer as
+   * GraphQL.
+   */
+  rest?: {
+    basePath: string;
+    operations: {
+      list: boolean;
+      get: boolean;
+      create: boolean;
+      update: boolean;
+      delete: boolean;
+    };
+  };
+  /**
+   * Per-operation entity role allow-lists, bridged from the authored
+   * `authorization.roles` block. Each list is the deduplicated, sorted union
+   * of the authored names and their Keycloak-normalized forms (Dutch →
+   * English, e.g. `Relaties.All.Read` + `Relations.All.Read`), so the API
+   * runtime can enforce with a plain case-sensitive set intersection against
+   * session roles from either a bearer token (normalized names) or
+   * trusted-context headers (authored names).
+   *
+   * Enforced fail-closed BEFORE the DB call (issue #94): a session whose roles
+   * do not intersect the required set for an operation is rejected with a
+   * FORBIDDEN error. The gate lives in the generated CRUD layer, so both the
+   * GraphQL resolvers and the REST routes are covered.
    */
   authorization?: {
     roles: {
@@ -291,6 +310,11 @@ export type TableSourceDefinition = {
       delete: string[];
     };
   };
+  relationshipStatus?: {
+    emittedReferences: string[];
+    skippedReferences: string[];
+  };
+  retentionSource?: string;
 };
 
 export type TableDefinition = {

@@ -11,6 +11,8 @@ Endpoints (`src/roles/api.ts`):
 | Route | Purpose |
 | --- | --- |
 | `POST/GET /api/graphql` | GraphQL (GraphiQL enabled unless `NODE_ENV=production`) |
+| `/api/rest/v1/<basePath>[/:id]` | Generated REST (entities that opt in via the `rest:` block) |
+| `GET /api/rest/openapi.json` | Generated OpenAPI 3.1 spec for the REST surface |
 | `GET /api/health`, `/api/ready`, `/api/graphql/health` | liveness/readiness |
 
 On startup (`onReady`) the API compares the database's applied
@@ -52,6 +54,47 @@ Engine semantics (`src/graphql/generated-crud.ts`):
   `tenant_id`, `created_at`, and `updated_at`. Create injects `tenant_id`
   from the session; update always sets `updated_at = now()`; delete returns
   `true` only when a row (visible to this tenant) was actually removed.
+
+## The generated REST surface
+
+`src/rest/generated-rest-routes.ts` is the REST counterpart of the GraphQL
+schema builder. Entities opt in per entity with a `rest:` block in their YAML
+(see [authoring.md](authoring.md#rest-generated-rest-exposure)); the compiler
+bridges it to `source.rest` in the manifest, and every such table gets routes
+under `/api/rest/v1/<basePath>`:
+
+| Route | Operation flag | Success |
+| --- | --- | --- |
+| `GET /api/rest/v1/<basePath>` | `list` | `200 { items, totalCount, nextCursor }` |
+| `GET /api/rest/v1/<basePath>/:id` | `get` | `200` row (`404` if not visible) |
+| `POST /api/rest/v1/<basePath>` | `create` | `201` row |
+| `PATCH /api/rest/v1/<basePath>/:id` | `update` | `200` row (partial update) |
+| `DELETE /api/rest/v1/<basePath>/:id` | `delete` | `204` |
+
+Handlers delegate to the same `generated-crud.ts` functions as the GraphQL
+resolvers — same auth (`resolveSessionContext`), same tenant scoping and RLS
+session, same filter/sort/cursor semantics, same camelCase field names.
+Disabled operations simply have no route (404).
+
+REST-specific semantics:
+
+- **List query params** — `first`, `after`, `sortField`, `sortDirection` are
+  reserved; every other query parameter is an equality filter on the field of
+  that name (text fields: `ilike '%value%'`). Repeating a parameter
+  (`?status=a&status=b`) or naming it explicitly (`?statusIn=a`, single or
+  repeated — the GraphQL filter convention) becomes the `<field>In`
+  IN-filter. Values are coerced to the column type; unknown fields are `400`.
+- **Bodies** — stricter than GraphQL parity: unknown or read-only keys in a
+  JSON body are rejected with `400` instead of being silently dropped.
+  Malformed JSON is `400`.
+- **Errors** — `{ "error": { "code", "message" } }`; the CRUD layer's
+  GraphQL error codes map to statuses in `src/rest/http-error.ts`
+  (`BAD_USER_INPUT` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403,
+  `GENERATED_CRUD_NOT_ENABLED` 404, `DATABASE_NOT_CONFIGURED` 503; anything
+  unexpected is a redacted 500).
+- **OpenAPI** — `bun run generate` also emits
+  `apps/api/src/generated/rest/openapi.json` (always, empty `paths` when no
+  entity opts in), served verbatim at `GET /api/rest/openapi.json`.
 
 ## Multi-tenancy and the RLS session
 
@@ -99,8 +142,11 @@ and `..._ISSUER` are set (`..._AUDIENCE` optional). When an
 JWKS; **verification failure fails closed** to an empty session — it never
 falls back to trusted-context, so bearer auth is not downgrade-attackable.
 Claims used: `tid` (tenant UUID — the dev realm sets it as a user attribute
-mapped to the `tid` claim), `sub` (user id), `realm_access.roles`, and
-`groups` (requires the group-membership protocol mapper).
+mapped to the `tid` claim), `sub` (user id), `realm_access.roles` **unioned
+with every `resource_access.<client>.roles` list** (Keycloak expands realm
+composites like `directie` into per-client entity roles under
+`resource_access`, so realm roles alone would never match the entity role
+lists), and `groups` (requires the group-membership protocol mapper).
 
 **2. Trusted-context HMAC headers (v2)** — the internal service-to-service
 path (`packages/auth/src/trusted-context.ts`). Header names:
@@ -127,14 +173,36 @@ the e2e harness, the k6 suite) default the secret to
 same value, so an `.env` copied from the example works with them against a
 running API out of the box.
 
-**Role enforcement:** the generated CRUD engine authenticates and
-tenant-isolates but does **not** check the per-entity `authorization.roles`
-lists at request time — roles flow into `app.roles` for future policies and
-into Keycloak realm generation. Entity-derived roles are appended to the
-`erp-provider` client during realm generation (deduplicated against the
-hand-authored role list, first wins); with the current entities they all
-coincide with hand-authored roles, so they act as a safety net for future
-entities rather than adding rows today.
+**Role enforcement:** the generated CRUD engine enforces the per-entity
+`authorization.roles` lists at request time, **fail closed**, for GraphQL and
+REST alike (`requireEntityOperation` in `src/graphql/generated-crud.ts` —
+both APIs delegate to the same functions). Per operation (list/get → `read`,
+create, update, delete) the session's roles must intersect the entity's
+allow-list or the request is rejected with `FORBIDDEN` (HTTP 403 on REST)
+**before any SQL runs** — forbidden mutations open no transaction and journal
+no entity events. Details:
+
+- The allow-lists come from the manifest's `source.authorization.roles`
+  block: per operation, the deduplicated sorted **union of the authored
+  (Dutch) role names and their Keycloak-normalized (English) forms** — bearer
+  tokens carry the normalized names from the generated realm, trusted-context
+  callers typically send the authored names; both match. Comparison is exact
+  and case-sensitive.
+- A generatedCrud table without role metadata (stale artifacts predating the
+  bridge) is **denied** with a distinct "no role metadata" message.
+- Error messages name only the entity and operation, never the allowed role
+  list (no role enumeration for authenticated probes).
+- Relationship traversal requires the **target** entity's `read` roles.
+- An empty-body update is authorized by the `update` role alone.
+- Profile-level read roles (`profileAuthorizations`) are **not** enforced —
+  deferred; no profile surface exists in the generic CRUD engine today.
+- Trusted-context callers MUST send (and sign) `x-user-roles`; a session with
+  no matching role is 403 on every entity operation.
+
+Entity-derived roles are appended to the `erp-provider` client during realm
+generation (deduplicated against the hand-authored role list, first wins);
+with the current entities they all coincide with hand-authored roles, so they
+act as a safety net for future entities rather than adding rows today.
 
 Scope resolution: a role listed in `APP_TENANT_BYPASS_ROLES` (env,
 comma-separated) yields scope `tenant`; else `group` when groups exist; else

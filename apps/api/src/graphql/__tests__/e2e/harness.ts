@@ -61,6 +61,8 @@ type Store = {
   seed: string;
   tenantA: Identity;
   tenantB: Identity;
+  readOnly: Identity;
+  noRoles: Identity;
   capturedRequests: CapturedRequest[];
   capturedEventReads: CapturedEventRead[];
   createdRows: CreatedRow[];
@@ -71,21 +73,29 @@ type Store = {
 
 /**
  * Roles held by the default e2e identities. Function-level authorization
- * (#94) now gates every generated operation, so the CRUD/security suites must
+ * (#94) gates every generated operation, so the CRUD/security suites must
  * present a role that grants read+write on the shipped entities. The three
  * core entities (relation, contact-detail, relation-group) all authorize
- * writes with `Relaties.All.ReadWrite`; that role also appears in each
- * entity's read list, so it satisfies every operation. Field-level redaction
- * (#96/#101) treats it as a write grant, so classified columns stay visible to
- * these identities. The dedicated authorization suite uses narrower roles to
- * prove enforcement.
+ * writes with the ReadWrite role; it also appears in each entity's read list,
+ * so it satisfies every operation. Field-level redaction (#96/#101) treats it
+ * as a write grant, so classified columns stay visible to these identities.
+ *
+ * The compiler emits both the authored (Dutch) and Keycloak-normalized
+ * (English) spelling of every role, so either matches; these use the
+ * normalized spelling that bearer tokens actually carry.
  */
-export const E2E_READWRITE_ROLES = ["Relaties.All.ReadWrite"];
+export const E2E_READWRITE_ROLES = ["Relations.All.ReadWrite"];
+export const E2E_READONLY_ROLES = ["Relations.All.Read"];
 
+// readOnly/noRoles reuse tenantA's tenant with fresh users so role denial is
+// isolated from RLS/tenant denial.
+const tenantAId = randomUUID();
 const store: Store = ((globalThis as Record<string, any>).__openshapeforgeE2E ??= {
   seed: randomUUID().slice(0, 8),
-  tenantA: { tenantId: randomUUID(), userId: randomUUID(), roles: [...E2E_READWRITE_ROLES] },
+  tenantA: { tenantId: tenantAId, userId: randomUUID(), roles: [...E2E_READWRITE_ROLES] },
   tenantB: { tenantId: randomUUID(), userId: randomUUID(), roles: [...E2E_READWRITE_ROLES] },
+  readOnly: { tenantId: tenantAId, userId: randomUUID(), roles: [...E2E_READONLY_ROLES] },
+  noRoles: { tenantId: tenantAId, userId: randomUUID(), roles: [] },
   capturedRequests: [],
   capturedEventReads: [],
   createdRows: [],
@@ -97,6 +107,8 @@ const store: Store = ((globalThis as Record<string, any>).__openshapeforgeE2E ??
 export const seed = store.seed;
 export const tenantA = store.tenantA;
 export const tenantB = store.tenantB;
+export const readOnly = store.readOnly;
+export const noRoles = store.noRoles;
 export const createdRows = store.createdRows;
 export const remoteUrl = process.env.E2E_API_URL;
 

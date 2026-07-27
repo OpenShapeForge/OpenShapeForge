@@ -7,11 +7,15 @@ name: Deploy
 # ones published by the "API image" and "Keycloak image" workflows; this
 # workflow builds nothing.
 #
-# REQUIRED REPOSITORY SECRETS — four, all Scaleway:
+# REQUIRED REPOSITORY SECRETS — five, all Scaleway. Only the first two are
+# actually secret; the rest are identifiers the SDK insists on.
 #   SCW_ACCESS_KEY               Scaleway API key
 #   SCW_SECRET_KEY               Scaleway API secret
 #   SCW_DEFAULT_PROJECT_ID       MUST be the OpenShapeForge project, not the
 #                                CLI default — the organization has several
+#   SCW_DEFAULT_ORGANIZATION_ID  The ORGANIZATION, which is not the project.
+#                                With no config file on the runner the SDK
+#                                rejects most calls without it.
 #   SCW_CLUSTER_ID               Kapsule cluster ID
 #
 # Every application credential (database URLs, app password, internal context
@@ -67,7 +71,8 @@ jobs:
       - name: Preflight — required secrets are present
         env:
           REQUIRED: >-
-            SCW_ACCESS_KEY SCW_SECRET_KEY SCW_DEFAULT_PROJECT_ID SCW_CLUSTER_ID
+            SCW_ACCESS_KEY SCW_SECRET_KEY SCW_DEFAULT_PROJECT_ID
+            SCW_DEFAULT_ORGANIZATION_ID SCW_CLUSTER_ID
           SECRETS_JSON: ${{ toJSON(secrets) }}
         run: |
           missing=""
@@ -108,7 +113,10 @@ jobs:
           SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
           SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
           SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
-          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          # Was wrongly set to the PROJECT id. It happened to work here because
+          # a cluster lookup by ID needs no organization, but it would have
+          # failed the moment any call did.
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
         run: |
           scw k8s kubeconfig install "${{ secrets.SCW_CLUSTER_ID }}" \
             region=${{ env.REGION }} auth-method=copy-cli-token
@@ -182,8 +190,17 @@ jobs:
           SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
           SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
           SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          # Required: with no config file on the runner, the SDK refuses every
+          # call without an organization. It is NOT the project ID — this
+          # organization contains several projects.
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
         run: |
           set -euo pipefail
+          # NOTE: no 2>/dev/null here, deliberately. Suppressing scw's stderr
+          # once turned a plain "organization ID is required" into a step that
+          # died in 40ms with no output at all, because pipefail + set -e killed
+          # it before anything was written. An error we cannot read costs far
+          # more than noisy logs.
           fetch() {
             scw secret version access-by-path \
               secret-path=/ \
@@ -191,7 +208,7 @@ jobs:
               revision=latest \
               region="$REGION" \
               project-id="$SCW_DEFAULT_PROJECT_ID" \
-              -o json 2>/dev/null | jq -r '.data' | base64 -d
+              -o json | jq -r '.data' | base64 -d
           }
           umask 077
           : > secrets.values.yaml

@@ -78,18 +78,19 @@ jobs:
             echo "no tag given; using the deployed one: $tag"
           fi
 
-          # Token issuer for the harness: the in-cluster Service. Not the public
-          # hostname — see the comment in deploy/e2e-job.yaml.
-          realm=$(kubectl -n "$NAMESPACE" get deploy "${RELEASE}-openshapeforge-api" \
-            -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER")]}{.value}{end}' \
-            | sed -E 's#.*/realms/##')
-          if [ -z "$realm" ]; then
+          # Read the issuer straight off the deployment and pass it through
+          # unchanged, so the suite authenticates against exactly what the API
+          # verifies against. Deriving it independently would let the two drift
+          # and turn a config mismatch into a mysterious auth failure.
+          issuer=$(kubectl -n "$NAMESPACE" get deploy "${RELEASE}-openshapeforge-api" \
+            -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER")]}{.value}{end}')
+          if [ -z "$issuer" ]; then
             echo "::error::the API deployment has no bearer issuer configured; deploy with Keycloak enabled first"
             exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "issuer=http://${RELEASE}-keycloak:8080/realms/${realm}" >> "$GITHUB_OUTPUT"
-          echo "realm: $realm"
+          echo "issuer=$issuer" >> "$GITHUB_OUTPUT"
+          echo "issuer: $issuer"
 
       - name: Run the suite
         id: run

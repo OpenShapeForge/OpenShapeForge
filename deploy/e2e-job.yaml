@@ -59,12 +59,9 @@ spec:
                 secretKeyRef:
                   name: openshapeforge-openshapeforge-api
                   key: OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET
-            # The harness uses this ONLY as the base URL for fetching a token —
-            # it is not verifying anything. Pointing it at the in-cluster
-            # Service keeps the suite independent of public DNS and certificate
-            # validity, and the token is still accepted by the API: Keycloak
-            # stamps `iss` from KC_HOSTNAME regardless of which URL minted it,
-            # so an internally-fetched token carries the PUBLIC issuer.
+            # The SAME issuer the API is deployed with, passed through verbatim
+            # — the suite obtains its tokens from exactly the endpoint real
+            # clients use, over the public hostname and its certificate.
             - name: OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER
               value: "__TOKEN_ISSUER__"
           resources:

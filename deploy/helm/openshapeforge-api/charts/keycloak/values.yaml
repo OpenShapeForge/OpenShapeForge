@@ -74,6 +74,17 @@ service:
   type: ClusterIP
   port: 8080
 
+# --- Ingress (optional) ------------------------------------------------------
+# Exposing Keycloak CHANGES THE ISSUER. Tokens carry `iss` derived from
+# `hostname` above, and the API verifies that claim against auth.bearer.issuer
+# in the parent chart. Set both together or every token stops validating.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
 # Extra environment variables (name/value) appended to the container.
 extraEnv: []
 

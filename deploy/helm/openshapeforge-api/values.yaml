@@ -187,3 +187,26 @@ tolerations: []
 affinity: {}
 # Extra environment variables (name/value) appended to the API container.
 extraEnv: []
+
+# --- Keycloak subchart (optional) --------------------------------------------
+# OFF by default: the documented posture is an EXTERNAL OIDC issuer, and that
+# does not change. Enable this only where the chart should also stand up the
+# identity provider (dev, CI, a self-contained demo environment).
+#
+# When enabled you must ALSO set auth.bearer.* above to point at it — the chart
+# deliberately does not infer them, because `issuer` has to match the `iss`
+# claim in issued tokens exactly, which depends on the external URL clients use.
+# For an in-cluster issuer that is typically:
+#
+#   auth.bearer.issuer  = http://<release>-keycloak:8080/realms/openshapeforge
+#   auth.bearer.jwksUri = <issuer>/protocol/openid-connect/certs
+#
+# Full settings live in charts/keycloak/values.yaml.
+keycloak:
+  enabled: false
+
+# Pull secrets shared by BOTH the API and the Keycloak subchart. The GHCR
+# packages are private, so a docker-registry Secret is required unless the
+# packages are made public.
+global:
+  imagePullSecrets: []

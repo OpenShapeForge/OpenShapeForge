@@ -47,10 +47,59 @@ docker run --rm \
   bun apps/api/src/db/migrate.ts
 ```
 
+## Deploy pipeline
+
+[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) runs
+`helm upgrade --install` against the Scaleway Kapsule cluster. It is
+`workflow_dispatch` only — deploys are deliberately a decision, not a
+side effect of merging — and runs against the `dev` GitHub Environment, so
+required reviewers can gate it.
+
+It builds nothing: it installs images already published by the `API image` and
+`Keycloak image` workflows, and verifies both tags exist in GHCR **before**
+touching the cluster, so a missing tag fails fast instead of surfacing as an
+`ImagePullBackOff` minutes into a doomed rollout.
+
+The workflow header lists every required repository secret. The database values
+all come from Terraform in
+[OpenShapeForge-Base](https://github.com/OpenShapeForge/OpenShapeForge-Base) —
+read them with `terraform output -raw <name>`.
+
+> The GHCR packages are **private**, so the pipeline creates a `ghcr-pull`
+> docker-registry Secret from `GHCR_PULL_TOKEN` (a PAT with `read:packages`) on
+> every deploy. Drop that secret only if the packages are made public.
+
 ## Helm chart
 
 The chart (`deploy/helm/openshapeforge-api`) deploys the API Deployment + Service
 and runs migrations as a **pre-install/pre-upgrade Job**.
+
+### Keycloak subchart (optional, off by default)
+
+`charts/keycloak` deploys Keycloak using the image built from
+`packages/keycloak-spi` — official Keycloak plus this project's SPI provider jar.
+It is vendored as a first-party subchart rather than pulled from upstream
+precisely because no upstream chart knows about that image.
+
+It stays **disabled** unless `keycloak.enabled=true`, so the documented
+bring-your-own-issuer posture is unchanged for production.
+
+Enabling it does **not** auto-configure `auth.bearer.*` — you must set those
+yourself. `issuer` has to match the `iss` claim in issued tokens exactly, which
+depends on the external URL clients use, so inferring it would be wrong more
+often than right:
+
+```sh
+--set auth.bearer.issuer=https://idp.example.com/realms/openshapeforge \
+--set auth.bearer.jwksUri=https://idp.example.com/realms/openshapeforge/protocol/openid-connect/certs \
+--set auth.bearer.audience=erp-provider
+```
+
+The realm is **not** baked into the image — `bun run generate` produces an
+environment-specific, gitignored realm file, so it is supplied at deploy time
+with `--set-file keycloak.realm.json=keycloak/openshapeforge-dev-realm.json` and
+stored in a Secret (a realm export can carry client secrets). Keycloak only
+imports a realm that does not already exist, so this is safe across upgrades.
 
 Security posture it encodes (see `../SECURITY.md`):
 

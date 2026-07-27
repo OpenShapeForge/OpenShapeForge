@@ -97,6 +97,24 @@ jobs:
             --set database.appPassword="ci-template-only" \
             --set auth.internalContextSecret="ci-template-only"
 
+      # The Keycloak subchart is disabled by default, so the render above never
+      # touches it. Template it explicitly, otherwise a broken subchart would
+      # only surface during an actual deploy.
+      - name: Helm template with the Keycloak subchart enabled
+        run: |
+          printf '{"realm":"ci-template-only"}' > /tmp/ci-realm.json
+          helm template ./deploy/helm/openshapeforge-api \
+            --set database.url="postgres://app:app@db:5432/app" \
+            --set database.migrateUrl="postgres://mig:mig@db:5432/app" \
+            --set database.appPassword="ci-template-only" \
+            --set auth.internalContextSecret="ci-template-only" \
+            --set keycloak.enabled=true \
+            --set keycloak.database.jdbcUrl="jdbc:postgresql://db:5432/keycloak" \
+            --set keycloak.database.password="ci-template-only" \
+            --set keycloak.admin.password="ci-template-only" \
+            --set 'global.imagePullSecrets[0].name=ghcr-pull' \
+            --set-file keycloak.realm.json=/tmp/ci-realm.json
+
   db-tests:
     name: Database migration tests
     runs-on: ubuntu-latest

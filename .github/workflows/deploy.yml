@@ -1,0 +1,260 @@
+name: Deploy
+
+# Deploys the Helm release (API + migrate Job + optional Keycloak) to the
+# Scaleway Kapsule cluster.
+#
+# Runs entirely in CI — never from a workstation. The images it installs are the
+# ones published by the "API image" and "Keycloak image" workflows; this
+# workflow builds nothing.
+#
+# REQUIRED REPOSITORY SECRETS — four, all Scaleway:
+#   SCW_ACCESS_KEY               Scaleway API key
+#   SCW_SECRET_KEY               Scaleway API secret
+#   SCW_DEFAULT_PROJECT_ID       MUST be the OpenShapeForge project, not the
+#                                CLI default — the organization has several
+#   SCW_CLUSTER_ID               Kapsule cluster ID
+#
+# Every application credential (database URLs, app password, internal context
+# secret, Keycloak database and admin passwords) is read at run time from
+# Scaleway Secret Manager, where Terraform in OpenShapeForge-Base publishes it.
+# Those passwords are generated inside Terraform state, which this repository
+# cannot read — so copying them into GitHub secrets by hand would be the only
+# alternative, and would go stale the moment they rotate.
+#
+# GHCR authentication uses the job's own GITHUB_TOKEN (packages: read), so no
+# personal access token is needed. See the pull-secret step for the one caveat
+# that carries.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy. Empty = sha-<short commit> of this ref."
+        required: false
+        type: string
+      deploy_keycloak:
+        description: "Also deploy Keycloak from the subchart."
+        required: false
+        type: boolean
+        default: true
+
+# Never let two deploys race for the same release.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read # pull the private GHCR images with GITHUB_TOKEN
+
+env:
+  NAMESPACE: openshapeforge
+  RELEASE: openshapeforge
+  REGION: nl-ams
+  SECRET_PREFIX: openshapeforge
+
+jobs:
+  deploy:
+    name: Helm upgrade --install
+    runs-on: ubuntu-latest
+    # Attach required reviewers to this environment in repo settings to gate
+    # deploys behind an approval.
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail early and legibly rather than part-way through a helm upgrade.
+      - name: Preflight — required secrets are present
+        env:
+          REQUIRED: >-
+            SCW_ACCESS_KEY SCW_SECRET_KEY SCW_DEFAULT_PROJECT_ID SCW_CLUSTER_ID
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+        run: |
+          missing=""
+          for key in $REQUIRED; do
+            if [ -z "$(jq -r --arg k "$key" '.[$k] // ""' <<<"$SECRETS_JSON")" ]; then
+              missing="$missing $key"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::missing repository secrets:$missing"
+            exit 1
+          fi
+          echo "all required secrets present"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # Produces keycloak/openshapeforge-dev-realm.json, which is gitignored and
+      # therefore must be regenerated here rather than read from the checkout.
+      - name: Generate artifacts
+        run: bun run generate
+
+      - uses: azure/setup-helm@v4
+
+      - name: Install Scaleway CLI
+        run: |
+          curl -fsSL https://github.com/scaleway/scaleway-cli/releases/download/v2.51.0/scaleway-cli_2.51.0_linux_amd64 \
+            -o /usr/local/bin/scw
+          chmod +x /usr/local/bin/scw
+          scw version
+
+      - name: Fetch kubeconfig
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+        run: |
+          scw k8s kubeconfig install "${{ secrets.SCW_CLUSTER_ID }}" \
+            region=${{ env.REGION }} auth-method=copy-cli-token
+          kubectl config current-context
+          kubectl get nodes
+
+      - name: Ensure namespace
+        run: |
+          kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+
+      # The GHCR packages are private, so both the API and Keycloak pods need
+      # this to pull. Recreated on every deploy.
+      #
+      # CAVEAT: GITHUB_TOKEN expires when this job ends. `helm --wait` below
+      # blocks until the rollout completes, so every image is pulled while the
+      # token is still valid, and imagePullPolicy=IfNotPresent means restarts
+      # reuse the node's cached copy. But a pod scheduled onto a NEW node long
+      # after the deploy would fail to pull. To make this durable, either make
+      # the GHCR packages public, or set a GHCR_PULL_TOKEN repository secret
+      # (a PAT with read:packages) — it is used in preference when present.
+      - name: Create GHCR pull secret
+        env:
+          PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ secrets.GHCR_PULL_TOKEN }}" ]; then
+            echo "using GHCR_PULL_TOKEN (durable)"
+          else
+            echo "::warning::using GITHUB_TOKEN for the pull secret; it expires with this job. Pods scheduled onto a new node later will fail to pull. Set GHCR_PULL_TOKEN or make the packages public to fix."
+          fi
+          kubectl -n "$NAMESPACE" create secret docker-registry ghcr-pull \
+            --docker-server=ghcr.io \
+            --docker-username="${{ github.actor }}" \
+            --docker-password="$PULL_TOKEN" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          tag="${{ inputs.image_tag }}"
+          if [ -z "$tag" ]; then
+            # Matches docker/metadata-action's type=sha (7-char short sha).
+            tag="sha-$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "deploying tag: $tag"
+
+      # Confirm the images actually exist before touching the cluster: a missing
+      # tag would otherwise surface as an ImagePullBackOff several minutes into
+      # a failed rollout.
+      - name: Verify images exist in GHCR
+        env:
+          PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$PULL_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          for img in openshapeforge-api openshapeforge-keycloak; do
+            ref="ghcr.io/openshapeforge/$img:${{ steps.tag.outputs.tag }}"
+            if ! docker manifest inspect "$ref" >/dev/null 2>&1; then
+              echo "::error::image not found: $ref"
+              exit 1
+            fi
+            echo "found $ref"
+          done
+
+      # Credentials come from Secret Manager, where Terraform published them.
+      # They are written straight into a values file rather than onto the helm
+      # command line: --set values would be visible in the process table, and
+      # these are not GitHub secrets so the runner does not mask them
+      # automatically — hence the explicit ::add-mask:: on every value.
+      - name: Read deploy credentials from Secret Manager
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          fetch() {
+            scw secret version access-by-path \
+              secret-path=/ \
+              secret-name="${SECRET_PREFIX}-$1" \
+              revision=latest \
+              region="$REGION" \
+              project-id="$SCW_DEFAULT_PROJECT_ID" \
+              -o json 2>/dev/null | jq -r '.data' | base64 -d
+          }
+          umask 077
+          : > secrets.values.yaml
+          emit() { # name -> yaml path
+            value="$(fetch "$1")"
+            if [ -z "$value" ]; then
+              echo "::error::Secret Manager entry not found or empty: ${SECRET_PREFIX}-$1"
+              exit 1
+            fi
+            echo "::add-mask::$value"
+            printf '%s: %s\n' "$2" "$(jq -Rn --arg v "$value" '$v')" >> secrets.values.yaml
+          }
+          {
+            echo "database:"
+          } >> secrets.values.yaml
+          emit database-url            "  url"
+          emit migrate-database-url    "  migrateUrl"
+          emit app-password            "  appPassword"
+          echo "auth:" >> secrets.values.yaml
+          emit internal-context-secret "  internalContextSecret"
+          echo "keycloak:" >> secrets.values.yaml
+          echo "  database:" >> secrets.values.yaml
+          emit keycloak-jdbc-url       "    jdbcUrl"
+          emit keycloak-db-password    "    password"
+          echo "  admin:" >> secrets.values.yaml
+          emit keycloak-admin-password "    password"
+          echo "wrote $(grep -c ':' secrets.values.yaml) lines of values (contents masked)"
+
+      - name: Helm upgrade --install
+        run: |
+          helm upgrade --install "$RELEASE" ./deploy/helm/openshapeforge-api \
+            --namespace "$NAMESPACE" \
+            --values secrets.values.yaml \
+            --set image.tag="${{ steps.tag.outputs.tag }}" \
+            --set 'global.imagePullSecrets[0].name=ghcr-pull' \
+            --set keycloak.enabled=${{ inputs.deploy_keycloak }} \
+            --set keycloak.image.tag="${{ steps.tag.outputs.tag }}" \
+            --set-file keycloak.realm.json=keycloak/openshapeforge-dev-realm.json \
+            --wait \
+            --timeout 15m
+
+      - name: Remove the rendered credentials
+        if: always()
+        run: rm -f secrets.values.yaml
+
+      # --wait already blocks on readiness; this reports WHAT is running so the
+      # log is useful without cluster access.
+      - name: Report rollout
+        if: always()
+        run: |
+          kubectl -n "$NAMESPACE" get deploy,pod,svc -o wide || true
+          echo "--- migrate Job (Helm hook) ---"
+          kubectl -n "$NAMESPACE" get jobs || true
+
+      # On failure the pod logs are the only way to tell a migration error from
+      # an image-pull problem, and they vanish with the next attempt.
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n "$NAMESPACE" describe pods || true
+          for c in api keycloak migrate; do
+            echo "=== logs: $c ==="
+            kubectl -n "$NAMESPACE" logs -l app.kubernetes.io/instance="$RELEASE" \
+              -c "$c" --tail=200 --all-containers=false || true
+          done
+          kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp | tail -40 || true

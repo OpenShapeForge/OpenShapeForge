@@ -7,6 +7,17 @@ description: >-
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
+
+# Keycloak is vendored under charts/ rather than pulled from a repository: the
+# deployment must run the image built from packages/keycloak-spi, which no
+# upstream chart knows about. Declared here purely so `condition` can gate it —
+# it stays OFF unless explicitly enabled, preserving the documented
+# bring-your-own-issuer posture.
+dependencies:
+  - name: keycloak
+    version: 0.1.0
+    repository: ""
+    condition: keycloak.enabled
 keywords:
   - openshapeforge
   - graphql

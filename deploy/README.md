@@ -5,8 +5,21 @@ The API is a Bun service. It expects an **external Postgres** and an
 
 ## Container image
 
-Build from the repository root (the build runs `bun run generate`, so the
-generated DB schema/types/manifest are baked into the image):
+Images are published to GHCR automatically by
+[`.github/workflows/docker-api.yml`](../.github/workflows/docker-api.yml):
+
+| Trigger          | Tags pushed                                       |
+| ---------------- | ------------------------------------------------- |
+| pull request     | none — build + smoke test only                    |
+| push to `main`   | `main`, `sha-<commit>`                            |
+| tag `v0.1.0`     | `0.1.0`, `0.1`, `latest`                          |
+
+`latest` follows the newest release tag, not the newest `main` commit. Pin an
+explicit version in the chart (`image.tag`) for anything but scratch testing.
+
+To build the same image locally, run this from the repository root (the build
+runs `bun run generate`, so the generated DB schema/types/manifest are baked
+into the image):
 
 ```sh
 docker build -f apps/api/Dockerfile -t ghcr.io/openshapeforge/openshapeforge-api:0.1.0 .

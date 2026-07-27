@@ -1,0 +1,137 @@
+name: API image
+
+# Builds the API container image (apps/api/Dockerfile), smoke-tests it, and
+# publishes it to the GitHub Container Registry.
+#
+#   pull_request -> build + smoke test only, never push
+#   push to main -> push :main and :sha-<commit>
+#   tag v*       -> push :<version>, :<major>.<minor> and :latest
+#
+# The image path matches what the Helm chart defaults to
+# (deploy/helm/openshapeforge-api/values.yaml) and what deploy/README.md
+# documents, so a chart install needs no image.repository override.
+#
+# NOTE: pushes to main/tags are not gated on the CI workflow here — the two run
+# independently. Merges to main are already gated by CI on the pull request.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-api-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Lowercase literal: GHCR rejects the mixed-case ${{ github.repository_owner }}
+  # (OpenShapeForge), and this is the path values.yaml already ships.
+  IMAGE: ghcr.io/openshapeforge/openshapeforge-api
+
+jobs:
+  build:
+    name: Build, smoke test, push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # required to push to GHCR
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build into the local docker daemon FIRST so the image is smoke-tested
+      # before anything is published. The registry build below reuses this
+      # build's layer cache, so it costs one build, not two.
+      #
+      # Build context is the repository ROOT: the Dockerfile runs
+      # `bun run generate`, which needs the compiler, its config, the workspace
+      # plugins and authoring.config.yaml (see .dockerignore).
+      - name: Build image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          load: true
+          tags: openshapeforge-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Prove the image actually boots and serves /api/health. NODE_ENV is
+      # development because production mode deliberately refuses to start
+      # without a pinned bearer audience and a strong internal context secret
+      # (assertProductionEnv) — credentials CI has no business minting. With no
+      # DATABASE_URL the API logs a warning and serves without a database,
+      # which is enough to catch a broken image.
+      - name: Smoke test the image
+        run: |
+          docker run -d --name api-smoke -p 3001:3001 \
+            -e NODE_ENV=development \
+            openshapeforge-api:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3001/api/health | grep -q '"status":"ok"'; then
+              echo "health OK after ${i}s"
+              docker rm -f api-smoke >/dev/null
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::image did not serve /api/health within 30s"
+          docker logs api-smoke
+          docker rm -f api-smoke >/dev/null
+          exit 1
+
+      # Only authenticate when we actually publish. PR builds (especially from
+      # forks) get a read-only GITHUB_TOKEN and must not push.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags and labels
+        if: github.event_name != 'pull_request'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # `latest` tracks the newest RELEASE tag, not the newest main commit —
+          # the chart pins an explicit version, so latest must mean a release.
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+          labels: |
+            org.opencontainers.image.title=openshapeforge-api
+            org.opencontainers.image.description=OpenShapeForge API — generated GraphQL CRUD service with Postgres row-level security
+            org.opencontainers.image.licenses=BUSL-1.1
+
+      # Fully cache-hit from the build above; this step just exports and pushes.
+      # provenance/sbom attestations are why this is a separate step — the local
+      # docker exporter used above cannot carry them.
+      - name: Push to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          # Emulated arm64 would run `bun install` + `bun run generate` under
+          # QEMU; add linux/arm64 above only if you need it and can absorb the
+          # build time.
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha

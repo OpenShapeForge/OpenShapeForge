@@ -21,10 +21,7 @@ spec:
         app.kubernetes.io/component: migrate
     spec:
       restartPolicy: Never
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+      {{- include "openshapeforge-api.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ include "openshapeforge-api.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}

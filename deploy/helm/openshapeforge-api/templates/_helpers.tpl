@@ -45,6 +45,23 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{/*
+Image pull secrets for the API pods and the migration Job. Prefers this chart's
+own imagePullSecrets and falls back to global.imagePullSecrets, so one --set at
+the top level covers the API and the Keycloak subchart together. Needed because
+the GHCR packages are private.
+*/}}
+{{- define "openshapeforge-api.imagePullSecrets" -}}
+{{- $secrets := .Values.imagePullSecrets -}}
+{{- if and (not $secrets) .Values.global -}}
+{{- $secrets = .Values.global.imagePullSecrets -}}
+{{- end -}}
+{{- with $secrets }}
+imagePullSecrets:
+{{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end -}}
+
+{{/*
 Non-secret env shared by the API container and the migration Job.
 NODE_ENV=production is always set, which triggers the production env validator.
 */}}

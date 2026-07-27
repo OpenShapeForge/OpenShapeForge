@@ -1,0 +1,136 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "keycloak.fullname" . }}
+  labels:
+    {{- include "keycloak.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # Keycloak owns singleton state (realm import, its own schema). Recreate
+  # avoids two versions running against one database during a rollout.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "keycloak.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "keycloak.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "keycloak.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: keycloak
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          # `start` (not start-dev): the image already ran `kc.sh build
+          # --db=postgres --health-enabled=true`, so --optimized skips the
+          # re-build and boots straight into production mode.
+          args:
+            - start
+            - --optimized
+            {{- if include "keycloak.realmEnabled" . }}
+            - --import-realm
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            # Health and metrics live on the management port in Keycloak 25+,
+            # never on 8080.
+            - name: management
+              containerPort: 9000
+              protocol: TCP
+          env:
+            - name: KC_DB
+              value: "postgres"
+            - name: KC_HEALTH_ENABLED
+              value: "true"
+            # TLS is terminated upstream (ingress/service mesh); the container
+            # itself speaks plain HTTP inside the cluster.
+            - name: KC_HTTP_ENABLED
+              value: "true"
+            {{- if .Values.hostname }}
+            - name: KC_HOSTNAME
+              value: {{ .Values.hostname | quote }}
+            {{- else }}
+            # No external hostname pinned: acceptable in-cluster, but tokens
+            # will carry whatever host the request arrived on.
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            {{- end }}
+            {{- with .Values.proxyHeaders }}
+            - name: KC_PROXY_HEADERS
+              value: {{ . | quote }}
+            {{- end }}
+            - name: KC_DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "keycloak.secretName" . }}
+                  key: KC_DB_URL
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "keycloak.secretName" . }}
+                  key: KC_DB_USERNAME
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "keycloak.secretName" . }}
+                  key: KC_DB_PASSWORD
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "keycloak.secretName" . }}
+                  key: KC_BOOTSTRAP_ADMIN_USERNAME
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "keycloak.secretName" . }}
+                  key: KC_BOOTSTRAP_ADMIN_PASSWORD
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if include "keycloak.realmEnabled" . }}
+          volumeMounts:
+            - name: realm
+              mountPath: /opt/keycloak/data/import
+              readOnly: true
+          {{- end }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- if include "keycloak.realmEnabled" . }}
+      volumes:
+        - name: realm
+          secret:
+            secretName: {{ include "keycloak.realmSecretName" . }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

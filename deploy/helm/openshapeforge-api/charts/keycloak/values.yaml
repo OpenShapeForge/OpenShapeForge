@@ -1,0 +1,132 @@
+# Keycloak subchart values.
+#
+# DISABLED by default: production keeps the documented bring-your-own-issuer
+# posture. Enable it (keycloak.enabled=true in the parent) for environments
+# where the chart should also stand up the identity provider.
+#
+# Like the parent chart this is FAIL-CLOSED — it refuses to render without
+# credentials rather than defaulting to something guessable.
+
+enabled: false
+
+image:
+  # Built and published by .github/workflows/docker-keycloak.yml.
+  repository: ghcr.io/openshapeforge/openshapeforge-keycloak
+  tag: "" # defaults to .Chart.appVersion
+  pullPolicy: IfNotPresent
+
+# Usually inherited from the parent via global.imagePullSecrets; set here to
+# override for Keycloak alone.
+imagePullSecrets: []
+
+# Keycloak holds cluster-wide singleton state (realm import, DB schema).
+# Scaling past 1 needs a configured cache stack — do not raise this casually.
+replicaCount: 1
+
+nameOverride: ""
+fullnameOverride: ""
+
+# --- Database ----------------------------------------------------------------
+# Keycloak's own store. Point this at the `keycloak` database and its non-admin
+# role — NOT the application database. Terraform (OpenShapeForge-Base) outputs
+# keycloak_jdbc_url, keycloak_db_user and keycloak_db_password for exactly this.
+database:
+  # If set, KC_DB_URL / KC_DB_USERNAME / KC_DB_PASSWORD are read from this
+  # existing Secret and the inline values below are ignored.
+  existingSecret: ""
+  jdbcUrl: "" # e.g. jdbc:postgresql://db.internal:5432/keycloak
+  username: "keycloak"
+  password: ""
+
+# --- Bootstrap admin ---------------------------------------------------------
+# Creates the initial admin ONLY on an empty database; ignored afterwards.
+# Rotate it in the Keycloak UI after first login.
+admin:
+  username: "admin"
+  password: ""
+
+# --- Realm import ------------------------------------------------------------
+# `bun run generate` produces keycloak/openshapeforge-dev-realm.json. It is
+# gitignored and environment-specific, so it is NOT baked into the image —
+# supply it at deploy time:
+#
+#   helm upgrade ... --set-file keycloak.realm.json=keycloak/openshapeforge-dev-realm.json
+#
+# Stored in a Secret rather than a ConfigMap: a realm can carry client secrets.
+realm:
+  json: ""
+  # Use an existing Secret instead; it must hold a single key, realm.json.
+  existingSecret: ""
+  # Keycloak only imports a realm that does not already exist, so leaving this
+  # on is safe across upgrades — it will not clobber live realm edits.
+  enabled: true
+
+# --- Hostname / proxy --------------------------------------------------------
+# Set hostname to the EXTERNAL URL clients use. It must match the `iss` in
+# issued tokens, which is what the API verifies against auth.bearer.issuer.
+# Left empty, hostname-strict is disabled — fine for in-cluster testing, wrong
+# for anything reachable from outside.
+hostname: ""
+# Set when Keycloak sits behind an ingress/load balancer that terminates TLS.
+proxyHeaders: "" # e.g. xforwarded
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# Extra environment variables (name/value) appended to the container.
+extraEnv: []
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    memory: 1536Mi
+
+# Keycloak takes ~40s to become ready against a fresh database (measured in the
+# image's CI smoke test), so the startup probe is generous. Liveness only starts
+# counting once the startup probe has passed.
+startupProbe:
+  httpGet:
+    path: /health/started
+    port: management
+  periodSeconds: 5
+  failureThreshold: 60
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: management
+  periodSeconds: 15
+  timeoutSeconds: 3
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: management
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  # Keycloak writes to /opt/keycloak/data at runtime, so the root filesystem
+  # cannot be read-only without additional volume plumbing.
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

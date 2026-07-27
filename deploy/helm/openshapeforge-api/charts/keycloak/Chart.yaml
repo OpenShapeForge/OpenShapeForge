@@ -1,0 +1,18 @@
+apiVersion: v2
+name: keycloak
+description: >-
+  Keycloak with the OpenShapeForge SPI provider. Vendored as a first-party
+  subchart rather than depending on an upstream chart: the deployment must run
+  the image built from packages/keycloak-spi (official Keycloak + the project's
+  provider jar, with `kc.sh build` already applied), which no upstream chart
+  knows about.
+type: application
+version: 0.1.0
+# Tracks the base image in packages/keycloak-spi/Dockerfile.
+appVersion: "26.5.3"
+keywords:
+  - keycloak
+  - oidc
+home: https://github.com/OpenShapeForge/OpenShapeForge
+sources:
+  - https://github.com/OpenShapeForge/OpenShapeForge

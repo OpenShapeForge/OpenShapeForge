@@ -46,6 +46,19 @@ on:
         required: false
         type: string
         default: "erp-provider"
+      api_host:
+        description: "Public hostname to serve the API on. Empty = no Ingress (ClusterIP only)."
+        required: false
+        type: string
+        default: "api.openshapeforge.eu"
+      tls_issuer:
+        description: "cert-manager ClusterIssuer. Use staging while iterating — production allows only 5 failed validations per hostname per hour."
+        required: false
+        type: choice
+        default: letsencrypt-staging
+        options:
+          - letsencrypt-staging
+          - letsencrypt-prod
 
 # Never let two deploys race for the same release.
 concurrency:
@@ -276,6 +289,28 @@ jobs:
               --set auth.bearer.audience="${{ inputs.bearer_audience }}"
             )
           fi
+
+          # Ingress + TLS. The controller, cert-manager and the DNS record are
+          # cluster platform, owned by Terraform in OpenShapeForge-Base; the
+          # chart only declares the Ingress and names the issuer that should
+          # fulfil it. An empty api_host leaves the release ClusterIP-only.
+          ingress_args=()
+          host="${{ inputs.api_host }}"
+          if [ -n "$host" ]; then
+            ingress_args=(
+              --set ingress.enabled=true
+              --set ingress.className=nginx
+              --set "ingress.annotations.cert-manager\.io/cluster-issuer=${{ inputs.tls_issuer }}"
+              --set "ingress.hosts[0].host=$host"
+              --set "ingress.hosts[0].paths[0].path=/"
+              --set "ingress.hosts[0].paths[0].pathType=Prefix"
+              --set "ingress.tls[0].secretName=openshapeforge-api-tls"
+              --set "ingress.tls[0].hosts[0]=$host"
+            )
+            echo "serving on https://$host (issuer: ${{ inputs.tls_issuer }})"
+          else
+            echo "no api_host given — ClusterIP only, no Ingress"
+          fi
           helm upgrade --install "$RELEASE" ./deploy/helm/openshapeforge-api \
             --namespace "$NAMESPACE" \
             --values secrets.values.yaml \
@@ -285,6 +320,7 @@ jobs:
             --set keycloak.image.tag="${{ steps.tag.outputs.tag }}" \
             --set-file keycloak.realm.json="$(ls keycloak/*-realm.json | head -1)" \
             "${bearer_args[@]}" \
+            "${ingress_args[@]}" \
             --wait \
             --timeout 15m
 

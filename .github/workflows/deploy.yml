@@ -51,6 +51,11 @@ on:
         required: false
         type: string
         default: "api.openshapeforge.eu"
+      auth_host:
+        description: "Public hostname for Keycloak. CHANGES THE TOKEN ISSUER — existing tokens stop validating. Empty = Keycloak stays cluster-internal."
+        required: false
+        type: string
+        default: "auth.openshapeforge.eu"
       tls_issuer:
         description: "cert-manager ClusterIssuer. Use staging while iterating — production allows only 5 failed validations per hostname per hour."
         required: false
@@ -264,7 +269,7 @@ jobs:
       # The realm NAME comes from the generated file rather than being
       # hardcoded — it is "openshapeforge-dev", not the release name, and
       # guessing it yields a 404 discovery document.
-      - name: Derive in-cluster issuer
+      - name: Derive issuer
         if: ${{ inputs.deploy_keycloak }}
         id: issuer
         run: |
@@ -274,10 +279,25 @@ jobs:
             echo "::error::could not read realm name from $realm_file"
             exit 1
           fi
-          issuer="http://${RELEASE}-keycloak:8080/realms/${realm}"
+          internal="http://${RELEASE}-keycloak:8080/realms/${realm}"
+
+          if [ -n "${{ inputs.auth_host }}" ]; then
+            # Keycloak is public: it stamps `iss` with its external URL, so the
+            # API must verify against THAT, not the Service name.
+            issuer="https://${{ inputs.auth_host }}/realms/${realm}"
+          else
+            issuer="$internal"
+          fi
+
+          # JWKS is fetched back-channel and its host is never compared to any
+          # claim, so keep it INTERNAL even when the issuer is public: it avoids
+          # hairpinning out through the load balancer and back, and keeps the
+          # API's startup independent of public DNS and certificate validity.
           echo "issuer=$issuer" >> "$GITHUB_OUTPUT"
-          echo "jwks=$issuer/protocol/openid-connect/certs" >> "$GITHUB_OUTPUT"
-          echo "realm '$realm' -> $issuer"
+          echo "jwks=$internal/protocol/openid-connect/certs" >> "$GITHUB_OUTPUT"
+          echo "realm '$realm'"
+          echo "  issuer (must equal the iss claim): $issuer"
+          echo "  jwks   (back-channel, internal):   $internal/protocol/openid-connect/certs"
 
       - name: Helm upgrade --install
         run: |
@@ -311,6 +331,28 @@ jobs:
           else
             echo "no api_host given — ClusterIP only, no Ingress"
           fi
+
+          # Keycloak's own hostname. KC_HOSTNAME is what Keycloak stamps into
+          # `iss`, so this and auth.bearer.issuer above are one decision made in
+          # two places — the derive step computed both from the same input.
+          # KC_PROXY_HEADERS is required because the ingress terminates TLS:
+          # without it Keycloak builds redirect and issuer URLs from the
+          # in-cluster request and advertises http:// on the wrong host.
+          auth_args=()
+          ahost="${{ inputs.auth_host }}"
+          if [ "${{ inputs.deploy_keycloak }}" = "true" ] && [ -n "$ahost" ]; then
+            auth_args=(
+              --set keycloak.hostname="https://$ahost"
+              --set keycloak.proxyHeaders=xforwarded
+              --set keycloak.ingress.enabled=true
+              --set keycloak.ingress.className=nginx
+              --set "keycloak.ingress.annotations.cert-manager\.io/cluster-issuer=${{ inputs.tls_issuer }}"
+              --set "keycloak.ingress.hosts[0].host=$ahost"
+              --set "keycloak.ingress.tls[0].secretName=openshapeforge-keycloak-tls"
+              --set "keycloak.ingress.tls[0].hosts[0]=$ahost"
+            )
+            echo "keycloak public at https://$ahost"
+          fi
           helm upgrade --install "$RELEASE" ./deploy/helm/openshapeforge-api \
             --namespace "$NAMESPACE" \
             --values secrets.values.yaml \
@@ -321,6 +363,7 @@ jobs:
             --set-file keycloak.realm.json="$(ls keycloak/*-realm.json | head -1)" \
             "${bearer_args[@]}" \
             "${ingress_args[@]}" \
+            "${auth_args[@]}" \
             --wait \
             --timeout 15m
 

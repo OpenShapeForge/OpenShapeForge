@@ -8,6 +8,7 @@ so coverage extends to new entities automatically.
 ```sh
 bun run check:authoring-local   # authoring catalog compiles deterministically
 bun run check:generated         # artifacts fresh + deterministic, no orphans
+bun run check:ts-nocheck        # compiler/workflow @ts-nocheck baseline does not grow
 bun run typecheck:compiler && bun run typecheck:api
 bun run test:compiler           # compiler unit tests (bun test packages/compiler)
 bun run test:e2e                # manifest-driven GraphQL e2e suite (needs Postgres)
@@ -16,6 +17,14 @@ bun run --cwd apps/api test:migrations   # migrator vs throwaway scratch DBs
 bun run test:perf               # k6 load suite (needs k6 + a running API)
 bun run scan:dependencies       # OSV-Scanner scan of the root bun.lock
 ```
+
+**`check:ts-nocheck`** (`scripts/check-ts-nocheck-baseline.mjs`) is an
+incremental safety gate for compiler and workflow-plugin typecheck coverage.
+The checked-in `config/ts-nocheck-baseline.json` records the current 56
+directives; adding a directive or leaving a cleaned-up entry in the baseline
+fails the gate. This does not claim that the existing compiler type errors are
+resolved. Each future cleanup should remove the directive and its baseline
+entry in the same change, so the baseline only shrinks.
 
 ## Dependency vulnerability scan
 

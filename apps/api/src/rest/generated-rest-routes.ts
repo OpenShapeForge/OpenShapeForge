@@ -33,8 +33,10 @@ import {
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "./http-error.js";
 
-export const REST_MOUNT_PATH = "/api/rest/v1";
-export const REST_OPENAPI_PATH = "/api/rest/openapi.json";
+import { registerRestDocs } from "./rest-docs.js";
+// Re-exported so existing import sites keep working.
+export { REST_MOUNT_PATH, REST_OPENAPI_PATH } from "./rest-paths.js";
+import { REST_MOUNT_PATH, REST_OPENAPI_PATH } from "./rest-paths.js";
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 type GeneratedColumn = GeneratedTable["columns"][number];
@@ -211,6 +213,8 @@ export function registerGeneratedRestRoutes(
   // The generated spec is a build artifact of the same manifest that drives
   // these routes; serve it unauthenticated like the health endpoints.
   app.get(REST_OPENAPI_PATH, async () => openApiSpec);
+
+  registerRestDocs(app);
 
   if (restTables.length === 0) {
     return;

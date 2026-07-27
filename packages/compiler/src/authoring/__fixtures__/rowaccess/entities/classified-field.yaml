@@ -1,0 +1,71 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ClassifiedField
+title: Classified Field
+description: Test fixture — carries pii/confidential/internal fields to prove classification propagation into the manifest. Not part of the shipped slice.
+language: en
+displayTemplate: "{{label}}"
+filterField: label
+labels:
+  en: Classified Field
+  nl: Classified Field
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+      - Relaties.All.ReadWrite
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: label
+    valueType: string
+    required: true
+    label:
+      en: Label
+      nl: Label
+    persisted:
+      column: label
+      storageClass: core
+  - key: secretNote
+    valueType: string
+    required: false
+    label:
+      en: Secret note
+      nl: Secret note
+    classification:
+      sensitivity: confidential
+    persisted:
+      column: secret_note
+      storageClass: core
+  - key: personalEmail
+    valueType: string
+    required: false
+    label:
+      en: Personal email
+      nl: Personal email
+    classification:
+      sensitivity: pii
+    persisted:
+      column: personal_email
+      storageClass: core
+  - key: internalNote
+    valueType: string
+    required: false
+    label:
+      en: Internal note
+      nl: Internal note
+    classification:
+      sensitivity: internal
+    persisted:
+      column: internal_note
+      storageClass: core

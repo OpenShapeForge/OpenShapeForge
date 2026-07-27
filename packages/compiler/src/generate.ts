@@ -431,6 +431,7 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
       // information_schema.data_type/nullability/identity).
       ...(column.default === undefined ? {} : { default: column.default }),
       ...(column.sourceField === undefined ? {} : { sourceField: column.sourceField }),
+      ...(column.classification === undefined ? {} : { classification: column.classification }),
     })),
     ...(table.retention === undefined ? {} : { retention: table.retention }),
     ...(table.source === undefined ? {} : { source: table.source }),
@@ -456,12 +457,18 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
         deleteMutationName: table.source!.graphql!.deleteMutationName,
       },
       ...(table.source?.rest === undefined ? {} : { rest: table.source.rest }),
+      // Per-operation authorization roles, surfaced for the runtime resolver's
+      // fail-closed function-level authorization (#94).
+      ...(table.source?.authorization
+        ? { authorization: table.source.authorization }
+        : {}),
       fields: table.columns.map((column) => ({
         field: column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase()),
         column: column.name,
         type: column.type,
         required: column.required,
         primaryKey: column.primaryKey,
+        ...(column.classification === undefined ? {} : { classification: column.classification }),
       })),
     }))
     .sort((a, b) => a.slug.localeCompare(b.slug));

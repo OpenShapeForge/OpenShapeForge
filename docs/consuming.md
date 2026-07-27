@@ -107,6 +107,13 @@ exist again.
   anything else is skipped (recorded in
   `relationshipStatus.skippedReferences`), and cross-module FKs additionally
   require `relationshipRegister` entries in the platform schema.
+- **Retention is advisory metadata; there is no enforcement runtime.** The
+  compiler emits a `retention` block (clock, rules, legal hold, review gates,
+  crypto-delete key, erasure cascades) into the DB manifest, but nothing reads
+  it: no scheduler deletes/anonymizes data past its window, no legal hold is
+  honored, and there is no cross-entity data-subject erasure primitive. See
+  [retention.md](retention.md); building the enforcement job and the erasure
+  primitive are tracked as follow-up issues.
 - The host repo owns everything downstream of the artifacts: the API
   runtime, migrations, compose stack, and test harnesses in this repo are
   reference implementations, not part of the compiler package.

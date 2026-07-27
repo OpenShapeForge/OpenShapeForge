@@ -1,10 +1,21 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Entity-level CRUD role enforcement, manifest-driven per generated entity:
- * no-role sessions are denied everything, read-only sessions can read but
- * not mutate, forbidden mutations journal no entity events, and the authored
- * (Dutch) role spelling keeps working alongside the Keycloak-normalized one.
- * Same-tenant identities isolate role denial from RLS/tenant denial.
+ * Function-level (operation/role) authorization on generated entities (#94)
+ * and field-level data-classification protection (#96/#101), manifest-driven
+ * per generated entity.
+ *
+ * A read-only principal must be:
+ *   - ALLOWED to read (single + list) and to traverse relationships,
+ *   - REJECTED with FORBIDDEN on create/update/delete (empty-body update
+ *     included) without journaling an entity event,
+ *   - and, where a classified column exists, served the row with that column
+ *     redacted — and refused any filter/sort on it, which would otherwise leak
+ *     the value through totalCount or ordering.
+ *
+ * A role-less principal is denied every operation. The authored (Dutch) role
+ * spelling must keep working alongside the Keycloak-normalized (English) one,
+ * since the compiler emits the union of both. All identities share tenant A so
+ * role denial is isolated from RLS/tenant denial.
  */
 import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -20,7 +31,13 @@ import {
   test,
   type Identity,
 } from "./e2e/harness.js";
-import { createRow, fieldName, tables, tablesByTypeName } from "./e2e/entity-factory.js";
+import {
+  createRow,
+  fieldName,
+  sampleValue,
+  tables,
+  tablesByTypeName,
+} from "./e2e/entity-factory.js";
 
 registerSuiteLifecycle();
 
@@ -109,6 +126,14 @@ for (const table of tables) {
         `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
         { id },
       );
+
+      // The rejected delete must not have removed the row.
+      const stillThere = await expectData(
+        tenantA,
+        `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
+        { id },
+      );
+      expect(stillThere[graphql.singleQueryName]?.id).toBe(id);
     });
 
     test("forbidden mutations journal no entity events", async () => {
@@ -136,6 +161,69 @@ for (const table of tables) {
       );
       expect(data[graphql.deleteMutationName]).toBe(true);
     });
+
+    // Field-level redaction (#96/#101): where the entity carries a classified
+    // column, a read-only reader sees it nulled while a write grant sees it.
+    const classifiedColumns = table.columns.filter(
+      (column) => (column as { classification?: string }).classification !== undefined,
+    );
+    if (classifiedColumns.length > 0) {
+      const selection = classifiedColumns.map(fieldName).join(" ");
+
+      test("classified columns are redacted for a read-only reader, visible to a writer", async () => {
+        const id = await createRow(table, tenantA);
+        const asWriter = await expectData(
+          tenantA,
+          `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id ${selection} } }`,
+          { id },
+        );
+        const asReader = await expectData(
+          readOnly,
+          `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id ${selection} } }`,
+          { id },
+        );
+        for (const column of classifiedColumns) {
+          const field = fieldName(column);
+          expect(asReader[graphql.singleQueryName][field]).toBeNull();
+          // The writer sees the real value (created rows populate required
+          // columns; optional classified columns may legitimately be null).
+          if (column.required) {
+            expect(asWriter[graphql.singleQueryName][field]).not.toBeNull();
+          }
+        }
+      });
+
+      const classifiedColumn = classifiedColumns[0]!;
+      const classifiedField = fieldName(classifiedColumn);
+      const probeValue = sampleValue(classifiedColumn, "classified-query");
+
+      test("read-only filter on a classified field is rejected before totalCount can leak", async () => {
+        await expectForbidden(
+          readOnly,
+          `query($filter: ${typeName}Filter) {
+             ${graphql.listQueryName}(filter: $filter, first: 1) { totalCount }
+           }`,
+          { filter: { [classifiedField]: probeValue } },
+        );
+        await expectForbidden(
+          readOnly,
+          `query($filter: ${typeName}Filter) {
+             ${graphql.listQueryName}(filter: $filter, first: 1) { totalCount }
+           }`,
+          { filter: { [`${classifiedField}In`]: [probeValue] } },
+        );
+      });
+
+      test("read-only sort on a classified field is rejected before ordering can leak", async () => {
+        await expectForbidden(
+          readOnly,
+          `query($sort: ${typeName}Sort) {
+             ${graphql.listQueryName}(sort: $sort, first: 1) { totalCount }
+           }`,
+          { sort: { field: classifiedField, direction: "asc" } },
+        );
+      });
+    }
   });
 }
 

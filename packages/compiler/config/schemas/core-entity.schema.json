@@ -430,6 +430,17 @@
                   }
                 }
               ]
+            },
+            "cryptoDelete": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["keyReference"],
+              "properties": {
+                "keyReference": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
             }
           }
         },

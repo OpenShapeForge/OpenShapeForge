@@ -95,27 +95,106 @@ export type RowScopePolicy = {
 
 export type RetentionAction = "retain" | "archive" | "redact" | "delete";
 
+/**
+ * The authored disposition action, preserved verbatim so a future retention
+ * executor can distinguish (e.g.) a crypto-erase from a value redaction — the
+ * coarse {@link RetentionAction} collapses several of these to `redact`.
+ */
+export type RetentionDisposition =
+  | "keep"
+  | "archive"
+  | "delete"
+  | "anonymize"
+  | "mask"
+  | "cryptoDelete"
+  | "review";
+
 export type RetentionDuration = {
   years?: number;
   months?: number;
   days?: number;
 };
 
+/**
+ * Human-review gate that must be cleared before a rule's disposition may run.
+ * Carried through so an executor can route records to the named queue instead
+ * of destroying them unattended.
+ */
+export type RetentionReviewGate = {
+  required: boolean;
+  queue?: string;
+};
+
 export type RetentionRuleDefinition = {
   id: string;
   after: RetentionDuration;
   action: RetentionAction;
+  /** Authored disposition before {@link RetentionAction} coarsening. */
+  disposition?: RetentionDisposition;
   reason?: string;
+  /** Human-review gate that must clear before this rule may act. */
+  review?: RetentionReviewGate;
+  /**
+   * Present when the disposition is `cryptoDelete`: the key an executor must
+   * destroy to render the record unrecoverable, rather than deleting rows.
+   */
+  cryptoDelete?: {
+    keyReference?: string;
+  };
+};
+
+/**
+ * Legal-hold / litigation-hold control plane. When `suspendDestruction` is
+ * true a retention executor MUST NOT run any destructive disposition for the
+ * table, regardless of clock expiry, until the hold is lifted.
+ */
+export type RetentionLegalHold = {
+  suspendDestruction: boolean;
+};
+
+/**
+ * Advisory metadata describing how a data-subject erasure request should
+ * cascade from this table to dependent PII. This is metadata only: no runtime
+ * enforcement exists yet (tracked as a follow-up). Downstream tooling and
+ * operators consume it to drive/verify ordered erasure.
+ */
+export type RetentionErasure = {
+  /** This table participates in subject-scoped erasure. */
+  subjectScoped?: boolean;
+  /** Columns that identify the data subject (e.g. relation_id). */
+  subjectColumns?: string[];
+  /** Dependent tables that must be erased when this subject is erased. */
+  cascades?: Array<{
+    schema: string;
+    table: string;
+    /** Column on the dependent table referencing this table. */
+    via: string;
+  }>;
 };
 
 export type RetentionDefinition = {
   clock: {
     column: string;
+    /** Column type of the clock anchor. `date` anchors are permitted. */
+    type?: "timestamptz" | "date";
     fallbackColumns?: string[];
   };
   rules: RetentionRuleDefinition[];
+  /** Legal hold that suspends all destructive dispositions while active. */
+  legalHold?: RetentionLegalHold;
+  /** Subject-erasure cascade metadata (advisory; no runtime enforcement yet). */
+  erasure?: RetentionErasure;
   source?: string;
 };
+
+/**
+ * Data-classification tier for a column, carried from the authoring
+ * `classification.sensitivity` of the field that backs it. Consumed at runtime
+ * to redact sensitive columns from readers who lack a write-grant on the entity
+ * (field-level data protection — issues #96/#101). `public`/`internal` are not
+ * emitted (they impose no restriction); only the restricting tiers surface.
+ */
+export type ColumnSensitivity = "confidential" | "pii" | "bsn";
 
 export type ColumnDefinition = {
   name: string;
@@ -126,6 +205,13 @@ export type ColumnDefinition = {
   generated?: "identity";
   references?: ReferenceDefinition;
   sourceField?: string;
+  /**
+   * Data-classification tier propagated from the authoring field's
+   * `classification.sensitivity`. Only the restricting tiers
+   * (`confidential`/`pii`/`bsn`) are recorded; `public`/`internal` are omitted
+   * so byte-identical output is preserved for unclassified columns.
+   */
+  classification?: ColumnSensitivity;
 };
 
 export type LocalizedTextManifest = {
@@ -209,8 +295,12 @@ export type TableSourceDefinition = {
    * English, e.g. `Relaties.All.Read` + `Relations.All.Read`), so the API
    * runtime can enforce with a plain case-sensitive set intersection against
    * session roles from either a bearer token (normalized names) or
-   * trusted-context headers (authored names). Enforced fail-closed by the
-   * generated CRUD layer.
+   * trusted-context headers (authored names).
+   *
+   * Enforced fail-closed BEFORE the DB call (issue #94): a session whose roles
+   * do not intersect the required set for an operation is rejected with a
+   * FORBIDDEN error. The gate lives in the generated CRUD layer, so both the
+   * GraphQL resolvers and the REST routes are covered.
    */
   authorization?: {
     roles: {

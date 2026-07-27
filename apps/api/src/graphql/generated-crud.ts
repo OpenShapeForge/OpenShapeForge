@@ -52,15 +52,18 @@ type GeneratedCrudTable = {
     /**
      * Per-operation entity role allow-lists (authored + Keycloak-normalized
      * union, compiler-emitted). Enforced fail-closed by
-     * requireEntityOperation before any SQL runs.
+     * requireEntityOperation before any SQL runs, so both the GraphQL
+     * resolvers and the REST routes are gated by construction (#94).
      */
-    authorization?: {
-      roles?: Partial<Record<EntityOperation, string[]>>;
-    };
+    authorization?: GeneratedCrudAuthorization;
   };
 };
 
-export type EntityOperation = "read" | "create" | "update" | "delete";
+export type GeneratedCrudOperation = "read" | "create" | "update" | "delete";
+
+export type GeneratedCrudAuthorization = {
+  roles: Record<GeneratedCrudOperation, string[]>;
+};
 
 type GeneratedCrudColumn = {
   name: string;
@@ -69,6 +72,12 @@ type GeneratedCrudColumn = {
   primaryKey: boolean;
   generated: string | null;
   sourceField?: string;
+  /**
+   * Data-classification tier (pii/bsn/confidential) propagated from the
+   * authoring field. Present only for restricting tiers; used to redact the
+   * column from readers who lack a write grant on the entity (#96/#101).
+   */
+  classification?: "confidential" | "pii" | "bsn";
 };
 
 export type GeneratedCrudRelationship = {
@@ -97,14 +106,14 @@ const generatedCrudTables = new Map(
 // source.authorization block. Membership checks are exact case-sensitive
 // string matches — the compiler already emitted both the authored (Dutch)
 // and Keycloak-normalized (English) spellings of every role.
-const entityRoleSets = new Map<string, Partial<Record<EntityOperation, ReadonlySet<string>>>>(
+const entityRoleSets = new Map<string, Partial<Record<GeneratedCrudOperation, ReadonlySet<string>>>>(
   [...generatedCrudTables.values()].map((table) => [
     table.name,
     Object.fromEntries(
       Object.entries(table.source?.authorization?.roles ?? {}).map(
         ([operation, roles]) => [operation, new Set(roles)],
       ),
-    ) as Partial<Record<EntityOperation, ReadonlySet<string>>>,
+    ) as Partial<Record<GeneratedCrudOperation, ReadonlySet<string>>>,
   ]),
 );
 
@@ -117,7 +126,7 @@ const entityRoleSets = new Map<string, Partial<Record<EntityOperation, ReadonlyS
  */
 function requireEntityOperation(
   table: GeneratedCrudTable,
-  operation: EntityOperation,
+  operation: GeneratedCrudOperation,
   session: DbSessionInput,
 ): void {
   const allowed = entityRoleSets.get(table.name)?.[operation];
@@ -164,7 +173,7 @@ function generatedCrudError(message: string, code: string) {
  */
 function readGeneratedCrudTable(
   name: string,
-  operation: EntityOperation,
+  operation: GeneratedCrudOperation,
   session: DbSessionInput,
 ) {
   const table = generatedCrudTables.get(name);

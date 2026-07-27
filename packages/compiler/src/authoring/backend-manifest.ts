@@ -19,6 +19,7 @@ import type {
 } from "./types/index.js";
 import type {
   ColumnDefinition,
+  ColumnSensitivity,
   PlatformSchemaManifest,
   ReferenceDefinition,
   RelationshipRegisterEntry,
@@ -28,7 +29,7 @@ import type {
   ScalarType,
   TableDefinition,
 } from "../schema.js";
-import type { CompiledAuthorization } from "./types/compiled.js";
+import type { CompiledAuthorization, CompiledField } from "./types/compiled.js";
 import { normalizeKeycloakRoleName } from "./role-names.js";
 
 /**
@@ -354,6 +355,39 @@ export function deriveRowScope(
   };
 }
 
+/**
+ * Restricting data-classification tiers. `public`/`internal` impose no
+ * field-level access restriction, so they are dropped — only the tiers that
+ * gate reads propagate into the manifest (issues #96/#101).
+ */
+const RESTRICTING_SENSITIVITIES: ReadonlySet<string> = new Set([
+  "confidential",
+  "pii",
+  "bsn",
+]);
+
+/**
+ * Flatten compiled fields (including nested `children`/`item`) into a
+ * field-key → restricting-sensitivity map. Used to stamp each storage column
+ * with the classification of the authoring field that backs it.
+ */
+function collectFieldSensitivities(
+  fields: CompiledField[] | undefined,
+  result = new Map<string, ColumnSensitivity>(),
+): Map<string, ColumnSensitivity> {
+  for (const field of fields ?? []) {
+    const sensitivity = field.classification?.sensitivity;
+    if (sensitivity && RESTRICTING_SENSITIVITIES.has(sensitivity) && !result.has(field.key)) {
+      result.set(field.key, sensitivity as ColumnSensitivity);
+    }
+    collectFieldSensitivities(field.children, result);
+    if (field.item) {
+      collectFieldSensitivities([field.item], result);
+    }
+  }
+  return result;
+}
+
 function sortTablesByDependencies(tables: TableDefinition[]): TableDefinition[] {
   const pending = new Map(tables.map((table) => [tableKey(table), table]));
   const sorted: TableDefinition[] = [];
@@ -438,6 +472,31 @@ function retentionAction(policy: RetentionPolicy | undefined): RetentionAction {
 }
 
 /**
+ * Normalise the authored `disposition.review` (which may be a boolean or an
+ * object) into the compiled review gate, or `undefined` when review is not
+ * required. Carried through so an executor can honor a mandatory review queue
+ * before acting on a record (see #100).
+ */
+function retentionReview(
+  policy: RetentionPolicy | undefined,
+): { required: boolean; queue?: string } | undefined {
+  const review = policy?.disposition?.review;
+  if (review === undefined || review === false) {
+    return undefined;
+  }
+  if (review === true) {
+    return { required: true };
+  }
+  if (!review.required) {
+    return undefined;
+  }
+  return {
+    required: true,
+    ...(typeof review.queue === "string" ? { queue: review.queue } : {}),
+  };
+}
+
+/**
  * Resolve authored entity-level indexes (field keys) into TableDefinition
  * indexes (column names). `tenantId` is accepted directly for tenant-scoped
  * tables since the compiler auto-attaches a `tenant_id` column.
@@ -513,35 +572,104 @@ function compileRetention(
   }
   const duration = parsedDuration ?? { years: 7 };
 
+  const strategy = entityRetention.startsFrom?.strategy;
   const startFields = [
     ...(entityRetention.startsFrom?.fields ?? []),
     ...(entityRetention.startsFrom?.field ? [entityRetention.startsFrom.field] : []),
   ];
-  const clockColumns = startFields
-    .map((fieldKey) => columnsByField.get(fieldKey))
-    .filter((column): column is ColumnDefinition => column !== undefined)
-    .filter((column) => columnsByName.get(column.name)?.type === "timestamptz");
+  const strategyField =
+    startFields.length > 0
+      ? undefined
+      : strategy === "createdAt"
+        ? "createdAt"
+        : strategy === "updatedAt"
+          ? "updatedAt"
+          : undefined;
+  const clockFields = strategyField === undefined ? startFields : [strategyField];
+
+  // #97: resolve the retention clock deterministically. A retention policy is
+  // a statutory/GDPR erasure control — silently dropping a start field or
+  // emitting no clock at all would let an entity advertise a retention window
+  // that compiles to nothing. So every declared start field must resolve to a
+  // usable timestamp anchor (`timestamptz` or `date`); anything else is a hard
+  // build error rather than a silent filter.
+  const clockColumns = clockFields.map((fieldKey) => {
+    const column = columnsByField.get(fieldKey);
+    if (!column) {
+      throw new Error(
+        `[${entityName}] retention.startsFrom references unknown field "${fieldKey}".`,
+      );
+    }
+    const columnType = columnsByName.get(column.name)?.type;
+    if (columnType !== "timestamptz" && columnType !== "date") {
+      throw new Error(
+        `[${entityName}] retention.startsFrom field "${fieldKey}" resolves to column ` +
+          `"${column.name}" of type "${columnType ?? "unknown"}", which cannot serve as a ` +
+          `retention clock. Anchor retention on a timestamptz or date field.`,
+      );
+    }
+    return { column, type: columnType as "timestamptz" | "date" };
+  });
+
   const [clock, ...fallbacks] = clockColumns;
   if (!clock) {
-    return undefined;
+    // A start field is only meaningful with an explicit-field strategy. If a
+    // policy declares no usable anchor at all, refuse to emit a clockless (and
+    // therefore unenforceable) retention rule.
+    if (strategy === "field" || strategy === "firstNonNull") {
+      throw new Error(
+        `[${entityName}] retention.startsFrom.strategy is "${strategy}" but no start field was ` +
+          `declared — cannot resolve a retention clock.`,
+      );
+    }
+    throw new Error(
+      `[${entityName}] declares a retention policy but no retention clock column could be ` +
+        `resolved. Declare startsFrom.field (or .fields) pointing at a timestamptz/date column.`,
+    );
+  }
+
+  const disposition = policy?.disposition?.action;
+  const review = retentionReview(policy);
+  const legalHold = policy?.holds?.suspendDestruction === true;
+  const cryptoDeleteKey = policy?.disposition?.cryptoDelete?.keyReference;
+  if (disposition === "cryptoDelete" && (!cryptoDeleteKey || cryptoDeleteKey.trim().length === 0)) {
+    throw new Error(
+      `[${entityName}] retention.disposition.cryptoDelete.keyReference is required when ` +
+        `disposition.action is "cryptoDelete".`,
+    );
   }
 
   return {
     clock: {
-      column: clock.name,
-      ...(fallbacks.length === 0 ? {} : { fallbackColumns: fallbacks.map((column) => column.name) }),
+      column: clock.column.name,
+      type: clock.type,
+      ...(fallbacks.length === 0
+        ? {}
+        : { fallbackColumns: fallbacks.map((entry) => entry.column.name) }),
     },
     rules: [
       {
         id: `${snakeCase(candidate.slug)}_retention`,
         after: duration,
         action: retentionAction(policy),
+        // #100: preserve the authored disposition, review gate, and crypto-delete
+        // key so a future executor can honor them instead of the coarse action.
+        ...(disposition === undefined ? {} : { disposition }),
         reason:
           typeof policy?.legalBasis?.reference === "string"
             ? policy.legalBasis.reference
             : "Authoring catalog retention policy.",
+        ...(review === undefined ? {} : { review }),
+        ...(disposition === "cryptoDelete"
+          ? {
+              cryptoDelete: { keyReference: cryptoDeleteKey as string },
+            }
+          : {}),
       },
     ],
+    // #100: a legal hold must suspend all destructive dispositions; carry it so
+    // an executor never deletes a record under litigation hold.
+    ...(legalHold ? { legalHold: { suspendDestruction: true } } : {}),
     source: entityRetention.policy ?? "authoring-entity-retention",
   };
 }
@@ -781,16 +909,21 @@ export function compileAuthoringBackendManifest(
     const skippedReferences: string[] = [];
     const columnsByField = new Map<string, ColumnDefinition>();
     const columns: ColumnDefinition[] = [];
+    // Field-key → restricting data-classification (pii/bsn/confidential), used
+    // to stamp each backing column so the runtime can redact it (#96/#101).
+    const fieldSensitivities = collectFieldSensitivities(candidate.contract.model.fields);
 
     for (const storageColumn of candidate.contract.storage.columns) {
       const field = candidate.fieldsByKey.get(storageColumn.field);
       const primaryKey = storageColumn.column === "id";
+      const sensitivity = fieldSensitivities.get(storageColumn.field);
       const column: ColumnDefinition = {
         name: storageColumn.column,
         type: field ? serviceScalarForField(field) : storageColumn.type === "text" ? "text" : "uuid",
         ...(primaryKey ? { primaryKey: true } : {}),
         ...(primaryKey || !storageColumn.nullable ? { required: true } : {}),
         sourceField: storageColumn.field,
+        ...(sensitivity ? { classification: sensitivity } : {}),
       };
       const defaultValue = defaultSql(field, column);
       if (defaultValue !== undefined) {
@@ -940,6 +1073,10 @@ export function compileAuthoringBackendManifest(
           })(),
         },
         ...(candidate.contract.rest ? { rest: candidate.contract.rest } : {}),
+        // Compiled per-operation role lists → runtime enforcement (#94). Emitted
+        // as the authored ∪ Keycloak-normalized union so a session authenticated
+        // either way (bearer token or trusted context) matches by plain set
+        // intersection.
         ...(candidate.contract.authorization
           ? { authorization: { roles: bridgeAuthorizationRoles(candidate.contract.authorization.roles) } }
           : {}),

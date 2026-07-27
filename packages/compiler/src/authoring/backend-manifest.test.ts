@@ -255,12 +255,13 @@ describe("retention compilation fail-closed guards (M-07)", () => {
     const manifest = compileFixtures(["rowaccess-retention-ok"]);
     const table = tableByName(manifest, "row_access_retention_oks");
     expect(table?.retention).toEqual({
-      clock: { column: "created_at" },
+      clock: { column: "created_at", type: "timestamptz" },
       rules: [
         {
           id: "rowaccess_retention_ok_retention",
           after: { years: 3 },
           action: "delete",
+          disposition: "delete",
           reason: "Test fixture retention",
         },
       ],
@@ -334,7 +335,7 @@ describe("generated REST exposure (source.rest bridge)", () => {
   });
 });
 
-describe("entity authorization roles (source.authorization bridge)", () => {
+describe("entity authorization roles (source.authorization bridge, #94)", () => {
   it("emits per-operation role lists as the sorted union of authored + Keycloak-normalized names", () => {
     // Fixtures author Dutch names (Relaties.*); the bridge must add the
     // normalized English twins (Relations.*) so bearer-token roles match.
@@ -363,5 +364,55 @@ describe("entity authorization roles (source.authorization bridge)", () => {
       expect(table.source?.authorization?.roles.read.length).toBeGreaterThan(0);
       expect(table.source?.authorization?.roles.create.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("field classification → column classification (#96/#101)", () => {
+  it("propagates restricting sensitivities onto backing columns and drops internal/public", () => {
+    const manifest = compileFixtures(["classified-field", "rowaccess-owner-target"]);
+    const table = tableByName(manifest, "classified_fields");
+    const byName = new Map((table?.columns ?? []).map((c) => [c.name, c]));
+
+    // Restricting tiers propagate.
+    expect(byName.get("secret_note")?.classification).toBe("confidential");
+    expect(byName.get("personal_email")?.classification).toBe("pii");
+
+    // Non-restricting tiers (internal/public) impose no restriction and are dropped.
+    expect(byName.get("internal_note")?.classification).toBeUndefined();
+    expect(byName.get("label")?.classification).toBeUndefined();
+    // Operational columns are never classified.
+    expect(byName.get("id")?.classification).toBeUndefined();
+    expect(byName.get("tenant_id")?.classification).toBeUndefined();
+  });
+});
+
+describe("retention clock and crypto-delete compilation", () => {
+  it("resolves createdAt and updatedAt strategies to operational timestamptz columns", () => {
+    const manifest = compileFixtures([
+      "retention-created-at",
+      "retention-updated-at",
+    ]);
+    const createdAt = manifest.tables.find((table) => table.retention?.clock.column === "created_at");
+    const updatedAt = manifest.tables.find((table) => table.retention?.clock.column === "updated_at");
+
+    expect(createdAt?.retention?.clock).toEqual({ column: "created_at", type: "timestamptz" });
+    expect(updatedAt?.retention?.clock).toEqual({ column: "updated_at", type: "timestamptz" });
+  });
+
+  it("requires and propagates an authored crypto-delete key reference", () => {
+    const manifest = compileFixtures(["retention-crypto-valid"]);
+    const table = manifest.tables.find((entry) => entry.retention !== undefined);
+
+    expect(table?.retention?.rules[0]).toMatchObject({
+      disposition: "cryptoDelete",
+      reason: "Legal basis prose, not a key identifier.",
+      cryptoDelete: { keyReference: "retention-subject-key" },
+    });
+  });
+
+  it("fails closed when crypto-delete has no authored key reference", () => {
+    expect(() => compileFixtures(["retention-crypto-missing-key"])).toThrow(
+      /retention\.disposition\.cryptoDelete\.keyReference is required/,
+    );
   });
 });

@@ -1,26 +1,28 @@
 name: E2E against cluster
 
-# Runs the GraphQL + REST e2e suite against the DEPLOYED environment: the real
-# API behind its ingress, the real Keycloak, and the managed database.
+# Runs the GraphQL + REST e2e suite against the DEPLOYED environment: the public
+# API behind its ingress and certificate, the real Keycloak, and the managed
+# database.
 #
-# Manual dispatch only for now. It mutates the deployed database — the suite
-# creates rows and cleans them up afterwards — so it should be a decision, not
-# something that fires on every push.
+# The suite runs ON THE RUNNER, from this checkout. Most of it only needs HTTPS —
+# it drives https://api.openshapeforge.eu exactly as any client would. Four
+# specs additionally read Postgres directly (the entity-event journal and the
+# schema-drift state), and that database has no public endpoint, so a short-lived
+# tunnel is opened for them rather than exposing it.
 #
-# The suite runs as a Job INSIDE the cluster rather than on the runner, because
-# the database sits on a private network with no public endpoint and the harness
-# talks to it directly for verification and teardown. The Job manifest lives in
-# deploy/e2e-job.yaml so what runs against a live environment is reviewable.
+# Running from the checkout rather than from a container image is deliberate: a
+# newly written test runs immediately, instead of only after a build has been
+# published and deployed.
+#
+# Manual dispatch only. It mutates the deployed database — the suite creates
+# rows and removes them through the API afterwards — so it should be a decision,
+# not something that fires on every push.
 #
 # REQUIRED REPOSITORY SECRETS: the same Scaleway set the deploy workflow uses.
 
 on:
   workflow_dispatch:
     inputs:
-      image_tag:
-        description: "Image tag to run the suite FROM. Empty = the tag the API deployment is currently running."
-        required: false
-        type: string
       api_url:
         description: "URL the suite drives. Default exercises the public ingress and its certificate."
         required: false
@@ -38,6 +40,8 @@ env:
   NAMESPACE: openshapeforge
   RELEASE: openshapeforge
   REGION: nl-ams
+  # Local port the database tunnel listens on.
+  DB_LOCAL_PORT: "15432"
 
 jobs:
   e2e:
@@ -46,6 +50,17 @@ jobs:
     environment: dev
     steps:
       - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The suite imports generated types and the entity manifest.
+      - name: Generate artifacts
+        run: bun run generate
 
       - name: Install Scaleway CLI
         run: |
@@ -64,70 +79,94 @@ jobs:
             region=${{ env.REGION }} auth-method=copy-cli-token
           kubectl get nodes
 
-      # Default to whatever is actually deployed. Running the suite from a
-      # different build than the one under test is a real way to chase a
-      # phantom failure, so it has to be deliberate.
-      - name: Resolve image tag and token issuer
+      # Read the issuer off the deployment and pass it through unchanged, so the
+      # suite authenticates against exactly what the API verifies against.
+      # Deriving it independently would let the two drift and turn a config
+      # mismatch into a mysterious auth failure.
+      - name: Read issuer from the deployed API
         id: cfg
         run: |
-          tag="${{ inputs.image_tag }}"
-          if [ -z "$tag" ]; then
-            image=$(kubectl -n "$NAMESPACE" get deploy "${RELEASE}-openshapeforge-api" \
-              -o jsonpath='{.spec.template.spec.containers[0].image}')
-            tag="${image##*:}"
-            echo "no tag given; using the deployed one: $tag"
-          fi
-
-          # Read the issuer straight off the deployment and pass it through
-          # unchanged, so the suite authenticates against exactly what the API
-          # verifies against. Deriving it independently would let the two drift
-          # and turn a config mismatch into a mysterious auth failure.
           issuer=$(kubectl -n "$NAMESPACE" get deploy "${RELEASE}-openshapeforge-api" \
             -o jsonpath='{range .spec.template.spec.containers[0].env[?(@.name=="OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER")]}{.value}{end}')
           if [ -z "$issuer" ]; then
             echo "::error::the API deployment has no bearer issuer configured; deploy with Keycloak enabled first"
             exit 1
           fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "issuer=$issuer" >> "$GITHUB_OUTPUT"
           echo "issuer: $issuer"
 
-      - name: Run the suite
-        id: run
+      # Four specs read Postgres directly. The instance is on the cluster's
+      # private network with no public endpoint, so forward a local port through
+      # a throwaway in-cluster TCP proxy. kubectl port-forward can only target a
+      # pod, hence the proxy rather than a selector-less Service.
+      #
+      # This keeps the database unreachable from the internet — the alternative,
+      # enabling its public endpoint, would expose it permanently to make a
+      # manual test convenient.
+      - name: Open a tunnel to the database
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
         run: |
-          kubectl -n "$NAMESPACE" delete job e2e --ignore-not-found --wait=true
+          set -euo pipefail
+          url=$(scw secret version access-by-path secret-path=/ \
+            secret-name=openshapeforge-migrate-database-url revision=latest \
+            region="$REGION" project-id="$SCW_DEFAULT_PROJECT_ID" -o json | jq -r '.data' | base64 -d)
+          echo "::add-mask::$url"
+          hostport=$(sed -E 's#.*@([^/]+)/.*#\1#' <<<"$url")
 
-          sed -e "s|__IMAGE_TAG__|${{ steps.cfg.outputs.tag }}|" \
-              -e "s|__E2E_API_URL__|${{ inputs.api_url }}|" \
-              -e "s|__TOKEN_ISSUER__|${{ steps.cfg.outputs.issuer }}|" \
-              deploy/e2e-job.yaml | kubectl apply -f -
+          kubectl -n "$NAMESPACE" delete pod db-tunnel --ignore-not-found --wait=true
+          kubectl -n "$NAMESPACE" run db-tunnel --image=alpine/socat --restart=Never -- \
+            "TCP-LISTEN:5432,fork,reuseaddr" "TCP:${hostport}"
+          kubectl -n "$NAMESPACE" wait --for=condition=ready pod/db-tunnel --timeout=120s
 
-          # Poll for BOTH terminal conditions. `kubectl wait --for=complete`
-          # alone would sit until timeout on a failing suite and report a
-          # timeout instead of the failure.
-          for i in $(seq 1 120); do
-            complete=$(kubectl -n "$NAMESPACE" get job e2e -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null)
-            failed=$(kubectl -n "$NAMESPACE" get job e2e -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null)
-            [ "$complete" = "True" ] && { echo "result=passed" >> "$GITHUB_OUTPUT"; break; }
-            [ "$failed" = "True" ] && { echo "result=failed" >> "$GITHUB_OUTPUT"; break; }
-            sleep 10
+          kubectl -n "$NAMESPACE" port-forward pod/db-tunnel "${DB_LOCAL_PORT}:5432" \
+            > /tmp/port-forward.log 2>&1 &
+
+          # nc, not bash's /dev/tcp: the builtin is shell-specific, so a probe
+          # written with it cannot be exercised outside the runner's shell —
+          # and a readiness check nobody can test is worse than none.
+          ready=""
+          for i in $(seq 1 30); do
+            if nc -z 127.0.0.1 "${DB_LOCAL_PORT}" 2>/dev/null; then ready=yes; break; fi
+            sleep 1
           done
+          if [ -z "$ready" ]; then
+            echo "::error::database tunnel never came up"; cat /tmp/port-forward.log; exit 1
+          fi
+          echo "tunnel up on 127.0.0.1:${DB_LOCAL_PORT}"
 
-      # Always print the suite output — on failure it is the only place the
-      # failing assertions appear, and the Job is deleted below.
-      - name: Test output
-        if: always()
-        run: kubectl -n "$NAMESPACE" logs -l job-name=e2e --tail=-1 || true
+          # Same credentials, rerouted through the tunnel.
+          local_url=$(sed -E "s#@[^/]+/#@127.0.0.1:${DB_LOCAL_PORT}/#" <<<"$url")
+          echo "::add-mask::$local_url"
+          echo "DATABASE_URL=$local_url" >> "$GITHUB_ENV"
 
-      - name: Clean up
-        if: always()
-        run: kubectl -n "$NAMESPACE" delete job e2e --ignore-not-found
+      - name: Read the trusted-context secret
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+        run: |
+          set -euo pipefail
+          secret=$(scw secret version access-by-path secret-path=/ \
+            secret-name=openshapeforge-internal-context-secret revision=latest \
+            region="$REGION" project-id="$SCW_DEFAULT_PROJECT_ID" -o json | jq -r '.data' | base64 -d)
+          echo "::add-mask::$secret"
+          echo "OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET=$secret" >> "$GITHUB_ENV"
 
-      - name: Fail the workflow if the suite failed
+      - name: Run the e2e suite
+        working-directory: apps/api
+        env:
+          NODE_ENV: test
+          E2E_API_URL: ${{ inputs.api_url }}
+          OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER: ${{ steps.cfg.outputs.issuer }}
+        run: bun test src/graphql/__tests__ src/rest/__tests__
+
+      - name: Close the tunnel
         if: always()
         run: |
-          case "${{ steps.run.outputs.result }}" in
-            passed) echo "e2e passed against the deployed cluster" ;;
-            failed) echo "::error::e2e failed — see the Test output step"; exit 1 ;;
-            *)      echo "::error::e2e did not reach a terminal state within 20m"; exit 1 ;;
-          esac
+          pkill -f "port-forward pod/db-tunnel" || true
+          kubectl -n "$NAMESPACE" delete pod db-tunnel --ignore-not-found

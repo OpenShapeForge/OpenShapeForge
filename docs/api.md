@@ -257,7 +257,7 @@ compose stack):
 | `keycloak` | built from `packages/keycloak-spi` | **8181**→8080 (`KEYCLOAK_PORT`) | `start-dev --import-realm`, org feature on, admin `admin`/`admin` |
 
 Keycloak imports the **generated** realm
-`keycloak/openshapeforge-dev-realm.json` (realm `openshapeforge-dev`) — regenerate it
+`keycloak/openshapeforge-realm.json` (realm `openshapeforge`) — regenerate it
 with `bun run generate` before first compose up. Dev users (password `test`)
 carry a `tid` tenant attribute: `acme-directie`, `acme-vastgoedbeheerder`,
 `acme-wijkbeheerder`, `acme-verhuurconsulent`, `acme-noaccess` (tenant

@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Keycloak `openshapeforge-dev-realm.json` generator.
+ * Keycloak `openshapeforge-realm.json` generator.
  *
  * Pipeline position: cross-entity generator. Combines hand-authored YAML
  * (`packages/compiler/config/authoring/authorization.yaml`) with the
  * entity-derived client roles emitted by every compiled entity contract.
  *
  * Output (single file):
- *   `keycloak/openshapeforge-dev-realm.json`
+ *   `keycloak/openshapeforge-realm.json`
  *
  * The output is mounted into the local Keycloak container by
  * `docker-compose.local.yml` and into production Keycloak configuration.
@@ -17,7 +17,7 @@
  * Defaults intentionally hardcoded (not in YAML):
  *   - gateway client's protocolMappers (tid, organization, act, audience-*)
  *   - bearerOnly / serviceAccount client shape (bearerOnly flag, direct-access, etc.)
- *   - realm name falls back to "openshapeforge-dev"
+ *   - realm name falls back to "openshapeforge"
  *
  * Security-sensitive values that MUST come from YAML (never hardcoded):
  *   - gateway redirectUris / webOrigins — explicit per-client allow-list;
@@ -37,8 +37,8 @@ import type {
 } from "../types/authoring.js";
 import { KEYCLOAK_ROLE_SEGMENT_RENAMES, normalizeKeycloakRoleName } from "../role-names.js";
 
-const DEFAULT_REALM_NAME = "openshapeforge-dev";
-export const KEYCLOAK_REALM_OUTPUT_PATH = "keycloak/openshapeforge-dev-realm.json";
+const DEFAULT_REALM_NAME = "openshapeforge";
+export const KEYCLOAK_REALM_OUTPUT_PATH = "keycloak/openshapeforge-realm.json";
 
 // Canonical rename table + normalizer live in ../role-names.ts so the
 // backend manifest's authorization bridge can share them; re-exported here to
@@ -223,16 +223,47 @@ function gatewayProtocolMappers(resourceClientIds: string[]): KeycloakProtocolMa
   ];
 }
 
+/** Which kind of realm the compiler should emit. */
+export type RealmMode = "development" | "production";
+
+/** Env var selecting the mode. Absent or unrecognised means development. */
+export const REALM_MODE_ENV = "OPENSHAPEFORGE_REALM_MODE";
+
 /**
- * A realm is treated as "development" — where committed literal `devSecret`s and
- * plain-text passwords are acceptable — when it opts out of TLS
- * (`sslRequired: none`) or its name ends in `-dev`. Any other realm is treated
- * as production-grade: literal checked-in secrets are rejected and secrets must
- * come from an env reference.
+ * Resolve the realm mode.
+ *
+ * Development is the default deliberately: `bun run generate` is run constantly
+ * — locally, in CI, in every image build — and the safe failure for a missing
+ * setting is the realm that only ever reaches a laptop, not the one that gets
+ * published. Producing a production realm is an explicit act.
  */
-export function isDevRealm(realm: AuthorizationRealmConfig | undefined): boolean {
-  const name = realm?.name ?? DEFAULT_REALM_NAME;
-  return realm?.sslRequired === "none" || name === DEFAULT_REALM_NAME || name.endsWith("-dev");
+export function resolveRealmMode(env: NodeJS.ProcessEnv = process.env): RealmMode {
+  return env[REALM_MODE_ENV]?.trim().toLowerCase() === "production"
+    ? "production"
+    : "development";
+}
+
+/**
+ * Whether committed literal `devSecret`s and plain-text user passwords are
+ * acceptable. The MODE is the only input.
+ *
+ * It deliberately no longer infers from the realm's `sslRequired` or its NAME:
+ *
+ *   - `sslRequired` would contradict itself. The authored config carries
+ *     `sslRequired: none` for local work, and production mode OVERRIDES that to
+ *     `external`. Reading the authored value would make production mode
+ *     classify itself as development and harden nothing.
+ *   - the NAME was safe to read only while the default ended in `-dev`. With
+ *     the default now `openshapeforge`, name inference would classify every
+ *     production realm using the default name as development and silently
+ *     permit checked-in secrets — precisely the failure this guard exists to
+ *     prevent.
+ */
+export function isDevRealm(
+  _realm: AuthorizationRealmConfig | undefined,
+  mode: RealmMode = resolveRealmMode(),
+): boolean {
+  return mode === "development";
 }
 
 const ENV_REF_RE = /^\$\{env:([A-Za-z_][A-Za-z0-9_]*)(?::-(.*))?\}$/;
@@ -254,6 +285,15 @@ export function resolveClientSecret(
   def: AuthorizationClient,
   dev: boolean,
 ): string | undefined {
+  // Development takes devSecret FIRST, before any env reference is resolved.
+  // The order matters: `secret: ${env:VAR}` and `devSecret: literal` are
+  // complementary — one value per mode — so resolving the env ref first would
+  // make local work fail on an unset production variable it has no business
+  // needing.
+  if (dev && def.devSecret !== undefined) {
+    return def.devSecret;
+  }
+
   if (def.secret !== undefined) {
     const match = ENV_REF_RE.exec(def.secret.trim());
     if (match) {
@@ -265,29 +305,25 @@ export function resolveClientSecret(
         `Client "${def.id}": secret references env var ${varName}, but it is not set and no \${env:${varName}:-fallback} default was given.`,
       );
     }
-    // Literal secret.
+    // Literal secret: acceptable only where committed credentials are.
     if (!dev) {
       throw new Error(
         `Client "${def.id}": a literal client secret is committed for a non-dev realm. Use a \${env:VAR} reference resolved at generate/deploy time instead.`,
       );
     }
+    return def.secret;
   }
 
   if (def.devSecret !== undefined) {
-    if (!dev) {
-      throw new Error(
-        `Client "${def.id}": devSecret is dev-only but the realm is not a development realm. Remove it and reference the secret via \${env:VAR}.`,
-      );
-    }
-    if (def.secret !== undefined) {
-      throw new Error(
-        `Client "${def.id}": set either "secret" or "devSecret", not both.`,
-      );
-    }
-    return def.devSecret;
+    // Production, and the only value on offer is a committed literal. Refusing
+    // here is the whole point of the guard: it is what stops a published realm
+    // shipping a secret that is readable in the repository.
+    throw new Error(
+      `Client "${def.id}": only a devSecret is configured, but the realm is not a development realm. Add "secret: \${env:VAR}" alongside it for production.`,
+    );
   }
 
-  return def.secret;
+  return undefined;
 }
 
 /**
@@ -601,6 +637,10 @@ export interface KeycloakRealmArtifact {
 export function generateKeycloakRealmArtifacts(
   contracts: CompiledEntityContract[],
   authConfig: AuthorizationConfigFile | null | undefined,
+  // Explicit rather than read from process.env inside: the mode decides whether
+  // committed secrets are refused, and a security rule that can only be
+  // exercised by mutating global state is a rule that stops being tested.
+  mode: RealmMode = resolveRealmMode(),
 ): KeycloakRealmArtifact[] {
   if (!authConfig) {
     return [];
@@ -617,7 +657,7 @@ export function generateKeycloakRealmArtifacts(
   const resourceClientIds = clientDefs
     .filter((c) => c.kind === "bearerOnly")
     .map((c) => c.id);
-  const dev = isDevRealm(authConfig.realm);
+  const dev = isDevRealm(authConfig.realm, mode);
 
   const entityAggregate = aggregateFromEntities(contracts, entityRoleClient);
 
@@ -678,7 +718,13 @@ export function generateKeycloakRealmArtifacts(
   const groupNodes = authConfig.groups ?? [];
   const groupsOut = groupNodes.length > 0 ? buildKeycloakGroupsFromAuthoring(groupNodes, "") : undefined;
 
-  const users: KeycloakUser[] = (authConfig.users ?? []).map((u) => ({
+  // Seeded users are DEVELOPMENT fixtures: they carry plain-text passwords from
+  // the authoring config, so a production realm must not contain them. Unlike
+  // client secrets — where the compiler errors, because a missing secret means
+  // a broken client — silently omitting users is correct: a production realm is
+  // supposed to have no built-in accounts, and failing the build would only
+  // push operators to delete the fixtures local dev depends on.
+  const users: KeycloakUser[] = (dev ? (authConfig.users ?? []) : []).map((u) => ({
     username: u.username,
     enabled: u.enabled ?? true,
     email: u.email,
@@ -716,7 +762,11 @@ export function generateKeycloakRealmArtifacts(
     realm: realmCfg.name ?? DEFAULT_REALM_NAME,
     displayName: realmCfg.displayName,
     enabled: realmCfg.enabled ?? true,
-    sslRequired: realmCfg.sslRequired,
+    // Forced in production rather than merely defaulted: the authored value is
+    // `none`, which exists so the local compose stack works over plain HTTP.
+    // Carrying that into a published realm would let Keycloak accept
+    // unencrypted traffic, so the mode overrides it outright.
+    sslRequired: dev ? realmCfg.sslRequired : "external",
     loginTheme: realmCfg.loginTheme,
     accountTheme: realmCfg.accountTheme,
     adminTheme: realmCfg.adminTheme,
@@ -726,7 +776,10 @@ export function generateKeycloakRealmArtifacts(
     duplicateEmailsAllowed: realmCfg.duplicateEmailsAllowed,
     resetPasswordAllowed: realmCfg.resetPasswordAllowed,
     editUsernameAllowed: realmCfg.editUsernameAllowed,
-    bruteForceProtected: realmCfg.bruteForceProtected,
+    // Also forced: an internet-reachable login endpoint without lockout is an
+    // open invitation to credential stuffing, and the authored default is off
+    // so local test logins are not throttled.
+    bruteForceProtected: dev ? realmCfg.bruteForceProtected : true,
     organizationsEnabled: realmCfg.organizationsEnabled,
     accessTokenLifespan: realmCfg.accessTokenLifespan,
     ssoSessionIdleTimeout: realmCfg.ssoSessionIdleTimeout,

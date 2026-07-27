@@ -130,7 +130,9 @@ describe("keycloak realm generator — secret handling", () => {
 
   it("rejects a devSecret on a non-dev realm", () => {
     const config = devConfig({}, { name: "openshapeforge-prod", sslRequired: "all" });
-    expect(() => generateKeycloakRealmArtifacts([], config)).toThrow(/devSecret is dev-only/);
+    expect(() => generateKeycloakRealmArtifacts([], config, "production")).toThrow(
+      /only a devSecret is configured/,
+    );
   });
 
   it("rejects a literal secret on a non-dev realm", () => {
@@ -148,19 +150,32 @@ describe("keycloak realm generator — secret handling", () => {
       },
       { name: "openshapeforge-prod", sslRequired: "all" },
     );
-    expect(() => generateKeycloakRealmArtifacts([], config)).toThrow(/literal client secret is committed for a non-dev realm/);
+    expect(() => generateKeycloakRealmArtifacts([], config, "production")).toThrow(
+      /literal client secret is committed for a non-dev realm/,
+    );
   });
 });
 
 describe("isDevRealm", () => {
-  it("treats sslRequired:none and -dev names as dev", () => {
-    expect(isDevRealm({ name: "openshapeforge-dev", sslRequired: "none" })).toBe(true);
-    expect(isDevRealm({ name: "acme-dev" })).toBe(true);
-    expect(isDevRealm(undefined)).toBe(true); // falls back to DEFAULT_REALM_NAME
+  it("follows the mode, defaulting to development", () => {
+    expect(isDevRealm(undefined, "development")).toBe(true);
+    expect(isDevRealm({ name: "anything", sslRequired: "all" }, "development")).toBe(true);
+    expect(isDevRealm(undefined, "production")).toBe(false);
   });
 
-  it("treats a TLS-required non-dev-named realm as production", () => {
-    expect(isDevRealm({ name: "openshapeforge", sslRequired: "all" })).toBe(false);
+  // Regression guard. The default realm name no longer ends in "-dev", so any
+  // inference from the NAME would classify a production realm using the default
+  // name as development and silently allow committed secrets to ship.
+  it("does NOT infer development from the realm name", () => {
+    expect(isDevRealm({ name: "openshapeforge" }, "production")).toBe(false);
+    expect(isDevRealm({ name: "anything-dev" }, "production")).toBe(false);
+  });
+
+  // Likewise sslRequired: the authored config carries "none" for local work and
+  // production mode overrides it, so reading the authored value would make
+  // production classify itself as development.
+  it("does NOT infer development from sslRequired", () => {
+    expect(isDevRealm({ name: "x", sslRequired: "none" }, "production")).toBe(false);
   });
 });
 
@@ -315,7 +330,7 @@ describe("generated dev realm", () => {
   test("openshapeforge-auth-api service account holds realm-management manage-realm", () => {
     const realmPath = join(
       import.meta.dir,
-      "../../../../../keycloak/openshapeforge-dev-realm.json",
+      "../../../../../keycloak/openshapeforge-realm.json",
     );
     const realm = JSON.parse(readFileSync(realmPath, "utf8")) as {
       users: Array<{

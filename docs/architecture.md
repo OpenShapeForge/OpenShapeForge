@@ -29,7 +29,7 @@ Generated artifacts (all gitignored; reproducible)
   apps/api/src/generated/db/types.ts         Kysely table types
   apps/api/src/generated/db/manifest.json    runtime manifest (+ checksum)
   packages/compiler/config/referentiedata/core-by-groep.json
-  keycloak/openshapeforge-dev-realm.json         realm import for the compose stack
+  keycloak/openshapeforge-realm.json         realm import for the compose stack
   apps/api/src/generated/workflow/*          workflow plugin (api side)
   docs/entities.generated.md                 entity-docs plugin
         │

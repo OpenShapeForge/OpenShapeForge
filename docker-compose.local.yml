@@ -70,7 +70,7 @@ services:
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_HTTPS: "false"
     volumes:
-      - ./keycloak/openshapeforge-dev-realm.json:/opt/keycloak/data/import/openshapeforge-dev-realm.json:ro
+      - ./keycloak/openshapeforge-realm.json:/opt/keycloak/data/import/openshapeforge-realm.json:ro
     depends_on:
       keycloak-db:
         condition: service_healthy

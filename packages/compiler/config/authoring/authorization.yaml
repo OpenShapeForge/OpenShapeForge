@@ -13,7 +13,7 @@ kind: authorizationConfig
 # top of the entityRoleClient by the generator, based on entity YAML auth blocks.
 
 realm:
-  name: openshapeforge-dev
+  name: openshapeforge
   displayName: OpenShapeForge
   enabled: true
   sslRequired: none
@@ -56,13 +56,14 @@ keycloak:
       # Dev-only credential — never reuse outside local development. A real
       # deployment authors its own gateway with a `${env:...}` secret.
       devSecret: dev-secret
+      secret: ${env:KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_GATEWAY}
       # Concrete local-dev redirect URIs / CORS origins for the docker-compose
       # stack (API :3001, Keycloak account console :8181, and a dev SPA on
       # :3000). A non-dev realm must supply its own real hostnames here.
       redirectUris:
         - http://localhost:3000/*
         - http://localhost:3001/*
-        - http://localhost:8181/realms/openshapeforge-dev/account/*
+        - http://localhost:8181/realms/openshapeforge/account/*
       webOrigins:
         - http://localhost:3000
         - http://localhost:3001
@@ -72,6 +73,7 @@ keycloak:
       kind: bearerOnly
       name: ERP Provider — entity scopes
       devSecret: erp-provider-secret
+      secret: ${env:KEYCLOAK_CLIENT_SECRET_ERP_PROVIDER}
 
     - id: openshapeforge-support
       kind: bearerOnly
@@ -83,6 +85,7 @@ keycloak:
       kind: bearerOnly
       name: OpenShapeForge Timeline Service
       devSecret: openshapeforge-timeline-secret
+      secret: ${env:KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_TIMELINE}
 
     - id: openshapeforge-knowledge-base
       kind: bearerOnly
@@ -92,6 +95,7 @@ keycloak:
       kind: serviceAccount
       name: Seed Service Account
       devSecret: seed-service-secret
+      secret: ${env:KEYCLOAK_CLIENT_SECRET_SEED_SERVICE}
 
     - id: openshapeforge-messaging
       kind: bearerOnly
@@ -103,6 +107,7 @@ keycloak:
       kind: serviceAccount
       name: OpenShapeForge Auth API Service
       devSecret: openshapeforge-auth-api-secret
+      secret: ${env:KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API}
       # The identity-configuration SPI (OpenShapeForgeResource) manages realm
       # organizations, groups, roles, and user role mappings, and its admin
       # endpoints require the caller to hold realm-management `manage-realm`

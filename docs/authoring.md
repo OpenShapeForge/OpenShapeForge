@@ -241,7 +241,7 @@ Catalog files under `catalogs/` merge across authoring layers automatically
 ## `authorization.yaml`
 
 One file authors the whole Keycloak realm export
-(`keycloak/openshapeforge-dev-realm.json`, generated and mounted into the local
+(`keycloak/openshapeforge-realm.json`, generated and mounted into the local
 Keycloak container): realm settings (token lifespans, org feature), clients
 (`gateway` / `bearerOnly` / `serviceAccount` kinds), realm roles with
 per-client composites, hand-authored client roles, a demo group hierarchy,

@@ -117,7 +117,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # Produces keycloak/openshapeforge-dev-realm.json, which is gitignored and
+      # Produces keycloak/openshapeforge-realm.json, which is gitignored and
       # therefore must be regenerated here rather than read from the checkout.
       - name: Generate artifacts
         run: bun run generate
@@ -267,7 +267,7 @@ jobs:
       # here. Without this the API accepts no bearer token at all.
       #
       # The realm NAME comes from the generated file rather than being
-      # hardcoded — it is "openshapeforge-dev", not the release name, and
+      # hardcoded — it is "openshapeforge", not the release name, and
       # guessing it yields a 404 discovery document.
       - name: Derive issuer
         if: ${{ inputs.deploy_keycloak }}
@@ -293,6 +293,7 @@ jobs:
           # claim, so keep it INTERNAL even when the issuer is public: it avoids
           # hairpinning out through the load balancer and back, and keeps the
           # API's startup independent of public DNS and certificate validity.
+          echo "realm=$realm" >> "$GITHUB_OUTPUT"
           echo "issuer=$issuer" >> "$GITHUB_OUTPUT"
           echo "jwks=$internal/protocol/openid-connect/certs" >> "$GITHUB_OUTPUT"
           echo "realm '$realm'"
@@ -348,10 +349,17 @@ jobs:
               --set keycloak.ingress.className=nginx
               --set "keycloak.ingress.annotations.cert-manager\.io/cluster-issuer=${{ inputs.tls_issuer }}"
               --set "keycloak.ingress.hosts[0].host=$ahost"
+              # ONLY these prefixes are routed. /admin (the console) and
+              # /realms/master match no rule and never reach Keycloak, so the
+              # console and the master realm stay off the internet while the
+              # token, JWKS and discovery endpoints stay reachable.
+              # /resources serves the login page assets.
+              --set "keycloak.ingress.hosts[0].paths[0]=/realms/${{ steps.issuer.outputs.realm }}"
+              --set "keycloak.ingress.hosts[0].paths[1]=/resources"
               --set "keycloak.ingress.tls[0].secretName=openshapeforge-keycloak-tls"
               --set "keycloak.ingress.tls[0].hosts[0]=$ahost"
             )
-            echo "keycloak public at https://$ahost"
+            echo "keycloak public at https://$ahost (only /realms/${{ steps.issuer.outputs.realm }} and /resources routed)"
           fi
           helm upgrade --install "$RELEASE" ./deploy/helm/openshapeforge-api \
             --namespace "$NAMESPACE" \

@@ -1,0 +1,162 @@
+name: Keycloak image
+
+# Builds the Keycloak image (packages/keycloak-spi/Dockerfile) — official
+# Keycloak with the OpenShapeForge SPI provider jar layered on and `kc.sh build`
+# already run — smoke-tests it, and publishes it to GHCR.
+#
+# Trigger/tag behaviour mirrors the API image workflow exactly, so a given git
+# tag produces a matching pair of images:
+#
+#   pull_request -> build + smoke test only, never push
+#   push to main -> push :main and :sha-<commit>
+#   tag v*       -> push :<version>, :<major>.<minor> and :latest
+#
+# There is deliberately NO paths filter: a tag push must publish this image even
+# when the tagged commit changed nothing under packages/keycloak-spi, otherwise
+# the API and Keycloak images would drift apart at release tags.
+#
+# The realm is NOT baked in. `bun run generate` produces
+# keycloak/openshapeforge-dev-realm.json, which is environment-specific and
+# gitignored; the Helm chart imports it at deploy time instead, so one image
+# serves every environment.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-keycloak-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Lowercase literal: GHCR rejects the mixed-case ${{ github.repository_owner }}.
+  IMAGE: ghcr.io/openshapeforge/openshapeforge-keycloak
+
+jobs:
+  build:
+    name: Build, smoke test, push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # required to push to GHCR
+    services:
+      # Keycloak's image is built with `kc.sh build --db=postgres`, so it needs a
+      # real Postgres to reach a ready state. This throwaway instance exists only
+      # for the smoke test; the credentials are local to the runner.
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: keycloak
+          POSTGRES_USER: keycloak
+          POSTGRES_PASSWORD: keycloak
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U keycloak -d keycloak"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build into the local daemon first so the image is smoke-tested before
+      # anything is published. The registry build below reuses this layer cache.
+      # Context is packages/keycloak-spi (the Maven build needs only pom.xml and
+      # src), NOT the repository root.
+      - name: Build image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: packages/keycloak-spi
+          file: packages/keycloak-spi/Dockerfile
+          load: true
+          tags: openshapeforge-keycloak:ci
+          cache-from: type=gha,scope=keycloak
+          cache-to: type=gha,mode=max,scope=keycloak
+
+      # Cheap structural check first: if the Maven stage silently produced
+      # nothing, the jar would be missing and Keycloak would still start fine
+      # without the SPI — a failure mode the health probe alone cannot catch.
+      - name: Verify the SPI provider jar is present
+        run: |
+          docker run --rm --entrypoint ls openshapeforge-keycloak:ci \
+            /opt/keycloak/providers/openshapeforge-keycloak-spi.jar
+
+      # Prove the image actually reaches a ready state against Postgres. Host
+      # networking lets the container reach the service container on localhost.
+      - name: Smoke test the image
+        run: |
+          docker run -d --name kc-smoke --network host \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            -e KC_DB=postgres \
+            -e KC_DB_URL=jdbc:postgresql://localhost:5432/keycloak \
+            -e KC_DB_USERNAME=keycloak \
+            -e KC_DB_PASSWORD=keycloak \
+            -e KC_HEALTH_ENABLED=true \
+            -e KC_HTTP_ENABLED=true \
+            -e KC_HOSTNAME_STRICT=false \
+            openshapeforge-keycloak:ci start-dev
+          # Keycloak serves health on the management port (9000), not 8080.
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:9000/health/ready 2>/dev/null | grep -q '"status": *"UP"'; then
+              echo "keycloak ready after ${i}s"
+              docker rm -f kc-smoke >/dev/null
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::keycloak did not become ready within 90s"
+          docker logs kc-smoke
+          docker rm -f kc-smoke >/dev/null
+          exit 1
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags and labels
+        if: github.event_name != 'pull_request'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+          labels: |
+            org.opencontainers.image.title=openshapeforge-keycloak
+            org.opencontainers.image.description=Keycloak with the OpenShapeForge SPI provider
+            org.opencontainers.image.licenses=BUSL-1.1
+
+      # Fully cache-hit from the build above; this step exports and pushes.
+      # Separate from the load build because the local docker exporter cannot
+      # carry provenance/SBOM attestations.
+      - name: Push to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: packages/keycloak-spi
+          file: packages/keycloak-spi/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha,scope=keycloak

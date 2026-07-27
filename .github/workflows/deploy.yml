@@ -41,6 +41,11 @@ on:
         required: false
         type: boolean
         default: true
+      bearer_audience:
+        description: "aud the API requires in bearer tokens. Must appear in the token's aud array."
+        required: false
+        type: string
+        default: "erp-provider"
 
 # Never let two deploys race for the same release.
 concurrency:
@@ -237,8 +242,40 @@ jobs:
           emit keycloak-admin-password "    password"
           echo "wrote $(grep -c ':' secrets.values.yaml) lines of values (contents masked)"
 
+      # When the chart also deploys Keycloak, point the API's bearer verifier at
+      # it. The chart deliberately does not infer these (issuer must equal the
+      # `iss` claim exactly, which depends on the URL clients use), but for an
+      # in-cluster issuer the Service name IS that URL, so it can be derived
+      # here. Without this the API accepts no bearer token at all.
+      #
+      # The realm NAME comes from the generated file rather than being
+      # hardcoded — it is "openshapeforge-dev", not the release name, and
+      # guessing it yields a 404 discovery document.
+      - name: Derive in-cluster issuer
+        if: ${{ inputs.deploy_keycloak }}
+        id: issuer
+        run: |
+          realm_file=$(ls keycloak/*-realm.json | head -1)
+          realm=$(jq -r '.realm' "$realm_file")
+          if [ -z "$realm" ] || [ "$realm" = "null" ]; then
+            echo "::error::could not read realm name from $realm_file"
+            exit 1
+          fi
+          issuer="http://${RELEASE}-keycloak:8080/realms/${realm}"
+          echo "issuer=$issuer" >> "$GITHUB_OUTPUT"
+          echo "jwks=$issuer/protocol/openid-connect/certs" >> "$GITHUB_OUTPUT"
+          echo "realm '$realm' -> $issuer"
+
       - name: Helm upgrade --install
         run: |
+          bearer_args=()
+          if [ "${{ inputs.deploy_keycloak }}" = "true" ]; then
+            bearer_args=(
+              --set auth.bearer.issuer="${{ steps.issuer.outputs.issuer }}"
+              --set auth.bearer.jwksUri="${{ steps.issuer.outputs.jwks }}"
+              --set auth.bearer.audience="${{ inputs.bearer_audience }}"
+            )
+          fi
           helm upgrade --install "$RELEASE" ./deploy/helm/openshapeforge-api \
             --namespace "$NAMESPACE" \
             --values secrets.values.yaml \
@@ -246,7 +283,8 @@ jobs:
             --set 'global.imagePullSecrets[0].name=ghcr-pull' \
             --set keycloak.enabled=${{ inputs.deploy_keycloak }} \
             --set keycloak.image.tag="${{ steps.tag.outputs.tag }}" \
-            --set-file keycloak.realm.json=keycloak/openshapeforge-dev-realm.json \
+            --set-file keycloak.realm.json="$(ls keycloak/*-realm.json | head -1)" \
+            "${bearer_args[@]}" \
             --wait \
             --timeout 15m
 

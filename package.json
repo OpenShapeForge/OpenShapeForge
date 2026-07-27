@@ -28,6 +28,7 @@
     "test:e2e": "bun run --cwd apps/api test:e2e",
     "test:e2e:report": "bun scripts/render-e2e-report.ts",
     "test:perf": "bun scripts/run-perf.ts",
+    "scan:dependencies": "bash scripts/scan-dependencies.sh",
     "notices": "bun scripts/gen-third-party-notices.ts"
   }
 }

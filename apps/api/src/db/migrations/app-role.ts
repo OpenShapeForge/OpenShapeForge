@@ -152,7 +152,24 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
     await sql`alter role ${sql.ref(APP_ROLE)} login password ${sql.lit(appRolePassword)}`.execute(db);
   }
 
-  // 2. Grant USAGE on every schema that exists.
+  // 2. CONNECT on the database itself.
+  //    Stock PostgreSQL grants CONNECT to PUBLIC, so this is a no-op on a local
+  //    or CI Postgres — which is exactly why its absence went unnoticed. Managed
+  //    providers revoke it (Scaleway RDB does), leaving the role able to
+  //    authenticate but not connect:
+  //      permission denied for database "openshapeforge"
+  //      detail: "User does not have CONNECT privilege."
+  //    current_database() keeps this correct whatever the database is named,
+  //    and re-granting an existing privilege is idempotent.
+  await sql`
+    do $$
+    begin
+      execute format('grant connect on database %I to %I', current_database(), ${sql.lit(APP_ROLE)});
+    end
+    $$;
+  `.execute(db);
+
+  // 3. Grant USAGE on every schema that exists.
   for (const schema of APP_SCHEMAS) {
     await sql`
       do $$
@@ -165,7 +182,7 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
     `.execute(db);
   }
 
-  // 3. EXECUTE on the app.* RLS helper functions (app.current_tenant(), etc.).
+  // 4. EXECUTE on the app.* RLS helper functions (app.current_tenant(), etc.).
   //    Applying to ALL functions in `app` is broad but the schema only holds
   //    those helpers. Default privileges below cover future helpers.
   await sql`
@@ -182,7 +199,7 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
     $$;
   `.execute(db);
 
-  // 4. ALTER DEFAULT PRIVILEGES for the migrate (current) role so any table or
+  // 5. ALTER DEFAULT PRIVILEGES for the migrate (current) role so any table or
   //    sequence it creates LATER — including newly generated entities — is
   //    auto-granted to openshapeforge_app without a manual grant.
   for (const schema of ["erp", "platform"] as const) {

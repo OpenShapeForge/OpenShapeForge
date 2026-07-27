@@ -56,6 +56,14 @@ on:
         required: false
         type: string
         default: "auth.openshapeforge.eu"
+      realm_mode:
+        description: "Keycloak realm to compile. production forbids committed secrets and requires them from Secret Manager."
+        required: false
+        type: choice
+        default: development
+        options:
+          - development
+          - production
       tls_issuer:
         description: "cert-manager ClusterIssuer. Use staging while iterating — production allows only 5 failed validations per hostname per hour."
         required: false
@@ -119,17 +127,66 @@ jobs:
 
       # Produces keycloak/openshapeforge-realm.json, which is gitignored and
       # therefore must be regenerated here rather than read from the checkout.
-      - name: Generate artifacts
-        run: bun run generate
-
-      - uses: azure/setup-helm@v4
-
       - name: Install Scaleway CLI
         run: |
           curl -fsSL https://github.com/scaleway/scaleway-cli/releases/download/v2.51.0/scaleway-cli_2.51.0_linux_amd64 \
             -o /usr/local/bin/scw
           chmod +x /usr/local/bin/scw
-          scw version
+
+      # The compiler REFUSES to emit a production realm carrying committed
+      # client secrets or user passwords; it reads them from the environment
+      # here. Terraform generates them into Secret Manager, so the names below
+      # are the contract between the two — a mismatch fails generation naming
+      # the variable rather than silently shipping a committed default.
+      #
+      # Users are kept in the production realm on purpose: they are the
+      # identities the e2e suite authenticates as to prove roles and tenant
+      # isolation. Production changes their passwords, not their existence.
+      - name: Read realm credentials from Secret Manager
+        if: ${{ inputs.realm_mode == 'production' }}
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+        run: |
+          set -euo pipefail
+          fetch() {
+            scw secret version access-by-path secret-path=/ \
+              secret-name="$1" revision=latest region="$REGION" \
+              project-id="$SCW_DEFAULT_PROJECT_ID" -o json | jq -r '.data' | base64 -d
+          }
+          # secret-name -> env var the compiler reads.
+          while IFS='|' read -r name var; do
+            [ -z "$name" ] && continue
+            value="$(fetch "$name")"
+            if [ -z "$value" ]; then
+              echo "::error::Secret Manager entry missing or empty: $name (needed for $var)"
+              exit 1
+            fi
+            echo "::add-mask::$value"
+            echo "$var=$value" >> "$GITHUB_ENV"
+          done <<'PAIRS'
+          ${{ env.SECRET_PREFIX }}-realm-client-openshapeforge-gateway|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_GATEWAY
+          ${{ env.SECRET_PREFIX }}-realm-client-erp-provider|KEYCLOAK_CLIENT_SECRET_ERP_PROVIDER
+          ${{ env.SECRET_PREFIX }}-realm-client-openshapeforge-timeline|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_TIMELINE
+          ${{ env.SECRET_PREFIX }}-realm-client-seed-service|KEYCLOAK_CLIENT_SECRET_SEED_SERVICE
+          ${{ env.SECRET_PREFIX }}-realm-client-openshapeforge-auth-api|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API
+          ${{ env.SECRET_PREFIX }}-realm-user-acme-directie|E2E_USER_PASSWORD_ACME_DIRECTIE
+          ${{ env.SECRET_PREFIX }}-realm-user-acme-vastgoedbeheerder|E2E_USER_PASSWORD_ACME_VASTGOEDBEHEERDER
+          ${{ env.SECRET_PREFIX }}-realm-user-acme-wijkbeheerder|E2E_USER_PASSWORD_ACME_WIJKBEHEERDER
+          ${{ env.SECRET_PREFIX }}-realm-user-acme-verhuurconsulent|E2E_USER_PASSWORD_ACME_VERHUURCONSULENT
+          ${{ env.SECRET_PREFIX }}-realm-user-acme-noaccess|E2E_USER_PASSWORD_ACME_NOACCESS
+          ${{ env.SECRET_PREFIX }}-realm-user-beta-verhuurconsulent|E2E_USER_PASSWORD_BETA_VERHUURCONSULENT
+          PAIRS
+          echo "realm credentials loaded (values masked)"
+
+      - name: Generate artifacts
+        env:
+          OPENSHAPEFORGE_REALM_MODE: ${{ inputs.realm_mode }}
+        run: bun run generate
+
+      - uses: azure/setup-helm@v4
 
       - name: Fetch kubeconfig
         env:

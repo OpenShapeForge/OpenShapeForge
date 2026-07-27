@@ -143,6 +143,44 @@ jobs:
           echo "::add-mask::$local_url"
           echo "DATABASE_URL=$local_url" >> "$GITHUB_ENV"
 
+      # The suite authenticates as real realm users. Against a production-mode
+      # realm their passwords are generated, not the committed "test", so they
+      # have to come from the same Secret Manager the deploy wrote them to.
+      #
+      # Absent entries are NOT an error: a development-mode realm has no such
+      # secrets and the committed defaults are correct there. The harness skips
+      # a bearer test whose token cannot be obtained, so a genuinely wrong
+      # password surfaces as a skipped security test rather than a failure —
+      # which is why the summary below prints how many were found.
+      - name: Read realm user passwords from Secret Manager
+        env:
+          SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
+          SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
+          SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
+          SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+        run: |
+          set -uo pipefail
+          found=0
+          while IFS='|' read -r name var; do
+            [ -z "$name" ] && continue
+            value=$(scw secret version access-by-path secret-path=/ \
+              secret-name="$name" revision=latest region="$REGION" \
+              project-id="$SCW_DEFAULT_PROJECT_ID" -o json 2>/dev/null \
+              | jq -r '.data // empty' | base64 -d 2>/dev/null || true)
+            if [ -n "$value" ]; then
+              echo "::add-mask::$value"
+              echo "$var=$value" >> "$GITHUB_ENV"
+              found=$((found + 1))
+            fi
+          done <<'PAIRS'
+          openshapeforge-realm-user-acme-directie|E2E_USER_PASSWORD_ACME_DIRECTIE
+          openshapeforge-realm-user-acme-noaccess|E2E_USER_PASSWORD_ACME_NOACCESS
+          openshapeforge-realm-user-acme-verhuurconsulent|E2E_USER_PASSWORD_ACME_VERHUURCONSULENT
+          openshapeforge-realm-user-beta-verhuurconsulent|E2E_USER_PASSWORD_BETA_VERHUURCONSULENT
+          openshapeforge-realm-client-openshapeforge-gateway|E2E_KEYCLOAK_CLIENT_SECRET
+          PAIRS
+          echo "realm user passwords found in Secret Manager: $found (0 = development realm, committed defaults apply)"
+
       - name: Read the trusted-context secret
         env:
           SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}

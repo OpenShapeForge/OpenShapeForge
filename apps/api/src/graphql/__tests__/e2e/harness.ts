@@ -282,10 +282,26 @@ async function fetchKeycloakToken(
 }
 
 /**
+ * Password for a seeded realm user.
+ *
+ * A development realm carries the committed literal; a production realm carries
+ * a generated one, supplied as E2E_USER_PASSWORD_<USERNAME>. The fallback keeps
+ * local runs working with no environment at all, which is the same bargain the
+ * compiler strikes when it authors these as `${env:VAR:-test}`.
+ */
+function passwordFor(username: string): string {
+  const key = `E2E_USER_PASSWORD_${username.replace(/[^A-Za-z0-9]/g, "_").toUpperCase()}`;
+  return process.env[key] ?? "test";
+}
+
+/**
  * A token for any realm user, memoized per username so a spec can hold several
  * identities at once without re-authenticating.
  */
-export function keycloakTokenFor(username: string, password = "test"): Promise<string | null> {
+export function keycloakTokenFor(
+  username: string,
+  password = passwordFor(username),
+): Promise<string | null> {
   store.keycloakTokens ??= new Map();
   let token = store.keycloakTokens.get(username);
   if (!token) {
@@ -297,9 +313,10 @@ export function keycloakTokenFor(username: string, password = "test"): Promise<s
 
 /** A token for a user that HOLDS realm roles (acme-directie by default). */
 export function getKeycloakToken(): Promise<string | null> {
+  const username = process.env.E2E_KEYCLOAK_USERNAME ?? "acme-directie";
   store.keycloakToken ??= fetchKeycloakToken(
-    process.env.E2E_KEYCLOAK_USERNAME ?? "acme-directie",
-    process.env.E2E_KEYCLOAK_PASSWORD ?? "test",
+    username,
+    process.env.E2E_KEYCLOAK_PASSWORD ?? passwordFor(username),
   );
   return store.keycloakToken;
 }
@@ -318,9 +335,10 @@ export function getKeycloakToken(): Promise<string | null> {
  * that maps realm_access.roles out of a JWT.
  */
 export function getRolelessKeycloakToken(): Promise<string | null> {
+  const username = process.env.E2E_KEYCLOAK_NOACCESS_USERNAME ?? "acme-noaccess";
   store.keycloakRolelessToken ??= fetchKeycloakToken(
-    process.env.E2E_KEYCLOAK_NOACCESS_USERNAME ?? "acme-noaccess",
-    process.env.E2E_KEYCLOAK_NOACCESS_PASSWORD ?? "test",
+    username,
+    process.env.E2E_KEYCLOAK_NOACCESS_PASSWORD ?? passwordFor(username),
   );
   return store.keycloakRolelessToken;
 }

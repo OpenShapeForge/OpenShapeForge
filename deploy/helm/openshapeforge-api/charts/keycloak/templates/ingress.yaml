@@ -18,16 +18,25 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}
   rules:
-    {{- range .Values.ingress.hosts }}
-    - host: {{ .host | quote }}
+    {{- range $host := .Values.ingress.hosts }}
+    - host: {{ $host.host | quote }}
       http:
         paths:
-          - path: /
+          # Only the declared prefixes are routed. Anything else — /admin,
+          # /realms/master — matches no rule and never reaches Keycloak, which
+          # is how the admin console and the master realm are kept off the
+          # internet. Done with paths rather than a server-snippet annotation
+          # because ingress-nginx disables snippets by default (CVE-2021-25742)
+          # and a silently ignored annotation would look like protection while
+          # providing none.
+          {{- range (default (list "/") $host.paths) }}
+          - path: {{ . }}
             pathType: Prefix
             backend:
               service:
                 name: {{ include "keycloak.fullname" $ }}
                 port:
                   number: {{ $.Values.service.port }}
+          {{- end }}
     {{- end }}
 {{- end -}}

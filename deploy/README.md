@@ -97,7 +97,7 @@ often than right:
 
 The realm is **not** baked into the image — `bun run generate` produces an
 environment-specific, gitignored realm file, so it is supplied at deploy time
-with `--set-file keycloak.realm.json=keycloak/openshapeforge-dev-realm.json` and
+with `--set-file keycloak.realm.json=keycloak/openshapeforge-realm.json` and
 stored in a Secret (a realm export can carry client secrets). Keycloak only
 imports a realm that does not already exist, so this is safe across upgrades.
 

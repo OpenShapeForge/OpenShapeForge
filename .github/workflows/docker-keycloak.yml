@@ -16,7 +16,7 @@ name: Keycloak image
 # the API and Keycloak images would drift apart at release tags.
 #
 # The realm is NOT baked in. `bun run generate` produces
-# keycloak/openshapeforge-dev-realm.json, which is environment-specific and
+# keycloak/openshapeforge-realm.json, which is environment-specific and
 # gitignored; the Helm chart imports it at deploy time instead, so one image
 # serves every environment.
 

@@ -46,11 +46,11 @@ admin:
   password: ""
 
 # --- Realm import ------------------------------------------------------------
-# `bun run generate` produces keycloak/openshapeforge-dev-realm.json. It is
+# `bun run generate` produces keycloak/openshapeforge-realm.json. It is
 # gitignored and environment-specific, so it is NOT baked into the image —
 # supply it at deploy time:
 #
-#   helm upgrade ... --set-file keycloak.realm.json=keycloak/openshapeforge-dev-realm.json
+#   helm upgrade ... --set-file keycloak.realm.json=keycloak/openshapeforge-realm.json
 #
 # Stored in a Secret rather than a ConfigMap: a realm can carry client secrets.
 realm:

@@ -110,7 +110,7 @@ describe("mergeIdentityRoles (bearer effective roles)", () => {
     // expands it into entity client roles under resource_access.
     expect(
       mergeIdentityRoles({
-        roles: ["directie", "default-roles-openshapeforge-dev"],
+        roles: ["directie", "default-roles-openshapeforge"],
         clientRoles: {
           "erp-provider": ["Relations.All.ReadWrite", "Relations.All.Read"],
           account: ["manage-account", "Relations.All.Read"],
@@ -119,7 +119,7 @@ describe("mergeIdentityRoles (bearer effective roles)", () => {
     ).toEqual([
       "Relations.All.Read",
       "Relations.All.ReadWrite",
-      "default-roles-openshapeforge-dev",
+      "default-roles-openshapeforge",
       "directie",
       "manage-account",
     ]);

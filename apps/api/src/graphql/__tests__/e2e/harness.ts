@@ -69,6 +69,7 @@ type Store = {
   runtime: DatabaseRuntime | null;
   yoga: ReturnType<typeof createGraphqlYoga> | null;
   keycloakToken: Promise<string | null> | null;
+  keycloakRolelessToken: Promise<string | null> | null;
 };
 
 /**
@@ -102,6 +103,7 @@ const store: Store = ((globalThis as Record<string, any>).__openshapeforgeE2E ??
   runtime: null,
   yoga: null,
   keycloakToken: null,
+  keycloakRolelessToken: null,
 } satisfies Store);
 
 export const seed = store.seed;
@@ -250,31 +252,61 @@ export async function eventsFor(
 // Keycloak bearer support
 // ---------------------------------------------------------------------------
 
+async function fetchKeycloakToken(
+  username: string,
+  password: string,
+): Promise<string | null> {
+  const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+  if (!issuer) return null;
+  try {
+    const response = await fetch(`${issuer}/protocol/openid-connect/token`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "password",
+        client_id: process.env.E2E_KEYCLOAK_CLIENT_ID ?? "openshapeforge-gateway",
+        client_secret: process.env.E2E_KEYCLOAK_CLIENT_SECRET ?? "dev-secret",
+        username,
+        password,
+      }),
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { access_token?: string };
+    return body.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** A token for a user that HOLDS realm roles (acme-directie by default). */
 export function getKeycloakToken(): Promise<string | null> {
-  store.keycloakToken ??= (async () => {
-    const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
-    if (!issuer) return null;
-    try {
-      const response = await fetch(`${issuer}/protocol/openid-connect/token`, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "password",
-          client_id: process.env.E2E_KEYCLOAK_CLIENT_ID ?? "openshapeforge-gateway",
-          client_secret: process.env.E2E_KEYCLOAK_CLIENT_SECRET ?? "dev-secret",
-          username: process.env.E2E_KEYCLOAK_USERNAME ?? "acme-directie",
-          password: process.env.E2E_KEYCLOAK_PASSWORD ?? "test",
-        }),
-        signal: AbortSignal.timeout(4000),
-      });
-      if (!response.ok) return null;
-      const body = (await response.json()) as { access_token?: string };
-      return body.access_token ?? null;
-    } catch {
-      return null;
-    }
-  })();
+  store.keycloakToken ??= fetchKeycloakToken(
+    process.env.E2E_KEYCLOAK_USERNAME ?? "acme-directie",
+    process.env.E2E_KEYCLOAK_PASSWORD ?? "test",
+  );
   return store.keycloakToken;
+}
+
+/**
+ * A token for a real, ENABLED realm user that holds NO realm roles.
+ *
+ * This is the counterpart the bearer coverage was missing. Proving a token with
+ * the right role is accepted does not prove roles are read at all — an
+ * authorizer that ignored the token's roles and allowed everything would pass
+ * that test unchanged. Only a valid token that must be REFUSED distinguishes
+ * "roles are enforced" from "requests are waved through".
+ *
+ * The role-less identity has to come from Keycloak rather than a synthetic
+ * trusted-context header, because the claim path under test is exactly the one
+ * that maps realm_access.roles out of a JWT.
+ */
+export function getRolelessKeycloakToken(): Promise<string | null> {
+  store.keycloakRolelessToken ??= fetchKeycloakToken(
+    process.env.E2E_KEYCLOAK_NOACCESS_USERNAME ?? "acme-noaccess",
+    process.env.E2E_KEYCLOAK_NOACCESS_PASSWORD ?? "test",
+  );
+  return store.keycloakRolelessToken;
 }
 
 // ---------------------------------------------------------------------------

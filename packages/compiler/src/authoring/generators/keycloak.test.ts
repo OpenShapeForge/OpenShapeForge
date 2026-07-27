@@ -192,8 +192,18 @@ describe("resolveClientSecret — env references", () => {
     );
   });
 
-  it("uses the ${env:VAR:-fallback} default when unset", () => {
-    expect(resolveClientSecret({ id: "c", kind: "serviceAccount", secret: `\${env:${KEY}:-fb}` }, false)).toBe("fb");
+  it("uses the ${env:VAR:-fallback} default when unset, in DEVELOPMENT only", () => {
+    expect(resolveClientSecret({ id: "c", kind: "serviceAccount", secret: `\${env:${KEY}:-fb}` }, true)).toBe("fb");
+  });
+
+  // The fallback is a literal written in the repository. Substituting it for a
+  // production realm would ship the very credential the env indirection exists
+  // to avoid, while looking configured — so an unset variable is an error there
+  // even when a fallback is present.
+  it("refuses to fall back to the committed default for a production realm", () => {
+    expect(() =>
+      resolveClientSecret({ id: "c", kind: "serviceAccount", secret: `\${env:${KEY}:-fb}` }, false),
+    ).toThrow(/development-only and will not be used for a production realm/);
   });
 
   it("throws when an env ref is unset and has no fallback", () => {

@@ -736,7 +736,7 @@ users:
     email: directie@acme.example.com
     firstName: Diana
     lastName: Bestuur
-    password: test
+    password: ${env:E2E_USER_PASSWORD_ACME_DIRECTIE:-test}
     tid: 11111111-1111-4111-8111-111111111111
     realmRoles: [directie]
     groups: [/openshapeforge-demo/tenant-acme/role-directie]
@@ -747,7 +747,7 @@ users:
     email: vastgoed@acme.example.com
     firstName: Vincent
     lastName: Beheer
-    password: test
+    password: ${env:E2E_USER_PASSWORD_ACME_VASTGOEDBEHEERDER:-test}
     tid: 11111111-1111-4111-8111-111111111111
     realmRoles: [vastgoedbeheerder]
     groups: [/openshapeforge-demo/tenant-acme/role-vastgoedbeheer]
@@ -756,7 +756,7 @@ users:
     email: wijk@acme.example.com
     firstName: Willem
     lastName: Wijk
-    password: test
+    password: ${env:E2E_USER_PASSWORD_ACME_WIJKBEHEERDER:-test}
     tid: 11111111-1111-4111-8111-111111111111
     realmRoles: [wijkbeheerder]
     groups: [/openshapeforge-demo/tenant-acme/role-wijkbeheer]
@@ -765,7 +765,7 @@ users:
     email: verhuur@acme.example.com
     firstName: Eva
     lastName: Verhuur
-    password: test
+    password: ${env:E2E_USER_PASSWORD_ACME_VERHUURCONSULENT:-test}
     tid: 11111111-1111-4111-8111-111111111111
     realmRoles: [verhuurconsulent]
     groups: [/openshapeforge-demo/tenant-acme/role-verhuur]
@@ -774,7 +774,7 @@ users:
     email: noaccess@acme.example.com
     firstName: Nico
     lastName: Geenrol
-    password: test
+    password: ${env:E2E_USER_PASSWORD_ACME_NOACCESS:-test}
     tid: 11111111-1111-4111-8111-111111111111
     realmRoles: []
     groups: [/openshapeforge-demo/tenant-acme/role-zonder-app-toegang]
@@ -783,7 +783,7 @@ users:
     email: verhuur@beta.example.com
     firstName: Bart
     lastName: Verhuur
-    password: test
+    password: ${env:E2E_USER_PASSWORD_BETA_VERHUURCONSULENT:-test}
     tid: 33333333-3333-4333-8333-333333333333
     realmRoles: [verhuurconsulent]
     groups: [/openshapeforge-demo/tenant-beta/role-verhuur]

@@ -269,6 +269,36 @@ export function isDevRealm(
 const ENV_REF_RE = /^\$\{env:([A-Za-z_][A-Za-z0-9_]*)(?::-(.*))?\}$/;
 
 /**
+ * Resolve a `${env:VAR}` / `${env:VAR:-fallback}` reference.
+ *
+ * Returns undefined when the value is not an env reference at all, so callers
+ * can apply their own rule to literals.
+ *
+ * The fallback is DEVELOPMENT-ONLY. In production an unset variable is an
+ * error even when a fallback is written, because the fallback is by definition
+ * a value committed to the repository — silently substituting it would ship
+ * exactly the credential the env indirection exists to avoid, while looking
+ * like it had been configured.
+ */
+function resolveEnvRef(
+  raw: string,
+  dev: boolean,
+  what: string,
+): string | undefined {
+  const match = ENV_REF_RE.exec(raw.trim());
+  if (!match) return undefined;
+  const [, varName, fallback] = match;
+  const fromEnv = process.env[varName];
+  if (fromEnv !== undefined && fromEnv !== "") return fromEnv;
+  if (fallback !== undefined && dev) return fallback;
+  throw new Error(
+    fallback !== undefined
+      ? `${what}: env var ${varName} is not set. Its \${env:${varName}:-fallback} default is development-only and will not be used for a production realm.`
+      : `${what}: references env var ${varName}, but it is not set and no \${env:${varName}:-fallback} default was given.`,
+  );
+}
+
+/**
  * Resolve a client secret for a given realm.
  *
  * Precedence and rules:
@@ -281,6 +311,29 @@ const ENV_REF_RE = /^\$\{env:([A-Za-z_][A-Za-z0-9_]*)(?::-(.*))?\}$/;
  *     fails generation, so checked-in default credentials can never ship to
  *     production.
  */
+/**
+ * Resolve a seeded user's password, under the same rule as a client secret:
+ * a `${env:VAR}` reference works in any mode, a committed literal only in
+ * development.
+ *
+ * Authored as `${env:VAR:-literal}`, one line serves both: development falls
+ * back to the readable literal, production requires the variable to be set and
+ * refuses to substitute the fallback.
+ */
+export function resolveUserPassword(
+  user: { username: string; password: string },
+  dev: boolean,
+): string {
+  const resolved = resolveEnvRef(user.password, dev, `User "${user.username}": password`);
+  if (resolved !== undefined) return resolved;
+  if (!dev) {
+    throw new Error(
+      `User "${user.username}": a literal password is committed for a non-dev realm. Use a \${env:VAR:-devDefault} reference so production supplies a real one.`,
+    );
+  }
+  return user.password;
+}
+
 export function resolveClientSecret(
   def: AuthorizationClient,
   dev: boolean,
@@ -295,16 +348,8 @@ export function resolveClientSecret(
   }
 
   if (def.secret !== undefined) {
-    const match = ENV_REF_RE.exec(def.secret.trim());
-    if (match) {
-      const [, varName, fallback] = match;
-      const fromEnv = process.env[varName];
-      if (fromEnv !== undefined && fromEnv !== "") return fromEnv;
-      if (fallback !== undefined) return fallback;
-      throw new Error(
-        `Client "${def.id}": secret references env var ${varName}, but it is not set and no \${env:${varName}:-fallback} default was given.`,
-      );
-    }
+    const resolved = resolveEnvRef(def.secret, dev, `Client "${def.id}": secret`);
+    if (resolved !== undefined) return resolved;
     // Literal secret: acceptable only where committed credentials are.
     if (!dev) {
       throw new Error(
@@ -718,19 +763,24 @@ export function generateKeycloakRealmArtifacts(
   const groupNodes = authConfig.groups ?? [];
   const groupsOut = groupNodes.length > 0 ? buildKeycloakGroupsFromAuthoring(groupNodes, "") : undefined;
 
-  // Seeded users are DEVELOPMENT fixtures: they carry plain-text passwords from
-  // the authoring config, so a production realm must not contain them. Unlike
-  // client secrets — where the compiler errors, because a missing secret means
-  // a broken client — silently omitting users is correct: a production realm is
-  // supposed to have no built-in accounts, and failing the build would only
-  // push operators to delete the fixtures local dev depends on.
-  const users: KeycloakUser[] = (dev ? (authConfig.users ?? []) : []).map((u) => ({
+  // Seeded users are KEPT in production, but their passwords are held to the
+  // same rule as client secrets: a committed literal is refused, a ${env:VAR}
+  // reference is required.
+  //
+  // Dropping them instead would have been easier and wrong. These identities
+  // are what the e2e suite authenticates as to prove realm roles are enforced
+  // and that one tenant cannot read another's rows — assurances that matter
+  // MORE against a deployed environment than a laptop. Removing them would
+  // silently downgrade those tests to skipped exactly where they count.
+  const users: KeycloakUser[] = (authConfig.users ?? []).map((u) => ({
     username: u.username,
     enabled: u.enabled ?? true,
     email: u.email,
     firstName: u.firstName,
     lastName: u.lastName,
-    credentials: [{ type: "password", value: u.password, temporary: false }],
+    credentials: [
+      { type: "password", value: resolveUserPassword(u, dev), temporary: false },
+    ],
     attributes: u.tid ? { tid: [u.tid] } : undefined,
     realmRoles: u.realmRoles ? normalizeKeycloakRoleNames(u.realmRoles) : undefined,
     groups: u.groups?.length ? [...u.groups] : undefined,

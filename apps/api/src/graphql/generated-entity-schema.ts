@@ -10,6 +10,11 @@ import {
   updateGeneratedEntity,
   type GeneratedCrudRelationship,
 } from "./generated-crud.js";
+import {
+  assertOperationAllowed,
+  assertClassifiedQueryFieldsAllowed,
+  redactRow,
+} from "./generated-authz.js";
 import type { GraphqlContext } from "./context.js";
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
@@ -213,15 +218,20 @@ function toConnection(rows: Record<string, unknown>[], nextCursor: string | null
 const queryResolvers = Object.fromEntries(
   tables.flatMap((table) => {
     const graphql = assertGraphqlMetadata(table);
+    const authorization = table.source?.authorization;
     return [
       [
         graphql.singleQueryName,
         async (_parent: unknown, args: { id: string }, context: GraphqlContext) => {
           const db = requireGeneratedDb(context);
-          return getGeneratedEntity(db, context.session, {
+          assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
+          const row = await getGeneratedEntity(db, context.session, {
             table: table.name,
             id: args.id,
           });
+          return row
+            ? redactRow(row, table.columns, authorization, context.session)
+            : row;
         },
       ],
       [
@@ -237,6 +247,15 @@ const queryResolvers = Object.fromEntries(
           context: GraphqlContext,
         ) => {
           const db = requireGeneratedDb(context);
+          assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
+          assertClassifiedQueryFieldsAllowed(
+            table.columns,
+            authorization,
+            context.session,
+            graphql.typeName,
+            args.filter,
+            args.sort,
+          );
           const result = await listGeneratedEntities(db, context.session, {
             table: table.name,
             ...(args.first === undefined ? {} : { limit: args.first }),
@@ -244,7 +263,10 @@ const queryResolvers = Object.fromEntries(
             ...(args.filter === undefined ? {} : { filter: args.filter }),
             ...(args.sort === undefined ? {} : { sort: args.sort }),
           });
-          return toConnection(result.rows, result.nextCursor, result.totalCount);
+          const rows = result.rows.map((row) =>
+            redactRow(row, table.columns, authorization, context.session),
+          );
+          return toConnection(rows, result.nextCursor, result.totalCount);
         },
       ],
     ];
@@ -254,11 +276,13 @@ const queryResolvers = Object.fromEntries(
 const mutationResolvers = Object.fromEntries(
   tables.flatMap((table) => {
     const graphql = assertGraphqlMetadata(table);
+    const authorization = table.source?.authorization;
     return [
       [
         graphql.createMutationName,
         async (_parent: unknown, args: { input: Record<string, unknown> }, context: GraphqlContext) => {
           const db = requireGeneratedDb(context);
+          assertOperationAllowed(authorization, context.session, "create", graphql.typeName);
           return createGeneratedEntity(db, context.session, {
             table: table.name,
             values: args.input,
@@ -269,6 +293,7 @@ const mutationResolvers = Object.fromEntries(
         graphql.updateMutationName,
         async (_parent: unknown, args: { input: Record<string, unknown> & { id: string } }, context: GraphqlContext) => {
           const db = requireGeneratedDb(context);
+          assertOperationAllowed(authorization, context.session, "update", graphql.typeName);
           return updateGeneratedEntity(db, context.session, {
             table: table.name,
             id: args.input.id,
@@ -280,6 +305,7 @@ const mutationResolvers = Object.fromEntries(
         graphql.deleteMutationName,
         async (_parent: unknown, args: { id: string }, context: GraphqlContext) => {
           const db = requireGeneratedDb(context);
+          assertOperationAllowed(authorization, context.session, "delete", graphql.typeName);
           return deleteGeneratedEntity(db, context.session, {
             table: table.name,
             id: args.id,
@@ -305,24 +331,33 @@ const objectResolvers = Object.fromEntries(
         if (!targetTable) {
           return [];
         }
+        const targetAuthorization = targetTable.source?.authorization;
         return [
           [
             relationship.name,
             async (parent: Record<string, unknown>, _args: unknown, context: GraphqlContext) => {
               const db = requireGeneratedDb(context);
+              // Reading the related entity requires read authorization on the
+              // TARGET entity (#94): a caller with no read grant on the target
+              // cannot pull its rows through a relationship edge.
+              assertOperationAllowed(targetAuthorization, context.session, "read", relationship.target);
               const result = await listGeneratedEntityRelation(db, context.session, {
                 parent,
                 parentTable: table,
                 relationship,
                 targetTable,
               });
-              return relationship.resolve === "belongsTo" ? result.rows[0] ?? null : result.rows;
+              const rows = result.rows.map((row) =>
+                redactRow(row, targetTable.columns, targetAuthorization, context.session),
+              );
+              return relationship.resolve === "belongsTo" ? rows[0] ?? null : rows;
             },
           ],
           [
             `${relationship.name}Aggregate`,
             async (parent: Record<string, unknown>, _args: unknown, context: GraphqlContext) => {
               const db = requireGeneratedDb(context);
+              assertOperationAllowed(targetAuthorization, context.session, "read", relationship.target);
               const result = await listGeneratedEntityRelation(db, context.session, {
                 parent,
                 parentTable: table,

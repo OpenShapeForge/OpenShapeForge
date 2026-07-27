@@ -19,6 +19,7 @@ import type {
 } from "./types/index.js";
 import type {
   ColumnDefinition,
+  ColumnSensitivity,
   PlatformSchemaManifest,
   ReferenceDefinition,
   RelationshipRegisterEntry,
@@ -28,7 +29,7 @@ import type {
   ScalarType,
   TableDefinition,
 } from "../schema.js";
-import type { CompiledAuthorization } from "./types/compiled.js";
+import type { CompiledAuthorization, CompiledField } from "./types/compiled.js";
 
 export type AuthoringBackendMode = "report" | "promote";
 
@@ -330,6 +331,39 @@ export function deriveRowScope(
     ...(nullVisibleColumns.length > 0 ? { nullVisibleColumns } : {}),
     // bypassRoles wired in a later phase (see §E.3 note); omitted for now.
   };
+}
+
+/**
+ * Restricting data-classification tiers. `public`/`internal` impose no
+ * field-level access restriction, so they are dropped — only the tiers that
+ * gate reads propagate into the manifest (issues #96/#101).
+ */
+const RESTRICTING_SENSITIVITIES: ReadonlySet<string> = new Set([
+  "confidential",
+  "pii",
+  "bsn",
+]);
+
+/**
+ * Flatten compiled fields (including nested `children`/`item`) into a
+ * field-key → restricting-sensitivity map. Used to stamp each storage column
+ * with the classification of the authoring field that backs it.
+ */
+function collectFieldSensitivities(
+  fields: CompiledField[] | undefined,
+  result = new Map<string, ColumnSensitivity>(),
+): Map<string, ColumnSensitivity> {
+  for (const field of fields ?? []) {
+    const sensitivity = field.classification?.sensitivity;
+    if (sensitivity && RESTRICTING_SENSITIVITIES.has(sensitivity) && !result.has(field.key)) {
+      result.set(field.key, sensitivity as ColumnSensitivity);
+    }
+    collectFieldSensitivities(field.children, result);
+    if (field.item) {
+      collectFieldSensitivities([field.item], result);
+    }
+  }
+  return result;
 }
 
 function sortTablesByDependencies(tables: TableDefinition[]): TableDefinition[] {
@@ -837,16 +871,21 @@ export function compileAuthoringBackendManifest(
     const skippedReferences: string[] = [];
     const columnsByField = new Map<string, ColumnDefinition>();
     const columns: ColumnDefinition[] = [];
+    // Field-key → restricting data-classification (pii/bsn/confidential), used
+    // to stamp each backing column so the runtime can redact it (#96/#101).
+    const fieldSensitivities = collectFieldSensitivities(candidate.contract.model.fields);
 
     for (const storageColumn of candidate.contract.storage.columns) {
       const field = candidate.fieldsByKey.get(storageColumn.field);
       const primaryKey = storageColumn.column === "id";
+      const sensitivity = fieldSensitivities.get(storageColumn.field);
       const column: ColumnDefinition = {
         name: storageColumn.column,
         type: field ? serviceScalarForField(field) : storageColumn.type === "text" ? "text" : "uuid",
         ...(primaryKey ? { primaryKey: true } : {}),
         ...(primaryKey || !storageColumn.nullable ? { required: true } : {}),
         sourceField: storageColumn.field,
+        ...(sensitivity ? { classification: sensitivity } : {}),
       };
       const defaultValue = defaultSql(field, column);
       if (defaultValue !== undefined) {
@@ -999,6 +1038,21 @@ export function compileAuthoringBackendManifest(
           emittedReferences,
           skippedReferences,
         },
+        // Compiled per-operation role lists → runtime enforcement (#94). Carried
+        // verbatim from the authoring `authorization.roles` block so the API can
+        // reject an operation whose caller holds none of the required roles.
+        ...(candidate.contract.authorization?.roles
+          ? {
+              authorization: {
+                roles: {
+                  read: candidate.contract.authorization.roles.read,
+                  create: candidate.contract.authorization.roles.create,
+                  update: candidate.contract.authorization.roles.update,
+                  delete: candidate.contract.authorization.roles.delete,
+                },
+              },
+            }
+          : {}),
         ...(candidate.contract.retention?.entity
           ? { retentionSource: candidate.contract.retention.entity.policy ?? "authoring-entity-retention" }
           : {}),

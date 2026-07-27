@@ -187,6 +187,15 @@ export type RetentionDefinition = {
   source?: string;
 };
 
+/**
+ * Data-classification tier for a column, carried from the authoring
+ * `classification.sensitivity` of the field that backs it. Consumed at runtime
+ * to redact sensitive columns from readers who lack a write-grant on the entity
+ * (field-level data protection — issues #96/#101). `public`/`internal` are not
+ * emitted (they impose no restriction); only the restricting tiers surface.
+ */
+export type ColumnSensitivity = "confidential" | "pii" | "bsn";
+
 export type ColumnDefinition = {
   name: string;
   type: ScalarType;
@@ -196,6 +205,13 @@ export type ColumnDefinition = {
   generated?: "identity";
   references?: ReferenceDefinition;
   sourceField?: string;
+  /**
+   * Data-classification tier propagated from the authoring field's
+   * `classification.sensitivity`. Only the restricting tiers
+   * (`confidential`/`pii`/`bsn`) are recorded; `public`/`internal` are omitted
+   * so byte-identical output is preserved for unclassified columns.
+   */
+  classification?: ColumnSensitivity;
 };
 
 export type LocalizedTextManifest = {
@@ -259,6 +275,22 @@ export type TableSourceDefinition = {
     skippedReferences: string[];
   };
   retentionSource?: string;
+  /**
+   * Compiled per-operation authorization roles for the entity, carried from the
+   * authoring `authorization.roles` block (via CompiledAuthorization). The
+   * runtime GraphQL layer enforces these BEFORE the DB call: a session whose
+   * roles do not intersect the required set for an operation is rejected with a
+   * FORBIDDEN error (issue #94). A caller must hold at least one listed role for
+   * the operation it invokes.
+   */
+  authorization?: {
+    roles: {
+      read: string[];
+      create: string[];
+      update: string[];
+      delete: string[];
+    };
+  };
 };
 
 export type TableDefinition = {

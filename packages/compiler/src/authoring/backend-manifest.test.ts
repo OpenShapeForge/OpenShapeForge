@@ -237,6 +237,22 @@ describe("deriveRowScope unit guards (§C.1 emit-time fail-closed)", () => {
     ).toThrow(/column "org_unit_id" must be uuid, found text/);
   });
 });
+
+describe("authorization.roles → manifest source.authorization (#94)", () => {
+  it("carries the compiled per-operation role lists into the table source", () => {
+    const manifest = compileFixtures(["rowaccess-owner-target"]);
+    const table = tableByName(manifest, "row_access_owner_targets");
+    expect(table?.source?.authorization).toEqual({
+      roles: {
+        read: ["Relaties.All.Read"],
+        create: ["Relaties.All.ReadWrite"],
+        update: ["Relaties.All.ReadWrite"],
+        delete: ["Relaties.All.ReadWrite"],
+      },
+    });
+  });
+});
+
 describe("retention compilation fail-closed guards (M-07)", () => {
   it("throws (does not silently default to 7y) on an unresolved policyRef, naming the entity + key", () => {
     expect(() => compileFixtures(["rowaccess-retention-badref"])).toThrow(
@@ -266,6 +282,25 @@ describe("retention compilation fail-closed guards (M-07)", () => {
       ],
       source: "authoring-entity-retention",
     });
+  });
+});
+
+describe("field classification → column classification (#96/#101)", () => {
+  it("propagates restricting sensitivities onto backing columns and drops internal/public", () => {
+    const manifest = compileFixtures(["classified-field", "rowaccess-owner-target"]);
+    const table = tableByName(manifest, "classified_fields");
+    const byName = new Map((table?.columns ?? []).map((c) => [c.name, c]));
+
+    // Restricting tiers propagate.
+    expect(byName.get("secret_note")?.classification).toBe("confidential");
+    expect(byName.get("personal_email")?.classification).toBe("pii");
+
+    // Non-restricting tiers (internal/public) impose no restriction and are dropped.
+    expect(byName.get("internal_note")?.classification).toBeUndefined();
+    expect(byName.get("label")?.classification).toBeUndefined();
+    // Operational columns are never classified.
+    expect(byName.get("id")?.classification).toBeUndefined();
+    expect(byName.get("tenant_id")?.classification).toBeUndefined();
   });
 });
 

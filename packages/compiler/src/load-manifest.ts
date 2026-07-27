@@ -5,7 +5,11 @@ import type {
   PlatformSchemaManifest,
   RetentionAction,
   RetentionDefinition,
+  RetentionDisposition,
   RetentionDuration,
+  RetentionErasure,
+  RetentionLegalHold,
+  RetentionReviewGate,
   RelationshipRegisterEntry,
   RowScopePolicy,
   ScalarType,
@@ -130,6 +134,103 @@ function loadRetentionDuration(value: unknown, label: string): RetentionDuration
   return duration;
 }
 
+function loadRetentionReview(
+  value: unknown,
+  label: string,
+): RetentionReviewGate | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  if (typeof value.required !== "boolean") {
+    throw new Error(`${label}.required must be a boolean.`);
+  }
+  if (value.queue !== undefined && typeof value.queue !== "string") {
+    throw new Error(`${label}.queue must be text.`);
+  }
+  return {
+    required: value.required,
+    ...(value.queue === undefined ? {} : { queue: value.queue }),
+  };
+}
+
+function loadRetentionCryptoDelete(
+  value: unknown,
+  label: string,
+): { keyReference?: string } | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  if (value.keyReference !== undefined && typeof value.keyReference !== "string") {
+    throw new Error(`${label}.keyReference must be text.`);
+  }
+  return value.keyReference === undefined ? {} : { keyReference: value.keyReference };
+}
+
+function loadRetentionLegalHold(
+  value: unknown,
+  label: string,
+): RetentionLegalHold | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  if (typeof value.suspendDestruction !== "boolean") {
+    throw new Error(`${label}.suspendDestruction must be a boolean.`);
+  }
+  return { suspendDestruction: value.suspendDestruction };
+}
+
+function loadRetentionErasure(
+  value: unknown,
+  label: string,
+): RetentionErasure | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  const erasure: RetentionErasure = {};
+  if (value.subjectScoped !== undefined) {
+    if (typeof value.subjectScoped !== "boolean") {
+      throw new Error(`${label}.subjectScoped must be a boolean.`);
+    }
+    erasure.subjectScoped = value.subjectScoped;
+  }
+  if (value.subjectColumns !== undefined) {
+    if (!Array.isArray(value.subjectColumns)) {
+      throw new Error(`${label}.subjectColumns must be an array.`);
+    }
+    value.subjectColumns.forEach((column, index) =>
+      assertIdentifier(column, `${label}.subjectColumns[${index}]`),
+    );
+    erasure.subjectColumns = value.subjectColumns as string[];
+  }
+  if (value.cascades !== undefined) {
+    if (!Array.isArray(value.cascades)) {
+      throw new Error(`${label}.cascades must be an array.`);
+    }
+    erasure.cascades = value.cascades.map((cascade, index) => {
+      if (!isRecord(cascade)) {
+        throw new Error(`${label}.cascades[${index}] must be an object.`);
+      }
+      assertIdentifier(cascade.schema, `${label}.cascades[${index}].schema`);
+      assertIdentifier(cascade.table, `${label}.cascades[${index}].table`);
+      assertIdentifier(cascade.via, `${label}.cascades[${index}].via`);
+      return { schema: cascade.schema, table: cascade.table, via: cascade.via };
+    });
+  }
+  return erasure;
+}
+
 function loadRetention(
   value: unknown,
   label: string,
@@ -148,8 +249,17 @@ function loadRetention(
   if (!columnsByName.has(value.clock.column)) {
     throw new Error(`${label}.clock.column references unknown column ${value.clock.column}.`);
   }
-  if (columnsByName.get(value.clock.column) !== "timestamptz") {
-    throw new Error(`${label}.clock.column must reference a timestamptz column.`);
+  const clockType = columnsByName.get(value.clock.column);
+  // A retention clock anchors on a point in time — either a system timestamp
+  // (timestamptz) or a business date (date). Business-date anchors are common
+  // for statutory retention keyed on e.g. a contract-end date (#97).
+  if (clockType !== "timestamptz" && clockType !== "date") {
+    throw new Error(`${label}.clock.column must reference a timestamptz or date column.`);
+  }
+  if (value.clock.type !== undefined && value.clock.type !== clockType) {
+    throw new Error(
+      `${label}.clock.type "${String(value.clock.type)}" does not match column ${value.clock.column} (${clockType}).`,
+    );
   }
 
   const fallbackColumns =
@@ -162,8 +272,11 @@ function loadRetention(
     if (!columnsByName.has(column)) {
       throw new Error(`${label}.clock.fallbackColumns[${index}] references unknown column ${column}.`);
     }
-    if (columnsByName.get(column) !== "timestamptz") {
-      throw new Error(`${label}.clock.fallbackColumns[${index}] must reference a timestamptz column.`);
+    const fallbackType = columnsByName.get(column);
+    if (fallbackType !== "timestamptz" && fallbackType !== "date") {
+      throw new Error(
+        `${label}.clock.fallbackColumns[${index}] must reference a timestamptz or date column.`,
+      );
     }
   }
 
@@ -188,11 +301,24 @@ function loadRetention(
     if (rule.reason !== undefined && typeof rule.reason !== "string") {
       throw new Error(`${label}.rules[${index}].reason must be text.`);
     }
+    const review = loadRetentionReview(rule.review, `${label}.rules[${index}].review`);
+    const cryptoDelete = loadRetentionCryptoDelete(
+      rule.cryptoDelete,
+      `${label}.rules[${index}].cryptoDelete`,
+    );
+    if (rule.disposition !== undefined && typeof rule.disposition !== "string") {
+      throw new Error(`${label}.rules[${index}].disposition must be text.`);
+    }
     return {
       id: rule.id,
       after: loadRetentionDuration(rule.after, `${label}.rules[${index}].after`),
       action: rule.action as RetentionAction,
+      ...(rule.disposition === undefined
+        ? {}
+        : { disposition: rule.disposition as RetentionDisposition }),
       ...(rule.reason === undefined ? {} : { reason: rule.reason }),
+      ...(review === undefined ? {} : { review }),
+      ...(cryptoDelete === undefined ? {} : { cryptoDelete }),
     };
   });
 
@@ -200,12 +326,18 @@ function loadRetention(
     throw new Error(`${label}.source must be text.`);
   }
 
+  const legalHold = loadRetentionLegalHold(value.legalHold, `${label}.legalHold`);
+  const erasure = loadRetentionErasure(value.erasure, `${label}.erasure`);
+
   return {
     clock: {
       column: value.clock.column,
+      type: clockType as "timestamptz" | "date",
       ...(fallbackColumns.length === 0 ? {} : { fallbackColumns }),
     },
     rules,
+    ...(legalHold === undefined ? {} : { legalHold }),
+    ...(erasure === undefined ? {} : { erasure }),
     ...(value.source === undefined ? {} : { source: value.source }),
   };
 }

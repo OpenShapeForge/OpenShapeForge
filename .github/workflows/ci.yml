@@ -94,6 +94,7 @@ jobs:
           helm template ./deploy/helm/openshapeforge-api \
             --set database.url="postgres://app:app@db:5432/app" \
             --set database.migrateUrl="postgres://mig:mig@db:5432/app" \
+            --set database.appPassword="ci-template-only" \
             --set auth.internalContextSecret="ci-template-only"
 
   db-tests:

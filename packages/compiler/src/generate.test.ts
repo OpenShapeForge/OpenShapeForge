@@ -836,6 +836,104 @@ tables:
     }
   });
 
+  it("accepts a date-typed retention clock (business-date anchor)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: erp
+    name: cases
+    tenantScoped: true
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: contract_end_date, type: date, required: true }
+    retention:
+      clock: { column: contract_end_date }
+      rules:
+        - { id: delete_after_7_years, after: { years: 7 }, action: delete }
+`,
+      "utf8",
+    );
+
+    try {
+      const loaded = await loadManifest(path);
+      const table = loaded.tables.find((entry) => entry.name === "cases");
+      expect(table?.retention?.clock).toEqual({
+        column: "contract_end_date",
+        type: "date",
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("carries legal hold, review gate, disposition, crypto-delete, and erasure metadata through the manifest", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+relationshipRegister:
+  - from: { schema: erp, table: contact_details, column: relation_id }
+    to: { schema: erp, table: relations, column: id }
+tables:
+  - schema: erp
+    name: relations
+    tenantScoped: true
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: closed_at, type: timestamptz }
+    retention:
+      clock: { column: closed_at }
+      rules:
+        - id: crypto_erase_after_7_years
+          after: { years: 7 }
+          action: redact
+          disposition: cryptoDelete
+          review: { required: true, queue: privacy-review }
+          cryptoDelete: { keyReference: subject-key }
+      legalHold: { suspendDestruction: true }
+      erasure:
+        subjectScoped: true
+        subjectColumns: [id]
+        cascades:
+          - { schema: erp, table: contact_details, via: relation_id }
+  - schema: erp
+    name: contact_details
+    tenantScoped: true
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: relation_id, type: uuid, references: { schema: erp, table: relations, column: id } }
+`,
+      "utf8",
+    );
+
+    try {
+      const loaded = await loadManifest(path);
+      const relations = loaded.tables.find((entry) => entry.name === "relations");
+      expect(relations?.retention?.legalHold).toEqual({ suspendDestruction: true });
+      expect(relations?.retention?.rules[0]).toMatchObject({
+        disposition: "cryptoDelete",
+        review: { required: true, queue: "privacy-review" },
+        cryptoDelete: { keyReference: "subject-key" },
+      });
+      expect(relations?.retention?.erasure).toEqual({
+        subjectScoped: true,
+        subjectColumns: ["id"],
+        cascades: [{ schema: "erp", table: "contact_details", via: "relation_id" }],
+      });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects relationship register entries that do not match real columns", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
     const path = join(dir, "schema.yaml");

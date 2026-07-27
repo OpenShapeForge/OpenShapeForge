@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import {
   SignJWT,

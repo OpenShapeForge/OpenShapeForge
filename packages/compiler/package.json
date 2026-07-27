@@ -10,7 +10,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "ejs": "^5.0.1",
+    "ejs": "^6.0.1",
     "glob": "^13.0.6",
     "graphql": "^16.14.0",
     "yaml": "^2.8.3"

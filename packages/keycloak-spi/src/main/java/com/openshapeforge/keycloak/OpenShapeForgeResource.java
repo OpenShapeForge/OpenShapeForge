@@ -34,7 +34,7 @@ public class OpenShapeForgeResource {
     private static final String ATTR_SOURCE_AUTHORITY = "openshapeforge.sourceAuthority";
     private static final String ATTR_PERMISSION_GRANT = "openshapeforge.permissionGrant";
     private static final String ATTR_PERMISSION_TARGET = "openshapeforge.permissionTargetOrganizationId";
-    private static final Set<String> ALLOWED_ADMIN_CLIENTS = Set.of("openshapeforge-auth-api", "admin-cli");
+    private static final Set<String> ALLOWED_ADMIN_CLIENTS = Set.of("openshapeforge-auth-api");
 
     private final KeycloakSession session;
     private final RealmModel realm;
@@ -359,10 +359,39 @@ public class OpenShapeForgeResource {
         if (auth == null) {
             throw new NotAuthorizedException("Bearer");
         }
+
+        // Defense in depth: only tokens minted for the trusted auth-api service
+        // account may reach the configuration SPI. This is an allowlist on the
+        // azp claim, NOT an authorization decision on its own — the built-in
+        // public "admin-cli" client is deliberately excluded because any realm
+        // user can obtain a token whose azp is admin-cli via the direct-access
+        // grant, which would otherwise bypass the check below.
         AccessToken token = auth.getToken();
         String issuedFor = token == null ? null : token.getIssuedFor();
         if (!ALLOWED_ADMIN_CLIENTS.contains(issuedFor)) {
             throw new ForbiddenException("Client is not allowed to use the OpenShapeForge identity configuration SPI.");
+        }
+
+        // Actual authorization: require the authenticated subject to hold the
+        // realm-management "manage-realm" capability (Keycloak's realm-admin
+        // right). This is evaluated directly against the stable Keycloak model
+        // API (ClientModel/RoleModel/UserModel) rather than the internal admin
+        // permissions evaluator (org.keycloak.services.resources.admin.*): that
+        // class is a non-public server SPI whose package moved between Keycloak
+        // 26.1 and 26.5, so binding to it makes the jar fail at runtime on a
+        // different Keycloak minor than it was compiled against. UserModel.hasRole
+        // traverses composites, so a realm-admin (which composes manage-realm) is
+        // accepted too. A token whose subject lacks the capability is rejected
+        // even when its azp is in ALLOWED_ADMIN_CLIENTS, so client identity alone
+        // never grants access.
+        UserModel subject = auth.getUser();
+        if (subject == null) {
+            throw new ForbiddenException("Token subject could not be resolved for authorization.");
+        }
+        ClientModel realmManagement = realm.getClientByClientId("realm-management");
+        RoleModel manageRealm = realmManagement == null ? null : realmManagement.getRole("manage-realm");
+        if (manageRealm == null || !subject.hasRole(manageRealm)) {
+            throw new ForbiddenException("Subject lacks the realm-management manage-realm capability required by the OpenShapeForge identity configuration SPI.");
         }
     }
 

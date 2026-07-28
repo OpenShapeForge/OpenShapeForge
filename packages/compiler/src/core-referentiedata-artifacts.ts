@@ -74,18 +74,36 @@ function buildSnapshot(catalog: CoreCatalog): Snapshot {
   return Object.fromEntries(snapshotEntries);
 }
 
-export async function generateCoreReferentiedataArtifacts(
+export type CoreReferentiedataSnapshot = Snapshot;
+
+/**
+ * The snapshot as a value, built from the authoring catalog.
+ *
+ * Generators must consume THIS rather than reading the emitted
+ * `core-by-groep.json`: within a single compile the file on disk is still the
+ * previous run's, because artifacts are written only after every generator has
+ * produced its contents. A generator that read the file would therefore expand
+ * a newly added group only on the SECOND `bun run generate` — deterministic,
+ * but stale by one run and baffling to whoever added the group.
+ */
+export async function loadCoreReferentiedataSnapshot(
   repoRoot: string,
-): Promise<GeneratedArtifact[]> {
+): Promise<Snapshot> {
   // Read through the resolved authoring layers so overlay catalog merges
   // (e.g. extra referentiedata groups) flow into the snapshot.
   const rawCatalog = await readFile(
     join(resolveActiveAuthoringDir(repoRoot), catalogRelativePath),
     "utf8",
   );
-  const catalog = YAML.parse(rawCatalog) as CoreCatalog;
-  const snapshot = buildSnapshot(catalog);
-  const contents = `${JSON.stringify(snapshot, null, 2)}\n`;
+  return buildSnapshot(YAML.parse(rawCatalog) as CoreCatalog);
+}
+
+export async function generateCoreReferentiedataArtifacts(
+  repoRoot: string,
+  snapshot?: Snapshot,
+): Promise<GeneratedArtifact[]> {
+  const resolved = snapshot ?? (await loadCoreReferentiedataSnapshot(repoRoot));
+  const contents = `${JSON.stringify(resolved, null, 2)}\n`;
 
   // The apps/web copy only exists in repos that have a web app; a data-layer
   // only repo gets just the compiler-config snapshot.

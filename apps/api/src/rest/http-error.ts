@@ -29,10 +29,40 @@ const STATUS_BY_CODE: Record<string, number> = {
   DATABASE_NOT_CONFIGURED: 503,
 };
 
+/**
+ * @fastify/rate-limit rejects with an error carrying `statusCode: 429`. It is a
+ * deliberate, client-actionable answer rather than an internal fault, so it must
+ * survive the redaction below: a 500 tells a client to retry, which is the
+ * opposite of what the limiter is trying to say — and retry libraries (and
+ * agents on the MCP transport) escalate on 500 while backing off on 429.
+ *
+ * Recognised structurally rather than by instanceof: the plugin's error type is
+ * not exported, and matching on the status it already set keeps this independent
+ * of the plugin's internals.
+ */
+function rateLimitStatus(error: unknown): number | undefined {
+  const status = (error as { statusCode?: unknown } | null)?.statusCode;
+  return status === 429 ? 429 : undefined;
+}
+
 export function toHttpError(error: unknown): {
   status: number;
   body: HttpErrorBody;
 } {
+  if (rateLimitStatus(error) !== undefined) {
+    // Mirrors errorResponseBuilder in roles/api.ts: no limiter internals in the
+    // body. Retry-After is set by the plugin and survives on the reply.
+    return {
+      status: 429,
+      body: {
+        error: {
+          code: "TOO_MANY_REQUESTS",
+          message: "Rate limit exceeded. Please retry later.",
+        },
+      },
+    };
+  }
+
   if (error instanceof HttpError) {
     return {
       status: error.status,

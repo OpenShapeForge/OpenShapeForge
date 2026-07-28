@@ -23,12 +23,13 @@
  *      layer remains the enforcement; this is defence in depth and saves the
  *      model a wasted turn on a guaranteed 403.
  *   2. Classified fields are withheld from the schemas handed to a caller who
- *      may not read them, so the schema itself is not an enumeration oracle.
+ *      may not read them, so the schema itself is not an enumeration oracle,
+ *      and a write to such a field is refused rather than silently accepted
+ *      and redacted back.
  *
- * Field-level classification is applied here directly (redactRow /
- * assertClassifiedQueryFieldsAllowed), exactly as the GraphQL resolvers do
- * today. If those controls later move into the shared CRUD core (issue #164),
- * these calls become idempotent no-ops and can be deleted.
+ * Row redaction and the classified filter/sort guard are NOT applied here:
+ * they live in the shared CRUD core (#164), which every call below goes
+ * through, so this transport inherits them by construction.
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -49,11 +50,7 @@ import {
   listGeneratedEntities,
   updateGeneratedEntity,
 } from "../graphql/generated-crud.js";
-import {
-  assertClassifiedQueryFieldsAllowed,
-  canReadClassifiedColumns,
-  redactRow,
-} from "../graphql/generated-authz.js";
+import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 
@@ -302,7 +299,6 @@ async function invokeTool(
   rawArgs: unknown,
 ): Promise<ToolResult> {
   const args = requireArguments(rawArgs);
-  const authorization = table.source?.authorization;
 
   switch (tool.operation) {
     case "list": {
@@ -317,14 +313,6 @@ async function invokeTool(
               direction: typeof args.sortDirection === "string" ? args.sortDirection : null,
             }
           : undefined;
-      assertClassifiedQueryFieldsAllowed(
-        table.columns,
-        authorization,
-        session,
-        tool.entity,
-        filter,
-        sort,
-      );
       const result = await listGeneratedEntities(db, session, {
         table: table.name,
         ...(typeof args.first === "number" ? { limit: args.first } : {}),
@@ -333,9 +321,7 @@ async function invokeTool(
         ...(sort ? { sort } : {}),
       });
       return ok({
-        items: result.rows.map((row) =>
-          serializeRow(table, redactRow(row, table.columns, authorization, session)),
-        ),
+        items: result.rows.map((row) => serializeRow(table, row)),
         totalCount: result.totalCount,
         nextCursor: result.nextCursor,
       });
@@ -347,9 +333,7 @@ async function invokeTool(
         id: requireId(args),
       });
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      return ok(
-        serializeRow(table, redactRow(row, table.columns, authorization, session)),
-      );
+      return ok(serializeRow(table, row));
     }
 
     case "create": {
@@ -359,9 +343,7 @@ async function invokeTool(
         table: table.name,
         values,
       });
-      return ok(
-        serializeRow(table, redactRow(row, table.columns, authorization, session)),
-      );
+      return ok(serializeRow(table, row));
     }
 
     case "update": {
@@ -374,9 +356,7 @@ async function invokeTool(
         values,
       });
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      return ok(
-        serializeRow(table, redactRow(row, table.columns, authorization, session)),
-      );
+      return ok(serializeRow(table, row));
     }
 
     case "delete": {

@@ -96,7 +96,7 @@ jobs:
     # deploys behind an approval.
     environment: dev
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # Fail early and legibly rather than part-way through a helm upgrade.
       - name: Preflight — required secrets are present
@@ -118,7 +118,7 @@ jobs:
           fi
           echo "all required secrets present"
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.4
 
@@ -186,7 +186,7 @@ jobs:
           OPENSHAPEFORGE_REALM_MODE: ${{ inputs.realm_mode }}
         run: bun run generate
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
 
       - name: Fetch kubeconfig
         env:

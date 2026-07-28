@@ -41,3 +41,15 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "Europe/Amsterdam"
+
+  # Workflow actions in .github/workflows/**. Every action is pinned to a full
+  # commit SHA (issue #95); without this ecosystem those pins never move, so a
+  # patched action CVE would go unnoticed. Dependabot reads the trailing
+  # "# vX.Y.Z" comment and bumps both the SHA and the comment together.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Amsterdam"

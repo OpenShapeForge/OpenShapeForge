@@ -61,6 +61,32 @@ auth:
   # Comma-separated roles that grant tenant-wide read scope (optional).
   tenantBypassRoles: ""
 
+# --- Resource limits (rate limiting + timeouts) ------------------------------
+# App-level resource-exhaustion controls (issue #130). GraphQL query depth /
+# alias / cost limits are separate and always on (see the API's yoga config).
+#
+# The rate limiter uses an IN-MEMORY store, so the budget is enforced PER API
+# INSTANCE: with replicaCount > 1 a single client can reach up to
+# replicaCount × rateLimit.max before being throttled. For exact cross-instance
+# limits, front the deployment with a shared store (e.g. Redis) or an
+# ingress/edge rate limit. All values are also overridable via extraEnv.
+limits:
+  rateLimit:
+    # Max requests per window, per client IP, per instance.
+    max: 600
+    # Sliding window length in milliseconds.
+    windowMs: 60000
+  # Whole-request timeout in ms (Fastify requestTimeout); 0 disables.
+  requestTimeoutMs: 30000
+  # Per-request Postgres statement_timeout in ms, applied inside the tenant
+  # transaction so one request cannot hold a connection indefinitely; 0 disables.
+  dbStatementTimeoutMs: 15000
+  # Reverse-proxy hops Fastify trusts to derive the client IP that the rate
+  # limiter keys on. Behind a single ingress this is 1. Set a boolean or an
+  # IP/CIDR allowlist string for other topologies. Trusting too many hops lets a
+  # client spoof X-Forwarded-For and evade the limit.
+  trustProxy: 1
+
 # --- Migration Job -----------------------------------------------------------
 migration:
   enabled: true

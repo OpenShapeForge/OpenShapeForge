@@ -2,6 +2,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
+import { readStatementTimeoutMs } from "../config/limits.js";
 
 export type DbSessionScope = "tenant" | "group" | "self";
 
@@ -108,6 +109,18 @@ export async function applyDbSession<TDatabase>(
   trx: Transaction<TDatabase>,
   session: DbSessionContext,
 ) {
+  // Bound the wall-clock cost of every statement in this tenant-scoped
+  // transaction so one accepted GraphQL/REST request cannot hold a database
+  // connection indefinitely (issue #130). Transaction-local (`set_config(...,
+  // true)`), so it is scoped to this request and reset on commit/rollback; it
+  // also covers the closure-expansion queries below. 0 disables (dev/opt-out).
+  const statementTimeoutMs = readStatementTimeoutMs();
+  if (statementTimeoutMs > 0) {
+    await sql`select set_config('statement_timeout', ${String(statementTimeoutMs)}, true)`.execute(
+      trx,
+    );
+  }
+
   await sql`select set_config('app.tenant_id', ${session.tenantId}, true)`.execute(trx);
   await sql`select set_config('app.user_id', ${session.userId}, true)`.execute(trx);
   await sql`select set_config('app.roles', ${session.roles.join(",")}, true)`.execute(trx);

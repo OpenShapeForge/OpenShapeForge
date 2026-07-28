@@ -4,13 +4,13 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 101 packages.
+Regenerate with `bun run notices`. 104 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 80 |
+| MIT | 83 |
 | ISC | 6 |
 | BlueOak-1.0.0 | 5 |
 | Apache-2.0 | 4 |
@@ -76,6 +76,10 @@ Regenerate with `bun run notices`. 101 packages.
 - License: **MIT** — https://github.com/fastify/proxy-addr#readme
 - Author: Douglas Christopher Wilson <doug@somethingdoug.com>
 
+### @fastify/rate-limit@10.3.0
+- License: **MIT** — https://github.com/fastify/fastify-rate-limit#readme
+- Author: Tomas Della Vedova - @delvedor (http://delved.org)
+
 ### @graphql-tools/executor@1.5.7
 - License: **MIT** — https://github.com/ardatan/graphql-tools.git
 - Author: Saihajpreet Singh <saihajpreet.singh@gmail.com>
@@ -109,6 +113,10 @@ Regenerate with `bun run notices`. 101 packages.
 ### @graphql-yoga/typed-event-target@3.0.2
 - License: **MIT** — https://github.com/dotansimha/graphql-yoga.git
 - Author: Laurin Quast <laurinquast@googlemail.com>
+
+### @lukeed/ms@2.0.2
+- License: **MIT** — lukeed/ms
+- Author: Luke Edwards
 
 ### @pinojs/redact@0.4.0
 - License: **MIT** — https://github.com/pinojs/redact#readme
@@ -229,6 +237,10 @@ Regenerate with `bun run notices`. 101 packages.
 ### fastify@5.10.0
 - License: **MIT** — https://fastify.dev/
 - Author: Matteo Collina <hello@matteocollina.com>
+
+### fastify-plugin@5.1.0
+- License: **MIT** — https://github.com/fastify/fastify-plugin#readme
+- Author: Tomas Della Vedova - @delvedor (http://delved.org)
 
 ### fastq@1.20.1
 - License: **ISC** — https://github.com/mcollina/fastq#readme
@@ -641,6 +653,33 @@ SOFTWARE.
 ```
 </details>
 
+<details><summary>@fastify/rate-limit@10.3.0</summary>
+
+```
+MIT License
+
+Copyright (c) 2018 Fastify
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+</details>
+
 <details><summary>@graphql-typed-document-node/core@3.2.0</summary>
 
 ```
@@ -682,6 +721,21 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+</details>
+
+<details><summary>@lukeed/ms@2.0.2</summary>
+
+```
+MIT License
+
+Copyright (c) Luke Edwards <luke.edwards05@gmail.com> (lukeed.com)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 </details>
 
@@ -1546,6 +1600,35 @@ The complete list of contributors can be found at:
 MIT License
 
 Copyright (c) 2016-present The Fastify team <https://github.com/fastify/fastify#team>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+</details>
+
+<details><summary>fastify-plugin@5.1.0</summary>
+
+```
+MIT License
+
+Copyright (c) 2017-present The Fastify team
+
+The Fastify team members are listed at https://github.com/fastify/fastify#team.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

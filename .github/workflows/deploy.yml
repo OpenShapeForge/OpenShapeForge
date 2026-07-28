@@ -57,18 +57,18 @@ on:
         type: string
         default: "auth.openshapeforge.eu"
       realm_mode:
-        description: "Keycloak realm to compile. production forbids committed secrets and requires them from Secret Manager."
+        description: "Keycloak realm to compile. development permits the committed dev secrets and must never reach a public hostname."
         required: false
         type: choice
-        default: development
+        default: production
         options:
           - development
           - production
       tls_issuer:
-        description: "cert-manager ClusterIssuer. Use staging while iterating — production allows only 5 failed validations per hostname per hour."
+        description: "cert-manager ClusterIssuer. Switch to staging while iterating on a NON-production hostname — prod allows only 5 failed validations per hostname per hour."
         required: false
         type: choice
-        default: letsencrypt-staging
+        default: letsencrypt-prod
         options:
           - letsencrypt-staging
           - letsencrypt-prod
@@ -117,6 +117,41 @@ jobs:
             exit 1
           fi
           echo "all required secrets present"
+
+      # The inputs are individually plausible but can combine into a deploy
+      # that is both broken and unsafe: a development realm carries the
+      # committed dev client secrets (authorization.yaml devSecret literals)
+      # and sslRequired: none, and staging certificates are issued from an
+      # untrusted root. Neither belongs on a hostname real clients resolve.
+      #
+      # Iteration is unaffected — any OTHER hostname may still use a
+      # development realm and staging certificates, which is what they are for.
+      # Only the live names are constrained.
+      - name: Preflight — live hostnames require production settings
+        env:
+          PROTECTED_HOSTS: "api.openshapeforge.eu auth.openshapeforge.eu"
+        run: |
+          fail=0
+          for host in "${{ inputs.api_host }}" "${{ inputs.auth_host }}"; do
+            [ -n "$host" ] || continue
+            case " $PROTECTED_HOSTS " in
+              *" $host "*) ;;
+              *) continue ;;
+            esac
+            if [ "${{ inputs.tls_issuer }}" != "letsencrypt-prod" ]; then
+              echo "::error::$host is a live hostname, but tls_issuer is '${{ inputs.tls_issuer }}'. Staging certificates are issued from an untrusted root and every client would see a TLS error."
+              fail=1
+            fi
+            if [ "${{ inputs.realm_mode }}" != "production" ]; then
+              echo "::error::$host is a live hostname, but realm_mode is '${{ inputs.realm_mode }}'. A development realm carries this repository's committed client secrets and must never be reachable publicly."
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::refusing to deploy. Use realm_mode=production and tls_issuer=letsencrypt-prod for a live hostname, or deploy to a different hostname."
+            exit 1
+          fi
+          echo "hostname/settings combination is coherent"
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:

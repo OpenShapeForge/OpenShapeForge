@@ -60,7 +60,6 @@ function describeField(field: CompiledField): string | undefined {
   }
   if (help) parts.push(help);
   if (field.unit) parts.push(`Unit: ${field.unit}.`);
-  if (field.readOnly) parts.push("Read-only; set by the server.");
   if (field.relationship?.entity) {
     parts.push(
       `References the ${field.relationship.entity} entity — resolve an id with that entity's list tool.`,
@@ -240,17 +239,19 @@ function schemaForField(
 }
 
 /**
- * Fields a caller may write. Read-only and server-managed fields are omitted
- * entirely rather than marked, so they cannot be supplied at all — the CRUD
- * layer would reject them, and an absent property is a clearer instruction to
- * a model than a present-but-forbidden one.
+ * Fields a caller may write, mirroring the CRUD layer's writability rule so the
+ * advertised schema matches what the server will actually accept.
+ *
+ * Authored `readOnly` is deliberately NOT consulted. In this vocabulary it is a
+ * presentation flag — resolveRender uses it to pick a display component instead
+ * of an input one — not an API contract, and no transport enforces it. Treating
+ * it as one here omitted PaymentDetail.relationId, the only link between a
+ * payment detail and its relation, so an agent could not create the attached
+ * record that REST and GraphQL create happily.
  */
 function writableFields(fields: CompiledField[]): CompiledField[] {
   return fields.filter(
-    (field) =>
-      !field.readOnly &&
-      !SERVER_MANAGED_FIELDS.has(field.key) &&
-      field.computed === undefined,
+    (field) => !SERVER_MANAGED_FIELDS.has(field.key) && field.computed === undefined,
   );
 }
 

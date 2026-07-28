@@ -38,24 +38,40 @@ function normalizeLicense(pkg: Record<string, any>): string {
   return (lic as string) || "SEE-REPOSITORY";
 }
 
+/**
+ * Licence filenames vary in case and spelling across the ecosystem
+ * (`LICENSE`, `license.md`, `LICENCE`, `LICENSE-MIT`, `COPYING`).
+ *
+ * Matched against the directory listing rather than probed by name, because a
+ * fixed list of `statSync` guesses resolves differently per filesystem: on a
+ * case-insensitive one (macOS by default) `LICENSE.md` matches a file actually
+ * named `license.md`, and on CI's ext4 it does not. That made the emitted file
+ * a function of the author's machine as well as the lockfile — a notices file
+ * regenerated on a Mac failed `--check` in CI and could not be fixed by
+ * regenerating it there again.
+ */
+const LICENSE_FILE_RE = /^(licen[cs]e|copying|notice)([-._][a-z0-9]+)*(\.(md|txt|rst))?$/i;
+
 function findLicenseText(dir: string): string | null {
-  for (const name of [
-    "LICENSE",
-    "LICENSE.md",
-    "LICENSE.txt",
-    "license",
-    "LICENCE",
-    "LICENSE-MIT",
-    "COPYING",
-  ]) {
-    const p = join(dir, name);
-    try {
-      if (statSync(p).isFile()) return readFileSync(p, "utf8").trim();
-    } catch {
-      // not present
-    }
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return null;
   }
-  return null;
+  // Sorted: a package shipping several matching files (LICENSE + LICENSE-MIT)
+  // must always yield the same one, or the output stops being byte-stable.
+  const match = entries
+    .filter((name) => LICENSE_FILE_RE.test(name))
+    .sort()
+    .find((name) => {
+      try {
+        return statSync(join(dir, name)).isFile();
+      } catch {
+        return false;
+      }
+    });
+  return match === undefined ? null : readFileSync(join(dir, match), "utf8").trim();
 }
 
 /** Recursively collect package.json paths under a directory (bounded). */

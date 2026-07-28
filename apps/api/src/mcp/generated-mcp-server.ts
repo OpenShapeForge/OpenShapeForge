@@ -168,13 +168,15 @@ function withholdClassified(
     const source = node as Record<string, unknown>;
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(source)) {
-      if (key === "properties" && value && typeof value === "object") {
-        const properties = Object.fromEntries(
-          Object.entries(value as Record<string, unknown>).filter(
-            ([name]) => !withheld.has(name),
-          ),
+      if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
+        // Filter this level AND descend into what survives: the update tool
+        // nests its writable fields under `values`, so stripping only the top
+        // level would leave the classified field advertised one level down.
+        result[key] = Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .filter(([name]) => !withheld.has(name))
+            .map(([name, subSchema]) => [name, prune(subSchema)]),
         );
-        result[key] = properties;
         continue;
       }
       if (key === "required" && Array.isArray(value)) {
@@ -223,6 +225,18 @@ function describeTool(
     },
   };
 }
+
+/**
+ * Test-only direct handles on the two classification controls that exist only
+ * on this transport. They are the whole reason the MCP surface needs its own
+ * coverage: everything else here is the shared CRUD core's behaviour, already
+ * proven by the GraphQL and REST suites. Mirrors
+ * __requireEntityOperationForTests in generated-crud.ts.
+ */
+export const __withholdClassifiedForTests = withholdClassified;
+export const __assertWritableValuesForTests = assertWritableValues;
+export const __sessionMayInvokeForTests = sessionMayInvoke;
+export const __describeToolForTests = describeTool;
 
 type ToolResult = {
   content: { type: "text"; text: string }[];

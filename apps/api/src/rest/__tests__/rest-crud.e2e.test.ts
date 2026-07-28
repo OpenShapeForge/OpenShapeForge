@@ -29,11 +29,13 @@ import {
   fieldName,
   foreignKeyTargets,
   isMutableColumn,
+  redactableColumnFor,
   sampleValue,
   tables,
   tablesByName,
   textColumnFor,
   untrackRow,
+  withClassifiedColumn,
 } from "../../graphql/__tests__/e2e/entity-factory.js";
 
 registerSuiteLifecycle();
@@ -353,5 +355,93 @@ for (const table of restTables) {
       const response = await rest(tenantB, "GET", `${base}/${id}`);
       expect(response.status).toBe(404);
     });
+  });
+}
+
+/**
+ * Field-level data protection over REST (#164). The controls live in the
+ * shared CRUD core, so REST must behave exactly like GraphQL: a caller holding
+ * only a read grant gets classified columns nulled, and is refused when it
+ * tries to recover them by filtering or sorting on the column.
+ *
+ * Skipped against a remote server: withClassifiedColumn arms the in-process
+ * manifest, which a server behind E2E_API_URL does not share.
+ */
+for (const table of restTables) {
+  const rest_ = table.source!.rest!;
+  const base = `${REST_MOUNT_PATH}/${rest_.basePath}`;
+  const classified = redactableColumnFor(table);
+  if (!classified) continue;
+  const field = fieldName(classified);
+
+  describe(`${rest_.basePath} field-level classification`, () => {
+    test.skipIf(remoteUrl)(
+      `a read-only caller gets ${field} nulled on list and get; a writer still sees it`,
+      async () => {
+        const value = `rest-redaction-${seed}`;
+        const id = await createRow(table, tenantA, { [field]: value });
+
+        // Control: unclassified, the column is served to a read-only caller.
+        const control = await rest(readOnly, "GET", `${base}/${id}`);
+        expect(control.status).toBe(200);
+        expect(control.body[field]).toBe(value);
+
+        await withClassifiedColumn(classified, "pii", async () => {
+          const single = await rest(readOnly, "GET", `${base}/${id}`);
+          expect(single.status).toBe(200);
+          expect(single.body[field]).toBeNull();
+          // Unclassified columns are untouched.
+          expect(single.body.id).toBe(id);
+          expect(single.body.createdAt).toBeTruthy();
+
+          const list = await rest(readOnly, "GET", `${base}?id=${id}`);
+          expect(list.status).toBe(200);
+          expect(list.body.totalCount).toBe(1);
+          expect(list.body.items[0][field]).toBeNull();
+
+          // A write grant reads the real value on both paths — redaction is
+          // scoped to the grant, not a blanket null.
+          const writerSingle = await rest(tenantA, "GET", `${base}/${id}`);
+          expect(writerSingle.body[field]).toBe(value);
+          const writerList = await rest(tenantA, "GET", `${base}?id=${id}`);
+          expect(writerList.body.items[0][field]).toBe(value);
+        });
+      },
+    );
+
+    test.skipIf(remoteUrl)(
+      `a read-only caller cannot filter or sort by ${field}`,
+      async () => {
+        const value = `rest-oracle-${seed}`;
+        const id = await createRow(table, tenantA, { [field]: value });
+        const probe = encodeURIComponent(value);
+
+        await withClassifiedColumn(classified, "pii", async () => {
+          for (const query of [
+            `${field}=${probe}`,
+            `${field}In=${probe}`,
+            `sortField=${field}`,
+            `sortField=${field}&sortDirection=desc`,
+          ]) {
+            const response = await rest(readOnly, "GET", `${base}?${query}`);
+            expect(response.status).toBe(403);
+            expect(response.body.error.code).toBe("FORBIDDEN");
+            // The refusal must not answer the question it refused.
+            expect(response.body.items).toBeUndefined();
+            expect(response.body.totalCount).toBeUndefined();
+          }
+
+          // The same query stays available to a write grant.
+          const allowed = await rest(
+            tenantA,
+            "GET",
+            `${base}?${field}=${probe}&sortField=${field}`,
+          );
+          expect(allowed.status).toBe(200);
+          expect(allowed.body.totalCount).toBe(1);
+          expect(allowed.body.items[0].id).toBe(id);
+        });
+      },
+    );
   });
 }

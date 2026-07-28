@@ -5,20 +5,29 @@
  * The compiler carries each entity's per-operation role lists and per-column
  * data-classification into the runtime manifest (see
  * packages/compiler/src/generate.ts + backend-manifest.ts). This module is the
- * hand-written engine that CONSUMES that metadata and enforces it in the
- * generated GraphQL resolvers:
+ * hand-written engine that CONSUMES that metadata:
  *
  *   - `assertOperationAllowed` — fail-closed function-level authorization
  *     (issue #94). A caller must hold at least one role listed for the
  *     operation it invokes (read/create/update/delete). Missing metadata or a
  *     non-intersecting role set is a FORBIDDEN error thrown BEFORE the DB call.
+ *     Called by the generated GraphQL resolvers; the CRUD core enforces the
+ *     same rule independently in requireEntityOperation.
  *
- *   - `redactRow` / `canReadClassification` — field-level data protection
+ *   - `redactRow` / `canReadClassifiedColumns` — field-level data protection
  *     (issues #96/#101). Columns classified pii/bsn/confidential are redacted
  *     (set to null) for readers who lack a write grant on the entity. Holding a
  *     write role (any of create/update/delete's roles — the "ReadWrite" tier)
  *     is what authorizes reading sensitive columns; a read-only grant sees the
  *     row with sensitive columns nulled out.
+ *
+ *   - `assertClassifiedQueryFieldsAllowed` — the companion oracle guard: a
+ *     reader who cannot see a classified value must not be able to recover it
+ *     by filtering or sorting on it.
+ *
+ * The two classification controls are invoked from the shared generated CRUD
+ * core (generated-crud.ts), not from a transport, so GraphQL, REST and any
+ * future transport inherit them by construction (issue #164).
  *
  * Tenant/row RLS is enforced independently at the DB layer; this is the
  * declared operation/field permission model layered on top.
@@ -100,10 +109,12 @@ export function canReadClassifiedColumns(
   session: AuthzSession,
 ): boolean {
   if (!authorization?.roles) return false;
+  // A manifest that predates an operation key (stale artifacts) must degrade to
+  // "no write grant", not to a TypeError on a request path.
   const writeRoles = [
-    ...authorization.roles.create,
-    ...authorization.roles.update,
-    ...authorization.roles.delete,
+    ...(authorization.roles.create ?? []),
+    ...(authorization.roles.update ?? []),
+    ...(authorization.roles.delete ?? []),
   ];
   return intersects(session?.roles ?? [], writeRoles);
 }
@@ -122,6 +133,9 @@ export function assertClassifiedQueryFieldsAllowed(
   filter?: Record<string, unknown> | null,
   sort?: QuerySort,
 ): void {
+  // Every list request runs this; entities without a classified column (the
+  // common case) must not pay for the role intersection.
+  if (!columns.some((column) => column.classification)) return;
   if (canReadClassifiedColumns(authorization, session)) return;
 
   const requestedFields = [

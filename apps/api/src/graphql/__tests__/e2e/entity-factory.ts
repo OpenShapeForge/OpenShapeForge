@@ -156,3 +156,47 @@ export function textColumnFor(
   );
   return mutableText.find((column) => fieldName(column) === preferredField) ?? mutableText[0];
 }
+
+/**
+ * A column a redaction test can drive end to end: writable (so a value can be
+ * planted at create time) and OPTIONAL — a required column renders as GraphQL
+ * `String!`, where a redacted null surfaces as a non-null execution error
+ * instead of a null field.
+ */
+export function redactableColumnFor(table: GeneratedTable): Column | undefined {
+  return table.columns.find(
+    (column) => isMutableColumn(column) && column.type === "text" && !column.required,
+  );
+}
+
+/**
+ * Runs `fn` with `column` carrying a restricting data classification.
+ *
+ * No entity shipped in this repo declares one, so the manifest has no
+ * classified column for the field-level controls (#96/#101/#164) to act on and
+ * every assertion about them would be vacuous. The CRUD core reads
+ * `column.classification` per request, so tagging a column for the duration of
+ * one test exercises the real transport → CRUD → Postgres path with a
+ * classified column present. Restored in `finally`; bun runs tests within a
+ * file sequentially, so no other test observes the tag.
+ *
+ * In-process transports only — a server behind E2E_API_URL has its own
+ * manifest and is unaffected, so callers must skip when remoteUrl is set.
+ */
+export async function withClassifiedColumn<T>(
+  column: Column,
+  sensitivity: NonNullable<Column["classification"]>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const previous = column.classification;
+  column.classification = sensitivity;
+  try {
+    return await fn();
+  } finally {
+    if (previous === undefined) {
+      delete column.classification;
+    } else {
+      column.classification = previous;
+    }
+  }
+}

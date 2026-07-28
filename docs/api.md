@@ -73,8 +73,9 @@ under `/api/rest/v1/<basePath>`:
 
 Handlers delegate to the same `generated-crud.ts` functions as the GraphQL
 resolvers — same auth (`resolveSessionContext`), same tenant scoping and RLS
-session, same filter/sort/cursor semantics, same camelCase field names.
-Disabled operations simply have no route (404).
+session, same role enforcement and field-level classification (see
+[below](#authentication--authorization)), same filter/sort/cursor semantics,
+same camelCase field names. Disabled operations simply have no route (404).
 
 REST-specific semantics:
 
@@ -210,6 +211,28 @@ no entity events. Details:
   deferred; no profile surface exists in the generic CRUD engine today.
 - Trusted-context callers MUST send (and sign) `x-user-roles`; a session with
   no matching role is 403 on every entity operation.
+
+**Field-level classification:** columns carrying a restricting data
+classification (`pii` / `bsn` / `confidential`, from the field's own
+`classification` block or its semantic type) are enforced in that same shared
+layer — `redactRow` and `assertClassifiedQueryFieldsAllowed` in
+`src/graphql/generated-authz.ts`, called from `generated-crud.ts` — so every
+transport inherits them:
+
+- A session holding **no write grant** on the entity (none of the roles listed
+  under `create`/`update`/`delete`) reads those columns as `null` on the
+  single, list and relationship-traversal paths.
+- The same session is refused with `FORBIDDEN` (HTTP 403 on REST) when it
+  filters or sorts a list by a classified field — `totalCount` and ordering
+  would otherwise recover the value redaction withheld. A `<field>In` filter
+  counts as that field.
+- A compiler-derived embedded default sort on a classified column is dropped
+  for such a session (falling back to primary-key order) rather than failing
+  an otherwise legitimate traversal.
+- Create/update responses are not redacted: the operation already required the
+  write grant that authorizes reading the column.
+- No entity shipped in this repo declares a classification, so these controls
+  are inert here until an authoring layer adds one.
 
 Entity-derived roles are appended to the `erp-provider` client during realm
 generation (deduplicated against the hand-authored role list, first wins);

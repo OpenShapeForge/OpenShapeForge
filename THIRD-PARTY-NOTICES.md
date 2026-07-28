@@ -4,13 +4,13 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 192 packages.
+Regenerate with `bun run notices`. 189 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 162 |
+| MIT | 159 |
 | ISC | 13 |
 | BlueOak-1.0.0 | 5 |
 | BSD-3-Clause | 5 |
@@ -143,9 +143,6 @@ Regenerate with `bun run notices`. 192 packages.
 
 ### @types/ejs@3.1.5
 - License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/ejs
-
-### @types/node@20.19.43
-- License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node
 
 ### @types/node@26.1.1
 - License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node
@@ -458,10 +455,6 @@ Regenerate with `bun run notices`. 192 packages.
 - License: **BSD-2-Clause** — https://github.com/RemyRylan/json-schema-typed/tree/main/dist/node
 - Author: Remy Rylan
 
-### kysely@0.28.17
-- License: **MIT** — https://kysely.dev
-- Author: Sami Koskimäki <sami@jakso.me>
-
 ### kysely@0.29.4
 - License: **MIT** — https://kysely.dev
 - Author: Sami Koskimäki <sami@jakso.me>
@@ -717,9 +710,6 @@ Regenerate with `bun run notices`. 192 packages.
 ### typescript@5.9.3
 - License: **Apache-2.0** — https://www.typescriptlang.org/
 - Author: Microsoft Corp.
-
-### undici-types@6.21.0
-- License: **MIT** — https://undici.nodejs.org
 
 ### undici-types@8.3.0
 - License: **MIT** — https://undici.nodejs.org
@@ -1373,7 +1363,7 @@ Apache License
 ```
 </details>
 
-<details><summary>@types/bun@1.3.14, @types/ejs@3.1.5, @types/node@20.19.43, @types/node@26.1.1</summary>
+<details><summary>@types/bun@1.3.14, @types/ejs@3.1.5, @types/node@26.1.1</summary>
 
 ```
 MIT License
@@ -3268,7 +3258,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 </details>
 
-<details><summary>kysely@0.28.17, kysely@0.29.4</summary>
+<details><summary>kysely@0.29.4</summary>
 
 ```
 The MIT License (MIT)
@@ -4646,7 +4636,7 @@ END OF TERMS AND CONDITIONS
 ```
 </details>
 
-<details><summary>undici-types@6.21.0, undici-types@8.3.0</summary>
+<details><summary>undici-types@8.3.0</summary>
 
 ```
 MIT License

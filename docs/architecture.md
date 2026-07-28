@@ -28,6 +28,8 @@ Generated artifacts (all gitignored; reproducible)
   apps/api/src/generated/db/schema.sql       DDL + RLS policies + FKs (idempotent)
   apps/api/src/generated/db/types.ts         Kysely table types
   apps/api/src/generated/db/manifest.json    runtime manifest (+ checksum)
+  apps/api/src/generated/rest/openapi.json   OpenAPI 3.1 for opted-in entities
+  apps/api/src/generated/mcp/tools.json      MCP tool catalog (field schemas)
   packages/compiler/config/referentiedata/core-by-groep.json
   keycloak/openshapeforge-realm.json         realm import for the compose stack
   apps/api/src/generated/workflow/*          workflow plugin (api side)

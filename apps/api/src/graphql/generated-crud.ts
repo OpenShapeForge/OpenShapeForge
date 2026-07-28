@@ -55,6 +55,24 @@ type GeneratedCrudTable = {
       };
     };
     /**
+     * Opt-in generated MCP exposure (entity YAML `mcp:` block). When present,
+     * the MCP server advertises tools for this table under `toolPrefix`. The
+     * tools' input schemas are not here — they live in the separate
+     * generated/mcp/tools.json catalog, built from the authored field
+     * definitions rather than these storage columns.
+     */
+    mcp?: {
+      toolPrefix: string;
+      tools: "dedicated" | "generic";
+      operations: {
+        list: boolean;
+        get: boolean;
+        create: boolean;
+        update: boolean;
+        delete: boolean;
+      };
+    };
+    /**
      * Per-operation entity role allow-lists (authored + Keycloak-normalized
      * union, compiler-emitted). Enforced fail-closed by
      * requireEntityOperation before any SQL runs, so both the GraphQL

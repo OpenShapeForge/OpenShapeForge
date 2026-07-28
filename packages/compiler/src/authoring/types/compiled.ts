@@ -35,6 +35,8 @@ import type {
   FieldMapping,
   FieldRelationship,
   FieldSuggestions,
+  McpOperationKey,
+  McpToolStyle,
   RestOperationKey,
   ThirdPartyApiEndpoint,
 } from "./authoring.js";
@@ -158,6 +160,23 @@ export interface GraphQLSection {
     update: { name: string; input: string };
     delete: { name: string; args: { name: string; type: string }[] };
   };
+}
+
+export interface McpSection {
+  /**
+   * Tool-name prefix for `dedicated` style (e.g. "contact_detail", yielding
+   * `contact_detail_list`). Validated at load and again at compile against
+   * ^[a-z][a-z0-9_]*$ because it is emitted verbatim into MCP tool names,
+   * which the protocol constrains and the runtime dispatches on.
+   */
+  toolPrefix: string;
+  /**
+   * `dedicated` emits one tool per enabled operation; `generic` routes the
+   * entity through the shared osf_* tools instead, keeping the advertised
+   * tool count flat for large catalogs.
+   */
+  tools: McpToolStyle;
+  operations: Record<McpOperationKey, boolean>;
 }
 
 export interface RestSection {
@@ -456,6 +475,8 @@ export interface CompiledEntityContract {
   graphql: GraphQLSection;
   /** Present only when the entity opts into generated REST exposure. */
   rest?: RestSection;
+  /** Present only when the entity opts into generated MCP exposure. */
+  mcp?: McpSection;
   retention?: {
     entity?: RetentionPolicy;
     policies?: Record<string, RetentionPolicy>;

@@ -69,6 +69,11 @@ const FIELD_KEY_PATTERN = /^[a-z][A-Za-z0-9]*$/;
 // rest.basePath is emitted verbatim into Fastify route strings and OpenAPI
 // paths, so it gets the same fail-closed treatment: lowercase kebab-case only.
 const REST_BASE_PATH_PATTERN = /^[a-z][a-z0-9-]*$/;
+// mcp.toolPrefix is emitted verbatim into MCP tool names, which the protocol
+// constrains to `^[a-zA-Z0-9_-]{1,128}$` and which the runtime dispatches on.
+// Underscore rather than kebab-case, because the generated names join prefix
+// and operation with `_` (`contact_detail_list`).
+const MCP_TOOL_PREFIX_PATTERN = /^[a-z][a-z0-9_]*$/;
 
 function validateContentIdentifier(
   value: unknown,
@@ -123,6 +128,18 @@ export function validateEntityContentIdentifiers(coreEntity: CoreEntity, origin:
     coreEntity.rest.basePath !== undefined
   ) {
     validateContentIdentifier(coreEntity.rest.basePath, REST_BASE_PATH_PATTERN, "rest basePath", origin);
+  }
+  if (
+    typeof coreEntity.mcp === "object" &&
+    coreEntity.mcp !== null &&
+    coreEntity.mcp.toolPrefix !== undefined
+  ) {
+    validateContentIdentifier(
+      coreEntity.mcp.toolPrefix,
+      MCP_TOOL_PREFIX_PATTERN,
+      "mcp toolPrefix",
+      origin,
+    );
   }
 }
 

@@ -14,13 +14,16 @@ import {
 } from "./active-manifest.js";
 import { generateCoreReferentiedataArtifacts } from "./core-referentiedata-artifacts.js";
 import { generateArtifacts } from "./generate.js";
-import type { GeneratedArtifact } from "./schema.js";
+import { renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
+import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
+import type { CompiledEntityInfo } from "./plugins.js";
 
 const defaultRepoRoot = resolve(import.meta.dir, "../../..");
 
 export type ArtifactCollection = {
   groups: {
     db: GeneratedArtifact[];
+    mcp: GeneratedArtifact[];
     referentiedata: GeneratedArtifact[];
     ui: GeneratedArtifact[];
     keycloak: GeneratedArtifact[];
@@ -30,6 +33,36 @@ export type ArtifactCollection = {
   /** Plugin-owned output paths, merged into the check gates. */
   ownedPaths: { roots: string[]; files: string[] };
 };
+
+/**
+ * Pair each MCP-opted-in contract with its physical table identity.
+ *
+ * The table name is read back from the manifest rather than recomputed, so the
+ * `schema.table` string the MCP runtime dispatches on is by construction the
+ * same one the CRUD layer keys its table map on. An entity whose table did not
+ * make it into the manifest is skipped — the backend manifest already fails
+ * the build for an `mcp:` block without generated CRUD, so this is a guard
+ * against surprises, not an expected path.
+ */
+function mcpCatalogInputs(
+  entities: CompiledEntityInfo[],
+  manifest: PlatformSchemaManifest,
+): McpCatalogInput[] {
+  const tableByEntityName = new Map(
+    manifest.tables
+      .filter((table) => table.source?.authoringEntityName)
+      .map((table) => [
+        table.source!.authoringEntityName!,
+        `${table.schema}.${table.name}`,
+      ]),
+  );
+  return entities.flatMap((entity) => {
+    if (!entity.contract.mcp) return [];
+    const table = tableByEntityName.get(entity.contract.entity.name);
+    if (!table) return [];
+    return [{ slug: entity.slug, contract: entity.contract, table }];
+  });
+}
 
 /**
  * Collects every artifact the compiler would write, without touching disk.
@@ -47,6 +80,15 @@ export async function collectAllArtifacts(
   const webPresent = existsSync(join(repoRoot, "apps/web"));
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, { source: activeManifestSource }),
+    mcp: [
+      {
+        path: "apps/api/src/generated/mcp/tools.json",
+        contents: renderMcpCatalog(
+          mcpCatalogInputs(entities, manifest),
+          activeManifestSource,
+        ),
+      },
+    ],
     referentiedata: await generateCoreReferentiedataArtifacts(repoRoot),
     ui: webPresent ? await generateAuthoringUiArtifacts(authoringDir) : [],
     keycloak: generateAuthoringKeycloakArtifacts(authoringDir),
@@ -62,6 +104,7 @@ export async function collectAllArtifacts(
 
   const all = [
     ...groups.db,
+    ...groups.mcp,
     ...groups.referentiedata,
     ...groups.ui,
     ...groups.keycloak,

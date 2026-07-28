@@ -11,6 +11,7 @@ coverage/
 
 # Compiler-generated artifacts (recreate with `bun run generate`)
 apps/api/src/generated/db/
+apps/api/src/generated/mcp/
 apps/api/src/generated/rest/
 apps/api/src/generated/workflow/
 keycloak/*-realm.json

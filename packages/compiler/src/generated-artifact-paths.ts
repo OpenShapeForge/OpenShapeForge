@@ -11,6 +11,10 @@ export const compilerOwnedGeneratedRoots = [
   // emitted by `packages/compiler/src/generate-openapi.ts` and statically
   // imported by the API's REST route registration.
   "apps/api/src/generated/rest",
+  // MCP tool catalog for entities that opt into generated MCP exposure —
+  // emitted by `packages/compiler/src/generate-mcp.ts` and statically imported
+  // by the API's MCP server registration.
+  "apps/api/src/generated/mcp",
   // NOTE: workflow-generated roots (apps/api/src/generated/workflow, the web
   // workflow/renderer feature roots) are owned by the example workflow plugin
   // (examples/plugins/workflow) via its `ownedPaths.roots` — the check scripts

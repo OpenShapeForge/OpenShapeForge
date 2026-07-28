@@ -46,6 +46,8 @@ type Column = {
 
 type QuerySort = { field?: string | null; direction?: string | null } | null | undefined;
 
+// `readonly` because callers pass session objects assembled from immutable
+// resolved-identity data (DbSessionInput.roles); nothing here mutates.
 type AuthzSession = {
   roles?: readonly string[] | null;
 } | null | undefined;

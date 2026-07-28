@@ -289,6 +289,28 @@ export type TableSourceDefinition = {
     };
   };
   /**
+   * Opt-in generated MCP exposure for this table (entity YAML `mcp:` block).
+   * Present only when the entity declared one AND the table is generated-CRUD
+   * enabled — the backend manifest fails compilation on the mismatch, exactly
+   * as it does for `rest`.
+   *
+   * This block says only WHICH tools exist. Their input schemas live in the
+   * separate `mcp/tools.json` artifact, which is generated from the compiled
+   * contracts because the authored labels, validation, and enumerations that
+   * make those schemas useful are not carried in this manifest.
+   */
+  mcp?: {
+    toolPrefix: string;
+    tools: "dedicated" | "generic";
+    operations: {
+      list: boolean;
+      get: boolean;
+      create: boolean;
+      update: boolean;
+      delete: boolean;
+    };
+  };
+  /**
    * Per-operation entity role allow-lists, bridged from the authored
    * `authorization.roles` block. Each list is the deduplicated, sorted union
    * of the authored names and their Keycloak-normalized forms (Dutch →

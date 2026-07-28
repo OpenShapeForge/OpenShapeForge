@@ -779,6 +779,7 @@ function detectCandidateCollisions(candidates: CompiledCandidate[], schemaByModu
     "physical table": new Map(),
     "candidate slug": new Map(),
     "REST base path": new Map(),
+    "MCP tool prefix": new Map(),
   };
 
   function record(bucket: string, key: string, candidate: CompiledCandidate) {
@@ -811,6 +812,12 @@ function detectCandidateCollisions(candidates: CompiledCandidate[], schemaByModu
 
     if (candidate.contract.rest) {
       record("REST base path", candidate.contract.rest.basePath, candidate);
+    }
+    // Two entities sharing a prefix would generate the same tool names, and the
+    // runtime dispatches on those names — the second registration would shadow
+    // the first and silently route an agent's writes at the wrong table.
+    if (candidate.contract.mcp) {
+      record("MCP tool prefix", candidate.contract.mcp.toolPrefix, candidate);
     }
   }
 
@@ -902,6 +909,16 @@ export function compileAuthoringBackendManifest(
         `Entity ${describeCandidateOrigin(candidate)} declares a rest: block but is not ` +
           `generated-CRUD enabled${domainInternal ? " (domain-internal)" : ""}. ` +
           `Add it to the generated CRUD allowlist or remove the rest: block.`,
+      );
+    }
+    // Same fail-closed reasoning as rest: MCP tools delegate to the generated
+    // CRUD layer, so an mcp: block on an entity that has none is authoring
+    // intent that would silently evaporate.
+    if (candidate.contract.mcp && !generatedCrud) {
+      throw new Error(
+        `Entity ${describeCandidateOrigin(candidate)} declares an mcp: block but is not ` +
+          `generated-CRUD enabled${domainInternal ? " (domain-internal)" : ""}. ` +
+          `Add it to the generated CRUD allowlist or remove the mcp: block.`,
       );
     }
     const tenantScoped = candidate.contract.authorization !== undefined;
@@ -1073,6 +1090,7 @@ export function compileAuthoringBackendManifest(
           })(),
         },
         ...(candidate.contract.rest ? { rest: candidate.contract.rest } : {}),
+        ...(candidate.contract.mcp ? { mcp: candidate.contract.mcp } : {}),
         // Compiled per-operation role lists → runtime enforcement (#94). Emitted
         // as the authored ∪ Keycloak-normalized union so a session authenticated
         // either way (bearer token or trusted context) matches by plain set

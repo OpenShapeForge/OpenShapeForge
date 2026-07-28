@@ -97,6 +97,18 @@ REST-specific semantics:
   `apps/api/src/generated/rest/openapi.json` (always, empty `paths` when no
   entity opts in), served verbatim at `GET /api/rest/openapi.json`.
 
+## The generated MCP surface
+
+A third transport over the same CRUD core, for language models and agents.
+Entities opt in with an `mcp:` block; the compiler emits a tool catalog whose
+JSON Schemas are built from the authored field definitions (validation bounds,
+enumerations, labels), and `POST /api/mcp` serves it over Streamable HTTP.
+
+It differs from REST in two ways that matter for authorization: `tools/list` is
+resolved per session, so a caller is never shown a tool it lacks the roles for,
+and classified fields are withheld from the advertised schemas as well as
+redacted from responses. See [mcp.md](mcp.md).
+
 ## Multi-tenancy and the RLS session
 
 Every operation runs inside `withDbSession` (`src/db/session.ts`): a

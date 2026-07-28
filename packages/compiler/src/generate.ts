@@ -457,6 +457,7 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
         deleteMutationName: table.source!.graphql!.deleteMutationName,
       },
       ...(table.source?.rest === undefined ? {} : { rest: table.source.rest }),
+      ...(table.source?.mcp === undefined ? {} : { mcp: table.source.mcp }),
       // Per-operation authorization roles, surfaced for the runtime resolver's
       // fail-closed function-level authorization (#94).
       ...(table.source?.authorization

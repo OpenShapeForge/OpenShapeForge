@@ -2,11 +2,28 @@
 import { costLimitPlugin } from "@escape.tech/graphql-armor-cost-limit";
 import { maxAliasesPlugin } from "@escape.tech/graphql-armor-max-aliases";
 import { maxDepthPlugin } from "@escape.tech/graphql-armor-max-depth";
-import { createYoga } from "graphql-yoga";
+import { NoSchemaIntrospectionCustomRule } from "graphql";
+import { createYoga, type Plugin } from "graphql-yoga";
 import { readPositiveIntEnv } from "../config/limits.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { createGraphqlContext, type GraphqlContext } from "./context.js";
 import { graphqlSchema } from "./schema.js";
+
+/**
+ * Rejects schema introspection (__schema / __type) during validation.
+ *
+ * graphql-yoga enables introspection by default, and the /api/graphql route is
+ * reachable unauthenticated, so without this an anonymous caller can read the
+ * full schema — every generated entity type, filter/sort input, and mutation —
+ * even though GraphiQL is disabled in production (issue #16). We only install
+ * this in production so local development keeps introspection (and GraphiQL,
+ * which depends on it) working.
+ */
+const disableIntrospectionPlugin: Plugin = {
+  onValidate({ addValidationRule }) {
+    addValidationRule(NoSchemaIntrospectionCustomRule);
+  },
+};
 
 export type CreateGraphqlYogaOptions = {
   db?: OpenShapeForgeDatabase | undefined;
@@ -36,16 +53,18 @@ export function createGraphqlYoga(options: CreateGraphqlYogaOptions = {}) {
     DEFAULT_MAX_ALIASES,
   );
   const maxCost = readPositiveIntEnv("GRAPHQL_MAX_COST", DEFAULT_MAX_COST);
+  const isProduction = process.env.NODE_ENV === "production";
 
   return createYoga<Record<string, unknown>, GraphqlContext>({
     schema: graphqlSchema,
     graphqlEndpoint: "/api/graphql",
     landingPage: false,
-    graphiql: process.env.NODE_ENV !== "production",
+    graphiql: !isProduction,
     plugins: [
       maxDepthPlugin({ n: maxDepth, ignoreIntrospection: true }),
       maxAliasesPlugin({ n: maxAliases }),
       costLimitPlugin({ maxCost, ignoreIntrospection: true }),
+      ...(isProduction ? [disableIntrospectionPlugin] : []),
     ],
     context: async ({ request }) => createGraphqlContext(request.headers, options),
   });

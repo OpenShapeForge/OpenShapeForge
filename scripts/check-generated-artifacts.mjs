@@ -42,6 +42,7 @@ function hashArtifacts(artifactsToHash) {
 
 const groupPairs = [
   ["database", first.groups.db, second.groups.db],
+  ["MCP", first.groups.mcp, second.groups.mcp],
   ["referentiedata", first.groups.referentiedata, second.groups.referentiedata],
   ["authoring UI", first.groups.ui, second.groups.ui],
   ["Keycloak", first.groups.keycloak, second.groups.keycloak],

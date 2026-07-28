@@ -279,6 +279,38 @@
         }
       ]
     },
+    "mcp": {
+      "description": "Opt-in generated MCP (Model Context Protocol) exposure. Absent or false means no tools are generated (fail closed). `true` emits one tool per operation under a prefix derived from the entity name; the object form allows per-operation flags, a custom toolPrefix, and the `generic` tool style for large catalogs.",
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "toolPrefix": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            },
+            "tools": {
+              "type": "string",
+              "enum": ["dedicated", "generic"]
+            },
+            "operations": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "list": { "type": "boolean" },
+                "get": { "type": "boolean" },
+                "create": { "type": "boolean" },
+                "update": { "type": "boolean" },
+                "delete": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      ]
+    },
     "workflow": {
       "type": "object",
       "description": "Workflow node generation settings for this entity.",

@@ -18,6 +18,7 @@ import {
 import { createGraphqlYoga } from "../graphql/yoga.js";
 import { headersFromFastify } from "../http/headers.js";
 import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
+import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
 
 /** Startup drift check must not delay readiness meaningfully. */
 const DRIFT_CHECK_TIMEOUT_MS = 5000;
@@ -238,6 +239,7 @@ export function createApiApp(
     });
 
     registerGeneratedRestRoutes(routes, dbOptions);
+    registerGeneratedMcpServer(routes, dbOptions);
   });
 
   return app;

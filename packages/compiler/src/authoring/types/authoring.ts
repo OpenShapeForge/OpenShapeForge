@@ -237,6 +237,37 @@ export interface RestConfig {
   operations?: Partial<Record<RestOperationKey, boolean>>;
 }
 
+/** MCP exposes the same five CRUD operations REST does. */
+export type McpOperationKey = RestOperationKey;
+
+/**
+ * How an entity's operations are surfaced as MCP tools.
+ *
+ * `dedicated` emits one tool per operation (`relation_list`, `relation_get`,
+ * …). The authored labels, descriptions, and enumerations land directly in
+ * each tool's schema, which is what makes them usable by a model — so this is
+ * the default. `generic` routes the entity through the shared
+ * `osf_list`/`osf_get`/… tools instead, trading that per-tool detail for a
+ * flat tool count. Large catalogs need the trade: tool-selection quality
+ * degrades well before a hundred tools.
+ */
+export type McpToolStyle = "dedicated" | "generic";
+
+export interface McpConfig {
+  /** Defaults to true when the `mcp` block is present. */
+  enabled?: boolean;
+  /**
+   * Tool-name prefix for `dedicated` style; defaults to the entity name in
+   * snake_case (`ContactDetail` → `contact_detail`). Emitted verbatim into
+   * tool names, so the compiler restricts it to `^[a-z][a-z0-9_]*$`.
+   */
+  toolPrefix?: string;
+  /** Defaults to `dedicated`. */
+  tools?: McpToolStyle;
+  /** Per-operation flags; each defaults to true when MCP is enabled. */
+  operations?: Partial<Record<McpOperationKey, boolean>>;
+}
+
 export interface CoreEntity {
   schemaVersion: number;
   kind: "coreEntity";
@@ -297,6 +328,15 @@ export interface CoreEntity {
    * OpenAPI paths, so the loader restricts it to `^[a-z][a-z0-9-]*$`.
    */
   rest?: boolean | RestConfig;
+  /**
+   * Opt-in generated MCP (Model Context Protocol) exposure for this entity.
+   * Absent or `false` means no tools are generated — fail closed, exactly as
+   * `rest` does. `true` emits one tool per operation under a prefix derived
+   * from the entity name (snake_case, e.g. `ContactDetail` →
+   * `contact_detail`). The object form allows per-operation flags, a custom
+   * prefix, and the `generic` tool style for large catalogs.
+   */
+  mcp?: boolean | McpConfig;
   workflow?: {
     nodes?: {
       actions?: {

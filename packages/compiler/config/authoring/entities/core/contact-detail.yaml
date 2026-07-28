@@ -13,6 +13,7 @@ labels:
 domains:
   - relations
 rest: true
+mcp: true
 authorization:
   roles:
     read:

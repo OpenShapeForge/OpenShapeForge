@@ -14,6 +14,8 @@ From one entity YAML file you get:
 - a Postgres schema with row-level security (multi-tenant by construction),
 - a generic GraphQL CRUD API (queries, mutations, filters, sort, cursor
   pagination, relationship traversal),
+- an MCP server whose tool schemas carry the authored validation, enumerations,
+  and labels, so agents get the constraints up front,
 - an append-only entity-event journal on every mutation,
 - automatically derived e2e tests (with HTML reports) and k6 load tests.
 
@@ -51,6 +53,7 @@ Requests need a Keycloak bearer token or signed trusted-context headers — see
 | [docs/layers.md](docs/layers.md) | Authoring layers, overlays, `entityPatch` merge semantics |
 | [docs/plugins.md](docs/plugins.md) | Compiler plugin contract + shipped examples |
 | [docs/api.md](docs/api.md) | CRUD engine, RLS, auth, event journal, local stack |
+| [docs/mcp.md](docs/mcp.md) | Generated MCP server: tools from field definitions, authorization |
 | [docs/testing.md](docs/testing.md) | Proof gates, e2e suite, reports, k6 |
 | [docs/migrations.md](docs/migrations.md) | Roll-forward + versioned migrations, drift signals |
 | [docs/consuming.md](docs/consuming.md) | Using the compiler from a host repo |

@@ -66,13 +66,6 @@ jobs:
       - name: Check local authoring catalog is self-consistent
         run: bun run check:authoring-local
 
-      - name: DEBUG notices drift (temporary)
-        run: |
-          bun run notices
-          echo "=== git diff of regenerated notices ==="
-          git diff --stat THIRD-PARTY-NOTICES.md || true
-          git diff THIRD-PARTY-NOTICES.md | head -60 || true
-
       - name: Check THIRD-PARTY-NOTICES is up to date
         run: bun run check:notices
 

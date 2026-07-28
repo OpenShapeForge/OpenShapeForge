@@ -63,6 +63,21 @@ groepen:
       - value: expired
         label: { nl: Verlopen, en: Expired, fr: Expiré }
 
+  BETAALGEGEVENSOORT:
+    description: >-
+      Kerncodetabel voor het soort betaalgegeven. Bewust sectoroverstijgend
+      gehouden: jurisdictie- of sectorgebonden vormen (zoals een G-rekening)
+      horen in een overlay, niet in de kerncodetabel.
+    items:
+      - value: bank_account
+        label: { nl: Bankrekening, en: Bank account, fr: Compte bancaire }
+      - value: direct_debit
+        label: { nl: Automatische incasso, en: Direct debit, fr: Prélèvement automatique }
+      - value: credit_card
+        label: { nl: Creditcard, en: Credit card, fr: Carte de crédit }
+      - value: payment_service
+        label: { nl: Betaaldienst, en: Payment service, fr: Service de paiement }
+
   CONTACTGEGEVENSOORT:
     description: Kerncodetabel voor het soort contactgegeven.
     items:

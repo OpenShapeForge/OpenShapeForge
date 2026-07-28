@@ -156,6 +156,36 @@
       }
     }
   ],
+  "BETAALGEGEVENSOORT": [
+    {
+      "value": "bank_account",
+      "label": {
+        "nl": "Bankrekening",
+        "en": "Bank account"
+      }
+    },
+    {
+      "value": "direct_debit",
+      "label": {
+        "nl": "Automatische incasso",
+        "en": "Direct debit"
+      }
+    },
+    {
+      "value": "credit_card",
+      "label": {
+        "nl": "Creditcard",
+        "en": "Credit card"
+      }
+    },
+    {
+      "value": "payment_service",
+      "label": {
+        "nl": "Betaaldienst",
+        "en": "Payment service"
+      }
+    }
+  ],
   "CONTACTGEGEVENSOORT": [
     {
       "value": "email",

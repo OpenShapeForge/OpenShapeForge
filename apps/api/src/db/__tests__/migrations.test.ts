@@ -175,6 +175,10 @@ describe("generated schema migration", () => {
           expect(await tableExists(db, "erp", "relations")).toBe(true);
           expect(await tableExists(db, "platform", "org_unit")).toBe(true);
           expect(await tableExists(db, "platform", "org_unit_closure")).toBe(true);
+          expect(await tableExists(db, "platform", "retention_actions")).toBe(true);
+          expect(await tableExists(db, "platform", "retention_review_queue")).toBe(true);
+          expect(await tableExists(db, "platform", "retention_archive")).toBe(true);
+          expect(await tableExists(db, "platform", "retention_crypto_delete_queue")).toBe(true);
         });
 
         const second = await runChain(url);

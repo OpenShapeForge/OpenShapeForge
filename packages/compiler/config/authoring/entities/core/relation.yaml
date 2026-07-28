@@ -29,6 +29,21 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+retention:
+  mode: inline
+  jurisdiction: EU
+  legalBasis:
+    type: legitimate_interest
+    reference: Inactive relation retention
+  duration:
+    default: P7Y
+  startsFrom:
+    strategy: updatedAt
+  disposition:
+    action: delete
+    review:
+      required: true
+      queue: privacy-review
 fields:
   - key: displayName
     valueType: string

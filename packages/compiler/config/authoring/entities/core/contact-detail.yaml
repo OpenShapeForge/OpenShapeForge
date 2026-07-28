@@ -27,6 +27,22 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+retention:
+  mode: inline
+  jurisdiction: EU
+  legalBasis:
+    type: legitimate_interest
+    reference: Expired contact-detail retention
+  duration:
+    default: P2Y
+  startsFrom:
+    strategy: firstNonNull
+    fields:
+      - validUntil
+      - updatedAt
+  disposition:
+    action: delete
+    review: false
 fields:
   - key: relationId
     valueType: string

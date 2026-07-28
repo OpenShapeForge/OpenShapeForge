@@ -47,23 +47,39 @@ rule) when a declared retention policy cannot resolve a usable clock:
 This prevents an entity from advertising a statutory retention window that
 compiles to nothing.
 
-## Runtime enforcement: NOT IMPLEMENTED (follow-up)
+## Runtime enforcement
 
-**There is no retention-enforcement runtime.** Nothing in `apps/api` reads the
-compiled `retention` block: no scheduler, cron, or job deletes, anonymizes, or
-redacts records past their retention window, and nothing checks `legalHold`
-before acting. The compiled metadata exists so a future job can consume it, but
-until that job ships, retention is **advisory metadata only**.
+`apps/api` ships a one-shot retention worker that consumes the generated DB
+manifest. Run it after migrations from a scheduler or cron controller:
 
-Any executor built against this metadata MUST:
+```sh
+bun run --cwd apps/api retention:enforce
+```
 
-1. Check `legalHold.suspendDestruction` first and skip all destructive
-   dispositions while a hold is active.
-2. Honor each rule's `review` gate — route to the named queue instead of
-   destroying unattended.
-3. For `cryptoDelete`, destroy the referenced key rather than deleting rows.
+The worker takes a PostgreSQL advisory lock, processes each rule in bounded
+batches, and exits with a JSON summary. Set `OPENSHAPEFORGE_RETENTION_BATCH_SIZE`
+to an integer from 1 through 10000 (default 500). Schedule repeated invocations
+until the eligible backlog is drained.
 
-Building that job is tracked as a follow-up issue.
+For each table, the worker resolves the first non-null clock column in manifest
+order. `date` clocks expire at midnight UTC plus the calendar interval;
+`timestamptz` clocks retain their instant semantics. The worker then:
+
+1. skips destructive rules while `legalHold.suspendDestruction` is true;
+2. inserts review-gated records into `platform.retention_review_queue` without
+   changing the source row;
+3. archives full rows in `platform.retention_archive` before deleting them;
+4. queues referenced keys in `platform.retention_crypto_delete_queue` for the
+   configured key-management integration rather than deleting source rows;
+5. nulls classified sensitive columns for anonymize/mask/redact rules, using
+   deterministic non-identifying placeholders only for required columns; and
+6. records non-row-removing outcomes in `platform.retention_actions` so later
+   runs are idempotent.
+
+The worker runs through the audited system-session path because policies can
+span tenants. Operators must monitor pending review and crypto-delete queues;
+queue insertion is durable, but a key-management adapter remains responsible
+for destroying queued keys and marking them complete.
 
 ## Data-subject erasure: metadata only (follow-up)
 
@@ -80,12 +96,15 @@ It is **not** enforced yet. Building the erasure primitive (and deciding
 `ON DELETE` semantics deliberately per PII relationship) is tracked as a
 follow-up issue.
 
-## No shipped entity declares retention
+## Shipped policies
 
-At present **no entity YAML** under `packages/compiler/config/authoring/entities`
-declares a `retention:` block, so the shipped `manifest.json` contains no
-`retention` metadata. `retention-policies.yaml` is authored but not yet
-referenced by any table. Wiring policies onto the PII-bearing entities
-(relations, contact details) is the authoring step that makes the metadata
-above actually appear in the manifest — do it alongside, or ahead of, the
-runtime-enforcement follow-up.
+The PII-bearing `Relation` and `ContactDetail` entities declare retention:
+
+- relations enter the `privacy-review` queue seven years after their last
+  update; approval tooling can then act on that review item;
+- contact details are deleted two years after `validUntil`, falling back to
+  `updatedAt` when no validity date is present.
+
+These policies compile into `erp.relations` and `erp.contact_details` retention
+blocks in the generated DB manifest. Changing a policy requires updating the
+entity authoring YAML and regenerating artifacts.

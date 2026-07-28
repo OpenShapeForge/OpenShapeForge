@@ -69,6 +69,25 @@ read them with `terraform output -raw <name>`.
 > docker-registry Secret from `GHCR_PULL_TOKEN` (a PAT with `read:packages`) on
 > every deploy. Drop that secret only if the packages are made public.
 
+### Inputs
+
+The defaults describe a **production deploy of the current `main`**: leave every
+input untouched and you get `sha-<short commit>` on `api.openshapeforge.eu` and
+`auth.openshapeforge.eu`, with a production realm and Let's Encrypt production
+certificates.
+
+Two inputs change what the deployment *is*, rather than merely where it runs:
+
+| Input | Production | Iterating |
+| --- | --- | --- |
+| `realm_mode` | `production` — client secrets come from Secret Manager | `development` — permits the committed `devSecret` literals and `sslRequired: none` |
+| `tls_issuer` | `letsencrypt-prod` | `letsencrypt-staging` — untrusted root, but no rate limit to burn (prod allows only 5 failed validations per hostname per hour) |
+
+A development realm on a public hostname would publish a Keycloak whose client
+secrets are readable in this repository, so the workflow **refuses** to combine
+either non-production setting with a live hostname. Iterate against a different
+hostname, or with the hosts left empty for a ClusterIP-only release.
+
 ## Helm chart
 
 The chart (`deploy/helm/openshapeforge-api`) deploys the API Deployment + Service

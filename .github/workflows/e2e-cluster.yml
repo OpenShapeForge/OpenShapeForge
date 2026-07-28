@@ -207,7 +207,7 @@ jobs:
           NODE_ENV: test
           E2E_API_URL: ${{ inputs.api_url }}
           OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER: ${{ steps.cfg.outputs.issuer }}
-        run: bun test --timeout 30000 src/graphql/__tests__ src/rest/__tests__
+        run: bun test --timeout 30000 src/graphql/__tests__ src/rest/__tests__ src/mcp/__tests__
 
       - name: Close the tunnel
         if: always()

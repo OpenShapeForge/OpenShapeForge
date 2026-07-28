@@ -82,6 +82,16 @@ NODE_ENV=production is always set, which triggers the production env validator.
 - name: APP_TENANT_BYPASS_ROLES
   value: {{ .Values.auth.tenantBypassRoles | quote }}
 {{- end }}
+- name: API_RATE_LIMIT_MAX
+  value: {{ .Values.limits.rateLimit.max | quote }}
+- name: API_RATE_LIMIT_WINDOW_MS
+  value: {{ .Values.limits.rateLimit.windowMs | quote }}
+- name: API_REQUEST_TIMEOUT_MS
+  value: {{ .Values.limits.requestTimeoutMs | quote }}
+- name: DB_STATEMENT_TIMEOUT_MS
+  value: {{ .Values.limits.dbStatementTimeoutMs | quote }}
+- name: API_TRUST_PROXY
+  value: {{ .Values.limits.trustProxy | quote }}
 - name: OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET
   valueFrom:
     secretKeyRef:

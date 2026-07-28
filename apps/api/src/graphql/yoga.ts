@@ -3,6 +3,7 @@ import { costLimitPlugin } from "@escape.tech/graphql-armor-cost-limit";
 import { maxAliasesPlugin } from "@escape.tech/graphql-armor-max-aliases";
 import { maxDepthPlugin } from "@escape.tech/graphql-armor-max-depth";
 import { createYoga } from "graphql-yoga";
+import { readPositiveIntEnv } from "../config/limits.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { createGraphqlContext, type GraphqlContext } from "./context.js";
 import { graphqlSchema } from "./schema.js";
@@ -27,18 +28,6 @@ export type CreateGraphqlYogaOptions = {
 const DEFAULT_MAX_DEPTH = 8;
 const DEFAULT_MAX_ALIASES = 15;
 const DEFAULT_MAX_COST = 5000;
-
-function readPositiveIntEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw.trim() === "") return fallback;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(
-      `Invalid ${name}=${JSON.stringify(raw)}: expected a positive integer`,
-    );
-  }
-  return parsed;
-}
 
 export function createGraphqlYoga(options: CreateGraphqlYogaOptions = {}) {
   const maxDepth = readPositiveIntEnv("GRAPHQL_MAX_DEPTH", DEFAULT_MAX_DEPTH);

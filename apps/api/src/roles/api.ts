@@ -6,7 +6,9 @@
  * routes, messaging/whatsapp webhooks, workflow node bridges, realtime dirty
  * worker, and entity-event fanout wiring are intentionally absent.
  */
+import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyBaseLogger } from "fastify";
+import { readApiLimits } from "../config/limits.js";
 import { assertProductionEnv } from "../config/production-guard.js";
 import { createDatabaseRuntime, type DatabaseRuntime, type OpenShapeForgeDatabase } from "../db/connection.js";
 import {
@@ -19,6 +21,23 @@ import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
 
 /** Startup drift check must not delay readiness meaningfully. */
 const DRIFT_CHECK_TIMEOUT_MS = 5000;
+
+/**
+ * Liveness/readiness endpoints are exempt from rate limiting: kubelet probes hit
+ * them on a fixed schedule and must never be throttled, and they perform no
+ * database or resolver work, so exempting them opens no amplification path.
+ */
+const RATE_LIMIT_EXEMPT_PATHS = new Set([
+  "/api/health",
+  "/api/ready",
+  "/api/graphql/health",
+]);
+
+function isRateLimitExempt(url: string): boolean {
+  const queryStart = url.indexOf("?");
+  const path = queryStart === -1 ? url : url.slice(0, queryStart);
+  return RATE_LIMIT_EXEMPT_PATHS.has(path);
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -118,8 +137,33 @@ export function createApiApp(
     databaseUrl?: string;
   } = {},
 ) {
+  const limits = readApiLimits();
+
   // Default level stays "info"; LOG_LEVEL=debug surfaces the drift "ok" line.
-  const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
+  // trustProxy lets Fastify derive the real client IP from X-Forwarded-For (the
+  // rate-limit key) behind the ingress; requestTimeout bounds the whole request
+  // so a slow/hung request cannot pin a worker (issue #130).
+  const app = Fastify({
+    logger: { level: process.env.LOG_LEVEL ?? "info" },
+    trustProxy: limits.trustProxy,
+    requestTimeout: limits.requestTimeoutMs,
+  });
+
+  // Request-rate boundary, before GraphQL/REST execution. Keyed on the client IP
+  // (default keyGenerator + trustProxy). In-memory store => enforced per API
+  // instance; see apps/api/src/config/limits.ts. Health probes are exempt.
+  void app.register(rateLimit, {
+    max: limits.rateLimitMax,
+    timeWindow: limits.rateLimitWindowMs,
+    allowList: (request) => isRateLimitExempt(request.url),
+    // 429 with Retry-After (added by the plugin); body carries no limiter internals.
+    errorResponseBuilder: () => ({
+      statusCode: 429,
+      error: "Too Many Requests",
+      message: "Rate limit exceeded. Please retry later.",
+    }),
+  });
+
   app.removeContentTypeParser("application/json");
   app.addContentTypeParser(
     "application/json",
@@ -148,48 +192,53 @@ export function createApiApp(
   const yoga = createGraphqlYoga(
     databaseRuntime ? { db: databaseRuntime.db } : {},
   );
+  const dbOptions = databaseRuntime ? { db: databaseRuntime.db } : {};
 
-  app.get("/api/health", async () => ({
-    status: "ok",
-    role: "api",
-  }));
+  // Register the routes inside a child plugin so they load AFTER the rate-limit
+  // plugin above. @fastify/rate-limit attaches its per-route guard through an
+  // onRoute hook that only sees routes registered once it has loaded; routes
+  // added directly on `app` (which happens synchronously, before the deferred
+  // plugin loads) would silently escape the limiter.
+  void app.register(async (routes) => {
+    routes.get("/api/health", async () => ({
+      status: "ok",
+      role: "api",
+    }));
 
-  app.get("/api/ready", async () => ({
-    status: "ready",
-    role: "api",
-  }));
+    routes.get("/api/ready", async () => ({
+      status: "ready",
+      role: "api",
+    }));
 
-  app.get("/api/graphql/health", async () => ({
-    status: "ok",
-    role: "api",
-  }));
+    routes.get("/api/graphql/health", async () => ({
+      status: "ok",
+      role: "api",
+    }));
 
-  app.route({
-    url: "/api/graphql",
-    method: ["GET", "POST", "OPTIONS"],
-    handler: async (request, reply) => {
-      const origin = `${request.protocol}://${request.headers.host ?? "localhost"}`;
-      const response = await yoga.fetch(
-        new URL(request.url, origin),
-        {
-          method: request.method,
-          headers: headersFromFastify(request.headers),
-          body: bodyFromFastify(request.method, request.body),
-        },
-        {
-          fastifyRequest: request,
-          fastifyReply: reply,
-        },
-      );
+    routes.route({
+      url: "/api/graphql",
+      method: ["GET", "POST", "OPTIONS"],
+      handler: async (request, reply) => {
+        const origin = `${request.protocol}://${request.headers.host ?? "localhost"}`;
+        const response = await yoga.fetch(
+          new URL(request.url, origin),
+          {
+            method: request.method,
+            headers: headersFromFastify(request.headers),
+            body: bodyFromFastify(request.method, request.body),
+          },
+          {
+            fastifyRequest: request,
+            fastifyReply: reply,
+          },
+        );
 
-      return reply.send(response);
-    },
+        return reply.send(response);
+      },
+    });
+
+    registerGeneratedRestRoutes(routes, dbOptions);
   });
-
-  registerGeneratedRestRoutes(
-    app,
-    databaseRuntime ? { db: databaseRuntime.db } : {},
-  );
 
   return app;
 }

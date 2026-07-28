@@ -10,11 +10,10 @@ import {
   updateGeneratedEntity,
   type GeneratedCrudRelationship,
 } from "./generated-crud.js";
-import {
-  assertOperationAllowed,
-  assertClassifiedQueryFieldsAllowed,
-  redactRow,
-} from "./generated-authz.js";
+// Field-level redaction and the classified filter/sort guard are NOT applied
+// here: they live in the generated CRUD core, which every read below goes
+// through, so REST and future transports are covered by the same code (#164).
+import { assertOperationAllowed } from "./generated-authz.js";
 import type { GraphqlContext } from "./context.js";
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
@@ -225,13 +224,10 @@ const queryResolvers = Object.fromEntries(
         async (_parent: unknown, args: { id: string }, context: GraphqlContext) => {
           const db = requireGeneratedDb(context);
           assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
-          const row = await getGeneratedEntity(db, context.session, {
+          return getGeneratedEntity(db, context.session, {
             table: table.name,
             id: args.id,
           });
-          return row
-            ? redactRow(row, table.columns, authorization, context.session)
-            : row;
         },
       ],
       [
@@ -248,14 +244,6 @@ const queryResolvers = Object.fromEntries(
         ) => {
           const db = requireGeneratedDb(context);
           assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
-          assertClassifiedQueryFieldsAllowed(
-            table.columns,
-            authorization,
-            context.session,
-            graphql.typeName,
-            args.filter,
-            args.sort,
-          );
           const result = await listGeneratedEntities(db, context.session, {
             table: table.name,
             ...(args.first === undefined ? {} : { limit: args.first }),
@@ -263,10 +251,7 @@ const queryResolvers = Object.fromEntries(
             ...(args.filter === undefined ? {} : { filter: args.filter }),
             ...(args.sort === undefined ? {} : { sort: args.sort }),
           });
-          const rows = result.rows.map((row) =>
-            redactRow(row, table.columns, authorization, context.session),
-          );
-          return toConnection(rows, result.nextCursor, result.totalCount);
+          return toConnection(result.rows, result.nextCursor, result.totalCount);
         },
       ],
     ];
@@ -347,10 +332,9 @@ const objectResolvers = Object.fromEntries(
                 relationship,
                 targetTable,
               });
-              const rows = result.rows.map((row) =>
-                redactRow(row, targetTable.columns, targetAuthorization, context.session),
-              );
-              return relationship.resolve === "belongsTo" ? rows[0] ?? null : rows;
+              return relationship.resolve === "belongsTo"
+                ? result.rows[0] ?? null
+                : result.rows;
             },
           ],
           [

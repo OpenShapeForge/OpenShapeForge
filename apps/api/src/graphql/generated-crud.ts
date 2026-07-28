@@ -5,6 +5,11 @@ import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
 import { appendScopedEntityEventInTransaction } from "../platform/entity-events.js";
+import {
+  assertClassifiedQueryFieldsAllowed,
+  canReadClassifiedColumns,
+  redactRow,
+} from "./generated-authz.js";
 
 type GeneratedCrudTable = {
   name: string;
@@ -151,6 +156,59 @@ function requireEntityOperation(
 
 /** Test-only direct handle on the guard (unit tests bypass the DB layer). */
 export const __requireEntityOperationForTests = requireEntityOperation;
+
+/**
+ * Entity name used in authorization errors — the authored name when the
+ * manifest carries one, never the physical table. Matches the wording
+ * requireEntityOperation already produces.
+ */
+function entityLabel(table: GeneratedCrudTable) {
+  return table.source?.authoringEntityName ?? table.name;
+}
+
+/**
+ * Field-level data protection (#96/#101), applied in the shared CRUD core
+ * rather than per transport: every read reaches its rows through the functions
+ * below, so GraphQL, the generated REST routes and any transport added later
+ * inherit redaction by construction instead of having to remember it (#164).
+ *
+ * Write paths (create/update returning rows) are deliberately not redacted:
+ * their role gate already required a write grant, which is exactly what
+ * authorizes reading classified columns.
+ */
+function redactRows(
+  table: GeneratedCrudTable,
+  session: DbSessionInput,
+  rows: GeneratedEntityRow[],
+): GeneratedEntityRow[] {
+  // Hot path: an entity with no classified column costs one column scan per
+  // page instead of a per-row scan inside redactRow.
+  if (!table.columns.some((column) => column.classification)) {
+    return rows;
+  }
+  return rows.map((row) =>
+    redactRow(row, table.columns, table.source?.authorization, session),
+  );
+}
+
+/** The oracle guard for caller-supplied list filters and ordering. */
+function assertClassifiedQueryAllowed(
+  table: GeneratedCrudTable,
+  session: DbSessionInput,
+  input: {
+    filter?: Record<string, unknown> | null;
+    sort?: { field?: string | null; direction?: string | null } | null;
+  },
+): void {
+  assertClassifiedQueryFieldsAllowed(
+    table.columns,
+    table.source?.authorization,
+    session,
+    entityLabel(table),
+    input.filter,
+    input.sort,
+  );
+}
 
 export function isGeneratedCrudTableReadable(name: string) {
   return generatedCrudTables.has(name);
@@ -422,7 +480,11 @@ async function listGeneratedEntitiesForTable(
       where ${where}
     `.execute(trx);
 
-    const rows = result.rows.slice(0, limit).map((row) => row.row);
+    const rows = redactRows(
+      table,
+      session,
+      result.rows.slice(0, limit).map((row) => row.row),
+    );
     const totalCount = Number(countResult.rows[0]?.total_count ?? 0);
     return {
       rows,
@@ -445,6 +507,10 @@ export async function listGeneratedEntities(
   },
 ): Promise<GeneratedEntityConnection> {
   const table = readGeneratedCrudTable(input.table, "read", session);
+  // Before any SQL runs: filtering or sorting by a column this session may not
+  // read turns the result set (and totalCount) into an oracle for the value
+  // redaction withholds.
+  assertClassifiedQueryAllowed(table, session, input);
   return listGeneratedEntitiesForTable(db, session, table, input);
 }
 
@@ -457,14 +523,19 @@ export async function getGeneratedEntity(
   },
 ): Promise<GeneratedEntityRow | null> {
   const table = readGeneratedCrudTable(input.table, "read", session);
-  return fetchGeneratedEntityRow(db, session, table, input.id);
+  const row = await fetchGeneratedEntityRow(db, session, table, input.id);
+  return row === null
+    ? null
+    : redactRow(row, table.columns, table.source?.authorization, session);
 }
 
 /**
- * Row fetch WITHOUT the role gate — callers must have already authorized the
- * operation that led here (getGeneratedEntity gates "read"; the empty-body
- * update path in updateGeneratedEntity gates "update", deliberately not
- * requiring read on top).
+ * Row fetch WITHOUT the role gate or classification redaction — callers must
+ * have already authorized the operation that led here and must redact before
+ * handing the row to a reader (getGeneratedEntity gates "read" and redacts;
+ * the empty-body update path in updateGeneratedEntity gates "update",
+ * deliberately not requiring read on top, and needs no redaction because an
+ * update grant is itself a write grant).
  */
 async function fetchGeneratedEntityRow(
   db: OpenShapeForgeDatabase,
@@ -679,7 +750,7 @@ export async function listGeneratedEntityRelation(
   if (parentId == null) {
     return { rows: [], nextCursor: null, totalCount: 0 };
   }
-  const targetDefaultSort = input.targetTable.source?.graphql?.defaultSort;
+  const targetDefaultSort = readableDefaultSort(input.targetTable, session);
   return listGeneratedEntitiesForTable(db, session, input.targetTable, {
     limit: input.limit ?? 50,
     fixedWhere: [{ column: relationship.foreignKey, value: parentId }],
@@ -687,4 +758,19 @@ export async function listGeneratedEntityRelation(
       ? { sort: { field: targetDefaultSort.field, direction: targetDefaultSort.direction } }
       : {}),
   });
+}
+
+/**
+ * The embedded-list default sort comes from the compiler, not the caller, so
+ * it is not an input to reject — but ordering by a column the reader may not
+ * see is the same oracle assertClassifiedQueryAllowed refuses on the list
+ * entry point. Drop it (falling back to primary-key order) instead of failing
+ * an otherwise legitimate traversal.
+ */
+function readableDefaultSort(table: GeneratedCrudTable, session: DbSessionInput) {
+  const sort = table.source?.graphql?.defaultSort;
+  if (!sort || canReadClassifiedColumns(table.source?.authorization, session)) {
+    return sort;
+  }
+  return fieldColumnMap(table).get(sort.field)?.classification ? undefined : sort;
 }

@@ -260,6 +260,33 @@ describe("generated MCP server", () => {
       expect(toolError(other.body)).toMatch(/NOT_FOUND/);
     });
 
+    test(`${prefix}: rejects a create argument the tool schema does not declare`, async () => {
+      // The schema says additionalProperties:false; the server must agree.
+      const { body } = await callTool(tenantA, `${prefix}_create`, {
+        definitelyNotAField: "x",
+      });
+      expect(toolError(body)).toMatch(/BAD_USER_INPUT/);
+      expect(toolError(body)).toMatch(/definitelyNotAField/);
+    });
+
+    test(`${prefix}: rejects a server-managed field on create`, async () => {
+      // Silently dropping `id` would let a model believe it chose the id.
+      const { body } = await callTool(tenantA, `${prefix}_create`, {
+        id: "00000000-0000-0000-0000-000000000001",
+      });
+      expect(toolError(body)).toMatch(/BAD_USER_INPUT/);
+      expect(toolError(body)).toMatch(/\bid\b/);
+    });
+
+    test(`${prefix}: rejects an undeclared field inside update values`, async () => {
+      const createdId = await createRow(table, tenantA);
+      const { body } = await callTool(tenantA, `${prefix}_update`, {
+        id: createdId,
+        values: { definitelyNotAField: "x" },
+      });
+      expect(toolError(body)).toMatch(/BAD_USER_INPUT/);
+    });
+
     test(`${prefix}: rejects an unknown filter field`, async () => {
       const { body } = await callTool(tenantA, `${prefix}_list`, {
         filter: { definitelyNotAField: "x" },

@@ -271,6 +271,40 @@ function requireArguments(args: unknown): Record<string, unknown> {
   return args as Record<string, unknown>;
 }
 
+/**
+ * Reject arguments the tool's own schema does not declare.
+ *
+ * The CRUD layer already drops non-writable keys, so this is not a privilege
+ * check — it is honesty. Every tool schema carries
+ * `additionalProperties: false`, and accepting additional properties anyway
+ * makes the catalog lie to the one consumer that reads it: a model that sets
+ * `id` believes it created that id, gets a different one, and builds its next
+ * step on a false premise. A typo'd field name looks like a successful write of
+ * a value that was never stored. REST refuses the same body for the same
+ * reason (`assertWritableBody`).
+ *
+ * Validated against the ADVERTISED schema rather than a second list, so the
+ * check and the advertisement cannot drift apart.
+ */
+function assertDeclaredProperties(
+  schema: Record<string, unknown> | undefined,
+  values: Record<string, unknown>,
+  what: string,
+): void {
+  const properties = schema?.properties;
+  if (!properties || typeof properties !== "object") return;
+  const declared = new Set(Object.keys(properties as Record<string, unknown>));
+  const unknown = Object.keys(values).filter((key) => !declared.has(key));
+  if (unknown.length > 0) {
+    throw new HttpError(
+      400,
+      "BAD_USER_INPUT",
+      `Unknown or non-writable ${what}: ${unknown.sort().join(", ")}. ` +
+        `Accepted: ${[...declared].sort().join(", ") || "(none)"}.`,
+    );
+  }
+}
+
 function requireId(args: Record<string, unknown>): string {
   const id = args.id;
   if (typeof id !== "string" || id === "") {
@@ -352,6 +386,7 @@ async function invokeTool(
 
     case "create": {
       const values = requireArguments(args);
+      assertDeclaredProperties(tool.inputSchema, values, "field");
       assertWritableValues(values, entity, table, session);
       const row = await createGeneratedEntity(db, session, {
         table: table.name,
@@ -362,7 +397,13 @@ async function invokeTool(
 
     case "update": {
       const id = requireId(args);
+      assertDeclaredProperties(tool.inputSchema, args, "argument");
       const values = requireArguments(args.values);
+      assertDeclaredProperties(
+        (tool.inputSchema.properties as Record<string, Record<string, unknown>> | undefined)?.values,
+        values,
+        "field",
+      );
       assertWritableValues(values, entity, table, session);
       const row = await updateGeneratedEntity(db, session, {
         table: table.name,

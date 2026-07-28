@@ -12,11 +12,16 @@ import {
   loadActivePlatformCompile,
   resolveActiveAuthoringDir,
 } from "./active-manifest.js";
-import { generateCoreReferentiedataArtifacts } from "./core-referentiedata-artifacts.js";
+import {
+  generateCoreReferentiedataArtifacts,
+  loadCoreReferentiedataSnapshot,
+  type CoreReferentiedataSnapshot,
+} from "./core-referentiedata-artifacts.js";
 import { generateArtifacts } from "./generate.js";
 import { renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
 import type { CompiledEntityInfo } from "./plugins.js";
+import type { CompiledField } from "./authoring/types.js";
 
 const defaultRepoRoot = resolve(import.meta.dir, "../../..");
 
@@ -65,6 +70,75 @@ function mcpCatalogInputs(
 }
 
 /**
+ * Every referentiedata group an entity points at, from either authoring
+ * spelling: the documented `options.referentieGroep`, and the
+ * `render.props.referentieGroep` the UI select components consume. Walks
+ * nested children/item so a group referenced inside an object field counts.
+ */
+function collectReferentieGroepReferences(
+  fields: readonly CompiledField[] | undefined,
+  into: Map<string, Set<string>>,
+  entityName: string,
+): Map<string, Set<string>> {
+  for (const field of fields ?? []) {
+    const fromOptions =
+      field.options?.type === "referentiedata" ? field.options.referentieGroep : undefined;
+    const fromRender = field.render?.props?.referentieGroep;
+    for (const groep of [fromOptions, fromRender]) {
+      if (typeof groep === "string" && groep.length > 0) {
+        const where = into.get(groep) ?? new Set<string>();
+        where.add(`${entityName}.${field.key}`);
+        into.set(groep, where);
+      }
+    }
+    collectReferentieGroepReferences(field.children, into, entityName);
+    if (field.item) collectReferentieGroepReferences([field.item], into, entityName);
+  }
+  return into;
+}
+
+/**
+ * Fail closed on a `referentieGroep` that resolves to nothing.
+ *
+ * An unresolved group is silent by nature: the field degrades to an
+ * unconstrained string, every gate stays green, and the only symptom is a
+ * missing enum in generated output that nobody is looking at. A typo in the
+ * group name therefore ships as a quietly weaker schema. Since the catalog and
+ * the reference are both authored in this repo, a mismatch is always a
+ * mistake — so it is a build error, like an unknown retention policyRef.
+ */
+function assertReferentieGroepsResolve(
+  entities: CompiledEntityInfo[],
+  snapshot: CoreReferentiedataSnapshot,
+): void {
+  const references = new Map<string, Set<string>>();
+  for (const entity of entities) {
+    collectReferentieGroepReferences(
+      entity.contract.model.fields,
+      references,
+      entity.contract.entity.name,
+    );
+  }
+
+  const failures = [...references.entries()]
+    .filter(([groep]) => (snapshot[groep]?.length ?? 0) === 0)
+    .map(
+      ([groep, where]) =>
+        `"${groep}" (referenced by ${[...where].sort().join(", ")}) ` +
+        `${groep in snapshot ? "is defined but empty" : "is not defined"}`,
+    )
+    .sort();
+
+  if (failures.length > 0) {
+    throw new Error(
+      `Referentiedata group(s) do not resolve:\n  - ${failures.join("\n  - ")}\n` +
+        `Add them to catalogs/core-referentiedata.yaml (or fix the referentieGroep spelling). ` +
+        `An unresolved group silently degrades the field to an unconstrained string.`,
+    );
+  }
+}
+
+/**
  * Collects every artifact the compiler would write, without touching disk.
  * The single entry point shared by `runCompiler` and the check scripts.
  */
@@ -78,6 +152,11 @@ export async function collectAllArtifacts(
   // data-layer + API repo skips them entirely; adding apps/web back
   // re-enables generation without compiler changes.
   const webPresent = existsSync(join(repoRoot, "apps/web"));
+  // Built once, as a value, and shared by everything that needs it. Reading the
+  // emitted snapshot back off disk would see the PREVIOUS run's file, since
+  // artifacts are written only after every generator has produced its contents.
+  const referentiedata = await loadCoreReferentiedataSnapshot(repoRoot);
+  assertReferentieGroepsResolve(entities, referentiedata);
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, { source: activeManifestSource }),
     mcp: [
@@ -86,10 +165,11 @@ export async function collectAllArtifacts(
         contents: renderMcpCatalog(
           mcpCatalogInputs(entities, manifest),
           activeManifestSource,
+          referentiedata,
         ),
       },
     ],
-    referentiedata: await generateCoreReferentiedataArtifacts(repoRoot),
+    referentiedata: await generateCoreReferentiedataArtifacts(repoRoot, referentiedata),
     ui: webPresent ? await generateAuthoringUiArtifacts(authoringDir) : [],
     keycloak: generateAuthoringKeycloakArtifacts(authoringDir),
     plugins: [],

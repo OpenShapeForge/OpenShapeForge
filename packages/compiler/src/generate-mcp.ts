@@ -20,7 +20,7 @@
  */
 import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
 import type { LocalizedText } from "./authoring/types/common.js";
-import { getReferentieItemsForGroep } from "./authoring/referentiedata/resolve-referentiedata-options.js";
+import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -89,6 +89,7 @@ function describeField(field: CompiledField): string | undefined {
  */
 function resolveEnum(
   field: CompiledField,
+  referentiedata: CoreReferentiedataSnapshot,
 ): { values: string[]; labels: Map<string, string> } | undefined {
   const options = field.options;
   const renderGroep = field.render?.props?.referentieGroep;
@@ -113,7 +114,7 @@ function resolveEnum(
         : undefined;
   if (!groep) return undefined;
 
-  const items = getReferentieItemsForGroep(groep);
+  const items = referentiedata[groep] ?? [];
   if (items.length === 0) return undefined;
   return {
     values: items.map((item) => item.value),
@@ -175,7 +176,10 @@ function stringRule(rule: unknown): string | undefined {
  * artifact: every constraint the author already wrote becomes a constraint the
  * model is told about up front, instead of one it discovers through a 400.
  */
-function schemaForField(field: CompiledField): JsonObject {
+function schemaForField(
+  field: CompiledField,
+  referentiedata: CoreReferentiedataSnapshot,
+): JsonObject {
   const scalar: JsonObject = baseTypeFor(field);
   const validation = field.validation;
 
@@ -196,7 +200,7 @@ function schemaForField(field: CompiledField): JsonObject {
     if (validation.format !== undefined) scalar.format = validation.format;
   }
 
-  const enumeration = resolveEnum(field);
+  const enumeration = resolveEnum(field, referentiedata);
   if (enumeration) {
     scalar.enum = enumeration.values;
   }
@@ -252,12 +256,13 @@ function writableFields(fields: CompiledField[]): CompiledField[] {
 
 function objectSchema(
   fields: CompiledField[],
+  referentiedata: CoreReferentiedataSnapshot,
   options: { requireRequired: boolean },
 ): JsonObject {
   const properties: JsonObject = {};
   const required: string[] = [];
   for (const field of fields) {
-    properties[field.key] = schemaForField(field);
+    properties[field.key] = schemaForField(field, referentiedata);
     if (options.requireRequired && field.required) {
       required.push(field.key);
     }
@@ -328,6 +333,7 @@ function entityDescription(contract: CompiledEntityContract): string {
 function buildToolsForEntity(
   contract: CompiledEntityContract,
   table: string,
+  referentiedata: CoreReferentiedataSnapshot,
 ): McpToolDefinition[] {
   const mcp = contract.mcp;
   if (!mcp) return [];
@@ -356,7 +362,7 @@ function buildToolsForEntity(
     const filterProperties: JsonObject = {};
     for (const field of fields) {
       if (field.cardinality === "collection" || field.valueType === "object") continue;
-      const schema = schemaForField(field);
+      const schema = schemaForField(field, referentiedata);
       // Filters are always optional and never defaulted — a default here would
       // silently narrow a caller's result set.
       delete schema.default;
@@ -425,7 +431,7 @@ function buildToolsForEntity(
       table,
       title: `Create ${label}`,
       description: `${description} Creates a new record.`,
-      inputSchema: objectSchema(writable, { requireRequired: true }),
+      inputSchema: objectSchema(writable, referentiedata, { requireRequired: true }),
       annotations: annotationsFor("create"),
     });
   }
@@ -433,7 +439,7 @@ function buildToolsForEntity(
   if (mcp.operations.update) {
     // Update is a partial: nothing is required beyond the id, because omitting
     // a field means "leave it alone", not "clear it".
-    const patch = objectSchema(writable, { requireRequired: false });
+    const patch = objectSchema(writable, referentiedata, { requireRequired: false });
     tools.push({
       name: named("update"),
       operation: "update",
@@ -523,6 +529,7 @@ export const MAX_DEDICATED_TOOLS = 60;
 export function buildMcpCatalog(
   inputs: McpCatalogInput[],
   source: string,
+  referentiedata: CoreReferentiedataSnapshot = {},
 ): McpCatalog {
   const opted = inputs
     .filter((input) => input.contract.mcp !== undefined)
@@ -559,7 +566,7 @@ export function buildMcpCatalog(
           ...(description ? { description } : {}),
           required: field.required === true,
           readOnly: field.readOnly === true,
-          schema: schemaForField(field),
+          schema: schemaForField(field, referentiedata),
           ...(field.classification?.sensitivity
             ? { classification: field.classification.sensitivity }
             : {}),
@@ -567,7 +574,7 @@ export function buildMcpCatalog(
       }),
     });
 
-    tools.push(...buildToolsForEntity(contract, input.table));
+    tools.push(...buildToolsForEntity(contract, input.table, referentiedata));
   }
 
   const dedicatedCount = tools.filter((tool) => !tool.name.startsWith("osf_")).length;
@@ -592,6 +599,10 @@ export function buildMcpCatalog(
   };
 }
 
-export function renderMcpCatalog(inputs: McpCatalogInput[], source: string): string {
-  return `${JSON.stringify(buildMcpCatalog(inputs, source), null, 2)}\n`;
+export function renderMcpCatalog(
+  inputs: McpCatalogInput[],
+  source: string,
+  referentiedata: CoreReferentiedataSnapshot = {},
+): string {
+  return `${JSON.stringify(buildMcpCatalog(inputs, source, referentiedata), null, 2)}\n`;
 }

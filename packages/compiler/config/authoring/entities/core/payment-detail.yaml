@@ -1,0 +1,302 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: PaymentDetail
+title: Payment Detail
+description: Bank account or payment information associated with a relation.
+language: en
+displayTemplate: "{{iban}}"
+filterField: iban
+labels:
+  en: Payment Detail
+  nl: Betaalgegevens
+domains:
+  - relations
+rest: true
+mcp: true
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+      - Relaties.All.ReadWrite
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+retention:
+  mode: policyRef
+  policy: payment-detail-retain-7y
+  scope: record
+  startsFrom:
+    strategy: firstNonNull
+    fields:
+      - validUntil
+      - validFrom
+fields:
+  - key: type
+    valueType: string
+    required: true
+    label:
+      en: Type
+      nl: Type
+    description:
+      en: Type of payment detail (e.g. bank account, direct debit).
+      nl: Type betaalgegevens (bijv. bankrekening, automatische incasso).
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: BETAALGEGEVENSOORT
+        clearable: false
+  - key: iban
+    valueType: string
+    required: false
+    label:
+      en: IBAN
+      nl: IBAN
+    description:
+      en: International Bank Account Number.
+      nl: Internationaal bankrekeningnummer (IBAN).
+    semanticType: iban
+    validation:
+      maxLength: 34
+    persisted:
+      column: iban
+      storageClass: core
+    retention:
+      mode: fieldOverride
+      scope: field
+      duration: P7Y
+      startsFrom:
+        strategy: firstNonNull
+        fields:
+          - validUntil
+          - validFrom
+      disposition:
+        action: anonymize
+  - key: bic
+    valueType: string
+    required: false
+    label:
+      en: BIC
+      nl: BIC
+    description:
+      en: Bank Identifier Code (SWIFT/BIC).
+      nl: Bank Identifier Code (SWIFT/BIC).
+    validation:
+      maxLength: 11
+    persisted:
+      column: bic
+      storageClass: core
+  - key: accountHolder
+    valueType: string
+    required: false
+    label:
+      en: Account holder
+      nl: Rekeninghouder
+    description:
+      en: Name of the account holder.
+      nl: Naam van de rekeninghouder.
+    validation:
+      maxLength: 200
+    persisted:
+      column: account_holder
+      storageClass: core
+  - key: status
+    valueType: string
+    required: false
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of this payment detail.
+      nl: Levenscyclusstatus van deze betaalgegevens.
+    validation:
+      maxLength: 50
+    persisted:
+      column: status
+      storageClass: core
+  - key: isPrimary
+    valueType: boolean
+    required: false
+    label:
+      en: Primary
+      nl: Primair
+    description:
+      en: Whether this is the primary payment detail for the relation.
+      nl: Of dit de primaire betaalmethode van de relatie is.
+    persisted:
+      column: is_primary
+      storageClass: core
+  - key: validFrom
+    valueType: date
+    required: false
+    label:
+      en: Valid from
+      nl: Geldig vanaf
+    description:
+      en: Date from which this payment detail is valid.
+      nl: Datum vanaf wanneer deze betaalgegevens geldig zijn.
+    persisted:
+      column: valid_from
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: validUntil
+    valueType: date
+    required: false
+    label:
+      en: Valid until
+      nl: Geldig tot
+    description:
+      en: Date until which this payment detail is valid.
+      nl: Datum tot wanneer deze betaalgegevens geldig zijn.
+    persisted:
+      column: valid_until
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: relationId
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: Relation ID
+      nl: Relatie ID
+    description:
+      en: Identifier of the related relation instance.
+      nl: Identifier van de gerelateerde relatie-instantie.
+    semanticType: relationId
+    persisted:
+      column: relation_id
+      storageClass: core
+    validation:
+      format: uuid
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+ui:
+  routes:
+    list:
+      en: /payment-details
+      nl: /betaalgegevens
+    detail:
+      en: /payment-details/:id
+      nl: /betaalgegevens/:id
+    create:
+      en: /payment-details/create
+      nl: /betaalgegevens/aanmaken
+    edit:
+      en: /payment-details/:id/edit
+      nl: /betaalgegevens/:id/bewerken
+    delete:
+      en: /payment-details/:id/delete
+      nl: /betaalgegevens/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Payment Details
+        nl: Betaalgegevens
+      columns:
+        - key: type
+          sortable: true
+        - key: iban
+          sortable: true
+        - key: accountHolder
+          sortable: true
+        - key: status
+          sortable: true
+      defaultSort:
+        key: type
+        direction: asc
+      rowLink:
+        en: /payment-details/:id
+        nl: /betaalgegevens/:id
+    detail:
+      header:
+        title: "{{iban}}"
+        subtitle: "{{accountHolder}}"
+        badges:
+          - type
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Payment information
+                nl: Betaalinformatie
+              fields:
+                - type
+                - iban
+                - bic
+                - accountHolder
+                - status
+                - isPrimary
+                - validFrom
+                - validUntil
+    form:
+      variants:
+        create:
+          title:
+            en: Create payment detail
+            nl: Betaalgegevens aanmaken
+          groups:
+            - title:
+                en: Payment information
+                nl: Betaalinformatie
+              fields:
+                - type
+                - iban
+                - bic
+                - accountHolder
+                - status
+                - isPrimary
+                - validFrom
+                - validUntil
+        edit:
+          extends: create
+          title:
+            en: Edit payment detail
+            nl: Betaalgegevens bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

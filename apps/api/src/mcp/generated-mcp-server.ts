@@ -53,6 +53,11 @@ import {
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
+import { listConnectorContracts } from "../connectors/catalog.js";
+import {
+  connectorToolsForSession,
+  resolveConnectorTool,
+} from "../connectors/mcp-tools.js";
 
 export const MCP_MOUNT_PATH = "/api/mcp";
 
@@ -392,13 +397,46 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
   const tables = tablesByName();
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: toolsForSession(session, tables).map(({ tool, entity }) =>
-      describeTool(tool, entity, tables.get(tool.table), session),
-    ),
+    tools: [
+      ...toolsForSession(session, tables).map(({ tool, entity }) =>
+        describeTool(tool, entity, tables.get(tool.table), session),
+      ),
+      // Connector operations join the SAME catalog, filtered by the same
+      // session, so a caller sees one tool list rather than two surfaces with
+      // different rules. The shared 60-tool budget is enforced at compile time.
+      ...connectorToolsForSession(listConnectorContracts(), {
+        roles: session.roles ?? [],
+      }).map((tool) => ({
+        name: tool.name,
+        title: tool.title,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        annotations: { title: tool.title, ...tool.annotations },
+      })),
+    ],
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
+
+    // Connector operations dispatch outside CRUD — own input schema, own
+    // executor — so they are resolved before the entity table lookup. An
+    // unauthorized connector tool resolves to nothing, which falls through to
+    // the same NOT_FOUND an unknown name gets.
+    const connectorTool = resolveConnectorTool(listConnectorContracts(), name, {
+      roles: session.roles ?? [],
+    });
+    if (connectorTool) {
+      return failed(
+        new HttpError(
+          503,
+          "CONNECTOR_NOT_EXECUTABLE",
+          `Connector "${connectorTool.contract.slug}" is not executable on this deployment: ` +
+            "no implementation package is loaded.",
+        ),
+      );
+    }
+
     const match = catalog.tools.find((tool) => tool.name === name);
     const table = match ? tables.get(match.table) : undefined;
     // An unknown tool and one the caller may not invoke get the same answer:
@@ -422,7 +460,9 @@ export function registerGeneratedMcpServer(
   app: FastifyInstance,
   options: { db?: OpenShapeForgeDatabase | undefined } = {},
 ): void {
-  if (catalog.tools.length === 0) {
+  // The transport exists when EITHER surface has something to advertise; a
+  // deployment with connectors but no MCP-exposed entity still needs it.
+  if (catalog.tools.length === 0 && listConnectorContracts().length === 0) {
     return;
   }
 

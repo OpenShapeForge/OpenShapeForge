@@ -12,6 +12,7 @@
  * contract, rendered by a generic configuration form. Mirroring the whole field
  * vocabulary into SDL would freeze it into two places that must then agree.
  */
+import { GraphQLError } from "graphql";
 import type { GraphqlContext } from "../graphql/context.js";
 import {
   ConnectorAuthorizationError,
@@ -119,19 +120,21 @@ export type ConnectorGraphqlOptions = {
   now?: () => number;
 };
 
+/**
+ * Coded errors must be GraphQLError instances: yoga masks anything else as
+ * INTERNAL_SERVER_ERROR, which would swallow both the code and the reason and
+ * leave every connector refusal indistinguishable from a crash. Mirrors how the
+ * generated CRUD resolvers raise FORBIDDEN.
+ */
 function toServiceError(error: unknown): never {
   if (error instanceof ConnectorAuthorizationError) {
-    throw Object.assign(new Error(error.message), {
-      extensions: { code: error.code },
-    });
+    throw new GraphQLError(error.message, { extensions: { code: error.code } });
   }
   if (error instanceof ConnectorServiceError) {
-    throw Object.assign(new Error(error.message), {
-      extensions: { code: error.code },
-    });
+    throw new GraphQLError(error.message, { extensions: { code: error.code } });
   }
   if (error instanceof Error && error.name === "ConnectorConfigurationError") {
-    throw Object.assign(new Error(error.message), {
+    throw new GraphQLError(error.message, {
       extensions: { code: "CONNECTOR_INVALID_CONFIGURATION" },
     });
   }
@@ -143,7 +146,7 @@ export function createConnectorResolvers(options: ConnectorGraphqlOptions) {
 
   function catalogContext(context: GraphqlContext): CatalogContext {
     if (!context.db) {
-      throw Object.assign(new Error("Database is not configured."), {
+      throw new GraphQLError("Database is not configured.", {
         extensions: { code: "DATABASE_NOT_CONFIGURED" },
       });
     }

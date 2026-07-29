@@ -26,7 +26,7 @@ export type ConnectorOperationContract = {
   reliability: {
     timeouts: { attemptMs: number; totalMs: number };
     retry: { eligible: boolean; maxAttempts: number; backoff: string };
-    idempotency?: { strategy: string; keyInput?: string };
+    idempotency?: { strategy: string; keyInput?: string; header?: string };
     concurrency: { perTenant: number };
     limits: { requestBytes: number; responseBytes: number };
     pagination: { style: string };

@@ -18,6 +18,8 @@ import {
 import { createGraphqlYoga } from "../graphql/yoga.js";
 import { headersFromFastify } from "../http/headers.js";
 import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
+import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
+import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
 
 /** Startup drift check must not delay readiness meaningfully. */
@@ -239,6 +241,10 @@ export function createApiApp(
     });
 
     registerGeneratedRestRoutes(routes, dbOptions);
+    registerConnectorRestRoutes(routes, {
+      ...dbOptions,
+      config: readConnectorRuntimeConfig(),
+    });
     registerGeneratedMcpServer(routes, dbOptions);
   });
 

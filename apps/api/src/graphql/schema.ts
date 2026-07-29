@@ -15,13 +15,29 @@ import {
   generatedEntityResolvers,
   generatedEntityTypeDefs,
 } from "./generated-entity-schema.js";
+import {
+  connectorMutationFields,
+  connectorQueryFields,
+  connectorTypeDefs,
+  createConnectorResolvers,
+} from "../connectors/graphql-schema.js";
+import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import type { GraphqlContext } from "./context.js";
+
+// The connector catalog types are static — identical across deployments — so a
+// connector this deployment is not licensed for is a row with
+// status: NOT_LICENSED rather than a hole in the schema.
+const connectorResolvers = createConnectorResolvers({
+  config: readConnectorRuntimeConfig(),
+});
 
 export const graphqlSchema = createSchema<GraphqlContext>({
   typeDefs: /* GraphQL */ `
     scalar JSON
 
     ${generatedEntityTypeDefs}
+
+    ${connectorTypeDefs}
 
     type Health {
       status: String!
@@ -31,10 +47,12 @@ export const graphqlSchema = createSchema<GraphqlContext>({
     type Query {
       health: Health!
 ${generatedEntityQueryFields}
+${connectorQueryFields}
     }
 
     type Mutation {
 ${generatedEntityMutationFields}
+${connectorMutationFields}
     }
   `,
   resolvers: {
@@ -46,6 +64,7 @@ ${generatedEntityMutationFields}
     ...objectResolvers(),
     Query: {
       ...generatedEntityResolvers.Query,
+      ...connectorResolvers.Query,
       health: () => ({
         status: "ok",
         role: "api",
@@ -53,6 +72,7 @@ ${generatedEntityMutationFields}
     },
     Mutation: {
       ...generatedEntityResolvers.Mutation,
+      ...connectorResolvers.Mutation,
     },
   },
 });

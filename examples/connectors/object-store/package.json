@@ -1,0 +1,9 @@
+{
+  "name": "@openshapeforge/connector-example-object-store",
+  "version": "0.1.0",
+  "private": true,
+  "license": "BUSL-1.1",
+  "type": "module",
+  "description": "Example connector implementation package for the example-object-store contract.",
+  "module": "index.ts"
+}

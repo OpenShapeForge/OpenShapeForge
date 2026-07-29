@@ -212,13 +212,6 @@ export async function configureConnector(
   input: ConfigureInput,
 ): Promise<ConnectorInstallationView> {
   const contract = requireContract(context, input.slug);
-  const keyring = context.config.keyring;
-  if (!keyring) {
-    throw new ConnectorServiceError(
-      "CONNECTOR_SECRETS_NOT_CONFIGURED",
-      "Connector secret encryption is not configured on this deployment.",
-    );
-  }
 
   const grants = await listEntitlementGrants(context.db, context.session);
   const licensed = licensedEntitlements(context.config, context.now);
@@ -228,6 +221,17 @@ export async function configureConnector(
     throw new ConnectorServiceError(
       "CONNECTOR_NOT_LICENSED",
       `Connector "${input.slug}" is not licensed for this tenant.`,
+    );
+  }
+
+  // Checked AFTER entitlement: telling an unlicensed caller about this
+  // deployment's encryption configuration discloses state to someone who
+  // should not have got this far.
+  const keyring = context.config.keyring;
+  if (!keyring) {
+    throw new ConnectorServiceError(
+      "CONNECTOR_SECRETS_NOT_CONFIGURED",
+      "Connector secret encryption is not configured on this deployment.",
     );
   }
 

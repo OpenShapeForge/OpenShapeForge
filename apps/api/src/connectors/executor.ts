@@ -36,6 +36,8 @@ export type ConnectorExecutionErrorCode =
   | "CONNECTOR_PROVENANCE_REFUSED"
   | "CONNECTOR_EGRESS_DENIED"
   | "CONNECTOR_TIMEOUT"
+  | "CONNECTOR_RATE_LIMITED"
+  | "CONNECTOR_CIRCUIT_OPEN"
   | "CONNECTOR_UPSTREAM_ERROR";
 
 export class ConnectorExecutionError extends Error {

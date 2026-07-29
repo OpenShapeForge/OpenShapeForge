@@ -7,6 +7,9 @@ import {
   listAuthoringEntitySlugs,
 } from "./authoring/backend-manifest.js";
 import { resolveAuthoringLayers } from "./authoring/layers.js";
+import { buildConnector } from "./authoring/compiler/connector.js";
+import { listConnectorFiles, loadConnector } from "./authoring/connector-loader.js";
+import type { CompiledConnectorContract } from "./authoring/types/connector.js";
 import { loadManifest } from "./load-manifest.js";
 import {
   loadCompilerPlugins,
@@ -84,8 +87,27 @@ export type ActivePlatformCompile = {
   manifest: PlatformSchemaManifest;
   /** Compiled entity contracts, in deterministic allowlist order. */
   entities: CompiledEntityInfo[];
+  /** Compiled connector contracts, sorted by slug. */
+  connectors: CompiledConnectorContract[];
   plugins: CompilerPlugin[];
 };
+
+/**
+ * Compiles every `connectors/<slug>.yaml` in the resolved authoring tree.
+ * Connectors own no storage, so they compile independently of entity promotion
+ * — nothing here touches the manifest.
+ */
+function compileActiveConnectors(
+  authoringDir: string,
+  sourcePathPrefix: string,
+): CompiledConnectorContract[] {
+  return listConnectorFiles(authoringDir)
+    .map(({ slug, path }) => {
+      const origin = join(sourcePathPrefix, "connectors", `${slug}.yaml`);
+      return buildConnector(loadConnector(path, slug, origin), slug, origin);
+    })
+    .sort((a, b) => a.slug.localeCompare(b.slug));
+}
 
 const compileCache = new Map<string, Promise<ActivePlatformCompile>>();
 
@@ -132,6 +154,7 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
       return {
         manifest: mergePromotedTables(baseManifest, promotedManifest),
         entities,
+        connectors: compileActiveConnectors(authoringDir, relative(repoRoot, authoringDir)),
         plugins,
       };
     })();

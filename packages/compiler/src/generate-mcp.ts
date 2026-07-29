@@ -21,6 +21,13 @@
 import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
 import type { LocalizedText } from "./authoring/types/common.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
+import {
+  applyCollectionShape,
+  constraintsForField,
+  isCollection,
+  numericRule,
+  objectSchemaFrom,
+} from "./field-json-schema.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -127,78 +134,20 @@ function resolveEnum(
   };
 }
 
-function baseTypeFor(field: CompiledField): JsonObject {
-  switch (field.valueType) {
-    case "boolean":
-      return { type: "boolean" };
-    case "integer":
-      return { type: "integer" };
-    case "number":
-      return { type: "number" };
-    case "date":
-      return { type: "string", format: "date" };
-    case "datetime":
-      return { type: "string", format: "date-time" };
-    case "object":
-      return { type: "object" };
-    case "string":
-    default:
-      return { type: "string" };
-  }
-}
-
-/** Unwrap `x` or `{ value: x }` — validation rules carry either. */
-function ruleValue(rule: unknown): number | string | boolean | undefined {
-  if (rule === undefined || rule === null) return undefined;
-  if (typeof rule === "object" && "value" in (rule as JsonObject)) {
-    const inner = (rule as { value: unknown }).value;
-    return typeof inner === "number" || typeof inner === "string" || typeof inner === "boolean"
-      ? inner
-      : undefined;
-  }
-  return typeof rule === "number" || typeof rule === "string" || typeof rule === "boolean"
-    ? rule
-    : undefined;
-}
-
-function numericRule(rule: unknown): number | undefined {
-  const value = ruleValue(rule);
-  return typeof value === "number" ? value : undefined;
-}
-
-function stringRule(rule: unknown): string | undefined {
-  const value = ruleValue(rule);
-  return typeof value === "string" ? value : undefined;
-}
-
 /**
  * The authored field → JSON Schema mapping. This is the whole point of the
  * artifact: every constraint the author already wrote becomes a constraint the
  * model is told about up front, instead of one it discovers through a 400.
+ *
+ * The constraint half lives in `field-json-schema.ts` because the connector
+ * operation schemas must map identically; the enumeration and description half
+ * stays here because it is composed for a model, not for a validator.
  */
 function schemaForField(
   field: CompiledField,
   referentiedata: CoreReferentiedataSnapshot,
 ): JsonObject {
-  const scalar: JsonObject = baseTypeFor(field);
-  const validation = field.validation;
-
-  if (validation) {
-    const minLength = numericRule(validation.minLength);
-    const maxLength = numericRule(validation.maxLength);
-    const min = numericRule(validation.min);
-    const max = numericRule(validation.max);
-    const pattern = stringRule(validation.pattern);
-
-    if (minLength !== undefined) scalar.minLength = minLength;
-    if (maxLength !== undefined) scalar.maxLength = maxLength;
-    if (min !== undefined) scalar.minimum = min;
-    if (max !== undefined) scalar.maximum = max;
-    if (pattern !== undefined) scalar.pattern = pattern;
-    // `format: uuid` is both a JSON Schema format and the signal the storage
-    // layer uses to pick a uuid column, so it carries through unchanged.
-    if (validation.format !== undefined) scalar.format = validation.format;
-  }
+  const scalar: JsonObject = constraintsForField(field);
 
   const enumeration = resolveEnum(field, referentiedata);
   if (enumeration) {
@@ -225,18 +174,10 @@ function schemaForField(
     scalar.default = field.defaultValue;
   }
 
-  if (field.cardinality !== "collection") {
+  if (!isCollection(field)) {
     return scalar;
   }
-
-  // Collections: the scalar shape becomes the item shape. A description on the
-  // array itself is more useful to a model than one buried in `items`.
-  const { description, ...items } = scalar;
-  const array: JsonObject = { type: "array", items };
-  if (description !== undefined) array.description = description;
-  const minItems = numericRule(field.validation?.minItems);
-  if (minItems !== undefined) array.minItems = minItems;
-  return array;
+  return applyCollectionShape(scalar, field);
 }
 
 /**
@@ -259,20 +200,11 @@ function objectSchema(
   referentiedata: CoreReferentiedataSnapshot,
   options: { requireRequired: boolean },
 ): JsonObject {
-  const properties: JsonObject = {};
-  const required: string[] = [];
-  for (const field of fields) {
-    properties[field.key] = schemaForField(field, referentiedata);
-    if (options.requireRequired && field.required) {
-      required.push(field.key);
-    }
-  }
-  return {
-    type: "object",
-    properties,
-    ...(required.length > 0 ? { required } : {}),
-    additionalProperties: false,
-  };
+  return objectSchemaFrom(
+    fields,
+    (field) => schemaForField(field as CompiledField, referentiedata),
+    options,
+  );
 }
 
 function sortableFieldKeys(fields: CompiledField[]): string[] {

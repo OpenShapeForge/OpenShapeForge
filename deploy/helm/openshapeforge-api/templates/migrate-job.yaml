@@ -16,6 +16,8 @@ spec:
   activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds }}
   template:
     metadata:
+      annotations:
+        {{- include "openshapeforge-api.secretChecksumAnnotation" . | nindent 8 }}
       labels:
         {{- include "openshapeforge-api.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: migrate
@@ -64,8 +66,19 @@ spec:
             - name: OPENSHAPEFORGE_APP_PASSWORD_ROTATE
               value: "1"
             {{- end }}
+          {{- if .Values.tmpVolume.enabled }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          {{- end }}
           resources:
             {{- toYaml .Values.migration.resources | nindent 12 }}
+      {{- if .Values.tmpVolume.enabled }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmpVolume.sizeLimit }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

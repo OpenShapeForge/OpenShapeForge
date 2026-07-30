@@ -7,14 +7,26 @@ node_modules/
 dist/
 build/
 .next/
+next-env.d.ts
+*.tsbuildinfo
 coverage/
 
 # Compiler-generated artifacts (recreate with `bun run generate`)
 apps/api/src/generated/connectors/
 apps/api/src/generated/db/
 apps/api/src/generated/mcp/
+apps/api/src/generated/page-configs/
 apps/api/src/generated/rest/
 apps/api/src/generated/workflow/
+apps/web/src/actions/generated/
+apps/web/src/app/(generated)/
+apps/web/src/app/layout.tsx
+apps/web/src/app/page.tsx
+apps/web/src/compiler/
+apps/web/src/generated/
+apps/web/src/features/renderer/generated/
+apps/web/src/features/workflow/lib/nodes/generated/
+apps/web/src/lib/core-referentiedata-by-groep.json
 keycloak/*-realm.json
 cookies.txt
 .authoring-build/

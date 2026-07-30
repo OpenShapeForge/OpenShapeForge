@@ -27,6 +27,23 @@ services:
     networks:
       - service-net
 
+  # Session store for apps/web. The web app keeps the full OIDC session
+  # (access/id/refresh tokens) here and puts only an opaque session id in the
+  # encrypted cookie, so sign-in does not work without it.
+  redis:
+    image: redis:8-alpine
+    container_name: openshapeforge-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - service-net
+
   keycloak-db:
     image: postgres:18-alpine
     container_name: openshapeforge-keycloak-db
@@ -37,7 +54,12 @@ services:
       POSTGRES_PASSWORD: keycloak
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
-      - keycloak-db-data:/var/lib/postgresql/data
+      # Mount the whole data root, not `/var/lib/postgresql/data`. Postgres 18+
+      # images set PGDATA to a major-version subdirectory
+      # (`/var/lib/postgresql/18/docker`) and declare their volume one level up;
+      # mounting the pre-18 path makes the container exit on start. A major
+      # version bump still needs a fresh volume — there is no in-place upgrade.
+      - keycloak-db-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
       interval: 5s

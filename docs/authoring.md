@@ -21,7 +21,7 @@ authoring/
     retention-policies.yaml    named retention policies
     field-authoring-profiles.yaml  field-editor profiles (web authoring UI)
   authorization.yaml      Keycloak realm/clients/roles/groups/dev users
-  appShell.yaml           web app shell + sidebar navigation (dormant)
+  appShell.yaml           web app shell + sidebar navigation
   views/                  optional standalone view YAML (empty here)
   contexts/, mappings/    supported by the loader, unused in this repo
 ```
@@ -252,7 +252,7 @@ entity-derived roles. See [api.md](api.md#local-stack) for the dev logins.
 ## `appShell.yaml`
 
 Shell component + sidebar navigation (labels, icons, `entity:` references).
-Consumed only by web UI generation, which is dormant without `apps/web`.
+Consumed only by web UI generation, so it has no effect in a repo with no `apps/web`.
 
 ## Contexts and mappings (supported, unused here)
 

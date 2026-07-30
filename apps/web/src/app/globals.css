@@ -1,0 +1,267 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/*
+ * Design tokens. Keep this import before Tailwind's `@source`: CSS imports
+ * after other at-rules can be dropped by the dev CSS pipeline, leaving runtime
+ * `--color-brand-*` variables undefined.
+ *
+ * Path is relative rather than `@openshapeforge/ui/tokens.css` so bundlers that
+ * do not read package.json `exports` for CSS `@import` still resolve it.
+ */
+@import "../../../../packages/ui/src/tokens/index.css";
+
+/*
+ * Shared @openshapeforge/ui components live in a workspace package, so Tailwind
+ * must scan that source too. Without this, package-only arbitrary utilities
+ * (for example max-w-[1000px] and gradient card fills) are missing from the
+ * build.
+ */
+@source "../../../../packages/ui/src";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ==========================================================================
+   TIER 1: PRIMITIVE TOKENS
+   Raw palette values. Never applied directly to components.
+   These are the only values that change between light and dark modes.
+   ========================================================================== */
+
+:root {
+  /* Neutral retired — consumers now use `--color-white` from
+     @openshapeforge/ui/tokens (Figma: colors.main.white). */
+
+  /* Blue-slate scale — kept hand-typed for the muted/disabled steps because
+     Figma's `--color-foreground-muted` / `-disabled` values fail WCAG AA
+     contrast on white card surfaces (the Figma values are lighter than ours).
+     `--primitive-slate-900` and `--primitive-slate-300` ARE in Figma
+     (`--color-foreground` and `--color-foreground-disabled` light) but the
+     migration is paused until the design system fixes the contrast. */
+  --primitive-slate-700: #30394a;
+  --primitive-slate-500: #4b5566;
+  --primitive-slate-400: #8a8d98;
+  --color-foreground-muted: var(--primitive-slate-500);
+
+  /* Page surface palette — sourced from @openshapeforge/ui/tokens (Figma: colors.modes) */
+  --primitive-background: var(--color-background);
+  --primitive-surface: var(--color-surface);
+
+  /* Border palette — sourced from @openshapeforge/ui/tokens. `--primitive-border`
+     historically held Figma's `input-border` value; keep that mapping. */
+  --primitive-border: var(--color-input-border);
+  --primitive-border-subtle: var(--color-border-subtle);
+
+  /* Brand colour scales — sourced from @openshapeforge/ui/tokens (Figma: colors.brand) */
+  --primitive-indigo-100: var(--color-brand-indigo-100);
+  --primitive-indigo-80: var(--color-brand-indigo-80);
+  --primitive-indigo-60: var(--color-brand-indigo-60);
+
+  /* Accent — Figma: colors.modes.accent */
+  --primitive-accent: var(--color-accent);
+
+  /* Shadow scale — no Figma equivalent; values declared directly on the
+     semantic `--shadow-*` tokens (no primitive indirection). The `.dark`
+     block below overrides them for heavier dark-mode shadows. */
+  --shadow-xs: 0 1px 2px oklch(0 0 0 / 0.05);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.1), 0 1px 3px oklch(0 0 0 / 0.1);
+  --shadow-panel: 0 0 8px rgba(0, 0, 0, 0.08);
+  --shadow-panel-lg: 0 0 16px rgba(0, 0, 0, 0.16);
+  --shadow-selected: 0 0 4px rgba(0, 0, 0, 0.25);
+}
+
+/* ==========================================================================
+   TIER 2: SEMANTIC TOKENS
+   Intent-based tokens that reference primitives. Applied to components
+   via Tailwind utilities (e.g., bg-background, text-primary).
+   ========================================================================== */
+
+/* Static tokens: font stacks, animations — don't change between themes */
+@theme {
+  --radius: 0.25rem;
+  --font-sans: var(--font-dm-sans), "DM Sans", ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+}
+
+/* Dynamic tokens: colors that switch between light/dark via primitive overrides */
+@theme inline {
+  /* Surface colors */
+  --color-background: var(--primitive-background);
+  --color-surface: var(--primitive-surface);
+  --color-foreground: var(--color-foreground);
+  --color-foreground-subtle: var(--primitive-slate-700);
+  --color-foreground-disabled: var(--primitive-slate-400);
+  --color-card: var(--color-card);
+  --color-card-foreground: var(--color-foreground);
+  --color-popover: var(--color-card);
+  --color-popover-foreground: var(--color-foreground);
+
+  /* Interactive colors */
+  --color-primary: var(--color-foreground);
+  --color-primary-foreground: var(--color-white);
+  --color-secondary: var(--primitive-accent);
+  --color-secondary-foreground: var(--color-foreground);
+  --color-accent: var(--primitive-accent);
+  --color-accent-foreground: var(--color-foreground);
+  /* Figma functional reds fail WCAG AA for 12px normal text on white and for
+     white-on-solid badges at the mapped step. Use a single darker semantic
+     red for fills and foreground without editing generated Battery tokens. */
+  --color-destructive: #c4002a;
+  --color-destructive-bg: var(--color-functional-red-10);
+  --color-destructive-border: var(--color-functional-red-20);
+  --color-destructive-subtle: var(--color-functional-red-5);
+  --color-action-primary: var(--primitive-indigo-100);
+  --color-action-primary-hover: var(--primitive-indigo-80);
+  --color-action-primary-foreground: var(--color-white);
+
+  /* Muted / disabled */
+  --color-muted: var(--primitive-surface);
+  --color-muted-foreground: var(--primitive-slate-500);
+
+  /* Borders and inputs */
+  --color-border: var(--primitive-border);
+  --color-border-subtle: var(--primitive-border-subtle);
+  --color-input: var(--primitive-border);
+  --color-ring: var(--primitive-indigo-80);
+
+  /* Status colors — `--color-warning` is used by the workflow designer canvas
+     (color-mix into surfaces). Sourced from Figma's functional orange.
+     `--color-success` and `--color-chart-*` were declared but unused; removed. */
+  --color-warning: var(--color-functional-orange-100);
+
+  /* Workflow node card interaction colours — Figma: node component (15:5173).
+     `case` variant uses a different focus treatment (foreground-disabled +
+     input-border shadow); see CASE_FOCUS_RING in `node.tsx`. */
+  --color-node-card-border-subtle: var(--color-border-subtle);
+  --color-node-card-border: var(--color-input-border);
+  --color-node-card-focus: var(--color-brand-aquamarine-60);
+  --color-node-card-focus-glow: var(--color-brand-aquamarine-40);
+  /* Canvas interaction accent — used by designer-canvas-client.module.css for
+     selected / drop-target / preview states. Mapped to aquamarine-100 (vs the
+     Node component's own aquamarine-60 focus ring) so the overlays stay
+     readable at the 8–52% opacities the canvas applies. The runtime "active"
+     badge does NOT consume this token (aquamarine fails WCAG AA on white at
+     every shade) — it uses an aquamarine-20 tinted pill with foreground text,
+     bordered by --color-node-card-focus.
+     TODO: replace with explicit canvas-interaction tokens once the designer
+     formalises them — see the canvas-interaction token proposal */
+  --color-node-selected: var(--color-brand-aquamarine-100);
+
+  /* Sidebar — TIER 3: component-scoped tokens. Figma also has
+     `--color-sidebar` (`#eef1f5` light) which differs from the hand-typed
+     "white card" sidebar — leaving the override here as a code-side choice
+     until we agree to switch. */
+  --color-sidebar: var(--color-card);
+  --color-sidebar-foreground: var(--primitive-slate-700);
+  --color-sidebar-primary: var(--color-foreground);
+  --color-sidebar-primary-foreground: var(--color-white);
+  --color-sidebar-accent: var(--primitive-accent);
+  --color-sidebar-accent-foreground: var(--color-foreground);
+  --color-sidebar-border: var(--primitive-border-subtle);
+  --color-sidebar-ring: var(--primitive-indigo-80);
+
+  /* Radius scale — semantic names alias to Figma's t-shirt scale.
+     Figma exports `--radius-extrasmall|small|medium|large|extralarge|full`
+     via @openshapeforge/ui/tokens. Components reference `--radius-field` etc.
+     directly. The unused hand-typed `--radius-large: 12px` was dropped —
+     Figma's `--radius-large` is 8px, which matches `--radius-card`. */
+  --radius-field: var(--radius-small);
+  --radius-container: var(--radius-medium);
+  --radius-card: var(--radius-large);
+}
+
+/* ==========================================================================
+   DARK MODE
+   Override primitive values. Semantic tokens automatically resolve to
+   dark values through var() references.
+   ========================================================================== */
+
+.dark {
+  /* Slate dark equivalents (paused-migration steps). */
+  --primitive-slate-700: oklch(0.82 0.012 240);
+  --primitive-slate-500: oklch(0.64 0.012 240);
+  --primitive-slate-400: oklch(0.52 0.010 240);
+
+  /* Page surface, border, indigo, accent, border-subtle, foreground, white,
+     foreground-disabled dark values come from @openshapeforge/ui/tokens (Figma
+     `.dark` block overrides). The indigo brand scale is intentionally flat
+     across modes per Figma. */
+
+  /* Shadows — heavier in dark */
+  --shadow-xs: 0 1px 2px oklch(0 0 0 / 0.15);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.2), 0 1px 3px oklch(0 0 0 / 0.2);
+  --shadow-panel: 0 0 8px rgba(0, 0, 0, 0.24);
+  --shadow-panel-lg: 0 0 16px rgba(0, 0, 0, 0.4);
+  --shadow-selected: 0 0 4px rgba(0, 0, 0, 0.5);
+}
+
+/* ==========================================================================
+   KEYFRAMES
+   ========================================================================== */
+
+@keyframes accordion-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-accordion-content-height);
+  }
+}
+
+@keyframes accordion-up {
+  from {
+    height: var(--radix-accordion-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
+/* ==========================================================================
+   SHARED UTILITIES
+   ========================================================================== */
+
+@utility focus-ring {
+  &:focus-visible {
+    position: relative;
+    z-index: 1;
+    border-color: var(--color-ring);
+    outline: 4px solid color-mix(in oklab, var(--color-ring) 35%, transparent);
+    outline-offset: 0px;
+  }
+}
+
+@utility focus-ring-within {
+  &:has(input:focus-visible) {
+    position: relative;
+    z-index: 1;
+    border-color: var(--color-ring);
+    outline: 4px solid color-mix(in oklab, var(--color-ring) 35%, transparent);
+    outline-offset: 0px;
+  }
+}
+
+@utility animate-fade-in-out {
+  &[data-state="open"] {
+    @apply animate-in fade-in-0;
+  }
+  &[data-state="closed"] {
+    @apply animate-out fade-out-0;
+  }
+}
+
+/* ==========================================================================
+   BASE LAYER
+   ========================================================================== */
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

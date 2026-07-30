@@ -15,11 +15,40 @@ tables:
       - { name: applied_at, type: timestamptz, required: true, default: now() }
       - { name: applied_by, type: text }
 
-  # Global, tenant-agnostic workflow-node catalog. Compiler-generated platform
-  # config (identical for every tenant) — NOT tenant data, so tenantScoped:false
-  # (no tenant_id, no RLS). One row per workflow node type, serving three
-  # projections: the API standard-node catalog, the designer palette, and the
-  # designer detail (config/output fields).
+  # Global, tenant-agnostic page-config catalog for the generated web CRUD
+  # pages. Compiler-generated platform config, identical for every tenant — NOT
+  # tenant data, so tenantScoped:false (no tenant_id, no RLS), and
+  # domainInternal so no generated CRUD/GraphQL surface is emitted for it. It is
+  # read through the hand-written `entityPageConfigs` query in
+  # `apps/api/src/graphql/schema.ts`.
+  #
+  # One row per (entity_slug, config_kind). `id` is "<entity_slug>:<config_kind>"
+  # so the seeder can upsert on a single-column primary key, mirroring
+  # entity_trigger_registry. `checksum` is the sha256 the compiler computes over
+  # the whole serialized row set, so the seeder can skip a run whose input has
+  # not changed.
+  #
+  # Rows exist only when the repo has an `apps/web`: the seed is emitted by the
+  # web-gated UI generator. Without one the table stays empty and nothing reads
+  # it.
+  - schema: platform
+    name: entity_page_configs
+    tenantScoped: false
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: text, primaryKey: true }
+      - { name: entity_slug, type: text, required: true }
+      # 'list' | 'detail' | 'workspace' | 'create_form' | 'edit_form'
+      - { name: config_kind, type: text, required: true }
+      - { name: configs, type: jsonb, required: true, default: "'{}'::jsonb" }
+      - { name: checksum, type: text, required: true }
+    indexes:
+      - name: entity_page_configs_slug_kind_uidx
+        columns: [entity_slug, config_kind]
+        unique: true
+      - name: entity_page_configs_slug_idx
+        columns: [entity_slug]
 
   - schema: platform
     name: entity_events

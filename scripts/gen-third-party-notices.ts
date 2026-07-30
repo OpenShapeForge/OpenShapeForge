@@ -3,12 +3,32 @@
 /**
  * Regenerates THIRD-PARTY-NOTICES.md from the installed dependency tree.
  *
- *   bun run notices
+ *   bun run notices:linux    # regenerate (what CI checks)
+ *   bun run notices          # regenerate from THIS machine's install
  *
  * Walks bun's isolated store (node_modules/.bun/<key>/node_modules/<pkg>) for
  * every third-party package, reads its declared license + bundled license
  * text, and writes an aggregated, deduplicated notices file. Run after
  * changing dependencies.
+ *
+ * ## The committed file is the linux-x64 artifact
+ *
+ * Since the web app arrived, the tree carries platform-native optional
+ * packages — `@next/swc-*`, `@tailwindcss/oxide-*`, `lightningcss-*`,
+ * `@img/sharp-*` — and bun installs only the current platform's. A macOS
+ * install therefore yields `*-darwin-arm64` where CI's linux-x64 runner yields
+ * `*-linux-x64-{gnu,musl}`, so the walk cannot agree across platforms.
+ *
+ * They cannot simply be excluded: `@img/sharp-libvips-*` is LGPL-3.0-or-later
+ * while its parent `sharp` is Apache-2.0, so dropping the natives would drop a
+ * distinct license from a file whose whole job is attribution. Nor can the list
+ * come from `bun.lock` — it records versions, not licenses, and the license
+ * text only exists inside an installed package.
+ *
+ * So the committed file is generated for linux-x64: the platform CI runs and
+ * the one the Docker images ship. `notices:linux` does that in a container.
+ * Running plain `notices` on a Mac will produce a file that fails `--check` in
+ * CI; regenerate with `notices:linux` before committing.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";

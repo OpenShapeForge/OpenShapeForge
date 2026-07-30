@@ -91,6 +91,31 @@ Rules enforced by the runner (`versioned-runner.ts`):
 - If you create permanent tables in a bespoke migration, prefer moving them
   into authoring YAML afterwards so the manifest owns them.
 
+## The page-config seed
+
+The last step of the chain is data, not DDL:
+`apps/api/src/db/migrations/entity-page-configs-seed.ts` loads the compiler's
+page-config catalog
+(`apps/api/src/generated/page-configs/entity-page-configs.seed.json`) into
+`platform.entity_page_configs`. It runs after the grant sweep, so the table
+exists and the runtime role can already read it.
+
+- **Skippable.** The seed carries one sha256 over its whole serialized row
+  set. When every row in the table already carries that checksum and the row
+  count agrees, the run is a no-op — `db:migrate` on an unchanged repo does
+  not rewrite the catalog.
+- **Authoritative.** Rows the seed no longer describes are deleted. An entity
+  that stops emitting page configs — renamed, or its generated CRUD switched
+  off — must not leave a stale row for the renderer to pick up.
+- **Optional.** No seed file (a repo with no `apps/web`) is a no-op, reported
+  as absent rather than as an error.
+
+`configs` is bound as an object, never a pre-stringified string: the pg driver
+serializes object parameters itself, so stringifying first stores a jsonb
+*string* containing JSON and every reader gets a string back. There is a
+regression test for exactly that
+(`src/db/__tests__/entity-page-configs-seed.test.ts`).
+
 ## Drift signals
 
 Two independent tripwires compare the DB's recorded checksum against the

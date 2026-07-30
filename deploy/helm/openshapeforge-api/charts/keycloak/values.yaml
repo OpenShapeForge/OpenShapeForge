@@ -78,12 +78,24 @@ service:
 # Exposing Keycloak CHANGES THE ISSUER. Tokens carry `iss` derived from
 # `hostname` above, and the API verifies that claim against auth.bearer.issuer
 # in the parent chart. Set both together or every token stops validating.
+#
+# Enabling this without a tls block FAILS the render — the token endpoint and
+# the login flow must not be reachable over plaintext HTTP.
 ingress:
   enabled: false
   className: ""
   annotations: {}
   hosts: []
   tls: []
+  # Merged in (never overriding ingress.annotations) whenever TLS is configured.
+  # ingress-nginx keys — replace them for another controller.
+  sslRedirect:
+    enabled: true
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  # Only for TLS terminated upstream by a load balancer or mesh.
+  allowPlaintext: false
 
 # Extra environment variables (name/value) appended to the container.
 extraEnv: []
@@ -129,12 +141,22 @@ podSecurityContext:
 
 securityContext:
   allowPrivilegeEscalation: false
-  # Keycloak writes to /opt/keycloak/data at runtime, so the root filesystem
-  # cannot be read-only without additional volume plumbing.
-  readOnlyRootFilesystem: false
+  # Keycloak writes to /opt/keycloak/data and /tmp at runtime; both are mounted
+  # as emptyDir below (writableVolumes), so the root filesystem itself can stay
+  # read-only. `kc.sh build` already ran at image build time and the container
+  # boots with `start --optimized`, so nothing re-augments /opt/keycloak/lib.
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL
+
+# Writable scratch that readOnlyRootFilesystem: true depends on. Keycloak keeps
+# its transaction/state scratch under /opt/keycloak/data — emptyDir is correct
+# here because the durable state lives in Postgres, not on the pod.
+writableVolumes:
+  enabled: true
+  dataSizeLimit: 256Mi
+  tmpSizeLimit: 64Mi
 
 podAnnotations: {}
 podLabels: {}

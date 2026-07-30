@@ -55,6 +55,22 @@ true
 {{- end -}}
 
 {{/*
+Rolls the pod when a chart-managed credential changes. Every value reaches the
+container by secretKeyRef, so without this a rotated KC_DB_PASSWORD updates the
+Secret while leaving the pod spec identical, and Keycloak keeps running with the
+credential that was just rotated away.
+
+Only the chart-managed Secret is hashed: with database.existingSecret the
+contents live outside this release, and a constant annotation would falsely
+imply rotation coverage.
+*/}}
+{{- define "keycloak.secretChecksumAnnotation" -}}
+{{- if not .Values.database.existingSecret -}}
+checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Image pull secrets, preferring the subchart's own list and falling back to the
 parent's global list so a single --set at the top level covers both workloads.
 */}}

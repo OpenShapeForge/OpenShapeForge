@@ -142,6 +142,10 @@ service:
   targetPort: 3001
 
 # --- Ingress (optional) ------------------------------------------------------
+# The API carries OIDC bearer tokens and signed internal-context headers, so
+# plaintext HTTP is never an acceptable default. Enabling ingress without a tls
+# block FAILS the render (see templates/ingress.yaml) rather than quietly
+# serving the API over HTTP.
 ingress:
   enabled: false
   className: ""
@@ -151,7 +155,27 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
+  # Each entry: {secretName, hosts: []}. With cert-manager, name a secret that
+  # does not exist yet and add its issuer annotation, e.g.
+  #   annotations:
+  #     cert-manager.io/cluster-issuer: letsencrypt-prod
+  #   tls:
+  #     - secretName: openshapeforge-api-tls
+  #       hosts: [api.example.com]
   tls: []
+  # Annotations merged in (never overriding ingress.annotations) whenever TLS is
+  # configured, so a request that arrives on :80 is redirected instead of
+  # answered. These are ingress-nginx keys — replace them for another controller.
+  sslRedirect:
+    enabled: true
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  # Escape hatch for the one legitimate plaintext case: TLS terminated upstream
+  # by a load balancer or service mesh the chart cannot see. Setting this to
+  # true serves the API over HTTP if nothing else terminates TLS — it is a
+  # deliberate, auditable choice, not a default.
+  allowPlaintext: false
 
 # --- Workload ----------------------------------------------------------------
 resources:
@@ -198,10 +222,22 @@ podSecurityContext:
 
 securityContext:
   allowPrivilegeEscalation: false
-  readOnlyRootFilesystem: false
+  # The image is a static Bun app: it reads generated artifacts baked at build
+  # time and never writes to its own filesystem. Verified in CI — the API image
+  # smoke test in .github/workflows/docker-api.yml boots the container with
+  # `--read-only`. The chart still mounts an emptyDir at /tmp (see below) so a
+  # dependency reaching for os.tmpdir() has somewhere to go.
+  readOnlyRootFilesystem: true
   capabilities:
     drop:
       - ALL
+
+# Writable scratch mounted at /tmp in the API container and the migrate Job,
+# so readOnlyRootFilesystem: true does not depend on nothing ever needing a
+# temp file. sizeLimit caps it; the pod is evicted rather than filling the node.
+tmpVolume:
+  enabled: true
+  sizeLimit: 64Mi
 
 serviceAccount:
   create: true

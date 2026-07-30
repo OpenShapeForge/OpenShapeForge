@@ -26,3 +26,25 @@ are configured. Set auth.bearer.{jwksUri,issuer,audience} and provide
 OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET (via database.existingSecret or
 auth.internalContextSecret).
 {{- end }}
+
+{{- if and .Values.ingress.enabled .Values.ingress.allowPlaintext (not .Values.ingress.tls) }}
+
+WARNING: ingress.allowPlaintext=true and ingress.tls is empty, so this Ingress
+serves the API over HTTP. Bearer tokens and signed internal-context headers are
+readable, and replayable, by anyone on the network path. This is only safe if
+something upstream (load balancer, service mesh) terminates TLS and refuses
+plaintext. Otherwise set ingress.tls.
+{{- end }}
+
+{{- if .Values.database.existingSecret }}
+
+NOTE: credentials come from the existing Secret {{ .Values.database.existingSecret }}.
+The chart cannot hash contents it does not render, so rotating a value in that
+Secret will NOT roll the pods — they keep the credential injected at their last
+start. After rotating, restart them explicitly:
+
+  kubectl rollout restart -n {{ .Release.Namespace }} deploy/{{ include "openshapeforge-api.fullname" . }}
+
+(With chart-managed credentials a checksum/secret pod annotation does this for
+you on every `helm upgrade`.)
+{{- end }}

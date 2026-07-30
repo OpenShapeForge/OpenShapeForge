@@ -11,15 +11,19 @@
 # Job with the privileged DB URL, and the API Deployment with the restricted
 # role — see docs/api.md and SECURITY.md for the production posture.
 
+# Base images are pinned by DIGEST as well as tag: a tag is mutable and can be
+# repointed at different bytes without any diff here. Dependabot's docker
+# ecosystem (.github/dependabot.yml) bumps the tag and the digest together.
+
 # --- builder: install workspace deps + generate artifacts --------------------
-FROM oven/bun:1.3.4 AS builder
+FROM oven/bun:1.3.4@sha256:7608db4aeb44f1fe8169cc8ec7055376b3013557b106407ccf092b00e426407d AS builder
 WORKDIR /app
 COPY . .
 RUN bun install --frozen-lockfile
 RUN bun run generate
 
 # --- runtime -----------------------------------------------------------------
-FROM oven/bun:1.3.4 AS runtime
+FROM oven/bun:1.3.4@sha256:7608db4aeb44f1fe8169cc8ec7055376b3013557b106407ccf092b00e426407d AS runtime
 ENV NODE_ENV=production \
     PORT=3001 \
     HOST=0.0.0.0

@@ -61,6 +61,7 @@
         "openshapeforge-compiler": "./src/index.ts",
       },
       "dependencies": {
+        "ajv": "^8.20.0",
         "ejs": "^5.0.1",
         "glob": "^13.0.6",
         "graphql": "^16.14.0",

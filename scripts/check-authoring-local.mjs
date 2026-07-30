@@ -24,6 +24,11 @@ async function listFiles(root, current = root) {
   return files.sort();
 }
 
+// Deliberately NOT a conformance check. This asserts the schema directory is
+// present and parses; whether authoring MATCHES those schemas is a separate
+// gate (`bun run check:authoring-schemas`, #182). The success line below says
+// which, because the previous wording — "self-consistent (… , 14 schemas)" —
+// read as schema conformance while only ever being a JSON.parse.
 async function assertReadableJsonFiles(root, label) {
   const files = await listFiles(root);
   const jsonFiles = files.filter((file) => file.endsWith(".json"));
@@ -68,5 +73,6 @@ const pluginNote =
     : "";
 console.log(
   `Local authoring catalog is self-consistent (${first.all.length} artifacts, ` +
-    `${manifest.tables.length} tables, ${schemaCount} schemas${pluginNote}).`,
+    `${manifest.tables.length} tables${pluginNote}). ` +
+    `${schemaCount} schema files parse; conformance is checked by check:authoring-schemas.`,
 );

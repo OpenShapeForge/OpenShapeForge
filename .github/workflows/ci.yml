@@ -66,6 +66,11 @@ jobs:
       - name: Check local authoring catalog is self-consistent
         run: bun run check:authoring-local
 
+      # Conformance, which check:authoring-local never checked despite its
+      # wording (#182): every authoring YAML against the schema for its kind.
+      - name: Check authoring matches its schemas
+        run: bun run check:authoring-schemas
+
       - name: Check THIRD-PARTY-NOTICES is up to date
         run: bun run check:notices
 

@@ -1,12 +1,27 @@
 {{- if .Values.ingress.enabled -}}
 {{- $fullName := include "openshapeforge-api.fullname" . -}}
+{{- /*
+  Fail closed. This API authenticates with OIDC bearer tokens and signed
+  internal-context headers; served over plaintext HTTP both are readable, and
+  replayable, by anyone on path. An operator who enables ingress without TLS is
+  almost never doing it on purpose, so refuse rather than warn — unless they say
+  so explicitly via ingress.allowPlaintext (TLS terminated upstream).
+*/ -}}
+{{- if and (not .Values.ingress.tls) (not .Values.ingress.allowPlaintext) -}}
+{{- fail "ingress.enabled=true with an empty ingress.tls would serve bearer tokens and signed context headers over plaintext HTTP. Set ingress.tls (with a cert-manager annotation, or a pre-provisioned secret), or set ingress.allowPlaintext=true if TLS is terminated upstream by a load balancer or mesh." -}}
+{{- end -}}
+{{- $annotations := .Values.ingress.annotations | default dict -}}
+{{- if and .Values.ingress.tls .Values.ingress.sslRedirect.enabled -}}
+{{- /* Merge order matters: ingress.annotations wins over the defaults. */ -}}
+{{- $annotations = merge (deepCopy $annotations) (.Values.ingress.sslRedirect.annotations | default dict) -}}
+{{- end -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ $fullName }}
   labels:
     {{- include "openshapeforge-api.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- with $annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}

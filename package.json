@@ -21,6 +21,7 @@
     "check:notices": "bun scripts/gen-third-party-notices.ts --check",
     "check:license": "bun scripts/check-license-headers.mjs",
     "check:keycloak-lockstep": "bun scripts/check-keycloak-lockstep.mjs",
+    "check:required-checks": "bun scripts/check-required-checks.mjs",
     "license:headers": "bun scripts/add-license-headers.mjs",
     "typecheck:compiler": "bun run check:ts-nocheck && bun run --cwd packages/compiler typecheck",
     "typecheck:api": "bun run --cwd apps/api typecheck",

@@ -1,0 +1,284 @@
+// SPDX-License-Identifier: BUSL-1.1
+/**
+ * The schemas in config/schemas were never validated against anything (#182),
+ * so both halves of the contract could drift silently — and had. These tests
+ * pin both halves:
+ *
+ *   - the registry loads and every schema compiles (a dangling $ref used to be
+ *     undetectable, because nothing ever compiled them);
+ *   - a violation is rejected, with the offending path named;
+ *   - schema and compiler agree, in the direction that matters: the schema must
+ *     never reject a shape the compiler accepts, or authoring that works is
+ *     refused by its own documentation.
+ */
+import { describe, expect, it } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildConnector } from "./compiler/connector.js";
+import { loadConnector, validateConnectorContentIdentifiers } from "./connector-loader.js";
+import {
+  SCHEMA_BY_KIND,
+  UNSCHEMAD_KINDS,
+  authoringValidator,
+  createAuthoringValidator,
+} from "./schema-validation.js";
+import type { ConnectorDefinition } from "./types/connector.js";
+
+const validator = authoringValidator();
+
+/**
+ * Overrides are deliberately loosely typed: several tests supply shapes the
+ * TypeScript types forbid on purpose (a `backoff` outside the union, a missing
+ * `implementation`), because the point is what the SCHEMA does with them.
+ */
+function connectorDefinition(
+  overrides: Record<string, unknown> = {},
+): ConnectorDefinition {
+  return {
+    schemaVersion: 1,
+    kind: "connector",
+    connector: "ObjectStore",
+    title: "Object storage",
+    capabilities: ["operations"],
+    implementation: {
+      package: "@openshapeforge/connector-object-store",
+      contractVersion: 1,
+      provenance: "firstParty",
+      license: { spdx: "LicenseRef-BatterAI-Commercial" },
+    },
+    operations: [
+      {
+        key: "listObjects",
+        kind: "query",
+        authorization: { roles: { invoke: ["Connectors.All.Read"] } },
+        input: [{ key: "prefix", valueType: "string" }],
+        output: { cardinality: "many", fields: [{ key: "key", valueType: "string" }] },
+      },
+    ],
+    ...overrides,
+  } as ConnectorDefinition;
+}
+
+/** Writes a connector YAML-as-JSON (valid YAML) and loads it through the loader. */
+function loadFromDisk(definition: unknown, slug = "object-store") {
+  const dir = mkdtempSync(join(tmpdir(), "osf-schema-"));
+  const path = join(dir, `${slug}.yaml`);
+  writeFileSync(path, JSON.stringify(definition, null, 2));
+  return () => loadConnector(path, slug, `connectors/${slug}.yaml`);
+}
+
+describe("the schema registry", () => {
+  it("loads every schema, so a dangling $ref cannot hide", () => {
+    // The failure this replaces: compiled-entity-contract.schema.json referenced
+    // canonical-field.schema.json, a file that does not exist, and nothing
+    // noticed because nothing ever compiled the schema.
+    expect(validator.schemaFiles.length).toBeGreaterThan(0);
+    expect(validator.schemaFiles).toContain("core-entity.schema.json");
+    expect(validator.schemaFiles).toContain("connector.schema.json");
+  });
+
+  it("maps every kind to a schema or to a documented reason for having none", () => {
+    const overlap = Object.keys(SCHEMA_BY_KIND).filter((kind) => kind in UNSCHEMAD_KINDS);
+    expect(overlap).toEqual([]);
+    for (const reason of Object.values(UNSCHEMAD_KINDS)) {
+      expect(reason.length).toBeGreaterThan(10);
+    }
+  });
+
+  it("refuses a kind that is in neither list, rather than skipping it", () => {
+    expect(() => validator.validate({ kind: "somethingNew" }, "test.yaml")).toThrow(
+      /maps to no schema/,
+    );
+  });
+
+  it("refuses a document with no kind", () => {
+    expect(() => validator.validate({ title: "x" }, "test.yaml")).toThrow(/no `kind`/);
+  });
+
+  it("reports a schema directory whose refs do not resolve", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osf-broken-"));
+    writeFileSync(
+      join(dir, "broken.schema.json"),
+      JSON.stringify({
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        $id: "https://example.test/broken.schema.json",
+        type: "object",
+        properties: { kind: { const: "broken" }, x: { $ref: "no-such-file.schema.json" } },
+      }),
+    );
+    expect(() => createAuthoringValidator(dir)).toThrow(/do not compile/);
+  });
+});
+
+describe("a violation is rejected, with the offending path named", () => {
+  it("rejects a core entity field in the superseded v1 shape", () => {
+    // `type` was the v1 spelling; the compiler has taken `valueType` for a long
+    // time, but core-entity.schema.json still required `type` — the exact drift
+    // that made every shipped entity fail its own schema.
+    expect(() =>
+      validator.validate(
+        {
+          schemaVersion: 1,
+          kind: "coreEntity",
+          module: "core",
+          entity: "Widget",
+          title: "Widget",
+          language: "en",
+          fields: [{ key: "name", type: "string" }],
+        },
+        "widget.yaml",
+      ),
+    ).toThrow(/fields\/0/);
+  });
+
+  it("rejects an unknown property on a field", () => {
+    expect(() =>
+      validator.validate(
+        {
+          schemaVersion: 1,
+          kind: "coreEntity",
+          module: "core",
+          entity: "Widget",
+          title: "Widget",
+          language: "en",
+          fields: [{ key: "name", valueType: "string", notAThing: true }],
+        },
+        "widget.yaml",
+      ),
+    ).toThrow(/notAThing/);
+  });
+
+  it("accepts a well-formed core entity", () => {
+    expect(
+      validator.validate(
+        {
+          schemaVersion: 1,
+          kind: "coreEntity",
+          module: "core",
+          entity: "Widget",
+          title: "Widget",
+          language: "en",
+          fields: [{ key: "name", valueType: "string", required: true }],
+        },
+        "widget.yaml",
+      ),
+    ).toBe("core-entity.schema.json");
+  });
+});
+
+describe("connector contracts are validated at LOAD, not only in the corpus gate", () => {
+  it("accepts a well-formed contract", () => {
+    expect(loadFromDisk(connectorDefinition())().connector).toBe("ObjectStore");
+  });
+
+  it("rejects a malformed contract before any identifier check runs", () => {
+    const definition = { ...connectorDefinition() } as Record<string, unknown>;
+    delete definition.implementation;
+    expect(loadFromDisk(definition)).toThrow(/connector\.schema\.json/);
+  });
+
+  it("names the offending path", () => {
+    const definition = connectorDefinition({
+      operations: [
+        {
+          key: "listObjects",
+          kind: "query",
+          output: { cardinality: "many", fields: [{ key: "key", valueType: "string" }] },
+          reliability: { retry: { eligible: true, backoff: "sideways" } },
+        },
+      ],
+    });
+    expect(loadFromDisk(definition)).toThrow(/backoff/);
+  });
+
+  it("keeps the identifier allowlist as an independent gate", () => {
+    // Schema validation does not replace it: a shape schema documents a shape,
+    // it is not injection defence, and it can be edited. Asserted against the
+    // allowlist directly, because going through loadConnector would prove
+    // nothing — the schema's own `connector` pattern rejects this too, so the
+    // error could come from either layer.
+    const hostile = connectorDefinition({ connector: "Object`Store" });
+    expect(() => validateConnectorContentIdentifiers(hostile, "test.yaml")).toThrow(
+      /Unsafe connector name/,
+    );
+    // Operation keys too. The schema happens to carry the same pattern today —
+    // which is the point: two independent layers agreeing is the design, and
+    // this assertion holds even if the schema's pattern is loosened.
+    const hostileKey = connectorDefinition({
+      operations: [
+        {
+          key: "list`Objects",
+          kind: "query",
+          authorization: { roles: { invoke: ["Connectors.All.Read"] } },
+          output: { cardinality: "many", fields: [{ key: "key", valueType: "string" }] },
+        },
+      ],
+    });
+    expect(() => validateConnectorContentIdentifiers(hostileKey, "test.yaml")).toThrow(
+      /Unsafe/,
+    );
+  });
+});
+
+describe("schema and compiler agree", () => {
+  /**
+   * The direction that matters. A schema stricter than the compiler refuses
+   * authoring that works — which is what `reliability.timeoutMs` did: the
+   * schema declared a key the compiler never reads, while rejecting the
+   * `timeouts: { attemptMs, totalMs }` it does.
+   */
+  const acceptedByCompiler: Array<[string, ConnectorDefinition]> = [
+    [
+      "split attempt/total timeouts",
+      connectorDefinition({
+        operations: [
+          {
+            key: "listObjects",
+            kind: "query",
+            authorization: { roles: { invoke: ["Connectors.All.Read"] } },
+            output: { cardinality: "many", fields: [{ key: "key", valueType: "string" }] },
+            reliability: { timeouts: { attemptMs: 10_000, totalMs: 30_000 } },
+          },
+        ],
+      }),
+    ],
+    [
+      "retry with idempotency",
+      connectorDefinition({
+        operations: [
+          {
+            key: "putObject",
+            kind: "mutation",
+            authorization: { roles: { invoke: ["Connectors.All.ReadWrite"] } },
+            input: [{ key: "requestId", valueType: "string" }],
+            output: { cardinality: "one", fields: [{ key: "key", valueType: "string" }] },
+            reliability: {
+              retry: { eligible: true, maxAttempts: 3, backoff: "exponential" },
+              idempotency: { strategy: "key", keyInput: "requestId" },
+            },
+          },
+        ],
+      }),
+    ],
+    [
+      "a secret configuration field",
+      connectorDefinition({
+        configuration: {
+          fields: [
+            { key: "endpoint", valueType: "string", required: true },
+            { key: "accessKeyId", valueType: "string", required: true, secret: true },
+          ],
+        },
+      }),
+    ],
+  ];
+
+  for (const [label, definition] of acceptedByCompiler) {
+    it(`accepts what the compiler accepts: ${label}`, () => {
+      // Compiler first: if this throws, the fixture is wrong, not the schema.
+      expect(() => buildConnector(definition, "object-store", "test.yaml")).not.toThrow();
+      expect(validator.validate(definition, "test.yaml")).toBe("connector.schema.json");
+    });
+  }
+});

@@ -5,22 +5,21 @@
  * Lists and parses `connectors/<slug>.yaml` from the RESOLVED authoring tree
  * (post layer merge), then validates every identifier that will reach codegen.
  *
- * Why the checks live here rather than in the JSON schema: the schemas under
- * `config/schemas/` are not enforced anywhere today (see #182), so a loader
- * that trusted them would trust nothing. These names are emitted verbatim into
- * GraphQL SDL, Fastify route strings, OpenAPI paths and MCP tool names, so they
- * get the same fail-closed treatment `loader.ts` gives entity names, field keys
- * and `rest.basePath`.
+ * Two layers of checking, in this order:
  *
- * Connectors raise the stakes over other authoring artifacts: an entity YAML is
- * written by whoever owns this repo, while a connector contract is designed to
- * arrive from outside it — shipped by a package, or by a host repo's own
- * authoring layer. Validation at load is therefore the only point that sees
- * every contract regardless of origin.
+ *   1. `connector.schema.json` — the declared shape. Validated HERE rather than
+ *      only in the corpus gate (#182) because a connector contract is designed
+ *      to arrive from OUTSIDE this repository — shipped by a package, or by a
+ *      host repo's own authoring layer — so no in-repo gate can ever see them
+ *      all. Load is the only point that does.
+ *   2. The identifier allowlists below. A shape schema is not injection
+ *      defence, so these stay, and stay independent: these names are emitted
+ *      verbatim into GraphQL SDL, Fastify route strings, OpenAPI paths and MCP
+ *      tool names, and they must fail closed whether or not a schema agrees.
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { authoringValidator } from "./schema-validation.js";
 import type { ConnectorDefinition } from "./types/connector.js";
 
 /** PascalCase — becomes the GraphQL namespace type and type-name prefix. */
@@ -207,7 +206,10 @@ export function loadConnector(
   slug: string,
   origin: string,
 ): ConnectorDefinition {
-  const parsed = parseYaml(readFileSync(filePath, "utf8")) as ConnectorDefinition | null;
+  // Read + parse + schema-validate in one step, so the document that is checked
+  // is byte-for-byte the document that is used.
+  const { document } = authoringValidator().validateFile(filePath, `Connector contract ${origin}`);
+  const parsed = document as ConnectorDefinition | null;
   if (!parsed || typeof parsed !== "object") {
     throw new Error(`Connector contract ${origin} is empty or not a YAML mapping.`);
   }

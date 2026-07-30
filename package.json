@@ -16,6 +16,7 @@
   "scripts": {
     "generate": "bun run --cwd packages/compiler generate",
     "check:authoring-local": "bun scripts/check-authoring-local.mjs",
+    "check:authoring-schemas": "bun scripts/check-authoring-schemas.mjs",
     "check:generated": "bun scripts/check-generated-artifacts.mjs",
     "check:ts-nocheck": "bun scripts/check-ts-nocheck-baseline.mjs",
     "check:notices": "bun scripts/gen-third-party-notices.ts --check",

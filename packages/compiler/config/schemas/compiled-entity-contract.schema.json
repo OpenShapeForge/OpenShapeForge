@@ -685,14 +685,14 @@
           "additionalProperties": {
             "type": "array",
             "items": {
-              "$ref": "https://openshapeforge.example/canonical-field.schema.json"
+              "$ref": "core-entity.schema.json#/$defs/field"
             }
           }
         },
         "presentations": {
           "type": "object",
           "additionalProperties": {
-            "$ref": "https://openshapeforge.example/canonical-presentation.schema.json"
+            "$ref": "core-entity.schema.json#/$defs/presentations"
           }
         }
       }

@@ -21,6 +21,12 @@ import {
   requireConnectorRead,
 } from "./authorization.js";
 import { listConnectorContracts } from "./catalog.js";
+import { connectorGovernor, connectorKeyring, connectorRegistry } from "./dispatch.js";
+import {
+  ConnectorInvocationError,
+  invokeConnectorOperation,
+  verifyConnectorInstallation,
+} from "./runtime.js";
 import {
   configureConnector,
   describeConnector,
@@ -50,6 +56,18 @@ const STATUS_BY_CODE: Record<string, number> = {
   CONNECTOR_NOT_LICENSED: 403,
   CONNECTOR_INVALID_CONFIGURATION: 400,
   CONNECTOR_SECRETS_NOT_CONFIGURED: 503,
+  CONNECTOR_NOT_EXECUTABLE: 503,
+  CONNECTOR_DISABLED: 409,
+  CONNECTOR_VERIFY_UNSUPPORTED: 501,
+  CONNECTOR_PROVENANCE_REFUSED: 403,
+  CONNECTOR_EGRESS_DENIED: 502,
+  CONNECTOR_UPSTREAM_ERROR: 502,
+  CONNECTOR_TIMEOUT: 504,
+  CONNECTOR_RATE_LIMITED: 429,
+  CONNECTOR_CIRCUIT_OPEN: 503,
+  CONNECTOR_INVALID_INPUT: 400,
+  CONNECTOR_INVALID_OUTPUT: 502,
+  CONNECTOR_CONTRACT_MISMATCH: 500,
   DATABASE_NOT_CONFIGURED: 503,
 };
 
@@ -60,6 +78,19 @@ function sendError(reply: FastifyReply, code: string, message: string): FastifyR
 }
 
 function handleError(reply: FastifyReply, error: unknown): FastifyReply {
+  if (error instanceof ConnectorInvocationError) {
+    return sendError(reply, error.code, error.message);
+  }
+  if (
+    error instanceof Error &&
+    (error.name === "ConnectorExecutionError" || error.name === "ConnectorBoundaryError")
+  ) {
+    return sendError(
+      reply,
+      (error as Error & { code: string }).code,
+      error.message,
+    );
+  }
   if (error instanceof ConnectorAuthorizationError) {
     return sendError(reply, error.code, error.message);
   }
@@ -86,6 +117,35 @@ function parseJsonBody(body: unknown): unknown {
     return text.trim() === "" ? {} : JSON.parse(text);
   }
   return body;
+}
+
+/**
+ * Query strings are all text; the operation's input schema says what each field
+ * should be. Coerced here so a GET operation behaves like its POST twin rather
+ * than failing validation on "50" not being a number.
+ */
+function coerceQuery(
+  query: Record<string, unknown>,
+  operation: { schemas: { input: Record<string, unknown> } },
+): Record<string, unknown> {
+  const properties =
+    (operation.schemas.input.properties as Record<string, { type?: string }>) ?? {};
+  const input: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(query)) {
+    if (key === "instanceKey") continue;
+    const declared = properties[key]?.type;
+    if (declared === "integer" || declared === "number") {
+      const asNumber = Number(raw);
+      input[key] = Number.isFinite(asNumber) ? asNumber : raw;
+      continue;
+    }
+    if (declared === "boolean") {
+      input[key] = raw === "true" ? true : raw === "false" ? false : raw;
+      continue;
+    }
+    input[key] = raw;
+  }
+  return input;
 }
 
 export type ConnectorRestOptions = {
@@ -183,6 +243,105 @@ export function registerConnectorRestRoutes(
     } catch (error) {
       return handleError(reply, error);
     }
+  });
+
+  app.post(
+    `${CONNECTOR_MOUNT}/:slug/installations/:instanceKey/verify`,
+    async (request, reply) => {
+      try {
+        requireConnectorAdmin(await sessionFor(request));
+        const { slug, instanceKey } = request.params as {
+          slug: string;
+          instanceKey: string;
+        };
+        const context = await contextFor(request);
+        const contract = context.contracts.find((entry) => entry.slug === slug);
+        if (!contract) {
+          return sendError(reply, "CONNECTOR_NOT_FOUND", `Unknown connector "${slug}".`);
+        }
+        const result = await verifyConnectorInstallation(
+          {
+            db: context.db,
+            session: context.session,
+            registry: await connectorRegistry(),
+            governor: connectorGovernor(),
+            keyring: connectorKeyring(),
+            roles: context.session.roles ?? [],
+            instanceKey,
+          },
+          contract,
+        );
+        return reply.status(200).send(result);
+      } catch (error) {
+        return handleError(reply, error);
+      }
+    },
+  );
+
+  /**
+   * Operation invocation. Mounted under the connector's own base path so the
+   * catalog routes above cannot be shadowed by an operation called
+   * "installations".
+   */
+  app.route({
+    method: ["GET", "POST"],
+    url: `${CONNECTOR_MOUNT}/:basePath/invoke/:operationPath`,
+    handler: async (request, reply) => {
+      try {
+        const { basePath, operationPath } = request.params as {
+          basePath: string;
+          operationPath: string;
+        };
+        const context = await contextFor(request);
+        const contract = context.contracts.find(
+          (entry) => entry.exposure.rest?.basePath === basePath,
+        );
+        const operation = contract?.operations.find(
+          (entry) =>
+            entry.rest.path === operationPath && entry.rest.method === request.method,
+        );
+        if (!contract || !operation) {
+          // Unknown and not-exposed answer alike; the catalog already told the
+          // caller what exists.
+          return sendError(
+            reply,
+            "CONNECTOR_NOT_FOUND",
+            `No connector operation at "${basePath}/${operationPath}".`,
+          );
+        }
+
+        let input: unknown;
+        if (request.method === "GET") {
+          input = coerceQuery(request.query as Record<string, unknown>, operation);
+        } else {
+          try {
+            input = parseJsonBody(request.body);
+          } catch {
+            return sendError(reply, "CONNECTOR_INVALID_INPUT", "Malformed JSON body.");
+          }
+        }
+
+        const result = await invokeConnectorOperation(
+          {
+            db: context.db,
+            session: context.session,
+            registry: await connectorRegistry(),
+            governor: connectorGovernor(),
+            keyring: connectorKeyring(),
+            roles: context.session.roles ?? [],
+            ...(typeof (request.query as Record<string, unknown>)?.instanceKey === "string"
+              ? { instanceKey: String((request.query as Record<string, unknown>).instanceKey) }
+              : {}),
+          },
+          contract,
+          operation,
+          input,
+        );
+        return reply.status(200).send({ result });
+      } catch (error) {
+        return handleError(reply, error);
+      }
+    },
   });
 
   for (const [suffix, enabled] of [

@@ -58,6 +58,12 @@ import {
   connectorToolsForSession,
   resolveConnectorTool,
 } from "../connectors/mcp-tools.js";
+import {
+  connectorGovernor,
+  connectorKeyring,
+  connectorRegistry,
+} from "../connectors/dispatch.js";
+import { invokeConnectorOperation } from "../connectors/runtime.js";
 
 export const MCP_MOUNT_PATH = "/api/mcp";
 
@@ -427,14 +433,24 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
       roles: session.roles ?? [],
     });
     if (connectorTool) {
-      return failed(
-        new HttpError(
-          503,
-          "CONNECTOR_NOT_EXECUTABLE",
-          `Connector "${connectorTool.contract.slug}" is not executable on this deployment: ` +
-            "no implementation package is loaded.",
-        ),
-      );
+      try {
+        const result = await invokeConnectorOperation(
+          {
+            db,
+            session,
+            registry: await connectorRegistry(),
+            governor: connectorGovernor(),
+            keyring: connectorKeyring(),
+            roles: session.roles ?? [],
+          },
+          connectorTool.contract,
+          connectorTool.operation,
+          request.params.arguments ?? {},
+        );
+        return ok(result);
+      } catch (error) {
+        return failed(error);
+      }
     }
 
     const match = catalog.tools.find((tool) => tool.name === name);

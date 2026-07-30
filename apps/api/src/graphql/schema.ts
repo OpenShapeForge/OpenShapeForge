@@ -17,6 +17,9 @@ import {
 } from "./generated-entity-schema.js";
 import {
   connectorMutationFields,
+  connectorNamespaceMutationFields,
+  connectorNamespaceQueryFields,
+  connectorNamespaceTypeDefs,
   connectorQueryFields,
   connectorTypeDefs,
   createConnectorResolvers,
@@ -39,6 +42,8 @@ export const graphqlSchema = createSchema<GraphqlContext>({
 
     ${connectorTypeDefs}
 
+    ${connectorNamespaceTypeDefs}
+
     type Health {
       status: String!
       role: String!
@@ -48,11 +53,13 @@ export const graphqlSchema = createSchema<GraphqlContext>({
       health: Health!
 ${generatedEntityQueryFields}
 ${connectorQueryFields}
+${connectorNamespaceQueryFields}
     }
 
     type Mutation {
 ${generatedEntityMutationFields}
 ${connectorMutationFields}
+${connectorNamespaceMutationFields}
     }
   `,
   resolvers: {
@@ -62,6 +69,7 @@ ${connectorMutationFields}
       parseLiteral: parseJsonLiteral,
     },
     ...objectResolvers(),
+    ...connectorObjectResolvers(),
     Query: {
       ...generatedEntityResolvers.Query,
       ...connectorResolvers.Query,
@@ -76,6 +84,12 @@ ${connectorMutationFields}
     },
   },
 });
+
+/** Connector namespace types (ObjectStoreQueries, …), keyed by type name. */
+function connectorObjectResolvers() {
+  const { Query: _query, Mutation: _mutation, ...namespaces } = connectorResolvers;
+  return namespaces;
+}
 
 function objectResolvers() {
   const { Query: _query, Mutation: _mutation, ...objects } = generatedEntityResolvers;

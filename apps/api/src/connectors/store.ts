@@ -17,7 +17,14 @@ import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
 import type { DB } from "../generated/db/types.js";
-import { decryptSecret, encryptSecret, type SecretKeyring, type StoredSecret } from "./secrets.js";
+import {
+  decryptSecret,
+  encryptSecret,
+  needsRotation,
+  type SecretKeyring,
+  type StoredSecret,
+} from "./secrets.js";
+import { recordConnectorAudit } from "./audit.js";
 import type { InstallationRecord } from "./status.js";
 
 export type ConnectorInstallation = InstallationRecord & {
@@ -215,11 +222,82 @@ export async function upsertInstallation(
        where id = ${installationId}::uuid
     `.execute(trx);
 
+    // Journalled inside the same transaction as the write: an audit record that
+    // can survive a rolled-back change is worse than none, because it is
+    // trusted.
+    await recordConnectorAudit(trx, {
+      tenantId: String(tenantId),
+      userId: session.userId ?? null,
+      connectorSlug: input.connectorSlug,
+      instanceKey: input.instanceKey,
+      event: "connector.configured",
+      changedFields: Object.keys(input.config),
+      secretFields: Object.keys(input.secrets),
+      contractChecksum: input.contractChecksum,
+    });
+
     const secretFields = await loadSecretFieldNames(trx, [installationId]);
     return toInstallation(
       row.rows[0]!,
       secretFields.get(installationId) ?? new Set<string>(),
     );
+  });
+}
+
+/**
+ * Re-encrypt every stored secret that is not under the active key.
+ *
+ * This is what makes key rotation a rotation rather than a plan: retiring a key
+ * is only safe once nothing depends on it, and nothing walks the rows unless
+ * something is told to. Idempotent, so it can be run repeatedly and on a
+ * schedule; returns what it moved so an operator can see the keyring drain.
+ */
+export async function rotateSecrets(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  keyring: SecretKeyring,
+): Promise<{ rotated: number; skipped: number }> {
+  return withDbSession(db, session, async (trx) => {
+    const rows = await sql<{
+      id: string;
+      installation_id: string;
+      field_key: string;
+      ciphertext: string;
+      key_id: string;
+      algorithm: string;
+    }>`
+      select id, installation_id, field_key, ciphertext, key_id, algorithm
+        from platform.connector_secrets
+       order by id
+    `.execute(trx);
+
+    let rotated = 0;
+    let skipped = 0;
+    for (const row of rows.rows) {
+      const stored: StoredSecret = {
+        ciphertext: row.ciphertext,
+        keyId: row.key_id,
+        algorithm: row.algorithm,
+      };
+      if (!needsRotation(keyring, stored)) {
+        skipped += 1;
+        continue;
+      }
+      // Decrypt with the retired key, re-encrypt under the active one. The
+      // plaintext exists only inside this iteration.
+      const plaintext = decryptSecret(keyring, row.installation_id, row.field_key, stored);
+      const fresh = encryptSecret(keyring, row.installation_id, row.field_key, plaintext);
+      await sql`
+        update platform.connector_secrets
+           set ciphertext = ${fresh.ciphertext},
+               key_id = ${fresh.keyId},
+               algorithm = ${fresh.algorithm},
+               updated_at = now()
+         where id = ${row.id}::uuid
+      `.execute(trx);
+      rotated += 1;
+    }
+    return { rotated, skipped };
   });
 }
 
@@ -237,7 +315,16 @@ export async function setInstallationEnabled(
        where connector_slug = ${connectorSlug} and instance_key = ${instanceKey}
       returning id
     `.execute(trx);
-    return result.rows.length > 0;
+    if (result.rows.length === 0) return false;
+
+    await recordConnectorAudit(trx, {
+      tenantId: String(session.tenantId),
+      userId: session.userId ?? null,
+      connectorSlug,
+      instanceKey,
+      event: enabled ? "connector.enabled" : "connector.disabled",
+    });
+    return true;
   });
 }
 

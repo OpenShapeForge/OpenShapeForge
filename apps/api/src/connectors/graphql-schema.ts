@@ -19,7 +19,13 @@ import {
   requireConnectorAdmin,
   requireConnectorRead,
 } from "./authorization.js";
-import { listConnectorContracts } from "./catalog.js";
+import { listConnectorContracts, type ConnectorContract } from "./catalog.js";
+import { connectorGovernor, connectorKeyring, connectorRegistry } from "./dispatch.js";
+import {
+  ConnectorInvocationError,
+  invokeConnectorOperation,
+  verifyConnectorInstallation,
+} from "./runtime.js";
 import {
   configureConnector,
   describeConnector,
@@ -96,7 +102,74 @@ export const connectorTypeDefs = /* GraphQL */ `
     displayName: String
     configuration: JSON!
   }
+
+  type ConnectorVerifyResult {
+    ok: Boolean!
+    message: String
+  }
 `;
+
+/**
+ * Per-connector operation namespaces, generated from the compiled contracts.
+ *
+ * Namespaced so the root schema stays clean and a connector can never collide
+ * with an entity query. Input and output are JSON scalars on purpose: the
+ * authoritative shape is the generated JSON Schema the boundary enforces on
+ * both sides of the call, and mirroring it into SDL would create a second
+ * definition that must then be kept in agreement with the first.
+ */
+function namespaceTypeDefs(contracts: ConnectorContract[]): string {
+  const blocks: string[] = [];
+  for (const contract of contracts) {
+    if (!contract.exposure.graphql) continue;
+    const queries = contract.operations.filter((operation) => operation.kind === "query");
+    const mutations = contract.operations.filter(
+      (operation) => operation.kind === "mutation",
+    );
+    if (queries.length > 0) {
+      blocks.push(
+        `type ${contract.connector}Queries {\n` +
+          queries.map((op) => `  ${op.key}(input: JSON): JSON`).join("\n") +
+          "\n}",
+      );
+    }
+    if (mutations.length > 0) {
+      blocks.push(
+        `type ${contract.connector}Mutations {\n` +
+          mutations.map((op) => `  ${op.key}(input: JSON): JSON`).join("\n") +
+          "\n}",
+      );
+    }
+  }
+  return blocks.join("\n\n");
+}
+
+function namespaceFields(
+  contracts: ConnectorContract[],
+  kind: "query" | "mutation",
+): string {
+  return contracts
+    .filter(
+      (contract) =>
+        contract.exposure.graphql &&
+        contract.operations.some((operation) => operation.kind === kind),
+    )
+    .map(
+      (contract) =>
+        `  ${contract.namespace}: ${contract.connector}${kind === "query" ? "Queries" : "Mutations"}!`,
+    )
+    .join("\n");
+}
+
+export const connectorNamespaceTypeDefs = namespaceTypeDefs(listConnectorContracts());
+export const connectorNamespaceQueryFields = namespaceFields(
+  listConnectorContracts(),
+  "query",
+);
+export const connectorNamespaceMutationFields = namespaceFields(
+  listConnectorContracts(),
+  "mutation",
+);
 
 export const connectorQueryFields = `
   connectors: [Connector!]!
@@ -105,8 +178,10 @@ export const connectorQueryFields = `
 
 export const connectorMutationFields = `
   configureConnector(input: ConfigureConnectorInput!): ConnectorInstallation!
+  setConnectorSecret(slug: ID!, instanceKey: String, field: String!, value: String!): Boolean!
   enableConnector(slug: ID!, instanceKey: String): Boolean!
   disableConnector(slug: ID!, instanceKey: String): Boolean!
+  verifyConnector(slug: ID!, instanceKey: String): ConnectorVerifyResult!
 `;
 
 /**
@@ -129,6 +204,17 @@ export type ConnectorGraphqlOptions = {
 function toServiceError(error: unknown): never {
   if (error instanceof ConnectorAuthorizationError) {
     throw new GraphQLError(error.message, { extensions: { code: error.code } });
+  }
+  if (error instanceof ConnectorInvocationError) {
+    throw new GraphQLError(error.message, { extensions: { code: error.code } });
+  }
+  if (
+    error instanceof Error &&
+    (error.name === "ConnectorExecutionError" || error.name === "ConnectorBoundaryError")
+  ) {
+    throw new GraphQLError(error.message, {
+      extensions: { code: (error as Error & { code: string }).code },
+    });
   }
   if (error instanceof ConnectorServiceError) {
     throw new GraphQLError(error.message, { extensions: { code: error.code } });
@@ -165,8 +251,61 @@ export function createConnectorResolvers(options: ConnectorGraphqlOptions) {
     };
   }
 
+  /** One resolver per connector operation, under its namespace type. */
+  function namespaceResolvers(kind: "query" | "mutation") {
+    const resolvers: Record<string, Record<string, unknown>> = {};
+    for (const contract of listConnectorContracts()) {
+      if (!contract.exposure.graphql) continue;
+      const operations = contract.operations.filter((entry) => entry.kind === kind);
+      if (operations.length === 0) continue;
+      const typeName = `${contract.connector}${kind === "query" ? "Queries" : "Mutations"}`;
+      resolvers[typeName] = Object.fromEntries(
+        operations.map((operation) => [
+          operation.key,
+          async (_parent: unknown, args: { input?: unknown }, context: GraphqlContext) => {
+            try {
+              const catalog = catalogContext(context);
+              return await invokeConnectorOperation(
+                {
+                  db: catalog.db,
+                  session: catalog.session,
+                  registry: await connectorRegistry(),
+                  governor: connectorGovernor(),
+                  keyring: connectorKeyring(),
+                  roles: context.session.roles,
+                },
+                contract,
+                operation,
+                args.input ?? {},
+              );
+            } catch (error) {
+              return toServiceError(error);
+            }
+          },
+        ]),
+      );
+    }
+    return resolvers;
+  }
+
+  /** The namespace fields themselves resolve to an empty parent object. */
+  function namespaceRootFields(kind: "query" | "mutation") {
+    return Object.fromEntries(
+      listConnectorContracts()
+        .filter(
+          (contract) =>
+            contract.exposure.graphql &&
+            contract.operations.some((operation) => operation.kind === kind),
+        )
+        .map((contract) => [contract.namespace, () => ({})]),
+    );
+  }
+
   return {
+    ...namespaceResolvers("query"),
+    ...namespaceResolvers("mutation"),
     Query: {
+      ...namespaceRootFields("query"),
       connectors: async (_parent: unknown, _args: unknown, context: GraphqlContext) => {
         try {
           requireConnectorRead(context.session);
@@ -189,6 +328,7 @@ export function createConnectorResolvers(options: ConnectorGraphqlOptions) {
       },
     },
     Mutation: {
+      ...namespaceRootFields("mutation"),
       configureConnector: async (
         _parent: unknown,
         args: {
@@ -211,6 +351,55 @@ export function createConnectorResolvers(options: ConnectorGraphqlOptions) {
               : {}),
             configuration: args.input.configuration,
           });
+        } catch (error) {
+          return toServiceError(error);
+        }
+      },
+      setConnectorSecret: async (
+        _parent: unknown,
+        args: { slug: string; instanceKey?: string | null; field: string; value: string },
+        context: GraphqlContext,
+      ) => {
+        try {
+          requireConnectorAdmin(context.session);
+          await configureConnector(catalogContext(context), {
+            slug: args.slug,
+            ...(args.instanceKey ? { instanceKey: args.instanceKey } : {}),
+            // Only the one secret; every other field keeps its stored value.
+            configuration: { [args.field]: args.value },
+          });
+          return true;
+        } catch (error) {
+          return toServiceError(error);
+        }
+      },
+      verifyConnector: async (
+        _parent: unknown,
+        args: { slug: string; instanceKey?: string | null },
+        context: GraphqlContext,
+      ) => {
+        try {
+          requireConnectorAdmin(context.session);
+          const catalog = catalogContext(context);
+          const contract = catalog.contracts.find((entry) => entry.slug === args.slug);
+          if (!contract) {
+            throw new ConnectorServiceError(
+              "CONNECTOR_NOT_FOUND",
+              `Unknown connector "${args.slug}".`,
+            );
+          }
+          return await verifyConnectorInstallation(
+            {
+              db: catalog.db,
+              session: catalog.session,
+              registry: await connectorRegistry(),
+              governor: connectorGovernor(),
+              keyring: connectorKeyring(),
+              roles: context.session.roles,
+              ...(args.instanceKey ? { instanceKey: args.instanceKey } : {}),
+            },
+            contract,
+          );
         } catch (error) {
           return toServiceError(error);
         }

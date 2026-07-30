@@ -194,14 +194,18 @@ describe("MCP tools/call cannot be used to enumerate connectors", () => {
     expect(text(unauthorized)).not.toContain(SLUG);
   });
 
-  test("an authorized tool reports that it is not executable, not NOT_FOUND", async () => {
+  test("an authorized tool gets past authorization to a real refusal", async () => {
     const { body } = await rpc(identity(["Connectors.All.Read"]), "tools/call", {
       name: LIST_TOOL,
       arguments: {},
     });
-    // Authorized and known, but no implementation package is loaded — the
-    // honest answer, distinct from "no such tool".
-    expect(JSON.stringify(body)).toContain("CONNECTOR_NOT_EXECUTABLE");
+    // Authorized and known, so it is NOT hidden behind NOT_FOUND. This tenant
+    // has no installation, so the honest answer names that — and naming it is
+    // the point: a refusal a caller can act on must not be redacted into a
+    // generic failure.
+    const text = JSON.stringify(body);
+    expect(text).toContain("CONNECTOR_NOT_CONFIGURED");
+    expect(text).not.toContain("INTERNAL_SERVER_ERROR");
   });
 });
 

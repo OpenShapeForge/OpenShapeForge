@@ -88,6 +88,12 @@ jobs:
       - name: Check THIRD-PARTY-NOTICES is up to date
         run: bun run check:notices
 
+      # A required status check is matched by job NAME. Renaming a job here
+      # would silently drop the gate the branch-protection ruleset claims to
+      # enforce, so the two are checked against each other.
+      - name: Check branch protection requires the jobs that exist
+        run: bun run check:required-checks
+
   keycloak-spi:
     name: Build Keycloak SPI (Maven)
     runs-on: ubuntu-latest

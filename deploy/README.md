@@ -170,3 +170,24 @@ helm template openshapeforge deploy/helm/openshapeforge-api \
   changes require a versioned migration (see `../docs/migrations.md`).
 - Enable autoscaling with `autoscaling.enabled=true`, ingress with
   `ingress.enabled=true`.
+- **Ingress requires TLS.** `ingress.enabled=true` with an empty `ingress.tls`
+  fails the render instead of serving bearer tokens and signed context headers
+  over plaintext HTTP. Supply a `tls` entry (with a cert-manager annotation, or
+  a pre-provisioned secret); where TLS is terminated upstream by a load balancer
+  or mesh, say so explicitly with `ingress.allowPlaintext=true`. When TLS is
+  configured the chart also adds ingress-nginx `ssl-redirect` annotations —
+  override `ingress.sslRedirect.annotations` for a different controller. The
+  same rules apply to `keycloak.ingress.*`.
+- **Credential rotation rolls the pods.** With chart-managed credentials a
+  `checksum/secret` pod annotation changes when a value does, so `helm upgrade`
+  restarts the pods onto the new credential. With `database.existingSecret` the
+  chart cannot hash contents it does not render — rotate, then
+  `kubectl rollout restart deploy/<release>-openshapeforge-api` yourself.
+- **The containers run with a read-only root filesystem.** The API writes
+  nothing (verified by the `--read-only` smoke test in
+  `.github/workflows/docker-api.yml`); the chart mounts an emptyDir at `/tmp`
+  regardless. Keycloak gets emptyDirs at `/opt/keycloak/data` and `/tmp`, which
+  is all it needs given the image already ran `kc.sh build` and the pod starts
+  with `start --optimized`. Set `tmpVolume.enabled=false` or
+  `keycloak.writableVolumes.enabled=false` only alongside
+  `securityContext.readOnlyRootFilesystem=false`.

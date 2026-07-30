@@ -69,9 +69,15 @@ jobs:
       # (assertProductionEnv) — credentials CI has no business minting. With no
       # DATABASE_URL the API logs a warning and serves without a database,
       # which is enough to catch a broken image.
+      #
+      # --read-only mirrors the chart's securityContext.readOnlyRootFilesystem
+      # (issue #24). The tmpfs mirrors the emptyDir the chart mounts at /tmp. If
+      # the image ever starts needing to write to its own filesystem, this fails
+      # here rather than in a cluster after a rollout.
       - name: Smoke test the image
         run: |
           docker run -d --name api-smoke -p 3001:3001 \
+            --read-only --tmpfs /tmp \
             -e NODE_ENV=development \
             openshapeforge-api:ci
           for i in $(seq 1 30); do

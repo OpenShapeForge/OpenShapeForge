@@ -1,0 +1,149 @@
+# Example connector contract.
+#
+# It exists to exercise the whole pipeline end to end — compile, catalog,
+# GraphQL/REST configuration surface, MCP tool projection — the way
+# examples/plugins does for the plugin contract. There is no implementation
+# package behind it, which is exactly the "contract compiles, implementation
+# optional" property: the catalog advertises it and the runtime reports
+# NOT_INSTALLED.
+#
+# It also demonstrates the licensing split the connector model exists for: the
+# contract is source-available here, while the implementation would ship
+# separately under its own license and is gated behind an entitlement.
+schemaVersion: 1
+kind: connector
+connector: ExampleObjectStore
+title: Example object storage
+labels:
+  en: Example object storage
+  nl: Voorbeeld objectopslag
+description:
+  en: Reference connector contract for an S3-compatible object store.
+  nl: Referentiecontract voor een S3-compatibele objectopslag.
+category: storage
+domains: [documents]
+
+capabilities: [operations]
+
+implementation:
+  # Recorded verbatim and never resolved at compile time.
+  package: "@openshapeforge/connector-example-object-store"
+  contractVersion: 1
+  # firstParty keeps the example runnable under the in-process executor; a
+  # thirdParty contract would be refused, which is the point of the field.
+  provenance: firstParty
+  license:
+    spdx: LicenseRef-BatterAI-Commercial
+    notice: >-
+      Example contract. A real implementation package ships separately under its
+      own license and is not covered by the BUSL-1.1 grant on this repository.
+
+availability:
+  entitlement: connector.example-object-store
+
+configuration:
+  instances: multiple
+  verify: false
+  fields:
+    - key: endpoint
+      valueType: string
+      required: true
+      label: { en: Endpoint, nl: Endpoint }
+      description:
+        en: Base URL of the object store API.
+        nl: Basis-URL van de objectopslag-API.
+    - key: region
+      valueType: string
+      label: { en: Region, nl: Regio }
+      options:
+        type: static
+        items:
+          - { value: eu-west, label: { en: EU West, nl: EU West } }
+          - { value: eu-central, label: { en: EU Central, nl: EU Centraal } }
+    - key: accessKeyId
+      valueType: string
+      required: true
+      secret: true
+      label: { en: Access key ID, nl: Toegangssleutel-ID }
+    - key: secretAccessKey
+      valueType: string
+      required: true
+      secret: true
+      label: { en: Secret access key, nl: Geheime toegangssleutel }
+
+network:
+  egress:
+    - "*.objectstore.example"
+
+operations:
+  - key: listObjects
+    kind: query
+    label: { en: List objects, nl: Objecten tonen }
+    description:
+      en: List objects under a prefix.
+      nl: Toon objecten onder een prefix.
+    authorization:
+      roles:
+        invoke: [Connectors.All.Read]
+    input:
+      - key: prefix
+        valueType: string
+        label: { en: Prefix, nl: Prefix }
+        validation:
+          maxLength: 512
+      - key: limit
+        valueType: integer
+        defaultValue: 50
+        validation:
+          min: 1
+          max: 500
+    output:
+      cardinality: many
+      fields:
+        - { key: key, valueType: string, required: true }
+        - { key: sizeBytes, valueType: integer }
+    reliability:
+      timeouts:
+        attemptMs: 10000
+      pagination:
+        style: cursor
+
+  - key: putObject
+    kind: mutation
+    label: { en: Store object, nl: Object opslaan }
+    authorization:
+      roles:
+        invoke: [Connectors.All.ReadWrite]
+    input:
+      - key: key
+        valueType: string
+        required: true
+        validation:
+          minLength: 1
+          maxLength: 1024
+      - key: requestId
+        valueType: string
+        label: { en: Request id, nl: Request-id }
+        description:
+          en: Stable id so a retried upload is not stored twice.
+          nl: Stabiel id zodat een herhaalde upload niet dubbel wordt opgeslagen.
+    output:
+      cardinality: one
+      fields:
+        - { key: key, valueType: string, required: true }
+    reliability:
+      # Retry-eligible only because idempotency is declared — the compiler
+      # refuses the combination without it.
+      retry:
+        eligible: true
+        maxAttempts: 3
+      idempotency:
+        strategy: key
+        keyInput: requestId
+
+exposure:
+  graphql: true
+  rest:
+    enabled: true
+    basePath: example-object-store
+  mcp: true

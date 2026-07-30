@@ -52,6 +52,7 @@ Requests need a Keycloak bearer token or signed trusted-context headers — see
 | [docs/authoring.md](docs/authoring.md) | Entity YAML anatomy, catalogs, adding an entity |
 | [docs/layers.md](docs/layers.md) | Authoring layers, overlays, `entityPatch` merge semantics |
 | [docs/plugins.md](docs/plugins.md) | Compiler plugin contract + shipped examples |
+| [docs/connectors.md](docs/connectors.md) | Connector contracts: one YAML interface, many surfaces, license-gated |
 | [docs/api.md](docs/api.md) | CRUD engine, RLS, auth, event journal, local stack |
 | [docs/mcp.md](docs/mcp.md) | Generated MCP server: tools from field definitions, authorization |
 | [docs/testing.md](docs/testing.md) | Proof gates, e2e suite, reports, k6 |

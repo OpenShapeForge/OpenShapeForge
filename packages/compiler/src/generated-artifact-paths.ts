@@ -15,6 +15,11 @@ export const compilerOwnedGeneratedRoots = [
   // emitted by `packages/compiler/src/generate-mcp.ts` and statically imported
   // by the API's MCP server registration.
   "apps/api/src/generated/mcp",
+  // Compiled connector contracts — emitted by
+  // `packages/compiler/src/generate-connectors.ts` and statically imported by
+  // the API's connector surfaces. Always emitted (empty catalog when no
+  // connector is authored) so the runtime import is unconditional.
+  "apps/api/src/generated/connectors",
   // NOTE: workflow-generated roots (apps/api/src/generated/workflow, the web
   // workflow/renderer feature roots) are owned by the example workflow plugin
   // (examples/plugins/workflow) via its `ownedPaths.roots` — the check scripts

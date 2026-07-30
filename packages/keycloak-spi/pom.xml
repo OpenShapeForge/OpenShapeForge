@@ -23,7 +23,14 @@
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
-        <keycloak.version>26.1.0</keycloak.version>
+        <!-- MUST equal the tag of the runtime base image in this directory's
+             Dockerfile. This SPI calls internal server APIs (BearerTokenAuthenticator,
+             OrganizationProvider, OrganizationModel) that carry no cross-release
+             compatibility guarantee, so compiling against one minor and running on
+             another surfaces as NoSuchMethodError at first request, not as a build
+             failure. `bun run check:keycloak-lockstep` fails the build if the two
+             drift. -->
+        <keycloak.version>26.5.3</keycloak.version>
     </properties>
 
     <dependencies>

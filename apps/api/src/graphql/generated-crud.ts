@@ -116,6 +116,33 @@ type GeneratedEntityRow = Record<string, unknown>;
 export type GeneratedEntityConnection = {
   rows: GeneratedEntityRow[];
   nextCursor: string | null;
+  /**
+   * `null` unless the caller asked for it with `includeTotalCount` (#17).
+   *
+   * The count is a second pass over the same predicate as the page, and it is
+   * the expensive one: it cannot stop at `limit`, and a text filter compiles to
+   * an unanchored `ilike '%value%'` that no b-tree index answers, so on a large
+   * tenant it degrades to a sequential scan. Paying for it on every list —
+   * including `first: 1` — let a stream of cheap requests hold the database in
+   * sustained full scans.
+   *
+   * Transports that always publish a count (REST, MCP) opt in; GraphQL opts in
+   * only when the client actually selected the field.
+   */
+  totalCount: number | null;
+};
+
+type ListPageInput = {
+  limit?: number | null;
+  cursor?: string | null;
+  filter?: Record<string, unknown> | null;
+  sort?: { field?: string | null; direction?: string | null } | null;
+  /** Run the count pass. Off by default: see GeneratedEntityConnection.totalCount. */
+  includeTotalCount?: boolean;
+};
+
+/** A connection whose caller opted into the count, so it is never null. */
+export type CountedEntityConnection = GeneratedEntityConnection & {
   totalCount: number;
 };
 
@@ -468,11 +495,7 @@ async function listGeneratedEntitiesForTable(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   table: GeneratedCrudTable,
-  input: {
-    limit?: number | null;
-    cursor?: string | null;
-    filter?: Record<string, unknown> | null;
-    sort?: { field?: string | null; direction?: string | null } | null;
+  input: ListPageInput & {
     fixedWhere?: Array<{ column: string; value: unknown }>;
   },
 ): Promise<GeneratedEntityConnection> {
@@ -492,18 +515,23 @@ async function listGeneratedEntitiesForTable(
       offset ${offset}
     `.execute(trx);
 
-    const countResult = await sql<{ total_count: string | number }>`
-      select count(*) as total_count
-      from ${sql.id(table.schema, table.table)} as row_source
-      where ${where}
-    `.execute(trx);
+    // Second pass, and the costly one — run it only when someone consumes it.
+    // Kept inside this transaction so the count and the page see one snapshot.
+    let totalCount: number | null = null;
+    if (input.includeTotalCount) {
+      const countResult = await sql<{ total_count: string | number }>`
+        select count(*) as total_count
+        from ${sql.id(table.schema, table.table)} as row_source
+        where ${where}
+      `.execute(trx);
+      totalCount = Number(countResult.rows[0]?.total_count ?? 0);
+    }
 
     const rows = redactRows(
       table,
       session,
       result.rows.slice(0, limit).map((row) => row.row),
     );
-    const totalCount = Number(countResult.rows[0]?.total_count ?? 0);
     return {
       rows,
       totalCount,
@@ -516,13 +544,17 @@ async function listGeneratedEntitiesForTable(
 export async function listGeneratedEntities(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
-  input: {
-    table: string;
-    limit?: number | null;
-    cursor?: string | null;
-    filter?: Record<string, unknown> | null;
-    sort?: { field?: string | null; direction?: string | null } | null;
-  },
+  input: ListPageInput & { table: string; includeTotalCount: true },
+): Promise<CountedEntityConnection>;
+export async function listGeneratedEntities(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  input: ListPageInput & { table: string },
+): Promise<GeneratedEntityConnection>;
+export async function listGeneratedEntities(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  input: ListPageInput & { table: string },
 ): Promise<GeneratedEntityConnection> {
   const table = readGeneratedCrudTable(input.table, "read", session);
   // Before any SQL runs: filtering or sorting by a column this session may not
@@ -731,47 +763,64 @@ export async function deleteGeneratedEntity(
   });
 }
 
+type RelationInput = {
+  parent: GeneratedEntityRow;
+  parentTable: GeneratedCrudTable;
+  relationship: GeneratedCrudRelationship;
+  targetTable: GeneratedCrudTable;
+  limit?: number | null;
+  includeTotalCount?: boolean;
+};
+
 export async function listGeneratedEntityRelation(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
-  input: {
-    parent: GeneratedEntityRow;
-    parentTable: GeneratedCrudTable;
-    relationship: GeneratedCrudRelationship;
-    targetTable: GeneratedCrudTable;
-    limit?: number | null;
-  },
+  input: RelationInput & { includeTotalCount: true },
+): Promise<CountedEntityConnection>;
+export async function listGeneratedEntityRelation(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  input: RelationInput,
+): Promise<GeneratedEntityConnection>;
+export async function listGeneratedEntityRelation(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  input: RelationInput,
 ): Promise<GeneratedEntityConnection> {
   // Relationship traversal reads TARGET rows via the private list helper,
   // bypassing readGeneratedCrudTable — gate the target's read roles here,
   // before the degenerate empty-connection early-returns. The parent needs
   // no check: its row was only obtainable through a read-gated query.
   requireEntityOperation(input.targetTable, "read", session);
+  // An empty connection still answers a requested count — with 0, not null.
+  const emptyCount = input.includeTotalCount ? 0 : null;
   const relationship = input.relationship;
   if (!relationship.foreignKey) {
-    return { rows: [], nextCursor: null, totalCount: 0 };
+    return { rows: [], nextCursor: null, totalCount: emptyCount };
   }
 
   if (relationship.resolve === "belongsTo") {
     const id = input.parent[relationship.foreignKey];
     if (id == null) {
-      return { rows: [], nextCursor: null, totalCount: 0 };
+      return { rows: [], nextCursor: null, totalCount: emptyCount };
     }
     return listGeneratedEntitiesForTable(db, session, input.targetTable, {
       limit: 1,
       fixedWhere: [{ column: input.targetTable.primaryKey!, value: id }],
+      ...(input.includeTotalCount ? { includeTotalCount: true } : {}),
     });
   }
 
   const parentPrimaryKey = input.parentTable.primaryKey;
   const parentId = parentPrimaryKey == null ? null : input.parent[parentPrimaryKey];
   if (parentId == null) {
-    return { rows: [], nextCursor: null, totalCount: 0 };
+    return { rows: [], nextCursor: null, totalCount: emptyCount };
   }
   const targetDefaultSort = readableDefaultSort(input.targetTable, session);
   return listGeneratedEntitiesForTable(db, session, input.targetTable, {
     limit: input.limit ?? 50,
     fixedWhere: [{ column: relationship.foreignKey, value: parentId }],
+    ...(input.includeTotalCount ? { includeTotalCount: true } : {}),
     ...(targetDefaultSort
       ? { sort: { field: targetDefaultSort.field, direction: targetDefaultSort.direction } }
       : {}),

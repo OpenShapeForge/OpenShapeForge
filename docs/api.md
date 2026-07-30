@@ -44,8 +44,15 @@ Engine semantics (`src/graphql/generated-crud.ts`):
   primary key; direction defaults to `asc`.
 - **Cursor pagination** — `first` is clamped to 1..200 (default 50);
   `after` is a base64url-encoded offset cursor. Connections return
-  `totalCount` (a real `count(*)` under the same filter) and
-  `pageInfo { hasNextPage, endCursor }`.
+  `pageInfo { hasNextPage, endCursor }` and `totalCount`.
+- **`totalCount` is opt-in and costs a second pass.** It is a real `count(*)`
+  under the same filter, so it cannot stop at `first`, and a text filter
+  compiles to an unanchored `ilike '%value%'` that no b-tree index answers. On
+  a large tenant it is a sequential scan. It therefore runs **only when the
+  query selects the field** (through a fragment or an alias too) — a page that
+  does not ask for it issues one statement, not two. REST and MCP always
+  publish a count in their list bodies, so they always pay for it; a GraphQL
+  client that wants a cheap page simply omits the field.
 - **Relationship traversal** — `belongsTo` resolves the single parent via
   the FK on the row; `hasMany` resolves an embedded list (limit 50) filtered
   on the target's FK column, ordered by the target's compiler-derived
@@ -231,6 +238,13 @@ transport inherits them:
   an otherwise legitimate traversal.
 - Create/update responses are not redacted: the operation already required the
   write grant that authorizes reading the column.
+- **A classified column is nullable in the GraphQL schema however it is
+  authored.** Redaction produces a `null` the read contract has to admit;
+  rendering a `required: true` classified column as `String!` would turn that
+  null into a non-null execution error that propagates to the nearest nullable
+  parent, so one redacted field would null the whole row — and inside a
+  non-null connection, the whole page. The column stays `NOT NULL` in Postgres
+  and required on create; only reads may answer `null`.
 - No entity shipped in this repo declares a classification, so these controls
   are inert here until an authoring layer adds one.
 

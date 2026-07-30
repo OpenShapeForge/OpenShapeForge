@@ -338,12 +338,15 @@ async function invokeTool(
               direction: typeof args.sortDirection === "string" ? args.sortDirection : null,
             }
           : undefined;
+      // Like REST, the MCP list result always publishes totalCount, so the
+      // count pass is always requested (#17).
       const result = await listGeneratedEntities(db, session, {
         table: table.name,
         ...(typeof args.first === "number" ? { limit: args.first } : {}),
         ...(typeof args.after === "string" ? { cursor: args.after } : {}),
         ...(filter ? { filter } : {}),
         ...(sort ? { sort } : {}),
+        includeTotalCount: true,
       });
       return ok({
         items: result.rows.map((row) => serializeRow(table, row)),

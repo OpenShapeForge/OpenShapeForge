@@ -32,9 +32,10 @@ bun install
 cp apps/api/.env.example apps/api/.env                      # required before db:migrate/dev:api; defaults match the compose stack
 docker compose -f docker-compose.local.yml up -d --build   # Postgres :5434, Keycloak :8181
 
-bun run generate      # compile YAML -> schema.sql, manifest, realm, plugin artifacts
+bun run generate      # compile YAML -> schema.sql, manifest, realm, CRUD pages, plugin artifacts
 bun run db:migrate    # apply the schema (roll-forward, additive-safe)
 bun run dev:api       # http://127.0.0.1:3001/api/graphql (GraphiQL in dev)
+bun run dev:web       # http://localhost:3000 — the generated CRUD app
 
 bun run check:generated && bun run test:e2e    # proof gates
 bun run test:e2e:report                        # + HTML report in .e2e-report/

@@ -22,10 +22,17 @@
  *
  * The generators return old-style repo paths (`api/workflow/…`,
  * `workflow/contract/…`); this module maps them to service paths exactly like
- * the core's UI path mapper did. Unmapped prefixes (`compiler/`,
- * `generated/compiler/` — the web client's duplicate copies of the field
- * contract) are dropped, matching the core's greenfield-safe behavior of
- * skipping paths without a mapping.
+ * the core's UI path mapper did. Paths without a mapping are dropped, matching
+ * the core's greenfield-safe behavior.
+ *
+ * The `compiler/` and `generated/compiler/` prefixes carry the web client's
+ * copies of the field contract (`field-contract`, `canonical-condition`,
+ * `semantic-types`, …). Despite living behind a workflow-named generator these
+ * are the *renderer's* core type surface — `@/generated/compiler/field-contract`
+ * alone has ~87 importers across `features/renderer` and `components/entity` —
+ * so they are mapped and emitted whenever `apps/web` exists. Both prefixes
+ * receive byte-identical content (see `workflow-contract.ts`); the duplication
+ * is the source repo's, preserved here so the ported imports resolve unchanged.
  */
 import type { CompilerPlugin } from "../../../packages/compiler/src/plugins.js";
 import type { GeneratedArtifact, TableDefinition } from "../../../packages/compiler/src/schema.js";
@@ -50,6 +57,12 @@ const artifactPathMappings = [
     oldPrefix: "features/workflow/lib/nodes/generated/",
     servicePrefix: "apps/web/src/features/workflow/lib/nodes/generated/",
   },
+  // Renderer field-contract copies. `generated/compiler/` must be tested before
+  // `compiler/` would ever be reached for the same path, but the prefixes are
+  // disjoint so order is not load-bearing; both land inside roots the core
+  // already declares in `compilerOwnedGeneratedRoots`.
+  { oldPrefix: "generated/compiler/", servicePrefix: "apps/web/src/generated/compiler/" },
+  { oldPrefix: "compiler/", servicePrefix: "apps/web/src/compiler/" },
 ];
 
 function toServicePath(oldCompilerPath: string): string | null {

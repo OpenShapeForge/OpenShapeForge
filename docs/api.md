@@ -116,6 +116,27 @@ resolved per session, so a caller is never shown a tool it lacks the roles for,
 and classified fields are withheld from the advertised schemas as well as
 redacted from responses. See [mcp.md](mcp.md).
 
+## The page-config catalog
+
+One hand-written query sits beside the generated entity surface:
+
+```graphql
+entityPageConfigs(entitySlug: String!): EntityPageConfigs
+```
+
+It returns the presentation configuration for one entity's generated web pages
+— `listConfigs`, `detailConfigs`, `workspaceConfigs`, `createFormConfigBases`,
+`editFormConfigBases`, each a `JSON` blob keyed by context — out of
+`platform.entity_page_configs`, which `db:migrate` seeds from the compiler's
+catalog. An unknown slug returns `null` so the caller can 404.
+
+It is **authenticated but not role-gated**, deliberately: this is compiler
+output describing how to lay out a page, identical for every tenant, and the
+renderer needs it before it knows whether the user may read any row. What the
+user can actually see is decided by the entity queries, which are role- and
+RLS-enforced. The table is `tenantScoped: false` — no tenant column, no RLS —
+because there is nothing tenant-specific in it.
+
 ## Multi-tenancy and the RLS session
 
 Every operation runs inside `withDbSession` (`src/db/session.ts`): a

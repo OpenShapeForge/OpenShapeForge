@@ -6,11 +6,21 @@
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
+  "//exports": [
+    "Source-first, with a compiled fallback for bundlers.",
+    "This package's relative imports carry NodeNext `.js` specifiers, which",
+    "TypeScript (any moduleResolution) and Bun both map back onto the `.ts`",
+    "files. Bundlers do not: Turbopack resolves `./claims.js` literally and",
+    "fails. So Bun and TypeScript read `src/` — no build step, unchanged",
+    "behaviour for apps/api and the scripts — while anything else, notably",
+    "the Next build in apps/web, gets `dist/`. Consumers of `dist/` must",
+    "build it first; apps/web's own dev/build scripts do."
+  ],
   "exports": {
     ".": {
       "types": "./src/index.ts",
-      "import": "./src/index.ts",
-      "default": "./src/index.ts"
+      "bun": "./src/index.ts",
+      "default": "./dist/index.js"
     }
   },
   "scripts": {

@@ -7,7 +7,7 @@
  * schema (workflow, messaging, erp workspace, identity, realtime); those
  * domains are intentionally absent here.
  */
-import { Kind, type ValueNode } from "graphql";
+import { GraphQLError, Kind, type ValueNode } from "graphql";
 import { createSchema } from "graphql-yoga";
 import {
   generatedEntityMutationFields,
@@ -49,8 +49,21 @@ export const graphqlSchema = createSchema<GraphqlContext>({
       role: String!
     }
 
+    """
+    Presentation configuration for one entity's generated CRUD pages. Global
+    compiler output, identical for every tenant — layout, not data.
+    """
+    type EntityPageConfigs {
+      listConfigs: JSON
+      detailConfigs: JSON
+      workspaceConfigs: JSON
+      createFormConfigBases: JSON
+      editFormConfigBases: JSON
+    }
+
     type Query {
       health: Health!
+      entityPageConfigs(entitySlug: String!): EntityPageConfigs
 ${generatedEntityQueryFields}
 ${connectorQueryFields}
 ${connectorNamespaceQueryFields}
@@ -77,6 +90,7 @@ ${connectorNamespaceMutationFields}
         status: "ok",
         role: "api",
       }),
+      entityPageConfigs: resolveEntityPageConfigs,
     },
     Mutation: {
       ...generatedEntityResolvers.Mutation,
@@ -84,6 +98,67 @@ ${connectorNamespaceMutationFields}
     },
   },
 });
+
+/**
+ * `config_kind` as stored by the seeder -> the field the renderer asks for.
+ * The stored spelling is the compiler's; the GraphQL spelling is the web
+ * client's, and the two were never the same.
+ */
+const PAGE_CONFIG_FIELD_BY_KIND: Record<string, string> = {
+  list: "listConfigs",
+  detail: "detailConfigs",
+  workspace: "workspaceConfigs",
+  create_form: "createFormConfigBases",
+  edit_form: "editFormConfigBases",
+};
+
+/**
+ * Presentation config for one entity's generated pages.
+ *
+ * Authenticated but not role-gated: this is compiler output describing how to
+ * lay out a page, identical for every tenant, and the renderer needs it before
+ * it knows whether the user may read any rows. What the user can actually see
+ * is decided by the entity queries, which are role- and RLS-enforced. Returns
+ * null for an unknown slug so the caller can 404 rather than render an empty
+ * page.
+ */
+async function resolveEntityPageConfigs(
+  _parent: unknown,
+  args: { entitySlug: string },
+  context: GraphqlContext,
+) {
+  if (!context.session?.tenantId || !context.session?.userId) {
+    throw new GraphQLError("Entity page configs require an authenticated session.", {
+      extensions: { code: "UNAUTHENTICATED", status: 401 },
+    });
+  }
+  if (!context.db) {
+    throw new GraphQLError("Database is not configured for entity page configs.", {
+      extensions: { code: "DATABASE_NOT_CONFIGURED", status: 503 },
+    });
+  }
+
+  const rows = await context.db
+    .selectFrom("platform.entity_page_configs")
+    .select(["config_kind", "configs"])
+    .where("entity_slug", "=", args.entitySlug)
+    .execute();
+
+  if (rows.length === 0) return null;
+
+  const result: Record<string, unknown> = {
+    listConfigs: null,
+    detailConfigs: null,
+    workspaceConfigs: null,
+    createFormConfigBases: null,
+    editFormConfigBases: null,
+  };
+  for (const row of rows) {
+    const field = PAGE_CONFIG_FIELD_BY_KIND[row.config_kind];
+    if (field) result[field] = row.configs;
+  }
+  return result;
+}
 
 /** Connector namespace types (ObjectStoreQueries, …), keyed by type name. */
 function connectorObjectResolvers() {

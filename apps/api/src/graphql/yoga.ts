@@ -2,6 +2,8 @@
 import { costLimitPlugin } from "@escape.tech/graphql-armor-cost-limit";
 import { maxAliasesPlugin } from "@escape.tech/graphql-armor-max-aliases";
 import { maxDepthPlugin } from "@escape.tech/graphql-armor-max-depth";
+import { maxDirectivesPlugin } from "@escape.tech/graphql-armor-max-directives";
+import { maxTokensPlugin } from "@escape.tech/graphql-armor-max-tokens";
 import { NoSchemaIntrospectionCustomRule } from "graphql";
 import { createYoga, type Plugin } from "graphql-yoga";
 import { readPositiveIntEnv } from "../config/limits.js";
@@ -45,6 +47,19 @@ export type CreateGraphqlYogaOptions = {
 const DEFAULT_MAX_DEPTH = 8;
 const DEFAULT_MAX_ALIASES = 15;
 const DEFAULT_MAX_COST = 5000;
+/**
+ * Depth, aliases and cost are all measured AFTER parsing. A query can be
+ * expensive before it ever gets that far: a megabyte of tokens, or thousands of
+ * repeated directives, is work the parser does regardless of how trivial the
+ * resulting document turns out to be (#161). These two cap the document itself.
+ *
+ * 1000 tokens is far above any query this CRUD surface produces — the widest
+ * generated entity selection with its relationships is an order of magnitude
+ * below it — and far below what a flooding attempt needs to be interesting.
+ * Directives: the schema defines none beyond the built-ins, so 50 is generous.
+ */
+const DEFAULT_MAX_TOKENS = 1000;
+const DEFAULT_MAX_DIRECTIVES = 50;
 
 export function createGraphqlYoga(options: CreateGraphqlYogaOptions = {}) {
   const maxDepth = readPositiveIntEnv("GRAPHQL_MAX_DEPTH", DEFAULT_MAX_DEPTH);
@@ -53,6 +68,11 @@ export function createGraphqlYoga(options: CreateGraphqlYogaOptions = {}) {
     DEFAULT_MAX_ALIASES,
   );
   const maxCost = readPositiveIntEnv("GRAPHQL_MAX_COST", DEFAULT_MAX_COST);
+  const maxTokens = readPositiveIntEnv("GRAPHQL_MAX_TOKENS", DEFAULT_MAX_TOKENS);
+  const maxDirectives = readPositiveIntEnv(
+    "GRAPHQL_MAX_DIRECTIVES",
+    DEFAULT_MAX_DIRECTIVES,
+  );
   const isProduction = process.env.NODE_ENV === "production";
 
   return createYoga<Record<string, unknown>, GraphqlContext>({
@@ -61,6 +81,10 @@ export function createGraphqlYoga(options: CreateGraphqlYogaOptions = {}) {
     landingPage: false,
     graphiql: !isProduction,
     plugins: [
+      // Cheapest first: token and directive counts reject a flooding document
+      // before depth/alias/cost analysis walks it.
+      maxTokensPlugin({ n: maxTokens }),
+      maxDirectivesPlugin({ n: maxDirectives }),
       maxDepthPlugin({ n: maxDepth, ignoreIntrospection: true }),
       maxAliasesPlugin({ n: maxAliases }),
       costLimitPlugin({ maxCost, ignoreIntrospection: true }),

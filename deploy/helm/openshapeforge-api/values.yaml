@@ -62,20 +62,30 @@ auth:
   tenantBypassRoles: ""
 
 # --- Resource limits (rate limiting + timeouts) ------------------------------
-# App-level resource-exhaustion controls (issue #130). GraphQL query depth /
-# alias / cost limits are separate and always on (see the API's yoga config).
-#
-# The rate limiter uses an IN-MEMORY store, so the budget is enforced PER API
-# INSTANCE: with replicaCount > 1 a single client can reach up to
-# replicaCount × rateLimit.max before being throttled. For exact cross-instance
-# limits, front the deployment with a shared store (e.g. Redis) or an
-# ingress/edge rate limit. All values are also overridable via extraEnv.
+# App-level resource-exhaustion controls (issues #130, #161). GraphQL query
+# depth / alias / cost / token / directive limits are separate and always on
+# (see the API's yoga config). All values are overridable via extraEnv.
 limits:
   rateLimit:
-    # Max requests per window, per client IP, per instance.
+    # Max requests per window for an ANONYMOUS caller, keyed on client IP.
     max: 600
     # Sliding window length in milliseconds.
     windowMs: 60000
+    # Budget for a caller presenting a trusted-context header whose HMAC
+    # verifies — keyed per tenant+user, not per service. Empty => 5 × max.
+    maxTrusted: ""
+    # Shared store, so the budget is EXACT across replicas. Left empty the
+    # store is in-memory and the budget is per instance: with replicaCount 2 a
+    # client can reach up to 2 × max before being throttled.
+    #
+    # Two ways to supply it. Inline is fine for a URL with no credentials:
+    #   redisUrl: redis://valkey.openshapeforge.svc:6379
+    # A URL carrying a password belongs in a Secret instead:
+    #   redisUrlSecret: { name: openshapeforge-redis, key: url }
+    redisUrl: ""
+    redisUrlSecret:
+      name: ""
+      key: url
   # Whole-request timeout in ms (Fastify requestTimeout); 0 disables.
   requestTimeoutMs: 30000
   # Per-request Postgres statement_timeout in ms, applied inside the tenant

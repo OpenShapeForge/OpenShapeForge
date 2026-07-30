@@ -36,7 +36,9 @@ env:
 
 jobs:
   build:
-    name: Build, smoke test, push
+    # Named distinctly from the Keycloak image job: a required status check is
+    # matched by name, and two jobs sharing one name cannot both be required.
+    name: Build, smoke test, push the API image
     runs-on: ubuntu-latest
     permissions:
       contents: read

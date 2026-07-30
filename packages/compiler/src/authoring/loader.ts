@@ -56,9 +56,14 @@ function validateIdentifier(name: string, context: string): void {
 // Strict allowlists for authoring *content* identifiers (not filenames). These
 // mirror the config/schemas/*.json patterns (core-entity.schema.json: `entity`
 // and relationship `target` are `^[A-Z][A-Za-z0-9]*$`; `fieldKey` is
-// `^[a-z][A-Za-z0-9]*$`). The JSON schemas are not enforced at runtime (ajv is
-// declared but never wired), so these YAML-derived names would otherwise reach
-// codegen unvalidated: the entity name becomes an import path / string-literal
+// `^[a-z][A-Za-z0-9]*$`). Since #182 the schemas ARE enforced — by the corpus
+// gate (`check:authoring-schemas`) for authoring that lives here, and at load
+// for authoring that can arrive from outside (connector-loader.ts) — but these
+// patterns are deliberately independent of that and must stay: a shape schema
+// is documentation of a shape, not injection defence, and this layer has to
+// fail closed even if a schema is edited to agree with an attacker. Without it
+// these YAML-derived names reach codegen unvalidated: the entity name becomes
+// an import path / string-literal
 // key in the entity manifest (entity-manifest.ts.ejs), and field keys are
 // interpolated raw into generated GraphQL operation strings (actions.ts.ejs,
 // pages.ts). Enforcing the patterns here — at load, before any generator runs —

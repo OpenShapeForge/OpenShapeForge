@@ -290,6 +290,31 @@ An overlay layer can introduce all of these without compiler changes.
 
 A new **field** on an existing entity is steps 3–4 only.
 
+## The schemas are enforced
+
+`packages/compiler/config/schemas/*.json` describes the shape of every
+authoring artifact, and — since #182 — is checked rather than merely published:
+
+- `bun run check:authoring-schemas` validates every authoring YAML in this
+  repository against the schema for its `kind`. It runs in CI.
+- Artifacts that can arrive from **outside** this repository are validated at
+  load instead, because no in-repo gate can see them all. Connector contracts
+  are the case that exists today: `connector-loader.ts` validates a contract
+  before anything else touches it, whether it came from here, from a package,
+  or from a host repo's own layer.
+
+Both paths share one validator, so they cannot disagree about what a schema
+means. Adding an authoring `kind` requires listing it in `SCHEMA_BY_KIND` or in
+`UNSCHEMAD_KINDS` (with the reason) in
+`packages/compiler/src/authoring/schema-validation.ts` — a new kind cannot
+become unvalidated by omission.
+
+Schema validation does **not** replace the identifier allowlists in
+`loader.ts` and `connector-loader.ts`. Those guard names that are spliced
+verbatim into generated TypeScript, GraphQL, SQL, route strings and MCP tool
+names; a shape schema documents a shape, and both layers must fail closed
+independently.
+
 To keep a generated table **out of the CRUD surface**, its slug must be in
 `generatedCrudDeniedEntitySlugs` (`packages/compiler/src/active-manifest.ts`);
 such tables are marked `domainInternal` and get no GraphQL surface (used for

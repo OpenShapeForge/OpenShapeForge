@@ -93,9 +93,10 @@
         "fields": {
           "type": "array",
           "items": {
+            "description": "A field, plus the one connector-only addition. Refs the OPEN property set and closes the shape here: a ref of the closed $defs/fieldV2 would reject `secret`, because a closure cannot see the allOf branch beside it.",
             "allOf": [
               {
-                "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json"
+                "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json#/$defs/fieldV2Properties"
               },
               {
                 "type": "object",
@@ -106,7 +107,8 @@
                   }
                 }
               }
-            ]
+            ],
+            "unevaluatedProperties": false
           }
         }
       }
@@ -259,7 +261,15 @@
       "additionalProperties": false,
       "description": "Operating policy for reaching a remote system. Every field has a platform default; `kind` alone is not enough to run remote calls safely.",
       "properties": {
-        "timeoutMs": { "type": "integer", "minimum": 1, "maximum": 120000 },
+        "timeouts": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Split the way workflow engines split them: attemptMs bounds one attempt, totalMs bounds the operation including retries. One number cannot express both — three attempts at a 30s budget can occupy 90 seconds while every attempt looks well-behaved.",
+          "properties": {
+            "attemptMs": { "type": "integer", "minimum": 1, "maximum": 120000 },
+            "totalMs": { "type": "integer", "minimum": 1 }
+          }
+        },
         "retry": {
           "type": "object",
           "additionalProperties": false,

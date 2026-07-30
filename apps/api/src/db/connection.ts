@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { SQL } from "bun";
-import { Kysely } from "kysely";
+import { Kysely, type KyselyConfig } from "kysely";
 import { PostgresJSDialect } from "kysely-postgres-js";
 import type { DB } from "../generated/db/types.js";
 
@@ -14,6 +14,13 @@ export type DatabaseRuntime = {
 export type DatabaseRuntimeOptions = {
   databaseUrl?: string;
   maxConnections?: number;
+  /**
+   * Kysely's query log. Unset in every production path — SQL text can carry
+   * tenant data, so nothing routes this to the application logger by default.
+   * Diagnostics use it, and so do the tests that assert which statements a read
+   * actually issues (the opt-in count, #17).
+   */
+  log?: KyselyConfig["log"];
 };
 
 /**
@@ -67,6 +74,7 @@ export function createDatabaseRuntime(
     dialect: new PostgresJSDialect({
       postgres,
     }),
+    ...(options.log ? { log: options.log } : {}),
   });
 
   return {

@@ -279,6 +279,43 @@ compose stack):
 | `OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI` / `_ISSUER` / `_AUDIENCE` | Keycloak bearer verification (unset ⇒ bearer ignored) |
 | `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` | trusted-context HMAC secret; the example default matches the repo's signing scripts (unset ⇒ trusted-context rejected) |
 | `APP_TENANT_BYPASS_ROLES` | comma-separated roles that grant `tenant` scope |
+| `API_RATE_LIMIT_MAX` / `_WINDOW_MS` | anonymous budget per window (default 600 / 60s) |
+| `API_RATE_LIMIT_MAX_TRUSTED` | budget for a signed trusted-context caller (default 5× the anonymous budget) |
+| `API_RATE_LIMIT_REDIS_URL` | shared limiter store; unset ⇒ in-memory, budget enforced per instance |
+| `API_REQUEST_TIMEOUT_MS` / `DB_STATEMENT_TIMEOUT_MS` | whole-request and per-request statement budgets |
+| `GRAPHQL_MAX_DEPTH` / `_ALIASES` / `_COST` / `_TOKENS` / `_DIRECTIVES` | query-hardening caps |
+
+## Rate limiting
+
+The limiter runs **before** authentication — that ordering is the control, not
+an accident: it is what protects the authentication path itself. So the budget
+a request gets is chosen from what it can prove about itself *there*, with no
+network call, no JWKS fetch and no database read.
+
+| Tier | Key | Budget |
+| --- | --- | --- |
+| anonymous | client IP (via `trustProxy`) | `API_RATE_LIMIT_MAX` |
+| trusted | tenant + user from a trusted-context header whose **HMAC verifies** | `API_RATE_LIMIT_MAX_TRUSTED` |
+
+Sending the identity headers without a valid signature does not buy the higher
+tier — it falls back to the IP-keyed anonymous budget. Trusted callers are keyed
+per tenant+user rather than per service, so one runaway integration cannot
+consume the allowance of everything else holding the same secret.
+
+There is deliberately **no bearer-token tier**. Keying on an unverified `sub`
+would hand out a fresh budget per forged token, and verifying the token here
+would put JWKS work in front of the limit that exists to protect it. Per-identity
+budgets for bearer callers belong after session resolution, keyed on the
+verified subject.
+
+**Across replicas.** With `API_RATE_LIMIT_REDIS_URL` set, all instances share one
+budget (counter and TTL move in a single atomic Redis call). Without it the
+store is in-memory and N replicas mean up to N × the budget — still bounded,
+just loosely. If the store is unreachable the request proceeds **uncounted**
+rather than failing: a store outage must not become an API outage. Those are
+counted in `rateLimitMetrics.storeErrors`.
+
+Health and readiness probes are never throttled.
 
 ## Local stack
 

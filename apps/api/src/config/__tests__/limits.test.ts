@@ -10,6 +10,7 @@ import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_RATE_LIMIT_MAX,
   DEFAULT_RATE_LIMIT_WINDOW_MS,
+  DEFAULT_TRUSTED_RATE_LIMIT_MULTIPLIER,
   DEFAULT_REQUEST_TIMEOUT_MS,
   DEFAULT_STATEMENT_TIMEOUT_MS,
   DEFAULT_TRUST_PROXY,
@@ -73,6 +74,12 @@ describe("readApiLimits", () => {
     expect(readApiLimits(env({}))).toEqual({
       rateLimitMax: DEFAULT_RATE_LIMIT_MAX,
       rateLimitWindowMs: DEFAULT_RATE_LIMIT_WINDOW_MS,
+      rateLimitTiers: {
+        anonymous: DEFAULT_RATE_LIMIT_MAX,
+        trusted: DEFAULT_RATE_LIMIT_MAX * DEFAULT_TRUSTED_RATE_LIMIT_MULTIPLIER,
+      },
+      // Unset => in-memory store, budget enforced per instance (#161).
+      rateLimitRedisUrl: undefined,
       requestTimeoutMs: DEFAULT_REQUEST_TIMEOUT_MS,
       trustProxy: DEFAULT_TRUST_PROXY,
     });
@@ -83,6 +90,8 @@ describe("readApiLimits", () => {
         env({
           API_RATE_LIMIT_MAX: "100",
           API_RATE_LIMIT_WINDOW_MS: "1000",
+          API_RATE_LIMIT_MAX_TRUSTED: "700",
+          API_RATE_LIMIT_REDIS_URL: "redis://valkey:6379",
           API_REQUEST_TIMEOUT_MS: "0",
           API_TRUST_PROXY: "true",
         }),
@@ -90,9 +99,21 @@ describe("readApiLimits", () => {
     ).toEqual({
       rateLimitMax: 100,
       rateLimitWindowMs: 1000,
+      rateLimitTiers: { anonymous: 100, trusted: 700 },
+      rateLimitRedisUrl: "redis://valkey:6379",
       requestTimeoutMs: 0,
       trustProxy: true,
     });
+  });
+  test("derives the trusted budget from the anonymous one when unset", () => {
+    const limits = readApiLimits(env({ API_RATE_LIMIT_MAX: "100" }));
+    expect(limits.rateLimitTiers).toEqual({
+      anonymous: 100,
+      trusted: 100 * DEFAULT_TRUSTED_RATE_LIMIT_MULTIPLIER,
+    });
+  });
+  test("treats a blank redis url as unset, not as an empty host", () => {
+    expect(readApiLimits(env({ API_RATE_LIMIT_REDIS_URL: "   " })).rateLimitRedisUrl).toBeUndefined();
   });
 });
 

@@ -86,6 +86,24 @@ NODE_ENV=production is always set, which triggers the production env validator.
   value: {{ .Values.limits.rateLimit.max | quote }}
 - name: API_RATE_LIMIT_WINDOW_MS
   value: {{ .Values.limits.rateLimit.windowMs | quote }}
+{{- with .Values.limits.rateLimit.maxTrusted }}
+- name: API_RATE_LIMIT_MAX_TRUSTED
+  value: {{ . | quote }}
+{{- end }}
+{{- if and .Values.limits.rateLimit.redisUrl .Values.limits.rateLimit.redisUrlSecret.name }}
+{{- fail "Set limits.rateLimit.redisUrl OR limits.rateLimit.redisUrlSecret, not both — two sources for one URL is a silent-precedence bug waiting to happen." }}
+{{- end }}
+{{- with .Values.limits.rateLimit.redisUrl }}
+- name: API_RATE_LIMIT_REDIS_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.limits.rateLimit.redisUrlSecret.name }}
+- name: API_RATE_LIMIT_REDIS_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ . | quote }}
+      key: {{ $.Values.limits.rateLimit.redisUrlSecret.key | quote }}
+{{- end }}
 - name: API_REQUEST_TIMEOUT_MS
   value: {{ .Values.limits.requestTimeoutMs | quote }}
 - name: DB_STATEMENT_TIMEOUT_MS

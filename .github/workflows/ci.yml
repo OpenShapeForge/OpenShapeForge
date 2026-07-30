@@ -26,6 +26,19 @@ jobs:
   gates:
     name: Generate, typecheck, unit tests, notices
     runs-on: ubuntu-latest
+    services:
+      # Backs the shared rate-limit store tests (#161). Throwaway, no data, no
+      # credentials — without it those tests skip, and a skipped test proves
+      # nothing about a control whose whole point is behaviour across replicas.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6399:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -53,10 +66,16 @@ jobs:
       # authorization guards that reject before any transaction opens. The
       # database-backed suites run in the db-tests job below.
       - name: API unit tests (no database)
+        # TEST_REDIS_URL points at the service below, so the shared-store rate
+        # limit (#161) is PROVEN here rather than skipped — a skipped test is
+        # not evidence.
+        env:
+          TEST_REDIS_URL: redis://127.0.0.1:6399
         run: >-
           cd apps/api && bun test src/config src/roles
           src/graphql/__tests__/introspection.test.ts
           src/graphql/__tests__/classified-query-guard.unit.test.ts
+          src/graphql/__tests__/query-hardening.unit.test.ts
 
       # Determinism + freshness gate: regenerates twice and fails on drift, so
       # it must run after (or independently of) the generate step above.

@@ -17,6 +17,8 @@
     "@escape.tech/graphql-armor-cost-limit": "^2.4.3",
     "@escape.tech/graphql-armor-max-aliases": "^2.6.2",
     "@escape.tech/graphql-armor-max-depth": "^2.4.2",
+    "@escape.tech/graphql-armor-max-directives": "^2.3.1",
+    "@escape.tech/graphql-armor-max-tokens": "^2.5.1",
     "@fastify/rate-limit": "^10",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@openshapeforge/auth": "workspace:*",

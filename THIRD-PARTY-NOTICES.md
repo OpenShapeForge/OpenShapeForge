@@ -4,13 +4,13 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 189 packages.
+Regenerate with `bun run notices`. 191 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 159 |
+| MIT | 161 |
 | ISC | 13 |
 | BlueOak-1.0.0 | 5 |
 | BSD-3-Clause | 5 |
@@ -44,6 +44,14 @@ Regenerate with `bun run notices`. 189 packages.
 ### @escape.tech/graphql-armor-max-depth@2.4.2
 - License: **MIT** — https://github.com/Escape-Technologies/graphql-armor
 - Author: Escape Technologies SAS
+
+### @escape.tech/graphql-armor-max-directives@2.3.1
+- License: **MIT** — https://github.com/Escape-Technologies/graphql-armor
+- Author: Escape Technologies SAS
+
+### @escape.tech/graphql-armor-max-tokens@2.5.1
+- License: **MIT** — https://github.com/Escape-Technologies/graphql-armor
+- Author: Laurin Quast <laurinquast@googlemail.com>
 
 ### @escape.tech/graphql-armor-types@0.7.0
 - License: **MIT** — https://github.com/Escape-Technologies/graphql-armor

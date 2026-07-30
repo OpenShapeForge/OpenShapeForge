@@ -159,9 +159,19 @@ export function textColumnFor(
 
 /**
  * A column a redaction test can drive end to end: writable (so a value can be
- * planted at create time) and OPTIONAL — a required column renders as GraphQL
- * `String!`, where a redacted null surfaces as a non-null execution error
- * instead of a null field.
+ * planted at create time) and OPTIONAL.
+ *
+ * The optional restriction is an artefact of how these tests arm a
+ * classification, not of the schema rule. Since #168 a classified column
+ * renders nullable however it is authored — but `generatedEntityTypeDefs` is
+ * built once, at import, from the manifest as shipped, and withClassifiedColumn
+ * tags a column afterwards. The SDL a test runs against therefore still says
+ * `String!` for a required column, and a redacted null would surface as a
+ * non-null execution error here even though it would not in a deployment whose
+ * manifest declares the classification.
+ *
+ * classified-nullability.unit.test.ts covers the required case by rendering the
+ * schema directly.
  */
 export function redactableColumnFor(table: GeneratedTable): Column | undefined {
   return table.columns.find(

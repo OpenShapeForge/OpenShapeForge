@@ -287,9 +287,13 @@ export function registerGeneratedRestRoutes(
         instance.get(base, async (request, reply) => {
           const context = await requireRestContext(request);
           const query = (request.query ?? {}) as Record<string, unknown>;
+          // The REST list body always carries totalCount, so REST always pays
+          // for the count pass — unlike GraphQL, where the client selects it
+          // (#17). A REST opt-out would be a query-parameter contract change.
           const result = await listGeneratedEntities(context.db, context.session, {
             table: table.name,
             ...buildListInput(table, query),
+            includeTotalCount: true,
           });
           return reply.send({
             items: result.rows.map((row) => serializeRow(table, row)),

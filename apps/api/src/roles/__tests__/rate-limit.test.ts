@@ -41,6 +41,45 @@ describe("API rate limiting", () => {
     expect(limited.json()).toMatchObject({ statusCode: 429, error: "Too Many Requests" });
   });
 
+  // The REST routes and the MCP server each install an encapsulated error
+  // handler that runs everything through toHttpError. A limiter rejection is
+  // neither an HttpError nor a GraphQLError, so it used to fall through to the
+  // redacted 500 — telling a client to retry at exactly the moment the limiter
+  // wanted it to back off, and doing so only on these two transports while
+  // GraphQL answered 429 correctly.
+  for (const [transport, request] of [
+    ["REST", { method: "GET" as const, url: "/api/rest/v1/relations" }],
+    [
+      "MCP",
+      {
+        method: "POST" as const,
+        url: "/api/mcp",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        payload: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}',
+      },
+    ],
+  ] as const) {
+    test(`${transport} reports a throttled request as 429, not a redacted 500`, async () => {
+      process.env[RATE_LIMIT_MAX_ENV] = "2";
+      app = createApiApp();
+
+      let limited: Awaited<ReturnType<FastifyInstance["inject"]>> | undefined;
+      for (let i = 0; i < 6 && !limited; i++) {
+        const res = await app.inject(request);
+        if (res.statusCode === 429) limited = res;
+      }
+
+      expect(limited).toBeDefined();
+      expect(limited!.headers["retry-after"]).toBeDefined();
+      expect(limited!.json()).toMatchObject({
+        error: { code: "TOO_MANY_REQUESTS" },
+      });
+    });
+  }
+
   test("liveness/readiness probes are never throttled", async () => {
     process.env[RATE_LIMIT_MAX_ENV] = "1";
     app = createApiApp();

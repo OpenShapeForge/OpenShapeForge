@@ -13,15 +13,56 @@
  * carries a hardcoded path to a plugin's generated output, and a repo that
  * drops the workflow plugin stops seeding without editing the migration chain.
  *
- * GraphQL and routes arrive with the definition surface and the webhook
- * endpoints; the hooks are declared in the contract and left unimplemented here
- * rather than stubbed, so the schema advertises nothing that does not answer.
+ * It also contributes the definition-authoring GraphQL surface — definitions,
+ * versions, validation, patching, edit locks, and the node catalogs the designer
+ * reads. Those are not generated CRUD on purpose: the tables are declared
+ * `domainInternal`, because every invariant that makes a definition meaningful
+ * (versioning, validate-on-publish, the edit lock, refusing to delete a
+ * definition with runs) lives above the columns rather than in them.
+ *
+ * `restRoutes` stays unimplemented until the webhook trigger lands, rather than
+ * being stubbed, so the surface advertises nothing that does not answer.
  */
 import type { RuntimeModule } from "../../../apps/api/src/modules/contract.js";
 import { applyWorkflowCatalogsSeed } from "../../../apps/api/src/db/migrations/workflow-catalogs-seed.js";
+import {
+  workflowMutationFields,
+  workflowQueryFields,
+  workflowResolvers,
+  workflowTypeDefs,
+} from "./runtime/graphql.js";
+import { hydrateNodeCatalog } from "./runtime/node-catalog-store.js";
+import { registerAllWorkflowNodeBridges } from "./runtime/node-bridges.js";
 
 const plugin: RuntimeModule = {
   name: "workflow",
+
+  /**
+   * Hydrate the node catalog before anything can be asked about it.
+   *
+   * Definition validation resolves node types through the catalog, and an
+   * unhydrated store answers every lookup with nothing — which would make
+   * validation pass while checking nothing at all. Failing here is a load
+   * failure: the module is dropped and its surfaces are absent, which is the
+   * honest outcome when it cannot answer correctly.
+   */
+  async init({ db }) {
+    // Bridges first, and without a database: the registry is what decides
+    // whether a node type can execute at all, and a deployment that cannot
+    // reach Postgres should still be able to answer that question.
+    registerAllWorkflowNodeBridges();
+    if (!db) return; // no database configured; the surfaces degrade with it
+    await hydrateNodeCatalog(db);
+  },
+
+  graphql() {
+    return {
+      typeDefs: workflowTypeDefs,
+      queryFields: workflowQueryFields,
+      mutationFields: workflowMutationFields,
+      resolvers: workflowResolvers,
+    };
+  },
 
   seeds: [
     {

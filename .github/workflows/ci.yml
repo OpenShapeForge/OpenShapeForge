@@ -26,6 +26,19 @@ jobs:
   gates:
     name: Generate, typecheck, unit tests, notices
     runs-on: ubuntu-latest
+    services:
+      # Backs the shared rate-limit store tests (#161). Throwaway, no data, no
+      # credentials — without it those tests skip, and a skipped test proves
+      # nothing about a control whose whole point is behaviour across replicas.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6399:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -43,7 +56,15 @@ jobs:
         run: bun run generate
 
       - name: Typecheck
-        run: bun run typecheck:compiler && bun run typecheck:api
+        run: bun run typecheck:compiler && bun run typecheck:api && bun run typecheck:web
+
+      # The web app's CRUD pages are compiler output, so a compiler change can
+      # break the build without touching a single file under apps/web. Building
+      # here is what catches that. `build:web` builds packages/auth first — the
+      # bundler cannot resolve that package's NodeNext `.js` specifiers from
+      # source (see docs/consuming.md).
+      - name: Build the web app
+        run: bun run build:web
 
       - name: Compiler unit tests
         run: bun test packages/compiler
@@ -53,10 +74,17 @@ jobs:
       # authorization guards that reject before any transaction opens. The
       # database-backed suites run in the db-tests job below.
       - name: API unit tests (no database)
+        # TEST_REDIS_URL points at the service below, so the shared-store rate
+        # limit (#161) is PROVEN here rather than skipped — a skipped test is
+        # not evidence.
+        env:
+          TEST_REDIS_URL: redis://127.0.0.1:6399
         run: >-
           cd apps/api && bun test src/config src/roles
           src/graphql/__tests__/introspection.test.ts
           src/graphql/__tests__/classified-query-guard.unit.test.ts
+          src/graphql/__tests__/classified-nullability.unit.test.ts
+          src/graphql/__tests__/query-hardening.unit.test.ts
 
       # Determinism + freshness gate: regenerates twice and fails on drift, so
       # it must run after (or independently of) the generate step above.
@@ -66,14 +94,35 @@ jobs:
       - name: Check local authoring catalog is self-consistent
         run: bun run check:authoring-local
 
+      # Conformance, which check:authoring-local never checked despite its
+      # wording (#182): every authoring YAML against the schema for its kind.
+      - name: Check authoring matches its schemas
+        run: bun run check:authoring-schemas
+
       - name: Check THIRD-PARTY-NOTICES is up to date
         run: bun run check:notices
+
+      # A required status check is matched by job NAME. Renaming a job here
+      # would silently drop the gate the branch-protection ruleset claims to
+      # enforce, so the two are checked against each other.
+      - name: Check branch protection requires the jobs that exist
+        run: bun run check:required-checks
 
   keycloak-spi:
     name: Build Keycloak SPI (Maven)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.4
+
+      # Before spending a Maven build on it: the SPI calls internal Keycloak
+      # APIs, so compiling against a different version than it runs on fails at
+      # the first request, not here (issue #14).
+      - name: Check the SPI compiles against its runtime Keycloak version
+        run: bun run check:keycloak-lockstep
 
       # SPI targets Java 17 (packages/keycloak-spi/pom.xml).
       - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0

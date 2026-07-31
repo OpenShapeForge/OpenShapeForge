@@ -16,6 +16,7 @@ spec:
   template:
     metadata:
       annotations:
+        {{- include "keycloak.secretChecksumAnnotation" . | nindent 8 }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -102,11 +103,22 @@ spec:
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- if include "keycloak.realmEnabled" . }}
+          {{- if or .Values.writableVolumes.enabled (include "keycloak.realmEnabled" .) }}
           volumeMounts:
+            {{- if .Values.writableVolumes.enabled }}
+            # /opt/keycloak/data MUST precede the realm mount below: the kubelet
+            # mounts in list order, and a parent mounted after its child hides
+            # the child.
+            - name: data
+              mountPath: /opt/keycloak/data
+            - name: tmp
+              mountPath: /tmp
+            {{- end }}
+            {{- if include "keycloak.realmEnabled" . }}
             - name: realm
               mountPath: /opt/keycloak/data/import
               readOnly: true
+            {{- end }}
           {{- end }}
           startupProbe:
             {{- toYaml .Values.startupProbe | nindent 12 }}
@@ -116,11 +128,21 @@ spec:
             {{- toYaml .Values.readinessProbe | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-      {{- if include "keycloak.realmEnabled" . }}
+      {{- if or .Values.writableVolumes.enabled (include "keycloak.realmEnabled" .) }}
       volumes:
+        {{- if .Values.writableVolumes.enabled }}
+        - name: data
+          emptyDir:
+            sizeLimit: {{ .Values.writableVolumes.dataSizeLimit }}
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.writableVolumes.tmpSizeLimit }}
+        {{- end }}
+        {{- if include "keycloak.realmEnabled" . }}
         - name: realm
           secret:
             secretName: {{ include "keycloak.realmSecretName" . }}
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

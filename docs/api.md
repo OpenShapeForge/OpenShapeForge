@@ -44,8 +44,15 @@ Engine semantics (`src/graphql/generated-crud.ts`):
   primary key; direction defaults to `asc`.
 - **Cursor pagination** — `first` is clamped to 1..200 (default 50);
   `after` is a base64url-encoded offset cursor. Connections return
-  `totalCount` (a real `count(*)` under the same filter) and
-  `pageInfo { hasNextPage, endCursor }`.
+  `pageInfo { hasNextPage, endCursor }` and `totalCount`.
+- **`totalCount` is opt-in and costs a second pass.** It is a real `count(*)`
+  under the same filter, so it cannot stop at `first`, and a text filter
+  compiles to an unanchored `ilike '%value%'` that no b-tree index answers. On
+  a large tenant it is a sequential scan. It therefore runs **only when the
+  query selects the field** (through a fragment or an alias too) — a page that
+  does not ask for it issues one statement, not two. REST and MCP always
+  publish a count in their list bodies, so they always pay for it; a GraphQL
+  client that wants a cheap page simply omits the field.
 - **Relationship traversal** — `belongsTo` resolves the single parent via
   the FK on the row; `hasMany` resolves an embedded list (limit 50) filtered
   on the target's FK column, ordered by the target's compiler-derived
@@ -108,6 +115,27 @@ It differs from REST in two ways that matter for authorization: `tools/list` is
 resolved per session, so a caller is never shown a tool it lacks the roles for,
 and classified fields are withheld from the advertised schemas as well as
 redacted from responses. See [mcp.md](mcp.md).
+
+## The page-config catalog
+
+One hand-written query sits beside the generated entity surface:
+
+```graphql
+entityPageConfigs(entitySlug: String!): EntityPageConfigs
+```
+
+It returns the presentation configuration for one entity's generated web pages
+— `listConfigs`, `detailConfigs`, `workspaceConfigs`, `createFormConfigBases`,
+`editFormConfigBases`, each a `JSON` blob keyed by context — out of
+`platform.entity_page_configs`, which `db:migrate` seeds from the compiler's
+catalog. An unknown slug returns `null` so the caller can 404.
+
+It is **authenticated but not role-gated**, deliberately: this is compiler
+output describing how to lay out a page, identical for every tenant, and the
+renderer needs it before it knows whether the user may read any row. What the
+user can actually see is decided by the entity queries, which are role- and
+RLS-enforced. The table is `tenantScoped: false` — no tenant column, no RLS —
+because there is nothing tenant-specific in it.
 
 ## Multi-tenancy and the RLS session
 
@@ -231,6 +259,13 @@ transport inherits them:
   an otherwise legitimate traversal.
 - Create/update responses are not redacted: the operation already required the
   write grant that authorizes reading the column.
+- **A classified column is nullable in the GraphQL schema however it is
+  authored.** Redaction produces a `null` the read contract has to admit;
+  rendering a `required: true` classified column as `String!` would turn that
+  null into a non-null execution error that propagates to the nearest nullable
+  parent, so one redacted field would null the whole row — and inside a
+  non-null connection, the whole page. The column stays `NOT NULL` in Postgres
+  and required on create; only reads may answer `null`.
 - No entity shipped in this repo declares a classification, so these controls
   are inert here until an authoring layer adds one.
 
@@ -279,6 +314,43 @@ compose stack):
 | `OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI` / `_ISSUER` / `_AUDIENCE` | Keycloak bearer verification (unset ⇒ bearer ignored) |
 | `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` | trusted-context HMAC secret; the example default matches the repo's signing scripts (unset ⇒ trusted-context rejected) |
 | `APP_TENANT_BYPASS_ROLES` | comma-separated roles that grant `tenant` scope |
+| `API_RATE_LIMIT_MAX` / `_WINDOW_MS` | anonymous budget per window (default 600 / 60s) |
+| `API_RATE_LIMIT_MAX_TRUSTED` | budget for a signed trusted-context caller (default 5× the anonymous budget) |
+| `API_RATE_LIMIT_REDIS_URL` | shared limiter store; unset ⇒ in-memory, budget enforced per instance |
+| `API_REQUEST_TIMEOUT_MS` / `DB_STATEMENT_TIMEOUT_MS` | whole-request and per-request statement budgets |
+| `GRAPHQL_MAX_DEPTH` / `_ALIASES` / `_COST` / `_TOKENS` / `_DIRECTIVES` | query-hardening caps |
+
+## Rate limiting
+
+The limiter runs **before** authentication — that ordering is the control, not
+an accident: it is what protects the authentication path itself. So the budget
+a request gets is chosen from what it can prove about itself *there*, with no
+network call, no JWKS fetch and no database read.
+
+| Tier | Key | Budget |
+| --- | --- | --- |
+| anonymous | client IP (via `trustProxy`) | `API_RATE_LIMIT_MAX` |
+| trusted | tenant + user from a trusted-context header whose **HMAC verifies** | `API_RATE_LIMIT_MAX_TRUSTED` |
+
+Sending the identity headers without a valid signature does not buy the higher
+tier — it falls back to the IP-keyed anonymous budget. Trusted callers are keyed
+per tenant+user rather than per service, so one runaway integration cannot
+consume the allowance of everything else holding the same secret.
+
+There is deliberately **no bearer-token tier**. Keying on an unverified `sub`
+would hand out a fresh budget per forged token, and verifying the token here
+would put JWKS work in front of the limit that exists to protect it. Per-identity
+budgets for bearer callers belong after session resolution, keyed on the
+verified subject.
+
+**Across replicas.** With `API_RATE_LIMIT_REDIS_URL` set, all instances share one
+budget (counter and TTL move in a single atomic Redis call). Without it the
+store is in-memory and N replicas mean up to N × the budget — still bounded,
+just loosely. If the store is unreachable the request proceeds **uncounted**
+rather than failing: a store outage must not become an API outage. Those are
+counted in `rateLimitMetrics.storeErrors`.
+
+Health and readiness probes are never throttled.
 
 ## Local stack
 

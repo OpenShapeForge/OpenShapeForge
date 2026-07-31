@@ -1,0 +1,351 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openshapeforge.example/schema-phase0/connector.schema.json",
+  "title": "Connector Contract Schema",
+  "description": "A connector declares an interface — what it can do and how the platform exposes it — while the implementation ships as a separate package under its own license. The compiler never resolves that package.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "kind",
+    "connector",
+    "title",
+    "capabilities",
+    "implementation"
+  ],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "kind": { "type": "string", "const": "connector" },
+    "connector": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z0-9]*$",
+      "description": "PascalCase. Becomes the GraphQL namespace type and the prefix of every generated operation type."
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "labels": {
+      "$ref": "https://openshapeforge.example/schema-phase0/core-entity.schema.json#/$defs/localizedText"
+    },
+    "description": {
+      "oneOf": [
+        { "type": "string" },
+        {
+          "$ref": "https://openshapeforge.example/schema-phase0/core-entity.schema.json#/$defs/localizedText"
+        }
+      ]
+    },
+    "category": { "type": "string" },
+    "domains": { "type": "array", "items": { "type": "string" } },
+    "capabilities": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "enum": ["operations", "eventSource", "eventSink"] },
+      "description": "Only `operations` is implemented. `eventSource`/`eventSink` are reserved vocabulary and are rejected at compile time until the platform event pipeline ships."
+    },
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package", "contractVersion", "provenance", "license"],
+      "properties": {
+        "package": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Module specifier, recorded verbatim. Never resolved at compile time — output must not depend on node_modules."
+        },
+        "contractVersion": { "type": "integer", "minimum": 1 },
+        "provenance": {
+          "enum": ["firstParty", "reviewed", "thirdParty"],
+          "description": "Bounds how the platform may execute the package once the execution trust model is settled."
+        },
+        "license": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["spdx"],
+          "properties": {
+            "spdx": {
+              "type": "string",
+              "minLength": 1,
+              "description": "SPDX identifier or LicenseRef-* for a bespoke commercial license. Metadata: surfaced wherever the connector is offered. It grants and restricts nothing at runtime — see availability.entitlement."
+            },
+            "url": { "type": "string" },
+            "notice": { "type": "string" }
+          }
+        }
+      }
+    },
+    "availability": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "entitlement": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*([.-][a-z0-9]+)*$",
+          "description": "Key that must be granted by the deployment's signed license before this connector may be installed or invoked. Absent means always available."
+        }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fields"],
+      "properties": {
+        "instances": { "enum": ["single", "multiple"], "default": "single" },
+        "verify": { "type": "boolean", "default": false },
+        "fields": {
+          "type": "array",
+          "items": {
+            "description": "A field, plus the one connector-only addition. Refs the OPEN property set and closes the shape here: a ref of the closed $defs/fieldV2 would reject `secret`, because a closure cannot see the allOf branch beside it.",
+            "allOf": [
+              {
+                "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json#/$defs/fieldV2Properties"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "secret": {
+                    "type": "boolean",
+                    "description": "Routes the value to encrypted storage, keeps it out of every read path, and marks it for redaction in logs and errors."
+                  }
+                }
+              }
+            ],
+            "unevaluatedProperties": false
+          }
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "egress": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(\\*\\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
+          },
+          "description": "Hostnames the connector may reach, enforced by the runtime's bound fetch. Omitted means no outbound HTTP at all: the allowlist is the grant, not a filter over an open door."
+        }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/operation" }
+    },
+    "events": {
+      "type": "array",
+      "description": "Reserved. Requires the eventSource/eventSink capabilities and is rejected at compile time until the event pipeline ships.",
+      "items": { "$ref": "#/$defs/event" }
+    },
+    "exposure": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Which surfaces project this connector's operations. GraphQL is on by default (as for entities); REST and MCP are opt-in.",
+      "properties": {
+        "graphql": { "type": "boolean", "default": true },
+        "rest": {
+          "oneOf": [
+            { "type": "boolean" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "basePath": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]*$",
+                  "description": "Segment under the fixed connectors/ mount, so a connector can never collide with an entity's REST base path. Defaults to the slug."
+                }
+              }
+            }
+          ]
+        },
+        "mcp": {
+          "oneOf": [
+            { "type": "boolean" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean", "default": true },
+                "toolPrefix": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*$",
+                  "description": "Defaults to the connector name in snake_case. Connector tools share the entity tool budget."
+                },
+                "operations": {
+                  "type": "object",
+                  "additionalProperties": { "type": "boolean" },
+                  "description": "Per-operation flags keyed by operation key; each defaults to true."
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "kind", "output"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+        "kind": {
+          "enum": ["query", "mutation"],
+          "description": "Drives GraphQL field placement, the REST method, and the MCP tool's read-only/destructive hints."
+        },
+        "label": {
+          "$ref": "https://openshapeforge.example/schema-phase0/core-entity.schema.json#/$defs/localizedText"
+        },
+        "description": {
+          "oneOf": [
+            { "type": "string" },
+            {
+              "$ref": "https://openshapeforge.example/schema-phase0/core-entity.schema.json#/$defs/localizedText"
+            }
+          ]
+        },
+        "authorization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["roles"],
+          "properties": {
+            "roles": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["invoke"],
+              "properties": {
+                "invoke": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "input": {
+          "type": "array",
+          "items": {
+            "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json"
+          }
+        },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["cardinality", "fields"],
+          "properties": {
+            "cardinality": { "enum": ["one", "many"] },
+            "fields": {
+              "type": "array",
+              "items": {
+                "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json"
+              }
+            }
+          }
+        },
+        "reliability": { "$ref": "#/$defs/reliability" },
+        "rest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "method": { "enum": ["GET", "POST"] },
+            "path": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
+          }
+        }
+      }
+    },
+    "reliability": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Operating policy for reaching a remote system. Every field has a platform default; `kind` alone is not enough to run remote calls safely.",
+      "properties": {
+        "timeouts": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Split the way workflow engines split them: attemptMs bounds one attempt, totalMs bounds the operation including retries. One number cannot express both — three attempts at a 30s budget can occupy 90 seconds while every attempt looks well-behaved.",
+          "properties": {
+            "attemptMs": { "type": "integer", "minimum": 1, "maximum": 120000 },
+            "totalMs": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "retry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["eligible"],
+          "properties": {
+            "eligible": {
+              "type": "boolean",
+              "description": "A mutation may only be retry-eligible when idempotency is declared — enforced at compile time."
+            },
+            "maxAttempts": { "type": "integer", "minimum": 1 },
+            "backoff": { "enum": ["exponential", "fixed"] }
+          }
+        },
+        "idempotency": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["strategy"],
+          "properties": {
+            "strategy": { "enum": ["natural", "key"] },
+            "keyInput": {
+              "type": "string",
+              "description": "Required for strategy `key`: the input field carrying the idempotency key. Must name a declared input field."
+            }
+          }
+        },
+        "concurrency": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "perTenant": { "type": "integer", "minimum": 1 } }
+        },
+        "rateLimit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "perTenantPerMinute": { "type": "integer", "minimum": 1 } }
+        },
+        "circuitBreaker": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "failureThreshold": { "type": "integer", "minimum": 1 },
+            "resetAfterMs": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requestBytes": { "type": "integer", "minimum": 1 },
+            "responseBytes": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "pagination": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["style"],
+          "properties": { "style": { "enum": ["cursor", "page", "none"] } }
+        }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "direction", "payload"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+        "direction": { "enum": ["inbound", "outbound"] },
+        "label": {
+          "$ref": "https://openshapeforge.example/schema-phase0/core-entity.schema.json#/$defs/localizedText"
+        },
+        "payload": {
+          "type": "array",
+          "items": {
+            "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json"
+          }
+        }
+      }
+    }
+  }
+}

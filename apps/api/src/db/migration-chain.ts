@@ -18,6 +18,9 @@
  *   4. generated roll-forward — manifest-driven schema apply/diff.
  *   5. app role grants        — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically.
+ *   6. page-config seed       — load the compiler's entity page-config catalog
+ *      into platform.entity_page_configs. Data, not DDL, so it runs after the
+ *      table exists and after the grant sweep.
  *
  * `db` must be a connection-bound Kysely instance (obtained via
  * runtime.db.connection().execute) — steps 3 and 4 use explicit
@@ -40,6 +43,10 @@ import {
   applyGeneratedSchemaMigration,
   type GeneratedSchemaMigrationResult,
 } from "./migrations/generated-schema.js";
+import {
+  applyEntityPageConfigsSeed,
+  type EntityPageConfigsSeedResult,
+} from "./migrations/entity-page-configs-seed.js";
 
 export type MigrationChainOptions = {
   /** Override the versioned-migration registry (used by tests). */
@@ -50,6 +57,8 @@ export type MigrationChainOptions = {
 export type MigrationChainResult = GeneratedSchemaMigrationResult & {
   /** Versions of bespoke migrations applied during this run. */
   versionedApplied: string[];
+  /** Outcome of the entity page-config catalog seed. */
+  pageConfigs: EntityPageConfigsSeedResult;
 };
 
 export async function runMigrationChain(
@@ -66,5 +75,6 @@ export async function runMigrationChain(
   const generated = await applyGeneratedSchemaMigration(db, options.appliedBy);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
-  return { ...generated, versionedApplied: versioned.applied };
+  const pageConfigs = await applyEntityPageConfigsSeed(db);
+  return { ...generated, versionedApplied: versioned.applied, pageConfigs };
 }

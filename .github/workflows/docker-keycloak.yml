@@ -41,7 +41,9 @@ env:
 
 jobs:
   build:
-    name: Build, smoke test, push
+    # Named distinctly from the API image job: a required status check is
+    # matched by name, and two jobs sharing one name cannot both be required.
+    name: Build, smoke test, push the Keycloak image
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -117,6 +119,44 @@ jobs:
           echo "::error::keycloak did not become ready within 90s"
           docker logs kc-smoke
           docker rm -f kc-smoke >/dev/null
+          exit 1
+
+      # The chart runs the container with securityContext.readOnlyRootFilesystem
+      # (issue #24), writable emptyDirs mounted only at /opt/keycloak/data and
+      # /tmp. Prove that combination boots, using the command the chart actually
+      # uses: `start --optimized`, which skips Quarkus augmentation because
+      # `kc.sh build` already ran at image build time.
+      #
+      # This deliberately does NOT reuse the start-dev step above: start-dev
+      # re-runs augmentation and writes into /opt/keycloak/lib, so it cannot run
+      # on a read-only rootfs. If someone drops the `kc.sh build` line from the
+      # Dockerfile, `start --optimized` starts augmenting too and this step
+      # fails — which is exactly the regression worth catching.
+      - name: Smoke test the image with a read-only root filesystem
+        run: |
+          docker run -d --name kc-rofs --network host \
+            --read-only --tmpfs /tmp --tmpfs /opt/keycloak/data \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            -e KC_DB=postgres \
+            -e KC_DB_URL=jdbc:postgresql://localhost:5432/keycloak \
+            -e KC_DB_USERNAME=keycloak \
+            -e KC_DB_PASSWORD=keycloak \
+            -e KC_HEALTH_ENABLED=true \
+            -e KC_HTTP_ENABLED=true \
+            -e KC_HOSTNAME_STRICT=false \
+            openshapeforge-keycloak:ci start --optimized
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:9000/health/ready 2>/dev/null | grep -q '"status": *"UP"'; then
+              echo "keycloak ready on a read-only rootfs after ${i}s"
+              docker rm -f kc-rofs >/dev/null
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::keycloak did not become ready on a read-only rootfs within 90s"
+          docker logs kc-rofs
+          docker rm -f kc-rofs >/dev/null
           exit 1
 
       - name: Log in to GHCR

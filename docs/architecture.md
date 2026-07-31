@@ -32,12 +32,17 @@ Generated artifacts (all gitignored; reproducible)
   apps/api/src/generated/mcp/tools.json      MCP tool catalog (field schemas)
   packages/compiler/config/referentiedata/core-by-groep.json
   keycloak/openshapeforge-realm.json         realm import for the compose stack
+  apps/web/src/app/(generated)/*             CRUD pages (list/detail/create/edit)
+  apps/web/src/actions/generated/*           per-entity server actions
+  apps/web/src/compiler/*                    entity manifests + field contract
+  apps/api/src/generated/page-configs/*      page-config catalog seed (loaded by db:migrate)
   apps/api/src/generated/workflow/*          workflow plugin (api side)
   docs/entities.generated.md                 entity-docs plugin
         │
         ▼
 Runtimes and tools (all manifest-driven, no per-entity code)
   apps/api          generic GraphQL CRUD engine + entity-event journal
+  apps/web          Next.js app; generic entity/rendering engine
   db:migrate        roll-forward migrator keyed on the manifest checksum
   test:e2e          e2e suite derived from the manifest at load time
   test:perf         k6 scenarios/thresholds derived from the manifest
@@ -69,7 +74,7 @@ authoring YAML (or the compiler/plugin) and rerun `bun run generate`.
 The ownership boundary is explicit code, not convention alone:
 
 - `packages/compiler/src/generated-artifact-paths.ts` lists compiler-owned
-  roots and single files (including the dormant `apps/web/**` roots).
+  roots and single files, including the `apps/web/**` roots.
 - Each plugin declares its own outputs via `ownedPaths` (see
   [plugins.md](plugins.md)).
 - `scripts/check-generated-artifacts.mjs` walks all owned roots/files and
@@ -103,14 +108,41 @@ Because the gates hash byte-for-byte, anything nondeterministic — map
 iteration order, timestamps, `Math.random`, unsorted directory walks — fails
 CI immediately. Plugins are held to the same contract.
 
+## The generated web app
+
+`apps/web` is a Next.js app whose CRUD surface the compiler owns.
+`generateAuthoringUiArtifacts` and the EJS templates under
+`src/authoring/generators/templates/` emit the list/detail/create/edit pages,
+their server actions, the entity manifests and the app shell
+(`app/layout.tsx`, `app/page.tsx`); the routes are `/`, `/[entity]`,
+`/[entity]/[id]`, `/[entity]/[id]/edit` and `/[entity]/create`. Everything
+under the roots in `compilerOwnedGeneratedRoots` is gitignored and recreated
+by `bun run generate` — edit `packages/compiler`, never the output.
+
+Generation is keyed on the `apps/web` directory existing
+(`webPresent = existsSync(join(repoRoot, "apps/web"))`), so a host repo that
+wants the data layer and API only can delete it and the compiler silently
+stops emitting UI. See [consuming.md](consuming.md#the-web-app).
+
+The hand-written half — the entity/rendering engine those generated pages
+import (`features/renderer`, `components/entity`, the data table, the
+server-side auth and GraphQL client) — lives alongside it, with the
+design-system primitives in `packages/ui` (`@openshapeforge/ui`).
+
+**Page configs are data, not code.** How a page lays out its list columns,
+detail groups and form fields is *not* emitted as `.ts`; the compiler writes
+one catalog document, `db:migrate` loads it into
+`platform.entity_page_configs`, and the pages read it at request time through
+the `entityPageConfigs` GraphQL query. The seed carries a checksum over its
+rows, so an unchanged repo re-migrates without rewriting the catalog, and it
+is authoritative — a row it no longer describes is deleted rather than left
+for the renderer to find. The seed is emitted API-side
+(`apps/api/src/generated/page-configs/`) because apps/api owns the table,
+though it is produced by the web-gated UI generator: no `apps/web`, no page
+configs, empty table, nothing reading it.
+
 ## Dormant surfaces (present, intentionally inactive)
 
-- **Web UI generation** exists in the compiler
-  (`generateAuthoringUiArtifacts`, the EJS templates under
-  `src/authoring/generators/templates/`) but activates only when an
-  `apps/web` directory exists in the repo. Without one, `generate` emits the
-  data layer, referentiedata snapshot, Keycloak realm, and plugin artifacts
-  only. See [consuming.md](consuming.md#re-enabling-web-generation).
 - **Entity events have no consumers yet.** Mutations append journal rows in
   `platform.entity_events`; no outbox/realtime fanout ships in this repo, and
   no GraphQL query exposes the journal. See

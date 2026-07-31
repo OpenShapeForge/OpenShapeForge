@@ -18,6 +18,7 @@ import {
   type CoreReferentiedataSnapshot,
 } from "./core-referentiedata-artifacts.js";
 import { generateArtifacts } from "./generate.js";
+import { renderConnectorCatalog } from "./generate-connectors.js";
 import { renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
 import type { CompiledEntityInfo } from "./plugins.js";
@@ -29,6 +30,7 @@ export type ArtifactCollection = {
   groups: {
     db: GeneratedArtifact[];
     mcp: GeneratedArtifact[];
+    connectors: GeneratedArtifact[];
     referentiedata: GeneratedArtifact[];
     ui: GeneratedArtifact[];
     keycloak: GeneratedArtifact[];
@@ -145,7 +147,8 @@ function assertReferentieGroepsResolve(
 export async function collectAllArtifacts(
   repoRoot: string = defaultRepoRoot,
 ): Promise<ArtifactCollection> {
-  const { manifest, entities, plugins } = await loadActivePlatformCompile(repoRoot);
+  const { manifest, entities, connectors, plugins } =
+    await loadActivePlatformCompile(repoRoot);
   const authoringDir = resolveActiveAuthoringDir(repoRoot);
   // Web UI artifacts (CRUD pages, entity manifests, actions, workflow
   // contract) are only generated when the repo actually has a web app. A
@@ -169,6 +172,12 @@ export async function collectAllArtifacts(
         ),
       },
     ],
+    connectors: [
+      {
+        path: "apps/api/src/generated/connectors/catalog.json",
+        contents: renderConnectorCatalog(connectors, manifest),
+      },
+    ],
     referentiedata: await generateCoreReferentiedataArtifacts(repoRoot, referentiedata),
     ui: webPresent ? await generateAuthoringUiArtifacts(authoringDir) : [],
     keycloak: generateAuthoringKeycloakArtifacts(authoringDir),
@@ -185,6 +194,7 @@ export async function collectAllArtifacts(
   const all = [
     ...groups.db,
     ...groups.mcp,
+    ...groups.connectors,
     ...groups.referentiedata,
     ...groups.ui,
     ...groups.keycloak,

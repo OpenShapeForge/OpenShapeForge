@@ -27,6 +27,26 @@ const STATUS_BY_CODE: Record<string, number> = {
   FORBIDDEN: 403,
   GENERATED_CRUD_NOT_ENABLED: 404,
   DATABASE_NOT_CONFIGURED: 503,
+  // Connector invocation and execution. These carry their own code and a
+  // message that is already safe to surface; without an entry here they fall
+  // through to the redacted 500 below, and a caller learns nothing about a
+  // refusal it could act on (not configured, disabled, rate limited).
+  CONNECTOR_NOT_FOUND: 404,
+  CONNECTOR_NOT_EXECUTABLE: 503,
+  CONNECTOR_NOT_CONFIGURED: 409,
+  CONNECTOR_NEEDS_REPAIR: 409,
+  CONNECTOR_DISABLED: 409,
+  CONNECTOR_SECRETS_NOT_CONFIGURED: 503,
+  CONNECTOR_VERIFY_UNSUPPORTED: 501,
+  CONNECTOR_PROVENANCE_REFUSED: 403,
+  CONNECTOR_INVALID_INPUT: 400,
+  CONNECTOR_INVALID_OUTPUT: 502,
+  CONNECTOR_CONTRACT_MISMATCH: 500,
+  CONNECTOR_EGRESS_DENIED: 502,
+  CONNECTOR_UPSTREAM_ERROR: 502,
+  CONNECTOR_TIMEOUT: 504,
+  CONNECTOR_RATE_LIMITED: 429,
+  CONNECTOR_CIRCUIT_OPEN: 503,
 };
 
 /**
@@ -43,6 +63,29 @@ const STATUS_BY_CODE: Record<string, number> = {
 function rateLimitStatus(error: unknown): number | undefined {
   const status = (error as { statusCode?: unknown } | null)?.statusCode;
   return status === 429 ? 429 : undefined;
+}
+
+/**
+ * Connector errors are plain classes rather than GraphQLErrors, so they need
+ * recognising here or the mapper redacts them. Matched on the `code` field
+ * against the table above: an unknown code still falls through to a redacted
+ * 500, which is the right default for something nobody classified.
+ */
+function connectorErrorCode(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const named = error.name;
+  if (
+    named !== "ConnectorInvocationError" &&
+    named !== "ConnectorExecutionError" &&
+    named !== "ConnectorBoundaryError" &&
+    named !== "ConnectorServiceError" &&
+    named !== "ConnectorAuthorizationError" &&
+    named !== "ConnectorConfigurationError"
+  ) {
+    return undefined;
+  }
+  const code = (error as Error & { code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
 }
 
 export function toHttpError(error: unknown): {
@@ -68,6 +111,17 @@ export function toHttpError(error: unknown): {
       status: error.status,
       body: { error: { code: error.code, message: error.message } },
     };
+  }
+
+  const connectorCode = connectorErrorCode(error);
+  if (connectorCode !== undefined) {
+    const status = STATUS_BY_CODE[connectorCode];
+    if (status !== undefined) {
+      return {
+        status,
+        body: { error: { code: connectorCode, message: (error as Error).message } },
+      };
+    }
   }
 
   if (error instanceof GraphQLError) {

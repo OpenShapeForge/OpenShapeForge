@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { GraphQLError } from "graphql";
+import {
+  GraphQLError,
+  Kind,
+  type GraphQLResolveInfo,
+  type SelectionSetNode,
+} from "graphql";
 import {
   getGeneratedCrudTables,
   getGeneratedEntity,
@@ -58,7 +63,23 @@ function fieldNameForColumn(column: GeneratedTable["columns"][number]) {
   return column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase());
 }
 
-function nonNullSuffix(column: GeneratedTable["columns"][number]) {
+/**
+ * `!` for columns the API guarantees a value for.
+ *
+ * A data-classified column is deliberately NOT one of them, however the column
+ * is authored (#168). Field-level redaction nulls a classified column for a
+ * reader without a write grant, so `required: true` plus a restricting
+ * classification describes a field the runtime may legitimately answer with
+ * `null`. Rendering it `String!` made the two rules incompatible: redaction
+ * produced a non-null execution error that propagated up and nulled the whole
+ * selection — a list query lost every row rather than one field. The column
+ * stays NOT NULL in Postgres and required on create; only the read contract
+ * admits the null that redaction produces.
+ */
+export function nonNullSuffix(column: GeneratedTable["columns"][number]) {
+  if (column.classification) {
+    return "";
+  }
   return column.required || column.primaryKey ? "!" : "";
 }
 
@@ -82,7 +103,13 @@ function isMutableColumn(column: GeneratedTable["columns"][number]) {
   );
 }
 
-function renderTypeDefinition(table: GeneratedTable) {
+/**
+ * Exported for tests: the shipped manifest declares no classified column, so
+ * the nullability rule above (#168) has nothing to act on in
+ * `generatedEntityTypeDefs` and asserting against it would be vacuous. Calling
+ * this with a synthetic table exercises the real rendering path.
+ */
+export function renderTypeDefinition(table: GeneratedTable) {
   const graphql = assertGraphqlMetadata(table);
   const columnFields = table.columns
     .map((column) => {
@@ -200,7 +227,11 @@ function requireGeneratedDb(context: GraphqlContext) {
   return context.db;
 }
 
-function toConnection(rows: Record<string, unknown>[], nextCursor: string | null, totalCount: number) {
+function toConnection(
+  rows: Record<string, unknown>[],
+  nextCursor: string | null,
+  totalCount: number | null,
+) {
   return {
     edges: rows.map((row, index) => ({
       node: row,
@@ -210,8 +241,49 @@ function toConnection(rows: Record<string, unknown>[], nextCursor: string | null
       hasNextPage: nextCursor !== null,
       endCursor: nextCursor,
     },
+    // Null only when the client did not select it, in which case nothing reads
+    // it. `totalCount: Int` is nullable in the schema, so this is well-formed.
     totalCount,
   };
+}
+
+/**
+ * Whether the client selected `name` on the field being resolved.
+ *
+ * Drives the opt-in count (#17): a list query that does not ask for
+ * `totalCount` must not pay for the count pass. Walks the selection set the
+ * same way execution will — inline fragments and named fragment spreads
+ * included, since `... on FooConnection { totalCount }` selects the field just
+ * as plainly as naming it. Aliases need no handling: an alias renames the
+ * response key, not the field.
+ *
+ * Wrong in the safe direction if it ever missed a spelling: the count comes
+ * back null and the client sees no value, rather than the server quietly
+ * skipping authorization or returning stale data.
+ */
+function selectionIncludes(info: GraphQLResolveInfo, name: string): boolean {
+  const seenFragments = new Set<string>();
+
+  const walk = (selectionSet: SelectionSetNode | undefined): boolean => {
+    if (!selectionSet) return false;
+    for (const selection of selectionSet.selections) {
+      if (selection.kind === Kind.FIELD) {
+        if (selection.name.value === name) return true;
+      } else if (selection.kind === Kind.INLINE_FRAGMENT) {
+        if (walk(selection.selectionSet)) return true;
+      } else if (selection.kind === Kind.FRAGMENT_SPREAD) {
+        const fragmentName = selection.name.value;
+        // Fragment cycles are invalid GraphQL, but a guard costs nothing and
+        // turns a malformed document into a false rather than a stack overflow.
+        if (seenFragments.has(fragmentName)) continue;
+        seenFragments.add(fragmentName);
+        if (walk(info.fragments[fragmentName]?.selectionSet)) return true;
+      }
+    }
+    return false;
+  };
+
+  return info.fieldNodes.some((node) => walk(node.selectionSet));
 }
 
 const queryResolvers = Object.fromEntries(
@@ -241,6 +313,7 @@ const queryResolvers = Object.fromEntries(
             after?: string | null;
           },
           context: GraphqlContext,
+          info: GraphQLResolveInfo,
         ) => {
           const db = requireGeneratedDb(context);
           assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
@@ -250,6 +323,9 @@ const queryResolvers = Object.fromEntries(
             ...(args.after === undefined ? {} : { cursor: args.after }),
             ...(args.filter === undefined ? {} : { filter: args.filter }),
             ...(args.sort === undefined ? {} : { sort: args.sort }),
+            // The count is the expensive half of a list read (#17). Ask for it
+            // only when the client selected the field it feeds.
+            ...(selectionIncludes(info, "totalCount") ? { includeTotalCount: true as const } : {}),
           });
           return toConnection(result.rows, result.nextCursor, result.totalCount);
         },
@@ -342,12 +418,14 @@ const objectResolvers = Object.fromEntries(
             async (parent: Record<string, unknown>, _args: unknown, context: GraphqlContext) => {
               const db = requireGeneratedDb(context);
               assertOperationAllowed(targetAuthorization, context.session, "read", relationship.target);
+              // The count IS this field, so it is always computed here.
               const result = await listGeneratedEntityRelation(db, context.session, {
                 parent,
                 parentTable: table,
                 relationship,
                 targetTable,
                 limit: 1,
+                includeTotalCount: true,
               });
               return { count: result.totalCount };
             },

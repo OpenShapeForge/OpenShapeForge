@@ -18,7 +18,22 @@ import {
 import { createGraphqlYoga } from "../graphql/yoga.js";
 import { headersFromFastify } from "../http/headers.js";
 import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
+import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
+import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
+import {
+  classifyRequest,
+  createRateLimitMetrics,
+  createRedisRateLimitStore,
+  type RateLimitMetrics,
+} from "./rate-limit.js";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    /** Limiter decision counters, per tier. Read by tests and diagnostics. */
+    rateLimitMetrics: RateLimitMetrics;
+  }
+}
 
 /** Startup drift check must not delay readiness meaningfully. */
 const DRIFT_CHECK_TIMEOUT_MS = 5000;
@@ -150,13 +165,47 @@ export function createApiApp(
     requestTimeout: limits.requestTimeoutMs,
   });
 
-  // Request-rate boundary, before GraphQL/REST execution. Keyed on the client IP
-  // (default keyGenerator + trustProxy). In-memory store => enforced per API
-  // instance; see apps/api/src/config/limits.ts. Health probes are exempt.
+  // Request-rate boundary, before GraphQL/REST execution — that ordering is
+  // what protects the authentication path itself, so the tier is decided from
+  // what a request can prove locally (see classifyRequest). Health probes are
+  // exempt.
+  const rateLimitMetrics = createRateLimitMetrics();
+  const contextSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET?.trim() || undefined;
+  const sharedStore = limits.rateLimitRedisUrl
+    ? createRedisRateLimitStore(limits.rateLimitRedisUrl, rateLimitMetrics, (error) =>
+        app.log.error({ err: error }, "Rate-limit store unavailable; request not counted."),
+      )
+    : undefined;
+
+  if (sharedStore) {
+    app.addHook("onClose", async () => {
+      await sharedStore.close();
+    });
+    app.log.info("Rate limiting uses a shared store: one budget across all replicas.");
+  } else {
+    app.log.warn(
+      "Rate limiting uses an in-memory store: the budget is enforced PER INSTANCE. " +
+        "Set API_RATE_LIMIT_REDIS_URL for an exact cross-replica limit.",
+    );
+  }
+
   void app.register(rateLimit, {
-    max: limits.rateLimitMax,
+    // Per-request budget, so a trusted service-to-service caller does not
+    // compete with anonymous traffic for one allowance.
+    max: (request) => limits.rateLimitTiers[classifyRequest(request, contextSecret).tier],
+    keyGenerator: (request) => classifyRequest(request, contextSecret).key,
     timeWindow: limits.rateLimitWindowMs,
     allowList: (request) => isRateLimitExempt(request.url),
+    ...(sharedStore ? { store: sharedStore.Store as never } : {}),
+    // A store outage must not become an API outage: the request proceeds
+    // uncounted, and createRedisRateLimitStore records it in storeErrors.
+    skipOnError: true,
+    onExceeding: (request) => {
+      rateLimitMetrics.allowed[classifyRequest(request, contextSecret).tier] += 1;
+    },
+    onExceeded: (request) => {
+      rateLimitMetrics.throttled[classifyRequest(request, contextSecret).tier] += 1;
+    },
     // 429 with Retry-After (added by the plugin); body carries no limiter internals.
     errorResponseBuilder: () => ({
       statusCode: 429,
@@ -164,6 +213,8 @@ export function createApiApp(
       message: "Rate limit exceeded. Please retry later.",
     }),
   });
+
+  app.decorate("rateLimitMetrics", rateLimitMetrics);
 
   app.removeContentTypeParser("application/json");
   app.addContentTypeParser(
@@ -239,6 +290,10 @@ export function createApiApp(
     });
 
     registerGeneratedRestRoutes(routes, dbOptions);
+    registerConnectorRestRoutes(routes, {
+      ...dbOptions,
+      config: readConnectorRuntimeConfig(),
+    });
     registerGeneratedMcpServer(routes, dbOptions);
   });
 

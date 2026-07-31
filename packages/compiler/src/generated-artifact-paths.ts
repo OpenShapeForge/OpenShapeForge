@@ -15,6 +15,15 @@ export const compilerOwnedGeneratedRoots = [
   // emitted by `packages/compiler/src/generate-mcp.ts` and statically imported
   // by the API's MCP server registration.
   "apps/api/src/generated/mcp",
+  // Compiled connector contracts — emitted by
+  // `packages/compiler/src/generate-connectors.ts` and statically imported by
+  // the API's connector surfaces. Always emitted (empty catalog when no
+  // connector is authored) so the runtime import is unconditional.
+  "apps/api/src/generated/connectors",
+  // Seed for platform.entity_page_configs, applied by `db:migrate`. Emitted by
+  // the web-gated UI generator (no apps/web -> no page configs -> no rows), but
+  // owned API-side because apps/api owns the table.
+  "apps/api/src/generated/page-configs",
   // NOTE: workflow-generated roots (apps/api/src/generated/workflow, the web
   // workflow/renderer feature roots) are owned by the example workflow plugin
   // (examples/plugins/workflow) via its `ownedPaths.roots` — the check scripts
@@ -26,7 +35,7 @@ export const compilerOwnedGeneratedRoots = [
   // Keycloak realm export — emitted by
   // `packages/compiler/src/authoring/generators/keycloak.ts`
   // and mounted into the local Keycloak container by
-  // `docker-compose.local.yml`. The file `keycloak/openshapeforge-dev-realm.json` is
+  // `docker-compose.local.yml`. The file `keycloak/<realm>-realm.json` is
   // the only file expected under this root; orphan files cause `check:generated`
   // to fail.
   "keycloak",

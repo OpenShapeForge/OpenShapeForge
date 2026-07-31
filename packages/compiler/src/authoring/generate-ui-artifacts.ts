@@ -38,8 +38,15 @@ const generatedArtifactPathMappings = [
   { oldPrefix: "actions/generated/", servicePrefix: "apps/web/src/actions/generated/" },
   { oldPrefix: "app/", servicePrefix: "apps/web/src/app/" },
   { oldPrefix: "compiler/", servicePrefix: "apps/web/src/compiler/" },
-  // Catalog seed for platform.entity_page_configs. apps/web/src/generated is
-  // gitignored and covered by compilerOwnedGeneratedRoots.
+  // Catalog seed for platform.entity_page_configs. It lands API-side because
+  // apps/api owns that table and seeds it during `db:migrate`; the web app
+  // never reads the file, it queries the catalog over GraphQL. Still emitted
+  // from the web-gated UI generator, since page configs only exist when there
+  // are pages to configure.
+  {
+    oldPrefix: "page-configs/",
+    servicePrefix: "apps/api/src/generated/page-configs/",
+  },
   { oldPrefix: "generated/web/", servicePrefix: "apps/web/src/generated/" },
 ];
 
@@ -417,7 +424,7 @@ export async function generateAuthoringUiArtifacts(
   // bases emitted above — both are produced from the same in-memory configs.
   const entityPageConfigsSeed = buildEntityPageConfigsSeed(pageConfigBundles);
   generatedFiles.set(
-    "generated/web/entity-page-configs.seed.json",
+    "page-configs/entity-page-configs.seed.json",
     entityPageConfigsSeed,
   );
 

@@ -48,36 +48,44 @@ is expected to gitignore these and gate them with its own copies of the
 check scripts (or by invoking `collectAllArtifacts(repoRoot)` — the same
 in-memory entry point `scripts/check-generated-artifacts.mjs` uses here).
 
-## Re-enabling web generation
+## The web app
 
 Web UI artifact generation is keyed on one thing: an **`apps/web` directory
 existing at the repo root** (`webPresent = existsSync(join(repoRoot,
-"apps/web"))`). This repo does not ship an `apps/web` directory, so web
-generation is inactive by default. Create one and rerun `generate`; the
-compiler then additionally emits, with no compiler changes:
+"apps/web"))`). This repo ships one, so `generate` emits, on top of the data
+layer:
 
 - CRUD pages, entity manifests, and server actions under
   `apps/web/src/app/(generated)`, `apps/web/src/compiler`,
   `apps/web/src/actions/generated`, plus the app-shell files
   (`apps/web/src/app/layout.tsx`, `page.tsx`) and the referentiedata copy
   `apps/web/src/lib/core-referentiedata-by-groep.json`.
-- The `check:generated` web-shard coverage checks activate automatically
-  (entity-manifest and action shard counts must equal
-  `expectedGeneratedCrudEntityCount`).
+- The page-config catalog seed
+  `apps/api/src/generated/page-configs/entity-page-configs.seed.json`. It
+  lands API-side because `apps/api` owns `platform.entity_page_configs` and
+  loads it during `db:migrate`; the pages read it back over GraphQL. **Run
+  `db:migrate` after `generate`** whenever page configs change, or the
+  renderer serves the previous layout.
+- The `check:generated` web-shard coverage checks (entity-manifest and action
+  shard counts must equal `expectedGeneratedCrudEntityCount`).
 - Plugins receive `webPresent: true` — the workflow example plugin then also
-  emits its web-side artifacts (workflow contract, designer registries,
-  renderer seeds) under the `apps/web/**` roots it already declares in
-  `ownedPaths`.
+  emits its web-side artifacts (field contract, designer registries, renderer
+  seeds) under the `apps/web/**` roots it declares in `ownedPaths`.
 
-**Workflow plugin web-side caveat (field-contract copies):** the extracted
-generators still *produce* the web client's duplicate copies of the field
-contract under their old `compiler/` and `generated/compiler/` path
-prefixes, but the plugin's path mapper has **no mapping** for those prefixes
-and silently drops them (`examples/plugins/workflow/index.ts`). A restored
-web app that imports those duplicated contract modules will need mappings
-added for the `compiler/` / `generated/compiler/` prefixes (or its imports
-pointed at `apps/web/src/generated/workflow/contract/`) before those files
-exist again.
+A host repo that wants the data layer and API only can **delete `apps/web`**;
+the compiler stops emitting UI artifacts with no compiler changes, and the
+web-shard gates deactivate with it.
+
+Run it with `bun run dev:web` (`build:web` to build). Both first build
+`packages/auth` — see the note below.
+
+**`@openshapeforge/auth` resolves to `dist/` under a bundler.** Its relative
+imports carry NodeNext `.js` specifiers, which TypeScript and Bun map back
+onto the `.ts` sources but Turbopack resolves literally and fails on. The
+package's `exports` therefore serve `src/` to Bun and TypeScript — apps/api
+and the scripts are unaffected and need no build — and `dist/` to everything
+else. `apps/web`'s `dev` and `build` scripts run that build first; a host
+repo bundling this package needs to do the same.
 
 ## Current limitations
 

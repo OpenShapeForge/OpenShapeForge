@@ -85,10 +85,15 @@ SQL needs and almost nothing a model needs.
 | `sortable` scalars | the `sortField` enum on the list tool |
 | `classification` | withheld fields and redaction (below) — never the schema |
 
-`readOnly`, computed, and server-managed fields (`id`, `tenantId`,
-`createdAt`, `updatedAt`) are **omitted** from write schemas rather than marked:
-the CRUD layer would reject them, and an absent property is a clearer
-instruction to a model than a present-but-forbidden one.
+Computed and server-managed fields (`id`, `tenantId`, `createdAt`,
+`updatedAt`) are **omitted** from write schemas rather than marked: the CRUD
+layer would reject them, and an absent property is a clearer instruction to a
+model than a present-but-forbidden one.
+
+Authored `readOnly` is **not** consulted. In this vocabulary it is a
+presentation flag — it selects a display component instead of an input one — and
+no transport enforces it, so honouring it here would advertise a narrower write
+surface than REST and GraphQL actually accept.
 
 ### Enumerations
 

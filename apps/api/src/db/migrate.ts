@@ -32,6 +32,13 @@ try {
             ...(result.versionedApplied.length === 0
               ? {}
               : { versionedApplied: result.versionedApplied }),
+            ...(result.pageConfigs.present
+              ? {
+                  pageConfigs: result.pageConfigs.skipped
+                    ? `unchanged (${result.pageConfigs.rows} rows)`
+                    : `seeded ${result.pageConfigs.rows} rows`,
+                }
+              : {}),
           },
           null,
           2,

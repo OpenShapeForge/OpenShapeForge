@@ -149,8 +149,13 @@
       }
     },
     "fieldV2": {
+      "description": "The closed field shape — what to $ref when a field is used as-is. unevaluatedProperties rather than additionalProperties because only the former sees an allOf branch beside it, which is what lets a use site extend the shape (connector configuration fields add `secret`) without the closure rejecting the addition.",
+      "allOf": [{ "$ref": "#/$defs/fieldV2Properties" }],
+      "unevaluatedProperties": false
+    },
+    "fieldV2Properties": {
+      "description": "The property set, left OPEN so a use site can extend it. Extend this one only alongside your own unevaluatedProperties: false — on its own it closes nothing.",
       "type": "object",
-      "additionalProperties": false,
       "required": ["key", "valueType"],
       "properties": {
         "key": { "type": "string", "minLength": 1 },

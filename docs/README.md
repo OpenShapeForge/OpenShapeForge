@@ -12,11 +12,12 @@ journal, and manifest-derived e2e + load tests. Start with
 | [authoring.md](authoring.md) | Entity YAML anatomy, `_base.yaml`, slug rules, catalogs, `authorization.yaml`, adding an entity end-to-end |
 | [layers.md](layers.md) | `authoring.config.yaml`, overlays, `kind: entityPatch` strategic merge, catalog merging, `.authoring-build/` |
 | [plugins.md](plugins.md) | The `CompilerPlugin` contract, `ownedPaths`, determinism rules, and both shipped examples (entity-docs, workflow) |
+| [connectors.md](connectors.md) | Connector contracts, licensing and entitlement, configuration and secrets, the execution trust model |
 | [api.md](api.md) | The generic CRUD engine, multi-tenancy + RLS, auth (Keycloak bearer / trusted-context HMAC), the entity-event journal, env + local stack |
 | [mcp.md](mcp.md) | The generated MCP server: opting in, the tool catalog built from field definitions, per-session tool listing, classification handling |
 | [testing.md](testing.md) | Proof gates, the manifest-derived e2e suite, HTML reports, the k6 perf suite |
 | [migrations.md](migrations.md) | Roll-forward additive migrator, versioned bespoke migrations, drift signals, caveats |
-| [consuming.md](consuming.md) | Using the compiler from a host repo; re-enabling web generation; current limitations |
+| [consuming.md](consuming.md) | Using the compiler from a host repo; the web app; current limitations |
 
 Also in this directory: **`entities.generated.md`** — the live reference of
 every generated entity (columns + GraphQL operation names), produced by the

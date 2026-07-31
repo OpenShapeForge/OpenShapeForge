@@ -53,6 +53,17 @@ import {
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
+import { listConnectorContracts } from "../connectors/catalog.js";
+import {
+  connectorToolsForSession,
+  resolveConnectorTool,
+} from "../connectors/mcp-tools.js";
+import {
+  connectorGovernor,
+  connectorKeyring,
+  connectorRegistry,
+} from "../connectors/dispatch.js";
+import { invokeConnectorOperation } from "../connectors/runtime.js";
 
 export const MCP_MOUNT_PATH = "/api/mcp";
 
@@ -271,6 +282,40 @@ function requireArguments(args: unknown): Record<string, unknown> {
   return args as Record<string, unknown>;
 }
 
+/**
+ * Reject arguments the tool's own schema does not declare.
+ *
+ * The CRUD layer already drops non-writable keys, so this is not a privilege
+ * check — it is honesty. Every tool schema carries
+ * `additionalProperties: false`, and accepting additional properties anyway
+ * makes the catalog lie to the one consumer that reads it: a model that sets
+ * `id` believes it created that id, gets a different one, and builds its next
+ * step on a false premise. A typo'd field name looks like a successful write of
+ * a value that was never stored. REST refuses the same body for the same
+ * reason (`assertWritableBody`).
+ *
+ * Validated against the ADVERTISED schema rather than a second list, so the
+ * check and the advertisement cannot drift apart.
+ */
+function assertDeclaredProperties(
+  schema: Record<string, unknown> | undefined,
+  values: Record<string, unknown>,
+  what: string,
+): void {
+  const properties = schema?.properties;
+  if (!properties || typeof properties !== "object") return;
+  const declared = new Set(Object.keys(properties as Record<string, unknown>));
+  const unknown = Object.keys(values).filter((key) => !declared.has(key));
+  if (unknown.length > 0) {
+    throw new HttpError(
+      400,
+      "BAD_USER_INPUT",
+      `Unknown or non-writable ${what}: ${unknown.sort().join(", ")}. ` +
+        `Accepted: ${[...declared].sort().join(", ") || "(none)"}.`,
+    );
+  }
+}
+
 function requireId(args: Record<string, unknown>): string {
   const id = args.id;
   if (typeof id !== "string" || id === "") {
@@ -327,12 +372,15 @@ async function invokeTool(
               direction: typeof args.sortDirection === "string" ? args.sortDirection : null,
             }
           : undefined;
+      // Like REST, the MCP list result always publishes totalCount, so the
+      // count pass is always requested (#17).
       const result = await listGeneratedEntities(db, session, {
         table: table.name,
         ...(typeof args.first === "number" ? { limit: args.first } : {}),
         ...(typeof args.after === "string" ? { cursor: args.after } : {}),
         ...(filter ? { filter } : {}),
         ...(sort ? { sort } : {}),
+        includeTotalCount: true,
       });
       return ok({
         items: result.rows.map((row) => serializeRow(table, row)),
@@ -352,6 +400,7 @@ async function invokeTool(
 
     case "create": {
       const values = requireArguments(args);
+      assertDeclaredProperties(tool.inputSchema, values, "field");
       assertWritableValues(values, entity, table, session);
       const row = await createGeneratedEntity(db, session, {
         table: table.name,
@@ -362,7 +411,13 @@ async function invokeTool(
 
     case "update": {
       const id = requireId(args);
+      assertDeclaredProperties(tool.inputSchema, args, "argument");
       const values = requireArguments(args.values);
+      assertDeclaredProperties(
+        (tool.inputSchema.properties as Record<string, Record<string, unknown>> | undefined)?.values,
+        values,
+        "field",
+      );
       assertWritableValues(values, entity, table, session);
       const row = await updateGeneratedEntity(db, session, {
         table: table.name,
@@ -392,13 +447,56 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
   const tables = tablesByName();
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: toolsForSession(session, tables).map(({ tool, entity }) =>
-      describeTool(tool, entity, tables.get(tool.table), session),
-    ),
+    tools: [
+      ...toolsForSession(session, tables).map(({ tool, entity }) =>
+        describeTool(tool, entity, tables.get(tool.table), session),
+      ),
+      // Connector operations join the SAME catalog, filtered by the same
+      // session, so a caller sees one tool list rather than two surfaces with
+      // different rules. The shared 60-tool budget is enforced at compile time.
+      ...connectorToolsForSession(listConnectorContracts(), {
+        roles: session.roles ?? [],
+      }).map((tool) => ({
+        name: tool.name,
+        title: tool.title,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        annotations: { title: tool.title, ...tool.annotations },
+      })),
+    ],
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
+
+    // Connector operations dispatch outside CRUD — own input schema, own
+    // executor — so they are resolved before the entity table lookup. An
+    // unauthorized connector tool resolves to nothing, which falls through to
+    // the same NOT_FOUND an unknown name gets.
+    const connectorTool = resolveConnectorTool(listConnectorContracts(), name, {
+      roles: session.roles ?? [],
+    });
+    if (connectorTool) {
+      try {
+        const result = await invokeConnectorOperation(
+          {
+            db,
+            session,
+            registry: await connectorRegistry(),
+            governor: connectorGovernor(),
+            keyring: connectorKeyring(),
+            roles: session.roles ?? [],
+          },
+          connectorTool.contract,
+          connectorTool.operation,
+          request.params.arguments ?? {},
+        );
+        return ok(result);
+      } catch (error) {
+        return failed(error);
+      }
+    }
+
     const match = catalog.tools.find((tool) => tool.name === name);
     const table = match ? tables.get(match.table) : undefined;
     // An unknown tool and one the caller may not invoke get the same answer:
@@ -422,7 +520,9 @@ export function registerGeneratedMcpServer(
   app: FastifyInstance,
   options: { db?: OpenShapeForgeDatabase | undefined } = {},
 ): void {
-  if (catalog.tools.length === 0) {
+  // The transport exists when EITHER surface has something to advertise; a
+  // deployment with connectors but no MCP-exposed entity still needs it.
+  if (catalog.tools.length === 0 && listConnectorContracts().length === 0) {
     return;
   }
 

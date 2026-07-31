@@ -5,9 +5,23 @@
   "workspaces": [
     "apps/*",
     "packages/*",
-    "examples/plugins/*"
+    "examples/plugins/*",
+    "examples/connectors/*"
   ],
   "packageManager": "bun@1.3.4",
+  "//overrides": [
+    "Both entries lift a transitive pin inside `next` that carries fixed CVEs.",
+    "postcss: next pins 8.4.31 exactly, so it cannot float; 8.5.x is a minor",
+    "and @tailwindcss/postcss already requires ^8.5.16, so this de-duplicates",
+    "the tree rather than adding to it.",
+    "sharp: an optional dependency next uses for image optimisation. Nothing",
+    "here imports next/image, so it is unused — the bump is free.",
+    "Drop an entry once next ships a release that pins the fixed version."
+  ],
+  "overrides": {
+    "postcss": "^8.5.18",
+    "sharp": "^0.35.0"
+  },
   "engines": {
     "node": ">=22.12.0",
     "bun": ">=1.3.0"
@@ -15,22 +29,30 @@
   "scripts": {
     "generate": "bun run --cwd packages/compiler generate",
     "check:authoring-local": "bun scripts/check-authoring-local.mjs",
+    "check:authoring-schemas": "bun scripts/check-authoring-schemas.mjs",
     "check:generated": "bun scripts/check-generated-artifacts.mjs",
     "check:ts-nocheck": "bun scripts/check-ts-nocheck-baseline.mjs",
     "check:notices": "bun scripts/gen-third-party-notices.ts --check",
     "check:license": "bun scripts/check-license-headers.mjs",
+    "check:keycloak-lockstep": "bun scripts/check-keycloak-lockstep.mjs",
+    "check:required-checks": "bun scripts/check-required-checks.mjs",
     "license:headers": "bun scripts/add-license-headers.mjs",
     "typecheck:compiler": "bun run check:ts-nocheck && bun run --cwd packages/compiler typecheck",
     "typecheck:api": "bun run --cwd apps/api typecheck",
+    "typecheck:web": "bun run --cwd apps/web typecheck",
     "test:compiler": "bun test packages/compiler",
     "test:ts-nocheck": "bun test scripts/check-ts-nocheck-baseline.test.ts",
     "db:migrate": "bun run --cwd apps/api db:migrate",
     "db:migration:new": "bun run --cwd apps/api db:migration:new",
     "dev:api": "bun run --cwd apps/api dev",
+    "dev:web": "bun run --cwd apps/web dev",
+    "build:web": "bun run --cwd apps/web build",
     "test:e2e": "bun run --cwd apps/api test:e2e",
     "test:e2e:report": "bun scripts/render-e2e-report.ts",
     "test:perf": "bun scripts/run-perf.ts",
     "scan:dependencies": "bash scripts/scan-dependencies.sh",
-    "notices": "bun scripts/gen-third-party-notices.ts"
+    "notices": "bun scripts/gen-third-party-notices.ts",
+    "//notices:linux": "Regenerates the committed notices on the platform CI checks. The tree has platform-native optional packages, so a macOS run emits darwin variants and fails check:notices. node_modules is cleared inside the container first — installing over a macOS tree yields the UNION of both platforms, not the linux set — and the local install is restored afterwards. See the script header.",
+    "notices:linux": "docker run --rm --platform linux/amd64 -v \"$PWD\":/w -w /w oven/bun:1.3.4 sh -c 'rm -rf node_modules && bun install --frozen-lockfile >/dev/null 2>&1 && bun scripts/gen-third-party-notices.ts' && bun install --frozen-lockfile >/dev/null"
   }
 }

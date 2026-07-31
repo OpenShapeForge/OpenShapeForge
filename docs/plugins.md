@@ -177,11 +177,14 @@ old repo paths to service paths:
   `apps/web/src/features/renderer/generated/`, and
   `apps/web/src/features/workflow/lib/nodes/generated/` — mirroring the
   core's web gating.
-- Old path prefixes with **no mapping** (`compiler/`, `generated/compiler/`
-  — the web client's duplicate copies of the field contract) are dropped
-  entirely; see the note in [consuming.md](consuming.md) before re-enabling
-  a web app that expects them.
+- The `compiler/` and `generated/compiler/` prefixes carry the web client's
+  copies of the field contract. Despite the workflow-named generator these
+  are the *renderer's* core type surface — `@/generated/compiler/field-contract`
+  alone has ~87 importers across `features/renderer` and `components/entity` —
+  so both are mapped into `apps/web/src/`, with byte-identical content.
+- Any other unmapped prefix is dropped entirely, matching the core's
+  greenfield-safe behaviour.
 
-`ownedPaths.roots` declares the api root **and** all three web roots up
-front, so the stale/orphan gates cover the web side the moment `apps/web`
-returns.
+`ownedPaths.roots` declares the api root **and** all three web roots, so the
+stale/orphan gates cover the web side; they deactivate along with generation
+if a host repo removes `apps/web`.

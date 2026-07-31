@@ -17,9 +17,25 @@
         "required_review_thread_resolution": true,
         "allowed_merge_methods": ["squash", "rebase"]
       }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "Generate, typecheck, unit tests, notices" },
+          { "context": "Build Keycloak SPI (Maven)" },
+          { "context": "Lint and template Helm chart" },
+          { "context": "Database migration tests" },
+          { "context": "Dependency and secret scan (Trivy)" },
+          { "context": "Build, smoke test, push the API image" },
+          { "context": "Build, smoke test, push the Keycloak image" }
+        ]
+      }
     }
   ],
   "bypass_actors": [
-    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always" }
+    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request" }
   ]
 }

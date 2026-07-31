@@ -62,6 +62,27 @@ imagePullSecrets:
 {{- end -}}
 
 {{/*
+Rolls the pods when a chart-managed credential changes.
+
+Every secret value reaches the container by secretKeyRef, so rotating
+database.url or auth.internalContextSecret updates the Secret object while
+leaving the pod spec byte-identical — Kubernetes then has no reason to restart
+anything, and the API keeps serving with the credential the operator just
+rotated away. Hashing the rendered Secret into a pod annotation makes the pod
+spec change with the credential.
+
+Emitted ONLY for the chart-managed Secret: with database.existingSecret the
+contents live outside this release and cannot be hashed from here, so the
+annotation would be a constant and would falsely imply rotation coverage.
+NOTES.txt tells the operator to restart the Deployment themselves in that case.
+*/}}
+{{- define "openshapeforge-api.secretChecksumAnnotation" -}}
+{{- if not .Values.database.existingSecret -}}
+checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+{{- end -}}
+{{- end -}}
+
+{{/*
 Non-secret env shared by the API container and the migration Job.
 NODE_ENV=production is always set, which triggers the production env validator.
 */}}
@@ -86,6 +107,24 @@ NODE_ENV=production is always set, which triggers the production env validator.
   value: {{ .Values.limits.rateLimit.max | quote }}
 - name: API_RATE_LIMIT_WINDOW_MS
   value: {{ .Values.limits.rateLimit.windowMs | quote }}
+{{- with .Values.limits.rateLimit.maxTrusted }}
+- name: API_RATE_LIMIT_MAX_TRUSTED
+  value: {{ . | quote }}
+{{- end }}
+{{- if and .Values.limits.rateLimit.redisUrl .Values.limits.rateLimit.redisUrlSecret.name }}
+{{- fail "Set limits.rateLimit.redisUrl OR limits.rateLimit.redisUrlSecret, not both — two sources for one URL is a silent-precedence bug waiting to happen." }}
+{{- end }}
+{{- with .Values.limits.rateLimit.redisUrl }}
+- name: API_RATE_LIMIT_REDIS_URL
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.limits.rateLimit.redisUrlSecret.name }}
+- name: API_RATE_LIMIT_REDIS_URL
+  valueFrom:
+    secretKeyRef:
+      name: {{ . | quote }}
+      key: {{ $.Values.limits.rateLimit.redisUrlSecret.key | quote }}
+{{- end }}
 - name: API_REQUEST_TIMEOUT_MS
   value: {{ .Values.limits.requestTimeoutMs | quote }}
 - name: DB_STATEMENT_TIMEOUT_MS

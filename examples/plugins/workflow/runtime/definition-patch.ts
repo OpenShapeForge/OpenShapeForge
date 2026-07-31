@@ -309,11 +309,11 @@ export async function patchWorkflowDefinition(
   };
   const definition = applyWorkflowDefinitionPatch(baseDefinition, input.operations);
   const validation = validateWorkflowDefinition(definition);
-  const firstError = validation.issues.find((entry) => entry.severity === "error");
-  if (firstError) {
-    throw new WorkflowDefinitionError("BAD_USER_INPUT", firstError.message);
-  }
 
+  // A dry run reports, it does not refuse. Checking for errors first would mean
+  // the preview could only ever come back valid — unavailable in exactly the
+  // case a designer needs it, and returning one error's message in place of the
+  // issue list the caller asked for.
   if (input.dryRun) {
     return {
       dryRun: true,
@@ -322,6 +322,11 @@ export async function patchWorkflowDefinition(
       savedDefinition: null,
       publishedVersion: null,
     };
+  }
+
+  const firstError = validation.issues.find((entry) => entry.severity === "error");
+  if (firstError) {
+    throw new WorkflowDefinitionError("BAD_USER_INPUT", firstError.message);
   }
 
   const savedDefinition = await saveWorkflowDefinitionVersion(db, session, {

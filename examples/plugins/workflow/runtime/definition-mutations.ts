@@ -175,15 +175,57 @@ function requireCategory(value: string | null | undefined): WorkflowDefinitionCa
   return normalized;
 }
 
+const UUID_SUBJECT_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 /**
  * The stored ACL is always canonical `{ view, edit, delete }` with string
  * arrays, because the column is jsonb and nothing else would stop a caller
  * putting an arbitrary document where an authorization decision reads.
+ *
+ * User and group subjects are additionally required to be UUIDs, and a
+ * violation is refused rather than stored. This is not tidiness — it closes a
+ * lockout with no way back through the API.
+ *
+ * An ACL is evaluated against the SCOPED session, whose `groups` the session
+ * layer has already filtered to UUIDs (Keycloak group paths are dropped there,
+ * because the row-security GUC only accepts ids). So a group subject that is
+ * not a UUID matches nobody, ever. Store one in `view` and the definition
+ * becomes invisible to the whole tenant including its author — and the author
+ * cannot set it back, because repairing it requires reading it first. A
+ * plausible paste of a group path or a team name is enough to brick the row.
+ *
+ * Roles stay free-form: they are realm role names, not ids, and are compared
+ * against the session's role list as strings.
  */
+function assertUuidSubjects(
+  subjects: { users: string[]; groups: string[] },
+  action: "view" | "edit" | "delete",
+): void {
+  const byKind: ReadonlyArray<readonly [string, string[]]> = [
+    ["user", subjects.users],
+    ["group", subjects.groups],
+  ];
+  for (const [kind, values] of byKind) {
+    for (const value of values) {
+      if (!UUID_SUBJECT_PATTERN.test(value)) {
+        throw new WorkflowDefinitionError(
+          "BAD_USER_INPUT",
+          `Authorization ${action}.${kind}s must be UUIDs; received "${value}". A ${kind} subject that is not an id matches nobody and would make this definition unreachable.`,
+        );
+      }
+    }
+  }
+}
+
 function normalizeIncomingAuthorization(value: Json | null | undefined) {
-  return normalizeDefinitionAuthorization(
+  const acl = normalizeDefinitionAuthorization(
     value === undefined || value === null ? {} : normalizeJsonValue(value),
   );
+  assertUuidSubjects(acl.view, "view");
+  assertUuidSubjects(acl.edit, "edit");
+  assertUuidSubjects(acl.delete, "delete");
+  return acl;
 }
 
 /**
@@ -292,7 +334,7 @@ async function loadDefinitionRecord(
 ): Promise<WorkflowDefinitionRecord> {
   const row = await trx
     .selectFrom("workflow.definitions")
-    .select([
+    .select((eb) => [
       "id",
       "name",
       "description",
@@ -301,8 +343,15 @@ async function loadDefinitionRecord(
       "parent_node_id",
       "external_id",
       "is_active",
-      "created_at",
-      "updated_at",
+      // Cast to text, exactly as the read path does. A timestamptz read raw comes
+      // back as a JS Date, which truncates Postgres's microseconds to
+      // milliseconds — so one row would report two different `createdAt` strings
+      // depending on which resolver answered. For `updated_at` that is not
+      // cosmetic: it is the optimistic-concurrency token, and the moment a write
+      // leaves it to the column default instead of stamping it from JS, a
+      // truncated token would start refusing valid saves.
+      eb.cast<string>("created_at", "text").as("created_at"),
+      eb.cast<string>("updated_at", "text").as("updated_at"),
     ])
     .where("tenant_id", "=", tenantId)
     .where("id", "=", definitionId)

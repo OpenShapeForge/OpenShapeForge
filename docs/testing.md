@@ -89,7 +89,7 @@ a shared harness:
 | `entity-relationships.e2e.test.ts` | belongsTo/hasMany traversal + aggregates |
 | `entity-events.e2e.test.ts` | each mutation appends exactly one `created`/`updated`/`deleted` journal event; reads append none; sequences increase |
 | `entity-security.e2e.test.ts` | unauthenticated rejection; cross-tenant RLS invisibility; cross-tenant deletes fail and journal nothing |
-| `transport-auth.e2e.test.ts` | public health query; invalid bearer fails closed; real Keycloak password-grant token drives CRUD (skipped when Keycloak is unreachable) |
+| `transport-auth.e2e.test.ts` | public health query; invalid bearer fails closed; real Keycloak password-grant token drives CRUD (skipped unless bearer verification is configured — see below) |
 | `coverage.e2e.test.ts` | backstop: every `generatedCrud` entity is exercised |
 | `e2e/harness.ts` | transport, auth helpers, request/event capture, describe/test wrappers, cleanup lifecycle |
 | `e2e/entity-factory.ts` | manifest-driven row factory (recursively satisfies required FKs, mirrors the engine's column rules) |
@@ -109,6 +109,20 @@ Properties worth knowing:
 - **Request + event capture** — every GraphQL request/response and every
   journal read is captured per test and persisted to
   `.e2e-report/requests.json` for the HTML report.
+- **The three bearer tests are opt-in.** They skip unless the API is configured
+  to verify bearer tokens, because a suite that silently ran them against no
+  verifier would prove nothing. Both variables are needed — the harness fetches
+  its token from the issuer, the API verifies it against the JWKS:
+
+  ```sh
+  export OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER=http://localhost:8181/realms/openshapeforge
+  export OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI=$OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER/protocol/openid-connect/certs
+  ```
+
+  With only the issuer set the API rejects every bearer as `UNAUTHENTICATED`
+  and the three tests fail rather than skip. With the compose Keycloak up
+  (`docker compose -f docker-compose.local.yml up -d keycloak`), the suite runs
+  206 pass / 0 skip.
 - Keycloak knobs: `E2E_KEYCLOAK_CLIENT_ID` (default `openshapeforge-gateway`),
   `E2E_KEYCLOAK_CLIENT_SECRET` (`dev-secret`), `E2E_KEYCLOAK_USERNAME`
   (`acme-directie`), `E2E_KEYCLOAK_PASSWORD` (`test`).

@@ -28,7 +28,7 @@ Closes #
 - [ ] Gates pass (`set -o pipefail`; read the `N pass / N fail` lines):
   - [ ] `bun run check:generated`
   - [ ] `bun run check:authoring-local`
-  - [ ] `bun run check:notices` (ran `bun run notices` if I changed dependencies)
+  - [ ] `bun run check:notices:linux` (ran `bun run notices:linux` if I changed dependencies)
   - [ ] `bun run typecheck:compiler` and `bun run typecheck:api`
   - [ ] `bun run test:compiler`
   - [ ] `bun run test:e2e` (Postgres up)

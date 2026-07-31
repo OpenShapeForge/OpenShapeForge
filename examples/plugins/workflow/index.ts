@@ -336,6 +336,14 @@ function workflowDataTables(): TableDefinition[] {
           references: { schema: "workflow", table: "instances", column: "id", onDelete: "SET NULL" },
         },
         { name: "parent_node_id", type: "text" },
+        // Snapshot of what was published when the run started. Denormalised on
+        // purpose: a definition can be renamed or its version purged, and an
+        // instance list must still say what ran.
+        { name: "definition_version", type: "integer" },
+        { name: "definition_name", type: "text" },
+        // How the run was started, and whatever the trigger knew at the time.
+        { name: "trigger_type", type: "text" },
+        { name: "trigger_meta", type: "jsonb" },
       ],
       indexes: [
         { name: "workflow_instances_tenant_status_idx", columns: ["tenant_id", "status", "started_at"] },
@@ -430,6 +438,267 @@ function workflowDataTables(): TableDefinition[] {
   ];
 }
 
+/**
+ * The execution plane: how a run is asked to move, and what it is waiting for.
+ *
+ * These are separate from the authoring tables above because they are written
+ * by workers rather than by people, and their access pattern is a queue rather
+ * than a document store.
+ *
+ * The design commitment worth stating: **an intent to run is a row, not a call.**
+ * Starting, resuming and cancelling all go through `control_commands`, claimed
+ * with `for update skip locked`, so a crashed worker loses nothing and a
+ * duplicate request is absorbed by an idempotency key rather than starting a
+ * second run. That is also what lets the durable-execution service be optional
+ * — the queue is the durability, and an external dispatcher is one
+ * implementation of draining it.
+ */
+function workflowExecutionTables(): TableDefinition[] {
+  return [
+    {
+      // The command queue. Every state change to a run enters here first.
+      schema: "workflow",
+      name: "control_commands",
+      tenantScoped: true,
+      domainInternal: true,
+      generatedCrud: false,
+      columns: [
+        { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+        { name: "tenant_id", type: "uuid", required: true },
+        // 'workflow.instance.start' | '.resume' | '.cancel'
+        { name: "command_type", type: "text", required: true },
+        {
+          name: "workflow_instance_id",
+          type: "uuid",
+          references: { schema: "workflow", table: "instances", column: "id", onDelete: "CASCADE" },
+        },
+        { name: "payload", type: "jsonb", required: true, default: "'{}'::jsonb" },
+        // Deduplicates a retried enqueue. A schedule that fires twice for the
+        // same occurrence, or a webhook delivered twice, must start one run.
+        { name: "idempotency_key", type: "text" },
+        // 'pending' | 'processing' | 'completed' | 'failed'
+        { name: "status", type: "text", required: true, default: "'pending'::text" },
+        { name: "attempts", type: "integer", required: true, default: "0" },
+        { name: "next_attempt_at", type: "timestamptz" },
+        // Claim marker. `locked_at` also drives reclaim: a worker that died
+        // mid-command leaves the row processing, and the age of the claim is
+        // the only evidence available that nobody is still working on it.
+        { name: "locked_at", type: "timestamptz" },
+        { name: "locked_by", type: "text" },
+        { name: "last_error", type: "text" },
+        { name: "created_at", type: "timestamptz", required: true, default: "now()" },
+        { name: "updated_at", type: "timestamptz", required: true, default: "now()" },
+      ],
+      indexes: [
+        {
+          name: "workflow_control_commands_pending_idx",
+          columns: ["status", "next_attempt_at", "created_at"],
+        },
+        {
+          name: "workflow_control_commands_idempotency_uidx",
+          unique: true,
+          columns: ["tenant_id", "idempotency_key"],
+        },
+        { name: "workflow_control_commands_instance_idx", columns: ["tenant_id", "workflow_instance_id"] },
+      ],
+    },
+    {
+      // A node that stopped and is waiting to be told to continue: a human
+      // decision, an inbound signal, a timer. One row per parked node.
+      schema: "workflow",
+      name: "waits",
+      tenantScoped: true,
+      domainInternal: true,
+      generatedCrud: false,
+      columns: [
+        { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+        { name: "tenant_id", type: "uuid", required: true },
+        {
+          name: "instance_id",
+          type: "uuid",
+          required: true,
+          references: { schema: "workflow", table: "instances", column: "id", onDelete: "CASCADE" },
+        },
+        { name: "node_id", type: "text", required: true },
+        { name: "node_label", type: "text" },
+        // Opaque to the engine and required to resume, so a stale client cannot
+        // resume a wait that has since been superseded.
+        { name: "wait_token", type: "text", required: true },
+        { name: "wait_kind", type: "text", required: true },
+        { name: "instructions", type: "text" },
+        // What the resumer must supply, and whatever has been gathered so far.
+        { name: "fields", type: "jsonb" },
+        { name: "partial_input", type: "jsonb" },
+        { name: "wait_metadata", type: "jsonb" },
+        { name: "assigned_to", type: "text" },
+        { name: "created_at", type: "timestamptz", required: true, default: "now()" },
+        { name: "updated_at", type: "timestamptz", required: true, default: "now()" },
+      ],
+      indexes: [
+        { name: "workflow_waits_tenant_token_uidx", unique: true, columns: ["tenant_id", "wait_token"] },
+        { name: "workflow_waits_instance_idx", columns: ["tenant_id", "instance_id"] },
+      ],
+    },
+    {
+      // A wait on something happening elsewhere in the platform, matched against
+      // the entity-event journal.
+      //
+      // `checkpoint_sequence` is what makes this correct rather than racy: the
+      // wait records the journal position it was registered at, so an event that
+      // fired between the decision to wait and the row being written is still
+      // matched by replaying forward from the checkpoint. Without it, the gap
+      // between those two moments silently loses events.
+      schema: "workflow",
+      name: "collection_waits",
+      tenantScoped: true,
+      domainInternal: true,
+      generatedCrud: false,
+      columns: [
+        { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+        { name: "tenant_id", type: "uuid", required: true },
+        {
+          name: "instance_id",
+          type: "uuid",
+          required: true,
+          references: { schema: "workflow", table: "instances", column: "id", onDelete: "CASCADE" },
+        },
+        { name: "node_id", type: "text", required: true },
+        { name: "wait_token", type: "text", required: true },
+        { name: "entity_type", type: "text", required: true },
+        { name: "event_type", type: "text", required: true },
+        { name: "filters", type: "jsonb", required: true, default: "'{}'::jsonb" },
+        { name: "filter_hash", type: "text", required: true },
+        { name: "checkpoint_sequence", type: "bigint", required: true, default: "0" },
+        // 'pending' | 'matched' | 'timed_out'
+        { name: "status", type: "text", required: true, default: "'pending'::text" },
+        { name: "matched_event_id", type: "uuid" },
+        { name: "matched_sequence", type: "bigint" },
+        { name: "timeout_at", type: "timestamptz" },
+        { name: "created_at", type: "timestamptz", required: true, default: "now()" },
+        { name: "updated_at", type: "timestamptz", required: true, default: "now()" },
+      ],
+      indexes: [
+        {
+          name: "workflow_collection_waits_tenant_token_uidx",
+          unique: true,
+          columns: ["tenant_id", "wait_token"],
+        },
+        {
+          name: "workflow_collection_waits_pending_idx",
+          columns: ["tenant_id", "status", "entity_type", "event_type", "checkpoint_sequence"],
+        },
+        { name: "workflow_collection_waits_timeout_idx", columns: ["status", "timeout_at"] },
+      ],
+    },
+    {
+      // One row per published definition that carries a schedule trigger.
+      // Derived state, rebuilt on publish — never authored directly.
+      schema: "workflow",
+      name: "schedules",
+      tenantScoped: true,
+      domainInternal: true,
+      generatedCrud: false,
+      columns: [
+        { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+        { name: "tenant_id", type: "uuid", required: true },
+        {
+          name: "definition_id",
+          type: "uuid",
+          required: true,
+          references: { schema: "workflow", table: "definitions", column: "id", onDelete: "CASCADE" },
+        },
+        {
+          name: "version_id",
+          type: "uuid",
+          references: {
+            schema: "workflow",
+            table: "definition_versions",
+            column: "id",
+            onDelete: "SET NULL",
+          },
+        },
+        { name: "trigger_node_id", type: "text" },
+        { name: "cron", type: "text" },
+        { name: "timezone", type: "text" },
+        { name: "started_by", type: "uuid" },
+        // 'active' | 'inactive'
+        { name: "status", type: "text", required: true, default: "'active'::text" },
+        // Bumped whenever the definition republishes. A fire computed against an
+        // older generation is discarded rather than started, so an edit cannot
+        // leave a stale cron running.
+        { name: "generation", type: "integer", required: true, default: "1" },
+        { name: "next_fire_at", type: "timestamptz" },
+        { name: "next_occurrence", type: "integer", required: true, default: "1" },
+        { name: "last_fired_at", type: "timestamptz" },
+        { name: "last_result", type: "jsonb", required: true, default: "'{}'::jsonb" },
+        { name: "locked_at", type: "timestamptz" },
+        { name: "locked_by", type: "text" },
+        { name: "created_at", type: "timestamptz", required: true, default: "now()" },
+        { name: "updated_at", type: "timestamptz", required: true, default: "now()" },
+      ],
+      indexes: [
+        {
+          name: "workflow_schedules_definition_uidx",
+          unique: true,
+          columns: ["tenant_id", "definition_id"],
+        },
+        { name: "workflow_schedules_due_idx", columns: ["status", "next_fire_at"] },
+      ],
+    },
+    {
+      // The ledger that makes a scheduled start exactly-once. A fire is recorded
+      // before the command is enqueued, and the unique index on the occurrence is
+      // what refuses the second attempt — so two workers racing the same due row,
+      // or one worker retried after a crash, still produce one run.
+      schema: "workflow",
+      name: "schedule_fires",
+      tenantScoped: true,
+      domainInternal: true,
+      generatedCrud: false,
+      columns: [
+        { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+        { name: "tenant_id", type: "uuid", required: true },
+        {
+          name: "schedule_id",
+          type: "uuid",
+          required: true,
+          references: { schema: "workflow", table: "schedules", column: "id", onDelete: "CASCADE" },
+        },
+        {
+          name: "definition_id",
+          type: "uuid",
+          required: true,
+          references: { schema: "workflow", table: "definitions", column: "id", onDelete: "CASCADE" },
+        },
+        { name: "trigger_node_id", type: "text", required: true },
+        { name: "scheduled_at", type: "timestamptz", required: true },
+        { name: "occurrence", type: "integer", required: true },
+        { name: "idempotency_key", type: "text", required: true },
+        {
+          name: "workflow_instance_id",
+          type: "uuid",
+          references: { schema: "workflow", table: "instances", column: "id", onDelete: "SET NULL" },
+        },
+        { name: "status", type: "text", required: true, default: "'started'::text" },
+        { name: "created_at", type: "timestamptz", required: true, default: "now()" },
+      ],
+      indexes: [
+        {
+          name: "workflow_schedule_fires_occurrence_uidx",
+          unique: true,
+          columns: ["tenant_id", "definition_id", "scheduled_at", "occurrence"],
+        },
+        {
+          name: "workflow_schedule_fires_idempotency_uidx",
+          unique: true,
+          columns: ["tenant_id", "idempotency_key"],
+        },
+        { name: "workflow_schedule_fires_schedule_idx", columns: ["tenant_id", "schedule_id", "scheduled_at"] },
+      ],
+    },
+  ];
+}
+
 const plugin: CompilerPlugin = {
   name: "workflow",
   ownedPaths: {
@@ -439,7 +708,11 @@ const plugin: CompilerPlugin = {
   },
 
   contributePlatformTables() {
-    return [...workflowPlatformTables(), ...workflowDataTables()];
+    return [
+      ...workflowPlatformTables(),
+      ...workflowDataTables(),
+      ...workflowExecutionTables(),
+    ];
   },
 
   generate({ authoringDir, webPresent }) {

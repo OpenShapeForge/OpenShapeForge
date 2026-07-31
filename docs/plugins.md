@@ -1,10 +1,24 @@
-# Compiler plugins
+# Plugins
 
-Plugins extend the compiler without living in it: extra generators, extra
-platform tables, and optionally their own authoring layer. Contract and
-loader: `packages/compiler/src/plugins.ts` (tests in `plugins.test.ts`).
+A plugin extends the platform without living in it. It has two halves, loaded at
+two different times by two different processes:
 
-## The contract
+| Half | Entry point | Loaded by | Contributes |
+| --- | --- | --- | --- |
+| **Compiler plugin** | `<plugin>` | `bun run generate` | platform tables, generated artifacts, an authoring layer |
+| **Runtime module** | `<plugin>/runtime` | the API at boot | GraphQL, REST routes, migration seed steps |
+
+Both are registered by the same `plugins:` entry in `authoring.config.yaml`, so
+a deployment cannot end up running one half without the other. Shipping only a
+compiler half is normal — `entity-docs` has nothing to do at runtime.
+
+Contracts and loaders: `packages/compiler/src/plugins.ts` (tests in
+`plugins.test.ts`) and `apps/api/src/modules/contract.ts` (tests in
+`apps/api/src/modules/__tests__/`).
+
+## The compiler half
+
+### The contract
 
 The real types (from `plugins.ts` / `schema.ts`):
 
@@ -47,7 +61,7 @@ export type GeneratedArtifact = { path: string; contents: string };
 A plugin module **default-exports** a `CompilerPlugin` with a non-empty
 string `name`; duplicate names across registered plugins are an error.
 
-## Registration
+### Registration
 
 In `authoring.config.yaml`:
 
@@ -66,7 +80,7 @@ to the plugin module (for path specifiers) or at the package root (for
 package specifiers) is appended to the configured layers automatically — see
 [layers.md](layers.md).
 
-## The compile-once context
+### The compile-once context
 
 `loadActivePlatformCompile(repoRoot)` (in `src/active-manifest.ts`) does the
 expensive work exactly once per repo root and shares it:
@@ -90,7 +104,7 @@ Two shape details worth knowing when consuming the manifest in a plugin:
 - CRUD-eligible tables are those with `generatedCrud` and a
   `source.graphql` block; filter on that (as both shipped examples do).
 
-## `ownedPaths` and the gates
+### `ownedPaths` and the gates
 
 Declaring `ownedPaths` opts your output into the same freshness/orphan gates
 the core enjoys:
@@ -106,7 +120,7 @@ the core enjoys:
 Artifact **path collisions** across core + all plugins are rejected globally
 (`collectAllArtifacts` throws if two artifacts share a path).
 
-## Determinism requirements
+### Determinism requirements
 
 `check:generated` runs the whole pipeline **twice** and hashes each plugin's
 artifact group independently — any byte of drift between the two runs fails
@@ -117,6 +131,48 @@ with "plugin <name> artifacts are nondeterministic". Practical rules:
 - No timestamps, randomness, absolute paths, or environment-dependent
   content in artifact bodies.
 - Hooks must be pure: same repo state in, same bytes out.
+
+## The runtime half
+
+`apps/api` imports nothing from `packages/compiler`: it consumes generated
+artifacts, has no YAML parser, and in a container the repo layout
+`authoring.config.yaml` describes is not what it reads. So the compiler emits
+**which plugins ship a runtime half** as an artifact —
+`apps/api/src/generated/modules/registry.json`, always present, empty when none
+do — and the API resolves those specifiers at boot.
+
+The compiler records a specifier and never imports it. Resolving one would make
+output depend on `node_modules` and break the determinism gates, which is the
+same reason connector packages resolve at boot
+(`apps/api/src/connectors/loader.ts`). Existence of a path plugin's `runtime.ts`
+IS checked, because that is repo state like `webPresent`.
+
+```ts
+export type RuntimeModule = {
+  name: string;                                     // must match the compiler plugin's
+  graphql?(ctx): ModuleGraphqlContribution;         // typeDefs + root fields + resolvers
+  restRoutes?(routes, ctx): void;                   // fastify, inside the rate-limited scope
+  seeds?: ModuleSeed[];                             // appended to the migration chain
+};
+```
+
+Three properties are worth knowing:
+
+- **Loading is fail-soft.** A module that throws on import, loads as something
+  other than a `RuntimeModule`, or disagrees with its registration about its own
+  name, is recorded as a failure and skipped. One broken plugin must not take the
+  API down. Every failure is logged once at startup, because its surfaces are
+  otherwise silently absent.
+- **Root-field collisions are refused at boot.** `Query` and `Mutation`
+  resolvers are merged per type, not spread; a module claiming a field the core
+  or another module already owns fails startup rather than shadowing it. The
+  reserved set is derived from the SDL, so it grows with the authoring YAML.
+- **GraphQL is split into typeDefs / query fields / mutation fields** rather than
+  one SDL blob, because the root types are assembled: `type Query` appears once
+  and every module adds fields inside it.
+
+`graphql` and `restRoutes` are declared but unimplemented by the shipped
+workflow module; it contributes only its seed today.
 
 ## Shipped example 1: `entity-docs`
 
@@ -199,3 +255,10 @@ old repo paths to service paths:
 `ownedPaths.roots` declares the api root **and** all three web roots, so the
 stale/orphan gates cover the web side; they deactivate along with generation
 if a host repo removes `apps/web`.
+
+**Runtime half** — `examples/plugins/workflow/runtime.ts` contributes one seed
+step, `workflowCatalogs`, which loads the four generated documents into the three
+tables above. That is the whole reason the runtime contract exists here: before
+it, `apps/api` carried a hardcoded path to a plugin's generated output, and a
+repo that dropped the workflow plugin had to edit the migration chain to stop
+seeding. `db:migrate` reports the result under the seed's name.

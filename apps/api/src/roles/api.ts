@@ -21,6 +21,7 @@ import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
 import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
+import { loadRuntimeModules, type ModuleRegistry } from "../modules/registry.js";
 import {
   classifyRequest,
   createRateLimitMetrics,
@@ -151,8 +152,16 @@ function bodyFromFastify(method: string, body: unknown): BodyInit | undefined {
 export function createApiApp(
   options: {
     databaseUrl?: string;
+    /**
+     * Runtime modules resolved by the caller. Kept a parameter rather than
+     * loaded here because resolution is async and this factory is sync — and
+     * tests that only need the core surface should not have to resolve
+     * anything. `startApiRole` does the loading for the real process.
+     */
+    modules?: ModuleRegistry;
   } = {},
 ) {
+  const modules: ModuleRegistry = options.modules ?? { loaded: [], failures: [] };
   const limits = readApiLimits();
 
   // Default level stays "info"; LOG_LEVEL=debug surfaces the drift "ok" line.
@@ -241,10 +250,17 @@ export function createApiApp(
     app.log.warn("DATABASE_URL is not set; GraphQL runs without a database.");
   }
 
-  const yoga = createGraphqlYoga(
-    databaseRuntime ? { db: databaseRuntime.db } : {},
-  );
   const dbOptions = databaseRuntime ? { db: databaseRuntime.db } : {};
+  const yoga = createGraphqlYoga({ ...dbOptions, modules: modules.loaded });
+
+  // A module that failed to load contributes nothing, and its absence is
+  // otherwise invisible until a query 404s. Say so once, at startup.
+  for (const failure of modules.failures) {
+    app.log.error(
+      { module: failure.name, specifier: failure.specifier, reason: failure.reason },
+      `Runtime module "${failure.name}" was not loaded: ${failure.message}`,
+    );
+  }
 
   // Register the routes inside a child plugin so they load AFTER the rate-limit
   // plugin above. @fastify/rate-limit attaches its per-route guard through an
@@ -295,6 +311,10 @@ export function createApiApp(
       config: readConnectorRuntimeConfig(),
     });
     registerGeneratedMcpServer(routes, dbOptions);
+
+    for (const module of modules.loaded) {
+      module.restRoutes?.(routes, dbOptions);
+    }
   });
 
   return app;
@@ -308,9 +328,10 @@ export async function startApiRole() {
 
   const port = Number(process.env.PORT ?? 3001);
   const host = process.env.HOST ?? "0.0.0.0";
-  const app = createApiApp(
-    process.env.DATABASE_URL ? { databaseUrl: process.env.DATABASE_URL } : {},
-  );
+  const app = createApiApp({
+    ...(process.env.DATABASE_URL ? { databaseUrl: process.env.DATABASE_URL } : {}),
+    modules: await loadRuntimeModules(),
+  });
 
   await app.listen({ port, host });
 }

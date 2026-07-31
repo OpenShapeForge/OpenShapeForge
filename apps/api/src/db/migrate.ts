@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
 import { createDatabaseRuntime, readMigrateDatabaseUrl } from "./connection.js";
+import { loadRuntimeModules } from "../modules/registry.js";
 import type { CatalogSeedResult } from "./migrations/catalog-seed.js";
 import { runMigrationChain } from "./migration-chain.js";
 
@@ -18,6 +19,13 @@ function seedReport(name: string, result: CatalogSeedResult): Record<string, str
 
 // Migrations run as the PRIVILEGED role (CREATE ROLE, DDL, GRANT) via
 // OPENSHAPEFORGE_MIGRATE_DATABASE_URL, NOT the restricted runtime DATABASE_URL role.
+// Modules are resolved before the connection opens: a plugin whose runtime half
+// will not load must not leave a migration half-run. Load failures are reported
+// with the result rather than thrown — a broken plugin costs its own seed, not
+// the schema migration every other surface depends on.
+const modules = await loadRuntimeModules();
+const moduleSeeds = modules.loaded.flatMap((module) => module.seeds ?? []);
+
 const runtime = createDatabaseRuntime({ databaseUrl: readMigrateDatabaseUrl() });
 const migrationLockKey = "openshapeforge-service-db-migrate";
 
@@ -32,7 +40,7 @@ try {
     // hanging forever.
     await sql`set lock_timeout = '5s'`.execute(db);
     try {
-      const result = await runMigrationChain(db);
+      const result = await runMigrationChain(db, { moduleSeeds });
       console.log(
         JSON.stringify(
           {
@@ -50,10 +58,17 @@ try {
             ...(result.versionedReconciled.length === 0
               ? {}
               : { versionedReconciled: result.versionedReconciled }),
+            ...(modules.failures.length === 0
+              ? {}
+              : {
+                  moduleLoadFailures: modules.failures.map(
+                    (failure) => `${failure.name}: ${failure.reason} — ${failure.message}`,
+                  ),
+                }),
             ...seedReport("pageConfigs", result.pageConfigs),
-            ...seedReport("workflowNodeCatalogs", result.workflowCatalogs.nodeCatalogs),
-            ...seedReport("workflowTriggerRegistry", result.workflowCatalogs.triggerRegistry),
-            ...seedReport("workflowFieldSuggestions", result.workflowCatalogs.fieldSuggestions),
+            ...Object.entries(result.moduleSeeds).flatMap(([name, seed]) =>
+              Object.entries(seedReport(name, seed)),
+            ).reduce((all, [key, value]) => ({ ...all, [key]: value }), {}),
           },
           null,
           2,

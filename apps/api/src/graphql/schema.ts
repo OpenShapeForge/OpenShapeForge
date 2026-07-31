@@ -26,6 +26,8 @@ import {
 } from "../connectors/graphql-schema.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import type { GraphqlContext } from "./context.js";
+import type { ModuleRuntimeContext, RuntimeModule } from "../modules/contract.js";
+import { composeModuleGraphql, declaredFieldNames } from "../modules/graphql-composition.js";
 
 // The connector catalog types are static — identical across deployments — so a
 // connector this deployment is not licensed for is a row with
@@ -34,7 +36,25 @@ const connectorResolvers = createConnectorResolvers({
   config: readConnectorRuntimeConfig(),
 });
 
-export const graphqlSchema = createSchema<GraphqlContext>({
+/**
+ * Build the executable schema, splicing in whatever the loaded runtime modules
+ * contribute.
+ *
+ * A factory rather than a module-load constant because resolving plugin runtime
+ * modules is async (`modules/registry.ts`), and a schema built at import time
+ * could only ever carry the core surfaces. Callers that have no modules — most
+ * tests — pass nothing and get exactly the previous schema.
+ */
+export function buildGraphqlSchema(
+  modules: readonly RuntimeModule[] = [],
+  context: ModuleRuntimeContext = {},
+) {
+  const moduleGraphql = composeModuleGraphql(modules, context, {
+    query: coreQueryFieldNames,
+    mutation: coreMutationFieldNames,
+  });
+
+  return createSchema<GraphqlContext>({
   typeDefs: /* GraphQL */ `
     scalar JSON
 
@@ -43,6 +63,8 @@ export const graphqlSchema = createSchema<GraphqlContext>({
     ${connectorTypeDefs}
 
     ${connectorNamespaceTypeDefs}
+
+    ${moduleGraphql.typeDefs}
 
     type Health {
       status: String!
@@ -67,12 +89,14 @@ export const graphqlSchema = createSchema<GraphqlContext>({
 ${generatedEntityQueryFields}
 ${connectorQueryFields}
 ${connectorNamespaceQueryFields}
+${moduleGraphql.queryFields}
     }
 
     type Mutation {
 ${generatedEntityMutationFields}
 ${connectorMutationFields}
 ${connectorNamespaceMutationFields}
+${moduleGraphql.mutationFields}
     }
   `,
   resolvers: {
@@ -83,9 +107,11 @@ ${connectorNamespaceMutationFields}
     },
     ...objectResolvers(),
     ...connectorObjectResolvers(),
+    ...moduleObjectResolvers(moduleGraphql.resolvers),
     Query: {
       ...generatedEntityResolvers.Query,
       ...connectorResolvers.Query,
+      ...moduleGraphql.resolvers.Query,
       health: () => ({
         status: "ok",
         role: "api",
@@ -95,9 +121,37 @@ ${connectorNamespaceMutationFields}
     Mutation: {
       ...generatedEntityResolvers.Mutation,
       ...connectorResolvers.Mutation,
+      ...moduleGraphql.resolvers.Mutation,
     },
   },
-});
+  });
+}
+
+/**
+ * Root fields the core already owns, derived from the SDL rather than listed by
+ * hand — the generated entity surface changes with the authoring YAML, and a
+ * hardcoded list would quietly stop protecting new entities. A module claiming
+ * any of these is refused at boot instead of shadowing it; see
+ * `composeModuleGraphql`.
+ */
+const coreQueryFieldNames = [
+  "health",
+  "entityPageConfigs",
+  ...declaredFieldNames(generatedEntityQueryFields),
+  ...declaredFieldNames(connectorQueryFields),
+  ...declaredFieldNames(connectorNamespaceQueryFields),
+];
+const coreMutationFieldNames = [
+  ...declaredFieldNames(generatedEntityMutationFields),
+  ...declaredFieldNames(connectorMutationFields),
+  ...declaredFieldNames(connectorNamespaceMutationFields),
+];
+
+/** Module-contributed named types, i.e. everything except the root types. */
+function moduleObjectResolvers(resolvers: Record<string, Record<string, unknown>>) {
+  const { Query: _query, Mutation: _mutation, ...objects } = resolvers;
+  return objects;
+}
 
 /**
  * `config_kind` as stored by the seeder -> the field the renderer asks for.

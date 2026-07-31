@@ -63,6 +63,19 @@ export type ModuleSeed = {
 export type RuntimeModule = {
   /** Must match the CompilerPlugin name of the same package. */
   name: string;
+  /**
+   * One-shot async setup, awaited before the process serves traffic.
+   *
+   * `graphql()` is synchronous — a schema cannot be built from a promise — so a
+   * module that must read something before it can answer has nowhere else to do
+   * it. The workflow module hydrates its node catalog here: without that, every
+   * node type resolves to null and definition validation silently passes while
+   * checking nothing, which is worse than failing.
+   *
+   * Throwing here is a load failure like any other: the module is recorded and
+   * skipped rather than taking the process down.
+   */
+  init?(context: ModuleRuntimeContext): Promise<void>;
   graphql?(context: ModuleRuntimeContext): ModuleGraphqlContribution;
   /**
    * Register fastify routes. Called inside the same child plugin the core

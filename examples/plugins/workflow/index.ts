@@ -190,6 +190,246 @@ function workflowPlatformTables(): TableDefinition[] {
   ];
 }
 
+/**
+ * The workflow data model: definitions and their versions, instances and the
+ * per-node state of a run.
+ *
+ * Unlike the catalogs above these are TENANT DATA, so `tenantScoped: true` and
+ * the compiler generates the RLS policy — a workflow definition belongs to the
+ * tenant that authored it and must be invisible to every other one, which is
+ * the same guarantee every `erp.*` table gets, obtained the same way rather
+ * than hand-written here.
+ *
+ * `domainInternal: true` keeps them off the generated CRUD/GraphQL surface. The
+ * generic entity engine would happily expose `createWorkflowDefinition` as a
+ * flat column write, and that is precisely wrong: publishing a definition
+ * versions it, validates it against the node catalog, and respects an edit
+ * lock. The plugin's own resolvers own those invariants.
+ */
+function workflowDataTables(): TableDefinition[] {
+  return [
+    {
+      // The authored graph's identity and its mutable metadata. The graph
+      // itself lives in definition_versions — a definition row survives every
+      // edit, so anything referencing "this workflow" points here.
+      schema: "workflow",
+      name: "definitions",
+      tenantScoped: true,
+      domainInternal: true,
+      generatedCrud: false,
+      columns: [
+        { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+        { name: "tenant_id", type: "uuid", required: true },
+        { name: "name", type: "text", required: true },
+        { name: "description", type: "text" },
+        // 'process' today. The column exists because a category decides which
+        // node types the designer offers, and adding one must not be a migration.
+        { name: "category", type: "text", required: true, default: "'process'::text" },
+        // Subflow parentage: which node of which definition invokes this one.
+        { name: "parent_definition_id", type: "uuid" },
+        { name: "parent_node_id", type: "text" },
+        // Stable identifier for a definition that arrived from outside this
+        // deployment, so re-importing updates rather than duplicates.
+        { name: "external_id", type: "text" },
+        // Who may run, edit and view this definition. Shape is the plugin's;
+        // see `definition-authorization.ts`.
+        { name: "authorization", type: "jsonb", required: true, default: "'{}'::jsonb" },
+        { name: "is_active", type: "boolean", required: true, default: "true" },
+        { name: "created_at", type: "timestamptz", required: true, default: "now()" },
+        { name: "updated_at", type: "timestamptz", required: true, default: "now()" },
+      ],
+      indexes: [
+        { name: "workflow_definitions_tenant_name_idx", columns: ["tenant_id", "name"] },
+        {
+          name: "workflow_definitions_tenant_external_uidx",
+          unique: true,
+          columns: ["tenant_id", "external_id"],
+        },
+        { name: "workflow_definitions_parent_idx", columns: ["tenant_id", "parent_definition_id"] },
+      ],
+    },
+    {
+      // An immutable snapshot of the graph. A running instance pins the version
+      // it started on, so editing a definition cannot change what an in-flight
+      // run does — the property that makes a long-lived instance meaningful.
+      schema: "workflow",
+      name: "definition_versions",
+      tenantScoped: true,
+      domainInternal: true,
+      generatedCrud: false,
+      columns: [
+        { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+        { name: "tenant_id", type: "uuid", required: true },
+        {
+          name: "definition_id",
+          type: "uuid",
+          required: true,
+          references: { schema: "workflow", table: "definitions", column: "id", onDelete: "CASCADE" },
+        },
+        { name: "version", type: "integer", required: true },
+        { name: "definition", type: "jsonb", required: true },
+        // Null until published: a draft version exists and is editable, a
+        // published one is what new instances start from.
+        { name: "published_at", type: "timestamptz" },
+        { name: "published_by", type: "uuid" },
+        { name: "changelog", type: "text" },
+        { name: "created_at", type: "timestamptz", required: true, default: "now()" },
+      ],
+      indexes: [
+        {
+          name: "workflow_definition_versions_unique_idx",
+          unique: true,
+          columns: ["tenant_id", "definition_id", "version"],
+        },
+        {
+          name: "workflow_definition_versions_published_idx",
+          columns: ["tenant_id", "definition_id", "published_at"],
+        },
+      ],
+    },
+    {
+      // One run. `version_id` is SET NULL rather than RESTRICT on delete so
+      // purging history cannot orphan a completed instance out of existence;
+      // `definition_id` is RESTRICT because a definition with runs is not
+      // something to delete by accident.
+      schema: "workflow",
+      name: "instances",
+      tenantScoped: true,
+      domainInternal: true,
+      generatedCrud: false,
+      columns: [
+        { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+        { name: "tenant_id", type: "uuid", required: true },
+        {
+          name: "definition_id",
+          type: "uuid",
+          required: true,
+          references: { schema: "workflow", table: "definitions", column: "id", onDelete: "RESTRICT" },
+        },
+        {
+          name: "version_id",
+          type: "uuid",
+          references: {
+            schema: "workflow",
+            table: "definition_versions",
+            column: "id",
+            onDelete: "SET NULL",
+          },
+        },
+        // 'pending' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled'
+        { name: "status", type: "text", required: true, default: "'pending'::text" },
+        // Immutable start input; process_variables is the mutable scratchpad.
+        { name: "context", type: "jsonb", required: true, default: "'{}'::jsonb" },
+        { name: "process_variables", type: "jsonb", required: true, default: "'{}'::jsonb" },
+        { name: "started_by", type: "uuid" },
+        { name: "started_at", type: "timestamptz", required: true, default: "now()" },
+        { name: "completed_at", type: "timestamptz" },
+        { name: "error", type: "jsonb" },
+        // What the run is about, when an entity trigger started it. Text rather
+        // than a foreign key: the target is any entity, and a run must outlive
+        // the row that triggered it.
+        { name: "entity_type", type: "text" },
+        { name: "entity_id", type: "text" },
+        {
+          name: "parent_instance_id",
+          type: "uuid",
+          references: { schema: "workflow", table: "instances", column: "id", onDelete: "SET NULL" },
+        },
+        { name: "parent_node_id", type: "text" },
+      ],
+      indexes: [
+        { name: "workflow_instances_tenant_status_idx", columns: ["tenant_id", "status", "started_at"] },
+        { name: "workflow_instances_definition_idx", columns: ["tenant_id", "definition_id", "started_at"] },
+        { name: "workflow_instances_entity_idx", columns: ["tenant_id", "entity_type", "entity_id"] },
+        { name: "workflow_instances_parent_idx", columns: ["tenant_id", "parent_instance_id"] },
+      ],
+    },
+    {
+      // Per-node execution record. Both the audit trail and the engine's
+      // memory: `{{nodes.<id>.output.<field>}}` placeholders resolve out of
+      // shared_output, so this is read during a run, not only after it.
+      schema: "workflow",
+      name: "node_states",
+      tenantScoped: true,
+      domainInternal: true,
+      generatedCrud: false,
+      columns: [
+        { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+        { name: "tenant_id", type: "uuid", required: true },
+        {
+          name: "instance_id",
+          type: "uuid",
+          required: true,
+          references: { schema: "workflow", table: "instances", column: "id", onDelete: "CASCADE" },
+        },
+        { name: "node_id", type: "text", required: true },
+        { name: "node_type", type: "text", required: true },
+        // 'pending' | 'running' | 'waiting' | 'completed' | 'failed' | 'skipped'
+        { name: "status", type: "text", required: true },
+        { name: "input", type: "jsonb" },
+        { name: "resolved_parameters", type: "jsonb" },
+        // Split deliberately: shared_output is readable by later nodes through
+        // placeholders, private_output is not. A node that handles a secret has
+        // somewhere to put it that the graph cannot interpolate into a message.
+        { name: "shared_output", type: "jsonb" },
+        { name: "private_output", type: "jsonb" },
+        { name: "error", type: "jsonb" },
+        { name: "started_at", type: "timestamptz" },
+        { name: "completed_at", type: "timestamptz" },
+      ],
+      indexes: [
+        { name: "workflow_node_states_instance_idx", columns: ["tenant_id", "instance_id", "started_at"] },
+        {
+          name: "workflow_node_states_instance_node_idx",
+          columns: ["tenant_id", "instance_id", "node_id"],
+        },
+      ],
+    },
+    {
+      // A pessimistic editor lock, so two people editing one graph do not
+      // silently overwrite each other. Optimistic concurrency alone is a poor
+      // fit here: a designer session is minutes long and holds a whole graph,
+      // so losing the race means losing the work rather than retrying a field.
+      //
+      // Natural key is (tenant_id, definition_id), but a column can only be
+      // declared primaryKey individually and the emitter takes the first one it
+      // finds — so a surrogate id carries the PK and a unique index carries the
+      // real constraint, which is also what the upsert conflicts on.
+      schema: "workflow",
+      name: "definition_locks",
+      tenantScoped: true,
+      domainInternal: true,
+      generatedCrud: false,
+      columns: [
+        { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+        { name: "tenant_id", type: "uuid", required: true },
+        {
+          name: "definition_id",
+          type: "uuid",
+          required: true,
+          references: { schema: "workflow", table: "definitions", column: "id", onDelete: "CASCADE" },
+        },
+        // Held by the acquirer and required to release, so a stale browser tab
+        // cannot release a lock someone else has since taken over.
+        { name: "lock_token", type: "uuid", required: true, default: "gen_random_uuid()" },
+        { name: "owner_user_id", type: "text", required: true },
+        { name: "acquired_at", type: "timestamptz", required: true, default: "now()" },
+        // Expiry rather than an explicit release path: a closed laptop must not
+        // lock a definition forever. Refreshed while the editor is open.
+        { name: "expires_at", type: "timestamptz", required: true },
+      ],
+      indexes: [
+        {
+          name: "workflow_definition_locks_unique_idx",
+          unique: true,
+          columns: ["tenant_id", "definition_id"],
+        },
+        { name: "workflow_definition_locks_expiry_idx", columns: ["expires_at"] },
+      ],
+    },
+  ];
+}
+
 const plugin: CompilerPlugin = {
   name: "workflow",
   ownedPaths: {
@@ -199,7 +439,7 @@ const plugin: CompilerPlugin = {
   },
 
   contributePlatformTables() {
-    return workflowPlatformTables();
+    return [...workflowPlatformTables(), ...workflowDataTables()];
   },
 
   generate({ authoringDir, webPresent }) {

@@ -23,7 +23,7 @@
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import generatedRegistry from "../generated/modules/registry.json" with { type: "json" };
-import type { RuntimeModule } from "./contract.js";
+import type { ModuleRuntimeContext, RuntimeModule } from "./contract.js";
 
 type RuntimeModuleRegistration = { name: string; specifier: string };
 
@@ -38,7 +38,11 @@ const registry = generatedRegistry as unknown as {
 /** Repo root, module-relative: apps/api/src/modules -> src -> api -> apps -> . */
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 
-export type ModuleLoadFailureReason = "module_missing" | "invalid_module" | "name_mismatch";
+export type ModuleLoadFailureReason =
+  | "module_missing"
+  | "invalid_module"
+  | "name_mismatch"
+  | "init_failed";
 
 export type ModuleLoadFailure = {
   name: string;
@@ -122,6 +126,43 @@ export async function loadRuntimeModules(
       continue;
     }
     loaded.push(module);
+  }
+
+  return { loaded, failures };
+}
+
+/**
+ * Run every loaded module's `init`, then drop the ones that threw.
+ *
+ * Separate from loading because initialisation needs a database and loading
+ * does not — `db:migrate` resolves modules to collect their seeds and has no
+ * business hydrating caches. A module that fails to initialise is removed from
+ * `loaded`: its surfaces would answer with an empty cache, and answering wrongly
+ * is worse than not answering.
+ */
+export async function initRuntimeModules(
+  registry: ModuleRegistry,
+  context: ModuleRuntimeContext,
+): Promise<ModuleRegistry> {
+  const loaded: RuntimeModule[] = [];
+  const failures = [...registry.failures];
+
+  for (const module of registry.loaded) {
+    if (!module.init) {
+      loaded.push(module);
+      continue;
+    }
+    try {
+      await module.init(context);
+      loaded.push(module);
+    } catch (error) {
+      failures.push({
+        name: module.name,
+        specifier: "(loaded)",
+        reason: "init_failed",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   return { loaded, failures };

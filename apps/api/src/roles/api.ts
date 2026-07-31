@@ -21,7 +21,7 @@ import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
 import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
-import { loadRuntimeModules, type ModuleRegistry } from "../modules/registry.js";
+import { initRuntimeModules, loadRuntimeModules, type ModuleRegistry } from "../modules/registry.js";
 import {
   classifyRequest,
   createRateLimitMetrics,
@@ -251,16 +251,14 @@ export function createApiApp(
   }
 
   const dbOptions = databaseRuntime ? { db: databaseRuntime.db } : {};
-  const yoga = createGraphqlYoga({ ...dbOptions, modules: modules.loaded });
 
-  // A module that failed to load contributes nothing, and its absence is
-  // otherwise invisible until a query 404s. Say so once, at startup.
-  for (const failure of modules.failures) {
-    app.log.error(
-      { module: failure.name, specifier: failure.specifier, reason: failure.reason },
-      `Runtime module "${failure.name}" was not loaded: ${failure.message}`,
-    );
-  }
+  // Modules are initialised, and the schema built from the survivors, inside
+  // the async registration below rather than here: `init` needs the database
+  // this function has only just created, and a module that fails to initialise
+  // must not contribute a surface. `createApiApp` stays synchronous because its
+  // callers — tests included — should not have to await a server they are only
+  // constructing.
+  let ready: { yoga: ReturnType<typeof createGraphqlYoga> } | null = null;
 
   // Register the routes inside a child plugin so they load AFTER the rate-limit
   // plugin above. @fastify/rate-limit attaches its per-route guard through an
@@ -268,6 +266,18 @@ export function createApiApp(
   // added directly on `app` (which happens synchronously, before the deferred
   // plugin loads) would silently escape the limiter.
   void app.register(async (routes) => {
+    const initialised = await initRuntimeModules(modules, dbOptions);
+    ready = { yoga: createGraphqlYoga({ ...dbOptions, modules: initialised.loaded }) };
+
+    // A module that failed to load or initialise contributes nothing, and its
+    // absence is otherwise invisible until a query 404s. Say so once, here.
+    for (const failure of initialised.failures) {
+      routes.log.error(
+        { module: failure.name, specifier: failure.specifier, reason: failure.reason },
+        `Runtime module "${failure.name}" was not loaded: ${failure.message}`,
+      );
+    }
+
     routes.get("/api/health", async () => ({
       status: "ok",
       role: "api",
@@ -288,7 +298,10 @@ export function createApiApp(
       method: ["GET", "POST", "OPTIONS"],
       handler: async (request, reply) => {
         const origin = `${request.protocol}://${request.headers.host ?? "localhost"}`;
-        const response = await yoga.fetch(
+        // `ready` is assigned at the top of this same registration, before any
+        // route can be reached; the check is a type guard, not a race.
+        if (!ready) throw new Error("GraphQL was not initialised before serving.");
+        const response = await ready.yoga.fetch(
           new URL(request.url, origin),
           {
             method: request.method,
@@ -312,7 +325,7 @@ export function createApiApp(
     });
     registerGeneratedMcpServer(routes, dbOptions);
 
-    for (const module of modules.loaded) {
+    for (const module of initialised.loaded) {
       module.restRoutes?.(routes, dbOptions);
     }
   });

@@ -29,7 +29,7 @@ Closes #
   - [ ] `bun run check:generated`
   - [ ] `bun run check:authoring-local`
   - [ ] `bun run check:notices:linux` (ran `bun run notices:linux` if I changed dependencies)
-  - [ ] `bun run typecheck:compiler` and `bun run typecheck:api`
+  - [ ] `bun run typecheck:compiler`, `bun run typecheck:api` and `bun run typecheck:examples`
   - [ ] `bun run test:compiler`
   - [ ] `bun run test:e2e` (Postgres up)
   - [ ] `cd apps/api && bun test src/db` (migrations + drift)

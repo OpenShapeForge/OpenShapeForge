@@ -42,6 +42,7 @@ bun run check:ts-nocheck        # compiler/workflow @ts-nocheck baseline does no
 bun run check:notices:linux     # THIRD-PARTY-NOTICES matches the deps, as CI runs it
 bun run typecheck:compiler
 bun run typecheck:api
+bun run typecheck:examples  # the shipped example plugins/connectors
 bun run test:compiler
 bun run test:e2e                # manifest-driven GraphQL e2e suite (needs Postgres up)
 bun run --cwd apps/api test:migrations   # migrator + drift tests (bun test src/db)

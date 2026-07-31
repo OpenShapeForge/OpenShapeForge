@@ -14,9 +14,11 @@
  * understanding any of them; a payload that does not decode is this module's
  * `BAD_COMMAND`, not a queue problem.
  *
- * **Where idempotency comes from.** Not from a durable-execution service. These
- * three functions were once fronted by one, and removing that wrapper changes
- * nothing about correctness, because none of the guarantees were ever its:
+ * **Where idempotency comes from.** Not from a durable-execution service.
+ * `createWorkflowCommandRuntime` at the foot of this file fronts these three
+ * with one, and a deployment may choose to dispatch through it, but that
+ * wrapper is a keyed-idempotency and retry envelope — none of the guarantees
+ * are its:
  *
  *   - `consumeRuntimeCommand` moves the command row out of `pending`/
  *     `processing` in a conditional update and reports whether it won. A
@@ -29,8 +31,11 @@
  *     revive it.
  *
  * Those three hold for any dispatcher, which is what makes the plain in-process
- * one correct: durability lives in the queue, not in whoever drains it.
+ * one correct: durability lives in the queue, not in whoever drains it. It is
+ * also why the three functions stay callable with no `restate` context at all —
+ * being unaware of the envelope is what lets both dispatchers exist.
  */
+import * as restate from "@restatedev/restate-sdk";
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../../../apps/api/src/db/connection.js";
 import { withDbSession } from "../../../../apps/api/src/db/session.js";
@@ -688,4 +693,45 @@ export async function applyWorkflowCommandRuntimeCancel(
   );
 
   return { ok: true, commandId, instanceId, status: "cancelled" };
+}
+
+/**
+ * The optional durable-execution envelope around the three functions above.
+ *
+ * Registered with a Restate endpoint when a deployment configures the Restate
+ * dispatcher; the object's key is the command id, so Restate serializes and
+ * retries per command. That is all it is. Every handler is one `ctx.run` around
+ * an unmodified apply call, which means the retry granularity is the whole
+ * command and the journal holds a single step — safe only because each apply is
+ * already idempotent on its own, for the reasons at the top of this file. Take
+ * this away and the same commands still apply exactly once; the apply functions
+ * do not know it is here and must not learn.
+ */
+export function createWorkflowCommandRuntime(db: OpenShapeForgeDatabase) {
+  return restate.object({
+    name: "WorkflowCommandRuntime",
+    handlers: {
+      start: async (
+        ctx: restate.ObjectContext,
+        input: WorkflowCommandRuntimeInput,
+      ) =>
+        ctx.run("workflow-command-runtime:start", () =>
+          applyWorkflowCommandRuntimeStart(db, input),
+        ),
+      resume: async (
+        ctx: restate.ObjectContext,
+        input: WorkflowCommandRuntimeInput,
+      ) =>
+        ctx.run("workflow-command-runtime:resume", () =>
+          applyWorkflowCommandRuntimeResume(db, input),
+        ),
+      cancel: async (
+        ctx: restate.ObjectContext,
+        input: WorkflowCommandRuntimeInput,
+      ) =>
+        ctx.run("workflow-command-runtime:cancel", () =>
+          applyWorkflowCommandRuntimeCancel(db, input),
+        ),
+    },
+  });
 }

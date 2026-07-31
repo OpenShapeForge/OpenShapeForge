@@ -8,6 +8,7 @@ import {
   applyWorkflowCommandRuntimeResume,
   applyWorkflowCommandRuntimeStart,
 } from "./command-runtime.js";
+import { createRestateWorkflowControlCommandDispatcher } from "./restate-dispatcher.js";
 
 export type WorkflowControlCommandRecord = {
   id: string;
@@ -38,10 +39,31 @@ export type WorkflowControlCommandWorkerOptions = {
   processingTimeoutMs?: number;
 };
 
+export type WorkflowRestateDispatchConfig = {
+  ingressUrl: string;
+  workflowCommandServiceName: string;
+  timeoutMs: number;
+};
+
 const DEFAULT_BATCH_SIZE = 10;
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_PROCESSING_TIMEOUT_MS = 120_000;
+const DEFAULT_RESTATE_TIMEOUT_MS = 120_000;
+
+/**
+ * The exact value `OPENSHAPEFORGE_WORKFLOW_RESTATE_CONTRACT` must carry before
+ * commands are dispatched to a durable-execution service.
+ *
+ * A reachable ingress is not consent. An ingress URL can arrive from a shared
+ * environment, a copied deployment manifest or a sidecar's own defaults, and
+ * any of those would silently move every workflow in the deployment onto a
+ * service the operator never chose. Requiring a token nobody sets by accident
+ * makes that impossible, and pins which request shape the deployed handlers
+ * expect — a later incompatible shape takes a new token rather than quietly
+ * meeting an ingress that still answers on the old one.
+ */
+const RESTATE_DISPATCH_CONTRACT = "workflow-command-v1";
 
 function normalizeRecord(value: unknown): Record<string, unknown> {
   if (typeof value === "string") {
@@ -102,6 +124,76 @@ export function createInProcessWorkflowControlCommandDispatcher(
       }
     },
   };
+}
+
+function normalizeUrl(value?: string | null) {
+  const normalized = value?.trim();
+  return normalized ? normalized.replace(/\/$/, "") : null;
+}
+
+function normalizePositiveInteger(
+  value: string | number | null | undefined,
+  fallback: number,
+) {
+  const parsed = typeof value === "number" ? value : Number.parseInt(value ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * The durable-execution configuration, or null when this deployment has not
+ * asked for one. Both the contract token and an ingress are required; either
+ * alone is not an answer.
+ */
+export function readWorkflowRestateDispatchConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): WorkflowRestateDispatchConfig | null {
+  if (env.OPENSHAPEFORGE_WORKFLOW_RESTATE_CONTRACT !== RESTATE_DISPATCH_CONTRACT) {
+    return null;
+  }
+
+  const ingressUrl = normalizeUrl(
+    env.OPENSHAPEFORGE_WORKFLOW_RESTATE_INGRESS_URL ?? env.RESTATE_INGRESS_URL,
+  );
+  if (!ingressUrl) {
+    return null;
+  }
+
+  return {
+    ingressUrl,
+    workflowCommandServiceName:
+      env.OPENSHAPEFORGE_WORKFLOW_RESTATE_COMMAND_SERVICE ?? "WorkflowCommandRuntime",
+    timeoutMs: normalizePositiveInteger(
+      env.OPENSHAPEFORGE_WORKFLOW_RESTATE_TIMEOUT_MS,
+      DEFAULT_RESTATE_TIMEOUT_MS,
+    ),
+  };
+}
+
+/**
+ * The dispatcher this deployment should drain the queue with.
+ *
+ * In-process is the default and durable execution is the upgrade — deliberately
+ * that way round. The shape this follows treats an absent Restate config as
+ * "command dispatch off", which is a defensible posture for a deployment that
+ * always runs a Restate sidecar and never intends to run without one. It is the
+ * wrong posture here: a default deployment of this repo has no sidecar, so
+ * "off" would mean no workflow can start, resume or cancel at all, and the
+ * queue would fill with commands nothing ever claims. A workflow engine whose
+ * out-of-the-box behaviour is to accept work and never do it is not a safer
+ * default, it is a broken one.
+ *
+ * Callers take the dispatcher and hand it to the worker. Which one they got is
+ * not their business: both satisfy the same interface, and correctness does not
+ * depend on the answer — see the note on idempotency in `command-runtime.ts`.
+ */
+export function createWorkflowControlCommandDispatcher(
+  db: OpenShapeForgeDatabase,
+  env: NodeJS.ProcessEnv = process.env,
+): WorkflowControlCommandDispatcher {
+  const restateConfig = readWorkflowRestateDispatchConfig(env);
+  return restateConfig
+    ? createRestateWorkflowControlCommandDispatcher(restateConfig)
+    : createInProcessWorkflowControlCommandDispatcher(db);
 }
 
 /**

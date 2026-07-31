@@ -7,11 +7,12 @@
   "description": "Example plugin: workflow node catalogs and the workflow runtime (generators + platform tables + authoring layer + runtime module).",
   "module": "index.ts",
   "dependencies": {
+    "@restatedev/restate-sdk": "^1.10.4",
     "cron-parser": "^5.5.0",
     "fastify": "^5.8.2",
     "kysely": "^0.29.4",
     "yaml": "^2.8.3",
     "zod": "^4.3.6"
   },
-  "//dependencies": "kysely is a real dependency of the runtime half, which queries the workflow tables directly. zod validates a node's resolved config against the catalog's field schema before a bridge runs; cron-parser computes the next fire for a schedule trigger. All three must be declared here rather than borrowed from apps/api: a bare specifier does not resolve from examples/. Keep the kysely range in step with apps/api \u2014 they share a connection."
+  "//dependencies": "kysely is a real dependency of the runtime half, which queries the workflow tables directly. zod validates a node's resolved config against the catalog's field schema before a bridge runs; cron-parser computes the next fire for a schedule trigger. @restatedev/restate-sdk types the virtual object in runtime/command-runtime.ts, which is the optional durable-execution envelope around the three command-apply functions \u2014 the runtime imports it only when a deployment selects that dispatcher. All must be declared here rather than borrowed from apps/api: a bare specifier does not resolve from examples/. Keep the kysely range in step with apps/api \u2014 they share a connection."
 }

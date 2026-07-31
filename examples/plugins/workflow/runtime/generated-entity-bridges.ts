@@ -77,20 +77,25 @@ function fieldNameForColumn(column: GeneratedCrudColumn) {
   return column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase());
 }
 
+/**
+ * Columns that never reach a node's output.
+ *
+ * `tenant_id` is the run's own tenant — reading it back is not a cross-tenant
+ * leak — but this payload lands in `shared_output`, which is the channel later
+ * nodes interpolate through `{{nodes.<id>.output.*}}`. Putting the tenant id
+ * there makes it interpolable into a message body or an outbound call, which is
+ * precisely what `private_output` exists to keep it out of. The engine already
+ * knows the tenant; nothing downstream needs to be told.
+ */
+const OUTPUT_SUPPRESSED_COLUMNS = new Set(["tenant_id"]);
+
 function outputRow(table: GeneratedCrudTable, row: Record<string, unknown>) {
   const result: Record<string, unknown> = {};
   for (const column of table.columns) {
+    if (OUTPUT_SUPPRESSED_COLUMNS.has(column.name)) continue;
     const fieldName = fieldNameForColumn(column);
     if (Object.hasOwn(row, column.name)) {
       result[fieldName] = row[column.name];
-    }
-  }
-  if (table.schema === "erp" && table.table === "agreement_parties") {
-    if (Object.hasOwn(row, "address_label")) {
-      result.addressLabel = row.address_label;
-    }
-    if (Object.hasOwn(row, "address_id")) {
-      result.addressId = row.address_id;
     }
   }
   return result;
@@ -590,40 +595,18 @@ async function executeList(
   const where = sql.join(conditions, sql` and `);
   const orderBy = sortExpression(table, context.resolvedConfig.sort);
 
-  const result = table.schema === "erp" && table.table === "agreement_parties"
-    ? await sql<{ row: Record<string, unknown> }>`
-        select
-          to_jsonb(row_source.*) || jsonb_build_object(
-            'address_label',
-            nullif(
-              concat_ws(
-                ', ',
-                nullif(trim(concat_ws(' ', address.street, address.house_number, address.house_number_addition)), ''),
-                nullif(trim(concat_ws(' ', address.postal_code, address.city)), '')
-              ),
-              ''
-            ),
-            'address_id',
-            assignment.address_id::text
-          ) as row
-        from ${sql.id(table.schema, table.table)} as row_source
-        left join erp.address_assignments assignment
-          on assignment.tenant_id = row_source.tenant_id
-         and assignment.id = row_source.address_assignment_id
-        left join erp.addresses address
-          on address.tenant_id = assignment.tenant_id
-         and address.id = assignment.address_id
-        where ${where}
-        order by ${orderBy}
-        limit ${limit}
-      `.execute(db)
-    : await sql<{ row: Record<string, unknown> }>`
-        select to_jsonb(row_source.*) as row
-        from ${sql.id(table.schema, table.table)} as row_source
-        where ${where}
-        order by ${orderBy}
-        limit ${limit}
-      `.execute(db);
+  // One shape for every entity. The model this ports from special-cased a
+  // particular table here, joining two others to decorate the row — tables this
+  // deployment does not have. Worse, the branch fired on table NAME alone, so an
+  // entity that happened to be called that, arriving without its companions,
+  // would have produced a runtime SQL error rather than a missing field.
+  const result = await sql<{ row: Record<string, unknown> }>`
+    select to_jsonb(row_source.*) as row
+    from ${sql.id(table.schema, table.table)} as row_source
+    where ${where}
+    order by ${orderBy}
+    limit ${limit}
+  `.execute(db);
 
   const countResult = await sql<{ total_count: string | number }>`
     select count(*) as total_count

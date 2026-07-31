@@ -367,7 +367,6 @@ export async function enqueueWorkflowInstanceStartInTransaction(
     parentNodeId,
     requestedBy: startedBy,
   };
-  const workflowKey = `${tenantId}:${nextInstanceId}`;
 
   await trx
     .insertInto("workflow.instances")
@@ -383,20 +382,15 @@ export async function enqueueWorkflowInstanceStartInTransaction(
       entity_id: entityId,
       parent_instance_id: parentInstanceId,
       parent_node_id: parentNodeId,
+      // Snapshot of what was published when the run started, written with the
+      // row rather than by a follow-up update: an instance that exists without
+      // them is an instance a list read cannot describe.
+      definition_version: definition.version,
+      definition_name: definition.name,
+      trigger_type: triggerType,
+      trigger_meta: triggerMeta as Json,
     })
     .execute();
-
-  await sql`
-    update workflow.instances
-    set
-      workflow_key = ${workflowKey},
-      definition_version = ${definition.version},
-      definition_name = ${definition.name},
-      trigger_type = ${triggerType},
-      trigger_meta = ${jsonbLiteral(triggerMeta)}
-    where tenant_id = cast(${tenantId} as uuid)
-      and id = cast(${nextInstanceId} as uuid)
-  `.execute(trx);
 
   const { commandId } = await insertControlCommand(trx, {
     tenantId,

@@ -487,6 +487,13 @@ export async function applyWorkflowCommandRuntimeStart(
         },
       });
 
+      // The walk's result is deliberately not consumed. Every outcome it can
+      // report has already been written to the database inside this same
+      // transaction — a failed node and its cascade, or an explicit instance
+      // failure for a graph that could not be routed — so the return value is a
+      // second copy of what the rows already say. Acting on it here would make
+      // this a second writer of the instance's terminal status, which is
+      // precisely what `instance-completion.ts` reserves to itself.
       await runProcessInstance(trx, {
         tenantId,
         instanceId,

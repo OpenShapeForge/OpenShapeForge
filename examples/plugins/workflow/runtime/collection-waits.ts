@@ -10,7 +10,6 @@ export type WorkflowCollectionWaitFilterValue = string | number | boolean | null
 
 export type WorkflowCollectionWaitInput = {
   instanceId: string;
-  workflowKey: string;
   nodeId: string;
   waitToken: string;
   entityType: string;
@@ -272,7 +271,6 @@ export async function registerWorkflowCollectionWait(
   input: WorkflowCollectionWaitInput,
 ) {
   const instanceId = normalizeUuid(input.instanceId, "instanceId");
-  const workflowKey = normalizeRequiredText(input.workflowKey, "workflowKey");
   const nodeId = normalizeRequiredText(input.nodeId, "nodeId");
   const waitToken = normalizeRequiredText(input.waitToken, "waitToken");
   const entityType = normalizeRequiredText(input.entityType, "entityType");
@@ -297,7 +295,6 @@ export async function registerWorkflowCollectionWait(
       insert into workflow.collection_waits (
         tenant_id,
         instance_id,
-        workflow_key,
         node_id,
         wait_token,
         entity_type,
@@ -312,7 +309,6 @@ export async function registerWorkflowCollectionWait(
       ) values (
         cast(${scopedSession.tenantId} as uuid),
         cast(${instanceId} as uuid),
-        ${workflowKey},
         ${nodeId},
         ${waitToken},
         ${entityType},
@@ -333,7 +329,6 @@ export async function registerWorkflowCollectionWait(
       insert into workflow.waits (
         tenant_id,
         instance_id,
-        workflow_key,
         node_id,
         wait_token,
         wait_kind,
@@ -341,7 +336,6 @@ export async function registerWorkflowCollectionWait(
       ) values (
         cast(${scopedSession.tenantId} as uuid),
         cast(${instanceId} as uuid),
-        ${workflowKey},
         ${nodeId},
         ${waitToken},
         'collection_entity',

@@ -106,10 +106,20 @@ function requireStore(): CatalogStore {
 export async function hydrateNodeCatalog(db: OpenShapeForgeDatabase): Promise<void> {
   if (store) return;
 
+  // Both catalogs, not just 'standard'. The entity node types live under
+  // catalog='entity', and every catalog-driven check at run time goes through
+  // this store: definition validation resolves node types here, and resolved-
+  // config validation reads `config_fields` here to apply the catalog's
+  // defaults and enforce its schema. Filtering to one catalog meant a graph
+  // built entirely from entity nodes published with nothing type-checked and
+  // ran with none of its declared defaults applied — the checks were present
+  // and silently inapplicable, which is worse than their absence.
+  //
+  // `node_type` is the table's primary key, so the two catalogs cannot collide
+  // in one map.
   const rows = await db
     .selectFrom("platform.workflow_node_catalog_entries")
     .select(["node_type", "category", "label", "description", "config_fields", "output_fields"])
-    .where("catalog", "=", "standard")
     .execute();
 
   store = buildStore(rows.map(toEntry));

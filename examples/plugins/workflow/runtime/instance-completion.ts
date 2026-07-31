@@ -487,6 +487,113 @@ export async function tryCompleteInstanceInTransaction(
 }
 
 /**
+ * Fail the instance outright, for a failure no node state can carry.
+ *
+ * The cascade above infers a failure from a node that failed. Some failures
+ * have no such node. A graph that cannot be routed out of a node breaks *after*
+ * that node did its job perfectly — two edges share one output handle, an edge
+ * points at a target that is not in the graph, a trigger fans out, the walk hits
+ * its visit ceiling. The node is `completed` and must stay `completed`;
+ * `markNodeStateTerminalInTransaction` refuses to rewrite a settled row, and
+ * that refusal is right. But it leaves the cascade nothing to infer from: every
+ * node terminal, none failed, so it would answer `completed` — a run that went
+ * nowhere, indistinguishable from one that finished.
+ *
+ * So this is the one path that asserts the instance's status instead of reading
+ * it off the node rows, and it is the only one that writes
+ * `workflow.instances.error`, because it is the only place the reason can live.
+ * The cascade deliberately leaves that column alone: there the failing node's
+ * own `error` is the record, and a second copy could only drift from it.
+ *
+ * `atNodeId` annotates the node the walk stopped at — where, not who. Only its
+ * `error` is written; its status and `completed_at` are its own account of what
+ * it did, and it did nothing wrong.
+ */
+export async function failInstanceInTransaction(
+  trx: Transaction<DB>,
+  input: {
+    tenantId: string;
+    instanceId: string;
+    failedBy: string;
+    error: { code: string; message: string; details?: JsonRecord | undefined };
+    atNodeId?: string | null | undefined;
+  },
+): Promise<{
+  status: "failed" | "already_terminal" | "not_found";
+  parentResumeCommandId: string | null;
+}> {
+  const instance = await trx
+    .selectFrom("workflow.instances")
+    .select(["id", "status", "parent_instance_id", "parent_node_id", "process_variables"])
+    .where("tenant_id", "=", input.tenantId)
+    .where("id", "=", input.instanceId)
+    .forUpdate()
+    .executeTakeFirst();
+
+  if (!instance) {
+    return { status: "not_found", parentResumeCommandId: null };
+  }
+  if (TERMINAL_STATUSES.includes(instance.status)) {
+    return { status: "already_terminal", parentResumeCommandId: null };
+  }
+
+  const errorPayload = {
+    code: input.error.code,
+    message: input.error.message,
+    ...(input.error.details ? { details: input.error.details } : {}),
+  };
+
+  if (input.atNodeId) {
+    await sql`
+      update workflow.node_states
+      set error = ${jsonbLiteral(errorPayload)}
+      where tenant_id = cast(${input.tenantId} as uuid)
+        and instance_id = cast(${input.instanceId} as uuid)
+        and node_id = ${input.atNodeId}
+    `.execute(trx);
+  }
+
+  await sql`
+    update workflow.instances
+    set status = 'failed', error = ${jsonbLiteral(errorPayload)}, completed_at = now()
+    where tenant_id = cast(${input.tenantId} as uuid)
+      and id = cast(${input.instanceId} as uuid)
+  `.execute(trx);
+
+  await appendScopedEntityEventInTransaction(trx, {
+    aggregateType: "workflow.instance",
+    aggregateId: input.instanceId,
+    eventType: "workflow.instance.failed",
+    payload: {
+      instanceId: input.instanceId,
+      finalStatus: "failed",
+      error: toJson(errorPayload),
+      nodeId: input.atNodeId ?? null,
+      parentInstanceId: instance.parent_instance_id ?? null,
+      parentNodeId: instance.parent_node_id ?? null,
+    },
+  });
+
+  // A parent waiting on this run has to hear about it, and a failure it never
+  // hears about parks it forever. Same hand-off as every other terminal path.
+  let parentResumeCommandId: string | null = null;
+  if (instance.parent_instance_id && instance.parent_node_id) {
+    const processVariables = asRecord(instance.process_variables);
+    parentResumeCommandId = await enqueueParentResumeCommandInTransaction(trx, {
+      tenantId: input.tenantId,
+      parentInstanceId: instance.parent_instance_id,
+      parentNodeId: instance.parent_node_id,
+      childInstanceId: input.instanceId,
+      childFinalStatus: "failed",
+      result: { ...processVariables, error: errorPayload, processVariables },
+      completedBy: input.failedBy,
+    });
+  }
+
+  return { status: "failed", parentResumeCommandId };
+}
+
+/**
  * Cancel a run outright, without waiting for its nodes to settle themselves.
  *
  * This is the one terminal transition that does not go through the cascade,

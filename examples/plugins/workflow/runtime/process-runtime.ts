@@ -45,6 +45,7 @@ import type { DB } from "../../../../apps/api/src/generated/db/types.js";
 import { isTriggerNodeType } from "./definition-types.js";
 import { flattenFieldDefinitionSources } from "./field-definitions.js";
 import {
+  failInstanceInTransaction,
   markNodeStateCompletedInTransaction,
   markNodeStateFailedInTransaction,
   markNodeStateWaitingInTransaction,
@@ -828,7 +829,7 @@ export async function runProcessInstance(
         nextEdge = selectNextEdge(input.definition.edges, cursor.id, fromHandle);
       } catch (caught) {
         if (caught instanceof ProcessRuntimeError) {
-          await failInstance(trx, input, cursor.id, caught);
+          await failInstance(trx, input, cursor, caught);
           return failedResult(visited, cursor.id, caught);
         }
         throw caught;
@@ -844,7 +845,7 @@ export async function runProcessInstance(
             "NO_EDGE_FOR_HANDLE",
             cursor.id,
           );
-          await failInstance(trx, input, cursor.id, error);
+          await failInstance(trx, input, cursor, error);
           return failedResult(visited, cursor.id, error);
         }
         break;
@@ -857,7 +858,7 @@ export async function runProcessInstance(
           "EDGE_TARGET_MISSING",
           cursor.id,
         );
-        await failInstance(trx, input, cursor.id, error);
+        await failInstance(trx, input, cursor, error);
         return failedResult(visited, cursor.id, error);
       }
       nextNode = edgeTarget;
@@ -877,7 +878,7 @@ export async function runProcessInstance(
         });
       } catch (caught) {
         if (caught instanceof ProcessRuntimeError) {
-          await failInstance(trx, input, nextNode.id, caught);
+          await failInstance(trx, input, nextNode, caught);
           return failedResult(visited, nextNode.id, caught);
         }
         throw caught;
@@ -893,19 +894,33 @@ export async function runProcessInstance(
           nextNode.id,
         );
         const errorPayload = { code: error.code, message: error.message, details: endPayload };
-        await markNodeStateFailedInTransaction(trx, {
+        // Not routed through `failInstance` because the end payload belongs in
+        // the cascade's sharedResult, but the same guard applies: a resume aimed
+        // at an end node that already settled cannot re-settle it, and the
+        // cascade would then read the run as completed.
+        const nodeWrite = await markNodeStateFailedInTransaction(trx, {
           tenantId: input.tenantId,
           instanceId: input.instanceId,
           nodeId: nextNode.id,
           nodeType: nextNode.type,
           error: errorPayload,
         });
-        await tryCompleteInstanceInTransaction(trx, {
-          tenantId: input.tenantId,
-          instanceId: input.instanceId,
-          completedBy: input.startedBy,
-          sharedResult: { ...endPayload, error: errorPayload },
-        });
+        if (nodeWrite.status === "already_terminal") {
+          await failInstanceInTransaction(trx, {
+            tenantId: input.tenantId,
+            instanceId: input.instanceId,
+            failedBy: input.startedBy,
+            error: errorPayload,
+            atNodeId: nextNode.id,
+          });
+        } else {
+          await tryCompleteInstanceInTransaction(trx, {
+            tenantId: input.tenantId,
+            instanceId: input.instanceId,
+            completedBy: input.startedBy,
+            sharedResult: { ...endPayload, error: errorPayload },
+          });
+        }
         return failedResult(visited, nextNode.id, error);
       }
 
@@ -931,7 +946,7 @@ export async function runProcessInstance(
         "ENTRY_TYPE_MISMATCH",
         nextNode.id,
       );
-      await failInstance(trx, input, nextNode.id, error);
+      await failInstance(trx, input, nextNode, error);
       return failedResult(visited, nextNode.id, error);
     }
 
@@ -942,7 +957,7 @@ export async function runProcessInstance(
         "NO_BRIDGE",
         nextNode.id,
       );
-      await failInstance(trx, input, nextNode.id, error);
+      await failInstance(trx, input, nextNode, error);
       return failedResult(visited, nextNode.id, error);
     }
 
@@ -970,7 +985,7 @@ export async function runProcessInstance(
       resolvedConfig = resolveConfigValue(nextNode.config ?? {}, source) as Record<string, unknown>;
     } catch (caught) {
       if (caught instanceof ProcessRuntimeError) {
-        await failInstance(trx, input, nextNode.id, caught);
+        await failInstance(trx, input, nextNode, caught);
         return failedResult(visited, nextNode.id, caught);
       }
       throw caught;
@@ -1006,7 +1021,7 @@ export async function runProcessInstance(
           "CONFIG_VALIDATION_FAILED",
           nextNode.id,
         );
-        await failInstance(trx, input, nextNode.id, error);
+        await failInstance(trx, input, nextNode, error);
         return failedResult(visited, nextNode.id, error);
       }
     }
@@ -1046,7 +1061,7 @@ export async function runProcessInstance(
           nextNode.id,
         );
         try {
-          await failInstance(trx, input, nextNode.id, error);
+          await failInstance(trx, input, nextNode, error);
         } catch (failureWriteError) {
           // The transaction is probably already aborted by whatever the bridge
           // did. Log what was lost and throw, rather than return a "failed"
@@ -1126,7 +1141,7 @@ export async function runProcessInstance(
       "GRAPH_TOO_LARGE",
       cursor.id,
     );
-    await failInstance(trx, input, cursor.id, error);
+    await failInstance(trx, input, cursor, error);
     return failedResult(visited, cursor.id, error);
   }
 
@@ -1167,27 +1182,55 @@ function failedResult(
 }
 
 /**
- * Write the node failure, then let the completion cascade read it and flip the
- * instance. The instance status is never set from here for the same reason the
- * success path does not set it: one reader of the rows, one answer.
+ * Record a failure the walk detected, and settle the instance.
+ *
+ * Which of two mechanisms applies is decided by whether the node has already
+ * settled, and the distinction is not cosmetic.
+ *
+ * A node still open failed at its own step: its row takes the failure and the
+ * completion cascade reads it, which keeps one reader of the rows and one
+ * answer. A node that has already settled did not fail — the walk did, on its
+ * way out of a node that did its job. Re-settling it would overwrite a true
+ * outcome with a false one, so `markNodeStateTerminalInTransaction` refuses the
+ * write and reports `already_terminal`. That refusal is correct and it is also
+ * why the cascade cannot be used here: with nothing failed among the rows it
+ * would read the run as `completed`. The instance is failed explicitly instead.
+ *
+ * Ignoring that return value is what made every routing failure —
+ * `AMBIGUOUS_EDGES_FOR_HANDLE`, `NO_EDGE_FOR_HANDLE`, `TRIGGER_FANOUT`,
+ * `EDGE_TARGET_MISSING`, `GRAPH_TOO_LARGE` — report success.
  */
 async function failInstance(
   trx: Transaction<DB>,
   input: ProcessRuntimeInput,
-  nodeId: string,
+  node: ProcessRuntimeNode,
   error: ProcessRuntimeError,
 ): Promise<void> {
-  await markNodeStateFailedInTransaction(trx, {
+  const failure = { code: error.code, message: error.message };
+  const nodeWrite = await markNodeStateFailedInTransaction(trx, {
     tenantId: input.tenantId,
     instanceId: input.instanceId,
-    nodeId,
-    error: { code: error.code, message: error.message },
+    nodeId: node.id,
+    nodeType: node.type,
+    error: failure,
   });
+
+  if (nodeWrite.status === "already_terminal") {
+    await failInstanceInTransaction(trx, {
+      tenantId: input.tenantId,
+      instanceId: input.instanceId,
+      failedBy: input.startedBy,
+      error: failure,
+      atNodeId: node.id,
+    });
+    return;
+  }
+
   await tryCompleteInstanceInTransaction(trx, {
     tenantId: input.tenantId,
     instanceId: input.instanceId,
     completedBy: input.startedBy,
-    sharedResult: { error: { code: error.code, message: error.message } },
+    sharedResult: { error: failure },
   });
 }
 

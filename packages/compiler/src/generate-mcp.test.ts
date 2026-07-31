@@ -192,7 +192,7 @@ describe("buildMcpCatalog", () => {
       expect(notes.description).toBe("Free text. Never put personal data here.");
     });
 
-    it("omits read-only, computed, and server-managed fields from write schemas", () => {
+    it("omits computed and server-managed fields from write schemas, but not readOnly", () => {
       const catalog = buildMcpCatalog(
         [
           input(
@@ -212,7 +212,9 @@ describe("buildMcpCatalog", () => {
         "test",
       );
       const create = catalog.tools.find((tool) => tool.operation === "create")!;
-      expect(Object.keys(create.inputSchema.properties as object)).toEqual(["name"]);
+      // `slug` is authored readOnly, which is a presentation flag here, not an
+      // API contract — omitting it would hide a field the server accepts.
+      expect(Object.keys(create.inputSchema.properties as object)).toEqual(["slug", "name"]);
     });
 
     it("models a collection as an array carrying the item constraints", () => {

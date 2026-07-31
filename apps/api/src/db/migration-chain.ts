@@ -18,9 +18,10 @@
  *   4. generated roll-forward — manifest-driven schema apply/diff.
  *   5. app role grants        — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically.
- *   6. page-config seed       — load the compiler's entity page-config catalog
- *      into platform.entity_page_configs. Data, not DDL, so it runs after the
- *      table exists and after the grant sweep.
+ *   6. catalog seeds          — load the compiler's global configuration
+ *      catalogs (entity page configs, workflow node catalogs) into their
+ *      platform tables. Data, not DDL, so they run after the tables exist and
+ *      after the grant sweep. Each is a no-op when its seed was not emitted.
  *
  * `db` must be a connection-bound Kysely instance (obtained via
  * runtime.db.connection().execute) — steps 3 and 4 use explicit
@@ -47,6 +48,10 @@ import {
   applyEntityPageConfigsSeed,
   type EntityPageConfigsSeedResult,
 } from "./migrations/entity-page-configs-seed.js";
+import {
+  applyWorkflowCatalogsSeed,
+  type WorkflowCatalogsSeedResult,
+} from "./migrations/workflow-catalogs-seed.js";
 
 export type MigrationChainOptions = {
   /** Override the versioned-migration registry (used by tests). */
@@ -61,6 +66,8 @@ export type MigrationChainResult = GeneratedSchemaMigrationResult & {
   versionedReconciled: string[];
   /** Outcome of the entity page-config catalog seed. */
   pageConfigs: EntityPageConfigsSeedResult;
+  /** Outcome of the workflow plugin's catalog seeds. */
+  workflowCatalogs: WorkflowCatalogsSeedResult;
 };
 
 export async function runMigrationChain(
@@ -78,10 +85,12 @@ export async function runMigrationChain(
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
   const pageConfigs = await applyEntityPageConfigsSeed(db);
+  const workflowCatalogs = await applyWorkflowCatalogsSeed(db);
   return {
     ...generated,
     versionedApplied: versioned.applied,
     versionedReconciled: versioned.reconciled,
     pageConfigs,
+    workflowCatalogs,
   };
 }

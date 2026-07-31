@@ -98,8 +98,11 @@ export function generateWorkflowEntityNodeArtifacts(
       });
       designerLazyEntries.push({
         type: nodeType, action,
-        label: getActionLabel(entityLabels, action).nl,
-        description: getActionDescription(entityLabels, action).nl,
+        // Both locales: these become jsonb label/description columns, which the
+        // standard catalog and the runtime CatalogEntry type model as
+        // Record<string, string>. See DesignerLazyRegistryEntry.
+        label: getActionLabel(entityLabels, action),
+        description: getActionDescription(entityLabels, action),
         category: entityLabels.nl,
         defaultConfig: buildDesignerDefaultConfig(action, action === "list" ? listDefaultSort : undefined),
       });

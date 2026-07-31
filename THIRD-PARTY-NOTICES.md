@@ -4,13 +4,13 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 404 packages.
+Regenerate with `bun run notices`. 406 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 351 |
+| MIT | 353 |
 | ISC | 19 |
 | Apache-2.0 | 13 |
 | BSD-3-Clause | 6 |
@@ -596,6 +596,10 @@ Regenerate with `bun run notices`. 404 packages.
 - License: **MIT** — expressjs/cors
 - Author: Troy Goode <troygoode@gmail.com> (https://github.com/troygoode/)
 
+### cron-parser@5.6.2
+- License: **MIT** — https://github.com/harrisiirak/cron-parser.git
+- Author: Harri Siirak
+
 ### cross-inspect@1.0.1
 - License: **MIT** — ardatan/graphql-tools
 - Author: Arda TANRIKULU <ardatanrikulu@gmail.com>
@@ -926,6 +930,10 @@ Regenerate with `bun run notices`. 404 packages.
 ### lucide-react@1.28.0
 - License: **ISC** — https://lucide.dev
 - Author: Eric Fennis
+
+### luxon@3.7.2
+- License: **MIT** — https://github.com/moment/luxon
+- Author: Isaac Cambron
 
 ### magic-string@0.30.21
 - License: **MIT** — git+https://github.com/Rich-Harris/magic-string.git
@@ -4694,6 +4702,33 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 </details>
 
+<details><summary>cron-parser@5.6.2</summary>
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2014-2023 Harri Siirak
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+</details>
+
 <details><summary>cross-spawn@7.0.6</summary>
 
 ```
@@ -7350,6 +7385,19 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+</details>
+
+<details><summary>luxon@3.7.2</summary>
+
+```
+Copyright 2019 JS Foundation and other contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 </details>
 

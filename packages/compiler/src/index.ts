@@ -19,6 +19,7 @@ import {
 } from "./core-referentiedata-artifacts.js";
 import { generateArtifacts } from "./generate.js";
 import { renderConnectorCatalog } from "./generate-connectors.js";
+import { MODULE_REGISTRY_PATH, renderModuleRegistry } from "./generate-modules.js";
 import { renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
 import type { CompiledEntityInfo } from "./plugins.js";
@@ -31,6 +32,7 @@ export type ArtifactCollection = {
     db: GeneratedArtifact[];
     mcp: GeneratedArtifact[];
     connectors: GeneratedArtifact[];
+    modules: GeneratedArtifact[];
     referentiedata: GeneratedArtifact[];
     ui: GeneratedArtifact[];
     keycloak: GeneratedArtifact[];
@@ -147,7 +149,7 @@ function assertReferentieGroepsResolve(
 export async function collectAllArtifacts(
   repoRoot: string = defaultRepoRoot,
 ): Promise<ArtifactCollection> {
-  const { manifest, entities, connectors, plugins } =
+  const { manifest, entities, connectors, plugins, pluginEntries } =
     await loadActivePlatformCompile(repoRoot);
   const authoringDir = resolveActiveAuthoringDir(repoRoot);
   // Web UI artifacts (CRUD pages, entity manifests, actions, workflow
@@ -178,6 +180,15 @@ export async function collectAllArtifacts(
         contents: renderConnectorCatalog(connectors, manifest),
       },
     ],
+    // Which plugins ship a runtime half. Always emitted so the API's boot-time
+    // import is unconditional; see generate-modules.ts for why the API is told
+    // rather than reading authoring.config.yaml itself.
+    modules: [
+      {
+        path: MODULE_REGISTRY_PATH,
+        contents: renderModuleRegistry(repoRoot, pluginEntries),
+      },
+    ],
     referentiedata: await generateCoreReferentiedataArtifacts(repoRoot, referentiedata),
     ui: webPresent ? await generateAuthoringUiArtifacts(authoringDir) : [],
     keycloak: generateAuthoringKeycloakArtifacts(authoringDir),
@@ -195,6 +206,7 @@ export async function collectAllArtifacts(
     ...groups.db,
     ...groups.mcp,
     ...groups.connectors,
+    ...groups.modules,
     ...groups.referentiedata,
     ...groups.ui,
     ...groups.keycloak,

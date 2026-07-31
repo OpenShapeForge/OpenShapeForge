@@ -15,6 +15,7 @@ coverage/
 apps/api/src/generated/connectors/
 apps/api/src/generated/db/
 apps/api/src/generated/mcp/
+apps/api/src/generated/modules/
 apps/api/src/generated/page-configs/
 apps/api/src/generated/rest/
 apps/api/src/generated/workflow/

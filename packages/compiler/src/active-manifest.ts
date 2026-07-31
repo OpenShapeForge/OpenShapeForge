@@ -12,10 +12,11 @@ import { listConnectorFiles, loadConnector } from "./authoring/connector-loader.
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
 import { loadManifest } from "./load-manifest.js";
 import {
-  loadCompilerPlugins,
+  loadCompilerPluginEntries,
   mergePluginPlatformTables,
   type CompiledEntityInfo,
   type CompilerPlugin,
+  type LoadedCompilerPlugin,
 } from "./plugins.js";
 import type { PlatformSchemaManifest, TableDefinition } from "./schema.js";
 
@@ -90,6 +91,8 @@ export type ActivePlatformCompile = {
   /** Compiled connector contracts, sorted by slug. */
   connectors: CompiledConnectorContract[];
   plugins: CompilerPlugin[];
+  /** The same plugins with their provenance, for the module registry. */
+  pluginEntries: LoadedCompilerPlugin[];
 };
 
 /**
@@ -120,7 +123,8 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
   let cached = compileCache.get(repoRoot);
   if (!cached) {
     cached = (async () => {
-      const plugins = await loadCompilerPlugins(repoRoot);
+      const pluginEntries = await loadCompilerPluginEntries(repoRoot);
+      const plugins = pluginEntries.map((entry) => entry.plugin);
       const baseManifest = await loadManifest(
         join(repoRoot, "packages/compiler/config/platform-schema.yaml"),
       );
@@ -156,6 +160,7 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
         entities,
         connectors: compileActiveConnectors(authoringDir, relative(repoRoot, authoringDir)),
         plugins,
+        pluginEntries,
       };
     })();
     compileCache.set(repoRoot, cached);

@@ -20,6 +20,11 @@ export const compilerOwnedGeneratedRoots = [
   // the API's connector surfaces. Always emitted (empty catalog when no
   // connector is authored) so the runtime import is unconditional.
   "apps/api/src/generated/connectors",
+  // Which registered plugins ship a runtime half — emitted by
+  // `packages/compiler/src/generate-modules.ts` and statically imported by the
+  // API's boot-time module registry. Always emitted (empty list when no plugin
+  // has one) so the runtime import is unconditional.
+  "apps/api/src/generated/modules",
   // Seed for platform.entity_page_configs, applied by `db:migrate`. Emitted by
   // the web-gated UI generator (no apps/web -> no page configs -> no rows), but
   // owned API-side because apps/api owns the table.

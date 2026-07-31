@@ -19,6 +19,7 @@ import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
+import { applyWorkflowCatalogsSeed } from "../migrations/workflow-catalogs-seed.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -62,8 +63,21 @@ async function withDb<T>(url: string, fn: (db: Kysely<DB>) => Promise<T>): Promi
   }
 }
 
+/**
+ * Migrate, then apply the workflow seeds directly.
+ *
+ * The seeds reach the chain through the runtime module contract now
+ * (`examples/plugins/workflow/runtime.ts`), which reports one combined result
+ * per module. That is the right shape for an operator reading migrate output
+ * and the wrong shape for asserting per-slice behaviour, so the wiring is
+ * covered by its own test in module-seeds.test.ts and this file drives the
+ * seed itself.
+ */
 async function runChain(url: string) {
-  return withDb(url, (db) => db.connection().execute((conn) => runMigrationChain(conn)));
+  return withDb(url, async (db) => {
+    await db.connection().execute((conn) => runMigrationChain(conn));
+    return db.connection().execute((conn) => applyWorkflowCatalogsSeed(conn));
+  });
 }
 
 async function countByCatalog(db: Kysely<DB>, catalog: string): Promise<number> {
@@ -81,7 +95,7 @@ describe("workflow catalog seeds", () => {
     async () => {
       await withScratchDb(async (url) => {
         const first = await runChain(url);
-        const { nodeCatalogs, triggerRegistry, fieldSuggestions } = first.workflowCatalogs;
+        const { nodeCatalogs, triggerRegistry, fieldSuggestions } = first;
 
         // Without the workflow plugin registered there are no seed documents;
         // an empty catalog is then correct and the rest does not apply.
@@ -148,10 +162,10 @@ describe("workflow catalog seeds", () => {
 
         // Unchanged input: the second run must rewrite nothing.
         const second = await runChain(url);
-        expect(second.workflowCatalogs.nodeCatalogs.skipped).toBe(true);
-        expect(second.workflowCatalogs.nodeCatalogs.rows).toBe(nodeCatalogs.rows);
-        expect(second.workflowCatalogs.triggerRegistry.skipped).toBe(true);
-        expect(second.workflowCatalogs.fieldSuggestions.skipped).toBe(true);
+        expect(second.nodeCatalogs.skipped).toBe(true);
+        expect(second.nodeCatalogs.rows).toBe(nodeCatalogs.rows);
+        expect(second.triggerRegistry.skipped).toBe(true);
+        expect(second.fieldSuggestions.skipped).toBe(true);
       });
     },
     TEST_TIMEOUT,
@@ -162,7 +176,7 @@ describe("workflow catalog seeds", () => {
     async () => {
       await withScratchDb(async (url) => {
         const first = await runChain(url);
-        if (!first.workflowCatalogs.nodeCatalogs.present) return;
+        if (!first.nodeCatalogs.present) return;
 
         const entityBefore = await withDb(url, (db) => countByCatalog(db, "entity"));
 
@@ -187,7 +201,7 @@ describe("workflow catalog seeds", () => {
         });
 
         const second = await runChain(url);
-        expect(second.workflowCatalogs.nodeCatalogs.skipped).toBe(false);
+        expect(second.nodeCatalogs.skipped).toBe(false);
 
         await withDb(url, async (db) => {
           const ghost = await db
@@ -210,7 +224,7 @@ describe("workflow catalog seeds", () => {
     async () => {
       await withScratchDb(async (url) => {
         const first = await runChain(url);
-        if (!first.workflowCatalogs.triggerRegistry.present) return;
+        if (!first.triggerRegistry.present) return;
 
         await withDb(url, async (db) => {
           await db
@@ -229,7 +243,7 @@ describe("workflow catalog seeds", () => {
         });
 
         const second = await runChain(url);
-        expect(second.workflowCatalogs.triggerRegistry.skipped).toBe(false);
+        expect(second.triggerRegistry.skipped).toBe(false);
 
         await withDb(url, async (db) => {
           const ghost = await db

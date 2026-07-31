@@ -19,9 +19,10 @@
  *   5. app role grants        — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically.
  *   6. catalog seeds          — load the compiler's global configuration
- *      catalogs (entity page configs, workflow node catalogs) into their
- *      platform tables. Data, not DDL, so they run after the tables exist and
- *      after the grant sweep. Each is a no-op when its seed was not emitted.
+ *      catalogs into their platform tables: the entity page configs, then
+ *      whatever the loaded runtime modules contribute, in registration order.
+ *      Data, not DDL, so they run after the tables exist and after the grant
+ *      sweep. Each is a no-op when its seed was not emitted.
  *
  * `db` must be a connection-bound Kysely instance (obtained via
  * runtime.db.connection().execute) — steps 3 and 4 use explicit
@@ -48,15 +49,19 @@ import {
   applyEntityPageConfigsSeed,
   type EntityPageConfigsSeedResult,
 } from "./migrations/entity-page-configs-seed.js";
-import {
-  applyWorkflowCatalogsSeed,
-  type WorkflowCatalogsSeedResult,
-} from "./migrations/workflow-catalogs-seed.js";
+import type { ModuleSeed } from "../modules/contract.js";
+import type { CatalogSeedResult } from "./migrations/catalog-seed.js";
 
 export type MigrationChainOptions = {
   /** Override the versioned-migration registry (used by tests). */
   versioned?: readonly VersionedMigration[];
   appliedBy?: string;
+  /**
+   * Seed steps contributed by runtime modules, applied in registration order
+   * after the core seeds. Empty for a repo with no runtime plugin, and for
+   * every caller that only migrates schema.
+   */
+  moduleSeeds?: readonly ModuleSeed[];
 };
 
 export type MigrationChainResult = GeneratedSchemaMigrationResult & {
@@ -66,8 +71,8 @@ export type MigrationChainResult = GeneratedSchemaMigrationResult & {
   versionedReconciled: string[];
   /** Outcome of the entity page-config catalog seed. */
   pageConfigs: EntityPageConfigsSeedResult;
-  /** Outcome of the workflow plugin's catalog seeds. */
-  workflowCatalogs: WorkflowCatalogsSeedResult;
+  /** Outcome of each module-contributed seed, keyed by its reporting name. */
+  moduleSeeds: Record<string, CatalogSeedResult>;
 };
 
 export async function runMigrationChain(
@@ -85,12 +90,15 @@ export async function runMigrationChain(
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
   const pageConfigs = await applyEntityPageConfigsSeed(db);
-  const workflowCatalogs = await applyWorkflowCatalogsSeed(db);
+  const moduleSeeds: Record<string, CatalogSeedResult> = {};
+  for (const seed of options.moduleSeeds ?? []) {
+    moduleSeeds[seed.name] = await seed.apply(db);
+  }
   return {
     ...generated,
     versionedApplied: versioned.applied,
     versionedReconciled: versioned.reconciled,
     pageConfigs,
-    workflowCatalogs,
+    moduleSeeds,
   };
 }

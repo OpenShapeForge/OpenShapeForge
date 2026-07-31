@@ -37,6 +37,7 @@ Generated artifacts (all gitignored; reproducible)
   apps/web/src/compiler/*                    entity manifests + field contract
   apps/api/src/generated/page-configs/*      page-config catalog seed (loaded by db:migrate)
   apps/api/src/generated/workflow/*          workflow plugin (api side)
+  apps/api/src/generated/modules/*           which plugins ship a runtime half
   docs/entities.generated.md                 entity-docs plugin
         │
         ▼
@@ -58,6 +59,10 @@ Key entry points:
   merges plugin platform tables into `config/platform-schema.yaml`, promotes
   compiled entity contracts into the manifest. Memoized per repo root so a
   double-run sees identical inputs.
+- `apps/api/src/modules/registry.ts` — the runtime counterpart, run once at
+  boot: resolves the plugin runtime modules the compiler recorded and collects
+  their GraphQL, routes and seed steps. Fail-soft; see
+  [plugins.md](plugins.md#the-runtime-half).
 - `apps/api/src/graphql/generated-entity-schema.ts` — builds the whole GraphQL
   schema from `manifest.json` at module load. See [api.md](api.md).
 

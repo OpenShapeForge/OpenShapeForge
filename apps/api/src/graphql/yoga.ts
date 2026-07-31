@@ -9,7 +9,8 @@ import { createYoga, type Plugin } from "graphql-yoga";
 import { readPositiveIntEnv } from "../config/limits.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { createGraphqlContext, type GraphqlContext } from "./context.js";
-import { graphqlSchema } from "./schema.js";
+import type { RuntimeModule } from "../modules/contract.js";
+import { buildGraphqlSchema } from "./schema.js";
 
 /**
  * Rejects schema introspection (__schema / __type) during validation.
@@ -29,6 +30,11 @@ const disableIntrospectionPlugin: Plugin = {
 
 export type CreateGraphqlYogaOptions = {
   db?: OpenShapeForgeDatabase | undefined;
+  /**
+   * Runtime modules whose GraphQL surfaces join the schema. Resolved at boot by
+   * `modules/registry.ts`; omitted by callers that only need the core surface.
+   */
+  modules?: readonly RuntimeModule[] | undefined;
 };
 
 /**
@@ -76,7 +82,7 @@ export function createGraphqlYoga(options: CreateGraphqlYogaOptions = {}) {
   const isProduction = process.env.NODE_ENV === "production";
 
   return createYoga<Record<string, unknown>, GraphqlContext>({
-    schema: graphqlSchema,
+    schema: buildGraphqlSchema(options.modules ?? [], { db: options.db }),
     graphqlEndpoint: "/api/graphql",
     landingPage: false,
     graphiql: !isProduction,

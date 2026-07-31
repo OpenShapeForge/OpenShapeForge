@@ -61,6 +61,20 @@ export type CompilerPlugin = {
   ownedPaths?: { roots?: string[]; files?: string[] };
 };
 
+/**
+ * A loaded plugin plus where it came from. The specifier is what the runtime
+ * module registry is derived from — see `generate-modules.ts` — so it has to
+ * survive loading, and it is deliberately NOT part of `CompilerPlugin`: a
+ * plugin author declares hooks, not their own provenance.
+ */
+export type LoadedCompilerPlugin = {
+  plugin: CompilerPlugin;
+  /** Exactly as written in authoring.config.yaml. */
+  spec: string;
+  /** Absolute path the specifier resolved to. */
+  modulePath: string;
+};
+
 function resolvePluginModulePath(repoRoot: string, spec: string): string {
   if (spec.startsWith(".") || isAbsolute(spec)) {
     const asPath = isAbsolute(spec) ? spec : resolve(repoRoot, spec);
@@ -84,14 +98,17 @@ function assertPluginShape(spec: string, plugin: unknown): CompilerPlugin {
   return candidate;
 }
 
-const pluginCache = new Map<string, Promise<CompilerPlugin[]>>();
+const pluginCache = new Map<string, Promise<LoadedCompilerPlugin[]>>();
 
-export function loadCompilerPlugins(repoRoot: string): Promise<CompilerPlugin[]> {
+/** Loaded plugins with their provenance. Memoized per repo root. */
+export function loadCompilerPluginEntries(
+  repoRoot: string,
+): Promise<LoadedCompilerPlugin[]> {
   let cached = pluginCache.get(repoRoot);
   if (!cached) {
     cached = (async () => {
       const { plugins = [] } = loadAuthoringConfig(repoRoot);
-      const loaded: CompilerPlugin[] = [];
+      const loaded: LoadedCompilerPlugin[] = [];
       const seen = new Set<string>();
       for (const spec of plugins) {
         const modulePath = resolvePluginModulePath(repoRoot, spec);
@@ -101,13 +118,17 @@ export function loadCompilerPlugins(repoRoot: string): Promise<CompilerPlugin[]>
           throw new Error(`Duplicate compiler plugin name "${plugin.name}".`);
         }
         seen.add(plugin.name);
-        loaded.push(plugin);
+        loaded.push({ plugin, spec, modulePath });
       }
       return loaded;
     })();
     pluginCache.set(repoRoot, cached);
   }
   return cached;
+}
+
+export async function loadCompilerPlugins(repoRoot: string): Promise<CompilerPlugin[]> {
+  return (await loadCompilerPluginEntries(repoRoot)).map((entry) => entry.plugin);
 }
 
 /** Merge plugin-contributed platform tables into the base manifest (in place). */

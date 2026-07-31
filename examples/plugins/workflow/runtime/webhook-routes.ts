@@ -33,6 +33,7 @@ export function registerWorkflowWebhookRoutes(
         const instance = await enqueueWorkflowInstanceStart(options.db, session, {
           definitionId: request.params.definitionId,
           context: readBodyRecord(request.body),
+          idempotencyKey: readDeliveryKey(request.headers),
           triggerType: "webhook",
           triggerMeta: {
             path: request.url,
@@ -73,6 +74,25 @@ function headersFromFastify(headers: Record<string, string | string[] | undefine
 
 function readHeader(value: string | string[] | undefined) {
   return Array.isArray(value) ? value.join(",") : value;
+}
+
+/**
+ * What a redelivery of one webhook has in common with its original, and nothing
+ * else does.
+ *
+ * Only the sender can say. Nothing the request carries of its own works: a hash
+ * of the body collapses two deliveries that happen to carry the same payload,
+ * and two identical callbacks are two runs rather than one; anything derived
+ * from the connection is fresh on the retry, which is a key in name only. So the
+ * answer is the header a sender stamps on both the original and its retry, and
+ * `Idempotency-Key` is the name for it that is not vendor-specific.
+ *
+ * A delivery without one starts a run per delivery. That is the honest outcome:
+ * this route has no way to tell that such a delivery is a repeat, and inventing
+ * a key would only move the duplicate somewhere harder to see.
+ */
+function readDeliveryKey(headers: Record<string, string | string[] | undefined>) {
+  return readHeader(headers["idempotency-key"])?.trim() || null;
 }
 
 function readBodyRecord(body: unknown): Record<string, unknown> {

@@ -84,6 +84,7 @@
       "name": "@openshapeforge/example-plugin-workflow",
       "version": "0.1.0",
       "dependencies": {
+        "kysely": "^0.29.4",
         "yaml": "^2.8.3",
       },
     },

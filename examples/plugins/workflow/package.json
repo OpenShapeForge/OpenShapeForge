@@ -4,9 +4,11 @@
   "private": true,
   "license": "BUSL-1.1",
   "type": "module",
-  "description": "Example compiler plugin: workflow node catalogs (generators + platform tables + authoring layer).",
+  "description": "Example plugin: workflow node catalogs and the workflow runtime (generators + platform tables + authoring layer + runtime module).",
   "module": "index.ts",
   "dependencies": {
+    "kysely": "^0.29.4",
     "yaml": "^2.8.3"
-  }
+  },
+  "//dependencies": "kysely is a real dependency of the runtime half, which queries the workflow tables directly. It must be declared here rather than borrowed from apps/api: a bare specifier does not resolve from examples/, and two files already grew different workarounds for that. Keep the range in step with apps/api \u2014 they share a connection."
 }

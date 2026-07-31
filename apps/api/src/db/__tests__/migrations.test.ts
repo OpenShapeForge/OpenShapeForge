@@ -406,6 +406,78 @@ describe("versioned migrations framework", () => {
   );
 
   test(
+    "reconciles a superseded checksum once, without re-running the migration",
+    async () => {
+      await withScratchDb(async (url) => {
+        await runChain(url);
+
+        const dir = await mkdtemp(join(tmpdir(), "openshapeforge-versioned-"));
+        const file = join(dir, "0002_inert-edit.ts");
+        await writeFile(file, "// migration file v1\n");
+        const originalChecksum = createHash("sha256")
+          .update(await readFile(file))
+          .digest("hex");
+
+        let upCalls = 0;
+        const up: VersionedMigration["up"] = async (db) => {
+          upCalls += 1;
+          await sql`create schema if not exists bespoke`.execute(db);
+          await sql`create table bespoke.inert (id text primary key)`.execute(db);
+        };
+
+        const before: VersionedMigration[] = [
+          { version: "0002_inert-edit", fileUrl: pathToFileURL(file).href, up },
+        ];
+        expect((await runVersioned(url, before)).applied).toEqual(["0002_inert-edit"]);
+        expect(upCalls).toBe(1);
+
+        // The edit this exists for: a comment, changing the hash and nothing else.
+        await appendFile(file, "// SPDX-License-Identifier: BUSL-1.1\n");
+        const editedChecksum = createHash("sha256")
+          .update(await readFile(file))
+          .digest("hex");
+        expect(editedChecksum).not.toBe(originalChecksum);
+
+        // Without a declaration this is still an immutability violation.
+        const refused = await expectRejects(runVersioned(url, before));
+        expect(refused).toContain("immutable");
+        expect(refused).toContain("supersededChecksums");
+
+        const after: VersionedMigration[] = [
+          {
+            version: "0002_inert-edit",
+            fileUrl: pathToFileURL(file).href,
+            up,
+            supersededChecksums: [originalChecksum],
+          },
+        ];
+
+        const reconciled = await runVersioned(url, after);
+        expect(reconciled.reconciled).toEqual(["0002_inert-edit"]);
+        expect(reconciled.applied).toEqual([]);
+        expect(reconciled.skipped).toEqual([]);
+        // Reconciling must not re-run DDL the ledger already claims happened.
+        expect(upCalls).toBe(1);
+
+        await withDb(url, async (db) => {
+          expect(await recordedChecksum(db, "0002_inert-edit")).toBe(editedChecksum);
+        });
+
+        // Once reconciled the entry is inert: the plain skip path takes over.
+        const settled = await runVersioned(url, after);
+        expect(settled.reconciled).toEqual([]);
+        expect(settled.skipped).toEqual(["0002_inert-edit"]);
+        expect(upCalls).toBe(1);
+
+        // A hash nobody declared still fails, declaration list or not.
+        await appendFile(file, "// a second, undeclared edit\n");
+        expect(await expectRejects(runVersioned(url, after))).toContain("immutable");
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
     "a failing migration is rolled back atomically and records nothing",
     async () => {
       await withScratchDb(async (url) => {

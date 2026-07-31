@@ -39,7 +39,7 @@ flagged as drift by `check:generated`.
 bun run check:generated         # artifacts fresh + deterministic (double-run), no orphans
 bun run check:authoring-local   # authoring catalog compiles deterministically
 bun run check:ts-nocheck        # compiler/workflow @ts-nocheck baseline does not grow
-bun run check:notices           # THIRD-PARTY-NOTICES matches the installed deps
+bun run check:notices:linux     # THIRD-PARTY-NOTICES matches the deps, as CI runs it
 bun run typecheck:compiler
 bun run typecheck:api
 bun run test:compiler
@@ -50,8 +50,15 @@ bun run --cwd apps/api test:migrations   # migrator + drift tests (bun test src/
 Run `bun run test:perf` as well when touching the API hot path (resolvers, the CRUD
 engine, RLS/session plumbing); it needs k6 and a running API.
 
-If you add, remove, or bump a dependency, run `bun run notices` and commit the updated
-`THIRD-PARTY-NOTICES.md` — `check:notices` fails the PR otherwise.
+If you add, remove, or bump a dependency, run `bun run notices:linux` and commit the
+updated `THIRD-PARTY-NOTICES.md` — the notices gate fails the PR otherwise.
+
+**Use the `:linux` variants unless you are on linux-x64.** The committed notices are the
+linux-x64 artifact, because the tree carries platform-native optional packages
+(`@next/swc-*`, `@img/sharp-*`, …) and bun installs only the current platform's. Plain
+`check:notices` compares against *your* install, so on a Mac it reports the darwin
+natives as drift and can never pass — that failure is the platform, not a stale file.
+Both `:linux` scripts run in a container and restore your local install afterwards.
 
 **Pipefail warning:** never pipe test output through `tail`/`head` in a way that hides
 the ` N pass / N fail` summary lines. Always `set -o pipefail` and read the actual

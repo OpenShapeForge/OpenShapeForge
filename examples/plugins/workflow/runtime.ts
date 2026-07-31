@@ -32,6 +32,7 @@ import {
   workflowTypeDefs,
 } from "./runtime/graphql.js";
 import { hydrateNodeCatalog } from "./runtime/node-catalog-store.js";
+import { registerAllWorkflowNodeBridges } from "./runtime/node-bridges.js";
 
 const plugin: RuntimeModule = {
   name: "workflow",
@@ -46,6 +47,10 @@ const plugin: RuntimeModule = {
    * honest outcome when it cannot answer correctly.
    */
   async init({ db }) {
+    // Bridges first, and without a database: the registry is what decides
+    // whether a node type can execute at all, and a deployment that cannot
+    // reach Postgres should still be able to answer that question.
+    registerAllWorkflowNodeBridges();
     if (!db) return; // no database configured; the surfaces degrade with it
     await hydrateNodeCatalog(db);
   },

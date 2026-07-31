@@ -53,6 +53,8 @@
     "scan:dependencies": "bash scripts/scan-dependencies.sh",
     "notices": "bun scripts/gen-third-party-notices.ts",
     "//notices:linux": "Regenerates the committed notices on the platform CI checks. The tree has platform-native optional packages, so a macOS run emits darwin variants and fails check:notices. node_modules is cleared inside the container first — installing over a macOS tree yields the UNION of both platforms, not the linux set — and the local install is restored afterwards. See the script header.",
-    "notices:linux": "docker run --rm --platform linux/amd64 -v \"$PWD\":/w -w /w oven/bun:1.3.4 sh -c 'rm -rf node_modules && bun install --frozen-lockfile >/dev/null 2>&1 && bun scripts/gen-third-party-notices.ts' && bun install --frozen-lockfile >/dev/null"
+    "notices:linux": "docker run --rm --platform linux/amd64 -v \"$PWD\":/w -w /w oven/bun:1.3.4 sh -c 'rm -rf node_modules && bun install --frozen-lockfile >/dev/null 2>&1 && bun scripts/gen-third-party-notices.ts' && bun install --frozen-lockfile >/dev/null",
+    "//check:notices:linux": "The gate as CI runs it, from any platform. Plain check:notices compares against THIS machine's install, so on a Mac it reports the darwin natives as drift and can never pass — use this before opening a PR. Same container and same node_modules handling as notices:linux.",
+    "check:notices:linux": "docker run --rm --platform linux/amd64 -v \"$PWD\":/w -w /w oven/bun:1.3.4 sh -c 'rm -rf node_modules && bun install --frozen-lockfile >/dev/null 2>&1 && bun scripts/gen-third-party-notices.ts --check' && bun install --frozen-lockfile >/dev/null"
   }
 }

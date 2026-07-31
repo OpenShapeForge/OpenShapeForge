@@ -31,6 +31,15 @@ import type { VersionedMigration } from "../versioned-runner.js";
 const migration: VersionedMigration = {
   version: "0002_org-unit-closure-trigger",
   fileUrl: import.meta.url,
+  // Commit 8aa19b2 added the SPDX header line to this already-applied
+  // migration, and this entry itself changed the hash again. Neither edit
+  // touched a statement the database observes, so environments holding an
+  // earlier hash are reconciled rather than wedged. Ordered oldest first:
+  // initial release, then post-header.
+  supersededChecksums: [
+    "d90d49881b7942491b46eb75121b77fb2e614d1c2a82a86aea4af1a70ad7b92a",
+    "057e047c26b4b70edee825e6b967f8883209ccc7c2ebf572e79630f9015eb05e",
+  ],
   async up(db: Kysely<any>): Promise<void> {
     // ── Tables (IF NOT EXISTS; generated roll-forward re-declares identically) ──
     await sql`

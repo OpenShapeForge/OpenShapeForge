@@ -86,6 +86,18 @@ Rules enforced by the runner (`versioned-runner.ts`):
   records the manifest checksum). On every later run the file is re-hashed;
   a mismatch fails loudly: applied migrations are immutable — revert the
   edit and write a new migration instead.
+- **Superseded checksums** — the one sanctioned exception. A file hash cannot
+  tell a licence header from a DDL change, so an edit that provably could not
+  change what the migration did would otherwise wedge every environment that
+  already ran it, permanently and with no way out (commit 8aa19b2 did exactly
+  this by adding an SPDX line to three applied migrations). List the old hash
+  in the entry's `supersededChecksums` and the runner reconciles the ledger to
+  the current one — once; the next run takes the plain skip path, and
+  `db:migrate` reports the reconciliation under `versionedReconciled`. Any hash
+  not listed still fails. This is **not** a way to change an applied migration:
+  the ledger cannot re-run it, so reconciling a real change would assert an
+  effect that never happened. Deciding a diff is inert is a review judgement —
+  make it in a PR, and record which commit caused it in a comment.
 - Each `up()` runs in its own `BEGIN`/`COMMIT` together with its ledger
   insert and is rolled back as a unit on failure.
 - If you create permanent tables in a bespoke migration, prefer moving them

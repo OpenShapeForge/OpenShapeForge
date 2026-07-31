@@ -13,6 +13,13 @@
  * checksum — editing an applied migration fails loudly. Scaffold new
  * migrations with `bun run db:migration:new <kebab-name>`.
  *
+ * The one sanctioned exception is `supersededChecksums`: a hash the file used
+ * to have, for an edit that provably could not change what the migration did.
+ * A file hash cannot tell a licence header from a DDL change, so that
+ * judgement is recorded in code and reviewed in a PR rather than inferred. A
+ * recorded checksum listed there is reconciled to the current one — once, in
+ * the ledger — and every other mismatch still fails. See `VersionedMigration`.
+ *
  * `db` must be a connection-bound Kysely instance (the chain runs inside
  * runtime.db.connection().execute): each up() runs inside an explicit
  * BEGIN/COMMIT together with its ledger insert, and is rolled back as a unit
@@ -34,11 +41,27 @@ export type VersionedMigration = {
   /** file: URL of the migration source file, normally `import.meta.url`. */
   fileUrl: string;
   up: (db: Kysely<any>) => Promise<void>;
+  /**
+   * Checksums this file was previously recorded under, listed only for edits
+   * that CANNOT have changed what the migration did — a licence header, a
+   * comment, a formatting sweep. An environment holding one of these is
+   * reconciled to the current checksum instead of being wedged.
+   *
+   * This is not an escape hatch for changing an applied migration. If the SQL,
+   * the order of statements, or anything else the database observes changed,
+   * the correct answer is still a new migration: the ledger cannot re-run this
+   * one, so a reconciled checksum would assert an effect that never happened.
+   * Deciding a diff is inert is a review judgement — make it in a PR, and say
+   * in a comment which commit caused it.
+   */
+  supersededChecksums?: readonly string[];
 };
 
 export type VersionedMigrationsResult = {
   applied: string[];
   skipped: string[];
+  /** Applied versions whose ledger checksum was updated to the current file. */
+  reconciled: string[];
 };
 
 const versionPattern = /^(\d{4})_[a-z0-9][a-z0-9-]*$/;
@@ -98,7 +121,7 @@ export async function applyVersionedMigrations(
 ): Promise<VersionedMigrationsResult> {
   if (migrations.length === 0) {
     // Empty registry: stay a strict no-op (no DDL, no ledger reads).
-    return { applied: [], skipped: [] };
+    return { applied: [], skipped: [], reconciled: [] };
   }
 
   validateVersionedRegistry(migrations);
@@ -116,6 +139,7 @@ export async function applyVersionedMigrations(
 
   const applied: string[] = [];
   const skipped: string[] = [];
+  const reconciled: string[] = [];
 
   for (const migration of migrations) {
     const fileChecksum = await migrationFileChecksum(migration);
@@ -123,9 +147,20 @@ export async function applyVersionedMigrations(
 
     if (recorded !== undefined) {
       if (recorded !== fileChecksum) {
-        throw new Error(
-          `Versioned migration ${migration.version} was applied with checksum ${recorded}, but its file now hashes to ${fileChecksum}. Applied migrations are immutable — revert the edit and create a new migration instead (bun run db:migration:new <name>).`,
-        );
+        if (!migration.supersededChecksums?.includes(recorded)) {
+          throw new Error(
+            `Versioned migration ${migration.version} was applied with checksum ${recorded}, but its file now hashes to ${fileChecksum}. Applied migrations are immutable — revert the edit and create a new migration instead (bun run db:migration:new <name>). If the edit provably cannot have changed what this migration did, record ${recorded} in its supersededChecksums instead.`,
+          );
+        }
+        // Reconcile once, so the next run takes the plain skip path and the
+        // superseded entry becomes inert rather than permanently load-bearing.
+        await sql`
+          update platform.schema_migrations
+          set checksum = ${fileChecksum}
+          where version = ${migration.version} and checksum = ${recorded}
+        `.execute(db);
+        reconciled.push(migration.version);
+        continue;
       }
       skipped.push(migration.version);
       continue;
@@ -149,5 +184,5 @@ export async function applyVersionedMigrations(
     applied.push(migration.version);
   }
 
-  return { applied, skipped };
+  return { applied, skipped, reconciled };
 }

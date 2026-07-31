@@ -57,6 +57,8 @@ export type MigrationChainOptions = {
 export type MigrationChainResult = GeneratedSchemaMigrationResult & {
   /** Versions of bespoke migrations applied during this run. */
   versionedApplied: string[];
+  /** Applied versions whose ledger checksum was reconciled to the current file. */
+  versionedReconciled: string[];
   /** Outcome of the entity page-config catalog seed. */
   pageConfigs: EntityPageConfigsSeedResult;
 };
@@ -76,5 +78,10 @@ export async function runMigrationChain(
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
   const pageConfigs = await applyEntityPageConfigsSeed(db);
-  return { ...generated, versionedApplied: versioned.applied, pageConfigs };
+  return {
+    ...generated,
+    versionedApplied: versioned.applied,
+    versionedReconciled: versioned.reconciled,
+    pageConfigs,
+  };
 }

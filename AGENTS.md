@@ -102,7 +102,7 @@ issues, pull requests, and review comments. Act accordingly.
 set -o pipefail
 bun run check:generated
 bun run check:authoring-local
-bun run check:notices            # THIRD-PARTY-NOTICES matches installed deps (run bun run notices after changing deps)
+bun run check:notices:linux      # THIRD-PARTY-NOTICES matches deps, as CI runs it (see below)
 bun run typecheck:compiler && bun run typecheck:api
 bun run test:compiler
 bun run test:e2e                 # needs the compose Postgres up

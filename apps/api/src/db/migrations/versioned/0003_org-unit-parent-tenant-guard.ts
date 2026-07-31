@@ -44,6 +44,15 @@ import type { VersionedMigration } from "../versioned-runner.js";
 const migration: VersionedMigration = {
   version: "0003_org-unit-parent-tenant-guard",
   fileUrl: import.meta.url,
+  // Commit 8aa19b2 added the SPDX header line to this already-applied
+  // migration, and this entry itself changed the hash again. Neither edit
+  // touched a statement the database observes, so environments holding an
+  // earlier hash are reconciled rather than wedged. Ordered oldest first:
+  // initial release, then post-header.
+  supersededChecksums: [
+    "ebdb246b37a47795afb3da0b63ff17421a90259f53dad00c257d77e0ac6758d8",
+    "ee9a90b161837522feda9986089e82caeb1b6bf22733052aba81a4a79d056811",
+  ],
   async up(db: Kysely<any>): Promise<void> {
     await sql`
       create or replace function platform.org_unit_closure_maintain()

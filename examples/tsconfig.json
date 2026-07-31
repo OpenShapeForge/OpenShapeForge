@@ -1,0 +1,20 @@
+{
+  "//": [
+    "Typechecks the shipped example plugins and connectors, which nothing else covered.",
+    "apps/api and packages/compiler each include only their own src/**, so everything",
+    "under examples/ was invisible to `bun run typecheck:*` — including plugin runtime",
+    "code the API imports at boot.",
+    "",
+    "The 19 @ts-nocheck files in the compiler-side generators stay silent through their",
+    "directives; check:ts-nocheck keeps that count from growing.",
+    "",
+    "Modules here reach across into apps/api and packages/compiler by relative path,",
+    "so the program is rooted at the repo root rather than at examples/."
+  ],
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": ["**/*.ts"]
+}

@@ -33,7 +33,12 @@
 type ConnectorContext = {
   config: Readonly<Record<string, unknown>>;
   secrets: Readonly<Record<string, string>>;
-  fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  // `string | URL | Request` rather than `RequestInfo`: this context is declared
+  // structurally so the package depends on nothing, and `RequestInfo` is an
+  // ambient global that only exists once a DOM or host lib is loaded. Spelling
+  // it out keeps the file self-sufficient, which is the point of declaring it
+  // here at all.
+  fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
   signal: AbortSignal;
   log: (message: string, fields?: Record<string, unknown>) => void;
 };

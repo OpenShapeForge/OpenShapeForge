@@ -4,6 +4,9 @@
   "workspaces": {
     "": {
       "name": "openshapeforge",
+      "devDependencies": {
+        "@types/bun": "^1.3.5",
+      },
     },
     "apps/api": {
       "name": "@openshapeforge/api",

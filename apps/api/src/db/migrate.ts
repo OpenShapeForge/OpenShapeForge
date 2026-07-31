@@ -1,7 +1,20 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
 import { createDatabaseRuntime, readMigrateDatabaseUrl } from "./connection.js";
+import type { CatalogSeedResult } from "./migrations/catalog-seed.js";
 import { runMigrationChain } from "./migration-chain.js";
+
+/**
+ * One reporting line per catalog seed, omitted entirely when the compiler did
+ * not emit that seed — a repo without `apps/web`, or without the workflow
+ * plugin, should not read as though a catalog failed to load.
+ */
+function seedReport(name: string, result: CatalogSeedResult): Record<string, string> {
+  if (!result.present) return {};
+  return {
+    [name]: result.skipped ? `unchanged (${result.rows} rows)` : `seeded ${result.rows} rows`,
+  };
+}
 
 // Migrations run as the PRIVILEGED role (CREATE ROLE, DDL, GRANT) via
 // OPENSHAPEFORGE_MIGRATE_DATABASE_URL, NOT the restricted runtime DATABASE_URL role.
@@ -37,13 +50,10 @@ try {
             ...(result.versionedReconciled.length === 0
               ? {}
               : { versionedReconciled: result.versionedReconciled }),
-            ...(result.pageConfigs.present
-              ? {
-                  pageConfigs: result.pageConfigs.skipped
-                    ? `unchanged (${result.pageConfigs.rows} rows)`
-                    : `seeded ${result.pageConfigs.rows} rows`,
-                }
-              : {}),
+            ...seedReport("pageConfigs", result.pageConfigs),
+            ...seedReport("workflowNodeCatalogs", result.workflowCatalogs.nodeCatalogs),
+            ...seedReport("workflowTriggerRegistry", result.workflowCatalogs.triggerRegistry),
+            ...seedReport("workflowFieldSuggestions", result.workflowCatalogs.fieldSuggestions),
           },
           null,
           2,

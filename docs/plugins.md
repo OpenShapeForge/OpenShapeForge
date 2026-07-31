@@ -150,6 +150,11 @@ true`, so no RLS and no generated CRUD/GraphQL surface):
 | `platform.entity_trigger_registry` | one row per workflow-triggerable entity + its designer filter fields |
 | `platform.entity_field_suggestions` | per-entity `Field[]` suggestion arrays for condition/variable pickers |
 
+`db:migrate` fills them from the generated seed documents (see below). The
+node-catalog table is shared by two seeds discriminated on `catalog`, so each is
+authoritative over its own slice only — the mechanics live in
+`apps/api/src/db/migrations/catalog-seed.ts`.
+
 **Restored authoring layer** — `examples/plugins/workflow/authoring/` is
 picked up as a layer automatically and ships:
 
@@ -169,9 +174,15 @@ old repo paths to service paths:
 - **api-side (always emitted)**, under `apps/api/src/generated/workflow/`:
   `node-catalog.ts` (types + the checksum that keys the runtime cache/seed —
   the catalog *data* lives in the Postgres tables above),
-  `node-catalog.seed.json` (the seed source), and
   `entity-workflow-nodes.generated.json` (one entry per entity action node,
-  e.g. `entity.core.relation.create`).
+  e.g. `entity.core.relation.create`), and the four seed documents
+  `db:migrate` loads into the three tables above: `node-catalog.seed.json`
+  (`catalog='standard'`), `entity-catalog.seed.json` (`catalog='entity'`),
+  `entity-trigger-registry.seed.json` and `entity-field-suggestions.seed.json`.
+  The last three are produced by the entity-node generator, which names them
+  under web paths; the plugin maps them API-side because `apps/api` owns the
+  tables — the same split the core applies to the page-config catalog. A host
+  repo that deletes `apps/web` keeps its node catalogs.
 - **web-side (only when `apps/web` exists)**: the workflow contract, designer
   registries, and renderer seeds under `apps/web/src/generated/workflow/`,
   `apps/web/src/features/renderer/generated/`, and

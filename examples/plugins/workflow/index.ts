@@ -45,6 +45,34 @@ const WEB_WORKFLOW_ROOTS = [
   "apps/web/src/features/workflow/lib/nodes/generated",
 ];
 
+/**
+ * Seed documents for the three platform tables above. The generators emit them
+ * under web-side paths because that is where the originating repo's designer
+ * read them from, but the tables they feed are API-owned platform tables — so
+ * they are mapped API-side and emitted unconditionally, exactly as the core
+ * does for the page-config catalog (see `compilerOwnedGeneratedRoots` in
+ * `packages/compiler/src/generated-artifact-paths.ts`).
+ *
+ * Emitting them web-side would mean a host repo that deletes `apps/web` loses
+ * the catalogs the API needs to resolve a node type at all.
+ *
+ * Checked before the prefix mappings; exact paths, so order is not load-bearing.
+ */
+const seedPathMappings = new Map([
+  [
+    "features/workflow/lib/nodes/generated/entity-catalog.seed.json",
+    `${API_WORKFLOW_ROOT}/entity-catalog.seed.json`,
+  ],
+  [
+    "features/workflow/lib/nodes/generated/entity-trigger-registry.seed.json",
+    `${API_WORKFLOW_ROOT}/entity-trigger-registry.seed.json`,
+  ],
+  [
+    "features/renderer/generated/entity-field-suggestions.seed.json",
+    `${API_WORKFLOW_ROOT}/entity-field-suggestions.seed.json`,
+  ],
+]);
+
 const artifactPathMappings = [
   { oldPrefix: "api/workflow/", servicePrefix: `${API_WORKFLOW_ROOT}/` },
   { oldPrefix: "workflow/contract/", servicePrefix: "apps/web/src/generated/workflow/contract/" },
@@ -66,6 +94,10 @@ const artifactPathMappings = [
 ];
 
 function toServicePath(oldCompilerPath: string): string | null {
+  const seedPath = seedPathMappings.get(oldCompilerPath);
+  if (seedPath) {
+    return seedPath;
+  }
   for (const { oldPrefix, servicePrefix } of artifactPathMappings) {
     if (oldCompilerPath.startsWith(oldPrefix)) {
       return `${servicePrefix}${oldCompilerPath.slice(oldPrefix.length)}`;

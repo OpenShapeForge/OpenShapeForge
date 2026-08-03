@@ -22,9 +22,20 @@
  *
  * `restRoutes` stays unimplemented until the webhook trigger lands, rather than
  * being stubbed, so the surface advertises nothing that does not answer.
+ *
+ * It also contributes the `workflow-worker` role — the process that drains the
+ * control-command queue. That is contributed rather than hardcoded in
+ * `apps/api/src/index.ts` for the same reason as everything else here: the API
+ * should not know which workers exist any more than it knows which node types
+ * do.
  */
 import type { RuntimeModule } from "../../../apps/api/src/modules/contract.js";
 import { applyWorkflowCatalogsSeed } from "../../../apps/api/src/db/migrations/workflow-catalogs-seed.js";
+import {
+  createWorkflowControlCommandDispatcher,
+  readWorkflowRestateDispatchConfig,
+  startWorkflowControlCommandWorker,
+} from "./runtime/control-command-worker.js";
 import {
   workflowMutationFields,
   workflowQueryFields,
@@ -33,6 +44,7 @@ import {
 } from "./runtime/graphql.js";
 import { hydrateNodeCatalog } from "./runtime/node-catalog-store.js";
 import { registerAllWorkflowNodeBridges } from "./runtime/node-bridges.js";
+import { WORKFLOW_WORKER_ROLE } from "./worker-role.js";
 
 const plugin: RuntimeModule = {
   name: "workflow",
@@ -62,6 +74,45 @@ const plugin: RuntimeModule = {
       mutationFields: workflowMutationFields,
       resolvers: workflowResolvers,
     };
+  },
+
+  /**
+   * The `workflow-worker` role: one process draining `workflow.control_commands`.
+   *
+   * It runs here rather than alongside GraphQL because it is a poll loop with
+   * its own failure modes, and because its database session is deliberately
+   * different from a request's — it presents `app.worker_role`, which the three
+   * queue tables' RLS policies name and the API's request path never sets.
+   * `apps/api` does not know this role exists; a repo that drops the workflow
+   * plugin loses it with the plugin.
+   *
+   * The schedule worker is NOT started alongside it. It cannot complete a fire
+   * today — it writes `workflow.schedule_fires.version_id` and `.command_id`,
+   * neither of which the table declares — and a worker that throws on every due
+   * row is worse than one that is not running. Tracked separately; when that is
+   * fixed it belongs in this same role, since the two drain the same queue.
+   */
+  workers: {
+    [WORKFLOW_WORKER_ROLE]: {
+      start({ db, log }) {
+        // Which dispatcher was chosen is worth one line at boot: in-process and
+        // durable execution are both correct, and an operator who configured a
+        // Restate ingress should be able to see that it took.
+        const restate = readWorkflowRestateDispatchConfig();
+        log.info(
+          {
+            worker: WORKFLOW_WORKER_ROLE,
+            dispatch: restate ? "restate" : "in-process",
+            ...(restate ? { service: restate.workflowCommandServiceName } : {}),
+          },
+          "Draining workflow.control_commands.",
+        );
+        return startWorkflowControlCommandWorker(
+          db,
+          createWorkflowControlCommandDispatcher(db),
+        );
+      },
+    },
   },
 
   seeds: [

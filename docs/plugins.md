@@ -162,13 +162,15 @@ IS checked, because that is repo state like `webPresent`.
 ```ts
 export type RuntimeModule = {
   name: string;                                     // must match the compiler plugin's
+  init?(ctx): Promise<void>;                        // awaited before anything serves
   graphql?(ctx): ModuleGraphqlContribution;         // typeDefs + root fields + resolvers
   restRoutes?(routes, ctx): void;                   // fastify, inside the rate-limited scope
   seeds?: ModuleSeed[];                             // appended to the migration chain
+  workers?: Record<string, ModuleWorker>;           // background roles, keyed by role name
 };
 ```
 
-Three properties are worth knowing:
+Four properties are worth knowing:
 
 - **Loading is fail-soft.** A module that throws on import, loads as something
   other than a `RuntimeModule`, or disagrees with its registration about its own
@@ -182,9 +184,61 @@ Three properties are worth knowing:
 - **GraphQL is split into typeDefs / query fields / mutation fields** rather than
   one SDL blob, because the root types are assembled: `type Query` appears once
   and every module adds fields inside it.
+- **Workers are separate processes, not timers.** See below.
 
-`graphql` and `restRoutes` are declared but unimplemented by the shipped
-workflow module; it contributes only its seed today.
+`restRoutes` is declared but unimplemented by the shipped workflow module,
+which stays that way until the webhook trigger lands rather than being stubbed.
+
+### Worker roles
+
+`apps/api` has one entry point and several roles. `OPENSHAPEFORGE_ROLE` picks
+which; `api` is the default, so an existing deployment keeps starting the
+server it always did. Any other value is looked up among the worker roles the
+loaded modules contribute:
+
+```sh
+OPENSHAPEFORGE_ROLE=workflow-worker bun apps/api/src/index.ts
+```
+
+```ts
+workers: {
+  "workflow-worker": {
+    start({ db, log }) {
+      return startTheLoop(db);          // -> { stop(): Promise<void> }
+    },
+  },
+},
+```
+
+A worker is its own process rather than a timer inside the API, for three
+reasons: a poll loop and a request path have unrelated failure modes and
+unrelated scaling needs; a wedged worker must not take GraphQL down with it;
+and the database session differs — the workflow worker presents
+`app.worker_role`, a GUC the request path never sets
+([api.md](api.md#the-worker-axis)).
+
+Where the API role degrades, the worker role fails closed:
+
+- **No `DATABASE_URL` is fatal.** GraphQL without a database can still answer
+  `DATABASE_NOT_CONFIGURED`; a queue-draining worker without one has nothing to
+  do, and a process that idles while looking healthy is the worst outcome
+  available.
+- **A module that failed to load or initialise is fatal *if it owns the
+  requested role*.** The API tolerates a missing module because its other
+  surfaces still work; here the module *is* the process. The error names the
+  load failure rather than reporting an unknown role, which would send an
+  operator hunting a typo.
+- **A role name claimed by two modules is refused at boot**, exactly as a
+  colliding GraphQL field is.
+
+`init` runs before any worker starts — the workflow module hydrates its node
+catalog there, and a worker that claimed commands first would fail every one of
+them with `NO_BRIDGE`, spending the retry bound on a configuration problem.
+
+`stop()` must settle **after** the in-flight tick. `SIGTERM` (what a container
+runtime sends) drains before exiting; a `stop()` that returned early would
+leave one claimed command per replica `processing` until the visibility timeout
+reclaimed it — every redeploy, costing the next worker a delay and an attempt.
 
 ## Shipped example 1: `entity-docs`
 
@@ -228,6 +282,18 @@ Three of those — `control_commands`, `schedules`, `schedule_fires` — declare
 `workerAccess: "workflow-worker"`, the queue a worker claims across tenants;
 the rest get the plain tenant-isolation policy. See
 [api.md](api.md#the-worker-axis).
+
+**Contributed worker role** (`workers`) — `workflow-worker`, one process
+draining `workflow.control_commands`:
+
+```sh
+OPENSHAPEFORGE_ROLE=workflow-worker bun apps/api/src/index.ts
+```
+
+Whether it dispatches in-process or through a durable-execution service is the
+deployment's choice and is logged once at boot; correctness does not depend on
+the answer, because idempotency comes from the command row's conditional
+consume rather than from whoever dispatches.
 
 **Restored authoring layer** — `examples/plugins/workflow/authoring/` is
 picked up as a layer automatically and ships:

@@ -355,6 +355,7 @@ compose stack):
 
 | Variable | Purpose |
 | --- | --- |
+| `OPENSHAPEFORGE_ROLE` | which role `src/index.ts` starts; `api` (default) is this server, any other value names a module-contributed worker role ([plugins.md](plugins.md#worker-roles)) |
 | `PORT` / `HOST` | listen address (default `3001` / `0.0.0.0`) |
 | `NODE_ENV` | `production` disables GraphiQL and makes schema drift fatal |
 | `LOG_LEVEL` | fastify log level (`debug` surfaces the drift-ok line) |

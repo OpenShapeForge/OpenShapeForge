@@ -715,6 +715,19 @@ function workflowExecutionTables(): TableDefinition[] {
           required: true,
           references: { schema: "workflow", table: "definitions", column: "id", onDelete: "CASCADE" },
         },
+        // Which published graph this fire ran. A fire is a ledger entry, and
+        // without this it cannot say what it started — `definition_id` names the
+        // definition but not the version, and a definition's graph changes.
+        {
+          name: "version_id",
+          type: "uuid",
+          references: {
+            schema: "workflow",
+            table: "definition_versions",
+            column: "id",
+            onDelete: "SET NULL",
+          },
+        },
         { name: "trigger_node_id", type: "text", required: true },
         { name: "scheduled_at", type: "timestamptz", required: true },
         { name: "occurrence", type: "integer", required: true },
@@ -723,6 +736,21 @@ function workflowExecutionTables(): TableDefinition[] {
           name: "workflow_instance_id",
           type: "uuid",
           references: { schema: "workflow", table: "instances", column: "id", onDelete: "SET NULL" },
+        },
+        // The start command this fire enqueued. Written after the insert, by the
+        // same claim: the row is the fire's record that the start was queued, so
+        // a fire that committed without one is a worker that died between the
+        // two statements. Nullable for that window, and SET NULL rather than
+        // CASCADE because losing the command must not erase the fire.
+        {
+          name: "command_id",
+          type: "uuid",
+          references: {
+            schema: "workflow",
+            table: "control_commands",
+            column: "id",
+            onDelete: "SET NULL",
+          },
         },
         { name: "status", type: "text", required: true, default: "'started'::text" },
         { name: "created_at", type: "timestamptz", required: true, default: "now()" },

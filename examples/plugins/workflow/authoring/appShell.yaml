@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: BUSL-1.1
+#
+# How this plugin gets into the sidebar.
+#
+# `kind: appShellPatch` strategically merges into the base `appShell.yaml`
+# (packages/compiler/config/authoring). `sidebarItems` is a keyed array, so this
+# appends one entry and restates nothing the base or another plugin declared.
+# Shipping a plain `appShell.yaml` instead would collide, which is why the patch
+# kind exists: without it a plugin can emit a route file and have nothing in the
+# app link to it.
+#
+# `route` is a literal rather than `entity:`/`view:`, because this screen is not
+# an entity page — the workflow designer is the plugin's own route, emitted
+# alongside this patch under the plugin's web route root. Drop the plugin from
+# authoring.config.yaml and both disappear together.
+schemaVersion: 1
+kind: appShellPatch
+
+navigation:
+  sidebarItems:
+    - key: workflow
+      # Identical in both locales, so this is one word rather than a translation.
+      label: { en: Workflows, nl: Workflows }
+      icon: Workflow
+      route: { en: /workflow, nl: /workflow }

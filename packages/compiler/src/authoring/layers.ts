@@ -15,6 +15,12 @@
  *     slug and `kind: entityPatch` — a strategic merge (objects deep-merge,
  *     keyed arrays merge by `key`/`id`, `$delete: true` removes a keyed item,
  *     explicit `null` removes an object property)
+ *   - patch the app shell with `kind: appShellPatch`, the same strategic merge
+ *     against `appShell.yaml`. This is how a PLUGIN contributes a sidebar
+ *     entry: `sidebarItems` is a keyed array, so a patch appends its own entry
+ *     without restating anyone else's. Without it a plugin could emit a route
+ *     file and have nothing in the app link to it, because shipping
+ *     `appShell.yaml` outright collides.
  *
  * Catalog files (`catalogs/*.yaml`) merge across layers automatically: a
  * later layer's file with the same path strategically merges into the earlier
@@ -218,6 +224,13 @@ export function strategicMerge(base: JsonValue, patch: JsonValue): JsonValue {
 // Layer resolution
 // ---------------------------------------------------------------------------
 
+/**
+ * The app shell's canonical path inside a resolved authoring tree. `loader.ts`
+ * reads it from exactly here, so a patch has to merge into this path and no
+ * other for the result to be the document the generator sees.
+ */
+const APP_SHELL_FILENAME = "appShell.yaml";
+
 function isEntityFile(relativePath: string): boolean {
   return (
     relativePath.startsWith("entities/") &&
@@ -288,6 +301,32 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
           files.set(targetRelative, { layer: buildDir, path: targetRelative });
           continue;
         }
+
+        if (parsed?.kind === "appShellPatch") {
+          // Targeted by path, not by slug: there is exactly one app shell, so a
+          // slug lookup would have one possible answer. The patch is merged
+          // into the canonical path wherever the patch file itself sits, which
+          // is what keeps a misfiled patch from being copied through as an
+          // inert extra document nobody reads.
+          const target = files.get(APP_SHELL_FILENAME);
+          if (!target) {
+            throw new Error(
+              `appShellPatch ${layerDir}/${relativePath} cannot be applied: ` +
+                "no earlier layer defines an app shell " +
+                `(${APP_SHELL_FILENAME}).`,
+            );
+          }
+          const baseDoc = YAML.parse(
+            readFileSync(join(target.layer, target.path), "utf8"),
+          ) as JsonValue;
+          const { kind: _kind, ...patchBody } = parsed as { [key: string]: JsonValue };
+          const merged = strategicMerge(baseDoc, patchBody as JsonValue);
+          const mergedPath = join(buildDir, APP_SHELL_FILENAME);
+          mkdirSync(join(mergedPath, ".."), { recursive: true });
+          writeFileSync(mergedPath, YAML.stringify(merged), "utf8");
+          files.set(APP_SHELL_FILENAME, { layer: buildDir, path: APP_SHELL_FILENAME });
+          continue;
+        }
       }
 
       if (files.has(relativePath)) {
@@ -309,7 +348,8 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
         throw new Error(
           `Layer collision on ${relativePath}: ${files.get(relativePath)!.layer} ` +
             `already provides it and ${layerDir} ships a plain replacement. ` +
-            "Entities can be modified with kind: entityPatch; catalogs/*.yaml merge automatically.",
+            "Entities can be modified with kind: entityPatch; the app shell with " +
+            "kind: appShellPatch; catalogs/*.yaml merge automatically.",
         );
       }
       if (isEntityFile(relativePath)) {

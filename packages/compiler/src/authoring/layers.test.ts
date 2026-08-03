@@ -224,3 +224,167 @@ describe("resolveAuthoringLayers", () => {
     expect(first).toBe(second);
   });
 });
+
+// ---------------------------------------------------------------------------
+// appShellPatch
+// ---------------------------------------------------------------------------
+
+/**
+ * The app shell is the one authored document a plugin has to reach without
+ * owning: it holds the sidebar, and a plugin that ships a screen needs one
+ * entry in it. Before this existed the only way in was to ship `appShell.yaml`
+ * itself, which collides — so a plugin could emit a route file and have nothing
+ * link to it.
+ *
+ * Targeted by path rather than by slug. There is exactly one app shell, so the
+ * slug indirection `entityPatch` needs would be a lookup with one possible
+ * answer.
+ */
+describe("resolveAuthoringLayers — appShellPatch", () => {
+  const roots: string[] = [];
+
+  function makeRepo(): string {
+    const root = mkdtempSync(join(tmpdir(), "openshapeforge-shell-"));
+    roots.push(root);
+    return root;
+  }
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  function writeYaml(root: string, relativePath: string, doc: unknown) {
+    const full = join(root, relativePath);
+    mkdirSync(join(full, ".."), { recursive: true });
+    writeFileSync(full, YAML.stringify(doc), "utf8");
+  }
+
+  function configureLayers(root: string, layers: string[]) {
+    writeFileSync(join(root, "authoring.config.yaml"), YAML.stringify({ layers }), "utf8");
+  }
+
+  const baseShell = {
+    schemaVersion: 1,
+    kind: "appShell",
+    shell: { component: "AppLayout", title: "OpenShapeForge" },
+    navigation: {
+      component: "SidebarNav",
+      sidebarItems: [
+        {
+          key: "data",
+          label: { en: "Data", nl: "Data" },
+          children: [{ key: "relations", label: { en: "Relations" }, entity: "relation" }],
+        },
+      ],
+    },
+  };
+
+  function readShell(resolved: string) {
+    return YAML.parse(readFileSync(join(resolved, "appShell.yaml"), "utf8")) as {
+      kind: string;
+      navigation: { sidebarItems: { key: string; route?: unknown }[] };
+    };
+  }
+
+  test("a patch appends a nav entry and leaves the base entries intact", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/appShell.yaml", baseShell);
+    writeYaml(root, "plugin/appShell.yaml", {
+      kind: "appShellPatch",
+      navigation: {
+        sidebarItems: [
+          { key: "workflow", label: { en: "Workflows" }, icon: "Workflow", route: { en: "/workflow" } },
+        ],
+      },
+    });
+    configureLayers(root, ["base", "plugin"]);
+
+    const merged = readShell(resolveAuthoringLayers(root));
+
+    // The merged document is an appShell, not an appShellPatch: the loader
+    // reads it by kind, so a patch envelope surviving the merge would make the
+    // shell unreadable.
+    expect(merged.kind).toBe("appShell");
+    expect(merged.navigation.sidebarItems.map((item) => item.key)).toEqual([
+      "data",
+      "workflow",
+    ]);
+    expect(merged.navigation.sidebarItems[1]!.route).toEqual({ en: "/workflow" });
+  });
+
+  test("two plugins each append, in layer order", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/appShell.yaml", baseShell);
+    writeYaml(root, "first/appShell.yaml", {
+      kind: "appShellPatch",
+      navigation: { sidebarItems: [{ key: "workflow", route: { en: "/workflow" } }] },
+    });
+    writeYaml(root, "second/appShell.yaml", {
+      kind: "appShellPatch",
+      navigation: { sidebarItems: [{ key: "reports", route: { en: "/reports" } }] },
+    });
+    configureLayers(root, ["base", "first", "second"]);
+
+    // Chaining is the property under test: the first patch has to become the
+    // base the second one merges into, or the second silently drops the first.
+    expect(readShell(resolveAuthoringLayers(root)).navigation.sidebarItems.map((i) => i.key))
+      .toEqual(["data", "workflow", "reports"]);
+  });
+
+  test("a patch can amend an entry an earlier layer contributed", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/appShell.yaml", baseShell);
+    writeYaml(root, "overlay/appShell.yaml", {
+      kind: "appShellPatch",
+      navigation: { sidebarItems: [{ key: "data", label: { en: "Records" } }] },
+    });
+    configureLayers(root, ["base", "overlay"]);
+
+    const items = readShell(resolveAuthoringLayers(root)).navigation.sidebarItems as {
+      key: string;
+      label: { en: string };
+      children?: unknown[];
+    }[];
+    expect(items).toHaveLength(1);
+    expect(items[0]!.label.en).toBe("Records");
+    // Keyed-array merge, not replacement: the children the base declared stay.
+    expect(items[0]!.children).toHaveLength(1);
+  });
+
+  test("a patch with no app shell in an earlier layer is rejected", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", { schemaVersion: 1, kind: "coreEntity" });
+    writeYaml(root, "plugin/appShell.yaml", {
+      kind: "appShellPatch",
+      navigation: { sidebarItems: [{ key: "workflow" }] },
+    });
+    configureLayers(root, ["base", "plugin"]);
+
+    // Failing loudly matters more here than elsewhere: a silently ignored patch
+    // produces a working build with an unreachable screen.
+    expect(() => resolveAuthoringLayers(root)).toThrow(/no earlier layer defines an app shell/);
+  });
+
+  test("shipping a plain appShell.yaml over an earlier one is still rejected, and says how to patch", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/appShell.yaml", baseShell);
+    writeYaml(root, "plugin/appShell.yaml", { ...baseShell, shell: { title: "Hijacked" } });
+    configureLayers(root, ["base", "plugin"]);
+    expect(() => resolveAuthoringLayers(root)).toThrow(/appShellPatch/);
+  });
+
+  test("merging is deterministic across runs", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/appShell.yaml", baseShell);
+    writeYaml(root, "plugin/appShell.yaml", {
+      kind: "appShellPatch",
+      navigation: { sidebarItems: [{ key: "workflow", route: { en: "/workflow" } }] },
+    });
+    configureLayers(root, ["base", "plugin"]);
+    const first = readFileSync(join(resolveAuthoringLayers(root), "appShell.yaml"), "utf8");
+    const second = readFileSync(join(resolveAuthoringLayers(root), "appShell.yaml"), "utf8");
+    expect(first).toBe(second);
+  });
+});

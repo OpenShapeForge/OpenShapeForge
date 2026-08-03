@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The standard workflow node catalog, held in process for the life of the API.
+ * The workflow node catalog, held in process for the life of the API.
  *
- * The catalog is compiler output, not tenant data: the plugin emits
- * `node-catalog.seed.json`, `db:migrate` writes it into
- * `platform.workflow_node_catalog_entries` under `catalog = 'standard'`, and
- * everything that has to resolve a node type reads it back from there. The
- * readers are synchronous — definition validation resolves a type per node,
- * inside a loop — so the rows are read once at boot and kept in a map instead
- * of being queried per lookup.
+ * The catalog is compiler output, not tenant data. Three generators emit into
+ * `platform.workflow_node_catalog_entries`, each authoritative over its own
+ * `catalog` slice — `standard` and `entity` from the workflow plugin, `domain`
+ * from the domain node packs — and everything that has to resolve a node type
+ * reads all of them back from there. The readers are synchronous — definition
+ * validation resolves a type per node, inside a loop — so the rows are read
+ * once at boot and kept in a map instead of being queried per lookup.
  *
- * Postgres is the only source. The standard catalog is 44 rows read exactly
- * once per process, so a cache in front of it saves nothing worth measuring
- * while adding a second thing that can be unreachable, stale, or quietly
- * disagree with the table. A failure mode is not free just because the code
- * that introduces it is short.
+ * Postgres is the only source. The whole catalog is a few dozen rows read
+ * exactly once per process, so a cache in front of it saves nothing worth
+ * measuring while adding a second thing that can be unreachable, stale, or
+ * quietly disagree with the table. A failure mode is not free just because the
+ * code that introduces it is short.
  *
  * **Reads before hydration throw**, and that is what the nullable store is
  * for. "Nobody has hydrated yet" and "hydrated, and the table is empty" are
@@ -106,17 +106,21 @@ function requireStore(): CatalogStore {
 export async function hydrateNodeCatalog(db: OpenShapeForgeDatabase): Promise<void> {
   if (store) return;
 
-  // Both catalogs, not just 'standard'. The entity node types live under
-  // catalog='entity', and every catalog-driven check at run time goes through
-  // this store: definition validation resolves node types here, and resolved-
-  // config validation reads `config_fields` here to apply the catalog's
-  // defaults and enforce its schema. Filtering to one catalog meant a graph
-  // built entirely from entity nodes published with nothing type-checked and
-  // ran with none of its declared defaults applied — the checks were present
-  // and silently inapplicable, which is worse than their absence.
+  // Every slice, not just 'standard'. Entity node types live under
+  // catalog='entity' and the domain node packs under catalog='domain', and
+  // every catalog-driven check at run time goes through this store: definition
+  // validation resolves node types here, and resolved-config validation reads
+  // `config_fields` here to apply the catalog's defaults and enforce its
+  // schema. Filtering to one slice meant a graph built entirely from entity
+  // nodes published with nothing type-checked and ran with none of its
+  // declared defaults applied — the checks were present and silently
+  // inapplicable, which is worse than their absence.
   //
-  // `node_type` is the table's primary key, so the two catalogs cannot collide
-  // in one map.
+  // `node_type` is the table's primary key, so the slices cannot collide in
+  // one map. Note the consequence for anything building a palette: this store
+  // holds the union, and the `catalog` column is deliberately NOT selected, so
+  // a caller cannot tell a domain node from a standard one here. A palette
+  // that needs that distinction has to read the column, not this map.
   const rows = await db
     .selectFrom("platform.workflow_node_catalog_entries")
     .select(["node_type", "category", "label", "description", "config_fields", "output_fields"])

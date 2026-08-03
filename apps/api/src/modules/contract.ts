@@ -60,6 +60,57 @@ export type ModuleSeed = {
   apply(db: Kysely<DB>): Promise<CatalogSeedResult>;
 };
 
+/**
+ * The logger a worker writes to. Structurally the slice of Fastify's logger a
+ * worker needs, declared here so a plugin's worker does not have to import
+ * Fastify — or, worse, reach for `console` and land outside the process's log
+ * stream.
+ */
+export type ModuleWorkerLogger = {
+  info(payload: Record<string, unknown>, message: string): void;
+  warn(payload: Record<string, unknown>, message: string): void;
+  error(payload: Record<string, unknown>, message: string): void;
+};
+
+/**
+ * What a worker may read when it starts.
+ *
+ * `db` is REQUIRED here, unlike {@link ModuleRuntimeContext} where a module must
+ * degrade without one. A GraphQL surface with no database can still answer with
+ * DATABASE_NOT_CONFIGURED; a queue-draining worker with no database has nothing
+ * to do at all, so the worker role refuses to start rather than idling.
+ */
+export type ModuleWorkerContext = {
+  db: OpenShapeForgeDatabase;
+  log: ModuleWorkerLogger;
+};
+
+export type ModuleWorkerHandle = {
+  /**
+   * Stop, and settle only AFTER the in-flight tick has finished.
+   *
+   * A `stop()` that returns while a command is still claimed leaves the row
+   * `processing` until the visibility timeout reclaims it — a shutdown that
+   * costs the next worker a delay and an attempt, every time, which is exactly
+   * the sort of thing nobody notices until the retry bound is reached.
+   */
+  stop(): Promise<void>;
+};
+
+/**
+ * A long-running process a module contributes, run by the `worker` role rather
+ * than alongside the API.
+ *
+ * Separate processes on purpose: a poll loop and a request path have unrelated
+ * failure modes and unrelated scaling needs, and a worker that wedges must not
+ * take GraphQL down with it. It is also what lets a worker's database session
+ * differ from a request's — the workflow worker presents `app.worker_role`,
+ * which the API's request path never sets.
+ */
+export type ModuleWorker = {
+  start(context: ModuleWorkerContext): ModuleWorkerHandle | Promise<ModuleWorkerHandle>;
+};
+
 export type RuntimeModule = {
   /** Must match the CompilerPlugin name of the same package. */
   name: string;
@@ -84,4 +135,11 @@ export type RuntimeModule = {
   restRoutes?(routes: FastifyInstance, context: ModuleRuntimeContext): void;
   /** Seed steps appended to the migration chain, in declaration order. */
   seeds?: ModuleSeed[];
+  /**
+   * Worker roles this module contributes, keyed by role name — the value
+   * `OPENSHAPEFORGE_ROLE` selects. A role name colliding across two modules is
+   * refused at boot rather than silently last-wins, exactly as a GraphQL field
+   * name is.
+   */
+  workers?: Record<string, ModuleWorker>;
 };

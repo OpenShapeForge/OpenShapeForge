@@ -7,9 +7,15 @@ import {
   WorkflowInstanceCommandError,
 } from "./instance-commands.js";
 
+/**
+ * `db` is `| undefined` rather than merely optional so this matches
+ * `RuntimeModule["restRoutes"]`'s context under `exactOptionalPropertyTypes`,
+ * where a present-but-undefined `db` and an absent one are different types.
+ * The module contract passes the former, and the 503 below is the reason it can.
+ */
 export function registerWorkflowWebhookRoutes(
   app: FastifyInstance,
-  options: { db?: OpenShapeForgeDatabase } = {},
+  options: { db?: OpenShapeForgeDatabase | undefined } = {},
 ) {
   app.post<{ Params: { definitionId: string } }>(
     "/api/workflow/triggers/webhook/:definitionId",

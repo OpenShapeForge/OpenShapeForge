@@ -502,4 +502,111 @@ describe("workflow over HTTP", () => {
     },
     TEST_TIMEOUT,
   );
+
+  // -------------------------------------------------------------------------
+  // The module's REST contribution
+  // -------------------------------------------------------------------------
+
+  /**
+   * `restRoutes` is the module contract's other half, and until the webhook
+   * trigger landed nothing implemented it — so the host's registration loop in
+   * `roles/api.ts` had never once been executed with a module that contributes
+   * a route. These three tests are the only thing standing under it.
+   *
+   * They are here rather than in a unit test because mounting is precisely the
+   * part a unit test cannot see: the route exists as a function either way, and
+   * the question is whether `createApiApp` ever calls it.
+   */
+  async function postWebhook(
+    bearer: string | null,
+    definitionId: string,
+    body: Record<string, unknown> = {},
+    extraHeaders: Record<string, string> = {},
+  ): Promise<{ status: number; body: any }> {
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      ...extraHeaders,
+    };
+    if (bearer) headers.authorization = `Bearer ${bearer}`;
+    const response = await fetch(
+      `${suite.baseUrl}/api/workflow/triggers/webhook/${definitionId}`,
+      { method: "POST", headers, body: JSON.stringify(body) },
+    );
+    return { status: response.status, body: await response.json().catch(() => null) };
+  }
+
+  /** A published definition with a manual trigger, which a webhook may start. */
+  async function publishTriggerable(bearer: string): Promise<string> {
+    const created = (
+      await expectData(bearer, CREATE_DEFINITION, {
+        input: { name: `webhook ${randomUUID().slice(0, 8)}` },
+      })
+    ).createWorkflowDefinition as { id: string; updatedAt: string };
+
+    const saved = (
+      await expectData(bearer, SAVE_VERSION, {
+        input: {
+          definitionId: created.id,
+          expectedUpdatedAt: created.updatedAt,
+          definition: TRIGGERED_GRAPH,
+        },
+      })
+    ).saveWorkflowDefinitionVersion as { latestVersion: number };
+
+    await expectData(bearer, PUBLISH_VERSION, {
+      input: { definitionId: created.id, version: saved.latestVersion },
+    });
+    return created.id;
+  }
+
+  httpTest(
+    "the module's webhook route is mounted and starts a run",
+    async () => {
+      const bearer = writerToken!;
+      const definitionId = await publishTriggerable(bearer);
+
+      const { status, body } = await postWebhook(bearer, definitionId, {
+        source: "http round trip",
+      });
+
+      expect(status).toBe(202);
+      expect(body.definitionId).toBe(definitionId);
+      // An id, not just an acknowledgement: a 202 that enqueued nothing would
+      // be indistinguishable from a route that accepted and dropped the call.
+      expect(typeof body.instanceId).toBe("string");
+      expect(body.instanceId.length).toBeGreaterThan(0);
+    },
+    TEST_TIMEOUT,
+  );
+
+  httpTest(
+    "an unauthenticated webhook call is refused, not unrouted",
+    async () => {
+      const definitionId = await publishTriggerable(writerToken!);
+
+      const { status } = await postWebhook(null, definitionId);
+
+      // 401 rather than 404 is the whole assertion. Before the module
+      // contributed `restRoutes` this path did not exist, and an unmounted
+      // route answers 404 — which is also what a *mounted* route would answer
+      // for a bad definition id, so authentication is the axis that separates
+      // "not wired" from "wired and guarding".
+      expect(status).toBe(401);
+    },
+    TEST_TIMEOUT,
+  );
+
+  httpTest(
+    "a webhook call without the writer role is refused",
+    async () => {
+      const definitionId = await publishTriggerable(writerToken!);
+
+      // Same tenant as the writer, no roles — so the refusal is attributable to
+      // the role rather than to tenant isolation.
+      const { status } = await postWebhook(rolelessToken!, definitionId);
+
+      expect(status).toBe(403);
+    },
+    TEST_TIMEOUT,
+  );
 });

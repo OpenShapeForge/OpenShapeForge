@@ -13,13 +13,23 @@
  * least one issue is an error, which is what a caller that must refuse a
  * definition should key on.
  *
- * ## Severity is the contract
+ * ## Severity is the contract, and it has two settings
  *
- * `assertPublishable` in `definition-mutations.ts` is the one caller with
- * teeth: it filters this list for error severity and refuses to publish. Saving
- * a draft never validates at all, deliberately, so a work-in-progress graph is
- * stored with its problems attached. Error therefore means "this graph would
- * fail at run time", not "this graph is unfinished".
+ * Two callers have teeth, and they are not the same gate.
+ * `assertPublishable` in `definition-mutations.ts` refuses to publish on ANY
+ * error. `patchWorkflowDefinition` refuses a write only on an error whose
+ * `blocksAt` is `"write"`. Saving a draft never validates at all, deliberately,
+ * so a work-in-progress graph is always storable through that door.
+ *
+ * The split exists because two different things were being called errors. Some
+ * mean the graph is incoherent — a patch that produced one had a wrong intent,
+ * and writing it helps nobody. Others mean the graph will not run, which is
+ * also, exactly, what a graph looks like while it is still being drawn: a
+ * decision node dropped on a canvas has branches nothing wires yet. Refusing
+ * that write would break the incremental edit `patchWorkflowDefinition` exists
+ * to serve, so it is refused at publish instead. See
+ * {@link WorkflowDefinitionValidationBlocksAt} and the rule table below, which
+ * is where the policy lives.
  *
  * An error is raised for exactly the faults that map onto a
  * `ProcessRuntimeErrorCode`: an unresolvable id, a handle with two edges
@@ -78,9 +88,85 @@ import { canonicalizeWorkflowNodeConfigAliases } from "./resolved-config-validat
 
 export type WorkflowDefinitionValidationSeverity = "error" | "warning";
 
+/**
+ * Which write an error refuses. Meaningful only on an error; a warning refuses
+ * nothing and carries null.
+ *
+ * `write` — the graph is INCOHERENT. An id that resolves to nothing, an id
+ * used twice, a node with no type: the document cannot be stored and read back
+ * as the thing it claims to be. A patch that produces one had a wrong intent,
+ * so the write itself is refused.
+ *
+ * `publish` — the graph is WELL-FORMED BUT WILL NOT RUN. A handle with no
+ * edge, two edges on one handle, an edge into a trigger, a node type this
+ * engine cannot execute. Every one of those is also what an unfinished graph
+ * looks like halfway through being drawn: a designer drops a decision node and
+ * wires its branches afterwards, and `patchWorkflowDefinition` exists to make
+ * exactly that edit. Writing it is therefore allowed and publishing it is not,
+ * because a published version is what new runs start from.
+ */
+export type WorkflowDefinitionValidationBlocksAt = "write" | "publish";
+
+type WorkflowDefinitionValidationRule = {
+  severity: WorkflowDefinitionValidationSeverity;
+  blocksAt: WorkflowDefinitionValidationBlocksAt | null;
+};
+
+/**
+ * Every rule this pass can raise, and what it costs. One table rather than a
+ * severity argument at each of seventeen call sites: this is the file's whole
+ * policy, it is the thing reviewers argue about, and scattering it is how a
+ * rule ends up an error in one branch of a function and a warning in another.
+ *
+ * `blocksAt` is null exactly when the severity is `warning` — not "unknown"
+ * but "refuses nothing" — which is why deriving both from one entry is what
+ * keeps them from disagreeing.
+ */
+const VALIDATION_RULES = {
+  // Incoherent. Refused by every writer, a patch included: nothing downstream
+  // can read this document back as the graph it claims to be.
+  MISSING_NODES: { severity: "error", blocksAt: "write" },
+  MISSING_EDGES: { severity: "error", blocksAt: "write" },
+  MISSING_NODE_ID: { severity: "error", blocksAt: "write" },
+  DUPLICATE_NODE_ID: { severity: "error", blocksAt: "write" },
+  MISSING_NODE_TYPE: { severity: "error", blocksAt: "write" },
+  MISSING_EDGE_SOURCE: { severity: "error", blocksAt: "write" },
+  MISSING_EDGE_TARGET: { severity: "error", blocksAt: "write" },
+  UNKNOWN_EDGE_SOURCE: { severity: "error", blocksAt: "write" },
+  UNKNOWN_EDGE_TARGET: { severity: "error", blocksAt: "write" },
+
+  // Well-formed, not runnable. Refused at publish only, because each of these
+  // is indistinguishable from a graph that is simply not finished yet.
+  //
+  // AMBIGUOUS_EDGE_HANDLE sits here rather than with the incoherent set, which
+  // is the one genuinely arguable placement. A second edge on an occupied
+  // handle contradicts nothing structural: every id resolves, the document
+  // round-trips, a designer renders it. What it breaks is the walk, and
+  // AMBIGUOUS_EDGES_FOR_HANDLE is a run-time code exactly like
+  // NO_EDGE_FOR_HANDLE. It is also produced by an ordinary canvas gesture —
+  // drag the new edge, then delete the old one — and refusing the write would
+  // make that order of operations illegal while the reverse order was fine,
+  // which is not a rule an author can be expected to predict.
+  AMBIGUOUS_EDGE_HANDLE: { severity: "error", blocksAt: "publish" },
+  ORPHAN_EDGE_HANDLE: { severity: "error", blocksAt: "publish" },
+  ORPHAN_NODE_HANDLE: { severity: "error", blocksAt: "publish" },
+  TRIGGER_NOT_ENTRY: { severity: "error", blocksAt: "publish" },
+  UNSUPPORTED_NODE_TYPE: { severity: "error", blocksAt: "publish" },
+
+  // Reported, never refused. See the severity note in this file's header for
+  // why each of these must stay a warning.
+  UNKNOWN_NODE_TYPE: { severity: "warning", blocksAt: null },
+  UNIMPLEMENTED_NODE_TYPE: { severity: "warning", blocksAt: null },
+  UNREACHABLE_NODE: { severity: "warning", blocksAt: null },
+} as const satisfies Record<string, WorkflowDefinitionValidationRule>;
+
+export type WorkflowDefinitionValidationCode = keyof typeof VALIDATION_RULES;
+
 export type WorkflowDefinitionValidationIssue = {
   severity: WorkflowDefinitionValidationSeverity;
-  code: string;
+  /** Null on a warning, which refuses nothing. See the type's own note. */
+  blocksAt: WorkflowDefinitionValidationBlocksAt | null;
+  code: WorkflowDefinitionValidationCode;
   message: string;
   path: string;
   nodeId?: string | null;
@@ -147,15 +233,20 @@ function declaredOutputHandles(nodeType: string, config: unknown): Set<string> |
   return handles;
 }
 
+/**
+ * Severity and blocking come from {@link VALIDATION_RULES}, so a call site
+ * chooses a rule and never a cost.
+ */
 function issue(
-  severity: WorkflowDefinitionValidationSeverity,
-  code: string,
+  code: WorkflowDefinitionValidationCode,
   message: string,
   path: string,
   context: { nodeId?: string | null; edgeId?: string | null } = {},
 ): WorkflowDefinitionValidationIssue {
+  const rule: WorkflowDefinitionValidationRule = VALIDATION_RULES[code];
   return {
-    severity,
+    severity: rule.severity,
+    blocksAt: rule.blocksAt,
     code,
     message,
     path,
@@ -174,12 +265,12 @@ export function validateWorkflowDefinition(
 
   if (!Array.isArray(nodes)) {
     issues.push(
-      issue("error", "MISSING_NODES", "definition.nodes must be an array.", "nodes"),
+      issue("MISSING_NODES", "definition.nodes must be an array.", "nodes"),
     );
   }
   if (!Array.isArray(edges)) {
     issues.push(
-      issue("error", "MISSING_EDGES", "definition.edges must be an array.", "edges"),
+      issue("MISSING_EDGES", "definition.edges must be an array.", "edges"),
     );
   }
 
@@ -201,12 +292,11 @@ export function validateWorkflowDefinition(
 
       if (!nodeId) {
         issues.push(
-          issue("error", "MISSING_NODE_ID", "Node id is required.", `${nodePath}.id`),
+          issue("MISSING_NODE_ID", "Node id is required.", `${nodePath}.id`),
         );
       } else if (nodeIds.has(nodeId)) {
         issues.push(
           issue(
-            "error",
             "DUPLICATE_NODE_ID",
             `Node id "${nodeId}" is duplicated.`,
             `${nodePath}.id`,
@@ -225,7 +315,7 @@ export function validateWorkflowDefinition(
 
       if (!nodeType) {
         issues.push(
-          issue("error", "MISSING_NODE_TYPE", "Node type is required.", `${nodePath}.type`, {
+          issue("MISSING_NODE_TYPE", "Node type is required.", `${nodePath}.type`, {
             nodeId,
           }),
         );
@@ -234,7 +324,6 @@ export function validateWorkflowDefinition(
         if (!catalogued) {
           issues.push(
             issue(
-              "warning",
               "UNKNOWN_NODE_TYPE",
               `Node type "${nodeType}" is not present in the compiler-owned node catalog.`,
               `${nodePath}.type`,
@@ -247,7 +336,6 @@ export function validateWorkflowDefinition(
         if (support === "unsupported") {
           issues.push(
             issue(
-              "error",
               "UNSUPPORTED_NODE_TYPE",
               `Node type "${nodeType}" cannot be executed by the process runtime; ` +
                 `registering a bridge for it would not make this graph runnable.`,
@@ -268,7 +356,6 @@ export function validateWorkflowDefinition(
           // can implement this" is not true of a typo.
           issues.push(
             issue(
-              "warning",
               "UNIMPLEMENTED_NODE_TYPE",
               `Node type "${nodeType}" has no bridge registered in this deployment; ` +
                 `a run reaching it fails with NO_BRIDGE.`,
@@ -300,14 +387,13 @@ export function validateWorkflowDefinition(
 
       if (!source) {
         issues.push(
-          issue("error", "MISSING_EDGE_SOURCE", "Edge source is required.", `${edgePath}.source`, {
+          issue("MISSING_EDGE_SOURCE", "Edge source is required.", `${edgePath}.source`, {
             edgeId,
           }),
         );
       } else if (!nodeIds.has(source)) {
         issues.push(
           issue(
-            "error",
             "UNKNOWN_EDGE_SOURCE",
             `Edge source "${source}" does not reference an existing node.`,
             `${edgePath}.source`,
@@ -322,7 +408,6 @@ export function validateWorkflowDefinition(
           // arm, so this graph cannot be walked as drawn.
           issues.push(
             issue(
-              "error",
               "AMBIGUOUS_EDGE_HANDLE",
               `Node "${source}" has multiple edges for output handle "${sourceHandle}"; routing is ambiguous.`,
               `${edgePath}.sourceHandle`,
@@ -339,7 +424,6 @@ export function validateWorkflowDefinition(
           // handle this edge names does not exist on the node it leaves.
           issues.push(
             issue(
-              "error",
               "ORPHAN_EDGE_HANDLE",
               `Edge from "${source}" uses output handle "${sourceHandle}" that the node never emits.`,
               `${edgePath}.sourceHandle`,
@@ -351,14 +435,13 @@ export function validateWorkflowDefinition(
 
       if (!target) {
         issues.push(
-          issue("error", "MISSING_EDGE_TARGET", "Edge target is required.", `${edgePath}.target`, {
+          issue("MISSING_EDGE_TARGET", "Edge target is required.", `${edgePath}.target`, {
             edgeId,
           }),
         );
       } else if (!nodeIds.has(target)) {
         issues.push(
           issue(
-            "error",
             "UNKNOWN_EDGE_TARGET",
             `Edge target "${target}" does not reference an existing node.`,
             `${edgePath}.target`,
@@ -372,7 +455,6 @@ export function validateWorkflowDefinition(
         // here rather than at the step that reaches it.
         issues.push(
           issue(
-            "error",
             "TRIGGER_NOT_ENTRY",
             `Edge target "${target}" is an entry node; triggers may only start a workflow, not be routed to.`,
             `${edgePath}.target`,
@@ -402,7 +484,6 @@ export function validateWorkflowDefinition(
       if (!wired.has(handle)) {
         issues.push(
           issue(
-            "error",
             "ORPHAN_NODE_HANDLE",
             `Node "${nodeId}" can emit output handle "${handle}" but no edge wires it.`,
             "edges",
@@ -442,7 +523,6 @@ export function validateWorkflowDefinition(
     if (reachable.has(node.id)) continue;
     issues.push(
       issue(
-        "warning",
         "UNREACHABLE_NODE",
         `Node "${node.id}" cannot be reached from any entry node.`,
         node.path,

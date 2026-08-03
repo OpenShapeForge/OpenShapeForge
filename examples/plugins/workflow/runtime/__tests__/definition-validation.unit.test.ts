@@ -11,6 +11,13 @@
  * the `ProcessRuntimeErrorCode` it prevents, because nothing else in the suite
  * would notice a severity quietly going back.
  *
+ * Severity is not the only axis. `blocksAt` splits the errors into the ones
+ * that mean the graph is incoherent and the ones that mean it will not run, and
+ * only the first refuse a WRITE — because the second are also exactly what a
+ * graph looks like halfway through being drawn. A designer that drops a
+ * decision node and wires its branches on the next gesture depends on that, so
+ * the mid-build case is pinned directly.
+ *
  * The pairs are what make this worth pinning rather than the individual codes:
  *
  * - `UNSUPPORTED_NODE_TYPE` refuses and `UNIMPLEMENTED_NODE_TYPE` does not,
@@ -93,6 +100,17 @@ function codesOf(
   severity: "error" | "warning",
 ): string[] {
   return result.issues.filter((issue) => issue.severity === severity).map((issue) => issue.code);
+}
+
+/** Throws rather than returning undefined, so a missing code fails loudly. */
+function blocksAtOf(result: WorkflowDefinitionValidationResult, code: string): string | null {
+  const found = result.issues.find((issue) => issue.code === code);
+  if (!found) {
+    throw new Error(
+      `no "${code}" issue (have: ${result.issues.map((issue) => issue.code).join(", ") || "none"})`,
+    );
+  }
+  return found.blocksAt;
 }
 
 /** A trigger, an end, one edge: the graph this pass has nothing to say about. */
@@ -560,6 +578,106 @@ describe("UNREACHABLE_NODE", () => {
       valid: true,
       issues: [],
     });
+  });
+});
+
+describe("blocksAt", () => {
+  test("a warning carries null, and every error carries a setting", () => {
+    // The invariant the rule table exists to hold: `blocksAt` is not "unknown"
+    // on a warning, it is "refuses nothing". A caller filtering on
+    // `blocksAt === "write"` therefore never has to check severity as well.
+    const result = validateWorkflowDefinition({
+      nodes: [
+        { id: "mystery", type: "notInTheCatalog" },
+        { id: "gather", type: "join" },
+        { id: "twice", type: "end" },
+        { id: "twice", type: "end" },
+      ],
+      edges: [],
+    });
+
+    for (const entry of result.issues) {
+      if (entry.severity === "warning") {
+        expect(entry.blocksAt).toBeNull();
+      } else {
+        expect(entry.blocksAt === "write" || entry.blocksAt === "publish").toBe(true);
+      }
+    }
+    // Both settings are actually present, or the loop above proves nothing.
+    expect(blocksAtOf(result, "DUPLICATE_NODE_ID")).toBe("write");
+    expect(blocksAtOf(result, "UNSUPPORTED_NODE_TYPE")).toBe("publish");
+  });
+
+  test("an incoherent graph blocks the write", () => {
+    // Nothing downstream can read this back as the graph it claims to be, so a
+    // patch that produced it had a wrong intent.
+    const dangling = validateWorkflowDefinition({
+      nodes: [{ id: "start", type: "triggerManual" }],
+      edges: [{ id: "nowhere", source: "start", target: "ghost" }],
+    });
+    expect(blocksAtOf(dangling, "UNKNOWN_EDGE_TARGET")).toBe("write");
+  });
+
+  test("a mid-build decision node does not block the write", () => {
+    // THE regression case. A designer drops a decision on the canvas and
+    // patches it in before wiring anything; `patchWorkflowDefinition` exists
+    // for exactly this edit. The graph will not run — that is true and it is
+    // reported — but refusing to store it would mean the canvas cannot save
+    // between two gestures.
+    const midBuild = validateWorkflowDefinition({
+      nodes: [
+        { id: "start", type: "triggerManual" },
+        { id: "choice", type: "decision", config: { branches: [], defaultEdgeId: "default" } },
+      ],
+      edges: [{ id: "in", source: "start", target: "choice" }],
+    });
+
+    expect(midBuild.valid).toBe(false);
+    expect(codesOf(midBuild, "error")).toEqual(["ORPHAN_NODE_HANDLE"]);
+    // Publishing is still refused; writing is not.
+    expect(blocksAtOf(midBuild, "ORPHAN_NODE_HANDLE")).toBe("publish");
+    expect(midBuild.issues.some((issue) => issue.blocksAt === "write")).toBe(false);
+  });
+
+  test("every not-runnable error is a publish blocker, never a write blocker", () => {
+    // Stated as a set rather than one case at a time, because the cost of
+    // getting one wrong is the same regression in a different gesture: an
+    // author mid-rewire cannot save.
+    const notRunnable = validateWorkflowDefinition({
+      nodes: [
+        { id: "start", type: "triggerManual" },
+        { id: "again", type: "triggerWebhook" },
+        {
+          id: "choice",
+          type: "decision",
+          config: { branches: [{ handle: "approved" }], defaultEdgeId: "rejected" },
+        },
+        { id: "gather", type: "join" },
+        { id: "finish", type: "end" },
+      ],
+      edges: [
+        { id: "in", source: "start", target: "choice" },
+        // Two edges on one handle: the transient state of swapping a branch's
+        // target by dragging the new edge before deleting the old one.
+        { id: "approved", source: "choice", target: "finish", sourceHandle: "approved" },
+        { id: "approved-2", source: "choice", target: "gather", sourceHandle: "approved" },
+        // A handle the node never emits.
+        { id: "stray", source: "choice", target: "finish", sourceHandle: "maybe" },
+        // An edge back into a trigger.
+        { id: "loop", source: "finish", target: "again" },
+      ],
+    });
+
+    expect(new Set(codesOf(notRunnable, "error"))).toEqual(
+      new Set([
+        "AMBIGUOUS_EDGE_HANDLE",
+        "ORPHAN_EDGE_HANDLE",
+        "ORPHAN_NODE_HANDLE",
+        "TRIGGER_NOT_ENTRY",
+        "UNSUPPORTED_NODE_TYPE",
+      ]),
+    );
+    expect(notRunnable.issues.some((issue) => issue.blocksAt === "write")).toBe(false);
   });
 });
 

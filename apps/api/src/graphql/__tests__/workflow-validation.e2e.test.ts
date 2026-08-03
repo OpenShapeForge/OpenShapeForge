@@ -21,12 +21,15 @@
  * is well-formed and walks fine until the unwired branch happens to win, so it
  * used to publish clean and die later on a path nobody exercised.
  *
- * **Draft and publish are deliberately asymmetric.** A draft is allowed to be
+ * **The three writers are deliberately asymmetric.** A draft is allowed to be
  * broken — half-wired, mid-thought, saved because the author is going home — so
  * `saveWorkflowDefinitionVersion` never validates. A published version is what
- * new runs start from, so publishing the very same version is refused. A patch
- * sits with publish rather than with save: it is a deliberate edit with a known
- * intent, so producing a broken graph means the intent was wrong.
+ * new runs start from, so publishing that very same version is refused on any
+ * error. A patch sits between the two, and `blocksAt` is what places it: it
+ * refuses only the errors that mean the graph is INCOHERENT, because a patch is
+ * an incremental edit and an unwired branch is what a decision node looks like
+ * one gesture after it was dropped on a canvas. Both halves are pinned — the
+ * mid-build patch is written, and the graph it wrote does not publish.
  *
  * **What is still not checked is pinned too.** Cycles are outside the pass's
  * scope, and reachability is inside it only as a warning, so a clean result
@@ -985,6 +988,60 @@ describe("patchWorkflowDefinition", () => {
   );
 
   test(
+    "a patch may leave a decision node unwired, and that graph then refuses to publish",
+    async () => {
+      // The mid-build gesture. A designer drops a decision on the canvas and
+      // patches it in; its branches are wired on the next gesture. The graph
+      // will not run yet, and `ORPHAN_NODE_HANDLE` says so — but the patch is
+      // an incremental edit, so refusing the WRITE would mean the canvas cannot
+      // save between two gestures and the node is lost on a refresh.
+      const definition = await definitionHolding("patch-mid-build", LINEAR_GRAPH);
+      const data = await expectData(PATCH_DEFINITION, {
+        input: {
+          definitionId: definition.id,
+          expectedUpdatedAt: definition.updatedAt,
+          operations: [
+            {
+              op: "upsertNode",
+              nodeId: "choice",
+              node: {
+                id: "choice",
+                type: "decision",
+                config: { branches: [], defaultEdgeId: "default" },
+              },
+            },
+            // Upsert by id, so the trigger's existing edge is re-pointed at the
+            // new node rather than joined by a second edge on the same handle.
+            {
+              op: "upsertEdge",
+              edgeId: "start-finish",
+              edge: { id: "start-finish", source: "start", target: "choice" },
+            },
+          ],
+        },
+      });
+
+      const patch = data.patchWorkflowDefinition;
+      expect(patch.savedDefinition.latestVersion).toBe(2);
+      // Written, and reported. The issue is not suppressed to make the write
+      // legal — a designer still has to be told the branch needs an edge.
+      expect(patch.validation.valid).toBe(false);
+      expect(
+        patch.validation.issues.filter((issue: { severity: string }) => issue.severity === "error"),
+      ).toEqual([{ severity: "error", code: "ORPHAN_NODE_HANDLE" }]);
+
+      // The other end of the bargain: what was storable is still not runnable,
+      // so publishing that very version is refused.
+      const code = await expectErrorCode(PUBLISH_VERSION, {
+        input: { definitionId: definition.id, version: 2 },
+      });
+      expect(code).toBe("BAD_USER_INPUT");
+      expect((await readDefinition(definition.id)).publishedVersion).toBeNull();
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
     "a patch that would produce an invalid graph is refused and writes nothing",
     async () => {
       const definition = await definitionHolding("patch-invalid-result", LINEAR_GRAPH);
@@ -1003,8 +1060,10 @@ describe("patchWorkflowDefinition", () => {
       });
 
       // The asymmetry with a hand-authored draft: the same graph would have
-      // been stored by saveWorkflowDefinitionVersion. A patch states an intent,
-      // so a broken result means the intent was wrong.
+      // been stored by saveWorkflowDefinitionVersion. An edge to a node that is
+      // not there is INCOHERENT rather than unfinished — no later gesture makes
+      // it mean something — so unlike the mid-build case above it refuses the
+      // write itself.
       expect(code).toBe("BAD_USER_INPUT");
       expect((await readDefinition(definition.id)).latestVersion).toBe(1);
     },

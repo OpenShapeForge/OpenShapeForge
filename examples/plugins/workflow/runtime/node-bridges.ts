@@ -20,6 +20,7 @@
  */
 import { registerDecisionNodeBridge } from "./decision-bridge.js";
 import { registerGeneratedEntityNodeBridges } from "./generated-entity-bridges.js";
+import { registerTimerNodeBridge } from "./timer-bridge.js";
 
 let registered = false;
 
@@ -27,8 +28,11 @@ export function registerAllWorkflowNodeBridges(): void {
   if (registered) return;
   registered = true;
 
-  // Flow control: the one hand-written bridge that is not entity CRUD.
+  // Flow control: the two hand-written bridges that are not entity CRUD.
   registerDecisionNodeBridge();
+  // `timer` is the only one that parks a run rather than answering in the same
+  // transaction; its deadline is swept by the worker role, not by this file.
+  registerTimerNodeBridge();
 
   // One bridge per generated `entity.<module>.<entity>.<action>` node type,
   // driven by the compiler's manifest rather than by per-entity code.

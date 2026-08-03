@@ -47,6 +47,7 @@ import {
 import { hydrateNodeCatalog } from "./runtime/node-catalog-store.js";
 import { registerAllWorkflowNodeBridges } from "./runtime/node-bridges.js";
 import { startWorkflowScheduleWorker } from "./runtime/schedule-worker.js";
+import { startWorkflowTimerWaitWorker } from "./runtime/timer-waits.js";
 import { registerWorkflowWebhookRoutes } from "./runtime/webhook-routes.js";
 import { WORKFLOW_WORKER_ROLE } from "./worker-role.js";
 
@@ -109,16 +110,27 @@ const plugin: RuntimeModule = {
    * `apps/api` does not know this role exists; a repo that drops the workflow
    * plugin loses it with the plugin.
    *
-   * The schedule worker runs in this same role, because the two are one
-   * pipeline: a due schedule does not start a run itself, it enqueues a
-   * `workflow.instance.start` command that the control-command worker then
-   * drains. Splitting them across roles would mean a deployment could run half
-   * of that and see schedules fire into a queue nothing reads.
+   * The schedule and timer workers run in this same role, because all three are
+   * one pipeline. Neither of the other two touches a run directly: a due
+   * schedule enqueues a `workflow.instance.start` command and a due timer
+   * enqueues a `workflow.instance.resume`, and the control-command worker is
+   * what drains both. Split across roles, a deployment could run half of that
+   * and watch schedules fire and timers expire into a queue nothing reads.
    *
-   * Both are poll loops, so the role owns two intervals and stops both. `stop()`
-   * must settle only after each has finished its in-flight tick — the schedule
-   * worker holds claimed `workflow.schedules` rows with `locked_by` set, and
-   * returning early would leave them locked until the claim ages out.
+   * That is also why the timer is swept here rather than slept on. A deployment
+   * may configure an external durable-execution service to dispatch commands,
+   * and it offers a durable sleep — but it is optional, the two dispatchers are
+   * interchangeable by construction, and a timer built on it would silently not
+   * exist in the default deployment. The sweep decides only *when*; the resume
+   * it enqueues is dispatched by whichever dispatcher is configured, so the two
+   * compose rather than compete.
+   *
+   * All three are poll loops, so the role owns three intervals and stops them
+   * all. `stop()` must settle only after each has finished its in-flight tick:
+   * the schedule worker holds claimed `workflow.schedules` rows with `locked_by`
+   * set, and the timer sweep may have claimed waits whose resume is not
+   * enqueued yet — those runs would stay parked with `resumed_at` already
+   * written, so nothing would ever sweep them again.
    */
   workers: {
     [WORKFLOW_WORKER_ROLE]: {
@@ -133,7 +145,7 @@ const plugin: RuntimeModule = {
             dispatch: restate ? "restate" : "in-process",
             ...(restate ? { service: restate.workflowCommandServiceName } : {}),
           },
-          "Draining workflow.control_commands and firing due workflow.schedules.",
+          "Draining workflow.control_commands, firing due workflow.schedules and resuming due timer waits.",
         );
 
         const commands = startWorkflowControlCommandWorker(
@@ -141,14 +153,16 @@ const plugin: RuntimeModule = {
           createWorkflowControlCommandDispatcher(db),
         );
         const schedules = startWorkflowScheduleWorker(db);
+        const timers = startWorkflowTimerWaitWorker(db);
 
         return {
           stop: async () => {
-            // Schedules first: it enqueues commands, so stopping it before the
-            // drain means the queue is not being refilled while it empties.
-            // Sequential rather than Promise.all for that ordering — neither
-            // rejects, both only await their own tick.
+            // Producers first, drain last: both enqueue commands, so stopping
+            // them before the drain means the queue is not being refilled while
+            // it empties. Sequential rather than Promise.all for that ordering
+            // — none rejects, each only awaits its own tick.
             await schedules.stop();
+            await timers.stop();
             await commands.stop();
           },
         };

@@ -27,17 +27,38 @@
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
-import { sql, type Kysely } from "kysely";
+import { sql, type Kysely, type Transaction } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
 import { withDbSession } from "../session.js";
 import { loadRuntimeModules } from "../../modules/registry.js";
-import {
-  deactivateWorkflowDefinitionScheduleInTransaction,
-  syncWorkflowDefinitionScheduleInTransaction,
-} from "../../../../../examples/plugins/workflow/runtime/schedule-worker.js";
+
+/**
+ * `apps/api/tsconfig.json` roots its program at `src`, so the helpers cannot be
+ * statically imported from here. Resolved at run time, as the plugin loader and
+ * `db/__tests__/worker-role-rls.test.ts` both do.
+ */
+const SCHEDULE_WORKER_MODULE = new URL(
+  "../../../../../examples/plugins/workflow/runtime/schedule-worker.js",
+  import.meta.url,
+).href;
+
+type SchedulePublishHelpers = {
+  syncWorkflowDefinitionScheduleInTransaction: (
+    trx: Transaction<DB>,
+    tenantId: string,
+    definitionId: string,
+    options?: { now?: Date },
+  ) => Promise<{ status: "active" | "inactive" }>;
+  deactivateWorkflowDefinitionScheduleInTransaction: (
+    trx: Transaction<DB>,
+    tenantId: string,
+    definitionId: string,
+    reason: string,
+  ) => Promise<void>;
+};
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -141,6 +162,11 @@ describe("the workflow schedule publish helpers", () => {
             db,
             { tenantId: ourTenant, userId: actor, roles: ["Workflow.Author"] },
             async (trx) => {
+              const {
+                syncWorkflowDefinitionScheduleInTransaction,
+                deactivateWorkflowDefinitionScheduleInTransaction,
+              } = (await import(SCHEDULE_WORKER_MODULE)) as SchedulePublishHelpers;
+
               const before = await sql<{ count: string }>`
                 select count(*)::text as count from workflow.control_commands
               `.execute(trx);

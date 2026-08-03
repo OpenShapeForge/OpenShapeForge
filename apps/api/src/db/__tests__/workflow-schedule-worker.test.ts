@@ -27,10 +27,31 @@ import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { loadRuntimeModules } from "../../modules/registry.js";
-import {
-  processWorkflowScheduleBatch,
-  syncWorkflowDefinitionSchedule,
-} from "../../../../../examples/plugins/workflow/runtime/schedule-worker.js";
+import type { OpenShapeForgeDatabase } from "../connection.js";
+
+/**
+ * `apps/api/tsconfig.json` roots its program at `src`, so the worker cannot be
+ * statically imported from here. The plugin loader has the same constraint and
+ * answers it the same way — resolve the specifier at run time. Mirrors
+ * `db/__tests__/worker-role-rls.test.ts`.
+ */
+const SCHEDULE_WORKER_MODULE = new URL(
+  "../../../../../examples/plugins/workflow/runtime/schedule-worker.js",
+  import.meta.url,
+).href;
+
+type ScheduleWorkerModule = {
+  syncWorkflowDefinitionSchedule: (
+    db: OpenShapeForgeDatabase,
+    tenantId: string,
+    definitionId: string,
+    options?: { now?: Date },
+  ) => Promise<{ status: "active" | "inactive"; nextFireAt?: Date }>;
+  processWorkflowScheduleBatch: (
+    db: OpenShapeForgeDatabase,
+    options?: { now?: Date; workerId?: string; batchSize?: number },
+  ) => Promise<{ processed: number; started: number; skipped: number }>;
+};
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -125,6 +146,10 @@ describe("the workflow schedule worker", () => {
 
             return { definitionId, versionId: version.rows[0]!.id };
           });
+
+          const { syncWorkflowDefinitionSchedule, processWorkflowScheduleBatch } = (await import(
+            SCHEDULE_WORKER_MODULE
+          )) as ScheduleWorkerModule;
 
           // 08:00 UTC — before the 09:00 fire, so the schedule is armed for today.
           const armedAt = new Date("2026-03-02T08:00:00.000Z");

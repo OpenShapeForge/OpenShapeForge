@@ -29,7 +29,29 @@ import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
 import { loadRuntimeModules } from "../../modules/registry.js";
-import { processPendingWorkflowCollectionWaits } from "../../../../../examples/plugins/workflow/runtime/collection-waits.js";
+import type { OpenShapeForgeDatabase } from "../connection.js";
+
+/**
+ * `apps/api/tsconfig.json` roots its program at `src`, so the sweeps cannot be
+ * statically imported from here. Resolved at run time, as the plugin loader and
+ * `db/__tests__/worker-role-rls.test.ts` both do.
+ */
+const COLLECTION_WAITS_MODULE = new URL(
+  "../../../../../examples/plugins/workflow/runtime/collection-waits.js",
+  import.meta.url,
+).href;
+
+type CollectionWaitSweeps = {
+  processPendingWorkflowCollectionWaits: (
+    db: OpenShapeForgeDatabase,
+    options?: { batchSize?: number },
+  ) => Promise<{
+    groups: number;
+    matched: number;
+    timedOut: number;
+    stalledContinuationRouting: number;
+  }>;
+};
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -137,6 +159,10 @@ describe("the collection-wait sweeps", () => {
             await seedTenant(conn as unknown as Kysely<DB>, tenantB, "tenant-b");
           });
         });
+
+        const { processPendingWorkflowCollectionWaits } = (await import(
+          COLLECTION_WAITS_MODULE
+        )) as CollectionWaitSweeps;
 
         // The sweep, as a worker runs it: restricted role, no tenant scope.
         const result = await withDb(scratchUrl(name, true), async (db) =>

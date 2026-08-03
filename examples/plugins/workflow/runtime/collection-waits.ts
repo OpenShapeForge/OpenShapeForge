@@ -594,27 +594,56 @@ async function listPendingCollectionWaitReplayGroups(
  * without one that resumes.
  */
 async function countStalledContinuationRoutingWaits(db: OpenShapeForgeDatabase) {
-  return db.transaction().execute(async (trx) => {
+  // Two passes on purpose. The wait tables carry the worker axis, so the sweep
+  // may scan them across tenants; `workflow.instances` deliberately does not,
+  // because run data is reached from a session scoped to its own tenant. So the
+  // first pass resolves candidate waits per tenant from the wait tables alone,
+  // and the second reads instance status inside that tenant's session. Joining
+  // `instances` here in one sweep would have needed the axis on run data — the
+  // widening the queue/work split exists to avoid.
+  const candidates = await db.transaction().execute(async (trx) => {
     await sql`select set_config('app.worker_role', 'workflow-worker', true)`.execute(
       trx,
     );
-    const result = await sql<{ count: string }>`
-      select count(*)::text as count
+    const rows = await sql<{ tenant_id: string; instance_id: string }>`
+      select
+        cw.tenant_id::text,
+        cw.instance_id::text
       from workflow.collection_waits cw
-      join workflow.instances i
-        on i.tenant_id = cw.tenant_id
-       and i.id = cw.instance_id
       left join workflow.waits w
         on w.tenant_id = cw.tenant_id
        and w.wait_token = cw.wait_token
       where cw.status = 'pending'
         and cw.timeout_at is null
         and cw.created_at < now() - interval '5 minutes'
-        and i.status not in ('completed', 'failed', 'cancelled', 'skipped')
         and coalesce((w.wait_metadata ->> 'requiresContinuationRouting')::boolean, false) = true
     `.execute(trx);
-    return Number(result.rows[0]?.count ?? "0");
+    return rows.rows;
   });
+
+  if (candidates.length === 0) return 0;
+
+  const byTenant = new Map<string, string[]>();
+  for (const row of candidates) {
+    const list = byTenant.get(row.tenant_id) ?? [];
+    list.push(row.instance_id);
+    byTenant.set(row.tenant_id, list);
+  }
+
+  let stalled = 0;
+  for (const [tenantId, instanceIds] of byTenant) {
+    stalled += await db.transaction().execute(async (trx) => {
+      await sql`select set_config('app.tenant_id', ${tenantId}, true)`.execute(trx);
+      const result = await sql<{ count: string }>`
+        select count(*)::text as count
+        from workflow.instances i
+        where i.id = any(cast(${instanceIds} as uuid[]))
+          and i.status not in ('completed', 'failed', 'cancelled', 'skipped')
+      `.execute(trx);
+      return Number(result.rows[0]?.count ?? "0");
+    });
+  }
+  return stalled;
 }
 
 export async function processPendingWorkflowCollectionWaits(

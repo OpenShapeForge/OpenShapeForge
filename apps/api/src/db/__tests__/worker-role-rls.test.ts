@@ -334,7 +334,7 @@ describe("worker-role RLS axis", () => {
   );
 
   test(
-    "only the three declared queue tables carry the worker disjunct",
+    "only the declared queue and wait tables carry the worker disjunct",
     async () => {
       await withScratchDb(async (name) => {
         await withDb(scratchAdminUrl(name), async (db) => {
@@ -354,15 +354,39 @@ describe("worker-role RLS axis", () => {
               order by 1
             `.execute(conn);
 
+            // The whole list, enumerated. Three queue tables the command and
+            // schedule workers claim from, and the two wait tables the
+            // collection-wait sweeps scan (#221) — that scan is their claim.
             expect(policies.rows.map((row) => row.qualified)).toEqual([
+              "workflow.collection_waits",
               "workflow.control_commands",
               "workflow.schedule_fires",
               "workflow.schedules",
+              "workflow.waits",
             ]);
             // USING and WITH CHECK move together, so a claim can also write back.
             for (const row of policies.rows) {
               expect(row.qual).toContain(WORKER_ROLE);
               expect(row.withcheck).toContain(WORKER_ROLE);
+            }
+
+            // Run data stays off the axis — the queue/work split the whole
+            // design rests on. A worker reaches an instance only from a session
+            // scoped to its tenant, which is why the stalled-wait counter in
+            // `runtime/collection-waits.ts` resolves tenants first rather than
+            // joining `instances` in one cross-tenant sweep.
+            const runData = await sql<{ qualified: string; qual: string }>`
+              select
+                schemaname || '.' || tablename as qualified,
+                coalesce(qual, '') as qual
+              from pg_policies
+              where schemaname = 'workflow'
+                and tablename in ('instances', 'node_states')
+            `.execute(conn);
+
+            expect(runData.rows.length).toBe(2);
+            for (const row of runData.rows) {
+              expect(row.qual).not.toContain("current_worker_role");
             }
 
             // The other 17 policies are untouched. Spot-checked on the business

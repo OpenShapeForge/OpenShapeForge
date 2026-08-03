@@ -461,10 +461,20 @@ function workflowDataTables(): TableDefinition[] {
  * replaces `app.bypass_rls`, which would have granted the same worker read and
  * write on every tenant's business data to let it read a queue.
  *
- * Note which tables are NOT on the list: `instances`, `node_states`, `waits`
- * and `collection_waits` are reached only after a command is claimed, from a
- * session scoped to that command's tenant, so they need no widening at all. The
- * cross-tenant surface is the queue, not the work.
+ * `waits` and `collection_waits` are on the list for the same reason, though
+ * they are not a command queue. The collection-wait sweeps are their own poll
+ * loop: they scan every tenant's pending waits to find which ones an event has
+ * satisfied, and which have timed out. That scan is the claim, and it is
+ * cross-tenant by exactly the same argument. What it finds is then handed to a
+ * session scoped to that wait's own tenant to do the resuming — so the widening
+ * buys the sweep its scan and nothing more.
+ *
+ * Note which tables are NOT on the list: `instances` and `node_states` are
+ * reached only after a wait or a command is claimed, from a session scoped to
+ * that tenant, so they need no widening at all. The cross-tenant surface is the
+ * queue, not the work — which is why the stalled-wait counter in
+ * `runtime/collection-waits.ts` resolves its tenants first and only then reads
+ * instance status per tenant, rather than joining `instances` in one sweep.
  */
 function workflowExecutionTables(): TableDefinition[] {
   return [
@@ -548,6 +558,9 @@ function workflowExecutionTables(): TableDefinition[] {
       schema: "workflow",
       name: "waits",
       tenantScoped: true,
+      // Read across tenants by the collection-wait sweeps, which join it to
+      // read `wait_metadata` while deciding which pending waits to replay.
+      workerAccess: WORKFLOW_WORKER_ROLE,
       domainInternal: true,
       generatedCrud: false,
       columns: [
@@ -591,6 +604,10 @@ function workflowExecutionTables(): TableDefinition[] {
       schema: "workflow",
       name: "collection_waits",
       tenantScoped: true,
+      // Scanned and timed out across tenants by the collection-wait sweeps.
+      // That scan is this table's claim; the resuming it leads to happens in a
+      // session scoped to the wait's own tenant.
+      workerAccess: WORKFLOW_WORKER_ROLE,
       domainInternal: true,
       generatedCrud: false,
       columns: [
@@ -715,6 +732,19 @@ function workflowExecutionTables(): TableDefinition[] {
           required: true,
           references: { schema: "workflow", table: "definitions", column: "id", onDelete: "CASCADE" },
         },
+        // Which published graph this fire ran. A fire is a ledger entry, and
+        // without this it cannot say what it started — `definition_id` names the
+        // definition but not the version, and a definition's graph changes.
+        {
+          name: "version_id",
+          type: "uuid",
+          references: {
+            schema: "workflow",
+            table: "definition_versions",
+            column: "id",
+            onDelete: "SET NULL",
+          },
+        },
         { name: "trigger_node_id", type: "text", required: true },
         { name: "scheduled_at", type: "timestamptz", required: true },
         { name: "occurrence", type: "integer", required: true },
@@ -723,6 +753,21 @@ function workflowExecutionTables(): TableDefinition[] {
           name: "workflow_instance_id",
           type: "uuid",
           references: { schema: "workflow", table: "instances", column: "id", onDelete: "SET NULL" },
+        },
+        // The start command this fire enqueued. Written after the insert, by the
+        // same claim: the row is the fire's record that the start was queued, so
+        // a fire that committed without one is a worker that died between the
+        // two statements. Nullable for that window, and SET NULL rather than
+        // CASCADE because losing the command must not erase the fire.
+        {
+          name: "command_id",
+          type: "uuid",
+          references: {
+            schema: "workflow",
+            table: "control_commands",
+            column: "id",
+            onDelete: "SET NULL",
+          },
         },
         { name: "status", type: "text", required: true, default: "'started'::text" },
         { name: "created_at", type: "timestamptz", required: true, default: "now()" },

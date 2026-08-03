@@ -179,4 +179,130 @@ describe("the workflow-worker role", () => {
     },
     TEST_TIMEOUT,
   );
+
+  test(
+    "fires a due schedule, because the schedule worker runs in this role too",
+    async () => {
+      const tenant = randomUUID();
+      const author = randomUUID();
+
+      await withScratchDb(async (name) => {
+        const seeded = await withDb(scratchUrl(name, false), async (db) => {
+          const modules = await loadRuntimeModules();
+          expect(modules.failures).toEqual([]);
+          const moduleSeeds = modules.loaded.flatMap((module) => module.seeds ?? []);
+          await db.connection().execute((conn) => runMigrationChain(conn, { moduleSeeds }));
+
+          return db.connection().execute(async (conn) => {
+            const definition = await sql<{ id: string }>`
+              insert into workflow.definitions (tenant_id, name, is_active)
+              values (${tenant}::uuid, ${"nightly"}, true)
+              returning id::text
+            `.execute(conn);
+            const definitionId = definition.rows[0]!.id;
+
+            const graph = {
+              nodes: [
+                {
+                  id: "trigger-1",
+                  type: "triggerSchedule",
+                  config: { cron: "0 9 * * *", timezone: "UTC" },
+                },
+                { id: "end-1", type: "end", config: {} },
+              ],
+              edges: [{ source: "trigger-1", target: "end-1" }],
+            };
+            const version = await sql<{ id: string }>`
+              insert into workflow.definition_versions (
+                tenant_id, definition_id, version, definition, published_at, published_by
+              )
+              values (
+                ${tenant}::uuid, ${definitionId}::uuid, 1,
+                ${sql.lit(JSON.stringify(graph))}::jsonb, now(), ${author}::uuid
+              )
+              returning id::text
+            `.execute(conn);
+            const versionId = version.rows[0]!.id;
+
+            // The schedule row the sync helper would have written, with its
+            // fire already due — the worker's job here is to notice, not to
+            // wait out a cron boundary the test would have to sleep through.
+            await sql`
+              insert into workflow.schedules (
+                tenant_id, definition_id, version_id, trigger_node_id,
+                cron, timezone, started_by, status, generation,
+                next_fire_at, next_occurrence
+              )
+              values (
+                ${tenant}::uuid, ${definitionId}::uuid, ${versionId}::uuid, ${"trigger-1"},
+                ${"0 9 * * *"}, ${"UTC"}, ${author}::uuid, ${"active"}, 1,
+                now() - interval '1 minute', 1
+              )
+            `.execute(conn);
+
+            return { definitionId, versionId };
+          });
+        });
+
+        // The same single role as the test above. Nothing here names the
+        // schedule worker: if it is not started by the role, nothing fires.
+        const handle = await startWorkerRole(WORKER_ROLE, {
+          databaseUrl: scratchUrl(name, true),
+          log: { info: () => {}, warn: () => {}, error: () => {} },
+        });
+
+        try {
+          await withDb(scratchUrl(name, false), async (db) => {
+            const fire = await until("the due schedule to fire", async () => {
+              const rows = await sql<{
+                version_id: string | null;
+                command_id: string | null;
+                status: string;
+              }>`
+                select version_id::text, command_id::text, status
+                from workflow.schedule_fires
+                where tenant_id = ${tenant}::uuid
+              `.execute(db);
+              const row = rows.rows[0];
+              return row && row.command_id ? row : null;
+            });
+
+            expect(fire.version_id).toBe(seeded.versionId);
+            expect(fire.status).toBe("started");
+
+            // ...and the two halves of the role met: the schedule worker
+            // enqueued a start, and the control-command worker drained it. That
+            // is why they share a role — either alone leaves this unfinished.
+            // Wait for a TERMINAL status, not merely "no longer pending":
+            // `processing` is the claim, and a row read there is in flight
+            // rather than finished.
+            const terminal = ["completed", "runtime_consumed", "failed"];
+            const command = await until("the start command to be drained", async () => {
+              const rows = await sql<{ status: string; command_type: string }>`
+                select status, command_type
+                from workflow.control_commands
+                where id = ${fire.command_id}::uuid
+              `.execute(db);
+              const row = rows.rows[0];
+              return row && terminal.includes(row.status) ? row : null;
+            });
+            expect(command.command_type).toBe("workflow.instance.start");
+            expect(["completed", "runtime_consumed"]).toContain(command.status);
+
+            // The schedule advanced rather than re-firing the same occurrence.
+            const schedule = await sql<{ next_occurrence: number; locked_by: string | null }>`
+              select next_occurrence, locked_by
+              from workflow.schedules
+              where tenant_id = ${tenant}::uuid
+            `.execute(db);
+            expect(schedule.rows[0]!.next_occurrence).toBe(2);
+            expect(schedule.rows[0]!.locked_by).toBeNull();
+          });
+        } finally {
+          await handle.stop();
+        }
+      });
+    },
+    TEST_TIMEOUT,
+  );
 });

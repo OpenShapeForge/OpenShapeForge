@@ -269,6 +269,26 @@ const NODE_TYPES = /* GraphQL */ `
   }
 `;
 
+/**
+ * Every field a palette reads, including the non-null ones. `outputFields` and
+ * `runtimeSupport` are declared `!`, so a resolver that omits either fails the
+ * whole query rather than returning a hole — which is precisely what made this
+ * worth asking for over HTTP instead of trusting the mapper.
+ */
+const NODE_TYPES_FOR_PALETTE = /* GraphQL */ `
+  query NodeTypesForPalette {
+    workflowNodeTypes {
+      type
+      catalog
+      category
+      label
+      configFields
+      outputFields
+      runtimeSupport
+    }
+  }
+`;
+
 const CREATE_DEFINITION = /* GraphQL */ `
   mutation CreateDefinition($input: CreateWorkflowDefinitionInput!) {
     createWorkflowDefinition(input: $input) {
@@ -401,6 +421,51 @@ describe("workflow over HTTP", () => {
       // wrong slice of the shared catalog table.
       expect(returned).toEqual(await seededNodeTypes());
       expect(returned.length).toBeGreaterThan(0);
+    },
+    TEST_TIMEOUT,
+  );
+
+  httpTest(
+    "the node catalog tells a palette where a node came from and whether it runs",
+    async () => {
+      const data = await expectData(writerToken!, NODE_TYPES_FOR_PALETTE);
+      const nodes = data.workflowNodeTypes as {
+        type: string;
+        catalog: string;
+        outputFields: unknown;
+        runtimeSupport: string;
+      }[];
+
+      // Both slices are present and distinguishable. Before this field existed
+      // the union came back flat, and a palette had no way to separate a node
+      // type this repo ships from one a host repo is expected to implement.
+      const byType = new Map(nodes.map((node) => [node.type, node]));
+      expect(byType.get("timer")?.catalog).toBe("standard");
+      expect(byType.get("message.reply")?.catalog).toBe("domain");
+
+      // The three states, each on a node type that reaches it for a different
+      // reason: a registered bridge, a missing one, and an engine limit no
+      // bridge would lift.
+      expect(byType.get("timer")?.runtimeSupport).toBe("EXECUTABLE");
+      expect(byType.get("triggerManual")?.runtimeSupport).toBe("EXECUTABLE");
+      expect(byType.get("condition")?.runtimeSupport).toBe("UNIMPLEMENTED");
+      expect(byType.get("message.reply")?.runtimeSupport).toBe("UNIMPLEMENTED");
+      expect(byType.get("join")?.runtimeSupport).toBe("UNSUPPORTED");
+      expect(byType.get("split")?.runtimeSupport).toBe("UNSUPPORTED");
+
+      // Only a small minority of the catalog can run. Asserting the shape of
+      // that gap rather than an exact count keeps this from failing every time
+      // a bridge lands, while still failing if the field silently reports
+      // everything executable.
+      const executable = nodes.filter((node) => node.runtimeSupport === "EXECUTABLE");
+      expect(executable.length).toBeGreaterThan(0);
+      expect(executable.length).toBeLessThan(nodes.length);
+
+      // Non-null in the schema, and unset by the mapper until this landed, so
+      // asking for it used to fail the query outright.
+      for (const node of nodes) {
+        expect(Array.isArray(node.outputFields)).toBe(true);
+      }
     },
     TEST_TIMEOUT,
   );

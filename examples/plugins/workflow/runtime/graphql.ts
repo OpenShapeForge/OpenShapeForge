@@ -58,6 +58,7 @@ import {
   getEntityTriggerOptions,
 } from "./entity-trigger-registry.js";
 import { getWorkflowNodeType, listWorkflowNodeTypes } from "./node-catalog.js";
+import { WORKFLOW_NODE_RUNTIME_SUPPORT_ENUM_VALUES } from "./node-executability.js";
 
 /** Enough of the API's GraphQL context to serve these fields. */
 type WorkflowGraphqlContext = {
@@ -208,14 +209,28 @@ export const workflowTypeDefs = /* GraphQL */ `
     expiresAt: String!
   }
 
+  "Whether this deployment can run a node type. See runtime/node-executability.ts."
+  enum WorkflowNodeRuntimeSupport {
+    "A bridge is registered, or the runtime handles the type natively."
+    EXECUTABLE
+    "In the catalog with no bridge here; a host repo can supply one."
+    UNIMPLEMENTED
+    "The engine cannot run it as designed. A bridge would not help."
+    UNSUPPORTED
+  }
+
   type WorkflowNodeType {
     type: String!
+    "Which pack authored it: standard, entity or domain. Provenance, not capability."
+    catalog: String!
     category: String!
     "Localized; the client picks a locale."
     label: JSON!
     description: JSON
     configFields: JSON!
     outputFields: JSON!
+    "What a palette gates on. Placing a non-EXECUTABLE node yields a graph that fails at run time."
+    runtimeSupport: WorkflowNodeRuntimeSupport!
   }
 
   type WorkflowEntityNodePaletteEntry {
@@ -315,6 +330,12 @@ export const workflowMutationFields = /* GraphQL */ `
 type Args = Record<string, never>;
 
 export const workflowResolvers = {
+  // An enum value map, not a field resolver: it tells graphql-js that the
+  // SCREAMING_CASE member `EXECUTABLE` carries the internal value the runtime
+  // actually returns. Without it every `runtimeSupport` read would fail to
+  // serialize, because "executable" is not the name of an enum member.
+  WorkflowNodeRuntimeSupport: WORKFLOW_NODE_RUNTIME_SUPPORT_ENUM_VALUES,
+
   Query: {
     workflowDefinitions: (
       _p: unknown,

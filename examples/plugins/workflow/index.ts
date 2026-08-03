@@ -116,9 +116,11 @@ function toServicePath(oldCompilerPath: string): string | null {
 function workflowPlatformTables(): TableDefinition[] {
   return [
     {
-      // One row per workflow node type (standard + entity catalogs). The API
-      // node-catalog loader reads this at runtime; the generated
-      // node-catalog.seed.json is its seed source, keyed by catalog_checksum.
+      // One row per workflow node type, across all three catalogs — this
+      // plugin seeds `standard` and `entity`, the domain node packs seed
+      // `domain` into the same table. The API node-catalog loader reads the
+      // union at runtime; the generated node-catalog.seed.json is this
+      // plugin's seed source, keyed by catalog_checksum.
       schema: "platform",
       name: "workflow_node_catalog_entries",
       tenantScoped: false,
@@ -126,7 +128,7 @@ function workflowPlatformTables(): TableDefinition[] {
       generatedCrud: false,
       columns: [
         { name: "node_type", type: "text", primaryKey: true },
-        { name: "catalog", type: "text", required: true }, // 'standard' | 'entity'
+        { name: "catalog", type: "text", required: true }, // 'standard' | 'entity' | 'domain'
         { name: "action", type: "text" },
         { name: "category", type: "text", required: true },
         { name: "label", type: "jsonb", required: true, default: "'{}'::jsonb" },

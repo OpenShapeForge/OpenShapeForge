@@ -66,7 +66,10 @@ import { validateWorkflowDefinition } from "../definition-validation.js";
 import { __generatedEntityBridgeInternals } from "../generated-entity-bridges.js";
 import { resetNodeCatalogForTests } from "../node-catalog-store.js";
 import { selectNextEdge } from "../process-runtime.js";
-import { validateResolvedWorkflowNodeConfig } from "../resolved-config-validation.js";
+import {
+  canonicalizeWorkflowNodeConfigAliases,
+  validateResolvedWorkflowNodeConfig,
+} from "../resolved-config-validation.js";
 
 const RUNTIME_DIR = resolve(import.meta.dir, "..");
 
@@ -142,7 +145,13 @@ function declaredHandles(config: Record<string, unknown>): string[] {
  * carry no `when` of their own, and what happens inside one is pinned where the
  * condition evaluator is tested.
  */
-function emittedHandles(config: Record<string, unknown>): string[] {
+function emittedHandles(rawConfig: Record<string, unknown>): string[] {
+  // Canonicalise first, because the runtime does: `bridge-node.ts` resolves and
+  // canonicalises a node's config before any bridge sees it, so a bridge is
+  // never handed the stored spelling. Driving `selectDecisionOutcome` with the
+  // raw config would model something that never happens, and would report an
+  // alias as a disagreement between the two sides when both in fact read it.
+  const config = canonicalizeWorkflowNodeConfigAliases("decision", rawConfig);
   const branches = config.branches;
   if (!Array.isArray(branches)) {
     return sorted([selectDecisionOutcome(config).outputHandle]);
@@ -223,6 +232,22 @@ const DECISION_CONFIGS: { name: string; config: Record<string, unknown> }[] = [
     name: "branches stored as something other than an array",
     config: { branches: "not-an-array" },
   },
+  {
+    // Was a recorded defect when this file was written: `decision.yaml` declares
+    // `conditions` as a runtime alias for `branches`, the runtime canonicalised
+    // it before the bridge ran, and the validator read the stored config and
+    // never saw it. The two disagreed about the same node — the drift this file
+    // exists for — and it cost an unwired branch no ORPHAN_NODE_HANDLE plus a
+    // false ORPHAN_EDGE_HANDLE on the edge that did wire it.
+    //
+    // Now that the validator canonicalises through the same helper, the alias is
+    // just another spelling and belongs in the table with every other one.
+    name: "branches under the catalog's `conditions` alias",
+    config: {
+      conditions: [{ id: "approve", handle: "approve", when: WHEN_TRUE }],
+      defaultEdgeId: "reject",
+    },
+  },
 ];
 
 describe("decision: the bridge and the validator derive the same handles", () => {
@@ -240,42 +265,37 @@ describe("decision: the bridge and the validator derive the same handles", () =>
 });
 
 describe("decision: a handle the validator does not declare strands the run", () => {
-  test(
-    "known defect: `declaredOutputHandles` ignores the catalog's `conditions` alias",
-    () => {
-      // `decision.yaml` declares `conditions` as a runtime alias for `branches`,
-      // so a stored config using it is a shape this deployment supports. The
-      // runtime canonicalises it before the bridge sees it; the validator reads
-      // the stored config and has no idea the alias exists. The two therefore
-      // disagree about the same node, which is the drift this file exists for.
-      const aliased = {
-        conditions: [{ id: "approve", handle: "approve", when: WHEN_TRUE }],
-        defaultEdgeId: "reject",
-      };
+  test("an undeclared handle is what a stranded run actually looks like", () => {
+    // The cost of the two sides disagreeing, kept as its own case even though
+    // no current config produces it. The table above proves they agree today;
+    // this pins WHY that matters, so a future divergence is read as the outage
+    // it is rather than as a cosmetic warning gap.
+    //
+    // The alias spelling was a real instance of this and is now in the table.
+    expect(() =>
+      selectNextEdge(
+        [{ source: DECISION_NODE_ID, sourceHandle: "reject", target: "end" }],
+        DECISION_NODE_ID,
+        "approve",
+      ),
+    ).toThrow(/No edge from node .* matches output handle "approve"/);
+  });
 
-      const canonical = validateResolvedWorkflowNodeConfig("decision", aliased);
-      expect(canonical.ok).toBe(true);
-      expect(selectDecisionOutcome(canonical.value).outputHandle).toBe("approve");
+  test("the catalog's alias is canonicalised before the bridge and the validator", () => {
+    // Both readers go through `canonicalizeWorkflowNodeConfigAliases` now, so
+    // the spelling cannot change either answer. Asserted from both ends rather
+    // than trusting the shared helper, because the bug this replaces was
+    // exactly one end forgetting to call it.
+    const aliased = {
+      conditions: [{ id: "approve", handle: "approve", when: WHEN_TRUE }],
+      defaultEdgeId: "reject",
+    };
 
-      // THIS IS THE DEFECT, recorded rather than fixed: the branch the bridge
-      // will emit is absent from what the validator declares, so nothing tells
-      // the author to wire it and no ORPHAN_NODE_HANDLE is raised for it. When
-      // `declaredOutputHandles` learns to canonicalise aliases, this becomes
-      // ["approve", "reject"] and the case folds into the table above.
-      expect(declaredHandles(aliased)).toEqual(["reject"]);
-
-      // What that costs at run time. The author wires the handles they were
-      // told about; the branch that was never mentioned has no edge, and the
-      // run fails here rather than at publish time.
-      expect(() =>
-        selectNextEdge(
-          [{ source: DECISION_NODE_ID, sourceHandle: "reject", target: "end" }],
-          DECISION_NODE_ID,
-          "approve",
-        ),
-      ).toThrow(/No edge from node .* matches output handle "approve"/);
-    },
-  );
+    const canonical = validateResolvedWorkflowNodeConfig("decision", aliased);
+    expect(canonical.ok).toBe(true);
+    expect(selectDecisionOutcome(canonical.value).outputHandle).toBe("approve");
+    expect(declaredHandles(aliased)).toEqual(["approve", "reject"]);
+  });
 });
 
 // ---------------------------------------------------------------------------

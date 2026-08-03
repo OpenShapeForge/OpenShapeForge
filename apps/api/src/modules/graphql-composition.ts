@@ -16,6 +16,7 @@
  * This is composition only; it neither imports nor knows about the core
  * schema's own fields. The caller passes those in as reserved names.
  */
+import { GraphQLError } from "graphql";
 import type { ModuleGraphqlContribution, ModuleRuntimeContext, RuntimeModule } from "./contract.js";
 
 export type ComposedModuleGraphql = {
@@ -100,6 +101,57 @@ function claimRootFields(
   }
 }
 
+/**
+ * Re-throw a module's error as a real `GraphQLError`, so its code survives the
+ * wire.
+ *
+ * A module has no `graphql` dependency — deliberately, so a plugin can be
+ * written without one — and therefore throws a plain `Error` carrying
+ * `extensions.code`. graphql-js copies those extensions when it locates the
+ * error, so the code is intact for anything calling `graphql()` in process.
+ *
+ * It does not survive the server. graphql-yoga masks errors by default, and
+ * keeps one only when the terminal link of the `originalError` chain is
+ * `instanceof GraphQLError`. A plain `Error` is not, so every module error
+ * reached a client as `INTERNAL_SERVER_ERROR` / "Unexpected error." — a caller
+ * could not tell "you are not signed in" from "the server broke", and could not
+ * fall back on the status either, since yoga answers 200 when `data` is present.
+ * In-process tests could never have caught it; only a request over HTTP does.
+ *
+ * Wrapping here rather than in each module keeps the fix in the layer that owns
+ * `graphql`, and covers every runtime module rather than the one that noticed.
+ *
+ * The `originalError` is deliberately NOT threaded onto the wrapper: yoga walks
+ * that chain to its end, so a GraphQLError wrapping a plain Error is masked just
+ * the same. The wrapper has to be the terminal link.
+ */
+function wrapModuleResolver(resolver: unknown): unknown {
+  if (typeof resolver !== "function") return resolver;
+  const fn = resolver as (...args: unknown[]) => unknown;
+
+  const rethrow = (error: unknown): never => {
+    if (error instanceof GraphQLError) throw error;
+    const extensions =
+      error && typeof error === "object" && "extensions" in error
+        ? (error as { extensions?: unknown }).extensions
+        : undefined;
+    if (!extensions || typeof extensions !== "object") throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new GraphQLError(message, {
+      extensions: extensions as Record<string, unknown>,
+    });
+  };
+
+  return (...args: unknown[]) => {
+    try {
+      const result = fn(...args);
+      return result instanceof Promise ? result.catch(rethrow) : result;
+    } catch (error) {
+      return rethrow(error);
+    }
+  };
+}
+
 export function composeModuleGraphql(
   modules: readonly RuntimeModule[],
   context: ModuleRuntimeContext,
@@ -135,7 +187,7 @@ export function composeModuleGraphql(
             `Runtime module "${module.name}" defines a resolver for ${typeName}.${fieldName}, which another module already defines.`,
           );
         }
-        target[fieldName] = resolver;
+        target[fieldName] = wrapModuleResolver(resolver);
       }
     }
   }

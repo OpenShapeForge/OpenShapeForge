@@ -37,6 +37,7 @@
 import type { CompilerPlugin } from "../../../packages/compiler/src/plugins.js";
 import type { GeneratedArtifact, TableDefinition } from "../../../packages/compiler/src/schema.js";
 import { generateWorkflowContractArtifacts } from "./src/workflow-contract.js";
+import { WORKFLOW_WORKER_ROLE } from "./worker-role.js";
 
 const API_WORKFLOW_ROOT = "apps/api/src/generated/workflow";
 const WEB_WORKFLOW_ROOTS = [
@@ -452,6 +453,18 @@ function workflowDataTables(): TableDefinition[] {
  * second run. That is also what lets the durable-execution service be optional
  * — the queue is the durability, and an external dispatcher is one
  * implementation of draining it.
+ *
+ * Claiming is cross-tenant by nature — one worker drains every tenant's backlog
+ * — so exactly the three tables a claim touches declare
+ * `workerAccess: WORKFLOW_WORKER_ROLE`. That widens their policy to admit a
+ * session holding `app.worker_role`, and nothing else in the manifest moves. It
+ * replaces `app.bypass_rls`, which would have granted the same worker read and
+ * write on every tenant's business data to let it read a queue.
+ *
+ * Note which tables are NOT on the list: `instances`, `node_states`, `waits`
+ * and `collection_waits` are reached only after a command is claimed, from a
+ * session scoped to that command's tenant, so they need no widening at all. The
+ * cross-tenant surface is the queue, not the work.
  */
 function workflowExecutionTables(): TableDefinition[] {
   return [
@@ -460,6 +473,8 @@ function workflowExecutionTables(): TableDefinition[] {
       schema: "workflow",
       name: "control_commands",
       tenantScoped: true,
+      // Claimed across tenants by the control-command worker.
+      workerAccess: WORKFLOW_WORKER_ROLE,
       domainInternal: true,
       generatedCrud: false,
       columns: [
@@ -621,6 +636,8 @@ function workflowExecutionTables(): TableDefinition[] {
       schema: "workflow",
       name: "schedules",
       tenantScoped: true,
+      // Scanned across tenants by the schedule worker for due rows.
+      workerAccess: WORKFLOW_WORKER_ROLE,
       domainInternal: true,
       generatedCrud: false,
       columns: [
@@ -678,6 +695,9 @@ function workflowExecutionTables(): TableDefinition[] {
       schema: "workflow",
       name: "schedule_fires",
       tenantScoped: true,
+      // Written by the schedule worker in the same claim, before the tenant is
+      // known well enough to open a tenant-scoped session on it.
+      workerAccess: WORKFLOW_WORKER_ROLE,
       domainInternal: true,
       generatedCrud: false,
       columns: [

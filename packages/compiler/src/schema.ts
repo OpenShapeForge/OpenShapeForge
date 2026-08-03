@@ -355,6 +355,33 @@ export type TableDefinition = {
    * the supporting composite indexes. Requires `tenantScoped: true`.
    */
   rowScope?: RowScopePolicy;
+  /**
+   * The worker role permitted to reach this table ACROSS tenants — rendered as
+   * an extra `app.current_worker_role() = '<role>'` disjunct in the emitted
+   * policy, next to the existing `app.bypass_rls()` short-circuit.
+   *
+   * This axis WIDENS, unlike every other one here: `rowScope`'s group and user
+   * axes narrow within a tenant, and the tenant predicate is always required
+   * alongside them. This admits a session that has no tenant at all.
+   *
+   * It exists so a queue-draining worker reads the queue BECAUSE A POLICY SAYS
+   * SO rather than by setting `app.bypass_rls`, which is all-or-nothing across
+   * every tenant-scoped table in the manifest. Declare it only on queue-shaped
+   * tables a worker claims from — never on a table holding tenant business
+   * data, where the correct grant is a tenant-scoped session and not this.
+   *
+   * Requires `tenantScoped: true`: on a global table there is no tenant
+   * boundary to widen, so accepting it would imply a guarantee that is not
+   * there.
+   *
+   * What this is NOT: authentication. `app.worker_role` is a GUC, so anything
+   * that can set a GUC can claim to be a worker — exactly as true of
+   * `app.bypass_rls`. The boundary is that the API's request path never sets it
+   * and a worker's boot path does; that is a code boundary, not a database one.
+   * Making it a database boundary means a separate Postgres role with its own
+   * grants.
+   */
+  workerAccess?: string;
 };
 
 export type RelationshipRegisterEntry = {

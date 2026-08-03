@@ -165,7 +165,47 @@ function groupFunctionForExpand(expand: GroupExpand): string {
   }
 }
 
-function renderRowScopePredicate(table: TableDefinition): string | undefined {
+/**
+ * The worker-role disjunct for a table's policy, or "" when it declares none.
+ *
+ * Emitted next to `app.bypass_rls()` because it plays the same structural role
+ * — a short-circuit evaluated before the tenant predicate — and the opposite
+ * security role: the bypass admits every tenant-scoped table in the manifest,
+ * this admits exactly the table that asked for it.
+ *
+ * The empty string is load-bearing. Every table that does not declare
+ * `workerAccess` must emit the predicate it emitted before this field existed,
+ * byte for byte; interpolating "" into the same template is what guarantees
+ * that, rather than a second code path that has to be kept in step.
+ *
+ * Validation lives here rather than only in the manifest loader because plugin
+ * `contributePlatformTables` hooks never pass through it — and the workflow
+ * queue tables, the reason this field exists at all, arrive that way.
+ */
+function renderWorkerAccessDisjunct(table: TableDefinition): string {
+  const workerRole = table.workerAccess;
+  if (workerRole === undefined) {
+    return "";
+  }
+  if (typeof workerRole !== "string" || workerRole.trim().length === 0) {
+    throw new Error(
+      `Table ${table.schema}.${table.name} declares an empty workerAccess. ` +
+        `Name the worker role permitted to read this table across tenants, or remove the field.`,
+    );
+  }
+  if (!table.tenantScoped) {
+    throw new Error(
+      `Table ${table.schema}.${table.name} declares workerAccess "${workerRole}" but is not tenantScoped. ` +
+        `workerAccess widens a tenant policy; a global table has no tenant boundary to widen, so accepting it would imply a guarantee that is not there.`,
+    );
+  }
+  return ` OR app.current_worker_role() = ${quoteSqlString(workerRole)}`;
+}
+
+function renderRowScopePredicate(
+  table: TableDefinition,
+  workerAccess: string,
+): string | undefined {
   const scope = table.rowScope;
   if (!scope) return undefined;
 
@@ -221,10 +261,10 @@ function renderRowScopePredicate(table: TableDefinition): string | undefined {
   if (branches.length === 0) {
     // Caller declared rowScope with no group/user axes — degenerate case;
     // behave the same as plain tenant scoping.
-    return `app.bypass_rls() OR (${tenant})`;
+    return `app.bypass_rls()${workerAccess} OR (${tenant})`;
   }
 
-  return `app.bypass_rls() OR (${tenant} AND (${branches.join(" OR ")}))`;
+  return `app.bypass_rls()${workerAccess} OR (${tenant} AND (${branches.join(" OR ")}))`;
 }
 
 function deriveRowScopeIndexes(table: TableDefinition): Array<{
@@ -269,6 +309,11 @@ function renderIndexSql(
 }
 
 function renderTableSql(table: TableDefinition): string {
+  // Resolved before the tenantScoped branch below so a workerAccess on a global
+  // table is REJECTED rather than silently dropped — the table emits no policy
+  // at all there, and a declaration that quietly does nothing reads like a
+  // grant that was made.
+  const workerAccess = renderWorkerAccessDisjunct(table);
   const lines = [
     `CREATE SCHEMA IF NOT EXISTS ${quoteIdent(table.schema)};`,
     "",
@@ -278,7 +323,7 @@ function renderTableSql(table: TableDefinition): string {
   ];
 
   if (table.tenantScoped) {
-    const rowScopePredicate = renderRowScopePredicate(table);
+    const rowScopePredicate = renderRowScopePredicate(table, workerAccess);
     if (rowScopePredicate) {
       const policyName = quoteIdent(`${table.name}_row_scope`);
       lines.push(
@@ -292,7 +337,7 @@ function renderTableSql(table: TableDefinition): string {
       );
     } else {
       const policyName = quoteIdent(`${table.name}_tenant_isolation`);
-      const tenantExpression = "app.bypass_rls() OR (tenant_id = app.current_tenant())";
+      const tenantExpression = `app.bypass_rls()${workerAccess} OR (tenant_id = app.current_tenant())`;
       lines.push(
         "",
         `ALTER TABLE ${tableIdent(table)} ENABLE ROW LEVEL SECURITY;`,

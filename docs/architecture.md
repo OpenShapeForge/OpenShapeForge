@@ -161,7 +161,9 @@ configs, empty table, nothing reading it.
 - **`rowScope` multi-axis RLS** (group/user/bypass axes) exists in the schema
   emitter and the `app.*` helper functions, but no current table declares it;
   every tenant-scoped table today gets the plain
-  `tenant_id = app.current_tenant()` policy.
+  `tenant_id = app.current_tenant()` policy. The one axis that *is* live is
+  `workerAccess`, on the three workflow queue tables — see
+  [api.md](api.md#the-worker-axis).
 
 ## Further reading
 

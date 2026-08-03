@@ -1,0 +1,25 @@
+{
+  "//": [
+    "No DOM lib. The package runs in a browser and under Bun, and the one",
+    "browser-only global it touches (`Worker`) is probed with `typeof` rather",
+    "than called, so declaring DOM would hide the fact that the server path",
+    "must not assume it."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["esnext"],
+    "types": ["bun"],
+    "skipLibCheck": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}

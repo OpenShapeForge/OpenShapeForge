@@ -69,6 +69,13 @@ jobs:
       - name: Compiler unit tests
         run: bun test packages/compiler
 
+      # The shipped example plugins carry unit tests that nothing ran until
+      # now: `test:compiler` is scoped to packages/compiler and the db/e2e jobs
+      # only reach plugin code through the API. A test that never executes is
+      # worse than no test, because it reads as coverage.
+      - name: Example plugin unit tests
+        run: bun run test:examples
+
       # API unit tests that need no database: config (limits, production guard),
       # the Fastify rate-limit boundary (driven with app.inject), and the
       # authorization guards that reject before any transaction opens. The

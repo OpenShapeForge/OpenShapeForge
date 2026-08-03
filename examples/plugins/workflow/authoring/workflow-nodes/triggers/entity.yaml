@@ -15,11 +15,11 @@ configFields:
       nl: Entiteit
       en: Entity
     description:
-      nl: De entiteit waarop deze trigger moet luisteren, bijvoorbeeld Factuur of Werkorder.
-      en: The entity this trigger should listen to, for example Invoice or Workorder.
+      nl: De entiteit waarop deze trigger moet luisteren, bijvoorbeeld Relation of ContactDetail.
+      en: The entity this trigger should listen to, for example Relation or ContactDetail.
     help:
-      en: The picker also supplies the matching internal `domain`. Together those two fields must match the ERP event envelope so the workflow can subscribe to the correct `entity.mutations` events.
-      nl: De picker levert ook het bijpassende interne `domain`. Samen moeten die twee velden overeenkomen met de ERP-event-envelope zodat de workflow op de juiste `entity.mutations`-events kan abonneren.
+      en: The picker also supplies the matching internal `domain`. Together those two fields must match the entity event envelope so the workflow can subscribe to the correct `entity.mutations` events.
+      nl: De picker levert ook het bijpassende interne `domain`. Samen moeten die twee velden overeenkomen met de entity-event-envelope zodat de workflow op de juiste `entity.mutations`-events kan abonneren.
     validation:
       required: true
     options:
@@ -33,8 +33,8 @@ configFields:
       nl: Domein
       en: Domain
     description:
-      en: Internal ERP domain paired with the selected entity.
-      nl: Intern ERP-domein dat hoort bij de geselecteerde entiteit.
+      en: Internal domain paired with the selected entity.
+      nl: Intern domein dat hoort bij de geselecteerde entiteit.
     help:
       en: This is hidden because authors pick an entity, not a free-form domain. The web picker writes both values so the runtime can match the exact event envelope.
       nl: Dit is verborgen omdat auteurs een entiteit kiezen, niet handmatig een domein. De web-picker schrijft beide waarden zodat de runtime exact op de event-envelope kan matchen.

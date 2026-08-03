@@ -66,26 +66,47 @@ describe("module-contributed seeds", () => {
       expect(modules.failures).toEqual([]);
 
       const moduleSeeds = modules.loaded.flatMap((module) => module.seeds ?? []);
-      // The workflow plugin is registered in this repo and contributes one seed.
-      expect(moduleSeeds.map((seed) => seed.name)).toEqual(["workflowCatalogs"]);
+      // Two plugins contribute a seed each: the workflow plugin's standard and
+      // entity catalogs, and the domain node packs split out of it. Order
+      // follows `authoring.config.yaml`, and the chain applies them in it.
+      expect(moduleSeeds.map((seed) => seed.name)).toEqual([
+        "workflowCatalogs",
+        "workflowDomainNodeCatalog",
+      ]);
 
       await withScratchDb(async (url) => {
         const result = await withDb(url, (db) =>
           db.connection().execute((conn) => runMigrationChain(conn, { moduleSeeds })),
         );
 
-        const workflow = result.moduleSeeds.workflowCatalogs;
-        expect(workflow).toBeDefined();
-        expect(workflow?.present).toBe(true);
-        expect(workflow?.skipped).toBe(false);
-        expect(workflow?.rows).toBeGreaterThan(0);
+        for (const name of ["workflowCatalogs", "workflowDomainNodeCatalog"]) {
+          const seed = result.moduleSeeds[name];
+          expect(seed).toBeDefined();
+          expect(seed?.present).toBe(true);
+          expect(seed?.skipped).toBe(false);
+          expect(seed?.rows).toBeGreaterThan(0);
+        }
 
         await withDb(url, async (db) => {
-          const counted = await db
+          // Both seeds write `platform.workflow_node_catalog_entries`, each
+          // authoritative over its own `catalog` slice via a scoped delete. The
+          // count per slice is what proves they coexist: a seed whose delete
+          // was not scoped would leave its own rows and nothing else, and a
+          // total-only assertion cannot tell that apart from a healthy table.
+          const bySlice = await db
             .selectFrom("platform.workflow_node_catalog_entries")
-            .select(({ fn }) => fn.countAll<string>().as("total"))
-            .executeTakeFirst();
-          expect(Number(counted?.total ?? 0)).toBeGreaterThan(0);
+            .select(({ fn }) => ["catalog", fn.countAll<string>().as("total")])
+            .groupBy("catalog")
+            .orderBy("catalog")
+            .execute();
+
+          expect(
+            bySlice.map((row) => [row.catalog, Number(row.total) > 0]),
+          ).toEqual([
+            ["domain", true],
+            ["entity", true],
+            ["standard", true],
+          ]);
         });
       });
     },

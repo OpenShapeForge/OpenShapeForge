@@ -8,6 +8,7 @@ export const DEFAULT_BASELINE_PATH = "config/ts-nocheck-baseline.json";
 export const DEFAULT_SCAN_ROOTS = [
   "packages/compiler/src",
   "examples/plugins/workflow/src",
+  "examples/plugins/workflow-domain-nodes/src",
 ];
 
 const TS_NOCHECK_DIRECTIVE = /^\s*\/\/\s*@ts-nocheck\b/m;

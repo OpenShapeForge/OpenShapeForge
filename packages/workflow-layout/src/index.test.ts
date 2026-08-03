@@ -6,6 +6,7 @@ import {
   type WorkflowLayoutDefinition,
   type WorkflowLayoutNode,
 } from "./index.js";
+import { collectCoercedEdgeHandles } from "./graph.js";
 
 function node(id: string, type = "task"): WorkflowLayoutNode {
   return {
@@ -132,5 +133,105 @@ describe("workflow layout", () => {
     const second = await layoutWorkflowDefinition(definition, { runtime: "server" });
 
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));
+  });
+});
+
+/**
+ * An edge naming a handle its source node does not have is drawable but not
+ * runnable: layout falls back to a port that exists, while the process runtime
+ * matches handles exactly and fails the run with NO_EDGE_FOR_HANDLE. Layout
+ * keeps drawing it — a blank canvas helps nobody — but must not do so silently,
+ * or the canvas renders a broken graph as though it were fine.
+ */
+describe("coerced edge handles", () => {
+  function branching(id: string): WorkflowLayoutNode {
+    return {
+      ...node(id),
+      outputHandles: [
+        { id: "approved", label: "Approved" },
+        { id: "rejected", label: "Rejected" },
+      ],
+    };
+  }
+
+  it("reports an edge whose handle the source node does not have", () => {
+    const coerced = collectCoercedEdgeHandles(
+      [branching("decide"), node("next")],
+      [{ id: "e1", source: "decide", target: "next", sourceHandle: "maybe" }],
+    );
+
+    expect(coerced).toEqual([
+      {
+        edgeId: "e1",
+        sourceNodeId: "decide",
+        requestedHandle: "maybe",
+        // No `default` port on this node, so layout lands it on the first one.
+        resolvedHandle: "approved",
+      },
+    ]);
+  });
+
+  it("reports an unhandled edge when the node has no default to fall back to", () => {
+    // Absent `sourceHandle` means `default` by the same convention the runtime
+    // uses — so on a node with no `default` port, an unhandled edge is drift.
+    const coerced = collectCoercedEdgeHandles(
+      [branching("decide"), node("next")],
+      [{ id: "e1", source: "decide", target: "next" }],
+    );
+
+    expect(coerced).toHaveLength(1);
+    expect(coerced[0]?.requestedHandle).toBeNull();
+  });
+
+  it("says nothing about edges that resolve exactly", () => {
+    expect(
+      collectCoercedEdgeHandles(
+        [branching("decide"), node("a"), node("b")],
+        [
+          { id: "e1", source: "decide", target: "a", sourceHandle: "approved" },
+          { id: "e2", source: "decide", target: "b", sourceHandle: "rejected" },
+        ],
+      ),
+    ).toEqual([]);
+    // Absent handle against a node that HAS a default is the normal case, not drift.
+    expect(
+      collectCoercedEdgeHandles(
+        [node("step"), node("next")],
+        [{ id: "e1", source: "step", target: "next" }],
+      ),
+    ).toEqual([]);
+  });
+
+  it("stays quiet about defects that are not its to report", () => {
+    // A dangling edge is definition validation's finding; this package cannot
+    // see the missing node and must not invent a handle complaint about it.
+    expect(
+      collectCoercedEdgeHandles(
+        [node("step")],
+        [{ id: "e1", source: "ghost", target: "step", sourceHandle: "x" }],
+      ),
+    ).toEqual([]);
+    // A node whose handles the caller simply did not supply has nothing to
+    // drift from — that is a missing input, not a broken graph.
+    expect(
+      collectCoercedEdgeHandles(
+        [{ ...node("step"), outputHandles: [] }, node("next")],
+        [{ id: "e1", source: "step", target: "next", sourceHandle: "x" }],
+      ),
+    ).toEqual([]);
+  });
+
+  it("surfaces the coercion through onWarning during a real layout", async () => {
+    const warnings: string[] = [];
+    await layoutWorkflowGraph(
+      [branching("decide"), node("next")],
+      [{ id: "e1", source: "decide", target: "next", sourceHandle: "maybe" }],
+      { runtime: "server", onWarning: (message) => warnings.push(message) },
+    );
+
+    const drift = warnings.filter((message) => message.includes('edge "e1"'));
+    expect(drift).toHaveLength(1);
+    expect(drift[0]).toContain('"maybe"');
+    expect(drift[0]).toContain("runtime cannot route it");
   });
 });

@@ -21,6 +21,7 @@ import {
 } from "./geometry.ts";
 import {
   applyDeterministicFallbackLayout,
+  collectCoercedEdgeHandles,
   detectBackEdgeIds,
   sortEdges,
   syncLayoutGraph,
@@ -56,6 +57,21 @@ export async function layoutWorkflowGraph(
   );
   const sortedEdges = sortEdges(synced.nodes, synced.edges);
   const backEdgeIds = detectBackEdgeIds(synced.nodes, synced.edges);
+
+  // Report every edge whose handle had to be coerced to place it. Layout draws
+  // these anyway — a blank canvas helps nobody find the problem — but the
+  // process runtime matches handles exactly and fails the run with
+  // NO_EDGE_FOR_HANDLE, so a coerced edge is drawn attached to a port that will
+  // never route. Saying so is the whole point: a canvas that renders a broken
+  // graph as though it were fine is worse than one that renders nothing.
+  for (const coerced of collectCoercedEdgeHandles(synced.nodes, synced.edges)) {
+    options.onWarning?.(
+      `Workflow auto-layout attached edge "${coerced.edgeId}" to handle ` +
+        `"${coerced.resolvedHandle}" on node "${coerced.sourceNodeId}", but the ` +
+        `edge declares handle "${coerced.requestedHandle ?? "(none)"}", which ` +
+        "that node does not have. Layout can place it; the runtime cannot route it.",
+    );
+  }
   const graph = buildElkLayoutGraph({
     nodes: synced.nodes,
     sortedEdges,

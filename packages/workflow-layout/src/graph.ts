@@ -4,6 +4,26 @@ import { normalizeHandleId } from "./defaults.ts";
 import { normalizeNodePositions, resolveNodeSize } from "./geometry.ts";
 import type { WorkflowLayoutEdge, WorkflowLayoutNode } from "./types.ts";
 
+/**
+ * Which port an edge leaves from, for layout purposes.
+ *
+ * When the edge names a handle the node does not have, this falls back —
+ * `default` if the node has one, else the node's first handle. That keeps a
+ * drifted graph drawable, which is the right call for a layout engine: refusing
+ * to place an edge would leave the user staring at a blank canvas with no way
+ * to find the problem.
+ *
+ * But it is a *presentation* fallback and nothing more. The process runtime
+ * matches handles by exact string and fails the run with NO_EDGE_FOR_HANDLE
+ * when nothing matches — it does not fall back. So a coerced edge is drawn
+ * attached to a port the engine will never route through, and the canvas looks
+ * correct precisely where the graph is broken.
+ *
+ * That is why {@link collectCoercedEdgeHandles} exists and why the layout entry
+ * point reports what it coerced. Falling back silently is the failure mode this
+ * package must not have: it makes a drawing that disagrees with the engine, and
+ * says nothing.
+ */
 export function resolveElkSourceHandleId(
   node: WorkflowLayoutNode | undefined,
   sourceHandle: string | null | undefined,
@@ -23,6 +43,62 @@ export function resolveElkSourceHandleId(
   }
 
   return availableHandles[0]?.id ?? normalizedSourceHandle ?? "default";
+}
+
+/** One edge whose declared handle does not exist on its source node. */
+export type CoercedEdgeHandle = {
+  edgeId: string;
+  sourceNodeId: string;
+  /** The handle the edge asked for; null when it named none. */
+  requestedHandle: string | null;
+  /** The port layout attached it to instead. */
+  resolvedHandle: string;
+};
+
+/**
+ * Every edge {@link resolveElkSourceHandleId} would silently move.
+ *
+ * Done as one pass over the edge list rather than inside the resolver, because
+ * the resolver is also called from `sortEdges`' comparator — warning from there
+ * would fire O(n log n) times per layout and in an order that depends on the
+ * sort. One pass, in edge order, reports each drifted edge exactly once.
+ *
+ * An edge naming no handle is not drift: absent means `default` by the same
+ * convention the runtime uses, so it is only reported when the node has no
+ * `default` port to land on.
+ */
+export function collectCoercedEdgeHandles(
+  nodes: WorkflowLayoutNode[],
+  edges: WorkflowLayoutEdge[],
+): CoercedEdgeHandle[] {
+  const nodeById = new Map(nodes.map((node) => [node.id, node] as const));
+  const coerced: CoercedEdgeHandle[] = [];
+
+  for (const edge of edges) {
+    const node = nodeById.get(edge.source);
+    // A dangling edge is a different defect, reported by definition validation
+    // rather than invented here from a node this package cannot see.
+    if (!node) continue;
+
+    const requested = normalizeHandleId(edge.sourceHandle);
+    const available = node.outputHandles ?? [];
+    const wanted = requested ?? "default";
+    if (available.some((handle) => handle.id === wanted)) continue;
+
+    // A node with no declared handles has nothing to drift from — the caller
+    // simply did not supply them, which is a different situation from an edge
+    // naming a handle that is genuinely absent.
+    if (available.length === 0) continue;
+
+    coerced.push({
+      edgeId: edge.id,
+      sourceNodeId: edge.source,
+      requestedHandle: requested,
+      resolvedHandle: resolveElkSourceHandleId(node, edge.sourceHandle),
+    });
+  }
+
+  return coerced;
 }
 
 export function detectBackEdgeIds(

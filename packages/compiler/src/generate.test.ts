@@ -426,6 +426,108 @@ describe("platform schema generator", () => {
     );
   });
 
+  // ── worker axis (#218) ──
+  //
+  // The one axis that WIDENS. `workerAccess` admits a named worker role across
+  // tenants on the table that declares it, so a queue-draining worker reads the
+  // queue because a policy says so rather than by setting app.bypass_rls, which
+  // is all-or-nothing over every tenant-scoped table in the manifest.
+
+  const workerAccessManifest = (
+    workerAccess: string | undefined,
+    extra: Partial<PlatformSchemaManifest["tables"][number]> = {},
+  ): PlatformSchemaManifest => ({
+    version: 1,
+    tables: [
+      {
+        schema: "workflow",
+        name: "control_commands",
+        tenantScoped: true,
+        columns: [
+          { name: "id", type: "uuid", primaryKey: true },
+          { name: "tenant_id", type: "uuid", required: true },
+          { name: "owner_id", type: "uuid" },
+        ],
+        ...(workerAccess === undefined ? {} : { workerAccess }),
+        ...extra,
+      },
+    ],
+  });
+
+  const schemaSqlFor = (manifest: PlatformSchemaManifest): string =>
+    generateArtifacts(manifest).find((artifact) => artifact.path.endsWith("schema.sql"))
+      ?.contents ?? "";
+
+  it("emits the worker-role disjunct on the plain tenant-isolation policy", () => {
+    const sql = schemaSqlFor(workerAccessManifest("workflow-worker"));
+
+    const predicate =
+      "app.bypass_rls() OR app.current_worker_role() = 'workflow-worker' OR (tenant_id = app.current_tenant())";
+    expect(sql).toContain(
+      `CREATE POLICY "control_commands_tenant_isolation" ON "workflow"."control_commands"\n  USING (${predicate})\n  WITH CHECK (${predicate});`,
+    );
+  });
+
+  it("emits the worker-role disjunct on the rowScope policy too", () => {
+    // Both branches or neither: a table must not be able to declare workerAccess
+    // and silently lose it by also declaring rowScope.
+    const sql = schemaSqlFor(
+      workerAccessManifest("workflow-worker", { rowScope: { userColumns: ["owner_id"] } }),
+    );
+
+    const predicate =
+      "app.bypass_rls() OR app.current_worker_role() = 'workflow-worker' OR (tenant_id = app.current_tenant() AND (\"owner_id\" = app.current_user_id()))";
+    expect(sql).toContain(
+      `CREATE POLICY "control_commands_row_scope" ON "workflow"."control_commands"\n  USING (${predicate})\n  WITH CHECK (${predicate});`,
+    );
+  });
+
+  it("emits today's two-way predicate, byte for byte, for a table without workerAccess", () => {
+    // The assertion that matters: this feature must not perturb any table that
+    // did not ask for it. Same manifest, field absent — the emitted SQL has to
+    // be identical to what the emitter produced before the field existed.
+    const sql = schemaSqlFor(workerAccessManifest(undefined));
+
+    const predicate = "app.bypass_rls() OR (tenant_id = app.current_tenant())";
+    expect(sql).toContain(
+      `CREATE POLICY "control_commands_tenant_isolation" ON "workflow"."control_commands"\n  USING (${predicate})\n  WITH CHECK (${predicate});`,
+    );
+    expect(sql).not.toContain("app.current_worker_role()");
+  });
+
+  it("escapes a single quote in a worker role name", () => {
+    const sql = schemaSqlFor(workerAccessManifest("worker's-role"));
+
+    expect(sql).toContain("app.current_worker_role() = 'worker''s-role'");
+  });
+
+  it("rejects workerAccess on a table that is not tenantScoped", () => {
+    // A global table has no tenant predicate to widen, so the declaration would
+    // read as a grant while granting nothing.
+    const globalManifest: PlatformSchemaManifest = {
+      version: 1,
+      tables: [
+        {
+          schema: "platform",
+          name: "node_catalog",
+          tenantScoped: false,
+          columns: [{ name: "id", type: "text", primaryKey: true }],
+          workerAccess: "workflow-worker",
+        },
+      ],
+    };
+
+    expect(() => generateArtifacts(globalManifest)).toThrow(
+      /declares workerAccess "workflow-worker" but is not tenantScoped/,
+    );
+  });
+
+  it("rejects an empty workerAccess", () => {
+    expect(() => generateArtifacts(workerAccessManifest("  "))).toThrow(
+      /declares an empty workerAccess/,
+    );
+  });
+
   it("determinism: the 3 shipped entities emit plain tenant-wide policies with bypass support", () => {
     // The committed generated schema.sql is the source of truth. The 3 shipped
     // entities declare rowAccess { enabled: true, empty: public } with no owner
@@ -1084,6 +1186,88 @@ tables:
 
     try {
       await expect(loadManifest(path)).rejects.toThrow(/requires tenantScoped: true/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads a workerAccess declaration from YAML", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: workflow
+    name: control_commands
+    tenantScoped: true
+    workerAccess: workflow-worker
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: tenant_id, type: uuid, required: true }
+`,
+      "utf8",
+    );
+
+    try {
+      const manifest = await loadManifest(path);
+      expect(manifest.tables[0]?.workerAccess).toBe("workflow-worker");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a YAML workerAccess on a non-tenant-scoped table", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: platform
+    name: reference_codes
+    tenantScoped: false
+    workerAccess: workflow-worker
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+`,
+      "utf8",
+    );
+
+    try {
+      await expect(loadManifest(path)).rejects.toThrow(
+        /workerAccess requires tenantScoped: true/,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an empty YAML workerAccess", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: workflow
+    name: control_commands
+    tenantScoped: true
+    workerAccess: "  "
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: tenant_id, type: uuid, required: true }
+`,
+      "utf8",
+    );
+
+    try {
+      await expect(loadManifest(path)).rejects.toThrow(
+        /workerAccess must be a non-empty string/,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

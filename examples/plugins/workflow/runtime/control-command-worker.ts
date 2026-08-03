@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../../../apps/api/src/db/connection.js";
 import type { DB } from "../../../../apps/api/src/generated/db/types.js";
+import { WORKFLOW_WORKER_ROLE } from "../worker-role.js";
 import {
   applyWorkflowCommandRuntimeCancel,
   applyWorkflowCommandRuntimeResume,
@@ -201,22 +202,28 @@ export function createWorkflowControlCommandDispatcher(
  *
  * The queue is tenant-scoped and RLS'd, but a claim is cross-tenant by nature:
  * it scans every pending command, precisely so one tenant's backlog does not
- * need its own worker. So the claim must run with the policy bypassed.
+ * need its own worker.
  *
- * This repo's sanctioned bypass is `withSystemSession`, which requires the
- * bypass role and a reason and writes an audit row before and after — designed
- * for rare, justified operations. A poll loop is neither: at the default
- * one-second interval it would write roughly 172,000 audit rows a day per
- * worker and drown the break-glass trail it exists to keep readable.
+ * Nothing here is bypassed. `workflow.control_commands` declares
+ * `workerAccess: WORKFLOW_WORKER_ROLE` (see the plugin's `index.ts`), so its
+ * policy admits a session presenting that role directly:
  *
- * Until that is settled the session is applied directly: same GUCs, no audit
- * row. This is a deliberate, narrow exception to the repo's bypass discipline,
- * and it is why no role starts this worker yet — nothing calls it in
- * production. It must not ship that way.
+ *   USING (app.bypass_rls()
+ *          OR app.current_worker_role() = 'workflow-worker'
+ *          OR (tenant_id = app.current_tenant()))
+ *
+ * That is the whole grant. A session holding only `app.worker_role` reaches the
+ * three queue tables that asked for it and no others — reading `erp.relations`
+ * from here returns nothing, which is the property that makes this worth doing.
+ * Setting `app.bypass_rls` instead would have granted read AND write on every
+ * tenant-scoped table in the manifest, to read a queue.
+ *
+ * No audit row, because there is no bypass to audit — which is also why the
+ * poll loop's rate stops being a problem for the break-glass trail.
  */
 async function applyWorkerSession(trx: Transaction<DB>) {
-  await sql`select set_config('app.roles', 'workflow-worker', true)`.execute(trx);
-  await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
+  await sql`select set_config('app.roles', ${WORKFLOW_WORKER_ROLE}, true)`.execute(trx);
+  await sql`select set_config('app.worker_role', ${WORKFLOW_WORKER_ROLE}, true)`.execute(trx);
 }
 
 async function claimPendingCommands(

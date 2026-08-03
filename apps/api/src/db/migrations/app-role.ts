@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
+import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../connection.js";
 
 /**
@@ -108,11 +109,28 @@ function shouldRotateAppRolePassword(env: NodeJS.ProcessEnv = process.env): bool
 }
 
 /**
- * Schemas the app role needs USAGE on. `app` holds the RLS helper functions;
- * `erp` and `platform` hold the tenant-scoped and platform tables. Only
- * schemas that actually exist are touched (guarded per-statement below).
+ * Every schema the generated manifest declares a table in, sorted so the DDL
+ * order is deterministic.
+ *
+ * Derived rather than listed because a compiler PLUGIN contributes schemas the
+ * core has never heard of — the workflow plugin owns `workflow` — and a
+ * hardcoded list silently withholds every grant from them. The database is
+ * loud about it (`permission denied for schema workflow`), but only once
+ * something actually connects as the restricted role, and the migration and
+ * e2e suites connect as the privileged one.
  */
-const APP_SCHEMAS = ["app", "erp", "platform"] as const;
+const MANAGED_SCHEMAS: readonly string[] = [
+  ...new Set(manifest.tables.map((table) => table.schema)),
+]
+  .filter((schema) => schema !== "app")
+  .sort();
+
+/**
+ * Schemas the app role needs USAGE on. `app` holds the RLS helper functions;
+ * the rest hold the tenant-scoped and platform tables. Only schemas that
+ * actually exist are touched (guarded per-statement below).
+ */
+const APP_SCHEMAS: readonly string[] = ["app", ...MANAGED_SCHEMAS];
 
 /**
  * Create/repair the role and grant schema usage, function execute, and default
@@ -202,7 +220,7 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
   // 5. ALTER DEFAULT PRIVILEGES for the migrate (current) role so any table or
   //    sequence it creates LATER — including newly generated entities — is
   //    auto-granted to openshapeforge_app without a manual grant.
-  for (const schema of ["erp", "platform"] as const) {
+  for (const schema of MANAGED_SCHEMAS) {
     await sql`
       do $$
       begin
@@ -223,18 +241,18 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
 }
 
 /**
- * Sweep DML grants over ALL existing tables and sequences in the tenant-scoped
- * schemas. Must run AFTER the generated schema so new entities' tables are
- * covered. Idempotent — re-runs harmlessly on every migrate, so the day a new
- * entity is generated its table is granted automatically without a bespoke
- * migration.
+ * Sweep DML grants over ALL existing tables and sequences in every schema the
+ * manifest declares. Must run AFTER the generated schema so new entities'
+ * tables — and a plugin's newly-contributed schema — are covered. Idempotent —
+ * re-runs harmlessly on every migrate, so the day a new entity is generated its
+ * table is granted automatically without a bespoke migration.
  *
  * The restricted role gets SELECT/INSERT/UPDATE/DELETE (enough for the app; RLS
  * still filters every row) and USAGE/SELECT on sequences (identity columns).
  * It deliberately gets NO privileges that would let it bypass RLS.
  */
 export async function applyAppRoleGrants(db: OpenShapeForgeDatabase) {
-  for (const schema of ["erp", "platform"] as const) {
+  for (const schema of MANAGED_SCHEMAS) {
     await sql`
       do $$
       begin

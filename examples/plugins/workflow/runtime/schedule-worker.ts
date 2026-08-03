@@ -5,6 +5,7 @@ import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../../../apps/api/src/db/connection.js";
 import type { DB } from "../../../../apps/api/src/generated/db/types.js";
 import { jsonbLiteral } from "../../../../apps/api/src/db/sql-helpers.js";
+import { WORKFLOW_WORKER_ROLE } from "../worker-role.js";
 import { enqueueWorkflowInstanceStartInTransaction } from "./instance-commands.js";
 
 type ScheduleNodeSnapshot = {
@@ -101,26 +102,24 @@ function startIdempotencyKey(schedule: ClaimedSchedule) {
  * Row security for a worker poll.
  *
  * The queue tables are tenant-scoped and RLS'd, but a worker claim is
- * cross-tenant by nature: it scans every pending command, precisely so one
- * tenant's backlog does not need its own worker. So the claim must run with the
- * policy bypassed.
+ * cross-tenant by nature: it scans every due schedule, precisely so one
+ * tenant's backlog does not need its own worker.
  *
- * This repo's sanctioned bypass is `withSystemSession`, which requires the
- * bypass role and a reason and writes an audit row before and after — designed
- * for rare, justified operations. A poll loop is neither rare nor justified
- * per-iteration: at the default one-second interval it would write roughly
- * 172,000 audit rows a day per worker and drown the break-glass trail it exists
- * to keep readable. See the issue linked from the plugin's runtime module.
+ * Nothing here is bypassed. `workflow.schedules` and `workflow.schedule_fires`
+ * declare `workerAccess: WORKFLOW_WORKER_ROLE` (see the plugin's `index.ts`),
+ * so their policies admit a session presenting that role directly. The grant
+ * stops there: `workflow.definitions` and `workflow.definition_versions` do NOT
+ * declare it, and this worker reads them only after `tenantId` is known and set
+ * below — through the ordinary tenant predicate, exactly as a user session
+ * would. Setting `app.bypass_rls` instead would have granted read AND write on
+ * every tenant-scoped table in the manifest.
  *
- * Until that is settled, the session is applied directly rather than through
- * the audited wrapper: same GUCs, no audit row. This is a deliberate, narrow
- * exception to the repo's bypass discipline and it is the reason the worker is
- * not yet wired into a role — nothing calls it in production. It must not ship
- * that way.
+ * No audit row, because there is no bypass to audit — which is also why the
+ * poll loop's rate stops being a problem for the break-glass trail.
  */
 async function applyWorkflowScheduleSession(trx: Transaction<DB>, tenantId?: string) {
-  await sql`select set_config('app.roles', 'workflow-worker', true)`.execute(trx);
-  await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
+  await sql`select set_config('app.roles', ${WORKFLOW_WORKER_ROLE}, true)`.execute(trx);
+  await sql`select set_config('app.worker_role', ${WORKFLOW_WORKER_ROLE}, true)`.execute(trx);
   if (tenantId) {
     await sql`select set_config('app.tenant_id', ${tenantId}, true)`.execute(trx);
   }

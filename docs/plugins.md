@@ -103,6 +103,18 @@ Two shape details worth knowing when consuming the manifest in a plugin:
   `` `${table.schema}.${table.name}` ``.
 - CRUD-eligible tables are those with `generatedCrud` and a
   `source.graphql` block; filter on that (as both shipped examples do).
+- A contributed table may declare **`workerAccess: "<role>"`** to let a
+  background worker reach it across tenants without `app.bypass_rls`. It
+  requires `tenantScoped: true`, widens rather than narrows, and belongs only
+  on queue-shaped tables a worker drains — see
+  [api.md](api.md#the-worker-axis). The manifest loader validates the field
+  for YAML-authored tables; the emitter repeats both checks, because
+  `contributePlatformTables` never passes through the loader.
+
+Schemas are covered automatically: `applyAppRoleGrants` derives the schema
+list from the generated manifest, so a schema your plugin introduces gets
+USAGE and DML grants for the restricted runtime role on the next
+`bun run db:migrate` without a bespoke migration.
 
 ### `ownedPaths` and the gates
 
@@ -210,6 +222,12 @@ true`, so no RLS and no generated CRUD/GraphQL surface):
 node-catalog table is shared by two seeds discriminated on `catalog`, so each is
 authoritative over its own slice only — the mechanics live in
 `apps/api/src/db/migrations/catalog-seed.ts`.
+
+It also contributes the tenant-scoped `workflow.*` data and execution tables.
+Three of those — `control_commands`, `schedules`, `schedule_fires` — declare
+`workerAccess: "workflow-worker"`, the queue a worker claims across tenants;
+the rest get the plain tenant-isolation policy. See
+[api.md](api.md#the-worker-axis).
 
 **Restored authoring layer** — `examples/plugins/workflow/authoring/` is
 picked up as a layer automatically and ships:

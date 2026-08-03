@@ -164,14 +164,62 @@ Session rules:
   tokens are silently filtered out — path → org-unit-UUID translation is a
   planned, separate concern.
 - The richer multi-axis `rowScope` policies (group/user/bypass branches) and
-  `app.scope`/`app.bypass_rls` exist in the emitter and helpers but **no
-  current table declares a rowScope** — all authored entities get the plain
-  tenant-isolation policy today.
+  `app.scope` exist in the emitter and helpers but **no current table declares
+  a rowScope** — all authored entities get the plain tenant-isolation policy
+  today.
 - `withSystemSession` is an audited break-glass wrapper (requires the
   `Platform.SystemBypass` role and a reason; writes
-  `platform.system_bypass_audit` rows). Note the plain tenant policies do not
-  include a bypass branch — only rowScope policies do; in the local compose
-  stack the `openshapeforge` superuser is exempt from RLS anyway.
+  `platform.system_bypass_audit` rows). It sets `app.bypass_rls`, which every
+  emitted policy honours — plain and `rowScope` alike — so it is
+  all-or-nothing over every tenant-scoped table in the manifest. In the local
+  compose stack the `openshapeforge` superuser is exempt from RLS anyway.
+
+### The worker axis
+
+A background worker that drains a queue is cross-tenant by nature: it claims
+every tenant's pending rows so no tenant needs a worker of its own. Doing that
+with `app.bypass_rls` works, but the grant is far wider than the need — a
+worker that has to read 3 tables would get read *and write* on all 20
+tenant-scoped ones, business data included.
+
+So a table may instead name the worker role permitted to reach it across
+tenants:
+
+```ts
+{ schema: "workflow", name: "control_commands", tenantScoped: true,
+  workerAccess: "workflow-worker", /* … */ }
+```
+
+which emits one extra disjunct in **that table's** policy and nowhere else:
+
+```sql
+USING (app.bypass_rls()
+       OR app.current_worker_role() = 'workflow-worker'
+       OR (tenant_id = app.current_tenant()))
+```
+
+`app.current_worker_role()` reads the `app.worker_role` GUC, which a worker
+sets on its own transaction (`applyWorkerSession` in the workflow plugin's
+`control-command-worker.ts`). Nothing is bypassed, so nothing is audited —
+the break-glass trail stays readable rather than being buried under a poll
+loop's heartbeat.
+
+Three tables declare it today: `workflow.control_commands`,
+`workflow.schedules` and `workflow.schedule_fires`. Notably *not*
+`workflow.instances` or `workflow.node_states` — those are reached only after
+a command is claimed, from a session scoped to that command's tenant.
+
+Two properties worth being explicit about:
+
+- **It widens.** Every other axis narrows within a tenant; this one crosses
+  the boundary. It belongs on queue-shaped tables a worker drains, never on
+  one holding tenant business data. The compiler rejects it on a table that is
+  not `tenantScoped`, where it would grant nothing while reading as a grant.
+- **It is not authentication.** `app.worker_role` is a GUC, so anything that
+  can set a GUC can claim to be a worker — exactly as true of
+  `app.bypass_rls`. The boundary is that the request path never sets it and a
+  worker's boot path does: a code boundary, not a database one. Making it a
+  database boundary means a separate Postgres role with its own grants.
 
 ## Authentication / authorization
 

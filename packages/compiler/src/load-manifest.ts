@@ -568,6 +568,22 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
         columnNames,
       );
     }
+
+    // workerAccess names the worker role permitted to read this table ACROSS
+    // tenants. Rejected on a global table for the same reason rowScope is:
+    // there is no tenant predicate to widen, so the declaration would read as a
+    // grant while granting nothing. The emitter repeats both checks, because a
+    // plugin's contributePlatformTables never passes through this loader.
+    if (table.workerAccess !== undefined) {
+      if (typeof table.workerAccess !== "string" || table.workerAccess.trim().length === 0) {
+        throw new Error(`${currentTableKey}.workerAccess must be a non-empty string.`);
+      }
+      if (!table.tenantScoped) {
+        throw new Error(
+          `${currentTableKey}.workerAccess requires tenantScoped: true.`,
+        );
+      }
+    }
   }
 
   for (const [index, entry] of relationshipRegister.entries()) {

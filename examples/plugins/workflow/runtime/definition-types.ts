@@ -136,6 +136,25 @@ export function isTriggerNodeType(type: string): boolean {
 }
 
 /**
+ * Node types the process runtime may ENTER a graph at: the prefix rule above
+ * plus `start`, the one entry node that predates the naming convention and
+ * cannot be folded into it.
+ *
+ * Three modules ask this question — the engine deciding where a walk begins,
+ * the palette deciding what it can offer, and definition validation deciding
+ * which nodes are reachable and which edges point at a second start — and each
+ * had, or was about to have, its own copy. It lives here rather than in
+ * `process-runtime.ts`, which owns the walk, because this file is the one the
+ * three already share and the only one free of the database layer: exporting it
+ * from the engine would make a structural validator import the transaction
+ * types, the node-state writers and the completion cascade to ask a question
+ * about a string.
+ */
+export function isEntryNodeType(type: string): boolean {
+  return isTriggerNodeType(type) || type === "start";
+}
+
+/**
  * Normalize a stored graph, enforcing only what the storage layer guarantees.
  *
  * Anything that is not an object with array `nodes` and `edges` becomes an

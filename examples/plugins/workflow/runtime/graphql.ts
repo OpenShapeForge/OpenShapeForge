@@ -185,8 +185,10 @@ export const workflowTypeDefs = /* GraphQL */ `
   }
 
   """
-  valid is false only when at least one issue is an error. Warnings are
-  reported and do not block a save.
+  valid is false only when at least one issue is an error, which is what
+  publishing refuses on. Warnings are reported and never refuse anything.
+  Saving a draft does not validate at all, so a broken graph can always be
+  stored and shown with its problems attached.
   """
   type WorkflowDefinitionValidationResult {
     valid: Boolean!

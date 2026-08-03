@@ -23,13 +23,14 @@
  * ## Coupled to the validator
  *
  * `definition-validation.ts` derives the handles a decision node can emit from
- * this same config, and warns when an edge names a handle no branch produces
- * (ORPHAN_EDGE_HANDLE) or a branch produces a handle no edge wires
- * (ORPHAN_NODE_HANDLE). The two must resolve handles identically. If they
- * drift, a definition either validates clean and then dead-ends mid-run on a
- * handle with no edge, or is flagged for edges it genuinely needs. Anything
- * that changes `branchOutputHandle` or `defaultOutputHandle` below has to
- * change `declaredOutputHandles` there in the same edit.
+ * this same config, and REFUSES to publish a graph where an edge names a handle
+ * no branch produces (ORPHAN_EDGE_HANDLE) or a branch produces a handle no edge
+ * wires (ORPHAN_NODE_HANDLE). The two must resolve handles identically, and the
+ * severity is what makes that binding: if they drift, a definition either
+ * validates clean and then dead-ends mid-run on a handle with no edge, or is
+ * refused for edges it genuinely needs. Anything that changes
+ * `branchOutputHandle` or `defaultOutputHandle` below has to change
+ * `declaredOutputHandles` there in the same edit.
  */
 import {
   registerWorkflowNodeBridge,

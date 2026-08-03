@@ -412,6 +412,13 @@ function assertVisibleAndDeletable(
   }
 }
 
+/**
+ * Every error, regardless of `blocksAt`. That field narrows what a WRITE
+ * refuses, so that an unfinished graph can still be stored; publishing is the
+ * other end of that bargain and has to hold the whole line. A published version
+ * is what new runs start from, so "well-formed but will not run" is precisely
+ * what must not get through here.
+ */
 function assertPublishable(version: number, definition: Json): void {
   const errors = validateWorkflowDefinition(definition).issues.filter(
     (issue) => issue.severity === "error",

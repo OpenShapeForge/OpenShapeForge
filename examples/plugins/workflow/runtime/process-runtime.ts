@@ -42,7 +42,7 @@ import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../../../apps/api/src/db/connection.js";
 import { jsonbLiteral } from "../../../../apps/api/src/db/sql-helpers.js";
 import type { DB } from "../../../../apps/api/src/generated/db/types.js";
-import { isTriggerNodeType } from "./definition-types.js";
+import { isEntryNodeType } from "./definition-types.js";
 import { flattenFieldDefinitionSources } from "./field-definitions.js";
 import {
   failInstanceInTransaction,
@@ -164,13 +164,13 @@ export class ProcessRuntimeError extends Error {
 // ---------------------------------------------------------------------------
 
 /**
- * `isTriggerNodeType` decides what a trigger is everywhere else; `start` is the
- * one entry node that predates the naming convention and cannot be folded into
- * it. Restating the prefix rule here would give the two copies room to drift,
- * and a definition would then list a trigger the engine refuses to enter.
+ * `isEntryNodeType` decides what an entry node is everywhere else — the palette
+ * and definition validation ask the same question. Restating the rule here
+ * would give the copies room to drift, and a definition would then list a
+ * trigger the engine refuses to enter.
  */
 function isTriggerNode(node: ProcessRuntimeNode): boolean {
-  return isTriggerNodeType(node.type) || node.type === "start";
+  return isEntryNodeType(node.type);
 }
 
 function isEndNode(node: ProcessRuntimeNode): boolean {

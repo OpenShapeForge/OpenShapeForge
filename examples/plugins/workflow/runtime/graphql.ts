@@ -177,6 +177,13 @@ export const workflowTypeDefs = /* GraphQL */ `
 
   type WorkflowDefinitionValidationIssue {
     severity: String!
+    """
+    Which write this error refuses: "write" when the graph is incoherent, so a
+    patch is refused too, or "publish" when the graph is well-formed but will
+    not run, which is also what an unfinished graph looks like. Null on a
+    warning, which refuses nothing.
+    """
+    blocksAt: String
     code: String!
     message: String!
     path: String!
@@ -185,8 +192,11 @@ export const workflowTypeDefs = /* GraphQL */ `
   }
 
   """
-  valid is false only when at least one issue is an error. Warnings are
-  reported and do not block a save.
+  valid is false only when at least one issue is an error, which is what
+  publishing refuses on. A patch refuses only the errors whose blocksAt is
+  "write". Warnings are reported and never refuse anything. Saving a draft does
+  not validate at all, so a broken graph can always be stored and shown with its
+  problems attached.
   """
   type WorkflowDefinitionValidationResult {
     valid: Boolean!

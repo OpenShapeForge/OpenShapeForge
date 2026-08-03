@@ -497,9 +497,12 @@ export async function processWorkflowCollectionWaitEvent(
 
   // A continuation-routed wait matched by filter but lacking a timeout can never
   // be reclaimed by processExpiredWorkflowCollectionWaits if the routing path
-  // fails to fire — log it loudly so the silent-stall is observable. Root cause
-  // of a never-firing routing path is cross-file: orchestrator-bridges.ts must
-  // propagate processStepId across the subWorkflow boundary.
+  // fails to fire — log it loudly so the silent-stall is observable.
+  //
+  // Nothing in this repository sets wait_metadata.requiresContinuationRouting,
+  // so no wait currently reaches this branch. It is kept because the skip in the
+  // scan below reads the same flag: whoever adds a routing path that sets it
+  // needs this warning already in place, not added afterwards.
   const unrecoverable = result.skippedContinuationRouting.filter((row) => !row.timeout_at);
   if (unrecoverable.length > 0) {
     console.warn(
@@ -579,13 +582,16 @@ async function listPendingCollectionWaitReplayGroups(
 /**
  * Safety net for the continuation-routing split (see processWorkflowCollectionWaitEvent).
  * Continuation-routed waits are intentionally skipped by this worker and the
- * replay scan, expecting the orchestrator/router continuation path to resume
- * them. A wait that path never fires for is only reclaimed by the timeout
- * sweep when timeout_at is set; one with timeout_at IS NULL would stall the
- * instance forever. Count those (still-active, past a short grace window) so a
- * broken routing path is observable rather than a silent stall. The root cause
- * of a never-firing routing path is cross-file: orchestrator-bridges.ts must
- * propagate processStepId across the subWorkflow boundary.
+ * replay scan, on the expectation that a routing path resumes them instead. A
+ * wait that path never fires for is only reclaimed by the timeout sweep when
+ * timeout_at is set; one with timeout_at IS NULL would stall the instance
+ * forever. Count those (still-active, past a short grace window) so a broken
+ * routing path is observable rather than a silent stall.
+ *
+ * This count is structurally zero today: nothing in this repository sets
+ * wait_metadata.requiresContinuationRouting, so no wait is ever skipped for a
+ * routing path to pick up. A non-zero reading means such a path was added
+ * without one that resumes.
  */
 async function countStalledContinuationRoutingWaits(db: OpenShapeForgeDatabase) {
   return db.transaction().execute(async (trx) => {
@@ -718,7 +724,7 @@ export function startWorkflowCollectionWaitWorker(
       if (result.stalledContinuationRouting > 0) {
         console.warn(
           { stalledContinuationRouting: result.stalledContinuationRouting },
-          "Continuation-routed collection waits with no timeout are pending past the grace window; the routing path may not be firing (cross-file root cause: orchestrator-bridges.ts processStepId propagation).",
+          "Continuation-routed collection waits with no timeout are pending past the grace window; a routing path marked them but nothing resumed them.",
         );
       }
     } finally {

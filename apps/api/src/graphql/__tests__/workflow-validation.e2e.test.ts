@@ -693,6 +693,57 @@ describe("validateWorkflowDefinition", () => {
   );
 
   test(
+    "a decision authored with the `conditions` alias is read the same as `branches`",
+    async () => {
+      // Against the real catalog, so the alias comes from `flow/decision.yaml`
+      // rather than from a fixture. The runtime accepts `conditions` as a
+      // spelling of `branches` and canonicalises it before the bridge runs, so
+      // a validator reading the raw key saw a decision with no branches: the
+      // unwired handle went unreported, and the wired one was reported as an
+      // edge to a handle the node never emits — a false error that, now that
+      // these are errors, would refuse to publish a correct workflow.
+      const wired = await validate({
+        nodes: [
+          { id: "start", type: "triggerManual" },
+          {
+            id: "choice",
+            type: "decision",
+            config: { conditions: [{ handle: "approved" }], defaultEdgeId: "rejected" },
+          },
+          { id: "finish", type: "end" },
+        ],
+        edges: [
+          { id: "in", source: "start", target: "choice" },
+          { id: "approved", source: "choice", target: "finish", sourceHandle: "approved" },
+          { id: "rejected", source: "choice", target: "finish", sourceHandle: "rejected" },
+        ],
+      });
+      expect(wired.valid).toBe(true);
+      expect(wired.issues).toEqual([]);
+
+      // And the other direction: the aliased branch's handle is now owed an
+      // edge, so dropping it is reported exactly as the canonical spelling is.
+      const unwired = await validate({
+        nodes: [
+          { id: "start", type: "triggerManual" },
+          {
+            id: "choice",
+            type: "decision",
+            config: { conditions: [{ handle: "approved" }], defaultEdgeId: "rejected" },
+          },
+          { id: "finish", type: "end" },
+        ],
+        edges: [
+          { id: "in", source: "start", target: "choice" },
+          { id: "rejected", source: "choice", target: "finish", sourceHandle: "rejected" },
+        ],
+      });
+      expect(codesOf(unwired, "error")).toEqual(["ORPHAN_NODE_HANDLE"]);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
     "cycles are still NOT checked",
     async () => {
       // Guarding what is left of the pass's documented scope, not endorsing it.

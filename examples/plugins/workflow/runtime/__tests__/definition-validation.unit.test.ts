@@ -46,9 +46,20 @@ import { resetNodeCatalogForTests, type CatalogEntry } from "../node-catalog-sto
 /** A handler is never called here; only its presence in the registry matters. */
 const NEVER_RUNS = async () => ({ outputHandle: "completed", payload: {} });
 
-function catalogued(nodeType: string): CatalogEntry {
-  return { nodeType, catalog: "standard", category: "flow", label: {}, configFields: [] };
+function catalogued(nodeType: string, configFields: unknown[] = []): CatalogEntry {
+  return { nodeType, catalog: "standard", category: "flow", label: {}, configFields };
 }
+
+/**
+ * `decision`'s config fields as `flow/decision.yaml` declares them, trimmed to
+ * what alias resolution reads. The alias is the load-bearing part: the runtime
+ * accepts `conditions` as a spelling of `branches`, and a validator that reads
+ * only the canonical key sees a decision with no branches at all.
+ */
+const DECISION_CONFIG_FIELDS = [
+  { key: "branches", valueType: "object", runtime: { aliases: ["conditions"] } },
+  { key: "defaultEdgeId", valueType: "string" },
+];
 
 /**
  * Every type these graphs name, so the catalog is never the reason a check
@@ -56,15 +67,11 @@ function catalogued(nodeType: string): CatalogEntry {
  * cannot do with it, not for being unknown.
  */
 const CATALOG: CatalogEntry[] = [
-  "triggerManual",
-  "triggerWebhook",
-  "start",
-  "end",
-  "decision",
-  "timer",
-  "join",
-  "message.reply",
-].map(catalogued);
+  catalogued("decision", DECISION_CONFIG_FIELDS),
+  ...["triggerManual", "triggerWebhook", "start", "end", "timer", "join", "message.reply"].map(
+    (nodeType) => catalogued(nodeType),
+  ),
+];
 
 beforeEach(() => {
   resetNodeCatalogForTests(CATALOG);
@@ -197,6 +204,102 @@ describe("handle faults are errors, not warnings", () => {
 
     expect(result.valid).toBe(false);
     expect(codesOf(result, "error")).toEqual(["ORPHAN_NODE_HANDLE"]);
+  });
+});
+
+describe("handles are read the way the bridge will read them", () => {
+  /** `DECISION_GRAPH`'s decision, authored with the alias instead. */
+  function aliasedDecision(edges: { id: string; sourceHandle?: string }[]) {
+    return {
+      nodes: [
+        { id: "start", type: "triggerManual" },
+        {
+          id: "choice",
+          type: "decision",
+          // `conditions`, not `branches`. `canonicalizeFieldAliases` moves this
+          // onto the canonical key before the bridge ever sees the config, so
+          // the bridge emits `approved` from a document that never says so.
+          config: { conditions: [{ handle: "approved" }], defaultEdgeId: "rejected" },
+        },
+        { id: "finish", type: "end" },
+      ],
+      edges: [
+        { id: "in", source: "start", target: "choice" },
+        ...edges.map((edge) => ({ ...edge, source: "choice", target: "finish" })),
+      ],
+    };
+  }
+
+  test("an aliased branch spelling still reports its unwired handle", () => {
+    // Reading `branches` alone saw an empty list here, so the handle the bridge
+    // can actually emit was never checked: nothing told the author to wire it
+    // and the run died with NO_EDGE_FOR_HANDLE the first time it won.
+    const result = validateWorkflowDefinition(
+      aliasedDecision([{ id: "rejected", sourceHandle: "rejected" }]),
+    );
+
+    expect(codesOf(result, "error")).toEqual(["ORPHAN_NODE_HANDLE"]);
+    expect(
+      result.issues.find((issue) => issue.code === "ORPHAN_NODE_HANDLE")?.message,
+    ).toContain("approved");
+  });
+
+  test("an aliased branch that IS wired raises nothing", () => {
+    // The half that the severity promotion turned into a live defect: reading
+    // the canonical key alone, this edge named a handle the node "never emits",
+    // so a correct graph collected a false ORPHAN_EDGE_HANDLE — and that is now
+    // an error, which would have refused the publish of a working workflow.
+    const result = validateWorkflowDefinition(
+      aliasedDecision([
+        { id: "approved", sourceHandle: "approved" },
+        { id: "rejected", sourceHandle: "rejected" },
+      ]),
+    );
+
+    expect(result).toEqual({ valid: true, issues: [] });
+  });
+
+  test("both spellings of the same decision validate identically", () => {
+    // The property that matters more than either case above: which key an
+    // author's tooling happened to write must not change what is reported.
+    expect(
+      validateWorkflowDefinition(
+        aliasedDecision([{ id: "approved", sourceHandle: "approved" }]),
+      ),
+    ).toEqual(
+      validateWorkflowDefinition({
+        ...DECISION_GRAPH,
+        edges: DECISION_GRAPH.edges.filter((edge) => edge.id !== "rejected"),
+      }),
+    );
+  });
+
+  test("the canonical key wins when a document carries both", () => {
+    // `canonicalizeFieldAliases` only fills a key that is absent, so an
+    // explicit `branches` is never overwritten by a stale alias left behind by
+    // an older writer.
+    const result = validateWorkflowDefinition({
+      nodes: [
+        { id: "start", type: "triggerManual" },
+        {
+          id: "choice",
+          type: "decision",
+          config: {
+            branches: [{ handle: "approved" }],
+            conditions: [{ handle: "ignored" }],
+            defaultEdgeId: "rejected",
+          },
+        },
+        { id: "finish", type: "end" },
+      ],
+      edges: [
+        { id: "in", source: "start", target: "choice" },
+        { id: "approved", source: "choice", target: "finish", sourceHandle: "approved" },
+        { id: "rejected", source: "choice", target: "finish", sourceHandle: "rejected" },
+      ],
+    });
+
+    expect(result).toEqual({ valid: true, issues: [] });
   });
 });
 

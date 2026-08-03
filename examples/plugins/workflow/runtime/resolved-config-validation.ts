@@ -71,6 +71,36 @@ export function validateResolvedWorkflowNodeConfig(
   };
 }
 
+/**
+ * A stored config with its aliased keys moved onto the canonical ones, using
+ * the catalog's own `runtime.aliases`.
+ *
+ * Exported because definition validation has to read a node's config the way
+ * the bridge will eventually see it, and the two see different documents: a
+ * bridge is handed the config that came back from
+ * {@link validateResolvedWorkflowNodeConfig}, which has been through the alias
+ * map above, while validation reads the raw stored graph. A decision authored
+ * with `conditions` therefore looked empty to the validator and full to the
+ * bridge — so an unwired branch raised nothing and a correctly wired one was
+ * reported as an edge to a handle the node never emits.
+ *
+ * Reusing the same function rather than restating the alias list is the point:
+ * a node type that gains an alias in its YAML must not need a second edit here
+ * to stay checkable.
+ *
+ * This closes the alias half of the gap and not the rest of it. Validation
+ * reads a STORED config and the bridge reads a RESOLVED one, so anything the
+ * process runtime substitutes still diverges — a `{{ template }}` in
+ * `defaultEdgeId` or in a branch's handle resolves to a value only the run
+ * knows, and no amount of reading the document will predict it.
+ */
+export function canonicalizeWorkflowNodeConfigAliases(
+  nodeType: string,
+  config: unknown,
+): JsonRecord {
+  return canonicalizeFieldAliases(asRecord(config), getConfigFields(nodeType));
+}
+
 export function formatResolvedConfigValidationIssues(
   issues: ResolvedConfigValidationIssue[],
 ): string {

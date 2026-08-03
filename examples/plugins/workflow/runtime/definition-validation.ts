@@ -74,6 +74,7 @@
 import { isEntryNodeType } from "./definition-types.js";
 import { getWorkflowNodeType } from "./node-catalog.js";
 import { getWorkflowNodeRuntimeSupport } from "./node-executability.js";
+import { canonicalizeWorkflowNodeConfigAliases } from "./resolved-config-validation.js";
 
 export type WorkflowDefinitionValidationSeverity = "error" | "warning";
 
@@ -124,10 +125,17 @@ function asArray(value: unknown): unknown[] {
  * config: each branch's handle plus the no-match default. Null for every node
  * type whose handles are decided at run time and therefore cannot be checked
  * against the document.
+ *
+ * The config goes through the catalog's alias map first, because that is what
+ * the bridge will be handed. `decision` accepts `conditions` as an alias for
+ * `branches`, and reading the raw key alone made this function disagree with
+ * the bridge about the whole branch list: a decision authored the aliased way
+ * looked to have no branches at all, so an unwired one was never reported and
+ * an edge that correctly wired it was reported as an orphan.
  */
 function declaredOutputHandles(nodeType: string, config: unknown): Set<string> | null {
   if (nodeType !== "decision") return null;
-  const record = asRecord(config);
+  const record = canonicalizeWorkflowNodeConfigAliases(nodeType, config);
   const handles = new Set<string>();
   for (const entry of asArray(record.branches)) {
     const branch = asRecord(entry);

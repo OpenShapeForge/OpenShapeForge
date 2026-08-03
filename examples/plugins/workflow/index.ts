@@ -473,10 +473,35 @@ function workflowExecutionTables(): TableDefinition[] {
           references: { schema: "workflow", table: "instances", column: "id", onDelete: "CASCADE" },
         },
         { name: "payload", type: "jsonb", required: true, default: "'{}'::jsonb" },
-        // Deduplicates a retried enqueue. A schedule that fires twice for the
-        // same occurrence, or a webhook delivered twice, must start one run.
+        // Deduplicates a retried enqueue: two commands cannot hold one key, so
+        // the caller that loses adopts the run the winner enqueued instead of
+        // opening a second one. Only a caller able to name the delivery can
+        // supply a key — the webhook route takes the sender's `Idempotency-Key`
+        // header, and a delivery carrying none starts a run per delivery.
+        // Schedules do not use this column; `schedule_fires` keys the occurrence
+        // itself, which is the fact a schedule can name and a key cannot.
         { name: "idempotency_key", type: "text" },
-        // 'pending' | 'processing' | 'completed' | 'failed'
+        // Every state a row can hold:
+        //   'pending'          waiting for a worker, or waiting out the backoff
+        //                      after a dispatch failed — `next_attempt_at` says
+        //                      which.
+        //   'processing'       claimed by `locked_by` at `locked_at`, and owed
+        //                      an outcome by whoever holds it.
+        //   'runtime_consumed' the runtime took the command inside the
+        //                      transaction that did the work, and that
+        //                      transaction committed. The worker normally
+        //                      reports back at once and the row becomes
+        //                      'completed'; a worker that dies in between leaves
+        //                      it here for good — never reclaimed, because the
+        //                      work happened, and never reconciled either. A row
+        //                      sitting at this status is a dead worker, not a
+        //                      run that was missed.
+        //   'completed'        dispatched, and the worker recorded it.
+        //   'failed'           terminal, from either end of the attempt bound:
+        //                      the dispatcher threw on the last attempt, or the
+        //                      claim closed a row that reached the bound without
+        //                      any worker reporting back. `last_error` says
+        //                      which.
         { name: "status", type: "text", required: true, default: "'pending'::text" },
         { name: "attempts", type: "integer", required: true, default: "0" },
         { name: "next_attempt_at", type: "timestamptz" },

@@ -15,24 +15,18 @@
  *
  * ## How a run is started here
  *
- * Not by calling the runtime. An intent to run is a ROW: a `workflow.instances`
- * row in `starting` and a `workflow.control_commands` row in `pending`, after
- * which nothing has executed. Each test reads that command back out of the queue
- * and hands it to the in-process dispatcher — the same seam
+ * Not by calling the runtime. An intent to run is a ROW, and the shipped
+ * `enqueueWorkflowInstanceStart` writes it: a `workflow.instances` row in
+ * `starting` and a `workflow.control_commands` row in `pending`, after which
+ * nothing has executed. Each test reads that command back out of the queue and
+ * hands it to the in-process dispatcher — the same seam
  * `processWorkflowControlCommandBatch` calls once it has claimed a row.
  *
- * Those two rows are written by `enqueueStartCommand` below rather than by the
- * shipped `enqueueWorkflowInstanceStart`, and that is not a convenience.
- * `enqueueWorkflowInstanceStartInTransaction` sets `workflow_key` on the
- * instance, and `workflow.instances` has no such column — not in the plugin's
- * table declaration and not in the generated types. The statement is raw SQL, so
- * nothing typechecks it, and every start path funnels through that one function
- * — the public `enqueueWorkflowInstanceStart`, the webhook route, and the
- * schedule worker's own in-transaction call — so all of them raise `column
- * "workflow_key" of relation "instances" does not exist` and no run can be
- * started at all. The helper below writes what that function intends to write,
- * minus the column that does not exist, so the dispatcher receives exactly the
- * command payload it would have been given.
+ * Going through the shipped enqueue is what makes the command below the one a
+ * deployment produces: the pinned `version_id`, the trigger type and the start
+ * context all come from that function rather than from this file. A start
+ * restated locally would keep agreeing with itself after the shipped one moved
+ * underneath it, and what the enqueue writes is everything a run then reads.
  *
  * The batch poll is deliberately not used. Its claim is cross-tenant by design,
  * so that one worker can drain every tenant's backlog; in a file that shares one
@@ -70,22 +64,20 @@
  *   what makes the queue safe to retry, and it comes from the conditional
  *   consume plus the instance-row lock rather than from any dispatcher.
  *
- * ## The refusal that only half holds
+ * ## Refusing, and saying so
  *
  * Two edges out of one node sharing a `sourceHandle` must refuse rather than
  * pick one: the engine has no parallelism, `workflow.node_states` cannot
  * represent two live branches, and silently choosing would be the worst
- * available answer. The engine does refuse to route — neither branch runs — but
- * it does NOT record the refusal, because `failInstance` writes the failure
- * against the node the walk was leaving and that node's state is already
- * `completed`. `markNodeStateTerminalInTransaction` treats a terminal row as
- * final and drops the write, so the completion cascade then sees every node
- * settled with nothing failed and marks the INSTANCE `completed`. The assertions
- * below are written against the contract, not against that behaviour; the
- * ambiguity test fails on purpose until the engine records a failure detected
- * after the failing node has settled. The same path covers TRIGGER_FANOUT,
- * NO_EDGE_FOR_HANDLE and EDGE_TARGET_MISSING, so all of them are lost the same
- * way.
+ * available answer. Refusing is only half of it — the refusal has to be
+ * recorded, and that is harder than it sounds. The failure is detected while
+ * LEAVING a node whose own state is already `completed`, and a settled node must
+ * not be re-settled, so there is no node row to write it to. A routing failure
+ * is not a node failure: the node did its job, the graph is broken. The instance
+ * is therefore failed directly rather than inferred from node states, and the
+ * node is annotated with where it happened without its outcome being rewritten.
+ * The same path covers TRIGGER_FANOUT, NO_EDGE_FOR_HANDLE and
+ * EDGE_TARGET_MISSING; the ambiguity test below is what pins all of them.
  *
  * ## Why it carries its own harness
  *
@@ -177,6 +169,14 @@ type ControlCommandWorkerModule = {
   };
 };
 
+type InstanceCommandsModule = {
+  enqueueWorkflowInstanceStart: (
+    db: OpenShapeForgeDatabase,
+    session: WorkflowSession,
+    input: { definitionId: string; context?: unknown },
+  ) => Promise<{ id: string; status: string }>;
+};
+
 async function importWorkflowRuntime<TModule>(name: string): Promise<TModule> {
   return (await import(`${WORKFLOW_RUNTIME_DIR}${name}.ts`)) as TModule;
 }
@@ -191,6 +191,7 @@ type Suite = {
   runtime: DatabaseRuntime;
   schema: GraphQLSchema;
   dispatch: (command: WorkflowControlCommand) => Promise<void>;
+  commands: InstanceCommandsModule;
 };
 
 let suite: Suite;
@@ -240,6 +241,7 @@ async function startSuite(): Promise<Suite> {
     runtime,
     schema: buildGraphqlSchema(initialized.loaded, { db: runtime.db }),
     dispatch: worker.createInProcessWorkflowControlCommandDispatcher(runtime.db).dispatch,
+    commands: await importWorkflowRuntime<InstanceCommandsModule>("instance-commands"),
   };
 }
 
@@ -501,90 +503,25 @@ async function readStartCommand(
 type QueuedRun = { instanceId: string; command: WorkflowControlCommand };
 
 /**
- * Write the two rows a start consists of: the instance, pinned to the version it
- * will execute, and the pending command that asks for it to be run.
- *
- * This restates `enqueueWorkflowInstanceStartInTransaction` because that
- * function cannot run — see the header. Everything the command runtime reads is
- * reproduced: the payload keys it decodes, the `starting` status it expects to
- * find, and the pinned `version_id`, which is what stops an edit to the
- * definition from changing an in-flight run.
- */
-async function enqueueStartCommand(
-  session: WorkflowSession,
-  definitionId: string,
-  context: Record<string, Json>,
-): Promise<string> {
-  return withDbSession(suite.runtime.db, session, async (trx, scoped) => {
-    const version = await trx
-      .selectFrom("workflow.definition_versions")
-      .select(["id", "version"])
-      .where("tenant_id", "=", scoped.tenantId)
-      .where("definition_id", "=", definitionId)
-      .where("published_at", "is not", null)
-      .orderBy("version", "desc")
-      .limit(1)
-      .executeTakeFirstOrThrow();
-
-    const instanceId = randomUUID();
-
-    await trx
-      .insertInto("workflow.instances")
-      .values({
-        id: instanceId,
-        tenant_id: scoped.tenantId,
-        definition_id: definitionId,
-        version_id: version.id,
-        status: "starting",
-        context,
-        started_by: scoped.userId,
-        definition_version: version.version,
-        trigger_type: "manual",
-      })
-      .execute();
-
-    await trx
-      .insertInto("workflow.control_commands")
-      .values({
-        id: randomUUID(),
-        tenant_id: scoped.tenantId,
-        command_type: "workflow.instance.start",
-        workflow_instance_id: instanceId,
-        payload: {
-          instanceId,
-          definitionId,
-          versionId: version.id,
-          version: version.version,
-          context,
-          initialProcessVariables: {},
-          triggerType: "manual",
-          triggerMeta: {},
-          signalDepth: 0,
-          requestedBy: scoped.userId,
-        },
-        status: "pending",
-      })
-      .execute();
-
-    return instanceId;
-  });
-}
-
-/**
  * Enqueue a start and stop there. Nothing has executed when this returns — the
  * instance is `starting` and the command is `pending`. The command is read back
- * out of the queue rather than returned from the insert, so the dispatcher gets
- * a payload that has been through `jsonb` exactly as a worker's would.
+ * out of the queue rather than taken from the enqueue's return value, so the
+ * dispatcher gets a payload that has been through `jsonb` exactly as a worker's
+ * would, and the `version_id` it carries is the one the enqueue pinned.
  */
 async function enqueueRun(
   session: WorkflowSession,
   definitionId: string,
   context: Record<string, Json> = {},
 ): Promise<QueuedRun> {
-  const instanceId = await enqueueStartCommand(session, definitionId, context);
-  const queued = await readStartCommand(session, instanceId);
+  const instance = await suite.commands.enqueueWorkflowInstanceStart(
+    suite.runtime.db,
+    session,
+    { definitionId, context },
+  );
+  const queued = await readStartCommand(session, instance.id);
   expect(queued.status).toBe("pending");
-  return { instanceId, command: queued.command };
+  return { instanceId: instance.id, command: queued.command };
 }
 
 /** Enqueue and dispatch in one step, for the tests that only want the outcome. */

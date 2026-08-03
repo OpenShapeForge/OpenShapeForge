@@ -25,6 +25,12 @@ export type StartWorkflowInstanceCommandInput = {
   triggerType?: string | null;
   triggerMeta?: unknown;
   signalDepth?: number | null;
+  /**
+   * Supplied by a caller that can be delivered more than once. Two calls
+   * carrying the same key start one run; the second adopts the first. See
+   * `enqueueWorkflowInstanceStartInTransaction`.
+   */
+  idempotencyKey?: string | null;
 };
 
 export type ResumeWorkflowInstanceCommandInput = {
@@ -203,11 +209,12 @@ async function insertControlCommand(
     tenantId: string;
     commandType: string;
     workflowInstanceId: string | null;
+    commandId?: string;
     idempotencyKey?: string | null;
     payload: Record<string, unknown>;
   },
 ) {
-  const commandId = randomUUID();
+  const commandId = input.commandId ?? randomUUID();
   const idempotencyKey = normalizeOptionalText(input.idempotencyKey);
   if (idempotencyKey) {
     const result = await sql<{ id: string; inserted: boolean }>`
@@ -301,6 +308,7 @@ export type EnqueueWorkflowInstanceStartInTransactionInput = {
   entityId?: string | null | undefined;
   parentInstanceId?: string | null | undefined;
   parentNodeId?: string | null | undefined;
+  idempotencyKey?: string | null | undefined;
 };
 
 export type EnqueueWorkflowInstanceStartResult = {
@@ -309,7 +317,123 @@ export type EnqueueWorkflowInstanceStartResult = {
   versionId: string;
   version: number;
   definitionName: string;
+  /**
+   * False when an equal `idempotencyKey` had already enqueued this run. Nothing
+   * was written: every field above describes the earlier run, which is the one
+   * that will execute.
+   */
+  enqueued: boolean;
 };
+
+/** The run an already-claimed key resolves to, as that command recorded it. */
+type AdoptedWorkflowInstanceStart = {
+  commandId: string;
+  instanceId: string;
+  versionId: string;
+  version: number;
+  definitionName: string;
+};
+
+/**
+ * Claim a start key, before any instance row exists. Returns null when this
+ * call won it and may now write its instance, or the run to adopt when another
+ * delivery already holds it.
+ *
+ * `workflow_instance_id` is left null and set once the instance exists, because
+ * the foreign key admits no other order. Nothing can observe the gap: the row
+ * is invisible until the caller's transaction commits, and a transaction that
+ * dies in between takes the command with it.
+ */
+async function claimStartCommandKey(
+  trx: Transaction<DB>,
+  input: {
+    tenantId: string;
+    commandId: string;
+    idempotencyKey: string;
+    payload: Record<string, unknown>;
+  },
+): Promise<AdoptedWorkflowInstanceStart | null> {
+  const claimed = await sql<{ id: string }>`
+    insert into workflow.control_commands (
+      id,
+      tenant_id,
+      command_type,
+      idempotency_key,
+      payload,
+      status,
+      next_attempt_at
+    ) values (
+      cast(${input.commandId} as uuid),
+      cast(${input.tenantId} as uuid),
+      'workflow.instance.start',
+      ${input.idempotencyKey},
+      ${jsonbLiteral(input.payload)},
+      'pending',
+      now()
+    )
+    -- Matches workflow_control_commands_idempotency_uidx exactly; a conflict
+    -- target no index covers is a runtime error on first use.
+    on conflict (
+      tenant_id,
+      idempotency_key
+    )
+    do nothing
+    returning id::text
+  `.execute(trx);
+
+  if (claimed.rows.length === 1) {
+    return null;
+  }
+
+  // Read in a statement of its own: under READ COMMITTED that snapshot is taken
+  // after the transaction we lost to committed, which a read spliced into the
+  // INSERT above would not be — it would still see the state from before.
+  //
+  // The pinned facts come from the surviving command's payload rather than from
+  // its instance, because this function writes them there and nothing since can
+  // clear them; the instance's own snapshot columns are nulled when a version
+  // is purged.
+  const existing = await sql<{
+    command_id: string;
+    instance_id: string | null;
+    version_id: string | null;
+    version: number | null;
+    definition_name: string | null;
+  }>`
+    select
+      id::text as command_id,
+      workflow_instance_id::text as instance_id,
+      payload ->> 'versionId' as version_id,
+      (payload ->> 'version')::int as version,
+      payload ->> 'definitionName' as definition_name
+    from workflow.control_commands
+    where tenant_id = cast(${input.tenantId} as uuid)
+      and idempotency_key = ${input.idempotencyKey}
+    limit 1
+  `.execute(trx);
+
+  const row = existing.rows[0];
+  if (
+    !row ||
+    row.instance_id === null ||
+    row.version_id === null ||
+    row.version === null ||
+    row.definition_name === null
+  ) {
+    throw new WorkflowInstanceCommandError(
+      "Idempotency key is already held by a command that does not describe a workflow start.",
+      "CONFLICT",
+    );
+  }
+
+  return {
+    commandId: row.command_id,
+    instanceId: row.instance_id,
+    versionId: row.version_id,
+    version: row.version,
+    definitionName: row.definition_name,
+  };
+}
 
 /**
  * Insert a workflow instance row plus its `workflow.instance.start` control
@@ -317,6 +441,20 @@ export type EnqueueWorkflowInstanceStartResult = {
  *   - the public `enqueueWorkflowInstanceStart` mutation (with session checks)
  *   - the case workflow runtime when it needs to start child subprocess
  *     workflows from inside the same transaction that seeded the ERP rows.
+ *
+ * ## Why a keyed start writes its command before its instance
+ *
+ * The unique index on (tenant_id, idempotency_key) is the only thing that can
+ * decide which of two deliveries wins, so the instance cannot be written first:
+ * the loser would find out it lost only after creating a row it has no way to
+ * withdraw, leaving an instance in `starting` that no command points at and no
+ * worker will ever run. A duplicate run is a visible mistake; that row is an
+ * invisible one, and it is the more expensive of the two.
+ *
+ * So the key is claimed first and the instance is created only by the call that
+ * won it. A call that lost adopts the run already enqueued rather than opening
+ * one of its own. Without a key there is nothing to win and nothing to adopt,
+ * and that path keeps the plain order.
  */
 export async function enqueueWorkflowInstanceStartInTransaction(
   trx: Transaction<DB>,
@@ -337,6 +475,12 @@ export async function enqueueWorkflowInstanceStartInTransaction(
     ? normalizeUuid(input.parentInstanceId, "parentInstanceId")
     : null;
   const parentNodeId = normalizeOptionalText(input.parentNodeId);
+  const callerKey = normalizeOptionalText(input.idempotencyKey);
+  // Scoped like the `resume:` and `cancel:` keys, and per definition because a
+  // caller's delivery id says nothing about which workflow it was delivered to:
+  // one delivery fanned out to two definitions is two runs, and the index is
+  // unique per tenant across every command type.
+  const idempotencyKey = callerKey ? `start:${definitionId}:${callerKey}` : null;
 
   const definition = await latestPublishedDefinitionForUpdate(
     trx,
@@ -350,6 +494,7 @@ export async function enqueueWorkflowInstanceStartInTransaction(
     );
   }
   const nextInstanceId = randomUUID();
+  const commandId = randomUUID();
   const commandPayload = {
     instanceId: nextInstanceId,
     definitionId,
@@ -367,6 +512,18 @@ export async function enqueueWorkflowInstanceStartInTransaction(
     parentNodeId,
     requestedBy: startedBy,
   };
+
+  if (idempotencyKey) {
+    const adopted = await claimStartCommandKey(trx, {
+      tenantId,
+      commandId,
+      idempotencyKey,
+      payload: commandPayload,
+    });
+    if (adopted) {
+      return { ...adopted, enqueued: false };
+    }
+  }
 
   await trx
     .insertInto("workflow.instances")
@@ -392,12 +549,24 @@ export async function enqueueWorkflowInstanceStartInTransaction(
     })
     .execute();
 
-  const { commandId } = await insertControlCommand(trx, {
-    tenantId,
-    commandType: "workflow.instance.start",
-    workflowInstanceId: nextInstanceId,
-    payload: commandPayload,
-  });
+  if (idempotencyKey) {
+    // The link the command insert could not carry, now that the instance it
+    // names exists.
+    await sql`
+      update workflow.control_commands
+      set workflow_instance_id = cast(${nextInstanceId} as uuid)
+      where id = cast(${commandId} as uuid)
+        and tenant_id = cast(${tenantId} as uuid)
+    `.execute(trx);
+  } else {
+    await insertControlCommand(trx, {
+      tenantId,
+      commandId,
+      commandType: "workflow.instance.start",
+      workflowInstanceId: nextInstanceId,
+      payload: commandPayload,
+    });
+  }
 
   await appendScopedEntityEventInTransaction(trx, {
     aggregateType: "workflow.instance",
@@ -420,6 +589,7 @@ export async function enqueueWorkflowInstanceStartInTransaction(
     versionId: definition.version_id,
     version: definition.version,
     definitionName: definition.name,
+    enqueued: true,
   };
 }
 
@@ -452,6 +622,7 @@ export async function enqueueWorkflowInstanceStart(
         signalDepth: input.signalDepth,
         entityType: input.entityType,
         entityId: input.entityId,
+        idempotencyKey: input.idempotencyKey,
       },
     );
 

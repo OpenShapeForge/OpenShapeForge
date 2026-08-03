@@ -47,23 +47,21 @@
  * carry no generated CRUD to clean up through, and the list assertions are only
  * meaningful against a database whose whole contents this file accounts for.
  *
- * The dispatcher is reached through a computed import specifier. `apps/api` sets
- * `rootDir: src`, so a static import of anything under `examples/` fails the API
- * typecheck. The specifier resolves to the same absolute file
- * `loadRuntimeModules` imported during init, so the bridge registry a run reads
- * is the one initialisation filled — a second copy of that module graph would
- * present an empty registry and every node would fail with NO_BRIDGE.
+ * The start path and the dispatcher are both reached through computed import
+ * specifiers. `apps/api` sets `rootDir: src`, so a static import of anything
+ * under `examples/` fails the API typecheck. The specifiers resolve to the same
+ * absolute files `loadRuntimeModules` imported during init, so the bridge
+ * registry a run reads is the one initialisation filled — a second copy of that
+ * module graph would present an empty registry and every node would fail with
+ * NO_BRIDGE.
  *
- * A run is started by writing its two rows here rather than by calling the
- * shipped `enqueueWorkflowInstanceStart`, and that is a workaround for a defect
- * rather than a shortcut. `enqueueWorkflowInstanceStartInTransaction` sets
- * `workflow_key` on the instance, and `workflow.instances` has no such column —
- * not in the plugin's table declaration and not in the generated types. The
- * statement is raw SQL, so nothing typechecks it, and every start path funnels
- * through that one function, so no run can currently be started at all.
- * `enqueueStartCommand` below writes what it intends to write, minus the column
- * that does not exist, and the dispatcher then receives the same command payload
- * it would have been handed. Delete it once the column exists.
+ * A run is started through the shipped `enqueueWorkflowInstanceStart` and only
+ * then dispatched here, so a bridge executes under the command a deployment
+ * enqueues: same payload keys, same pinned version, same `starting` instance.
+ * That matters more here than for flow control. A bridge takes its tenant and
+ * its database session from the run the start opened, so a start assembled in
+ * this file would leave the isolation assertions below testing a run this file
+ * wrote rather than one the system produces.
  *
  * Run (cwd apps/api):
  *   set -o pipefail; bun test src/graphql/__tests__/workflow-entity-nodes.e2e.test.ts 2>&1
@@ -121,19 +119,30 @@ type ControlCommand = {
 
 type DispatchCommand = (command: ControlCommand) => Promise<void>;
 
-async function loadDispatch(db: OpenShapeForgeDatabase): Promise<DispatchCommand> {
-  const runtimeDir = resolve(
-    dirname(fileURLToPath(import.meta.url)),
-    "../../../../../examples/plugins/workflow/runtime",
-  );
+type ControlCommandWorkerModule = {
+  createInProcessWorkflowControlCommandDispatcher: (db: OpenShapeForgeDatabase) => {
+    dispatch: DispatchCommand;
+  };
+};
+
+type InstanceCommandsModule = {
+  enqueueWorkflowInstanceStart: (
+    db: OpenShapeForgeDatabase,
+    session: WorkflowSession,
+    input: { definitionId: string; context?: unknown },
+  ) => Promise<{ id: string; status: string }>;
+};
+
+const WORKFLOW_RUNTIME_DIR = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../../../examples/plugins/workflow/runtime",
+);
+
+async function importWorkflowRuntime<TModule>(name: string): Promise<TModule> {
   // Held in a variable so the specifier is not a literal: a literal would make
   // tsc resolve a file outside `rootDir` and fail the API typecheck.
-  const workerSpecifier = `${runtimeDir}/control-command-worker.ts`;
-  const worker = (await import(workerSpecifier)) as Record<string, unknown>;
-  const createDispatcher = worker.createInProcessWorkflowControlCommandDispatcher as (
-    db: OpenShapeForgeDatabase,
-  ) => { dispatch: DispatchCommand };
-  return createDispatcher(db).dispatch;
+  const specifier = `${WORKFLOW_RUNTIME_DIR}/${name}.ts`;
+  return (await import(specifier)) as TModule;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +155,7 @@ type Suite = {
   runtime: DatabaseRuntime;
   schema: GraphQLSchema;
   dispatch: DispatchCommand;
+  commands: InstanceCommandsModule;
 };
 
 let suite: Suite;
@@ -186,12 +196,16 @@ async function startSuite(): Promise<Suite> {
   expect(initialized.failures).toEqual([]);
   expect(initialized.loaded.map((module) => module.name)).toContain("workflow");
 
+  const worker =
+    await importWorkflowRuntime<ControlCommandWorkerModule>("control-command-worker");
+
   return {
     admin,
     database,
     runtime,
     schema: buildGraphqlSchema(initialized.loaded, { db: runtime.db }),
-    dispatch: await loadDispatch(runtime.db),
+    dispatch: worker.createInProcessWorkflowControlCommandDispatcher(runtime.db).dispatch,
+    commands: await importWorkflowRuntime<InstanceCommandsModule>("instance-commands"),
   };
 }
 
@@ -414,93 +428,39 @@ async function publishGraph(
 }
 
 /**
- * Write the two rows a start is: an instance in `starting` and a pending
- * `workflow.instance.start` command. Nothing has executed when this returns.
+ * Ask for a run and stop there. The enqueue leaves an instance in `starting` and
+ * a pending `workflow.instance.start` command, and nothing has executed yet.
  *
- * This stands in for `enqueueWorkflowInstanceStart`, which cannot run at all —
- * see the note on `workflow_key` in the header. The payload is read back out of
- * the queue rather than returned from memory, so it has been through `jsonb`
- * exactly as a dispatched command's would be.
+ * The command is read back out of the queue rather than taken from the return
+ * value, so the payload the dispatcher receives has been through `jsonb` exactly
+ * as a claimed one would be.
  */
-async function enqueueStartCommand(
+async function enqueueStart(
   session: WorkflowSession,
   definitionId: string,
 ): Promise<{ instanceId: string; command: ControlCommand }> {
+  const instance = await suite.commands.enqueueWorkflowInstanceStart(
+    suite.runtime.db,
+    session,
+    { definitionId },
+  );
+
   return withDbSession(suite.runtime.db, session, async (trx, scoped) => {
-    const version = await trx
-      .selectFrom("workflow.definitions as d")
-      .innerJoin("workflow.definition_versions as v", (join) =>
-        join.onRef("v.definition_id", "=", "d.id").onRef("v.tenant_id", "=", "d.tenant_id"),
-      )
-      .select(["d.name", "v.id as version_id", "v.version"])
-      .where("d.tenant_id", "=", scoped.tenantId)
-      .where("d.id", "=", definitionId)
-      .where("d.is_active", "=", true)
-      .where("v.published_at", "is not", null)
-      .orderBy("v.version", "desc")
-      .limit(1)
-      .executeTakeFirstOrThrow();
-
-    const instanceId = randomUUID();
-    const commandId = randomUUID();
-
-    await trx
-      .insertInto("workflow.instances")
-      .values({
-        id: instanceId,
-        tenant_id: scoped.tenantId,
-        definition_id: definitionId,
-        version_id: version.version_id,
-        status: "starting",
-        started_by: scoped.userId,
-        definition_version: version.version,
-        definition_name: version.name,
-        trigger_type: "manual",
-      })
-      .execute();
-
-    await trx
-      .insertInto("workflow.control_commands")
-      .values({
-        id: commandId,
-        tenant_id: scoped.tenantId,
-        command_type: "workflow.instance.start",
-        workflow_instance_id: instanceId,
-        status: "pending",
-        payload: {
-          instanceId,
-          definitionId,
-          versionId: version.version_id,
-          version: version.version,
-          definitionName: version.name,
-          context: {},
-          initialProcessVariables: {},
-          triggerType: "manual",
-          triggerMeta: {},
-          signalDepth: 0,
-          entityType: null,
-          entityId: null,
-          parentInstanceId: null,
-          parentNodeId: null,
-          requestedBy: scoped.userId,
-        },
-      })
-      .execute();
-
     const queued = await trx
       .selectFrom("workflow.control_commands")
       .select(["id", "command_type", "idempotency_key", "payload", "attempts"])
       .where("tenant_id", "=", scoped.tenantId)
-      .where("id", "=", commandId)
+      .where("workflow_instance_id", "=", instance.id)
+      .where("command_type", "=", "workflow.instance.start")
       .executeTakeFirstOrThrow();
 
     return {
-      instanceId,
+      instanceId: instance.id,
       command: {
         id: queued.id,
         tenantId: scoped.tenantId,
         commandType: queued.command_type,
-        workflowInstanceId: instanceId,
+        workflowInstanceId: instance.id,
         idempotencyKey: queued.idempotency_key,
         payload: asRecord(queued.payload),
         attempts: queued.attempts,
@@ -520,7 +480,7 @@ async function enqueueStartCommand(
  * runs inside the start itself.
  */
 async function runDefinition(session: WorkflowSession, definitionId: string): Promise<Run> {
-  const started = await enqueueStartCommand(session, definitionId);
+  const started = await enqueueStart(session, definitionId);
   await suite.dispatch(started.command);
   return loadRun(session, started.instanceId);
 }

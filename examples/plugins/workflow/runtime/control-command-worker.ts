@@ -219,21 +219,72 @@ async function applyWorkerSession(trx: Transaction<DB>) {
   await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
 }
 
+type ClaimOptions = Required<
+  Pick<
+    WorkflowControlCommandWorkerOptions,
+    "workerId" | "batchSize" | "maxAttempts" | "processingTimeoutMs"
+  >
+>;
+
+/**
+ * End the rows the reclaim below can no longer help.
+ *
+ * A command that takes its worker down with it never writes an outcome, so it
+ * only ever moves by being reclaimed — and the reclaim requires
+ * `attempts < maxAttempts`, correctly, or the crash repeats without bound. What
+ * that left behind was a `processing` row still naming a worker that is gone,
+ * with `last_error` null: the same shape as work in flight, so no query
+ * separates the two and the one column an operator would read is empty. The
+ * other way a command exhausts its attempts ends `failed` with the error
+ * attached, and there is no reason for these two to differ.
+ *
+ * The claim is the only thing that ever observes such a row, so it is where the
+ * row is closed. Age still has to be the test: a row at the bound whose claim is
+ * fresh is a worker that may be one statement away from reporting back.
+ */
+async function expireExhaustedClaims(trx: Transaction<DB>, options: ClaimOptions) {
+  await sql`
+    update workflow.control_commands
+    set
+      status = 'failed',
+      -- The claim marker goes, as it does on every other terminal outcome, so
+      -- the worker id is carried into the message instead. An UPDATE's SET list
+      -- reads the row as it was, which is what makes that possible in one
+      -- statement.
+      last_error = 'Workflow control command was claimed '
+        || attempts
+        || ' times without a worker reporting back; the last claim was held by '
+        || coalesce(locked_by, 'an unnamed worker')
+        || '.',
+      locked_at = null,
+      locked_by = null,
+      next_attempt_at = null,
+      updated_at = now()
+    where id in (
+      select id
+      from workflow.control_commands
+      where status = 'processing'
+        and attempts >= ${options.maxAttempts}
+        and locked_at < now() - (${options.processingTimeoutMs} || ' milliseconds')::interval
+      order by created_at asc
+      limit ${options.batchSize}
+      for update skip locked
+    )
+  `.execute(trx);
+}
+
 async function claimPendingCommands(
   db: OpenShapeForgeDatabase,
-  options: Required<
-    Pick<
-      WorkflowControlCommandWorkerOptions,
-      "workerId" | "batchSize" | "maxAttempts" | "processingTimeoutMs"
-    >
-  >,
+  options: ClaimOptions,
 ) {
   return db.transaction().execute(async (trx) => {
     await applyWorkerSession(trx);
+    await expireExhaustedClaims(trx, options);
     // Claims fresh 'pending' commands plus 'processing' commands orphaned by a
     // crashed worker (locked longer than processingTimeoutMs). A reclaimed
-    // redispatch is idempotent because the consume is conditional. Reclaim
-    // is bounded by maxAttempts so a perpetually-stuck command eventually stops.
+    // redispatch is idempotent because the consume is conditional. Reclaim is
+    // bounded by maxAttempts; the statement above is what a command that reaches
+    // that bound without ever reporting back ends as.
     const result = await sql<{
       id: string;
       tenant_id: string;

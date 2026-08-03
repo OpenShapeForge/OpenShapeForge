@@ -88,8 +88,12 @@
         "cron-parser": "^5.5.0",
         "fastify": "^5.8.2",
         "kysely": "^0.29.4",
+        "react": "19.2.7",
         "yaml": "^2.8.3",
         "zod": "^4.3.6",
+      },
+      "devDependencies": {
+        "@types/react": "^19",
       },
     },
     "examples/plugins/workflow-domain-nodes": {

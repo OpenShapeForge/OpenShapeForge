@@ -22,6 +22,9 @@ apps/api/src/generated/workflow/
 apps/api/src/generated/workflow-domain-nodes/
 apps/web/src/actions/generated/
 apps/web/src/app/(generated)/
+# Routes plugins emit. One directory per plugin, each declared in that plugin's
+# ownedPaths so the stale/orphan gates sweep it.
+apps/web/src/app/(plugins)/
 apps/web/src/app/layout.tsx
 apps/web/src/app/page.tsx
 apps/web/src/compiler/

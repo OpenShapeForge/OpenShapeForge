@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import YAML from "yaml";
 import { loadActivePlatformManifest } from "./active-manifest.js";
+import { resolveAuthoringLayers } from "./authoring/layers.js";
 import { collectAllArtifacts } from "./index.js";
 import { mergePluginPlatformTables } from "./plugins.js";
 import type { PlatformSchemaManifest } from "./schema.js";
@@ -103,6 +105,23 @@ describe("compiler plugins", () => {
     expect(catalogTable.tenantScoped).toBe(false);
     expect(catalogTable.generatedCrud).toBe(false);
     expect(catalogTable.columns.map((column) => column.name)).toContain("catalog_checksum");
+  });
+
+  test("a plugin's sidebar entry reaches the resolved app shell", () => {
+    // The route file itself is asserted in the plugin's own suite, which can
+    // import it; this package cannot, because examples/ is outside its rootDir.
+    // What belongs here is the layer resolution: an appShellPatch from a plugin
+    // layer has to survive into the tree the web generator reads.
+    const shell = YAML.parse(
+      readFileSync(join(resolveAuthoringLayers(repoRoot), "appShell.yaml"), "utf8"),
+    ) as { kind: string; navigation: { sidebarItems: { key: string; route?: unknown }[] } };
+
+    expect(shell.kind).toBe("appShell");
+    const entry = shell.navigation.sidebarItems.find((item) => item.key === "workflow");
+    expect(entry).toBeTruthy();
+    expect(entry!.route).toEqual({ en: "/workflow", nl: "/workflow" });
+    // The base layer's entries survive: the patch appends rather than replaces.
+    expect(shell.navigation.sidebarItems.some((item) => item.key === "data")).toBe(true);
   });
 
   test("plugin platform-table collisions are rejected", () => {

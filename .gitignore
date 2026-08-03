@@ -19,6 +19,7 @@ apps/api/src/generated/modules/
 apps/api/src/generated/page-configs/
 apps/api/src/generated/rest/
 apps/api/src/generated/workflow/
+apps/api/src/generated/workflow-domain-nodes/
 apps/web/src/actions/generated/
 apps/web/src/app/(generated)/
 apps/web/src/app/layout.tsx

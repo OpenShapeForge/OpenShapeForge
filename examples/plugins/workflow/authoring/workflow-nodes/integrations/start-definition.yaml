@@ -51,13 +51,12 @@ configFields:
         started workflow instance (trigger metadata), and exposed on this node’s output. The technical Restate workflow
         key stays tenant:uuid; this is your logical key for traceability and reporting.
     help:
-      nl: Gebruik een stabiele domeinsleutel wanneer latere rapportage of idempotente analyse de child-run aan een externe
-        aanvraag, conversatie of zaak moet koppelen.
-      en: Use a stable domain key when later reporting or idempotency analysis must link the child run to an external request,
-        conversation, or case.
+      nl: Gebruik een stabiele domeinsleutel wanneer latere rapportage of idempotente analyse de child-run aan een extern
+        record moet koppelen.
+      en: Use a stable domain key when later reporting or idempotency analysis must link the child run to an external record.
     placeholder:
-      nl: bijv. {{nodes.trigger_turn.output.conversationId}}
-      en: e.g. {{nodes.trigger_turn.output.conversationId}}
+      nl: bijv. {{nodes.trigger.output.requestId}}
+      en: e.g. {{nodes.trigger.output.requestId}}
     render:
       component: Input
   - key: entityType
@@ -66,20 +65,20 @@ configFields:
       nl: Entiteitstype
       en: Entity type
     description:
-      nl: Welk soort zaak of domeinobject de gestarte workflow moet representeren (bijv. customer-care-session of een intern
-        vastgelegd type). Dat wordt meegegeven bij de start zodat koppelingen en messaging weten waar deze run bij
+      nl: Welk soort domeinobject de gestarte workflow moet representeren (bijv. relation of een ander type dat in je
+        deployment is gedefinieerd). Dat wordt meegegeven bij de start zodat koppelingen weten waar deze run bij
         hoort. Laat leeg om het entiteitstype van deze (parent) workflow over te nemen.
-      en: What kind of case or domain object the started workflow should be tied to (e.g. customer-care-session or your
-        internal type). Passed on start so integrations know what this run is about. Leave empty to inherit the parent
+      en: What kind of domain object the started workflow should be tied to (e.g. relation or another type defined in your
+        deployment). Passed on start so integrations know what this run is about. Leave empty to inherit the parent
         workflow’s entity type.
     help:
-      nl: Vul dit alleen in als de child-run aan een ander soort object hoort dan de parent. Messaging- en case-integraties
-        gebruiken deze metadata om runtime-relaties te leggen.
-      en: Fill this only when the child run belongs to a different object type than the parent. Messaging and case
-        integrations use this metadata to create runtime links.
+      nl: Vul dit alleen in als de child-run aan een ander soort object hoort dan de parent. Integraties gebruiken deze
+        metadata om runtime-relaties te leggen.
+      en: Fill this only when the child run belongs to a different object type than the parent. Integrations use this
+        metadata to create runtime links.
     placeholder:
-      nl: bijv. customer-care-session
-      en: e.g. customer-care-session
+      nl: bijv. relation
+      en: e.g. relation
     render:
       component: Input
   - key: entityId
@@ -88,10 +87,10 @@ configFields:
       nl: Entiteit-ID
       en: Entity ID
     description:
-      nl: De unieke sleutel van dat object (bijv. conversatie-id of zaak-id). Zo wordt de child-run aan dezelfde case of
-        hetzelfde gesprek gekoppeld als de parent wanneer dat nodig is. Laat leeg om de entity-id van deze workflow over
+      nl: De unieke sleutel van dat object (bijv. de id van het gekozen entiteitstype). Zo wordt de child-run aan hetzelfde
+        object gekoppeld als de parent wanneer dat nodig is. Laat leeg om de entity-id van deze workflow over
         te nemen.
-      en: The unique id of that object (e.g. conversation or case id). Links the child run to the same case or conversation as
+      en: The unique id of that object (e.g. the id of the selected entity type). Links the child run to the same object as
         the parent when needed. Leave empty to inherit this workflow’s entity id.
     help:
       nl: Gebruik een variabele uit de trigger of een eerdere node wanneer de koppeling pas tijdens uitvoering bekend is.
@@ -99,8 +98,8 @@ configFields:
       en: Use a variable from the trigger or an earlier node when the link is only known at runtime. Leave empty to pass
         through the parent entity id.
     placeholder:
-      nl: bijv. {{nodes.trigger_turn.output.conversationId}}
-      en: e.g. {{nodes.trigger_turn.output.conversationId}}
+      nl: bijv. {{nodes.trigger.output.entityId}}
+      en: e.g. {{nodes.trigger.output.entityId}}
     render:
       component: Input
   - key: entityUri
@@ -109,9 +108,9 @@ configFields:
       nl: Entiteit-URI
       en: Entity URI
     description:
-      nl: Een stabiel pad of canonieke URI voor die entiteit (bijv. conversations/… of een intern resourcepad). Integraties
+      nl: Een stabiel pad of canonieke URI voor die entiteit (bijv. relations/… of een ander resourcepad). Integraties
         kunnen hiermee naar hetzelfde object verwijzen. Laat leeg om de entity-uri van deze workflow over te nemen.
-      en: A stable path or canonical URI for that entity (e.g. conversations/… or an internal resource path). Integrations use
+      en: A stable path or canonical URI for that entity (e.g. relations/… or another resource path). Integrations use
         it to point at the same object. Leave empty to inherit this workflow’s entity URI.
     help:
       nl: Gebruik dit voor leesbare of canonieke resourcepaden naast de technische entityId. Houd de URI stabiel zodat
@@ -119,8 +118,8 @@ configFields:
       en: Use this for readable or canonical resource paths alongside the technical entityId. Keep the URI stable so logs,
         notifications, and integrations keep pointing to the same object.
     placeholder:
-      nl: bijv. conversations/{{nodes.trigger_turn.output.conversationId}}
-      en: e.g. conversations/{{nodes.trigger_turn.output.conversationId}}
+      nl: bijv. relations/{{nodes.trigger.output.entityId}}
+      en: e.g. relations/{{nodes.trigger.output.entityId}}
     render:
       component: Input
   - key: definitionName

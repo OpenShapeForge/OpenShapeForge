@@ -95,6 +95,12 @@ const GENERATED_WORKFLOW_DIR = join(
   "../../generated/workflow",
 );
 
+/** The domain node packs' own root, owned by the second plugin. */
+const GENERATED_DOMAIN_NODES_DIR = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../generated/workflow-domain-nodes",
+);
+
 // ---------------------------------------------------------------------------
 // Preconditions: a configured verifier and two real identities
 // ---------------------------------------------------------------------------
@@ -328,16 +334,23 @@ const TRIGGERED_GRAPH = {
  * Every node type the migration chain seeded into
  * `platform.workflow_node_catalog_entries`.
  *
- * Both documents, because `hydrateNodeCatalog` reads the table unfiltered: the
- * standard and entity catalogs share it, and the module's in-memory store holds
- * their union.
+ * All three documents, because `hydrateNodeCatalog` reads the table unfiltered:
+ * the standard, entity and domain catalogs share it — `node_type` is the
+ * primary key, so the slices cannot collide — and the module's in-memory store
+ * holds their union. The third is emitted by a different plugin into its own
+ * generated root, which is why this reads two directories rather than one.
  */
 async function seededNodeTypes(): Promise<string[]> {
+  const documents: [string, string][] = [
+    [GENERATED_WORKFLOW_DIR, "node-catalog.seed.json"],
+    [GENERATED_WORKFLOW_DIR, "entity-catalog.seed.json"],
+    [GENERATED_DOMAIN_NODES_DIR, "node-catalog.seed.json"],
+  ];
   const types: string[] = [];
-  for (const file of ["node-catalog.seed.json", "entity-catalog.seed.json"]) {
-    const seed = JSON.parse(
-      await readFile(join(GENERATED_WORKFLOW_DIR, file), "utf8"),
-    ) as { entries: { nodeType: string }[] };
+  for (const [dir, file] of documents) {
+    const seed = JSON.parse(await readFile(join(dir, file), "utf8")) as {
+      entries: { nodeType: string }[];
+    };
     types.push(...seed.entries.map((entry) => entry.nodeType));
   }
   return types.sort();

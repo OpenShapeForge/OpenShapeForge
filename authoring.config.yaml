@@ -12,3 +12,12 @@ plugins:
   # exists), and ships its own authoring layer (workflow-nodes/** plus a
   # Relation entityPatch). See examples/plugins/workflow/index.ts.
   - ./examples/plugins/workflow/index.ts
+  # The domain node packs, as their own plugin so a deployment can drop them.
+  # Its authoring layer ships `domain-workflow-nodes/**` rather than
+  # `workflow-nodes/**` on purpose: every plugin's authoring layer merges into
+  # one tree, and the workflow plugin's generator globs `workflow-nodes/`
+  # recursively. A shared directory name would put these straight back into the
+  # standard catalog, which is the thing this split exists to prevent. The two
+  # catalogs are separate slices of one table (`catalog = 'domain'` here,
+  # `'standard'` there), each authoritative over its own rows.
+  - ./examples/plugins/workflow-domain-nodes/index.ts

@@ -1,0 +1,13 @@
+{
+  "name": "@openshapeforge/example-plugin-workflow-domain-nodes",
+  "version": "0.1.0",
+  "private": true,
+  "license": "BUSL-1.1",
+  "type": "module",
+  "description": "Example plugin: the domain workflow node packs as their own catalog slice (generator + authoring layer + seed step).",
+  "module": "index.ts",
+  "dependencies": {
+    "yaml": "^2.8.3"
+  },
+  "//dependencies": "yaml parses the node-config authoring files in src/, and is the only value this package imports from anywhere: the compiler half reads YAML and writes JSON, and the runtime half applies that JSON through the API's catalog-seed helper, whose kysely and DB references are type-only and so pull in nothing at run time. It must be declared here rather than borrowed from apps/api or the workflow plugin — a bare specifier does not resolve from examples/. Keep the range in step with examples/plugins/workflow: both parse the same authoring files into two slices of one table, and a version skew would be a parse difference between them."
+}

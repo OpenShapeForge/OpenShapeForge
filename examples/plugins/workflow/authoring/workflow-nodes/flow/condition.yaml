@@ -72,7 +72,7 @@ configFields:
               defaultPath: ""
     defaultValue:
       - id: approved
-        label: Goedgekeurd
+        label: Approved
         when:
           kind: rule
           operator: equals
@@ -83,7 +83,7 @@ configFields:
             kind: literal
             value: approved
       - id: rejected
-        label: Afgewezen
+        label: Rejected
         when:
           kind: rule
           operator: equals

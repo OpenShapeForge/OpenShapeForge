@@ -92,6 +92,13 @@
         "zod": "^4.3.6",
       },
     },
+    "examples/plugins/workflow-domain-nodes": {
+      "name": "@openshapeforge/example-plugin-workflow-domain-nodes",
+      "version": "0.1.0",
+      "dependencies": {
+        "yaml": "^2.8.3",
+      },
+    },
     "packages/auth": {
       "name": "@openshapeforge/auth",
       "version": "0.1.0",
@@ -323,6 +330,8 @@
     "@openshapeforge/connector-example-object-store": ["@openshapeforge/connector-example-object-store@workspace:examples/connectors/object-store"],
 
     "@openshapeforge/example-plugin-workflow": ["@openshapeforge/example-plugin-workflow@workspace:examples/plugins/workflow"],
+
+    "@openshapeforge/example-plugin-workflow-domain-nodes": ["@openshapeforge/example-plugin-workflow-domain-nodes@workspace:examples/plugins/workflow-domain-nodes"],
 
     "@openshapeforge/ui": ["@openshapeforge/ui@workspace:packages/ui"],
 

@@ -116,6 +116,12 @@ function startIdempotencyKey(schedule: ClaimedSchedule) {
  *
  * No audit row, because there is no bypass to audit — which is also why the
  * poll loop's rate stops being a problem for the break-glass trail.
+ *
+ * Call this ONLY on a transaction this worker opened. `set_config(..., true)` is
+ * transaction-local, not statement-local, so calling it on a transaction someone
+ * else owns widens THEIR session for the rest of it — see
+ * `syncWorkflowDefinitionScheduleInTransaction` below, which is why the publish
+ * path does not come through here.
  */
 async function applyWorkflowScheduleSession(trx: Transaction<DB>, tenantId?: string) {
   await sql`select set_config('app.roles', ${WORKFLOW_WORKER_ROLE}, true)`.execute(trx);
@@ -123,6 +129,19 @@ async function applyWorkflowScheduleSession(trx: Transaction<DB>, tenantId?: str
   if (tenantId) {
     await sql`select set_config('app.tenant_id', ${tenantId}, true)`.execute(trx);
   }
+}
+
+/**
+ * Row security for a bare transaction that is nobody's request.
+ *
+ * The standalone `syncWorkflowDefinitionSchedule` wrapper opens its own
+ * transaction, so no session exists on it at all and the tenant predicate would
+ * see `app.tenant_id` unset. It sets the tenant and nothing else: rebuilding one
+ * tenant's `workflow.schedules` rows needs no cross-tenant reach, and the plain
+ * tenant predicate already admits it.
+ */
+async function applyWorkflowScheduleTenantSession(trx: Transaction<DB>, tenantId: string) {
+  await sql`select set_config('app.tenant_id', ${tenantId}, true)`.execute(trx);
 }
 
 async function loadLatestPublishedDefinition(
@@ -163,13 +182,18 @@ async function loadLatestPublishedDefinition(
   };
 }
 
+/**
+ * Sets no session: this runs under both the worker (which already set one on its
+ * own transaction) and the publish path (whose caller owns the transaction and
+ * whose session must not be touched). Writing one tenant's `workflow.schedules`
+ * rows is admitted by the plain tenant predicate either way.
+ */
 async function deactivateScheduleInTransaction(
   trx: Transaction<DB>,
   tenantId: string,
   definitionId: string,
   reason: string,
 ) {
-  await applyWorkflowScheduleSession(trx, tenantId);
   await sql`
     update workflow.schedules
     set
@@ -194,13 +218,34 @@ export async function deactivateWorkflowDefinitionScheduleInTransaction(
   await deactivateScheduleInTransaction(trx, tenantId, definitionId, reason);
 }
 
+/**
+ * Rebuild one definition's schedule row, on a transaction the CALLER owns.
+ *
+ * This is the publish path: it runs inside the request's `withDbSession`
+ * transaction. It therefore sets no session at all. It used to set
+ * `app.roles`, `app.worker_role` and `app.tenant_id` here, and because
+ * `set_config(..., true)` is transaction-local rather than statement-local, that
+ * widened the caller's session for the remainder of its transaction — clobbering
+ * the request's real roles and handing it read access to every tenant's
+ * `workflow.control_commands`, `schedules` and `schedule_fires`, the three
+ * tables whose policies name `app.worker_role`.
+ *
+ * That is the one thing the worker axis rests on not happening: the API's
+ * request path never presents the worker role, and a worker's boot path does.
+ * The widening was invisible at the call site — a publish resolver calling this
+ * looks like ordinary bookkeeping.
+ *
+ * Nothing here needs the widening. Every statement below touches one tenant's
+ * own rows, which the plain tenant predicate already admits under the caller's
+ * session. Callers that have no session — the standalone wrapper — set the
+ * tenant themselves.
+ */
 export async function syncWorkflowDefinitionScheduleInTransaction(
   trx: Transaction<DB>,
   tenantId: string,
   definitionId: string,
   options: WorkflowScheduleSyncOptions = {},
 ) {
-  await applyWorkflowScheduleSession(trx, tenantId);
   const published = await loadLatestPublishedDefinition(trx, tenantId, definitionId);
   if (!published) {
     await deactivateScheduleInTransaction(
@@ -273,15 +318,23 @@ export async function syncWorkflowDefinitionScheduleInTransaction(
   return { status: "active" as const, nextFireAt: upcoming };
 }
 
+/**
+ * The same rebuild, for a caller that has no transaction of its own.
+ *
+ * This opens a bare one, so no session exists on it and the tenant predicate
+ * would see `app.tenant_id` unset and match nothing. It sets the tenant, and
+ * only the tenant — this is not a worker and needs no cross-tenant reach.
+ */
 export async function syncWorkflowDefinitionSchedule(
   db: OpenShapeForgeDatabase,
   tenantId: string,
   definitionId: string,
   options: WorkflowScheduleSyncOptions = {},
 ) {
-  return db.transaction().execute(async (trx) =>
-    syncWorkflowDefinitionScheduleInTransaction(trx, tenantId, definitionId, options),
-  );
+  return db.transaction().execute(async (trx) => {
+    await applyWorkflowScheduleTenantSession(trx, tenantId);
+    return syncWorkflowDefinitionScheduleInTransaction(trx, tenantId, definitionId, options);
+  });
 }
 
 async function claimDueSchedules(

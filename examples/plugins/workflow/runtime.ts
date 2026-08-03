@@ -20,8 +20,10 @@
  * (versioning, validate-on-publish, the edit lock, refusing to delete a
  * definition with runs) lives above the columns rather than in them.
  *
- * `restRoutes` stays unimplemented until the webhook trigger lands, rather than
- * being stubbed, so the surface advertises nothing that does not answer.
+ * `restRoutes` mounts the inbound webhook trigger. The host calls it inside the
+ * same child plugin the core routes use, so a contributed route sits behind the
+ * rate limiter without asking — which matters most for the one route here,
+ * since it is the only workflow surface an outside caller reaches directly.
  *
  * It also contributes the `workflow-worker` role — the process that drains the
  * control-command queue. That is contributed rather than hardcoded in
@@ -44,6 +46,8 @@ import {
 } from "./runtime/graphql.js";
 import { hydrateNodeCatalog } from "./runtime/node-catalog-store.js";
 import { registerAllWorkflowNodeBridges } from "./runtime/node-bridges.js";
+import { startWorkflowScheduleWorker } from "./runtime/schedule-worker.js";
+import { registerWorkflowWebhookRoutes } from "./runtime/webhook-routes.js";
 import { WORKFLOW_WORKER_ROLE } from "./worker-role.js";
 
 const plugin: RuntimeModule = {
@@ -77,6 +81,25 @@ const plugin: RuntimeModule = {
   },
 
   /**
+   * `POST /api/workflow/triggers/webhook/:definitionId` — the one workflow
+   * surface reached from outside rather than through GraphQL.
+   *
+   * It is not anonymous: the handler resolves a session from the request
+   * headers and refuses without a verified tenant and user, then the start
+   * command applies the same writer-role check every other start path does. So
+   * "webhook" here means an authenticated caller poking a definition, not an
+   * arbitrary third party — there is no payload signature to verify because
+   * there is no shared secret with a sender.
+   *
+   * `db` may be absent (the module contract lets a runtime boot without one);
+   * the handler answers 503 rather than throwing, which is why it is passed
+   * straight through instead of being guarded here.
+   */
+  restRoutes(routes, context) {
+    registerWorkflowWebhookRoutes(routes, context);
+  },
+
+  /**
    * The `workflow-worker` role: one process draining `workflow.control_commands`.
    *
    * It runs here rather than alongside GraphQL because it is a poll loop with
@@ -86,11 +109,16 @@ const plugin: RuntimeModule = {
    * `apps/api` does not know this role exists; a repo that drops the workflow
    * plugin loses it with the plugin.
    *
-   * The schedule worker is NOT started alongside it. It cannot complete a fire
-   * today — it writes `workflow.schedule_fires.version_id` and `.command_id`,
-   * neither of which the table declares — and a worker that throws on every due
-   * row is worse than one that is not running. Tracked separately; when that is
-   * fixed it belongs in this same role, since the two drain the same queue.
+   * The schedule worker runs in this same role, because the two are one
+   * pipeline: a due schedule does not start a run itself, it enqueues a
+   * `workflow.instance.start` command that the control-command worker then
+   * drains. Splitting them across roles would mean a deployment could run half
+   * of that and see schedules fire into a queue nothing reads.
+   *
+   * Both are poll loops, so the role owns two intervals and stops both. `stop()`
+   * must settle only after each has finished its in-flight tick — the schedule
+   * worker holds claimed `workflow.schedules` rows with `locked_by` set, and
+   * returning early would leave them locked until the claim ages out.
    */
   workers: {
     [WORKFLOW_WORKER_ROLE]: {
@@ -105,12 +133,25 @@ const plugin: RuntimeModule = {
             dispatch: restate ? "restate" : "in-process",
             ...(restate ? { service: restate.workflowCommandServiceName } : {}),
           },
-          "Draining workflow.control_commands.",
+          "Draining workflow.control_commands and firing due workflow.schedules.",
         );
-        return startWorkflowControlCommandWorker(
+
+        const commands = startWorkflowControlCommandWorker(
           db,
           createWorkflowControlCommandDispatcher(db),
         );
+        const schedules = startWorkflowScheduleWorker(db);
+
+        return {
+          stop: async () => {
+            // Schedules first: it enqueues commands, so stopping it before the
+            // drain means the queue is not being refilled while it empties.
+            // Sequential rather than Promise.all for that ordering — neither
+            // rejects, both only await their own tick.
+            await schedules.stop();
+            await commands.stop();
+          },
+        };
       },
     },
   },

@@ -559,7 +559,10 @@ function workflowExecutionTables(): TableDefinition[] {
       name: "waits",
       tenantScoped: true,
       // Read across tenants by the collection-wait sweeps, which join it to
-      // read `wait_metadata` while deciding which pending waits to replay.
+      // read `wait_metadata` while deciding which pending waits to replay, and
+      // claimed across tenants by the timer sweep, which updates `resumed_at`
+      // on rows whose `resume_at` has passed. Both are claims on the wait
+      // itself; the resuming they lead to runs in the wait's own tenant.
       workerAccess: WORKFLOW_WORKER_ROLE,
       domainInternal: true,
       generatedCrud: false,
@@ -584,12 +587,29 @@ function workflowExecutionTables(): TableDefinition[] {
         { name: "partial_input", type: "jsonb" },
         { name: "wait_metadata", type: "jsonb" },
         { name: "assigned_to", type: "text" },
+        // When this parked node becomes due, and the claim that retires it.
+        //
+        // "Resume this node at a wall-clock time" is not specific to the timer
+        // node — a join timeout wants the same two columns — so it lives on the
+        // generic parked-node table rather than in a table per wait kind. Only
+        // the timer bridge writes `resume_at` today, and only its sweep writes
+        // `resumed_at`; both are null for every other kind, which is why the
+        // sweep filters on `resume_at is not null` rather than on the kind
+        // alone.
+        //
+        // `resumed_at` exists so the sweep can CLAIM. Without it the same row
+        // is re-selected on every tick forever: the resume command would dedupe
+        // on its idempotency key, so nothing breaks, but the row is never
+        // retired and the scan grows without bound.
+        { name: "resume_at", type: "timestamptz" },
+        { name: "resumed_at", type: "timestamptz" },
         { name: "created_at", type: "timestamptz", required: true, default: "now()" },
         { name: "updated_at", type: "timestamptz", required: true, default: "now()" },
       ],
       indexes: [
         { name: "workflow_waits_tenant_token_uidx", unique: true, columns: ["tenant_id", "wait_token"] },
         { name: "workflow_waits_instance_idx", columns: ["tenant_id", "instance_id"] },
+        { name: "workflow_waits_resume_idx", columns: ["wait_kind", "resume_at"] },
       ],
     },
     {

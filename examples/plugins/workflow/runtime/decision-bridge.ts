@@ -8,17 +8,17 @@
  * handle is returned instead, so a decision node always routes somewhere and
  * never ends a run by falling off the end of its own config.
  *
- * ## Why this is the only hand-written bridge that ships
+ * ## Why so few bridges are hand-written
  *
- * Every other executable node in the shipped catalog is generated from an
+ * Almost every executable node in the shipped catalog is generated from an
  * entity (see `generated-entity-bridges.ts`): its behaviour is a create,
  * update, delete or list against a table this deployment already owns. The
  * catalogued types that are neither — the ones that reach a model gateway, a
  * message transport or a billing service — need capabilities this deployment
  * does not have. Registering them anyway would only move a missing integration
  * from install time to the middle of somebody's run. Flow control needs nothing
- * but the config it was handed, so it is the one node type that can ship
- * unconditionally.
+ * but the config it was handed, so it is the category that can ship
+ * unconditionally: this and `timer-bridge.ts` are the two.
  *
  * ## Coupled to the validator
  *

@@ -298,8 +298,12 @@ consume rather than from whoever dispatches.
 **Restored authoring layer** — `examples/plugins/workflow/authoring/` is
 picked up as a layer automatically and ships:
 
-- `workflow-nodes/**` — the node-config YAMLs (ai/, flow/, messaging/,
-  triggers/, …) the generators compile.
+- `workflow-nodes/**` — the node-config YAMLs the generators compile into
+  the `standard` catalog: `flow/`, `triggers/`, `integrations/` and
+  `orchestrator/`, fifteen node types in all. The packs that describe
+  capabilities this repo does not provide — `ai/`, `messaging/`, `billing/`,
+  case handling — moved to the `workflow-domain-nodes` plugin, which seeds
+  them into the same table under `catalog='domain'`.
 - `entities/core/relation.yaml` with `kind: entityPatch` — the **Relation
   entityPatch**: it strategically merges a `workflow.nodes.actions` block
   (create/getOne/list/update/delete: true) back onto the base Relation

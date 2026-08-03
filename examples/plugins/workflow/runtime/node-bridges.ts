@@ -11,9 +11,11 @@
  * where the gap is.
  *
  * A node type with no bridge fails at execution with NO_BRIDGE, naming the
- * type. That is the honest answer, and it is why the designer palette should
- * filter on what is registered rather than on what the catalog contains — see
- * the plugin's own note on the domain node packs.
+ * type. That is the honest answer, but a late one, so the palette does not wait
+ * for it: `node-executability.ts` reads this registry — together with the two
+ * families the process runtime executes natively — and reports each node type's
+ * standing on `WorkflowNodeType.runtimeSupport`. That is what a palette gates
+ * on, rather than on which catalog a node type came from.
  *
  * Registration is one-shot and idempotent: the registry refuses a duplicate,
  * and the module contract's `init` may run more than once across a test suite.

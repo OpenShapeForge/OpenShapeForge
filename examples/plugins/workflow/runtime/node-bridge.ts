@@ -1,18 +1,25 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Workflow node runtime bridge — a tiny in-process registry that maps a
- * compiler-defined workflow nodeType ("ai.extractParameters", "billing.runProlongation",
- * ...) to the function that actually executes it inside the API process.
+ * compiler-defined workflow nodeType ("decision", "timer",
+ * "entity.core.relation.create", ...) to the function that actually executes it
+ * inside the API process.
  *
  * Why this exists: the compiler-owned node catalog only validates that a
  * workflow definition references a known node type — it cannot run those
- * nodes. The process runtime calls into this registry whenever an
- * instance reaches such a node so the side-effecting service code lives where
- * it belongs (e.g. apps/api/src/modules/billing for billing.runProlongation).
+ * nodes. The process runtime calls into this registry whenever an instance
+ * reaches such a node, so the side-effecting code lives with whoever owns the
+ * capability rather than inside the engine.
  *
- * Usage from a feature module:
- *   import { registerWorkflowNodeBridge } from "../../workflow/node-bridge.js";
- *   registerWorkflowNodeBridge("billing.runProlongation", async (ctx, config) => { ... });
+ * Most of the catalog is unregistered here, and deliberately: the domain node
+ * packs describe capabilities this repo does not provide. They are a contract a
+ * host repo implements against, by registering a bridge from its own module:
+ *
+ *   import { registerWorkflowNodeBridge } from "<workflow-plugin>/runtime/node-bridge.js";
+ *   registerWorkflowNodeBridge("message.reply", async (ctx) => { ... });
+ *
+ * Doing so is all it takes to put that node type in the designer palette;
+ * `node-executability.ts` reads this registry to decide.
  *
  * Usage from the workflow runtime:
  *   const handler = getWorkflowNodeBridge(node.type);

@@ -38,6 +38,12 @@ import type { Json } from "../../../../apps/api/src/generated/db/types.js";
  */
 export type CatalogEntry = {
   nodeType: string;
+  /**
+   * Which generator owns this row: `standard` and `entity` from the workflow
+   * plugin, `domain` from the node packs. Provenance, not capability — see
+   * node-executability.ts for why a palette must not confuse the two.
+   */
+  catalog: string;
   category: string;
   label: Record<string, string>;
   description?: Record<string, string>;
@@ -56,6 +62,7 @@ let store: CatalogStore | null = null;
 /** The columns this module reads; jsonb arrives parsed, never as a string. */
 type CatalogRow = {
   node_type: string;
+  catalog: string;
   category: string;
   label: Json;
   description: Json | null;
@@ -66,6 +73,7 @@ type CatalogRow = {
 function toEntry(row: CatalogRow): CatalogEntry {
   const entry: CatalogEntry = {
     nodeType: row.node_type,
+    catalog: row.catalog,
     category: row.category,
     label: (row.label ?? {}) as Record<string, string>,
     configFields: (row.config_fields ?? []) as unknown[],
@@ -117,13 +125,23 @@ export async function hydrateNodeCatalog(db: OpenShapeForgeDatabase): Promise<vo
   // inapplicable, which is worse than their absence.
   //
   // `node_type` is the table's primary key, so the slices cannot collide in
-  // one map. Note the consequence for anything building a palette: this store
-  // holds the union, and the `catalog` column is deliberately NOT selected, so
-  // a caller cannot tell a domain node from a standard one here. A palette
-  // that needs that distinction has to read the column, not this map.
+  // one map. `catalog` comes along because the store holds the union and a
+  // caller would otherwise have no way to tell a domain node from a standard
+  // one. It was once left out on the grounds that only a palette wants it and a
+  // palette could query for it; that traded one text column on a few-dozen-row
+  // table already held in memory for a second read of the same rows, which can
+  // disagree with this one. Selecting it is both cheaper and single-sourced.
   const rows = await db
     .selectFrom("platform.workflow_node_catalog_entries")
-    .select(["node_type", "category", "label", "description", "config_fields", "output_fields"])
+    .select([
+      "node_type",
+      "catalog",
+      "category",
+      "label",
+      "description",
+      "config_fields",
+      "output_fields",
+    ])
     .execute();
 
   store = buildStore(rows.map(toEntry));

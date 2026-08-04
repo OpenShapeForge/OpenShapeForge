@@ -8,15 +8,16 @@
  *   0. app role               — provision the restricted, non-superuser
  *      runtime role + schema/function grants + default privileges. Must run
  *      first (privileged migrate chain) so RLS is actually enforced against
- *      the app role; the table-grant SWEEP runs last (step 5) once tables
+ *      the app role; the table-grant SWEEP runs last (step 6) once tables
  *      exist.
  *   1. app helpers            — RLS helper functions every policy references.
  *   2. system bypass audit    — break-glass audit table (not manifest-managed).
- *   3. versioned bespoke      — hand-written transformations; run BEFORE the
+ *   3. retention controls     — durable review, archive, and key-destruction queues.
+ *   4. versioned bespoke      — hand-written transformations; run BEFORE the
  *      generated step so a bespoke migration can eliminate non-additive drift
  *      before the roll-forward evaluates it.
- *   4. generated roll-forward — manifest-driven schema apply/diff.
- *   5. app role grants        — sweep DML grants over ALL now-existing tables
+ *   5. generated roll-forward — manifest-driven schema apply/diff.
+ *   6. app role grants        — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically.
  *   6. catalog seeds          — load the compiler's global configuration
  *      catalogs into their platform tables: the entity page configs, then
@@ -25,7 +26,7 @@
  *      sweep. Each is a no-op when its seed was not emitted.
  *
  * `db` must be a connection-bound Kysely instance (obtained via
- * runtime.db.connection().execute) — steps 3 and 4 use explicit
+ * runtime.db.connection().execute) — steps 4 and 5 use explicit
  * BEGIN/COMMIT transactions on that single connection.
  *
  * NOTE: the whole chain runs as the PRIVILEGED migrate role
@@ -35,6 +36,7 @@ import type { Kysely } from "kysely";
 import type { DB } from "../generated/db/types.js";
 import { applyAppRoleMigration, applyAppRoleGrants } from "./migrations/app-role.js";
 import { applyAppHelpersMigration } from "./migrations/app-helpers.js";
+import { applyRetentionControlMigration } from "./migrations/retention-control.js";
 import { applySystemBypassAuditMigration } from "./migrations/system-bypass-audit.js";
 import {
   applyVersionedMigrations,
@@ -82,6 +84,7 @@ export async function runMigrationChain(
   await applyAppRoleMigration(db);
   await applyAppHelpersMigration(db);
   await applySystemBypassAuditMigration(db);
+  await applyRetentionControlMigration(db);
   const versioned = await applyVersionedMigrations(
     db,
     options.versioned ?? versionedMigrations,

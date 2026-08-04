@@ -78,6 +78,10 @@ const manifestTables = manifest.tables as unknown as ManifestTable[];
 const nonManifestManagedTables = new Set<string>([
   "platform.schema_migrations",
   "platform.system_bypass_audit",
+  "platform.retention_actions",
+  "platform.retention_review_queue",
+  "platform.retention_archive",
+  "platform.retention_crypto_delete_queue",
 ]);
 
 /**

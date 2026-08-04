@@ -1,0 +1,272 @@
+# AFAS Profit — the first real ERP connector contract.
+#
+# Where `example-object-store.yaml` exists to exercise the pipeline, this one
+# describes a system that actually exists, and every decision below is forced by
+# something AFAS does rather than by what is convenient here.
+#
+# ## Why AFAS is the first ERP and not Exact Online
+#
+# AFAS authenticates with an AppConnector token that is issued once and does not
+# rotate. That fits the connector model as it stands: a secret-marked config
+# field, encrypted at rest, handed to the package as a value. Exact Online's
+# OAuth2 rotates its refresh token on every refresh, and `ConnectorContext`
+# hands packages a FROZEN secrets object with no write-back path — an Exact
+# connector would authenticate once and fail on its next call. That needs a
+# platform capability first, so it is a later contract, not this one.
+#
+# ## Why the row shapes are `object` and not spelled out
+#
+# A GetConnector's columns are configured inside the customer's own AFAS
+# environment, not by AFAS and not by us. Two tenants pointing at the same
+# connector id can legitimately get different columns. Declaring a column list
+# here would be inventing a contract neither side agreed to, and the output
+# boundary would then reject perfectly good responses. `object` is the honest
+# declaration: the platform checks it is an object and leaves the shape to the
+# two systems that actually negotiated it.
+schemaVersion: 1
+kind: connector
+connector: AfasProfit
+title: AFAS Profit
+labels:
+  en: AFAS Profit
+  nl: AFAS Profit
+description:
+  en: Read and write AFAS Profit data through its Get- and UpdateConnectors.
+  nl: Lees en schrijf AFAS Profit-gegevens via de Get- en UpdateConnectors.
+category: erp
+domains: [finance]
+
+capabilities: [operations]
+
+implementation:
+  package: "@openshapeforge/connector-afas-profit"
+  contractVersion: 1
+  provenance: firstParty
+  license:
+    spdx: LicenseRef-BatterAI-Commercial
+    notice: >-
+      The implementation package ships separately under its own license and is
+      not covered by the BUSL-1.1 grant on this repository.
+
+availability:
+  entitlement: connector.afas-profit
+
+configuration:
+  # Multiple: an organisation routinely runs production alongside a test
+  # environment, and they are separate installations with separate tokens
+  # rather than one installation that switches.
+  instances: multiple
+  # AFAS exposes /profitversion, which is authenticated but reads nothing —
+  # exactly the cheap round trip a connectivity check wants.
+  verify: true
+  fields:
+    - key: environmentId
+      valueType: string
+      required: true
+      label: { en: Environment number, nl: Omgevingsnummer }
+      description:
+        en: The numeric participant number, without the leading O, A or T.
+        nl: Het deelnemersnummer in cijfers, zonder de voorloopletter O, A of T.
+      help:
+        en: >-
+          An AFAS environment is named like O12345AA, A12345AA or T12345AA. Only
+          the digits appear in the REST host, and the leading letter is what the
+          environment field below records instead.
+        nl: >-
+          Een AFAS-omgeving heet bijvoorbeeld O12345AA, A12345AA of T12345AA.
+          Alleen de cijfers komen in de REST-host voor; de voorloopletter legt
+          het veld hieronder vast.
+      validation:
+        pattern: "^[0-9]{3,10}$"
+
+    - key: environmentType
+      valueType: string
+      required: true
+      defaultValue: production
+      label: { en: Environment, nl: Omgeving }
+      description:
+        en: Selects which AFAS REST host this installation talks to.
+        nl: Bepaalt met welke AFAS REST-host deze installatie praat.
+      options:
+        type: static
+        items:
+          - { value: production, label: { en: Production, nl: Productie } }
+          - { value: accept, label: { en: Acceptance, nl: Acceptatie } }
+          - { value: test, label: { en: Test, nl: Test } }
+
+    - key: token
+      valueType: string
+      required: true
+      secret: true
+      label: { en: AppConnector token, nl: AppConnector-token }
+      description:
+        en: The base64 token AFAS issues for the AppConnector.
+        nl: Het base64-token dat AFAS voor de AppConnector uitgeeft.
+      help:
+        en: >-
+          Paste the token exactly as AFAS shows it. It is sent as
+          "Authorization: AfasToken <token>" and is never read back once stored.
+        nl: >-
+          Plak het token precies zoals AFAS het toont. Het wordt verstuurd als
+          "Authorization: AfasToken <token>" en is na opslaan niet meer op te
+          vragen.
+
+network:
+  # All three hosts, because the environment field selects between them at
+  # runtime and egress is enforced against the contract, not against the
+  # installation. Listing only production would make a test installation
+  # unreachable in a way that looks like an AFAS outage.
+  egress:
+    - "*.rest.afas.online"
+    - "*.restaccept.afas.online"
+    - "*.resttest.afas.online"
+
+operations:
+  - key: getConnector
+    kind: query
+    label: { en: Read a GetConnector, nl: GetConnector uitlezen }
+    description:
+      en: Fetch rows from a GetConnector published in the AFAS environment.
+      nl: Haal rijen op uit een GetConnector die in de AFAS-omgeving is gepubliceerd.
+    authorization:
+      roles:
+        invoke: [Connectors.All.Read]
+    input:
+      - key: connectorId
+        valueType: string
+        required: true
+        label: { en: GetConnector, nl: GetConnector }
+        description:
+          en: The published GetConnector name, for example Profit_Debiteuren.
+          nl: De gepubliceerde GetConnector-naam, bijvoorbeeld Profit_Debiteuren.
+        validation:
+          minLength: 1
+          maxLength: 128
+      - key: skip
+        valueType: integer
+        defaultValue: 0
+        label: { en: Skip, nl: Overslaan }
+        validation:
+          min: 0
+      - key: take
+        valueType: integer
+        defaultValue: 100
+        label: { en: Take, nl: Ophalen }
+        description:
+          en: Rows per call. AFAS refuses more than 1000.
+          nl: Rijen per aanroep. AFAS weigert er meer dan 1000.
+        validation:
+          min: 1
+          max: 1000
+      # AFAS filters are three parallel comma-separated lists, positionally
+      # matched: field ids, values, operator types. Modelled as the three
+      # strings AFAS actually takes rather than as a friendlier structure that
+      # would have to be lowered back into this shape anyway — and lowered by
+      # the one component least able to report what went wrong.
+      - key: filterFieldIds
+        valueType: string
+        label: { en: Filter fields, nl: Filtervelden }
+        validation:
+          maxLength: 1024
+      - key: filterValues
+        valueType: string
+        label: { en: Filter values, nl: Filterwaarden }
+        validation:
+          maxLength: 4096
+      - key: operatorTypes
+        valueType: string
+        label: { en: Filter operators, nl: Filteroperatoren }
+        description:
+          en: AFAS numeric operator codes, one per filter field.
+          nl: Numerieke AFAS-operatorcodes, één per filterveld.
+        validation:
+          maxLength: 256
+    output:
+      cardinality: one
+      fields:
+        - key: rows
+          valueType: object
+          cardinality: collection
+          required: true
+          label: { en: Rows, nl: Rijen }
+        - key: hasMore
+          valueType: boolean
+          required: true
+          label: { en: More rows available, nl: Meer rijen beschikbaar }
+          description:
+            en: True when the call returned a full page, so another may follow.
+            nl: Waar als de aanroep een volledige pagina teruggaf, dus er kan nog een volgen.
+    reliability:
+      timeouts:
+        attemptMs: 30000
+      retry:
+        eligible: true
+        maxAttempts: 3
+      pagination:
+        style: page
+
+  - key: updateConnector
+    kind: mutation
+    label: { en: Write to an UpdateConnector, nl: Naar een UpdateConnector schrijven }
+    description:
+      en: Send an insert or update payload to an AFAS UpdateConnector.
+      nl: Stuur een insert- of update-payload naar een AFAS UpdateConnector.
+    authorization:
+      roles:
+        invoke: [Connectors.All.ReadWrite]
+    input:
+      - key: connectorId
+        valueType: string
+        required: true
+        label: { en: UpdateConnector, nl: UpdateConnector }
+        description:
+          en: The UpdateConnector name, for example KnSalesRelationOrg.
+          nl: De UpdateConnector-naam, bijvoorbeeld KnSalesRelationOrg.
+        validation:
+          minLength: 1
+          maxLength: 128
+      - key: mode
+        valueType: string
+        required: true
+        defaultValue: update
+        label: { en: Mode, nl: Modus }
+        description:
+          en: Insert issues a POST, update issues a PUT.
+          nl: Insert verstuurt een POST, update verstuurt een PUT.
+        options:
+          type: static
+          items:
+            - { value: insert, label: { en: Insert, nl: Toevoegen } }
+            - { value: update, label: { en: Update, nl: Bijwerken } }
+      - key: payload
+        valueType: object
+        required: true
+        label: { en: Payload, nl: Payload }
+        description:
+          en: The AFAS envelope, exactly as the UpdateConnector expects it.
+          nl: De AFAS-envelop, precies zoals de UpdateConnector die verwacht.
+    output:
+      cardinality: one
+      fields:
+        - key: result
+          valueType: object
+          required: true
+          label: { en: Result, nl: Resultaat }
+    reliability:
+      timeouts:
+        attemptMs: 60000
+      # NOT retry-eligible, and this is the deliberate part. An AFAS
+      # UpdateConnector carries no idempotency key, so a retried POST inserts a
+      # second record and nothing afterwards undoes it. The compiler refuses a
+      # retry-eligible mutation without a declared idempotency strategy, and
+      # declaring `natural` here to unlock retries would be claiming a safety
+      # AFAS does not offer.
+      retry:
+        eligible: false
+
+exposure:
+  graphql: true
+  rest:
+    enabled: true
+    basePath: afas-profit
+  mcp: true

@@ -52,7 +52,8 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // Two realms: the tenant realm (authorization.yaml) and the control realm
   // operators sign in against (authorization.control.yaml).
   "authorization-config.schema.json": 2,
-  "connector.schema.json": 1,
+  // The example object store, and the AFAS Profit contract.
+  "connector.schema.json": 2,
   "core-entity.schema.json": 4,
   "retention-policy-catalog.schema.json": 1,
   "semantic-type-catalog.schema.json": 1,

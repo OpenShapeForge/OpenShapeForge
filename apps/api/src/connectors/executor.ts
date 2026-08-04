@@ -71,9 +71,16 @@ export class ConnectorExecutionError extends Error {
  * The subset of `fetch` a connector gets. Deliberately not `typeof fetch`: the
  * bound version carries no `preconnect` and no other host affordances, and
  * saying so in the type keeps a package from reaching for them.
+ *
+ * Spelled `string | URL | Request` rather than `RequestInfo`, for the reason
+ * the example package already states about its own structural copy:
+ * `RequestInfo` is an ambient global that exists only once a DOM or host lib is
+ * loaded. Naming it here made this module unimportable from any program without
+ * one — which the examples project is, so a connector test could not reach the
+ * executor it is testing.
  */
 export type FetchLike = (
-  input: RequestInfo | URL,
+  input: string | URL | Request,
   init?: RequestInit,
 ) => Promise<Response>;
 
@@ -147,7 +154,7 @@ export function createBoundFetch(
   underlying: FetchLike = fetch,
 ): FetchLike {
   const allowlist = contract.network.egress;
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+  return (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(
       typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
     );

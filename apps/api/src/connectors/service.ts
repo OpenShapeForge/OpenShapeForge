@@ -78,6 +78,15 @@ export type ConnectorView = {
   /** The configuration field contract; a generic form renders from this. */
   configFields: ConnectorContract["configuration"]["fields"];
   instances: "single" | "multiple";
+  /**
+   * Whether this contract declares a connectivity check.
+   *
+   * Reported rather than discovered, so a surface can decide whether to OFFER
+   * the check. Without it the only way to find out is to run one, which means
+   * showing an operator a button whose sole outcome is
+   * CONNECTOR_VERIFY_UNSUPPORTED.
+   */
+  supportsVerify: boolean;
   installations: ConnectorInstallationView[];
 };
 
@@ -173,6 +182,7 @@ export async function listConnectors(context: CatalogContext): Promise<Connector
       status,
       configFields: contract.configuration.fields,
       instances: contract.configuration.instances,
+      supportsVerify: contract.configuration.verify,
       installations: own.map((installation) => viewInstallation(contract, installation)),
     };
   });

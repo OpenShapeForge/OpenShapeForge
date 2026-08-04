@@ -20,3 +20,17 @@ navigation:
           label: { en: Relation groups, nl: Relatiegroepen }
           icon: UsersThree
           entity: relation-group
+
+    # A literal `route:` rather than `entity:`/`view:`, for the same reason the
+    # workflow plugin's appShellPatch uses one: this is not an entity page. It
+    # is a single screen over the connector catalog, hand-written under
+    # `app/integrations` and driven entirely by what the compiler emitted, so
+    # authoring a connector puts it on this screen with no change here or in
+    # the page.
+    - key: integrations
+      label: { en: Integrations, nl: Integraties }
+      # A name the Lucide registry actually carries. Unknown names resolve to a
+      # bare circle rather than failing, so a wrong one is invisible until
+      # somebody looks at the sidebar.
+      icon: Link
+      route: { en: /integrations, nl: /integrations }

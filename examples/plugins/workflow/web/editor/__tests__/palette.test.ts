@@ -117,6 +117,20 @@ describe("buildWorkflowPalette", () => {
     expect(reversed[0]?.label).toBe(forward[0]?.label);
   });
 
+  test("an acronym heading survives the fold", () => {
+    // Folding is not reversible: `ai` capitalised is `Ai`, which reads as a
+    // typo. Nothing in a lowercase string says which letters were capitals, so
+    // the override map is the only place that knows — and it is a second
+    // description of a category, which is why it goes away when the catalog
+    // serves a display form (#260).
+    const groups = buildWorkflowPalette({
+      nodeTypes: [entry("a", { category: "ai" }), entry("b", { category: "AI" })],
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.key).toBe("ai");
+    expect(groups[0]?.label).toBe("AI");
+  });
+
   test("triggers come first, everything else alphabetically", () => {
     // A workflow cannot start without one, so the group that holds them is the
     // one a reader needs first.

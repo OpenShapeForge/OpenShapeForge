@@ -133,6 +133,23 @@ function categoryKey(category: string | null | undefined): string {
 }
 
 /**
+ * Headings the fold cannot reconstruct.
+ *
+ * Folding is what stops one category becoming two buckets, and it is not
+ * reversible: `ai` capitalised is `Ai`, which reads as a typo rather than as an
+ * acronym. Nothing in a lowercase string says which letters were capitals.
+ *
+ * This is a second place a category is described, which is a real cost and the
+ * same one `presentation.ts` records for its icon map. It exists because the
+ * catalog serves `category` as a bare word with no display form beside it —
+ * so **delete this map when that mechanism lands** (#260). It is a stopgap for
+ * a missing field, not a feature.
+ */
+const GROUP_LABEL_OVERRIDES: Readonly<Record<string, string>> = {
+  ai: "AI",
+};
+
+/**
  * What the group is shown as.
  *
  * Derived from the folded key rather than from whichever spelling happened to
@@ -145,7 +162,7 @@ function categoryKey(category: string | null | undefined): string {
  * `description`. A palette cannot localize what it was handed as one word.
  */
 function groupLabel(key: string): string {
-  return key.charAt(0).toUpperCase() + key.slice(1);
+  return GROUP_LABEL_OVERRIDES[key] ?? key.charAt(0).toUpperCase() + key.slice(1);
 }
 
 /**

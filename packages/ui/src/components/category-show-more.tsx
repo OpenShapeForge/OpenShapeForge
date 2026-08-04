@@ -13,7 +13,7 @@ import { cn } from "../lib/cn";
  */
 export interface CategoryShowMoreProps
   extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
-  /** Custom label content. Falls back to "Toon meer" / "Toon minder". */
+  /** Custom label content. Falls back to "Show more" / "Show less". */
   label?: ReactNode;
   /** Whether the category is currently expanded. Default false. */
   expanded?: boolean;
@@ -32,10 +32,10 @@ export const CategoryShowMore = forwardRef<
     const text =
       label ??
       (expanded
-        ? "Toon minder"
+        ? "Show less"
         : hiddenCount && hiddenCount > 0
-          ? `Toon meer (${hiddenCount})`
-          : "Toon meer");
+          ? `Show more (${hiddenCount})`
+          : "Show more");
 
     return (
       <button

@@ -22,7 +22,7 @@ export interface TabLanguageSelectorOption<T extends string = string> {
   value: T;
   /** Short pill text (e.g. `"NL"`). */
   label: string;
-  /** Optional full accessible name (e.g. `"Nederlands"`). Falls back to `label`. */
+  /** Optional full accessible name (e.g. `"Dutch"`). Falls back to `label`. */
   fullName?: string;
 }
 

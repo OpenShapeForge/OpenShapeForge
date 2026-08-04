@@ -14,14 +14,14 @@ export interface TagProps extends HTMLAttributes<HTMLSpanElement> {
   children: ReactNode;
   /** Called when the remove button is clicked. The button is only shown when this is provided. */
   onRemove?: () => void;
-  /** Accessible label for the remove button. Defaults to "Verwijderen". */
+  /** Accessible label for the remove button. Defaults to "Remove". */
   removeLabel?: string;
 }
 
 export function Tag({
   children,
   onRemove,
-  removeLabel = "Verwijderen",
+  removeLabel = "Remove",
   className,
   ...props
 }: TagProps) {

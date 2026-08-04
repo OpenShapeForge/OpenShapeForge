@@ -33,9 +33,9 @@ export interface RowBlockheaderProps {
    * - `hover`: forces the hover styles unconditionally (for stories / specs).
    */
   state?: "active" | "hover";
-  /** Accessible label for the chevron button. Defaults to "Inklappen". */
+  /** Accessible label for the chevron button. Defaults to "Collapse". */
   toggleLabel?: string;
-  /** Accessible label for the add button. Defaults to "Toevoegen". */
+  /** Accessible label for the add button. Defaults to "Add". */
   addLabel?: string;
   className?: string;
 }
@@ -46,8 +46,8 @@ export function RowBlockheader({
   onToggle,
   onAdd,
   state = "active",
-  toggleLabel = "Inklappen",
-  addLabel = "Toevoegen",
+  toggleLabel = "Collapse",
+  addLabel = "Add",
   className,
 }: RowBlockheaderProps) {
   const chevron = (

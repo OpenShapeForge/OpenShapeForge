@@ -22,7 +22,7 @@ export interface CasestepSeperatorProps {
    * for stories/spec documentation.
    */
   state?: "active" | "hover";
-  /** Accessible label for the insert button. Defaults to "Stap tussen toevoegen". */
+  /** Accessible label for the insert button. Defaults to "Insert step". */
   insertLabel?: string;
   className?: string;
 }
@@ -31,7 +31,7 @@ export function CasestepSeperator({
   onInsert,
   disabled = false,
   state = "active",
-  insertLabel = "Stap tussen toevoegen",
+  insertLabel = "Insert step",
   className,
 }: CasestepSeperatorProps) {
   const canInsert = !disabled && !!onInsert;

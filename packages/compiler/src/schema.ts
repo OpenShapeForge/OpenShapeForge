@@ -382,6 +382,42 @@ export type TableDefinition = {
    * grants.
    */
   workerAccess?: string;
+  /**
+   * The column whose value IS a tenant id, for a global table that registers
+   * tenants themselves (`platform.tenants`). Names the uuid column holding the
+   * `tid` claim — `id` — and makes the table RLS-protected even though it can
+   * never be `tenantScoped`.
+   *
+   * Why this is not `tenantScoped`. Tenant scoping means "this row BELONGS to a
+   * tenant", carried in a `tenant_id` column the emitter compares against
+   * `app.current_tenant()`. A tenant registry has no enclosing tenant — the row
+   * IS the tenant — so `tenantScoped: true` is not expressible on it (there is
+   * no `tenant_id` to add that would not be a self-reference), and the table
+   * would otherwise emit no policy at all.
+   *
+   * That "no policy at all" is the problem this field solves. The restricted
+   * runtime role `openshapeforge_app` is granted blanket DML over every table in
+   * every manifest-covered schema (db/migrations/app-role.ts), so a policyless
+   * cross-tenant registry is readable in full by any raw-SQL path reachable from
+   * an ordinary tenant session. Nothing exposes one today — the table is
+   * `generatedCrud: false` — but "no query happens to do it yet" is not a
+   * boundary, and a cross-tenant registry is a materially different table from
+   * the global configuration catalogs that legitimately have no policy.
+   *
+   * The emitted policy is deliberately asymmetric:
+   *   USING       app.bypass_rls() OR "<col>" = app.current_tenant()
+   *   WITH CHECK  app.bypass_rls()
+   * A tenant session may read exactly its own row — which it already knows the
+   * id of, so this leaks nothing — and may write nothing. Every write goes
+   * through `withSystemSession` (db/session.ts), which sets `app.bypass_rls` and
+   * audits the invocation, so the registry cannot be mutated off the audited
+   * path.
+   *
+   * Requires `tenantScoped: false` and a uuid column: on a tenant-scoped table
+   * the tenant predicate already exists and this would be a second, conflicting
+   * answer to the same question.
+   */
+  tenantIdentityColumn?: string;
 };
 
 export type RelationshipRegisterEntry = {

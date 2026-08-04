@@ -1,0 +1,49 @@
+{
+  "//": [
+    "Mirrors apps/web's compiler options so the two Next apps stay coherent.",
+    "The one deliberate difference is the absence of an `@generated/*` path:",
+    "nothing under apps/admin is compiler output, and a path alias pointing at a",
+    "directory that must never exist would invite someone to create it.",
+    "See next.config.ts for why this project is a HARD build gate here, unlike",
+    "apps/web where Next's build-time typecheck is switched off."
+  ],
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

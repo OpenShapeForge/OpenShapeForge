@@ -37,12 +37,18 @@ export const compilerOwnedGeneratedRoots = [
   "apps/web/src/app/(generated)",
   "apps/web/src/compiler",
   "apps/web/src/generated",
-  // Keycloak realm export — emitted by
-  // `packages/compiler/src/authoring/generators/keycloak.ts`
-  // and mounted into the local Keycloak container by
-  // `docker-compose.local.yml`. The file `keycloak/<realm>-realm.json` is
-  // the only file expected under this root; orphan files cause `check:generated`
-  // to fail.
+  // Keycloak realm exports — emitted by
+  // `packages/compiler/src/authoring/generators/keycloak.ts` and mounted into
+  // the local Keycloak container by `docker-compose.local.yml`.
+  //
+  // ONE FILE PER AUTHORED REALM since #288 (`keycloak/<realm>-realm.json`), so
+  // the expected contents of this root is a SET, not a single name: whatever
+  // the authored `authorizationConfig` documents resolve to this run. The
+  // orphan gate compares the directory against exactly that set, which is what
+  // keeps a realm file whose authoring was deleted or renamed — the stale
+  // export nothing imports any more, but everything still mounts — a
+  // `check:generated` failure rather than a file that lingers. Any other file
+  // under this root fails the same way.
   "keycloak",
 ];
 

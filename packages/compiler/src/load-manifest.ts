@@ -584,6 +584,35 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
         );
       }
     }
+
+    // tenantIdentityColumn names the uuid column that IS a tenant id on a
+    // GLOBAL table registering tenants. Rejected on a tenant-scoped table
+    // because the tenant predicate already exists there, and two answers to
+    // "which tenant owns this row" is one too many. The emitter repeats both
+    // checks for the same reason workerAccess does: a plugin's
+    // contributePlatformTables never passes through this loader.
+    if (table.tenantIdentityColumn !== undefined) {
+      assertIdentifier(
+        table.tenantIdentityColumn,
+        `${currentTableKey}.tenantIdentityColumn`,
+      );
+      if (table.tenantScoped) {
+        throw new Error(
+          `${currentTableKey}.tenantIdentityColumn requires tenantScoped: false.`,
+        );
+      }
+      const identityType = columnsByName.get(table.tenantIdentityColumn);
+      if (identityType === undefined) {
+        throw new Error(
+          `${currentTableKey}.tenantIdentityColumn references unknown column ${table.tenantIdentityColumn}.`,
+        );
+      }
+      if (identityType !== "uuid") {
+        throw new Error(
+          `${currentTableKey}.tenantIdentityColumn "${table.tenantIdentityColumn}" must be uuid; app.current_tenant() returns uuid.`,
+        );
+      }
+    }
   }
 
   for (const [index, entry] of relationshipRegister.entries()) {

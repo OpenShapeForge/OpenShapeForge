@@ -10,6 +10,21 @@
 {{- if and .Values.ingress.tls .Values.ingress.sslRedirect.enabled -}}
 {{- $annotations = merge (deepCopy $annotations) (.Values.ingress.sslRedirect.annotations | default dict) -}}
 {{- end -}}
+{{- /*
+  The path list a host gets when it declares none: the OIDC surface of ONE realm
+  plus the login theme's assets, and deliberately nothing else. Requires
+  ingress.publicRealm, because every safe prefix is realm-qualified — a
+  realm-agnostic default would have to be `/realms`, which is the broad prefix
+  this exists to avoid.
+*/ -}}
+{{- $derivedPaths := list -}}
+{{- with .Values.ingress.publicRealm -}}
+{{- $derivedPaths = list
+  (printf "/realms/%s/.well-known" .)
+  (printf "/realms/%s/protocol" .)
+  (printf "/realms/%s/login-actions" .)
+  "/resources" -}}
+{{- end -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -30,17 +45,51 @@ spec:
   {{- end }}
   rules:
     {{- range $host := .Values.ingress.hosts }}
+    {{- $paths := default $derivedPaths $host.paths -}}
+    {{- if not $paths -}}
+    {{- fail (printf "keycloak.ingress host %q declares no paths and keycloak.ingress.publicRealm is unset, so there is nothing to route. Set keycloak.ingress.publicRealm to the realm that should be public, or list the prefixes explicitly." $host.host) -}}
+    {{- end -}}
+    {{- /*
+      Refuse any prefix that would also route the identity-configuration SPI at
+      /realms/{realm}/openshapeforge/*. Only apps/api reaches it, server-side
+      with a service-account credential, so it has no business being on the
+      public ingress at all — and it is the surface a 2026-07-27 review found
+      reachable from the internet. A Prefix path matches segment by segment, so
+      a prefix routes the SPI exactly when it stops at or before the realm
+      segment, or names the SPI segment itself.
+
+      The `openshapeforge` segment below is
+      OpenShapeForgeResourceProviderFactory.ID — Keycloak mounts a
+      RealmResourceProvider at /realms/{realm}/{providerId}. The two are one pair
+      that has to move together.
+    */ -}}
+    {{- range $path := $paths -}}
+    {{- $segments := compact (splitList "/" $path) -}}
+    {{- $routesSpi := eq (len $segments) 0 -}}
+    {{- if gt (len $segments) 0 -}}
+    {{- if eq (index $segments 0) "realms" -}}
+    {{- if lt (len $segments) 3 -}}
+    {{- $routesSpi = true -}}
+    {{- else if eq (index $segments 2) "openshapeforge" -}}
+    {{- $routesSpi = true -}}
+    {{- end -}}
+    {{- end -}}
+    {{- end -}}
+    {{- if $routesSpi -}}
+    {{- fail (printf "keycloak.ingress path %q would route the identity-configuration SPI at /realms/{realm}/openshapeforge/* to the internet. Route the OIDC surface instead: /realms/{realm}/.well-known, /realms/{realm}/protocol, /realms/{realm}/login-actions and /resources — or leave paths unset and set keycloak.ingress.publicRealm, which derives exactly those." $path) -}}
+    {{- end -}}
+    {{- end }}
     - host: {{ $host.host | quote }}
       http:
         paths:
           # Only the declared prefixes are routed. Anything else — /admin,
-          # /realms/master — matches no rule and never reaches Keycloak, which
-          # is how the admin console and the master realm are kept off the
-          # internet. Done with paths rather than a server-snippet annotation
-          # because ingress-nginx disables snippets by default (CVE-2021-25742)
-          # and a silently ignored annotation would look like protection while
-          # providing none.
-          {{- range (default (list "/") $host.paths) }}
+          # /realms/master, /realms/{realm}/openshapeforge — matches no rule and
+          # never reaches Keycloak, which is how the admin console, the master
+          # realm and the configuration SPI are kept off the internet. Done with
+          # paths rather than a server-snippet annotation because ingress-nginx
+          # disables snippets by default (CVE-2021-25742) and a silently ignored
+          # annotation would look like protection while providing none.
+          {{- range $paths }}
           - path: {{ . }}
             pathType: Prefix
             backend:

@@ -17,6 +17,19 @@ const repoRoot = process.cwd();
 const webPresent = existsSync(join(repoRoot, "apps/web"));
 const expectedGeneratedCrudEntityCount = 4;
 
+/**
+ * The realms this repository authors, by name.
+ *
+ * Stated rather than derived, for the same reason the entity count above is:
+ * `keycloak/` is gitignored, so on a fresh checkout there is nothing on disk
+ * for the orphan gate to compare against. A realm that stopped being generated
+ * — an authoring file renamed out of the loader's reach, a `kind` mistyped —
+ * would then produce a smaller artifact set and pass every other check here.
+ * Naming them makes "a realm disappeared" a failure rather than a number
+ * nobody reads. Adding a realm means adding it here.
+ */
+const expectedKeycloakRealms = ["openshapeforge", "openshapeforge-control"];
+
 const first = await collectAllArtifacts(repoRoot);
 const second = await collectAllArtifacts(repoRoot);
 
@@ -58,6 +71,51 @@ for (const [label, firstGroup, secondGroup] of groupPairs) {
     console.error(`Generated ${label} artifacts are nondeterministic.`);
     process.exit(1);
   }
+}
+
+// --- Keycloak: one file per authored realm, named after that realm ----------
+//
+// The orphan gate below can only reject files the generator did NOT emit. It
+// has nothing to say about a file the generator DID emit under a name that
+// disagrees with the realm inside it — which is the failure that matters here,
+// because `docker-compose.local.yml` and the Helm chart mount these by
+// filename while Keycloak imports by the `realm` field.
+
+const keycloakRealmFailures = [];
+const emittedRealms = [];
+for (const artifact of first.groups.keycloak) {
+  const match = /^keycloak\/(.+)-realm\.json$/.exec(artifact.path);
+  if (!match) {
+    keycloakRealmFailures.push(
+      `${artifact.path} is not of the form keycloak/<realm>-realm.json`,
+    );
+    continue;
+  }
+  const declared = JSON.parse(artifact.contents).realm;
+  if (declared !== match[1]) {
+    keycloakRealmFailures.push(
+      `${artifact.path} declares realm "${declared}"; the filename says "${match[1]}"`,
+    );
+    continue;
+  }
+  emittedRealms.push(declared);
+}
+const realmDiff = {
+  missing: expectedKeycloakRealms.filter((realm) => !emittedRealms.includes(realm)),
+  added: emittedRealms.filter((realm) => !expectedKeycloakRealms.includes(realm)),
+};
+for (const realm of realmDiff.missing) {
+  keycloakRealmFailures.push(`realm "${realm}" is expected but no file was emitted for it`);
+}
+for (const realm of realmDiff.added) {
+  keycloakRealmFailures.push(
+    `realm "${realm}" was emitted but is not in expectedKeycloakRealms in this script`,
+  );
+}
+if (keycloakRealmFailures.length > 0) {
+  console.error("Keycloak realm exports do not match the authored realms:");
+  for (const failure of keycloakRealmFailures) console.error(`- ${failure}`);
+  process.exit(1);
 }
 
 // --- Stale check: disk must match a fresh in-memory generation --------------
@@ -280,5 +338,5 @@ const pluginNote =
     : "";
 console.log(
   `Generated artifacts are fresh and deterministic (${first.groups.db.length} DB artifacts, ` +
-    `${uiEntitySummary}${pluginNote}).`,
+    `${uiEntitySummary}, Keycloak realms: ${emittedRealms.join(", ")}${pluginNote}).`,
 );

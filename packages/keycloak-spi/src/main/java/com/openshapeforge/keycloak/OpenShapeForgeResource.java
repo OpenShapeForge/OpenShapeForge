@@ -92,7 +92,14 @@ public class OpenShapeForgeResource {
 
         OrganizationModel organization = organizations.getByAlias(alias);
         if (organization == null) {
-            organization = organizations.create(name, alias, null);
+            // create(name, alias), NOT create(name, alias, null). The three-argument
+            // overload is create(id, name, alias), so passing a trailing null bound
+            // the display name to the ID parameter and the alias to the name — the
+            // organization's ID became the name string instead of a generated uuid,
+            // and that ID is what callers persist and address it by. The two-argument
+            // form is a default method that delegates with a null id, which is what
+            // makes the store generate one.
+            organization = organizations.create(name, alias);
         }
 
         organization.setName(name);

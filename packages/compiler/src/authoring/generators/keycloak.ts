@@ -1,17 +1,25 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Keycloak `openshapeforge-realm.json` generator.
+ * Keycloak realm-export generator.
  *
  * Pipeline position: cross-entity generator. Combines hand-authored YAML
- * (`packages/compiler/config/authoring/authorization.yaml`) with the
- * entity-derived client roles emitted by every compiled entity contract.
+ * (every `kind: authorizationConfig` document in the resolved authoring tree)
+ * with the entity-derived client roles emitted by every compiled entity
+ * contract.
  *
- * Output (single file):
- *   `keycloak/openshapeforge-realm.json`
+ * Output — ONE FILE PER AUTHORED REALM:
+ *   `keycloak/<realm-name>-realm.json`
+ *
+ * Plural since #288. The tenant realm (`openshapeforge`) and the control realm
+ * (`openshapeforge-control`, the issuer `apps/admin` signs operators in
+ * against) are separate documents on purpose: an operator identity must never
+ * exist in the realm tenants log into. Both files land in the same directory
+ * because Keycloak's `--import-realm` imports every file under its import
+ * directory — see `docker-compose.local.yml`, which mounts both.
  *
  * The output is mounted into the local Keycloak container by
  * `docker-compose.local.yml` and into production Keycloak configuration.
- * Hand-editing the file is forbidden — see
+ * Hand-editing a generated file is forbidden — see
  * `docs/auth-spi-migration/boundaries.md`.
  *
  * Defaults intentionally hardcoded (not in YAML):
@@ -24,7 +32,9 @@
  *     wildcards ("*") are refused and generation fails without a concrete list.
  *   - client secrets — either a dev-only `devSecret` (permitted only on a dev
  *     realm) or a `${env:VAR}` reference resolved at generate time. A non-dev
- *     realm carrying a checked-in literal secret fails generation.
+ *     realm carrying a checked-in literal secret fails generation. The rule is
+ *     per-realm and mode-driven, so it fires for EVERY authored realm, not just
+ *     the first one.
  */
 // @ts-nocheck
 import type { CompiledEntityContract } from "../types/compiled.js";
@@ -38,7 +48,36 @@ import type {
 import { KEYCLOAK_ROLE_SEGMENT_RENAMES, normalizeKeycloakRoleName } from "../role-names.js";
 
 const DEFAULT_REALM_NAME = "openshapeforge";
-export const KEYCLOAK_REALM_OUTPUT_PATH = "keycloak/openshapeforge-realm.json";
+
+/**
+ * The compiler-owned directory every realm export is written under. Registered
+ * in `generated-artifact-paths.ts`, where `check:generated` treats anything
+ * under it that this generator did not emit as an orphan.
+ */
+export const KEYCLOAK_OUTPUT_ROOT = "keycloak";
+
+/**
+ * Realm names accepted as an output FILENAME segment.
+ *
+ * Deliberately narrower than what Keycloak itself accepts. The name is spliced
+ * straight into a path, so a name carrying `/`, `\` or a leading `.` would let
+ * an authoring document decide where on disk the compiler writes — outside the
+ * one root `check:generated` polices, with no gate able to notice. Anything
+ * outside this alphabet fails generation instead.
+ */
+const REALM_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
+/** `keycloak/<realm>-realm.json` for a realm name, or throw if unsafe. */
+export function keycloakRealmOutputPath(realmName: string): string {
+  if (!REALM_NAME_RE.test(realmName)) {
+    throw new Error(
+      `Realm name "${realmName}" cannot be used as an output filename. ` +
+        "A realm name is spliced into keycloak/<realm>-realm.json, so it must " +
+        "start with a letter or digit and contain only letters, digits, '-' or '_'.",
+    );
+  }
+  return `${KEYCLOAK_OUTPUT_ROOT}/${realmName}-realm.json`;
+}
 
 // Canonical rename table + normalizer live in ../role-names.ts so the
 // backend manifest's authorization bridge can share them; re-exported here to
@@ -627,7 +666,7 @@ function buildRealmRole(
   name: string,
   def: AuthorizationRealmRole,
   entityComposites: Map<string, { entity: string; roles: string[] }>,
-  entityRoleClient: string,
+  entityRoleClient: string | undefined,
 ): KeycloakRole {
   const composites: Record<string, string[]> = {};
   if (def.composites) {
@@ -639,6 +678,17 @@ function buildRealmRole(
     }
   }
   if (def.includes && def.includes.length > 0) {
+    // `includes` is a wildcard expansion over ENTITY-derived roles, which only
+    // exist on the entity-role client. A realm that declares no such client has
+    // nothing to expand onto, so the pattern would silently resolve to an empty
+    // composite that reads like a grant. Refuse instead.
+    if (!entityRoleClient) {
+      throw new Error(
+        `Realm role "${name}" uses \`includes\`, which expands entity-derived ` +
+          "roles onto the entity-role client, but this realm authors no " +
+          "keycloak.entityRoleClient. Use explicit `composites` instead.",
+      );
+    }
     const expanded = expandIncludes(def.includes, entityComposites);
     composites[entityRoleClient] = [...(composites[entityRoleClient] ?? []), ...expanded];
   }
@@ -691,10 +741,25 @@ export function generateKeycloakRealmArtifacts(
     return [];
   }
 
+  const realmCfg = authConfig.realm ?? {};
+  const realmName = realmCfg.name ?? DEFAULT_REALM_NAME;
+  // Validated up front rather than at the return: an unusable realm name is a
+  // fault in the authoring, and reporting it only after a realm has been fully
+  // assembled (or, worse, only when the assembly happens to reach the return)
+  // would make it depend on unrelated config.
+  const outputPath = keycloakRealmOutputPath(realmName);
+
+  // Which client receives the entity-derived roles (natural-person:read, …).
+  //
+  // No fallback: absence means "this realm does not participate in entity role
+  // generation" and is the supported shape for a realm with no entities behind
+  // it — the control realm operators sign in against has no entity model, and
+  // pushing this repo's entity roles onto a client it never declares would
+  // emit a realm export referencing a client that does not exist. The former
+  // hardcoded "erp-provider" default made that the silent outcome for every
+  // realm that stayed quiet about it.
   const entityRoleClient =
-    authConfig.keycloak?.entityRoleClient ??
-    authConfig.keycloak?.client ??
-    "erp-provider";
+    authConfig.keycloak?.entityRoleClient ?? authConfig.keycloak?.client;
 
   const realmRolesDef = authConfig.realmRoles ?? authConfig.keycloak?.realmRoles ?? {};
 
@@ -704,7 +769,9 @@ export function generateKeycloakRealmArtifacts(
     .map((c) => c.id);
   const dev = isDevRealm(authConfig.realm, mode);
 
-  const entityAggregate = aggregateFromEntities(contracts, entityRoleClient);
+  const entityAggregate = entityRoleClient
+    ? aggregateFromEntities(contracts, entityRoleClient)
+    : { clientRoles: new Map(), entityComposites: new Map() };
 
   if (clientDefs.length === 0 && entityAggregate.clientRoles.size === 0) {
     return [];
@@ -806,10 +873,9 @@ export function generateKeycloakRealmArtifacts(
       clientRoles: c.serviceAccountClientRoles,
     }));
 
-  const realmCfg = authConfig.realm ?? {};
   const legacyEvents = authConfig.keycloak?.realm;
   const realm: KeycloakRealmExport = {
-    realm: realmCfg.name ?? DEFAULT_REALM_NAME,
+    realm: realmName,
     displayName: realmCfg.displayName,
     enabled: realmCfg.enabled ?? true,
     // Forced in production rather than merely defaulted: the authored value is
@@ -850,10 +916,49 @@ export function generateKeycloakRealmArtifacts(
   const cleaned = JSON.parse(JSON.stringify(realm));
   return [
     {
-      path: KEYCLOAK_REALM_OUTPUT_PATH,
+      path: outputPath,
       contents: JSON.stringify(cleaned, null, 2) + "\n",
     },
   ];
+}
+
+/**
+ * Every authored realm, in one pass over the shared entity contracts.
+ *
+ * Separate from the single-config entry point so the ONE property that only
+ * exists across realms — that two documents cannot claim the same realm — is
+ * enforced somewhere testable. Two documents naming the same realm would
+ * otherwise resolve to the same output path, and whichever ran last would win
+ * silently: an authoring mistake that hands one realm another's clients,
+ * secrets and users.
+ *
+ * The collision is caught here rather than left to the compiler's global
+ * artifact-path check because by then the message is "path emitted twice",
+ * which says nothing about which two realm documents disagree.
+ */
+export function generateAllKeycloakRealmArtifacts(
+  contracts: CompiledEntityContract[],
+  authConfigs: readonly (AuthorizationConfigFile | null | undefined)[],
+  mode: RealmMode = resolveRealmMode(),
+): KeycloakRealmArtifact[] {
+  const artifacts: KeycloakRealmArtifact[] = [];
+  const seenPaths = new Set<string>();
+
+  for (const authConfig of authConfigs) {
+    for (const artifact of generateKeycloakRealmArtifacts(contracts, authConfig, mode)) {
+      if (seenPaths.has(artifact.path)) {
+        throw new Error(
+          `Two authorizationConfig documents declare realm "${authConfig?.realm?.name ?? DEFAULT_REALM_NAME}". ` +
+            `Each realm is generated to ${artifact.path}, so one would overwrite the other. ` +
+            "Give every authored realm its own `realm.name`.",
+        );
+      }
+      seenPaths.add(artifact.path);
+      artifacts.push(artifact);
+    }
+  }
+
+  return artifacts;
 }
 
 function capitalize(s: string): string {

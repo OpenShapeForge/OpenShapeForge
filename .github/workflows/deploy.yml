@@ -87,6 +87,15 @@ env:
   RELEASE: openshapeforge
   REGION: nl-ams
   SECRET_PREFIX: openshapeforge
+  # The realm this deployment IS. `bun run generate` emits one
+  # keycloak/<realm>-realm.json per authored realm, and since #288 there are
+  # two of them — the tenant realm below and openshapeforge-control, which is
+  # generated but NOT deployed (apps/admin is dev/CI only; see
+  # deploy/README.md). Naming it here rather than globbing the directory: a
+  # glob picked the alphabetically first file, which is the CONTROL realm, so
+  # it would have derived the wrong issuer and handed Keycloak the wrong realm
+  # to import.
+  TENANT_REALM: openshapeforge
 
 jobs:
   deploy:
@@ -215,6 +224,32 @@ jobs:
           ${{ env.SECRET_PREFIX }}-realm-user-beta-verhuurconsulent|E2E_USER_PASSWORD_BETA_VERHUURCONSULENT
           PAIRS
           echo "realm credentials loaded (values masked)"
+
+      # The CONTROL realm (openshapeforge-control, #288) is generated but NOT
+      # deployed — apps/admin is dev/CI only, see deploy/README.md. Production
+      # mode still refuses to emit ANY realm that carries a committed dev
+      # credential, so generation would fail on a realm this deployment never
+      # installs. One-shot random values satisfy that rule without inventing a
+      # credential anyone could come to depend on: they are generated here,
+      # never stored, and the realm file they land in is not the one handed to
+      # Helm below.
+      #
+      # The day apps/admin gets deployed, these three move into the PAIRS list
+      # above and into Secret Manager alongside the tenant realm's — the
+      # deployment would otherwise stand up an issuer nobody holds credentials
+      # for.
+      - name: Placeholder credentials for the undeployed control realm
+        if: ${{ inputs.realm_mode == 'production' }}
+        run: |
+          set -euo pipefail
+          for var in KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_ADMIN_GATEWAY \
+                     E2E_USER_PASSWORD_PLATFORM_OPERATOR \
+                     E2E_USER_PASSWORD_PLATFORM_NOACCESS; do
+            value="$(openssl rand -hex 32)"
+            echo "::add-mask::$value"
+            echo "$var=$value" >> "$GITHUB_ENV"
+          done
+          echo "control-realm placeholders set (values masked, never stored)"
 
       - name: Generate artifacts
         env:
@@ -358,17 +393,22 @@ jobs:
       # in-cluster issuer the Service name IS that URL, so it can be derived
       # here. Without this the API accepts no bearer token at all.
       #
-      # The realm NAME comes from the generated file rather than being
-      # hardcoded — it is "openshapeforge", not the release name, and
-      # guessing it yields a 404 discovery document.
+      # The realm NAME is env.TENANT_REALM — it is "openshapeforge", not the
+      # release name, and guessing it yields a 404 discovery document. The
+      # generated file is cross-checked against it rather than searched for, so
+      # a renamed realm fails here instead of deploying the wrong issuer.
       - name: Derive issuer
         if: ${{ inputs.deploy_keycloak }}
         id: issuer
         run: |
-          realm_file=$(ls keycloak/*-realm.json | head -1)
-          realm=$(jq -r '.realm' "$realm_file")
-          if [ -z "$realm" ] || [ "$realm" = "null" ]; then
-            echo "::error::could not read realm name from $realm_file"
+          realm="${TENANT_REALM}"
+          realm_file="keycloak/${realm}-realm.json"
+          if [ ! -f "$realm_file" ]; then
+            echo "::error::$realm_file was not generated. env.TENANT_REALM must name an authored realm; found: $(ls keycloak/*-realm.json 2>/dev/null | tr '\n' ' ')"
+            exit 1
+          fi
+          if [ "$(jq -r '.realm' "$realm_file")" != "$realm" ]; then
+            echo "::error::$realm_file does not declare realm '$realm'"
             exit 1
           fi
           internal="http://${RELEASE}-keycloak:8080/realms/${realm}"
@@ -441,17 +481,19 @@ jobs:
               --set keycloak.ingress.className=nginx
               --set "keycloak.ingress.annotations.cert-manager\.io/cluster-issuer=${{ inputs.tls_issuer }}"
               --set "keycloak.ingress.hosts[0].host=$ahost"
-              # ONLY these prefixes are routed. /admin (the console) and
-              # /realms/master match no rule and never reach Keycloak, so the
-              # console and the master realm stay off the internet while the
-              # token, JWKS and discovery endpoints stay reachable.
-              # /resources serves the login page assets.
-              --set "keycloak.ingress.hosts[0].paths[0]=/realms/${{ steps.issuer.outputs.realm }}"
-              --set "keycloak.ingress.hosts[0].paths[1]=/resources"
+              # WHICH prefixes are public is the chart's decision, not this
+              # workflow's: naming the realm makes it route that realm's OIDC
+              # surface (discovery, protocol, login-actions) plus /resources for
+              # the login theme, and nothing else. /admin (the console),
+              # /realms/master, and the identity-configuration SPI at
+              # /realms/<realm>/openshapeforge match no rule and never reach
+              # Keycloak. This used to pass /realms/<realm> as a single prefix,
+              # which routed the SPI to the internet — the finding S8 closes.
+              --set "keycloak.ingress.publicRealm=${{ steps.issuer.outputs.realm }}"
               --set "keycloak.ingress.tls[0].secretName=openshapeforge-keycloak-tls"
               --set "keycloak.ingress.tls[0].hosts[0]=$ahost"
             )
-            echo "keycloak public at https://$ahost (only /realms/${{ steps.issuer.outputs.realm }} and /resources routed)"
+            echo "keycloak public at https://$ahost (OIDC surface of ${{ steps.issuer.outputs.realm }} + /resources only; admin console and configuration SPI unrouted)"
           fi
           helm upgrade --install "$RELEASE" ./deploy/helm/openshapeforge-api \
             --namespace "$NAMESPACE" \
@@ -460,7 +502,7 @@ jobs:
             --set 'global.imagePullSecrets[0].name=ghcr-pull' \
             --set keycloak.enabled=${{ inputs.deploy_keycloak }} \
             --set keycloak.image.tag="${{ steps.tag.outputs.tag }}" \
-            --set-file keycloak.realm.json="$(ls keycloak/*-realm.json | head -1)" \
+            --set-file keycloak.realm.json="keycloak/${TENANT_REALM}-realm.json" \
             "${bearer_args[@]}" \
             "${ingress_args[@]}" \
             "${auth_args[@]}" \

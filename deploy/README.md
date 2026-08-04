@@ -120,6 +120,66 @@ with `--set-file keycloak.realm.json=keycloak/openshapeforge-realm.json` and
 stored in a Secret (a realm export can carry client secrets). Keycloak only
 imports a realm that does not already exist, so this is safe across upgrades.
 
+`bun run generate` emits **one file per authored realm**, and there are two:
+the tenant realm `openshapeforge` and the control realm `openshapeforge-control`
+(the issuer `apps/admin` signs platform operators in against). The chart carries
+one, and the one it carries is the tenant realm — name it explicitly. The deploy
+workflow does this through `env.TENANT_REALM`; a glob would sort
+`openshapeforge-control-realm.json` first and import the wrong realm.
+
+#### What is public, and what is not
+
+Keycloak's ingress routes only the prefixes the chart is told to route.
+`keycloak.ingress.publicRealm: <realm>` derives the right set:
+
+| Routed | Not routed |
+| --- | --- |
+| `/realms/<realm>/.well-known` | `/admin` — the console |
+| `/realms/<realm>/protocol` | `/realms/master` |
+| `/realms/<realm>/login-actions` | `/realms/<realm>/openshapeforge` — the SPI |
+| `/resources` | `/realms/<realm>/account` |
+
+The last exclusion is the reason `publicRealm` exists. The
+identity-configuration SPI is a `RealmResourceProvider` mounted *inside* the
+realm path, so the obvious prefix `/realms/<realm>` publishes it — which is
+what a 2026-07-27 review found. Its only caller is `apps/api`, in-cluster, with
+the `openshapeforge-auth-api` service-account credential, so it has no reason to
+be reachable from the internet at all. Declaring `keycloak.ingress.hosts[].paths`
+explicitly still works, but a prefix that would route the SPI **fails the
+render** rather than publishing it quietly.
+
+### `apps/admin` is dev and CI only — no chart, on purpose
+
+`deploy/helm/` deploys the API and, optionally, Keycloak. It does not deploy
+`apps/web`, and it does not deploy `apps/admin`. That is a decision, not a gap:
+
+- **No precedent and no image.** `apps/api/Dockerfile` is the only Dockerfile in
+  the repository. Neither Next app is containerised, so a chart for `apps/admin`
+  would need an image, a build workflow, and a publish step before it had
+  anything to install.
+- **It would need its own public ingress.** `apps/admin` is a browser
+  application; deploying it means publishing an operator console. The control
+  plane is the highest-privilege surface in the system — it creates, suspends
+  and reparents tenants across every tenant boundary, through an audited
+  `withSystemSession` bypass — so putting its front door on the internet is a
+  larger decision than adding a chart, and one nobody has taken. It is exactly
+  the decision the SPI section above is undoing for a smaller surface.
+- **Its dependencies are not in the chart either.** It stores OIDC sessions in
+  Redis, which this chart does not deploy, and it needs the control realm, which
+  the deploy workflow deliberately does not install.
+- **Nothing is blocked by the absence.** Tenants are provisioned through
+  `/api/control/v1` with an operator token; `apps/admin` is a client of that API,
+  not a component the API depends on.
+
+**Consequence for the API chart:** the control routes are registered
+unconditionally but the chart sets none of the `OPENSHAPEFORGE_CONTROL_*`
+variables, so `/api/control/v1` answers `503` naming what is missing. It is
+inert in every deployment this chart produces. **Before configuring it, take it
+off the public ingress too** — the API's ingress routes `/`, so the moment the
+control plane is configured it is also published. `/api/control/v1` is its own
+mount for exactly this reason: excluding it is a path rule, not a per-route
+exception list.
+
 Security posture it encodes (see `../SECURITY.md`):
 
 - the API connects as a **restricted** (`NOSUPERUSER NOBYPASSRLS`) role

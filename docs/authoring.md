@@ -20,7 +20,8 @@ authoring/
     transforms.yaml       mapping transforms (enumMap/cast/fallbackChain)
     retention-policies.yaml    named retention policies
     field-authoring-profiles.yaml  field-editor profiles (web authoring UI)
-  authorization.yaml      Keycloak realm/clients/roles/groups/dev users
+  authorization.yaml      Keycloak tenant realm: clients/roles/groups/dev users
+  authorization.control.yaml  Keycloak control realm (platform operators)
   appShell.yaml           web app shell + sidebar navigation
   views/                  optional standalone view YAML (empty here)
   contexts/, mappings/    supported by the loader, unused in this repo
@@ -238,16 +239,30 @@ Catalog files under `catalogs/` merge across authoring layers automatically
 - **`field-authoring-profiles.yaml`** — presets for a (web) field-authoring
   editor; no effect on the data layer.
 
-## `authorization.yaml`
+## `authorization.yaml` (and `authorization.<realm>.yaml`)
 
-One file authors the whole Keycloak realm export
-(`keycloak/openshapeforge-realm.json`, generated and mounted into the local
-Keycloak container): realm settings (token lifespans, org feature), clients
-(`gateway` / `bearerOnly` / `serviceAccount` kinds), realm roles with
-per-client composites, hand-authored client roles, a demo group hierarchy,
-and dev users with plain passwords and a `tid` (tenant UUID) attribute. The
-`keycloak.entityRoleClient` (`erp-provider`) is the designated target for
-entity-derived roles. See [api.md](api.md#local-stack) for the dev logins.
+One file authors one whole Keycloak realm export: realm settings (token
+lifespans, org feature), clients (`gateway` / `bearerOnly` / `serviceAccount`
+kinds), realm roles with per-client composites, hand-authored client roles, a
+demo group hierarchy, and dev users with plain passwords and a `tid` (tenant
+UUID) attribute. Each is generated to `keycloak/<realm.name>-realm.json` and
+mounted into the local Keycloak container, whose `--import-realm` imports every
+file in its import directory.
+
+Two realms are authored here:
+
+- **`authorization.yaml`** — the tenant realm `openshapeforge`. Its
+  `keycloak.entityRoleClient` (`erp-provider`) is the designated target for
+  entity-derived roles. See [api.md](api.md#local-stack) for the dev logins.
+- **`authorization.control.yaml`** — the control realm
+  `openshapeforge-control`, the issuer `apps/admin` signs platform operators in
+  against. Deliberately minimal: one gateway client, one `platform-operator`
+  realm role, no tenant users, and no `entityRoleClient` — a realm that names
+  none takes no entity-derived roles at all.
+
+Keeping operators out of the tenant realm is the point of the split: an
+identity that can create and suspend tenants has no business existing in the
+realm those tenants log into.
 
 ## `appShell.yaml`
 

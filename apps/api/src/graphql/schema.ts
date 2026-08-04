@@ -25,6 +25,11 @@ import {
   createConnectorResolvers,
 } from "../connectors/graphql-schema.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
+import {
+  currentTenantQueryFields,
+  currentTenantTypeDefs,
+  resolveCurrentTenant,
+} from "./current-tenant.js";
 import type { GraphqlContext } from "./context.js";
 import type { ModuleRuntimeContext, RuntimeModule } from "../modules/contract.js";
 import { composeModuleGraphql, declaredFieldNames } from "../modules/graphql-composition.js";
@@ -66,6 +71,8 @@ export function buildGraphqlSchema(
 
     ${moduleGraphql.typeDefs}
 
+    ${currentTenantTypeDefs}
+
     type Health {
       status: String!
       role: String!
@@ -86,6 +93,7 @@ export function buildGraphqlSchema(
     type Query {
       health: Health!
       entityPageConfigs(entitySlug: String!): EntityPageConfigs
+${currentTenantQueryFields}
 ${generatedEntityQueryFields}
 ${connectorQueryFields}
 ${connectorNamespaceQueryFields}
@@ -117,6 +125,7 @@ ${moduleGraphql.mutationFields}
         role: "api",
       }),
       entityPageConfigs: resolveEntityPageConfigs,
+      currentTenant: resolveCurrentTenant,
     },
     Mutation: {
       ...generatedEntityResolvers.Mutation,
@@ -137,6 +146,7 @@ ${moduleGraphql.mutationFields}
 const coreQueryFieldNames = [
   "health",
   "entityPageConfigs",
+  ...declaredFieldNames(currentTenantQueryFields),
   ...declaredFieldNames(generatedEntityQueryFields),
   ...declaredFieldNames(connectorQueryFields),
   ...declaredFieldNames(connectorNamespaceQueryFields),

@@ -1,0 +1,286 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: LedgerAccount
+title: Ledger Account
+description: General-ledger account in the chart of accounts. Distinct from `Account` (relation-account / user-account).
+language: en
+displayTemplate: "{{code}} {{name}}"
+filterField: code
+labels:
+  en: Ledger account
+  nl: Grootboekrekening
+domains:
+  - finance
+rest: true
+mcp:
+  tools: generic
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique chart-of-accounts code.
+      nl: Tenant-unieke grootboekrekening-code.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the ledger account.
+      nl: Menselijk leesbare naam van de grootboekrekening.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: accountType
+    valueType: string
+    required: true
+    label:
+      en: Account type
+      nl: Rekeningsoort
+    description:
+      en: Classification of the account (asset, liability, equity, revenue, expense, control account).
+      nl: Classificatie van de rekening (activa, passiva, eigen vermogen, opbrengsten, kosten, tussenrekening).
+    persisted:
+      column: account_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: LEDGERACCOUNTTYPE
+        clearable: false
+  - key: isPostable
+    valueType: boolean
+    label:
+      en: Postable
+      nl: Boekbaar
+    description:
+      en: Whether journal entries can post directly to this account (true) or only to its children (false).
+      nl: Of journaalposten direct op deze rekening kunnen worden geboekt (waar) of alleen op onderliggende rekeningen (onwaar).
+    defaultValue: true
+    persisted:
+      column: is_postable
+      storageClass: core
+  - key: currencyCode
+    valueType: string
+    required: true
+    label:
+      en: Currency
+      nl: Valuta
+    description:
+      en: ISO 4217 currency code in which postings on this account are denominated.
+      nl: ISO 4217 valutacode waarin boekingen op deze rekening luiden.
+    defaultValue: EUR
+    validation:
+      minLength: 3
+      maxLength: 3
+    persisted:
+      column: currency_code
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description or business meaning of the account.
+      nl: Optionele omschrijving of zakelijke betekenis van de rekening.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the account in an external context.
+      nl: Functionele of zakelijke code van de rekening in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: parentLedgerAccount
+    kind: belongsTo
+    target: LedgerAccount
+    foreignKey: parent_ledger_account_id
+    label:
+      en: Parent ledger account
+      nl: Bovenliggende grootboekrekening
+  - key: childLedgerAccounts
+    kind: hasMany
+    target: LedgerAccount
+    foreignKey: parent_ledger_account_id
+    label:
+      en: Child ledger accounts
+      nl: Onderliggende grootboekrekeningen
+ui:
+  routes:
+    list:
+      en: /ledger-accounts
+      nl: /grootboekrekeningen
+    detail:
+      en: /ledger-accounts/:id
+      nl: /grootboekrekeningen/:id
+    create:
+      en: /ledger-accounts/create
+      nl: /grootboekrekeningen/aanmaken
+    edit:
+      en: /ledger-accounts/:id/edit
+      nl: /grootboekrekeningen/:id/bewerken
+    delete:
+      en: /ledger-accounts/:id/delete
+      nl: /grootboekrekeningen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Ledger accounts
+        nl: Grootboekrekeningen
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+        - key: accountType
+          sortable: true
+        - key: isPostable
+          sortable: true
+        - key: currencyCode
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /ledger-accounts/:id
+        nl: /grootboekrekeningen/:id
+    detail:
+      header:
+        title: "{{code}} {{name}}"
+        subtitle: "{{accountType}}"
+        badges:
+          - accountType
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Account details
+                nl: Rekeninggegevens
+              fields:
+                - code
+                - name
+                - accountType
+                - isPostable
+                - currencyCode
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create ledger account
+            nl: Grootboekrekening aanmaken
+          groups:
+            - title:
+                en: Account details
+                nl: Rekeninggegevens
+              fields:
+                - code
+                - name
+                - accountType
+                - isPostable
+                - currencyCode
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit ledger account
+            nl: Grootboekrekening bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

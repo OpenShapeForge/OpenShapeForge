@@ -1169,3 +1169,331 @@ groepen:
         label: { nl: Geen antwoord ontvangen, en: No response received }
       - value: completed
         label: { nl: Afgerond, en: Completed }
+
+  # --- Finance -------------------------------------------------------------
+  # Code tables for the finance-domain entities under `entities/finance/`.
+  # Authored here rather than ported: the entities reference these groups, but
+  # no upstream catalog defines them, so the value sets below are derived from
+  # each field's own description plus the standard domain vocabulary (SEPA for
+  # mandates and sequence types, ordinary double-entry terms for the ledger).
+  # Where an entity pins a `defaultValue`, that exact value appears here.
+
+  INVOICEKIND:
+    description: Kind of invoice — the three flavours that share the Invoice shape.
+    items:
+      - value: sales
+        label: { nl: Verkoop, en: Sales }
+      - value: purchase
+        label: { nl: Inkoop, en: Purchase }
+      - value: credit
+        label: { nl: Creditnota, en: Credit note }
+
+  INVOICESTATUS:
+    description: Lifecycle status of an invoice, from draft through settlement.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft }
+      - value: posted
+        label: { nl: Geboekt, en: Posted }
+      - value: sent
+        label: { nl: Verzonden, en: Sent }
+      - value: partially_paid
+        label: { nl: Deels betaald, en: Partially paid }
+      - value: paid
+        label: { nl: Betaald, en: Paid }
+      - value: credited
+        label: { nl: Gecrediteerd, en: Credited }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled }
+
+  INVOICEDISPATCHCHANNEL:
+    description: Channel through which an invoice is dispatched to its recipient.
+    items:
+      - value: email
+        label: { nl: E-mail, en: Email }
+      - value: letter
+        label: { nl: Brief, en: Letter }
+      - value: sms
+        label: { nl: Sms, en: SMS }
+      - value: portal
+        label: { nl: Portaal, en: Portal }
+
+  BILLINGPERIOD:
+    description: Cadence at which the prolongation engine emits a new invoice. `variable` defers the length to the schedule's `variableDays`.
+    items:
+      - value: weekly
+        label: { nl: Wekelijks, en: Weekly }
+      - value: four_weekly
+        label: { nl: Vierwekelijks, en: Four-weekly }
+      - value: monthly
+        label: { nl: Maandelijks, en: Monthly }
+      - value: quarterly
+        label: { nl: Per kwartaal, en: Quarterly }
+      - value: half_yearly
+        label: { nl: Halfjaarlijks, en: Half-yearly }
+      - value: yearly
+        label: { nl: Jaarlijks, en: Yearly }
+      - value: variable
+        label: { nl: Variabel, en: Variable }
+
+  BILLINGAMOUNTTYPE:
+    description: Amount mode used when a billing period is sliced. camelCase values, pinned by the `invoiceMode` default on BillingSchedule.
+    items:
+      - value: perPeriod
+        label: { nl: Per periode, en: Per period }
+      - value: perDay
+        label: { nl: Per dag, en: Per day }
+
+  LEDGERSIDE:
+    description: Side of a double-entry movement.
+    items:
+      - value: debit
+        label: { nl: Debet, en: Debit }
+      - value: credit
+        label: { nl: Credit, en: Credit }
+
+  LEDGERACCOUNTTYPE:
+    description: Classification of a ledger account within the chart of accounts.
+    items:
+      - value: asset
+        label: { nl: Activa, en: Asset }
+      - value: liability
+        label: { nl: Passiva, en: Liability }
+      - value: equity
+        label: { nl: Eigen vermogen, en: Equity }
+      - value: revenue
+        label: { nl: Opbrengsten, en: Revenue }
+      - value: expense
+        label: { nl: Kosten, en: Expense }
+      - value: control
+        label: { nl: Tussenrekening, en: Control account }
+
+  LEDGERPOSTINGSTATUS:
+    description: Lifecycle status of a journal entry. A reversed entry keeps its facts and points at its counter-entry.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft }
+      - value: posted
+        label: { nl: Geboekt, en: Posted }
+      - value: reversed
+        label: { nl: Gestorneerd, en: Reversed }
+
+  FISCALPERIODSTATUS:
+    description: Lifecycle status of a fiscal year or period.
+    items:
+      - value: open
+        label: { nl: Open, en: Open }
+      - value: closing
+        label: { nl: In afsluiting, en: Closing }
+      - value: closed
+        label: { nl: Gesloten, en: Closed }
+
+  BUDGETSTATUS:
+    description: Lifecycle status of a budget.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft }
+      - value: approved
+        label: { nl: Goedgekeurd, en: Approved }
+      - value: active
+        label: { nl: Actief, en: Active }
+      - value: closed
+        label: { nl: Gesloten, en: Closed }
+
+  VATTYPE:
+    description: Classification of a VAT rate.
+    items:
+      - value: none
+        label: { nl: Geen, en: None }
+      - value: zero
+        label: { nl: Nultarief, en: Zero-rated }
+      - value: low
+        label: { nl: Laag tarief, en: Low rate }
+      - value: high
+        label: { nl: Hoog tarief, en: High rate }
+
+  VATRETURNSTATUS:
+    description: Lifecycle status of a VAT return filed with the tax authority.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft }
+      - value: submitted
+        label: { nl: Ingediend, en: Submitted }
+      - value: accepted
+        label: { nl: Geaccepteerd, en: Accepted }
+      - value: rejected
+        label: { nl: Afgewezen, en: Rejected }
+      - value: corrected
+        label: { nl: Gecorrigeerd, en: Corrected }
+
+  PAYMENTMETHODCODE:
+    description: Tenant-unique payment-method code. `requiresIban` and `requiresMandate` on PaymentMethod qualify each one.
+    items:
+      - value: direct_debit
+        label: { nl: Automatische incasso, en: Direct debit }
+      - value: bank_transfer
+        label: { nl: Bankoverschrijving, en: Bank transfer }
+      - value: ideal
+        label: { nl: iDEAL, en: iDEAL }
+      - value: card
+        label: { nl: Kaartbetaling, en: Card payment }
+      - value: cash
+        label: { nl: Contant, en: Cash }
+
+  PAYMENTTERMS:
+    description: Default payment terms applied to a creditor's or debtor's invoices.
+    items:
+      - value: immediate
+        label: { nl: Direct, en: Immediate }
+      - value: net_14
+        label: { nl: 14 dagen netto, en: Net 14 days }
+      - value: net_30
+        label: { nl: 30 dagen netto, en: Net 30 days }
+      - value: net_60
+        label: { nl: 60 dagen netto, en: Net 60 days }
+      - value: end_of_month
+        label: { nl: Einde maand, en: End of month }
+
+  PAYMENTORDERSTATUS:
+    description: Lifecycle status of a payment order sent to the bank.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft }
+      - value: approved
+        label: { nl: Goedgekeurd, en: Approved }
+      - value: submitted
+        label: { nl: Aangeboden, en: Submitted }
+      - value: executed
+        label: { nl: Uitgevoerd, en: Executed }
+      - value: rejected
+        label: { nl: Afgewezen, en: Rejected }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled }
+
+  PAYMENTPLANSTATUS:
+    description: Lifecycle status of a payment plan agreed with a relation.
+    items:
+      - value: proposed
+        label: { nl: Voorgesteld, en: Proposed }
+      - value: active
+        label: { nl: Actief, en: Active }
+      - value: completed
+        label: { nl: Afgerond, en: Completed }
+      - value: defaulted
+        label: { nl: Niet nagekomen, en: Defaulted }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled }
+
+  SEPASEQUENCETYPE:
+    description: SEPA sequence type of a mandate or collection (FRST, RCUR, OOFF, FNAL).
+    items:
+      - value: first
+        label: { nl: Eerste (FRST), en: First (FRST) }
+      - value: recurrent
+        label: { nl: Doorlopend (RCUR), en: Recurrent (RCUR) }
+      - value: one_off
+        label: { nl: Eenmalig (OOFF), en: One-off (OOFF) }
+      - value: final
+        label: { nl: Laatste (FNAL), en: Final (FNAL) }
+
+  MANDATESTATUS:
+    description: Lifecycle status of a SEPA direct debit mandate.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft }
+      - value: active
+        label: { nl: Actief, en: Active }
+      - value: suspended
+        label: { nl: Opgeschort, en: Suspended }
+      - value: revoked
+        label: { nl: Ingetrokken, en: Revoked }
+      - value: expired
+        label: { nl: Verlopen, en: Expired }
+
+  DIRECTDEBITORDERSTATUS:
+    description: Lifecycle status of a direct debit order, up to and including a reversal.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft }
+      - value: queued
+        label: { nl: In wachtrij, en: Queued }
+      - value: submitted
+        label: { nl: Aangeboden, en: Submitted }
+      - value: settled
+        label: { nl: Verwerkt, en: Settled }
+      - value: rejected
+        label: { nl: Geweigerd, en: Rejected }
+      - value: reversed
+        label: { nl: Gestorneerd, en: Reversed }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled }
+
+  BANKSTATEMENTLINESTATUS:
+    description: Reconciliation status of a bank statement line.
+    items:
+      - value: unmatched
+        label: { nl: Niet afgeletterd, en: Unmatched }
+      - value: suggested
+        label: { nl: Voorstel, en: Suggested }
+      - value: matched
+        label: { nl: Afgeletterd, en: Matched }
+      - value: reconciled
+        label: { nl: Verwerkt, en: Reconciled }
+      - value: ignored
+        label: { nl: Genegeerd, en: Ignored }
+
+  PURCHASEORDERSTATUS:
+    description: Lifecycle status of a purchase order.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft }
+      - value: approved
+        label: { nl: Goedgekeurd, en: Approved }
+      - value: ordered
+        label: { nl: Besteld, en: Ordered }
+      - value: partially_received
+        label: { nl: Deels ontvangen, en: Partially received }
+      - value: received
+        label: { nl: Ontvangen, en: Received }
+      - value: invoiced
+        label: { nl: Gefactureerd, en: Invoiced }
+      - value: closed
+        label: { nl: Afgesloten, en: Closed }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled }
+
+  QUOTESTATUS:
+    description: Lifecycle status of a quote.
+    items:
+      - value: draft
+        label: { nl: Concept, en: Draft }
+      - value: sent
+        label: { nl: Verzonden, en: Sent }
+      - value: accepted
+        label: { nl: Geaccepteerd, en: Accepted }
+      - value: rejected
+        label: { nl: Afgewezen, en: Rejected }
+      - value: expired
+        label: { nl: Verlopen, en: Expired }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled }
+
+  PRICEADJUSTMENTKIND:
+    description: Kind of price adjustment applied to an agreement component.
+    items:
+      - value: cpi_indexation
+        label: { nl: CPI-indexatie, en: CPI indexation }
+      - value: manual
+        label: { nl: Handmatig, en: Manual }
+      - value: regulatory
+        label: { nl: Wettelijk, en: Regulatory }
+
+  ROLEASSIGNMENTSTATUS:
+    description: Lifecycle status of a financial role assignment (creditor, debtor) on a relation.
+    items:
+      - value: active
+        label: { nl: Actief, en: Active }
+      - value: blocked
+        label: { nl: Geblokkeerd, en: Blocked }
+      - value: ended
+        label: { nl: Beëindigd, en: Ended }

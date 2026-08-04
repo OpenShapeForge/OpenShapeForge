@@ -1,0 +1,367 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: BillingRun
+title: Billing Run
+description: Durable run-level ledger for one execution of the prolongation engine. Holds request-level idempotency, summary counts/totals, and aggregated failure payload. Per-agreement decisions live in BillingRunItem.
+language: en
+displayTemplate: "{{mode}} @ {{billUpToDate}}"
+filterField: idempotencyKey
+labels:
+  en: Billing run
+  nl: Facturatie-run
+domains:
+  - finance
+rest: true
+mcp:
+  tools: generic
+indexes:
+  - name: billing_runs_tenant_idempotency_uidx
+    fields:
+      - tenantId
+      - idempotencyKey
+    unique: true
+fields:
+  - key: idempotencyKey
+    valueType: string
+    required: true
+    label:
+      en: Idempotency key
+      nl: Idempotentiesleutel
+    description:
+      en: Stable request-level key. Replays of the same key resolve to the same BillingRun (status and summaries are append-only after completion).
+      nl: Stabiele sleutel op verzoekniveau. Herhalingen met dezelfde sleutel vinden dezelfde BillingRun terug (status en samenvattingen zijn append-only na afronding).
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: idempotency_key
+      storageClass: core
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the run.
+      nl: Levenscyclusstatus van de run.
+    defaultValue: queued
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: BILLINGRUNSTATUS
+        clearable: false
+  - key: mode
+    valueType: string
+    required: true
+    label:
+      en: Mode
+      nl: Modus
+    description:
+      en: Operating mode — prolongation, void, or reissue (TWK).
+      nl: Modus — prolongatie, storneren of hercreatie (TWK).
+    defaultValue: prolongation
+    persisted:
+      column: mode
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: BILLINGRUNMODE
+        clearable: false
+  - key: billUpToDate
+    valueType: date
+    required: true
+    label:
+      en: Bill up to date
+      nl: Factureren tot en met
+    description:
+      en: Inclusive boundary — agreements due on or before this date are eligible.
+      nl: Inclusieve bovengrens — overeenkomsten met prolongatiedatum op of voor deze datum komen in aanmerking.
+    persisted:
+      column: bill_up_to_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: agreementFilter
+    valueType: object
+    required: false
+    label:
+      en: Agreement filter
+      nl: Overeenkomstenfilter
+    description:
+      en: Snapshot of the condition-builder expression that selected eligible agreements (frozen at run start for replay).
+      nl: Snapshot van de condition-builder-expressie waarmee de in aanmerking komende overeenkomsten zijn geselecteerd (bij runstart vastgezet voor herhaling).
+    persisted:
+      column: agreement_filter
+      storageClass: core
+  - key: dryRun
+    valueType: boolean
+    required: false
+    label:
+      en: Dry run
+      nl: Proefrun
+    description:
+      en: When true, the run plans and computes but does not persist invoices, GL postings, or schedule cursor advances.
+      nl: Indien true plant en berekent de run wel maar worden facturen, grootboekposten en cursor-updates niet opgeslagen.
+    defaultValue: false
+    persisted:
+      column: dry_run
+      storageClass: core
+  - key: maxAgreementsPerWorker
+    valueType: integer
+    required: false
+    label:
+      en: Max agreements per worker
+      nl: Max overeenkomsten per worker
+    description:
+      en: Soft sharding hint — the planner divides the eligible agreement set into work batches of this size.
+      nl: Zachte sharding-hint — de planner verdeelt de geselecteerde overeenkomsten in batches van deze grootte.
+    validation:
+      min: 1
+      max: 10000
+    persisted:
+      column: max_agreements_per_worker
+      storageClass: core
+  - key: agreementsPlanned
+    valueType: integer
+    required: false
+    label:
+      en: Agreements planned
+      nl: Geplande overeenkomsten
+    description:
+      en: Total agreements selected by the planner.
+      nl: Totaal aantal overeenkomsten dat de planner heeft geselecteerd.
+    persisted:
+      column: agreements_planned
+      storageClass: core
+  - key: agreementsCompleted
+    valueType: integer
+    required: false
+    label:
+      en: Agreements completed
+      nl: Afgeronde overeenkomsten
+    persisted:
+      column: agreements_completed
+      storageClass: core
+  - key: agreementsFailed
+    valueType: integer
+    required: false
+    label:
+      en: Agreements failed
+      nl: Mislukte overeenkomsten
+    persisted:
+      column: agreements_failed
+      storageClass: core
+  - key: invoicesProduced
+    valueType: integer
+    required: false
+    label:
+      en: Invoices produced
+      nl: Geproduceerde facturen
+    persisted:
+      column: invoices_produced
+      storageClass: core
+  - key: totalAmount
+    valueType: number
+    required: false
+    label:
+      en: Total amount
+      nl: Totaalbedrag
+    description:
+      en: Sum of invoice totals produced by this run.
+      nl: Som van factuurtotalen die deze run heeft opgeleverd.
+    semanticType: currency
+    persisted:
+      column: total_amount
+      storageClass: core
+  - key: failures
+    valueType: object
+    required: false
+    label:
+      en: Failures
+      nl: Mislukkingen
+    description:
+      en: Aggregated failure payload (per-agreement summaries) for partial/failed runs.
+      nl: Geaggregeerd mislukkings-payload (samenvattingen per overeenkomst) voor deels/volledig mislukte runs.
+    persisted:
+      column: failures
+      storageClass: core
+  - key: startedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Started at
+      nl: Gestart op
+    persisted:
+      column: started_at
+      storageClass: core
+  - key: completedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Completed at
+      nl: Afgerond op
+    persisted:
+      column: completed_at
+      storageClass: core
+  - key: triggeredBy
+    valueType: string
+    required: false
+    label:
+      en: Triggered by
+      nl: Gestart door
+    description:
+      en: User account, workflow instance id, or system process that triggered the run.
+      nl: Gebruikersaccount, workflow-instantie-id of systeemproces dat de run heeft gestart.
+    validation:
+      maxLength: 200
+    persisted:
+      column: triggered_by
+      storageClass: core
+relationships: []
+ui:
+  routes:
+    list:
+      en: /billing-runs
+      nl: /facturatie-runs
+    detail:
+      en: /billing-runs/:id
+      nl: /facturatie-runs/:id
+    create:
+      en: /billing-runs/create
+      nl: /facturatie-runs/aanmaken
+    edit:
+      en: /billing-runs/:id/edit
+      nl: /facturatie-runs/:id/bewerken
+    delete:
+      en: /billing-runs/:id/delete
+      nl: /facturatie-runs/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Billing runs
+        nl: Facturatie-runs
+      columns:
+        - key: status
+          sortable: true
+        - key: mode
+          sortable: true
+        - key: billUpToDate
+          sortable: true
+        - key: agreementsPlanned
+          sortable: true
+        - key: invoicesProduced
+          sortable: true
+        - key: totalAmount
+          sortable: true
+        - key: startedAt
+          sortable: true
+      defaultSort:
+        key: startedAt
+        direction: desc
+      rowLink:
+        en: /billing-runs/:id
+        nl: /facturatie-runs/:id
+    detail:
+      header:
+        title: "{{mode}}"
+        subtitle: "{{status}}"
+        badges:
+          - mode
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Run details
+                nl: Run-gegevens
+              fields:
+                - status
+                - mode
+                - billUpToDate
+                - dryRun
+                - maxAgreementsPerWorker
+                - idempotencyKey
+                - triggeredBy
+            - title:
+                en: Counts
+                nl: Aantallen
+              fields:
+                - agreementsPlanned
+                - agreementsCompleted
+                - agreementsFailed
+                - invoicesProduced
+                - totalAmount
+            - title:
+                en: Timeline
+                nl: Tijdlijn
+              fields:
+                - startedAt
+                - completedAt
+            - title:
+                en: Filter snapshot
+                nl: Filter-snapshot
+              fields:
+                - agreementFilter
+            - title:
+                en: Failures
+                nl: Mislukkingen
+              fields:
+                - failures
+    form:
+      variants:
+        create:
+          title:
+            en: Create billing run
+            nl: Facturatie-run aanmaken
+          groups:
+            - title:
+                en: Run details
+                nl: Run-gegevens
+              fields:
+                - status
+                - mode
+                - billUpToDate
+                - dryRun
+                - maxAgreementsPerWorker
+                - idempotencyKey
+                - triggeredBy
+        edit:
+          extends: create
+          title:
+            en: Edit billing run
+            nl: Facturatie-run bewerken
+workflow:
+  nodes:
+    actions:
+      getOne: true
+      list: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

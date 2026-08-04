@@ -1,0 +1,225 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: FiscalYear
+title: Fiscal Year
+description: Fiscal year container, scoping fiscal periods and reporting windows.
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: Fiscal year
+  nl: Boekjaar
+domains:
+  - finance
+rest: true
+mcp:
+  tools: generic
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique fiscal-year code (typically the calendar year, e.g. "2026").
+      nl: Tenant-unieke boekjaarcode (meestal het kalenderjaar, bijv. "2026").
+    validation:
+      minLength: 1
+      maxLength: 20
+    persisted:
+      column: code
+      storageClass: core
+  - key: startDate
+    valueType: date
+    required: true
+    label:
+      en: Start date
+      nl: Begindatum
+    description:
+      en: First date covered by this fiscal year.
+      nl: Eerste datum die dit boekjaar omvat.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: true
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Last date covered by this fiscal year.
+      nl: Laatste datum die dit boekjaar omvat.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the fiscal year (open, closing, closed).
+      nl: Levenscyclusstatus van het boekjaar (open, afsluitend, afgesloten).
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: FISCALPERIODSTATUS
+        clearable: false
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the fiscal year in an external context.
+      nl: Functionele of zakelijke code van het boekjaar in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+ui:
+  routes:
+    list:
+      en: /fiscal-years
+      nl: /boekjaren
+    detail:
+      en: /fiscal-years/:id
+      nl: /boekjaren/:id
+    create:
+      en: /fiscal-years/create
+      nl: /boekjaren/aanmaken
+    edit:
+      en: /fiscal-years/:id/edit
+      nl: /boekjaren/:id/bewerken
+    delete:
+      en: /fiscal-years/:id/delete
+      nl: /boekjaren/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Fiscal years
+        nl: Boekjaren
+      columns:
+        - key: code
+          sortable: true
+        - key: startDate
+          sortable: true
+        - key: endDate
+          sortable: true
+        - key: status
+          sortable: true
+      defaultSort:
+        key: code
+        direction: desc
+      rowLink:
+        en: /fiscal-years/:id
+        nl: /boekjaren/:id
+    detail:
+      header:
+        title: "{{code}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Fiscal year details
+                nl: Boekjaargegevens
+              fields:
+                - code
+                - startDate
+                - endDate
+                - status
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create fiscal year
+            nl: Boekjaar aanmaken
+          groups:
+            - title:
+                en: Fiscal year details
+                nl: Boekjaargegevens
+              fields:
+                - code
+                - startDate
+                - endDate
+                - status
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit fiscal year
+            nl: Boekjaar bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

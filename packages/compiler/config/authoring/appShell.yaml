@@ -20,3 +20,211 @@ navigation:
           label: { en: Relation groups, nl: Relatiegroepen }
           icon: UsersThree
           entity: relation-group
+
+    - key: finance
+      label: { en: Finance, nl: Financiën }
+      children:
+        # Invoicing
+        - key: invoices
+          label: { en: Invoices, nl: Facturen }
+          icon: Receipt
+          entity: invoice
+
+        - key: invoice-lines
+          label: { en: Invoice lines, nl: Factuurregels }
+          icon: ListDashes
+          entity: invoice-line
+
+        - key: invoice-vat-buckets
+          label: { en: Invoice VAT buckets, nl: BTW-totalen }
+          icon: Percent
+          entity: invoice-vat-bucket
+
+        - key: invoice-payments
+          label: { en: Invoice payments, nl: Factuurbetalingen }
+          icon: HandCoins
+          entity: invoice-payment
+
+        - key: invoice-collection-items
+          label: { en: Invoice collection items, nl: Factuurincasso-regels }
+          icon: ArrowsLeftRight
+          entity: invoice-collection-item
+
+        - key: invoice-sequences
+          label: { en: Invoice sequences, nl: Factuurreeksen }
+          icon: Hash
+          entity: invoice-sequence
+
+        # Billing runs and schedules
+        - key: billing-runs
+          label: { en: Billing runs, nl: Facturatie-runs }
+          icon: Play
+          entity: billing-run
+
+        - key: billing-run-items
+          label: { en: Billing run items, nl: Facturatie-run-items }
+          icon: ListChecks
+          entity: billing-run-item
+
+        - key: billing-schedules
+          label: { en: Billing schedules, nl: Facturatieschemas }
+          icon: ClockCounterClockwise
+          entity: billing-schedule
+
+        # Ledger
+        - key: ledger-accounts
+          label: { en: Ledger accounts, nl: Grootboekrekeningen }
+          icon: BookOpen
+          entity: ledger-account
+
+        - key: ledger-postings
+          label: { en: Ledger postings, nl: Boekingen }
+          icon: NotePencil
+          entity: ledger-posting
+
+        - key: ledger-posting-lines
+          label: { en: Ledger posting lines, nl: Boekingsregels }
+          icon: ListDashes
+          entity: ledger-posting-line
+
+        - key: period-balances
+          label: { en: Period balances, nl: Periodesaldi }
+          icon: Scales
+          entity: period-balance
+
+        - key: fiscal-years
+          label: { en: Fiscal years, nl: Boekjaren }
+          icon: CalendarBlank
+          entity: fiscal-year
+
+        - key: fiscal-periods
+          label: { en: Fiscal periods, nl: Boekjaarperioden }
+          icon: CalendarDots
+          entity: fiscal-period
+
+        - key: cost-dimensions
+          label: { en: Cost dimensions, nl: Kostendimensies }
+          icon: SquaresFour
+          entity: cost-dimension
+
+        # VAT
+        - key: vat-rates
+          label: { en: VAT rates, nl: BTW-tarieven }
+          icon: Percent
+          entity: vat-rate
+
+        - key: vat-returns
+          label: { en: VAT returns, nl: BTW-aangiftes }
+          icon: FileArrowUp
+          entity: vat-return
+
+        # Budgeting
+        - key: budgets
+          label: { en: Budgets, nl: Begrotingen }
+          icon: ChartPieSlice
+          entity: budget
+
+        - key: budget-lines
+          label: { en: Budget lines, nl: Begrotingsregels }
+          icon: ListDashes
+          entity: budget-line
+
+        # Banking
+        - key: bank-statements
+          label: { en: Bank statements, nl: Bankafschriften }
+          icon: Bank
+          entity: bank-statement
+
+        - key: bank-statement-lines
+          label: { en: Bank statement lines, nl: Bankafschriftregels }
+          icon: ListDashes
+          entity: bank-statement-line
+
+        - key: bank-reconciliations
+          label: { en: Bank reconciliations, nl: Afletteringen }
+          icon: ArrowsLeftRight
+          entity: bank-reconciliation
+
+        # Payments and collection
+        - key: payment-methods
+          label: { en: Payment methods, nl: Betaalwijzen }
+          icon: CreditCard
+          entity: payment-method
+
+        - key: payment-orders
+          label: { en: Payment orders, nl: Betaalopdrachten }
+          icon: PaperPlaneTilt
+          entity: payment-order
+
+        - key: payment-plans
+          label: { en: Payment plans, nl: Betalingsregelingen }
+          icon: CalendarCheck
+          entity: payment-plan
+
+        - key: payment-plan-instalments
+          label: { en: Payment plan instalments, nl: Termijnen }
+          icon: ListNumbers
+          entity: payment-plan-instalment
+
+        - key: direct-debit-mandates
+          label: { en: Direct debit mandates, nl: Incassomachtigingen }
+          icon: Signature
+          entity: direct-debit-mandate
+
+        - key: direct-debit-orders
+          label: { en: Direct debit orders, nl: Incasso-opdrachten }
+          icon: Lightning
+          entity: direct-debit-order
+
+        # Ledger roles
+        - key: creditors
+          label: { en: Creditors, nl: Crediteuren }
+          icon: ArrowCircleUp
+          entity: creditor
+
+        - key: debtors
+          label: { en: Debtors, nl: Debiteuren }
+          icon: ArrowCircleDown
+          entity: debtor
+
+        # Purchasing and quotes
+        - key: purchase-orders
+          label: { en: Purchase orders, nl: Inkoopopdrachten }
+          icon: ShoppingCart
+          entity: purchase-order
+
+        - key: purchase-order-lines
+          label: { en: Purchase order lines, nl: Inkoopopdrachtregels }
+          icon: ListDashes
+          entity: purchase-order-line
+
+        - key: quotes
+          label: { en: Quotes, nl: Offertes }
+          icon: FileText
+          entity: quote
+
+        - key: quote-lines
+          label: { en: Quote lines, nl: Offerteregels }
+          icon: ListDashes
+          entity: quote-line
+
+        # Pricing and agreement components
+        - key: price-adjustments
+          label: { en: Price adjustments, nl: Prijsaanpassingen }
+          icon: TrendUp
+          entity: price-adjustment
+
+        - key: agreement-components
+          label: { en: Agreement components, nl: Overeenkomstcomponenten }
+          icon: PuzzlePiece
+          entity: agreement-component
+
+        - key: agreement-component-types
+          label: { en: Agreement component types, nl: Overeenkomstcomponenttypen }
+          icon: Tag
+          entity: agreement-component-type
+
+        - key: agreement-component-cumulatives
+          label: { en: Component cumulatives, nl: Component cumulatieven }
+          icon: Sigma
+          entity: agreement-component-cumulative

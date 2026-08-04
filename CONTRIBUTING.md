@@ -51,6 +51,11 @@ bun run --cwd apps/api test:migrations   # migrator + drift tests (bun test src/
 Run `bun run test:perf` as well when touching the API hot path (resolvers, the CRUD
 engine, RLS/session plumbing); it needs k6 and a running API.
 
+Run `bun run test:browser` when touching `apps/web`. It drives the assembled screen
+in a real Chromium and needs a running stack — the compose services plus both app
+processes — because it signs in through the Keycloak login page. Setup is in
+[docs/testing.md](docs/testing.md#the-browser-suite-for-appsweb).
+
 If you add, remove, or bump a dependency, run `bun run notices:linux` and commit the
 updated `THIRD-PARTY-NOTICES.md` — the notices gate fails the PR otherwise.
 

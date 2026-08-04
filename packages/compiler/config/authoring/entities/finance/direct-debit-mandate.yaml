@@ -1,0 +1,297 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: DirectDebitMandate
+title: Direct Debit Mandate
+description: SEPA direct debit mandate signed by a debtor relation, authorising recurring or one-off collections.
+language: en
+displayTemplate: "{{mandateReference}}"
+filterField: mandateReference
+labels:
+  en: Direct debit mandate
+  nl: Incassomachtiging
+domains:
+  - finance
+rest: true
+mcp:
+  tools: generic
+fields:
+  - key: mandateReference
+    valueType: string
+    required: true
+    label:
+      en: Mandate reference
+      nl: Machtigingskenmerk
+    description:
+      en: Unique SEPA mandate reference (max 35 characters per SEPA spec).
+      nl: Uniek SEPA-machtigingskenmerk (maximaal 35 tekens volgens SEPA-specificatie).
+    validation:
+      maxLength: 35
+    persisted:
+      column: mandate_reference
+      storageClass: core
+  - key: iban
+    valueType: string
+    required: true
+    label:
+      en: IBAN
+      nl: IBAN
+    description:
+      en: IBAN of the debtor account authorised for collection under this mandate.
+      nl: IBAN van de debiteurrekening die onder deze machtiging mag worden geïncasseerd.
+    validation:
+      maxLength: 34
+    persisted:
+      column: iban
+      storageClass: core
+  - key: signedDate
+    valueType: date
+    required: true
+    label:
+      en: Signed date
+      nl: Ondertekendatum
+    description:
+      en: Date on which the mandate was signed by the debtor.
+      nl: Datum waarop de machtiging door de debiteur is ondertekend.
+    persisted:
+      column: signed_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: firstUsedDate
+    valueType: date
+    required: false
+    label:
+      en: First used date
+      nl: Eerste gebruiksdatum
+    description:
+      en: Date on which the mandate was first used to collect.
+      nl: Datum waarop de machtiging voor het eerst is gebruikt voor incasso.
+    persisted:
+      column: first_used_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: lastUsedDate
+    valueType: date
+    required: false
+    label:
+      en: Last used date
+      nl: Laatste gebruiksdatum
+    description:
+      en: Date on which the mandate was most recently used to collect.
+      nl: Datum waarop de machtiging voor het laatst is gebruikt voor incasso.
+    persisted:
+      column: last_used_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the mandate.
+      nl: Levenscyclusstatus van de machtiging.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MANDATESTATUS
+        clearable: false
+  - key: sequenceType
+    valueType: string
+    required: true
+    label:
+      en: Sequence type
+      nl: Volgtype
+    description:
+      en: SEPA sequence type — first, recurrent, one-off, or final.
+      nl: SEPA-volgtype — eerste, terugkerend, eenmalig of laatste.
+    persisted:
+      column: sequence_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: SEPASEQUENCETYPE
+        clearable: false
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the mandate in an external context.
+      nl: Functionele of zakelijke code van de machtiging in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+ui:
+  routes:
+    list:
+      en: /direct-debit-mandates
+      nl: /incassomachtigingen
+    detail:
+      en: /direct-debit-mandates/:id
+      nl: /incassomachtigingen/:id
+    create:
+      en: /direct-debit-mandates/create
+      nl: /incassomachtigingen/aanmaken
+    edit:
+      en: /direct-debit-mandates/:id/edit
+      nl: /incassomachtigingen/:id/bewerken
+    delete:
+      en: /direct-debit-mandates/:id/delete
+      nl: /incassomachtigingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Direct debit mandates
+        nl: Incassomachtigingen
+      columns:
+        - key: mandateReference
+          sortable: true
+        - key: iban
+          sortable: true
+        - key: status
+          sortable: true
+        - key: sequenceType
+          sortable: true
+        - key: signedDate
+          sortable: true
+        - key: lastUsedDate
+          sortable: true
+      defaultSort:
+        key: signedDate
+        direction: desc
+      rowLink:
+        en: /direct-debit-mandates/:id
+        nl: /incassomachtigingen/:id
+    detail:
+      header:
+        title: "{{mandateReference}}"
+        subtitle: "{{iban}}"
+        badges:
+          - status
+          - sequenceType
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Mandate details
+                nl: Machtigingsgegevens
+              fields:
+                - mandateReference
+                - iban
+                - status
+                - sequenceType
+            - title:
+                en: Lifecycle
+                nl: Levensloop
+              fields:
+                - signedDate
+                - firstUsedDate
+                - lastUsedDate
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create direct debit mandate
+            nl: Incassomachtiging aanmaken
+          groups:
+            - title:
+                en: Mandate details
+                nl: Machtigingsgegevens
+              fields:
+                - mandateReference
+                - iban
+                - status
+                - sequenceType
+            - title:
+                en: Lifecycle
+                nl: Levensloop
+              fields:
+                - signedDate
+                - firstUsedDate
+                - lastUsedDate
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit direct debit mandate
+            nl: Incassomachtiging bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

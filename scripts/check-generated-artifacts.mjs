@@ -15,7 +15,7 @@ import {
 
 const repoRoot = process.cwd();
 const webPresent = existsSync(join(repoRoot, "apps/web"));
-const expectedGeneratedCrudEntityCount = 4;
+const expectedGeneratedCrudEntityCount = 43;
 
 const first = await collectAllArtifacts(repoRoot);
 const second = await collectAllArtifacts(repoRoot);

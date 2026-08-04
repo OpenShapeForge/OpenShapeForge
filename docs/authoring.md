@@ -13,6 +13,10 @@ authoring/
       relation.yaml
       relation-group.yaml
       contact-detail.yaml
+    finance/              the finance-domain entities (invoice, ledger, …)
+      invoice.yaml
+      ledger-posting.yaml
+      …
   catalogs/
     components.yaml       render-component catalog + per-type defaults
     semantic-types.yaml   reusable field semantics (email, phone, iban, …)
@@ -29,7 +33,7 @@ authoring/
 ## Entity files and slugs
 
 - An entity is one YAML file under `entities/`. Subfolders (`entities/core/`,
-  a future `entities/finance/`, …) are **organizational only** — the entity
+  `entities/finance/`, …) are **organizational only** — the entity
   **slug is the file stem** (`relation-group.yaml` → `relation-group`) and
   must be unique across the entire tree; duplicates fail compilation.
 - Files starting with `_` (like `_base.yaml`) are shared meta definitions,
@@ -130,7 +134,10 @@ Notes on what the compiler does with this:
   recorded on the compiled contract, but **the runtime does not execute
   hooks** today.
 - **`indexes:`** (entity-level) compiles to `CREATE [UNIQUE] INDEX IF NOT
-  EXISTS`; field keys are resolved to persisted column names.
+  EXISTS`; field keys are resolved to persisted column names. Declare one only
+  when it backs a runtime contract — e.g. the tenant-scoped uniqueness behind
+  the `ON CONFLICT (...) DO NOTHING` idempotency inserts on `billing-run`,
+  `billing-run-item` and `invoice-sequence`.
 - Entity-derived Keycloak role emission (`<slug>:read` etc. on the
   `entityRoleClient`) exists in the generator but currently emits nothing for
   this repo's entities — see the caveat in
@@ -276,10 +283,14 @@ An overlay layer can introduce all of these without compiler changes.
 
 1. Create `packages/compiler/config/authoring/entities/core/<slug>.yaml`
    (any subfolder works; the slug must be unique). Give it an
-   `authorization` block if it holds tenant data. Relationships may only
-   target entities present in this repo.
+   `authorization` block if it holds tenant data. A relationship whose target
+   is not present in this repo still compiles — it lands in
+   `relationshipStatus.skippedReferences` and emits no foreign key (see
+   [Relationships](#relationships)), so prefer targets that exist here.
 2. Bump `expectedGeneratedCrudEntityCount` in
-   `scripts/check-generated-artifacts.mjs` (currently `3`).
+   `scripts/check-generated-artifacts.mjs` (currently `43`) and the
+   `core-entity.schema.json` count in `EXPECTED_SCHEMA_COVERAGE`
+   (`scripts/check-authoring-schemas.mjs`) alongside it.
 3. `bun run generate` — regenerates schema.sql, types, manifest, realm,
    plugin artifacts.
 4. `bun run db:migrate` — new tables/columns are additive and apply

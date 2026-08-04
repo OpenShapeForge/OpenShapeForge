@@ -1,0 +1,316 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: InvoiceLine
+title: Invoice Line
+description: Line item on an invoice — references an optional agreement component, a VAT rate, a ledger account, and analytical dimensions.
+language: en
+displayTemplate: "{{description}}"
+filterField: description
+labels:
+  en: Invoice line
+  nl: Factuurregel
+domains:
+  - finance
+rest: true
+mcp:
+  tools: generic
+fields:
+  - key: lineNumber
+    valueType: integer
+    required: true
+    label:
+      en: Line number
+      nl: Regelnummer
+    description:
+      en: Sequential line number within the invoice.
+      nl: Volgnummer van de regel binnen de factuur.
+    validation:
+      min: 1
+    persisted:
+      column: line_number
+      storageClass: core
+  - key: description
+    valueType: string
+    required: true
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Description of what is being invoiced on this line.
+      nl: Omschrijving van wat op deze regel wordt gefactureerd.
+    validation:
+      minLength: 1
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 2000
+  - key: quantity
+    valueType: number
+    required: false
+    label:
+      en: Quantity
+      nl: Aantal
+    description:
+      en: Quantity for this line (multiplied by unit price to compute base).
+      nl: Aantal voor deze regel (vermenigvuldigd met eenheidsprijs voor basisbedrag).
+    persisted:
+      column: quantity
+      storageClass: core
+  - key: unitId
+    valueType: string
+    required: false
+    label:
+      en: Unit
+      nl: Eenheid
+    description:
+      en: Free-form unit identifier for this line (e.g. "Day", "Hour").
+      nl: Vrije eenheidsaanduiding voor deze regel (bv. "Dag", "Uur").
+    validation:
+      maxLength: 50
+    persisted:
+      column: unit_id
+      storageClass: core
+  - key: unitPrice
+    valueType: number
+    required: false
+    label:
+      en: Unit price
+      nl: Eenheidsprijs
+    description:
+      en: Price per unit, excluding VAT.
+      nl: Prijs per eenheid, exclusief BTW.
+    semanticType: currency
+    persisted:
+      column: unit_price
+      storageClass: core
+  - key: amountBase
+    valueType: number
+    required: false
+    label:
+      en: Base amount
+      nl: Basisbedrag
+    description:
+      en: Net amount excluding VAT for this line.
+      nl: Nettobedrag excl. BTW voor deze regel.
+    semanticType: currency
+    persisted:
+      column: amount_base
+      storageClass: core
+  - key: amountVat
+    valueType: number
+    required: false
+    label:
+      en: VAT amount
+      nl: BTW-bedrag
+    description:
+      en: VAT amount for this line.
+      nl: BTW-bedrag voor deze regel.
+    semanticType: currency
+    persisted:
+      column: amount_vat
+      storageClass: core
+  - key: amountTotal
+    valueType: number
+    required: false
+    label:
+      en: Total amount
+      nl: Totaalbedrag
+    description:
+      en: Total amount including VAT for this line.
+      nl: Totaalbedrag incl. BTW voor deze regel.
+    semanticType: currency
+    persisted:
+      column: amount_total
+      storageClass: core
+relationships:
+  - key: invoice
+    kind: belongsTo
+    target: Invoice
+    foreignKey: invoice_id
+    label:
+      en: Invoice
+      nl: Factuur
+  - key: agreementComponent
+    kind: belongsTo
+    target: AgreementComponent
+    foreignKey: agreement_component_id
+    label:
+      en: Agreement component
+      nl: Overeenkomstcomponent
+  - key: vatRate
+    kind: belongsTo
+    target: VatRate
+    foreignKey: vat_rate_id
+    label:
+      en: VAT rate
+      nl: BTW-tarief
+  - key: ledgerAccount
+    kind: belongsTo
+    target: LedgerAccount
+    foreignKey: ledger_account_id
+    label:
+      en: Ledger account
+      nl: Grootboekrekening
+  - key: componentDimension
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: component_dimension_id
+    label:
+      en: Component dimension
+      nl: Componentdimensie
+  - key: dimension1
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: dimension_1_id
+    label:
+      en: Cost dimension 1
+      nl: Kostendimensie 1
+  - key: dimension2
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: dimension_2_id
+    label:
+      en: Cost dimension 2
+      nl: Kostendimensie 2
+  - key: vatDimension
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: vat_dimension_id
+    label:
+      en: VAT dimension
+      nl: BTW-dimensie
+ui:
+  routes:
+    list:
+      en: /invoice-lines
+      nl: /factuurregels
+    detail:
+      en: /invoice-lines/:id
+      nl: /factuurregels/:id
+    create:
+      en: /invoice-lines/create
+      nl: /factuurregels/aanmaken
+    edit:
+      en: /invoice-lines/:id/edit
+      nl: /factuurregels/:id/bewerken
+    delete:
+      en: /invoice-lines/:id/delete
+      nl: /factuurregels/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Invoice lines
+        nl: Factuurregels
+      columns:
+        - key: lineNumber
+          sortable: true
+        - key: description
+          sortable: true
+        - key: quantity
+          sortable: true
+        - key: unitPrice
+          sortable: true
+        - key: amountTotal
+          sortable: true
+      defaultSort:
+        key: lineNumber
+        direction: asc
+      rowLink:
+        en: /invoice-lines/:id
+        nl: /factuurregels/:id
+    detail:
+      header:
+        title: "{{description}}"
+        subtitle: "{{amountTotal}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Line details
+                nl: Regelgegevens
+              fields:
+                - lineNumber
+                - description
+                - quantity
+                - unitId
+                - unitPrice
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - amountBase
+                - amountVat
+                - amountTotal
+    form:
+      variants:
+        create:
+          title:
+            en: Create invoice line
+            nl: Factuurregel aanmaken
+          groups:
+            - title:
+                en: Line details
+                nl: Regelgegevens
+              fields:
+                - lineNumber
+                - description
+                - quantity
+                - unitId
+                - unitPrice
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - amountBase
+                - amountVat
+                - amountTotal
+        edit:
+          extends: create
+          title:
+            en: Edit invoice line
+            nl: Factuurregel bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

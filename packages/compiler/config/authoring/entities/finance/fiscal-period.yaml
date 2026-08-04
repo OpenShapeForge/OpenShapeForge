@@ -1,0 +1,252 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: FiscalPeriod
+title: Fiscal Period
+description: Period within a fiscal year. Sequence is unique within fiscal year.
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: Fiscal period
+  nl: Boekjaarperiode
+domains:
+  - finance
+rest: true
+mcp:
+  tools: generic
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Human-readable period code, typically "{fiscalYearCode}-{sequence}" (e.g. "2026-01").
+      nl: Menselijk leesbare periodecode, doorgaans "{boekjaarcode}-{volgnummer}" (bijv. "2026-01").
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: sequence
+    valueType: integer
+    required: true
+    label:
+      en: Sequence
+      nl: Volgnummer
+    description:
+      en: Ordinal position of this period within its fiscal year (typically 1-12 for monthly cadence).
+      nl: Volgorde van deze periode binnen het boekjaar (typisch 1-12 voor een maandelijkse cadans).
+    validation:
+      min: 1
+      max: 366
+    persisted:
+      column: sequence
+      storageClass: core
+  - key: startDate
+    valueType: date
+    required: true
+    label:
+      en: Start date
+      nl: Begindatum
+    description:
+      en: First date covered by this period.
+      nl: Eerste datum die deze periode omvat.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: true
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Last date covered by this period.
+      nl: Laatste datum die deze periode omvat.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the period (open, closing, closed).
+      nl: Levenscyclusstatus van de periode (open, afsluitend, afgesloten).
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: FISCALPERIODSTATUS
+        clearable: false
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the period in an external context.
+      nl: Functionele of zakelijke code van de periode in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: fiscalYear
+    kind: belongsTo
+    target: FiscalYear
+    foreignKey: fiscal_year_id
+    label:
+      en: Fiscal year
+      nl: Boekjaar
+ui:
+  routes:
+    list:
+      en: /fiscal-periods
+      nl: /boekjaarperioden
+    detail:
+      en: /fiscal-periods/:id
+      nl: /boekjaarperioden/:id
+    create:
+      en: /fiscal-periods/create
+      nl: /boekjaarperioden/aanmaken
+    edit:
+      en: /fiscal-periods/:id/edit
+      nl: /boekjaarperioden/:id/bewerken
+    delete:
+      en: /fiscal-periods/:id/delete
+      nl: /boekjaarperioden/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Fiscal periods
+        nl: Boekjaarperioden
+      columns:
+        - key: code
+          sortable: true
+        - key: sequence
+          sortable: true
+        - key: startDate
+          sortable: true
+        - key: endDate
+          sortable: true
+        - key: status
+          sortable: true
+      defaultSort:
+        key: code
+        direction: desc
+      rowLink:
+        en: /fiscal-periods/:id
+        nl: /boekjaarperioden/:id
+    detail:
+      header:
+        title: "{{code}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Period details
+                nl: Periodegegevens
+              fields:
+                - code
+                - sequence
+                - startDate
+                - endDate
+                - status
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create fiscal period
+            nl: Boekjaarperiode aanmaken
+          groups:
+            - title:
+                en: Period details
+                nl: Periodegegevens
+              fields:
+                - code
+                - sequence
+                - startDate
+                - endDate
+                - status
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit fiscal period
+            nl: Boekjaarperiode bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

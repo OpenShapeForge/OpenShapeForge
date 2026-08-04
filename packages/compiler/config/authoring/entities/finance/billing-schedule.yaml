@@ -1,0 +1,283 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: BillingSchedule
+title: Billing Schedule
+description: Cadence and run-cursor configuration that drives prolongation for a billable sub-agreement. One BillingSchedule per active billable agreement; controls when the prolongation engine considers the agreement due. Line-level billed-through cursors stay on AgreementComponent.
+language: en
+displayTemplate: "{{period}}"
+filterField: period
+labels:
+  en: Billing schedule
+  nl: Facturatieschema
+domains:
+  - finance
+  - contracts
+rest: true
+mcp:
+  tools: generic
+fields:
+  - key: period
+    valueType: string
+    required: true
+    label:
+      en: Billing period
+      nl: Facturatieperiode
+    description:
+      en: Cadence at which the prolongation engine emits a new invoice for this agreement.
+      nl: Cadans waarmee de prolongatiemotor een nieuwe factuur genereert voor deze overeenkomst.
+    defaultValue: monthly
+    persisted:
+      column: period
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: BILLINGPERIOD
+        clearable: false
+  - key: startDay
+    valueType: integer
+    required: false
+    label:
+      en: Start day of month
+      nl: Startdag van de maand
+    description:
+      en: Day-of-month (1-31) at which each billing period starts. Defaults to the agreement start day when null.
+      nl: Dag van de maand (1-31) waarop elke facturatieperiode begint. Standaard de startdag van de overeenkomst als leeg.
+    validation:
+      min: 1
+      max: 31
+    persisted:
+      column: start_day
+      storageClass: core
+  - key: variableDays
+    valueType: integer
+    required: false
+    label:
+      en: Variable period length (days)
+      nl: Variabele periodelengte (dagen)
+    description:
+      en: Optional period length in days, used only when period = variable.
+      nl: Optionele periodelengte in dagen, alleen gebruikt wanneer periode = variabel.
+    validation:
+      min: 1
+      max: 366
+    persisted:
+      column: variable_days
+      storageClass: core
+  - key: invoiceMode
+    valueType: string
+    required: true
+    label:
+      en: Invoice amount mode
+      nl: Factuurbedragmodus
+    description:
+      en: Per-period vs per-day amount mode used when slicing partial periods (BILLINGAMOUNTTYPE).
+      nl: Per-periode of per-dag bedragmodus die wordt gebruikt bij het splitsen van deelperiodes (BILLINGAMOUNTTYPE).
+    defaultValue: perPeriod
+    persisted:
+      column: invoice_mode
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: BILLINGAMOUNTTYPE
+        clearable: false
+  - key: nextProlongationDate
+    valueType: date
+    required: false
+    label:
+      en: Next prolongation date
+      nl: Volgende prolongatiedatum
+    description:
+      en: Agreement-level due-run cursor. The prolongation engine selects this schedule when nextProlongationDate <= billUpToDate.
+      nl: Cursor voor volgende prolongatie op overeenkomstniveau. De prolongatiemotor selecteert dit schema wanneer volgende prolongatiedatum <= bill-up-to datum.
+    persisted:
+      column: next_prolongation_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endProlongationDate
+    valueType: date
+    required: false
+    label:
+      en: End prolongation date
+      nl: Einddatum prolongatie
+    description:
+      en: Optional hard stop after which the prolongation engine should not produce further invoices for this agreement.
+      nl: Optionele harde einddatum waarna de prolongatiemotor geen facturen meer maakt voor deze overeenkomst.
+    persisted:
+      column: end_prolongation_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: lastProlongationAt
+    valueType: datetime
+    required: false
+    label:
+      en: Last prolongation at
+      nl: Laatste prolongatie op
+    description:
+      en: Timestamp of the last successful prolongation run that advanced the cursor.
+      nl: Tijdstip van de laatste geslaagde prolongatie-run die de cursor heeft doorgezet.
+    persisted:
+      column: last_prolongation_at
+      storageClass: core
+  - key: source
+    valueType: string
+    required: false
+    label:
+      en: Source
+      nl: Bron
+    description:
+      en: Optional human-readable source/owner label (e.g. "import", "manual", "billing-engine").
+      nl: Optioneel leesbaar bron/eigenaar-label (bv. "import", "handmatig", "facturatiemotor").
+    validation:
+      maxLength: 100
+    persisted:
+      column: source
+      storageClass: core
+relationships:
+  - key: agreement
+    kind: belongsTo
+    target: Agreement
+    foreignKey: agreement_id
+    label:
+      en: Agreement
+      nl: Overeenkomst
+ui:
+  routes:
+    list:
+      en: /billing-schedules
+      nl: /facturatieschemas
+    detail:
+      en: /billing-schedules/:id
+      nl: /facturatieschemas/:id
+    create:
+      en: /billing-schedules/create
+      nl: /facturatieschemas/aanmaken
+    edit:
+      en: /billing-schedules/:id/edit
+      nl: /facturatieschemas/:id/bewerken
+    delete:
+      en: /billing-schedules/:id/delete
+      nl: /facturatieschemas/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Billing schedules
+        nl: Facturatieschemas
+      columns:
+        - key: period
+          sortable: true
+        - key: nextProlongationDate
+          sortable: true
+        - key: endProlongationDate
+          sortable: true
+        - key: lastProlongationAt
+          sortable: true
+      defaultSort:
+        key: nextProlongationDate
+        direction: asc
+      rowLink:
+        en: /billing-schedules/:id
+        nl: /facturatieschemas/:id
+    detail:
+      header:
+        title: "{{period}}"
+        subtitle: "{{nextProlongationDate}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Cadence
+                nl: Cadans
+              fields:
+                - period
+                - startDay
+                - variableDays
+                - invoiceMode
+            - title:
+                en: Cursors
+                nl: Cursors
+              fields:
+                - nextProlongationDate
+                - endProlongationDate
+                - lastProlongationAt
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - source
+    form:
+      variants:
+        create:
+          title:
+            en: Create billing schedule
+            nl: Facturatieschema aanmaken
+          groups:
+            - title:
+                en: Cadence
+                nl: Cadans
+              fields:
+                - period
+                - startDay
+                - variableDays
+                - invoiceMode
+            - title:
+                en: Cursors
+                nl: Cursors
+              fields:
+                - nextProlongationDate
+                - endProlongationDate
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - source
+        edit:
+          extends: create
+          title:
+            en: Edit billing schedule
+            nl: Facturatieschema bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

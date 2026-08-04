@@ -1,0 +1,172 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: BankReconciliation
+title: Bank Reconciliation
+description: Match between a bank statement line and an invoice payment (or, in a later phase, a ledger posting line).
+language: en
+displayTemplate: "{{matchedAt}}"
+filterField: id
+labels:
+  en: Bank reconciliation
+  nl: Aflettering
+domains:
+  - finance
+rest: true
+mcp:
+  tools: generic
+fields:
+  - key: matchedAt
+    valueType: datetime
+    required: true
+    label:
+      en: Matched at
+      nl: Afgeletterd op
+    description:
+      en: Timestamp at which the match was established.
+      nl: Tijdstip waarop de aflettering is vastgelegd.
+    persisted:
+      column: matched_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: matchedBy
+    valueType: string
+    required: false
+    label:
+      en: Matched by
+      nl: Afgeletterd door
+    description:
+      en: Identifier of the user or process that established the match.
+      nl: Identificatie van de gebruiker of het proces dat de aflettering heeft vastgelegd.
+    validation:
+      maxLength: 200
+    persisted:
+      column: matched_by
+      storageClass: core
+relationships:
+  - key: bankStatementLine
+    kind: belongsTo
+    target: BankStatementLine
+    foreignKey: bank_statement_line_id
+    label:
+      en: Bank statement line
+      nl: Bankafschriftregel
+  - key: invoicePayment
+    kind: belongsTo
+    target: InvoicePayment
+    foreignKey: invoice_payment_id
+    label:
+      en: Invoice payment
+      nl: Factuurbetaling
+  - key: ledgerPostingLine
+    kind: belongsTo
+    target: LedgerPostingLine
+    foreignKey: ledger_posting_line_id
+    label:
+      en: Ledger posting line
+      nl: Boekingsregel
+ui:
+  routes:
+    list:
+      en: /bank-reconciliations
+      nl: /afletteringen
+    detail:
+      en: /bank-reconciliations/:id
+      nl: /afletteringen/:id
+    create:
+      en: /bank-reconciliations/create
+      nl: /afletteringen/aanmaken
+    edit:
+      en: /bank-reconciliations/:id/edit
+      nl: /afletteringen/:id/bewerken
+    delete:
+      en: /bank-reconciliations/:id/delete
+      nl: /afletteringen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Bank reconciliations
+        nl: Afletteringen
+      columns:
+        - key: matchedAt
+          sortable: true
+        - key: matchedBy
+          sortable: true
+      defaultSort:
+        key: matchedAt
+        direction: desc
+      rowLink:
+        en: /bank-reconciliations/:id
+        nl: /afletteringen/:id
+    detail:
+      header:
+        title: "{{matchedAt}}"
+        subtitle: "{{matchedBy}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Match details
+                nl: Afletteringsgegevens
+              fields:
+                - matchedAt
+                - matchedBy
+    form:
+      variants:
+        create:
+          title:
+            en: Create bank reconciliation
+            nl: Aflettering aanmaken
+          groups:
+            - title:
+                en: Match details
+                nl: Afletteringsgegevens
+              fields:
+                - matchedAt
+                - matchedBy
+        edit:
+          extends: create
+          title:
+            en: Edit bank reconciliation
+            nl: Aflettering bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

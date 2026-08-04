@@ -1,0 +1,200 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: BudgetLine
+title: Budget Line
+description: Budget allocation per ledger account, fiscal period, and optional cost dimension within a budget.
+language: en
+displayTemplate: "{{description}}"
+filterField: description
+labels:
+  en: Budget line
+  nl: Begrotingsregel
+domains:
+  - finance
+rest: true
+mcp:
+  tools: generic
+fields:
+  - key: lineNumber
+    valueType: integer
+    required: true
+    label:
+      en: Line number
+      nl: Regelnummer
+    description:
+      en: Sequential line number within the budget.
+      nl: Volgnummer van de regel binnen de begroting.
+    validation:
+      min: 1
+    persisted:
+      column: line_number
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-form description of the budget allocation.
+      nl: Vrije omschrijving van de budgetallocatie.
+    validation:
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 500
+  - key: amount
+    valueType: number
+    required: true
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Budgeted amount for this line.
+      nl: Begroot bedrag voor deze regel.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+relationships:
+  - key: budget
+    kind: belongsTo
+    target: Budget
+    foreignKey: budget_id
+    label:
+      en: Budget
+      nl: Begroting
+  - key: fiscalPeriod
+    kind: belongsTo
+    target: FiscalPeriod
+    foreignKey: fiscal_period_id
+    label:
+      en: Fiscal period
+      nl: Boekjaarperiode
+  - key: ledgerAccount
+    kind: belongsTo
+    target: LedgerAccount
+    foreignKey: ledger_account_id
+    label:
+      en: Ledger account
+      nl: Grootboekrekening
+  - key: costDimension
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: cost_dimension_id
+    label:
+      en: Cost dimension
+      nl: Kostendimensie
+ui:
+  routes:
+    list:
+      en: /budget-lines
+      nl: /begrotingsregels
+    detail:
+      en: /budget-lines/:id
+      nl: /begrotingsregels/:id
+    create:
+      en: /budget-lines/create
+      nl: /begrotingsregels/aanmaken
+    edit:
+      en: /budget-lines/:id/edit
+      nl: /begrotingsregels/:id/bewerken
+    delete:
+      en: /budget-lines/:id/delete
+      nl: /begrotingsregels/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Budget lines
+        nl: Begrotingsregels
+      columns:
+        - key: lineNumber
+          sortable: true
+        - key: description
+          sortable: true
+        - key: amount
+          sortable: true
+      defaultSort:
+        key: lineNumber
+        direction: asc
+      rowLink:
+        en: /budget-lines/:id
+        nl: /begrotingsregels/:id
+    detail:
+      header:
+        title: "{{description}}"
+        subtitle: "{{amount}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Line details
+                nl: Regelgegevens
+              fields:
+                - lineNumber
+                - description
+                - amount
+    form:
+      variants:
+        create:
+          title:
+            en: Create budget line
+            nl: Begrotingsregel aanmaken
+          groups:
+            - title:
+                en: Line details
+                nl: Regelgegevens
+              fields:
+                - lineNumber
+                - description
+                - amount
+        edit:
+          extends: create
+          title:
+            en: Edit budget line
+            nl: Begrotingsregel bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

@@ -51,7 +51,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   "authorization-config.schema.json": 1,
   "connector.schema.json": 1,
-  "core-entity.schema.json": 4,
+  "core-entity.schema.json": 43,
   "retention-policy-catalog.schema.json": 1,
   "semantic-type-catalog.schema.json": 1,
   "transform-catalog.schema.json": 1,

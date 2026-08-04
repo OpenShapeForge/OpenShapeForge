@@ -1,0 +1,258 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: BankStatement
+title: Bank Statement
+description: Bank statement header for an account, with opening and closing balances on a given statement date.
+language: en
+displayTemplate: "{{accountIban}} #{{statementNumber}}"
+filterField: statementNumber
+labels:
+  en: Bank statement
+  nl: Bankafschrift
+domains:
+  - finance
+rest: true
+mcp:
+  tools: generic
+fields:
+  - key: accountIban
+    valueType: string
+    required: true
+    label:
+      en: Account IBAN
+      nl: Rekening-IBAN
+    description:
+      en: IBAN of the bank account this statement belongs to.
+      nl: IBAN van de bankrekening waartoe dit afschrift behoort.
+    validation:
+      maxLength: 34
+    persisted:
+      column: account_iban
+      storageClass: core
+  - key: statementNumber
+    valueType: string
+    required: true
+    label:
+      en: Statement number
+      nl: Afschriftnummer
+    description:
+      en: Statement number issued by the bank, unique within the account IBAN.
+      nl: Afschriftnummer toegekend door de bank, uniek binnen de rekening-IBAN.
+    persisted:
+      column: statement_number
+      storageClass: core
+  - key: statementDate
+    valueType: date
+    required: true
+    label:
+      en: Statement date
+      nl: Afschriftdatum
+    description:
+      en: Date of the statement as issued by the bank.
+      nl: Afschriftdatum zoals afgegeven door de bank.
+    persisted:
+      column: statement_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: openingBalance
+    valueType: number
+    required: true
+    label:
+      en: Opening balance
+      nl: Beginsaldo
+    description:
+      en: Opening balance of the account at the start of the statement period.
+      nl: Beginsaldo van de rekening aan het begin van de afschriftperiode.
+    semanticType: currency
+    persisted:
+      column: opening_balance
+      storageClass: core
+  - key: closingBalance
+    valueType: number
+    required: true
+    label:
+      en: Closing balance
+      nl: Eindsaldo
+    description:
+      en: Closing balance of the account at the end of the statement period.
+      nl: Eindsaldo van de rekening aan het einde van de afschriftperiode.
+    semanticType: currency
+    persisted:
+      column: closing_balance
+      storageClass: core
+  - key: currencyCode
+    valueType: string
+    required: true
+    label:
+      en: Currency
+      nl: Valuta
+    description:
+      en: ISO 4217 currency code in which the balances are denominated.
+      nl: ISO 4217 valutacode waarin de saldi luiden.
+    defaultValue: EUR
+    validation:
+      minLength: 3
+      maxLength: 3
+    persisted:
+      column: currency_code
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the statement in an external context.
+      nl: Functionele of zakelijke code van het afschrift in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+ui:
+  routes:
+    list:
+      en: /bank-statements
+      nl: /bankafschriften
+    detail:
+      en: /bank-statements/:id
+      nl: /bankafschriften/:id
+    create:
+      en: /bank-statements/create
+      nl: /bankafschriften/aanmaken
+    edit:
+      en: /bank-statements/:id/edit
+      nl: /bankafschriften/:id/bewerken
+    delete:
+      en: /bank-statements/:id/delete
+      nl: /bankafschriften/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Bank statements
+        nl: Bankafschriften
+      columns:
+        - key: accountIban
+          sortable: true
+        - key: statementNumber
+          sortable: true
+        - key: statementDate
+          sortable: true
+        - key: openingBalance
+          sortable: true
+        - key: closingBalance
+          sortable: true
+      defaultSort:
+        key: statementDate
+        direction: desc
+      rowLink:
+        en: /bank-statements/:id
+        nl: /bankafschriften/:id
+    detail:
+      header:
+        title: "{{accountIban}} #{{statementNumber}}"
+        subtitle: "{{statementDate}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Statement details
+                nl: Afschriftgegevens
+              fields:
+                - accountIban
+                - statementNumber
+                - statementDate
+                - currencyCode
+            - title:
+                en: Balances
+                nl: Saldi
+              fields:
+                - openingBalance
+                - closingBalance
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create bank statement
+            nl: Bankafschrift aanmaken
+          groups:
+            - title:
+                en: Statement details
+                nl: Afschriftgegevens
+              fields:
+                - accountIban
+                - statementNumber
+                - statementDate
+                - currencyCode
+            - title:
+                en: Balances
+                nl: Saldi
+              fields:
+                - openingBalance
+                - closingBalance
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit bank statement
+            nl: Bankafschrift bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

@@ -1,0 +1,255 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: VatReturn
+title: VAT Return
+description: VAT declaration period. One return per fiscal period, recording payable/receivable amounts and submission status.
+language: en
+displayTemplate: "{{referenceNumber}}"
+filterField: referenceNumber
+labels:
+  en: VAT return
+  nl: BTW-aangifte
+domains:
+  - finance
+rest: true
+mcp:
+  tools: generic
+fields:
+  - key: submittedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Submitted at
+      nl: Ingediend op
+    description:
+      en: Timestamp at which the VAT return was submitted to the tax authority.
+      nl: Tijdstip waarop de BTW-aangifte is ingediend bij de Belastingdienst.
+    persisted:
+      column: submitted_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the VAT return.
+      nl: Levenscyclusstatus van de BTW-aangifte.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: VATRETURNSTATUS
+        clearable: false
+  - key: payableAmount
+    valueType: number
+    required: false
+    label:
+      en: Payable amount
+      nl: Te betalen bedrag
+    description:
+      en: Amount due to the tax authority for the period.
+      nl: Aan de Belastingdienst verschuldigd bedrag voor de periode.
+    semanticType: currency
+    persisted:
+      column: payable_amount
+      storageClass: core
+  - key: receivableAmount
+    valueType: number
+    required: false
+    label:
+      en: Receivable amount
+      nl: Te ontvangen bedrag
+    description:
+      en: Amount to be received from the tax authority for the period.
+      nl: Van de Belastingdienst te ontvangen bedrag voor de periode.
+    semanticType: currency
+    persisted:
+      column: receivable_amount
+      storageClass: core
+  - key: referenceNumber
+    valueType: string
+    required: false
+    label:
+      en: Reference number
+      nl: Kenmerk
+    description:
+      en: Tenant-unique reference number assigned to the VAT return.
+      nl: Tenant-uniek kenmerk dat aan de BTW-aangifte is toegekend.
+    validation:
+      maxLength: 100
+    persisted:
+      column: reference_number
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the VAT return in an external context.
+      nl: Functionele of zakelijke code van de BTW-aangifte in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: fiscalPeriod
+    kind: belongsTo
+    target: FiscalPeriod
+    foreignKey: fiscal_period_id
+    label:
+      en: Fiscal period
+      nl: Boekjaarperiode
+ui:
+  routes:
+    list:
+      en: /vat-returns
+      nl: /btw-aangiftes
+    detail:
+      en: /vat-returns/:id
+      nl: /btw-aangiftes/:id
+    create:
+      en: /vat-returns/create
+      nl: /btw-aangiftes/aanmaken
+    edit:
+      en: /vat-returns/:id/edit
+      nl: /btw-aangiftes/:id/bewerken
+    delete:
+      en: /vat-returns/:id/delete
+      nl: /btw-aangiftes/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: VAT returns
+        nl: BTW-aangiftes
+      columns:
+        - key: referenceNumber
+          sortable: true
+        - key: status
+          sortable: true
+        - key: submittedAt
+          sortable: true
+        - key: payableAmount
+          sortable: true
+        - key: receivableAmount
+          sortable: true
+      defaultSort:
+        key: submittedAt
+        direction: desc
+      rowLink:
+        en: /vat-returns/:id
+        nl: /btw-aangiftes/:id
+    detail:
+      header:
+        title: "{{referenceNumber}}"
+        subtitle: "{{submittedAt}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Return details
+                nl: Aangiftegegevens
+              fields:
+                - referenceNumber
+                - status
+                - submittedAt
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - payableAmount
+                - receivableAmount
+            - title:
+                en: Provenance
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create VAT return
+            nl: BTW-aangifte aanmaken
+          groups:
+            - title:
+                en: Return details
+                nl: Aangiftegegevens
+              fields:
+                - referenceNumber
+                - status
+                - submittedAt
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - payableAmount
+                - receivableAmount
+            - title:
+                en: Provenance
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit VAT return
+            nl: BTW-aangifte bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

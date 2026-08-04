@@ -1,7 +1,7 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: message.emailNew
-category: Messaging
+category: messaging
 label:
   en: New email message
   nl: Nieuw emailbericht

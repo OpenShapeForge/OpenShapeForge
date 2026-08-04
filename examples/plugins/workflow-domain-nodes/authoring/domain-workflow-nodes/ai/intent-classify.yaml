@@ -1,7 +1,7 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: intent.classify
-category: AI
+category: ai
 label:
   nl: Intent classificeren
   en: Classify intent

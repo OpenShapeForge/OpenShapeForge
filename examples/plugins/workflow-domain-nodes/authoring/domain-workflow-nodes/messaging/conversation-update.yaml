@@ -1,7 +1,7 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: conversation.update
-category: Messaging
+category: messaging
 label:
   en: Update conversation
   nl: Conversatie bijwerken

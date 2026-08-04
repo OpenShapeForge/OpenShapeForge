@@ -1,7 +1,7 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: messaging.getConversationContext
-category: Messaging
+category: messaging
 label:
   en: Get conversation context
   nl: Haal conversatiecontext op

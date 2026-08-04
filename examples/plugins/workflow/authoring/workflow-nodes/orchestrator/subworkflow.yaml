@@ -1,7 +1,7 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: subWorkflow
-category: Workflow
+category: workflow
 label:
   en: Sub-workflow
   nl: Sub-workflow

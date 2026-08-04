@@ -25,6 +25,7 @@ import {
   Building2,
   Calculator,
   Calendar,
+  CalendarClock,
   Check,
   CheckSquare,
   ChevronDown,
@@ -33,6 +34,8 @@ import {
   CircleCheck,
   CircleDollarSign,
   CircleHelp,
+  CirclePlus,
+  CircleStop,
   CircleX,
   Clipboard,
   ClipboardCheck,
@@ -72,12 +75,14 @@ import {
   Link,
   List,
   ListChecks,
+  ListTodo,
   ListTree,
   Loader,
   Lock,
   Mail,
   MapPin,
   MapPinned,
+  Merge,
   MessageCircle,
   MessageSquare,
   Minus,
@@ -97,6 +102,8 @@ import {
   ShieldCheck,
   Shovel,
   ShoppingCart,
+  Split,
+  SquarePen,
   Star,
   Tag,
   Timer,
@@ -109,6 +116,7 @@ import {
   Users,
   Vault,
   Waypoints,
+  Webhook,
   Workflow,
   Wrench,
   X,
@@ -152,6 +160,7 @@ const LUCIDE_ICON_REGISTRY = {
   "building-2": Building2,
   calculator: Calculator,
   calendar: Calendar,
+  "calendar-clock": CalendarClock,
   check: Check,
   "check-square": CheckSquare,
   "chevron-down": ChevronDown,
@@ -160,6 +169,8 @@ const LUCIDE_ICON_REGISTRY = {
   "circle-check": CircleCheck,
   "circle-dollar-sign": CircleDollarSign,
   "circle-help": CircleHelp,
+  "circle-plus": CirclePlus,
+  "circle-stop": CircleStop,
   "circle-x": CircleX,
   clipboard: Clipboard,
   "clipboard-check": ClipboardCheck,
@@ -200,12 +211,14 @@ const LUCIDE_ICON_REGISTRY = {
   link: Link,
   list: List,
   "list-checks": ListChecks,
+  "list-todo": ListTodo,
   "list-tree": ListTree,
   loader: Loader,
   lock: Lock,
   mail: Mail,
   "map-pin": MapPin,
   "map-pinned": MapPinned,
+  merge: Merge,
   "message-circle": MessageCircle,
   "message-square": MessageSquare,
   minus: Minus,
@@ -225,6 +238,8 @@ const LUCIDE_ICON_REGISTRY = {
   "shield-check": ShieldCheck,
   shovel: Shovel,
   "shopping-cart": ShoppingCart,
+  split: Split,
+  "square-pen": SquarePen,
   star: Star,
   tag: Tag,
   timer: Timer,
@@ -237,6 +252,7 @@ const LUCIDE_ICON_REGISTRY = {
   users: Users,
   vault: Vault,
   waypoints: Waypoints,
+  webhook: Webhook,
   workflow: Workflow,
   wrench: Wrench,
   x: X,
@@ -256,10 +272,26 @@ const LUCIDE_ICON_ALIASES = {
   "dollar-sign": "badge-dollar-sign",
   edit: "pencil",
   grid: "grid-3-x-3",
+  // lucide renamed the circle-prefixed icons; the old spelling still ships as a
+  // deprecated export and still appears in authored icon names, so both resolve.
+  "plus-circle": "circle-plus",
+  "stop-circle": "circle-stop",
   screwdriver: "wrench",
   "smiley-melting": "circle-help",
   tray: "inbox",
 } satisfies Record<string, keyof typeof LUCIDE_ICON_REGISTRY>;
+
+/**
+ * Every name the registry answers to, including aliases.
+ *
+ * Take this rather than `string` wherever an icon name is authored in code:
+ * `resolveLucideIconByName` cannot fail, it falls back to a grey circle, and a
+ * grey circle on a canvas node is indistinguishable from a design decision. A
+ * typo should stop the build instead.
+ */
+export type LucideIconName =
+  | keyof typeof LUCIDE_ICON_REGISTRY
+  | keyof typeof LUCIDE_ICON_ALIASES;
 
 export const AVAILABLE_LUCIDE_ICON_NAMES = Object.keys(LUCIDE_ICON_REGISTRY).sort();
 
@@ -327,6 +359,13 @@ export const POPULAR_LUCIDE_ICON_NAMES = [
   "bookmark",
 ] satisfies Array<keyof typeof LUCIDE_ICON_REGISTRY>;
 
+/**
+ * Resolving a name that is definitely present always yields a component — the
+ * registry falls back to `Circle` rather than failing — so callers holding a
+ * name do not have to handle an `undefined` the implementation cannot return.
+ */
+export function resolveLucideIconByName(name: string): IconComponent;
+export function resolveLucideIconByName(name?: string): IconComponent | undefined;
 export function resolveLucideIconByName(name?: string): IconComponent | undefined {
   if (!name) return undefined;
 

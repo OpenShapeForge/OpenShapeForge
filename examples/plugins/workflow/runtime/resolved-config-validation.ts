@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { z, type ZodType } from "zod";
 import { getCatalogEntry } from "./node-catalog-store.js";
+import {
+  canonicalizeFieldAliases as canonicalizeAliasesOnRecord,
+  readFieldAliasSources,
+} from "./field-aliases.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -99,6 +103,30 @@ export function canonicalizeWorkflowNodeConfigAliases(
   config: unknown,
 ): JsonRecord {
   return canonicalizeFieldAliases(asRecord(config), getConfigFields(nodeType));
+}
+
+/**
+ * The same mapping, over config fields the caller already holds.
+ *
+ * The function above resolves a node type through the catalog store, which is
+ * hydrated from Postgres and THROWS when it is not — see
+ * `node-catalog-store.ts` on why an unhydrated read must not degrade quietly.
+ * That makes it unusable anywhere outside the API process, and the designer is
+ * outside it: a canvas has to derive a decision node's ports from the same
+ * canonical config the bridge will be handed, in a browser, with no store to
+ * read.
+ *
+ * So the catalog's own records are the input instead. They are the same records
+ * `WorkflowNodeType.configFields` puts on the wire, which is where a client
+ * gets them. Sharing this rather than restating the alias rule is the point:
+ * a node type that gains an alias in its YAML must not need a second edit
+ * anywhere to keep the two sides agreeing.
+ */
+export function canonicalizeWorkflowNodeConfigAliasesFromFields(
+  config: unknown,
+  configFields: unknown,
+): JsonRecord {
+  return canonicalizeAliasesOnRecord(asRecord(config), readFieldAliasSources(configFields));
 }
 
 export function formatResolvedConfigValidationIssues(
@@ -290,19 +318,23 @@ function isRuntimeRequired(field: RuntimeField): boolean {
   return field.runtime?.required === true;
 }
 
+/**
+ * Delegates to `field-aliases.ts`, which has no imports and is therefore safe
+ * to bundle for a browser. The designer shares that module, so a config reads
+ * the same here and on a canvas rather than through two derivations that can
+ * drift — which is the failure this rewriting exists to prevent in the first
+ * place.
+ */
 function canonicalizeFieldAliases(config: JsonRecord, fields: RuntimeField[] | null): JsonRecord {
   if (!fields) return config;
-  const next: JsonRecord = { ...config };
-  for (const field of fields) {
-    if (next[field.key] !== undefined) continue;
-    for (const alias of field.runtime?.aliases ?? []) {
-      if (next[alias] !== undefined) {
-        next[field.key] = next[alias];
-        break;
-      }
-    }
-  }
-  return next;
+  return canonicalizeAliasesOnRecord(
+    config,
+    fields.flatMap((field) =>
+      field.runtime?.aliases?.length
+        ? [{ key: field.key, aliases: field.runtime.aliases }]
+        : [],
+    ),
+  );
 }
 
 function normalizeFields(value: unknown): RuntimeField[] {

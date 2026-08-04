@@ -1,0 +1,237 @@
+/*
+ * Canvas styling that Tailwind utilities cannot express: pseudo-elements on the
+ * connector handles, and overrides of React Flow's own global class names.
+ * Everything a utility class can say is said on the components instead.
+ */
+
+/* --------------------------------------------------------------------------
+   Shell
+   -------------------------------------------------------------------------- */
+
+.canvasColumn {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.canvasShell {
+  position: relative;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-card);
+}
+
+.canvas :global(.react-flow) {
+  height: 100%;
+}
+
+/* The pane is the background, not a draggable thing. */
+.canvas :global(.react-flow__pane) {
+  cursor: default;
+}
+
+/*
+ * React Flow's node wrapper can be larger than the card it holds when the size
+ * was estimated rather than measured, so the grab cursor belongs to the card
+ * (which sets it itself) and not to the wrapper.
+ */
+.canvas :global(.react-flow__node) {
+  cursor: default;
+}
+
+.canvas :global(.react-flow__node.dragging) [data-type="canvas"] {
+  cursor: grabbing;
+}
+
+/*
+ * Read-only is one signal, not two: the same prop that removes the editing
+ * handlers also removes the cursor that advertises them.
+ */
+.canvas[data-read-only="true"] [data-type="canvas"] {
+  cursor: default;
+}
+
+/* --------------------------------------------------------------------------
+   Edges
+   -------------------------------------------------------------------------- */
+
+.canvas :global(.react-flow__edge-path) {
+  stroke-linecap: round;
+  transition:
+    stroke 140ms ease,
+    filter 140ms ease;
+}
+
+/*
+ * A selected edge stays solid: the indicator is the darker stroke plus a soft
+ * glow, not motion. `stroke-dasharray: none` overrides React Flow's default
+ * `.animated path { stroke-dasharray: 5 }` should an edge ever be marked
+ * animated.
+ */
+.canvas :global(.react-flow__edge.selected .react-flow__edge-path) {
+  stroke-dasharray: none !important;
+  stroke-dashoffset: 0 !important;
+  animation: none !important;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, currentColor 35%, transparent));
+}
+
+.canvas :global(.react-flow__arrowhead polyline) {
+  stroke-dasharray: none;
+  stroke-dashoffset: 0;
+  animation: none;
+}
+
+/* --------------------------------------------------------------------------
+   Floating panels
+   -------------------------------------------------------------------------- */
+
+.viewportControl {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 20;
+  background: var(--color-background);
+  overflow: hidden;
+}
+
+.minimapPanel {
+  position: absolute;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 20;
+}
+
+/* React Flow styles its minimap as a floating panel too; strip that so only
+   the design system's panel chrome shows. */
+.minimapPanel :global(.react-flow__minimap) {
+  position: static;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.minimapPanel :global(.react-flow__minimap-mask) {
+  fill: color-mix(in srgb, var(--color-foreground) 10%, transparent);
+}
+
+/* --------------------------------------------------------------------------
+   Node card states
+   -------------------------------------------------------------------------- */
+
+/* A node the run did not reach. */
+.nodeCardDimmed {
+  opacity: 0.42;
+}
+
+/* The node a run is sitting on. */
+.nodeCardActive {
+  border-color: color-mix(in srgb, var(--color-node-selected) 52%, transparent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--color-node-selected) 12%, transparent),
+    0 10px 22px rgba(15, 23, 42, 0.12);
+}
+
+/* The node a dragged connection would snap to. */
+.nodeCardAutoConnectTarget {
+  border-color: color-mix(in srgb, var(--color-node-selected) 52%, transparent);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--color-node-selected) 12%, transparent),
+    0 12px 24px color-mix(in srgb, var(--color-node-selected) 12%, transparent);
+}
+
+/* The ghost card following the cursor during a palette drag. */
+.nodeCardPalettePreview {
+  opacity: 0.92;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--color-node-selected) 8%, transparent),
+    0 16px 30px rgba(15, 23, 42, 0.12);
+}
+
+/* The card previewing a split of the edge under it. */
+.nodeCardEdgeInsertPreview {
+  animation: nodeCardEdgeInsertSnap 180ms ease-out;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--color-node-selected) 14%, transparent),
+    0 18px 34px rgba(15, 23, 42, 0.16);
+  transform: scale(1.02);
+}
+
+/* Holds its space while something else draws it. */
+.nodeCardVisuallyHidden {
+  opacity: 0;
+}
+
+@keyframes nodeCardEdgeInsertSnap {
+  0% {
+    transform: scale(0.98);
+  }
+
+  70% {
+    transform: scale(1.025);
+  }
+
+  100% {
+    transform: scale(1.02);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Connector handles
+
+   The visible connector is 7×7, which is far too small to grab. The handle
+   itself is therefore 18×18 and invisible, and the dot is drawn by ::after —
+   a forgiving hit target under a small mark.
+   -------------------------------------------------------------------------- */
+
+.nodeHandle {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 0 !important;
+  border-radius: 999px;
+  box-shadow: none !important;
+  background: transparent !important;
+  z-index: 3;
+  pointer-events: all !important;
+}
+
+.nodeHandle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--color-node-card-border);
+  border-radius: 999px;
+  background: var(--color-card);
+  transform: translate(-50%, -50%);
+}
+
+/* Under a labelled output column, so the label stays clickable. */
+.nodeHandleOutputBorder {
+  z-index: 2;
+}
+
+.nodeHandlePreview {
+  transform: scale(1.08);
+}
+
+.nodeHandlePreview::after {
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--color-node-selected) 18%, transparent),
+    0 0 0 8px color-mix(in srgb, var(--color-node-selected) 8%, transparent) !important;
+}

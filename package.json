@@ -48,6 +48,8 @@
     "typecheck:examples": "./apps/api/node_modules/.bin/tsc --noEmit -p examples/tsconfig.json",
     "//typecheck:layout": "packages/workflow-layout has its own tsconfig — no DOM lib, stricter than the app's — so it cannot be folded into typecheck:web. Its own gate, run alongside the others.",
     "typecheck:layout": "bun run --cwd packages/workflow-layout typecheck",
+    "//typecheck:plugin-web": "The workflow plugin's web half: browser code, so browser resolution. Separate from typecheck:examples, whose NodeNext settings would demand .js specifiers Turbopack cannot resolve.",
+    "typecheck:plugin-web": "./apps/api/node_modules/.bin/tsc --noEmit -p examples/plugins/workflow/web/tsconfig.json",
     "test:compiler": "bun test packages/compiler",
     "test:layout": "bun test packages/workflow-layout",
     "test:examples": "bun test examples",

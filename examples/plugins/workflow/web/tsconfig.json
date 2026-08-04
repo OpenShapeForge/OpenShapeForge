@@ -1,0 +1,41 @@
+{
+  "//": [
+    "The plugin's web half is browser code, so it is typechecked with browser",
+    "resolution rather than with the NodeNext settings the rest of examples/ uses.",
+    "",
+    "This is not a preference. The repo-wide base is `moduleResolution: NodeNext`,",
+    "which REQUIRES a `.js` extension on every relative import. Turbopack bundles",
+    "these same files for the browser and does not map a `.js` specifier onto the",
+    "`.ts` file beside it, so a `.js` extension that satisfies tsc makes the Next",
+    "build fail with `Can't resolve`. The two cannot both be satisfied by one",
+    "specifier, so the file gets the resolution that matches where it runs.",
+    "",
+    "`resolveExtensions` in next.config does NOT fix this — it chooses which",
+    "extensions to try for an extensionless import, not how to reinterpret one",
+    "that is already written. Verified, not assumed.",
+    "",
+    "The runtime half keeps NodeNext: the API imports it under Bun, where the",
+    "`.js` specifiers are correct and load-bearing. Only `web/` moves.",
+    "",
+    "Rooted at the repo root because these modules reach into apps/web and",
+    "packages/ by relative path, exactly as the parent project does."
+  ],
+  "//allowImportingTsExtensions": "Same reason examples/tsconfig.json gives: packages/workflow-layout's modules import each other with explicit .ts, so pulling any of them in raises TS5097 on that package's INTERNAL specifiers — files this project does not own. Nothing here writes one.",
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["bun"],
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  },
+  "//include": [
+    "`.ts` only. The `.tsx` files here are React components that import apps/web",
+    "by relative path, so checking them needs that app's `@/*` paths and its CSS",
+    "module declarations — they are already covered by `typecheck:web`, which has",
+    "both. Only the `.ts` modules had the NodeNext-versus-Turbopack conflict this",
+    "project exists to resolve, so only they belong in it."
+  ],
+  "include": ["**/*.ts"]
+}

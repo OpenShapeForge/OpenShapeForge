@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type {
   WorkflowLayoutDefinition,
-  WorkflowLayoutDefinitionEdge,
   WorkflowLayoutDefinitionNode,
   WorkflowLayoutNode,
   WorkflowLayoutOutputHandle,
@@ -47,9 +46,19 @@ export function defaultHandleLabel(handleId: string) {
   }
 }
 
+/**
+ * Ports for a node nothing has declared any for, derived from the edges that
+ * already leave it.
+ *
+ * Typed by what it READS rather than by the records it happens to be called
+ * with, so a caller holding a different shape of node — a designer's canvas
+ * node, say — can share this derivation instead of writing a second one. Two
+ * accounts of a node's port order is two different geometries for the same
+ * graph, because port index is what ELK lays edges out against.
+ */
 export function defaultOutputHandles(input: {
-  node: WorkflowLayoutDefinitionNode;
-  outgoingEdges: WorkflowLayoutDefinitionEdge[];
+  node: Pick<WorkflowLayoutDefinitionNode, "type">;
+  outgoingEdges: ReadonlyArray<{ sourceHandle?: string | null }>;
   definition?: WorkflowLayoutDefinition;
 }): WorkflowLayoutOutputHandle[] {
   if (input.node.type === "end") {

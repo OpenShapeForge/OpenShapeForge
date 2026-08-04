@@ -4,16 +4,16 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 410 packages.
+Regenerate with `bun run notices`. 430 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 355 |
-| ISC | 19 |
+| MIT | 366 |
+| ISC | 27 |
 | Apache-2.0 | 14 |
-| BSD-3-Clause | 6 |
+| BSD-3-Clause | 7 |
 | BlueOak-1.0.0 | 5 |
 | MPL-2.0 | 4 |
 | LGPL-3.0-or-later | 2 |
@@ -406,6 +406,24 @@ Regenerate with `bun run notices`. 410 packages.
 ### @types/bun@1.3.14
 - License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/bun
 
+### @types/d3-color@3.1.3
+- License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-color
+
+### @types/d3-drag@3.0.7
+- License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-drag
+
+### @types/d3-interpolate@3.0.4
+- License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-interpolate
+
+### @types/d3-selection@3.0.11
+- License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-selection
+
+### @types/d3-transition@3.0.9
+- License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-transition
+
+### @types/d3-zoom@3.0.8
+- License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/d3-zoom
+
 ### @types/debug@4.1.13
 - License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/debug
 
@@ -472,6 +490,12 @@ Regenerate with `bun run notices`. 410 packages.
 ### @whatwg-node/server@0.11.0
 - License: **MIT** — ardatan/whatwg-node
 - Author: Arda TANRIKULU <ardatanrikulu@gmail.com>
+
+### @xyflow/react@12.11.2
+- License: **MIT** — https://reactflow.dev
+
+### @xyflow/system@0.0.79
+- License: **MIT** — https://github.com/xyflow/xyflow.git
 
 ### abstract-logging@2.0.1
 - License: **MIT** — https://github.com/jsumners/abstract-logging#readme
@@ -562,6 +586,10 @@ Regenerate with `bun run notices`. 410 packages.
 - License: **Apache-2.0** — https://github.com/joe-bell/cva#readme
 - Author: Joe Bell (https://joebell.co.uk)
 
+### classcat@5.0.5
+- License: **MIT** — jorgebucaran/classcat
+- Author: Jorge Bucaran
+
 ### client-only@0.0.1
 - License: **MIT** — https://reactjs.org/
 
@@ -620,6 +648,42 @@ Regenerate with `bun run notices`. 410 packages.
 ### csstype@3.2.3
 - License: **MIT** — https://github.com/frenic/csstype
 - Author: Fredrik Nicol <fredrik.nicol@gmail.com>
+
+### d3-color@3.1.0
+- License: **ISC** — https://d3js.org/d3-color/
+- Author: Mike Bostock
+
+### d3-dispatch@3.0.1
+- License: **ISC** — https://d3js.org/d3-dispatch/
+- Author: Mike Bostock
+
+### d3-drag@3.0.0
+- License: **ISC** — https://d3js.org/d3-drag/
+- Author: Mike Bostock
+
+### d3-ease@3.0.1
+- License: **BSD-3-Clause** — https://d3js.org/d3-ease/
+- Author: Mike Bostock
+
+### d3-interpolate@3.0.1
+- License: **ISC** — https://d3js.org/d3-interpolate/
+- Author: Mike Bostock
+
+### d3-selection@3.0.0
+- License: **ISC** — https://d3js.org/d3-selection/
+- Author: Mike Bostock
+
+### d3-timer@3.0.1
+- License: **ISC** — https://d3js.org/d3-timer/
+- Author: Mike Bostock
+
+### d3-transition@3.0.1
+- License: **ISC** — https://d3js.org/d3-transition/
+- Author: Mike Bostock
+
+### d3-zoom@3.0.0
+- License: **ISC** — https://d3js.org/d3-zoom/
+- Author: Mike Bostock
 
 ### debug@4.4.3
 - License: **MIT** — git://github.com/debug-js/debug.git
@@ -1511,6 +1575,9 @@ Regenerate with `bun run notices`. 410 packages.
 - License: **MIT** — https://github.com/theKashey/use-sidecar
 - Author: theKashey <thekashey@gmail.com>
 
+### use-sync-external-store@1.6.0
+- License: **MIT** — https://github.com/facebook/react.git
+
 ### vary@1.1.2
 - License: **MIT** — jshttp/vary
 - Author: Douglas Christopher Wilson <doug@somethingdoug.com>
@@ -1545,6 +1612,10 @@ Regenerate with `bun run notices`. 410 packages.
 ### zod-to-json-schema@3.25.2
 - License: **ISC** — https://github.com/StefanTerdell/zod-to-json-schema
 - Author: Stefan Terdell
+
+### zustand@4.5.7
+- License: **MIT** — https://github.com/pmndrs/zustand
+- Author: Paul Henschel
 
 ### zwitch@2.0.4
 - License: **MIT** — wooorm/zwitch
@@ -2990,7 +3061,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>@types/bun@1.3.14, @types/debug@4.1.13, @types/ejs@3.1.5, @types/estree@1.0.9, @types/estree-jsx@1.0.5, @types/hast@3.0.5, @types/mdast@4.0.4, @types/ms@2.1.0, @types/node@26.1.1, @types/react@19.2.17, @types/react-dom@19.2.3, @types/unist@2.0.11, @types/unist@3.0.3</summary>
+<details><summary>@types/bun@1.3.14, @types/d3-color@3.1.3, @types/d3-drag@3.0.7, @types/d3-interpolate@3.0.4, @types/d3-selection@3.0.11, @types/d3-transition@3.0.9, @types/d3-zoom@3.0.8, @types/debug@4.1.13, @types/ejs@3.1.5, @types/estree@1.0.9, @types/estree-jsx@1.0.5, @types/hast@3.0.5, @types/mdast@4.0.4, @types/ms@2.1.0, @types/node@26.1.1, @types/react@19.2.17, @types/react-dom@19.2.3, @types/unist@2.0.11, @types/unist@3.0.3</summary>
 
 ```
 MIT License
@@ -3414,6 +3485,33 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 
   This Source Code Form is "Incompatible With Secondary Licenses", as
   defined by the Mozilla Public License, v. 2.0.
+```
+</details>
+
+<details><summary>@xyflow/react@12.11.2, @xyflow/system@0.0.79</summary>
+
+```
+MIT License
+
+Copyright (c) 2019-2025 webkid GmbH
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 </details>
 
@@ -4557,6 +4655,19 @@ Apache License
 ```
 </details>
 
+<details><summary>classcat@5.0.5</summary>
+
+```
+Copyright © Jorge Bucaran <<https://jorgebucaran.com>>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the 'Software'), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+</details>
+
 <details><summary>cluster-key-slot@1.1.1</summary>
 
 ```
@@ -4821,6 +4932,78 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+</details>
+
+<details><summary>d3-color@3.1.0</summary>
+
+```
+Copyright 2010-2022 Mike Bostock
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+```
+</details>
+
+<details><summary>d3-dispatch@3.0.1, d3-drag@3.0.0, d3-interpolate@3.0.1, d3-selection@3.0.0, d3-timer@3.0.1, d3-transition@3.0.1, d3-zoom@3.0.0</summary>
+
+```
+Copyright 2010-2021 Mike Bostock
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+```
+</details>
+
+<details><summary>d3-ease@3.0.1</summary>
+
+```
+Copyright 2010-2021 Mike Bostock
+Copyright 2001 Robert Penner
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of the author nor the names of contributors may be used to
+  endorse or promote products derived from this software without specific prior
+  written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 </details>
 
@@ -8508,7 +8691,7 @@ THE SOFTWARE.
 ```
 </details>
 
-<details><summary>react@19.2.7, react-dom@19.2.7, react-is@19.3.0-canary-3f0b9e61-20260317, scheduler@0.27.0</summary>
+<details><summary>react@19.2.7, react-dom@19.2.7, react-is@19.3.0-canary-3f0b9e61-20260317, scheduler@0.27.0, use-sync-external-store@1.6.0</summary>
 
 ```
 MIT License
@@ -9794,6 +9977,33 @@ ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
 WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
 ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+</details>
+
+<details><summary>zustand@4.5.7</summary>
+
+```
+MIT License
+
+Copyright (c) 2019 Paul Henschel
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 </details>
 

@@ -45,6 +45,18 @@ export type WorkflowDefinitionSummary = {
   latestVersion: number | null;
 };
 
+/**
+ * A row in the definition list.
+ *
+ * `triggerTypes` is the trigger node types on the PUBLISHED graph, and the API
+ * derives it by reading that graph in full — so it is asked for on the list read
+ * and nowhere else. Putting it on {@link WorkflowDefinitionSummary} would make
+ * every save and every publish pay for a document neither of them looks at.
+ */
+export type WorkflowDefinitionListEntry = WorkflowDefinitionSummary & {
+  triggerTypes: string[];
+};
+
 export type WorkflowDefinitionVersionView = {
   version: number;
   definition: unknown;
@@ -70,17 +82,18 @@ export type WorkflowDefinitionLockView = {
 };
 
 const DEFINITION_FIELDS = `id name description updatedAt publishedVersion latestVersion`;
+const DEFINITION_LIST_FIELDS = `${DEFINITION_FIELDS} triggerTypes`;
 const ISSUE_FIELDS = `severity blocksAt code message path nodeId edgeId`;
 const LOCK_FIELDS = `definitionId lockToken ownerUserId acquiredAt expiresAt`;
 
 export async function listWorkflowDefinitions(): Promise<
-  WorkflowActionResult<WorkflowDefinitionSummary[]>
+  WorkflowActionResult<WorkflowDefinitionListEntry[]>
 > {
   return run(async () => {
     const data = await executeGraphqlRequest<{
-      workflowDefinitions: WorkflowDefinitionSummary[];
+      workflowDefinitions: WorkflowDefinitionListEntry[];
     }>({
-      query: `query WorkflowDefinitions { workflowDefinitions { ${DEFINITION_FIELDS} } }`,
+      query: `query WorkflowDefinitions { workflowDefinitions { ${DEFINITION_LIST_FIELDS} } }`,
     });
     return data.workflowDefinitions ?? [];
   });
@@ -99,6 +112,64 @@ export async function createWorkflowDefinition(
       variables: { input: { name } },
     });
     return data.createWorkflowDefinition;
+  });
+}
+
+/**
+ * Rename a definition.
+ *
+ * `updateWorkflowDefinition` also carries description, category and the ACL;
+ * only the name is exposed here because only the name is on the list screen,
+ * and an action that could write four fields when the caller means one is an
+ * action whose blast radius does not match its name. The rest belongs to the
+ * settings sheet, which is its own slice.
+ *
+ * Renaming stamps `updated_at`, which is the optimistic-concurrency token an
+ * open editor is holding — so a rename made while somebody is editing costs
+ * them their next save. That is the API's semantics rather than this action's,
+ * and the caller refuses a no-op rename so the cost is at least never paid for
+ * nothing.
+ */
+export async function renameWorkflowDefinition(input: {
+  definitionId: string;
+  name: string;
+}): Promise<WorkflowActionResult<WorkflowDefinitionSummary>> {
+  return run(async () => {
+    const data = await executeGraphqlRequest<{
+      updateWorkflowDefinition: WorkflowDefinitionSummary;
+    }>({
+      query: `mutation RenameWorkflowDefinition($input: UpdateWorkflowDefinitionInput!) {
+        updateWorkflowDefinition(input: $input) { ${DEFINITION_FIELDS} }
+      }`,
+      variables: { input: { definitionId: input.definitionId, name: input.name } },
+    });
+    return data.updateWorkflowDefinition;
+  });
+}
+
+/**
+ * Archive a definition: `is_active = false`, and every read filters on it.
+ *
+ * The soft path, and the only removal offered here. Running instances pin the
+ * version they started on and keep going; the definition simply stops being
+ * something new runs can start from, and stops appearing in this list.
+ * `deleteWorkflowDefinitionPermanently` exists and is deliberately not wired
+ * up — it is irreversible, it refuses a definition that has ever run, and
+ * neither of those is a thing to discover from a row menu.
+ */
+export async function archiveWorkflowDefinition(
+  definitionId: string,
+): Promise<WorkflowActionResult<WorkflowDefinitionSummary>> {
+  return run(async () => {
+    const data = await executeGraphqlRequest<{
+      archiveWorkflowDefinition: WorkflowDefinitionSummary;
+    }>({
+      query: `mutation ArchiveWorkflowDefinition($definitionId: ID!) {
+        archiveWorkflowDefinition(definitionId: $definitionId) { ${DEFINITION_FIELDS} }
+      }`,
+      variables: { definitionId },
+    });
+    return data.archiveWorkflowDefinition;
   });
 }
 

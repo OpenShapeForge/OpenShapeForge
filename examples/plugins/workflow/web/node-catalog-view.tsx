@@ -17,10 +17,13 @@
  * that depends on its own plugins.
  *
  * What it renders is the node catalog, split by whether this deployment can
- * actually run each type. That is not a placeholder chosen for convenience —
- * `runtimeSupport` is the surface the eventual palette gates on, so putting it
- * on screen first makes the one question the designer must not get wrong
- * visible before any canvas exists to get it wrong in.
+ * actually run each type. `runtimeSupport` is the surface the palette gates on,
+ * so this is the same question the editor answers, answered in full rather than
+ * as a list of what may be dragged.
+ *
+ * It is the definition list's empty state. A deployment with no workflows yet
+ * has nothing to list, and what a reader needs at that moment is not an empty
+ * table but what a workflow could be made of here.
  */
 import { Badge } from "../../../../apps/web/src/components/ui/display/badge";
 import {
@@ -106,12 +109,11 @@ export function WorkflowNodeCatalogView({ nodes }: { nodes: WorkflowNodeTypeView
   return (
     <div className="flex flex-col gap-6 p-6">
       <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold">Workflows</h1>
+        <h2 className="text-xl font-semibold">What a workflow can be built from</h2>
         <p className="max-w-3xl text-sm text-muted-foreground">
           The workflow node catalog this deployment compiled, grouped by whether
           the engine can execute each type. {executable} of {nodes.length} run
-          today. The designer canvas is not built yet; this screen exists because
-          the plugin can now contribute a route and a sidebar entry of its own.
+          today, and the palette in the editor offers exactly those.
         </p>
       </header>
 

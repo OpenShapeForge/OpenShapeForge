@@ -27,8 +27,11 @@
  *   a caller can show what would happen. That is the only reason validation
  *   results are returned rather than thrown.
  *
- * Edge identity falls back to a `source:sourceHandle:target:targetHandle` tuple
- * when an edge carries no id, because the designer has not always written one.
+ * Edge identity falls back to the edge's ROUTE — source, source handle, target,
+ * target handle — when it carries no id, because the designer has not always
+ * written one. Every edge operation addresses an edge through the same key, so
+ * an edge that never got an id can still be deleted and mapped rather than only
+ * created. See {@link edgeIdentity}.
  */
 import type { OpenShapeForgeDatabase } from "../../../../apps/api/src/db/connection.js";
 import type { DbSessionInput } from "../../../../apps/api/src/db/session.js";
@@ -65,9 +68,11 @@ export type WorkflowDefinitionPatchOperationType =
 export type WorkflowDefinitionPatchOperation = {
   op: WorkflowDefinitionPatchOperationType;
   nodeId?: string | null;
+  /** A stored edge id. An edge that has none is addressed by `edge` instead. */
   edgeId?: string | null;
   key?: string | null;
   node?: Record<string, unknown> | null;
+  /** The edge to write, and — for a delete or a mapping — the route to address. */
   edge?: Record<string, unknown> | null;
   config?: Record<string, unknown> | null;
   parameter?: Record<string, unknown> | null;
@@ -131,6 +136,36 @@ function itemKey(value: unknown) {
   return typeof key === "string" && key.trim() ? key.trim() : null;
 }
 
+/**
+ * The key an edge is addressed by, in its own namespace per kind of key.
+ *
+ * A stored id wins, because that is what a caller holds. Otherwise the edge is
+ * identified by its ROUTE — source, source handle, target, target handle — the
+ * four fields that make two edges the same edge to every reader of a stored
+ * graph.
+ *
+ * The key has to be INJECTIVE: two edges a document distinguishes must never
+ * produce one key, or an upsert lands on the wrong edge and overwrites it.
+ * Joining the raw parts does not manage it. Node ids are author-supplied and
+ * handle ids are derived from author-supplied branch labels, so a separator
+ * inside a part shifts every part after it — source `a` with handle `b:c` reads
+ * the same as source `a:b` with handle `c` — and a join renders an absent
+ * handle and an explicit `""` identically, though `selectNextEdge` walks only
+ * one of them. So each part is percent-encoded, which emits neither the
+ * separator nor a `,`; `,` is therefore free to mean "the document held no
+ * string here".
+ *
+ * `deriveEdgeId` in `web/graph/canvas-graph.ts` derives a canvas key from the
+ * same four fields with the same encoding, and the two must go on agreeing
+ * about WHICH fields identify an edge: a canvas that keys edges differently
+ * from the patches it sends addresses a different edge than the one its user
+ * clicked. They differ deliberately in one place — a canvas key normalises the
+ * way every other reader of a stored graph does (trimmed, blank is absent)
+ * because it is a display key, while this one separates documents because it
+ * decides which stored edge a write lands on. The runtime cannot import that
+ * module (browser code, resolved differently), so the agreement is held by this
+ * comment and by tests on both sides.
+ */
 function edgeIdentity(edge: Record<string, unknown>) {
   const id = edge.id;
   if (typeof id === "string" && id.trim()) {
@@ -138,19 +173,63 @@ function edgeIdentity(edge: Record<string, unknown>) {
   }
   return [
     "route",
-    edge.source,
-    edge.sourceHandle,
-    edge.target,
-    edge.targetHandle,
+    identityPart(edge.source),
+    identityPart(edge.sourceHandle),
+    identityPart(edge.target),
+    identityPart(edge.targetHandle),
   ].join(":");
+}
+
+/**
+ * One part of a route key.
+ *
+ * A leading `,` cannot come out of `encodeURIComponent`, so it marks a part the
+ * document does not hold as a string: bare for absent, followed by the JSON
+ * form for anything else. The column is jsonb and constrains neither, so a
+ * handle stored as the number `42` is a real document that must not key the
+ * same as one stored as `"42"`.
+ */
+function identityPart(value: unknown) {
+  if (typeof value === "string") return encodeURIComponent(value);
+  if (value === undefined) return ",";
+  return `,${encodeURIComponent(JSON.stringify(value))}`;
+}
+
+/**
+ * The edge a `deleteEdge` or `updateMappingParameter` names.
+ *
+ * `edgeId` addresses a stored id; `edge` addresses a route, exactly as
+ * `upsertEdge` does, and is the only way to reach an edge that never got an id.
+ * Without it such an edge can be created and updated but neither deleted nor
+ * mapped, since nothing else assigns it one. The alternative — materialising an
+ * id onto every edge of every stored document on the next write — rewrites
+ * graphs nobody asked to change.
+ */
+function addressedEdgeIdentity(operation: WorkflowDefinitionPatchOperation) {
+  const edgeId = operation.edgeId?.trim();
+  if (edgeId) return edgeIdentity({ id: edgeId });
+  if (operation.edge) return edgeIdentity(asRecord(operation.edge));
+  throw new WorkflowDefinitionError("BAD_USER_INPUT", "edgeId or edge is required.");
+}
+
+/** What to call that edge in a message: the id given, else the route given. */
+function addressedEdgeLabel(operation: WorkflowDefinitionPatchOperation) {
+  const edgeId = operation.edgeId?.trim();
+  if (edgeId) return edgeId;
+  const edge = asRecord(operation.edge);
+  return `${endpointText(edge.source)} -> ${endpointText(edge.target)}`;
+}
+
+function endpointText(value: unknown) {
+  return typeof value === "string" ? value : "?";
 }
 
 function findNodeIndex(nodes: unknown[], nodeId: string) {
   return nodes.findIndex((entry) => asRecord(entry).id === nodeId);
 }
 
-function findEdgeIndex(edges: unknown[], edgeId: string) {
-  return edges.findIndex((entry) => asRecord(entry).id === edgeId);
+function findEdgeIndex(edges: unknown[], identity: string) {
+  return edges.findIndex((entry) => edgeIdentity(asRecord(entry)) === identity);
 }
 
 function upsertArrayItemByKey(items: unknown[], key: string, nextValue: Record<string, unknown>) {
@@ -207,8 +286,7 @@ function applyOperation(definition: DefinitionRecord, operation: WorkflowDefinit
     case "upsertEdge": {
       const edge = asRecord(operation.edge);
       const nextEdge = operation.edgeId ? { ...edge, id: operation.edgeId } : edge;
-      const identity = edgeIdentity(nextEdge);
-      const index = definition.edges.findIndex((entry) => edgeIdentity(asRecord(entry)) === identity);
+      const index = findEdgeIndex(definition.edges, edgeIdentity(nextEdge));
       if (index >= 0) {
         definition.edges[index] = { ...asRecord(definition.edges[index]), ...nextEdge };
       } else {
@@ -217,16 +295,24 @@ function applyOperation(definition: DefinitionRecord, operation: WorkflowDefinit
       return;
     }
     case "deleteEdge": {
-      const edgeId = requiredText(operation.edgeId, "edgeId");
-      definition.edges = definition.edges.filter((entry) => asRecord(entry).id !== edgeId);
+      // Filter, not splice: an id addresses every edge carrying it and a route
+      // addresses every edge on it, because nothing validates edge uniqueness
+      // and leaving a twin behind would make one delete look like none.
+      const identity = addressedEdgeIdentity(operation);
+      definition.edges = definition.edges.filter(
+        (entry) => edgeIdentity(asRecord(entry)) !== identity,
+      );
       return;
     }
     case "updateMappingParameter": {
-      const edgeId = requiredText(operation.edgeId, "edgeId");
+      const identity = addressedEdgeIdentity(operation);
       const key = requiredText(operation.key ?? itemKey(operation.parameter), "key");
-      const index = findEdgeIndex(definition.edges, edgeId);
+      const index = findEdgeIndex(definition.edges, identity);
       if (index < 0) {
-        throw new WorkflowDefinitionError("BAD_USER_INPUT", `Edge "${edgeId}" was not found.`);
+        throw new WorkflowDefinitionError(
+          "BAD_USER_INPUT",
+          `Edge "${addressedEdgeLabel(operation)}" was not found.`,
+        );
       }
       const edge = asRecord(definition.edges[index]);
       const mappingParameters = [...asArray(edge.mappingParameters)];

@@ -264,10 +264,16 @@ export function toCanvasEdges(graph: WorkflowDefinitionGraph): CanvasEdge[] {
  * leaving it out would collapse them onto one id.
  *
  * The parts are percent-encoded and joined with `:`, so a node id that itself
- * contains a separator cannot impersonate a different edge; an absent handle is
- * a bare `,`, which encoding never produces, so it cannot be confused with a
- * handle that is literally the empty string. Derived ids are for the canvas
- * only and are never written into the document — see this file's header.
+ * contains a separator cannot impersonate a different edge, and a part the
+ * document does not carry is a bare `,`, which encoding never produces.
+ *
+ * Each part is normalised the way every other reader of a stored graph
+ * normalises one, so a blank handle keys the same as an absent one: they draw
+ * identically, and {@link identifiedEdges} is what keeps two edges that key
+ * alike apart. `edgeIdentity` in `definition-patch.ts` does separate them,
+ * because it decides which stored edge a write lands on rather than what a
+ * canvas shows. Derived ids are for the canvas only and are never written into
+ * the document — see this file's header.
  */
 export function deriveEdgeId(edge: WorkflowDefinitionEdge): string {
   const record = asRecord(edge);

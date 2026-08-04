@@ -49,6 +49,15 @@ export type WorkflowNodePaletteProps = {
   presentationFor: (nodeType: string) => WorkflowNodePresentation;
   /** Add the node without a drag, at a position the caller chooses. */
   onAddNode: (nodeType: string) => void;
+  /**
+   * A drag of this node type started, and ended.
+   *
+   * The canvas cannot read what is being dragged while the drag is in flight —
+   * the drag data store is protected until the drop — so anything that has to
+   * know before then, a preview or a drop target, learns it from here.
+   */
+  onDragNodeStart?: (nodeType: string) => void;
+  onDragNodeEnd?: () => void;
   /** No palette at all when the canvas is not editable. */
   disabled?: boolean;
   className?: string;
@@ -68,6 +77,8 @@ export function WorkflowNodePalette({
   groups,
   presentationFor,
   onAddNode,
+  onDragNodeStart,
+  onDragNodeEnd,
   disabled = false,
   className,
 }: WorkflowNodePaletteProps) {
@@ -100,6 +111,8 @@ export function WorkflowNodePalette({
                   item={item}
                   presentation={presentationFor(item.type)}
                   onAddNode={onAddNode}
+                  onDragNodeStart={onDragNodeStart}
+                  onDragNodeEnd={onDragNodeEnd}
                   disabled={disabled}
                 />
               </li>
@@ -115,11 +128,15 @@ function PaletteEntry({
   item,
   presentation,
   onAddNode,
+  onDragNodeStart,
+  onDragNodeEnd,
   disabled,
 }: {
   item: WorkflowPaletteItem;
   presentation: WorkflowNodePresentation;
   onAddNode: (nodeType: string) => void;
+  onDragNodeStart?: (nodeType: string) => void;
+  onDragNodeEnd?: () => void;
   disabled: boolean;
 }) {
   const unplaceable = disabled || item.unavailable !== null;
@@ -138,9 +155,14 @@ function PaletteEntry({
       // during `dragover`, which is when the canvas has to decide.
       event.dataTransfer.setData(PALETTE_MIME_TYPE, JSON.stringify({ type: item.type }));
       event.dataTransfer.effectAllowed = "move";
+      onDragNodeStart?.(item.type);
     },
-    [item.type, unplaceable],
+    [item.type, onDragNodeStart, unplaceable],
   );
+
+  // Fires however the drag ended — dropped, cancelled with Escape, or released
+  // over something that would not take it — so nothing is left mid-drag.
+  const handleDragEnd = useCallback(() => onDragNodeEnd?.(), [onDragNodeEnd]);
 
   const handleAdd = useCallback(() => {
     if (!unplaceable) onAddNode(item.type);
@@ -150,6 +172,7 @@ function PaletteEntry({
     <div
       draggable={!unplaceable}
       onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
       className={cn(unplaceable && "cursor-not-allowed opacity-60")}
       // The reason travels with the row rather than only with the badge, so a
       // pointer user gets it wherever they land on the entry.

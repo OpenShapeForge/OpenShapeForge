@@ -12,7 +12,8 @@
  *   set -o pipefail; bun test examples/plugins/workflow/__tests__/web-contract.test.ts 2>&1
  */
 import { describe, expect, test } from "bun:test";
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import type {
   PluginGenerateContext,
   CompilerPlugin,
@@ -23,6 +24,8 @@ import plugin from "../index.js";
 
 const repoRoot = resolve(import.meta.dir, "../../../..");
 const ROUTE_PATH = "apps/web/src/app/(plugins)/workflow/page.tsx";
+/** The editor. `[id]` is a Next dynamic segment, so the name is load-bearing. */
+const DEFINITION_ROUTE_PATH = "apps/web/src/app/(plugins)/workflow/[id]/page.tsx";
 
 /**
  * `generate` reads only `authoringDir` and `webPresent`; `manifest` and
@@ -46,21 +49,52 @@ function generate(webPresent: boolean) {
   return artifacts;
 }
 
-describe("the workflow plugin's web route", () => {
-  test("is emitted when apps/web is present, as a re-export of the plugin's own page", () => {
-    const route = generate(true).find((artifact) => artifact.path === ROUTE_PATH);
-    expect(route).toBeTruthy();
-    // A re-export and nothing else. The page is hand-written under web/, where
-    // typecheck:web reads it as source rather than as a string literal.
-    expect(route!.contents).toContain("examples/plugins/workflow/web/workflow-page");
-    expect(route!.contents).toContain("export { default }");
+/** The specifier a re-export route file points at, without its quotes. */
+function specifierOf(contents: string): string {
+  const match = /from "([^"]+)"/.exec(contents);
+  if (!match) throw new Error(`No re-export specifier in:\n${contents}`);
+  return match[1]!;
+}
+
+describe("the workflow plugin's web routes", () => {
+  test("both are emitted when apps/web is present, as re-exports of the plugin's own pages", () => {
+    const artifacts = generate(true);
+    // A re-export and nothing else. The pages are hand-written under web/,
+    // where typecheck:web reads them as source rather than as string literals.
+    for (const [path, module] of [
+      [ROUTE_PATH, "web/workflow-page"],
+      [DEFINITION_ROUTE_PATH, "web/workflow-definition-page"],
+    ]) {
+      const route = artifacts.find((artifact) => artifact.path === path);
+      expect(route).toBeTruthy();
+      expect(route!.contents).toContain(`examples/plugins/workflow/${module}`);
+      expect(route!.contents).toContain("export { default }");
+    }
   });
 
-  test("is not emitted when apps/web is absent", () => {
+  test("each specifier resolves to a page that is actually there", () => {
+    // The one thing a string-concatenating emitter gets wrong: a route at a new
+    // depth needs one more `../`, and an off-by-one is only visible at build
+    // time. Resolved against the emitted path, so the count is checked rather
+    // than restated.
+    for (const route of generate(true).filter((artifact) =>
+      artifact.path.startsWith("apps/web/src/app/"),
+    )) {
+      const target = resolve(
+        repoRoot,
+        dirname(route.path),
+        specifierOf(route.contents),
+      );
+      expect(existsSync(`${target}.tsx`)).toBe(true);
+    }
+  });
+
+  test("neither is emitted when apps/web is absent", () => {
     // A repo that keeps the engine and drops the client must not be left
     // holding a Next.js route pointing into a directory that is not there.
     const paths = generate(false).map((artifact) => artifact.path);
     expect(paths).not.toContain(ROUTE_PATH);
+    expect(paths).not.toContain(DEFINITION_ROUTE_PATH);
     expect(paths.every((path) => path.startsWith("apps/api/"))).toBe(true);
   });
 

@@ -274,6 +274,16 @@ function WorkflowEditorSurface({
       for (const change of changes) {
         if (change.type === "position" && change.position) {
           const position = change.position;
+          // A position change that moves nothing is not a statement about
+          // layout, and this is where that distinction is load-bearing rather
+          // than tidy: `layoutTouched` is what turns `writePositions` on, so a
+          // no-op change would materialise a layout for EVERY node on a graph
+          // nobody has arranged — irreversibly, on a save the author made for
+          // some other reason. Clicking a card must not do that, and neither
+          // must a drag that ends where it started.
+          const at = graph.nodes.find((node) => node.id === change.id)?.position;
+          if (at && at.x === position.x && at.y === position.y) continue;
+
           // Applied on every frame, not only on drop: the nodes React Flow
           // draws come from this state, so a card that only moved at drag-stop
           // would not follow the cursor.
@@ -287,7 +297,7 @@ function WorkflowEditorSurface({
         }
       }
     },
-    [edit],
+    [edit, graph.nodes],
   );
 
   const handleEdgesChange = useCallback(

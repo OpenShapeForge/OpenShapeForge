@@ -672,6 +672,26 @@ describe("edge ids are content, not a counter", () => {
     );
   });
 
+  test("a blank handle keys the same as an absent one, and both edges still draw", () => {
+    // Where a canvas key deliberately parts company with `edgeIdentity` in
+    // `definition-patch.ts`, which separates the two because it decides which
+    // stored edge a WRITE lands on. A canvas key describes what is drawn, and
+    // these draw identically — so the collapse is answered by the same suffix
+    // that answers two genuinely identical edges, not by a finer key.
+    expect(deriveEdgeId({ source: "a", target: "b" })).toBe(
+      deriveEdgeId({ source: "a", target: "b", sourceHandle: "" }),
+    );
+
+    const base = graph({
+      nodes: [],
+      edges: [
+        { source: "a", target: "b" },
+        { source: "a", target: "b", sourceHandle: "" },
+      ],
+    });
+    expect(new Set(toCanvasEdges(base).map((edge) => edge.id)).size).toBe(2);
+  });
+
   test("edges that really are identical still get unique canvas ids", () => {
     const base = graph({
       nodes: [],

@@ -31,6 +31,7 @@ import {
   releaseWorkflowDefinitionLock,
   saveWorkflowDefinitionVersion,
   stealWorkflowDefinitionLock,
+  updateWorkflowDefinitionSettings,
   validateWorkflowDefinition,
 } from "../../../../apps/web/src/features/workflow/actions/workflow-definitions";
 import {
@@ -41,6 +42,10 @@ import {
 /**
  * `configFields` IS on this read, unlike the list's: the inspector renders it,
  * and it is by far the largest thing the catalog serves.
+ *
+ * `outputFields` too, for the variable walk. It is what a node of a type emits
+ * when its own config does not narrow it, so a picker without it can offer only
+ * what each upstream node happens to declare for itself.
  */
 const NODE_TYPES = /* GraphQL */ `
   query WorkflowEditorNodeCatalog {
@@ -52,6 +57,7 @@ const NODE_TYPES = /* GraphQL */ `
       description
       runtimeSupport
       configFields
+      outputFields
     }
   }
 `;
@@ -113,6 +119,7 @@ export default async function WorkflowDefinitionPage({
           save={saveWorkflowDefinitionVersion}
           publish={publishWorkflowDefinitionVersion}
           validate={validateWorkflowDefinition}
+          updateSettings={updateWorkflowDefinitionSettings}
           lockActions={{
             read: readWorkflowDefinitionLock,
             acquire: acquireWorkflowDefinitionLock,

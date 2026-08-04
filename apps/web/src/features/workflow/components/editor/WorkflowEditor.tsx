@@ -49,6 +49,20 @@
  * of ITS drags is overhead but not what is on it. The type is captured when the
  * drag starts, and the preview card is built by the same `createCanvasNode` the
  * drop will call, so nothing about the card changes when the author lets go.
+ *
+ * ## Two documents, saved through two mutations
+ *
+ * The GRAPH — nodes, edges and the definition's process variables — is a
+ * version, appended by `saveWorkflowDefinitionVersion`, and it is what the undo
+ * stack holds. The SETTINGS — name, description, category — are the definition
+ * row, written by `updateWorkflowDefinition`, not versioned, and not undoable:
+ * they are already written when the sheet closes, so there is nothing local to
+ * walk back to and reverting a rename is another rename.
+ *
+ * The two are not independent, and the seam is `expectedUpdatedAt`. A settings
+ * write stamps `updated_at`, which IS the token this editor saves with, so the
+ * refreshed value is adopted from the result — an editor that kept the old one
+ * would fail every subsequent save having changed nothing about the graph.
  */
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
@@ -67,12 +81,14 @@ import {
 import {
   addCanvasNode,
   buildWorkflowPalette,
+  buildWorkflowVariableSuggestions,
   connectCanvasNodes,
   createCanvasNode,
   deleteCanvasEdges,
   deleteCanvasNodes,
   insertCanvasNodeIntoEdge,
   moveCanvasNode,
+  readProcessVariableSet,
   setCanvasNodeConfig,
   setCanvasNodeLabel,
   summarizeWorkflowValidation,
@@ -80,6 +96,10 @@ import {
   type ConnectionWarning,
   type EditableCanvasGraph,
 } from "../../../../../../../examples/plugins/workflow/web/editor/index";
+import {
+  readWorkflowDefinitionSettings,
+  type WorkflowDefinitionSettingsChange,
+} from "../../../../../../../examples/plugins/workflow/web/definitions/index";
 import {
   toCanvasEdges,
   toCanvasNodes,
@@ -101,6 +121,8 @@ import {
 import { WorkflowNodePalette } from "./NodePalette";
 import { WorkflowNodeInspector } from "./NodeInspector";
 import { WorkflowValidationPanel } from "./ValidationPanel";
+import { ProcessVariablesPanel } from "./ProcessVariablesPanel";
+import { DefinitionSettingsSheet } from "./DefinitionSettingsSheet";
 import { useCanvasHistory, useCanvasHistoryShortcuts } from "./use-canvas-history";
 import {
   useWorkflowDefinitionLock,
@@ -122,6 +144,12 @@ export type WorkflowEditorNodeType = {
   runtimeSupport: string;
   /** The `Field[]` the inspector renders. Served as JSON. */
   configFields: unknown;
+  /**
+   * The `Field[]` a node of this type emits. Read by the variable walk, so an
+   * upstream node offers what its type declares even when its own config does
+   * not narrow it. Served as JSON.
+   */
+  outputFields: unknown;
 };
 
 export type WorkflowEditorProps = {
@@ -144,6 +172,16 @@ export type WorkflowEditorProps = {
   validate: (
     definition: unknown,
   ) => Promise<WorkflowActionResult<{ valid: boolean; issues: WorkflowValidationIssueView[] }>>;
+  /**
+   * Name, description and category. Writes the definition row rather than a
+   * version, and returns a summary carrying the refreshed save token.
+   */
+  updateSettings: (input: {
+    definitionId: string;
+    name?: string;
+    description?: string | null;
+    category?: string;
+  }) => Promise<WorkflowActionResult<WorkflowDefinitionSummary>>;
   lockActions: DefinitionLockActions;
   locale?: string;
 };
@@ -240,6 +278,7 @@ function WorkflowEditorSurface({
   save,
   publish,
   validate,
+  updateSettings,
   lockActions,
   locale = "en",
 }: WorkflowEditorProps) {
@@ -272,11 +311,16 @@ function WorkflowEditorSurface({
   const history = useCanvasHistory(() => {
     const source = (storedGraph ?? { nodes: [], edges: [] }) as Parameters<typeof toCanvasNodes>[0];
     return {
-      nodes: toCanvasNodes(source, { resolveConfigFields: (type) => catalog.get(type)?.configFields }),
-      edges: toCanvasEdges(source),
+      graph: {
+        nodes: toCanvasNodes(source, { resolveConfigFields: (type) => catalog.get(type)?.configFields }),
+        edges: toCanvasEdges(source),
+      },
+      // Read off the stored document BY REFERENCE, which is what lets a save
+      // that changed no variable write neither key — see `toStoredGraph`.
+      variables: readProcessVariableSet(source),
     };
   });
-  const graph: EditableCanvasGraph = history.graph;
+  const graph: EditableCanvasGraph = history.draft.graph;
   // Not a flag anybody has to remember to set: the present graph differs from
   // the one that was written, or it does not. Undoing back to what was saved
   // therefore stops offering a save with nothing in it.
@@ -284,10 +328,15 @@ function WorkflowEditorSurface({
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [paletteDrag, setPaletteDrag] = useState<PaletteDrag | null>(null);
-  const [expectedUpdatedAt, setExpectedUpdatedAt] = useState(definition.updatedAt);
+  // The definition row as this editor last saw it. Replaced whole by a save or
+  // a settings write, so the name in the header and the token a save presents
+  // are always from the same read.
+  const [record, setRecord] = useState<WorkflowDefinitionSummary>(definition);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const expectedUpdatedAt = record.updatedAt;
   const [latestVersion, setLatestVersion] = useState<number | null>(version);
   const [layoutTouched, setLayoutTouched] = useState(false);
-  const [busy, setBusy] = useState<"save" | "publish" | "validate" | null>(null);
+  const [busy, setBusy] = useState<"save" | "publish" | "validate" | "settings" | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [issues, setIssues] = useState<WorkflowValidationIssueView[] | null>(null);
 
@@ -317,8 +366,12 @@ function WorkflowEditorSurface({
    * The optional second argument is the coalescing tag: consecutive edits
    * carrying the same one replace each other rather than stacking, which is
    * what makes a drag one undo. A gesture that happens once passes none.
+   *
+   * `editVariables` is the same thing for the definition's process variables,
+   * onto the same stack: they are part of the document a version stores, so
+   * they are dirty state and they are undoable.
    */
-  const edit = history.edit;
+  const edit = history.editGraph;
 
   /**
    * Choose what to work on, which is also where a run of edits ends.
@@ -481,9 +534,9 @@ function WorkflowEditorSurface({
       );
       // No tag: drawing an edge happens once, so it is always its own undo. A
       // refusal returns the graph it was given and records nothing.
-      history.replace(result.graph);
+      history.replaceGraph(result.graph);
     },
-    [graph, history.replace],
+    [graph, history.replaceGraph],
   );
 
   /**
@@ -556,8 +609,12 @@ function WorkflowEditorSurface({
         nodes: graph.nodes,
         edges: graph.edges,
         writePositions: layoutTouched,
+        // Passed always, and that is safe rather than eager: the two keys are
+        // written only when the list is a DIFFERENT array from the one read off
+        // `base`, so an editor nobody touched the variables in writes neither.
+        variables: history.draft.variables,
       }),
-    [base, graph.edges, graph.nodes, layoutTouched],
+    [base, graph.edges, graph.nodes, history.draft.variables, layoutTouched],
   );
 
   const runValidation = useCallback(
@@ -589,10 +646,10 @@ function WorkflowEditorSurface({
       // and an author can undo while it is in flight; marking what was SENT is
       // what leaves them correctly dirty instead of telling them the screen is
       // what the server holds.
-      const sent = graph;
+      const sent = history.draft;
       const document = buildDocument();
       const result = await save({
-        definitionId: definition.id,
+        definitionId: record.id,
         expectedUpdatedAt,
         definition: document,
       });
@@ -608,7 +665,7 @@ function WorkflowEditorSurface({
 
       // The refreshed token replaces the one just spent. Keeping the old one
       // would fail every subsequent save and look like a lost lock.
-      setExpectedUpdatedAt(result.value.updatedAt);
+      setRecord(result.value);
       setLatestVersion(result.value.latestVersion);
       setBase(document as Record<string, unknown>);
       history.markSaved(sent);
@@ -620,10 +677,10 @@ function WorkflowEditorSurface({
     })();
   }, [
     buildDocument,
-    definition.id,
     expectedUpdatedAt,
-    graph,
+    history.draft,
     history.markSaved,
+    record.id,
     runValidation,
     save,
   ]);
@@ -646,7 +703,7 @@ function WorkflowEditorSurface({
         return;
       }
 
-      const result = await publish({ definitionId: definition.id, version: latestVersion });
+      const result = await publish({ definitionId: record.id, version: latestVersion });
       setStatus(
         result.ok
           ? `Published version ${result.value.version}.`
@@ -654,7 +711,33 @@ function WorkflowEditorSurface({
       );
       setBusy(null);
     })();
-  }, [buildDocument, definition.id, latestVersion, publish, runValidation]);
+  }, [buildDocument, latestVersion, publish, record.id, runValidation]);
+
+  /**
+   * Write the definition's metadata, and adopt the token it stamps.
+   *
+   * Not an effect and not on the undo stack: it is a write the author asked
+   * for, it lands immediately, and `updated_at` moves with it. Adopting the
+   * refreshed record is what keeps the next graph save from failing on a stale
+   * token for a change that was never about the graph.
+   */
+  const handleSaveSettings = useCallback(
+    (change: WorkflowDefinitionSettingsChange) => {
+      setBusy("settings");
+      void (async () => {
+        const result = await updateSettings({ definitionId: record.id, ...change });
+        setBusy(null);
+        if (!result.ok) {
+          setStatus(`Settings not saved. ${result.error}`);
+          return;
+        }
+        setRecord(result.value);
+        setSettingsOpen(false);
+        setStatus("Settings saved.");
+      })();
+    },
+    [record.id, updateSettings],
+  );
 
   // ---------------------------------------------------------------------
   // Drop target
@@ -747,19 +830,50 @@ function WorkflowEditorSurface({
     ? (graph.nodes.find((node) => node.id === selectedNodeId) ?? null)
     : null;
 
+  /**
+   * What the selected node can see, from the graph walk in the plugin's web
+   * half — the real answer `workflowGraphVariables` has been handed `[]` for.
+   *
+   * Computed for the SELECTED node only. It is a walk over the graph per node,
+   * and the inspector is the only thing that reads it, so doing every node
+   * would be the same work multiplied by the node count for one answer.
+   */
+  const variableSuggestions = useMemo(
+    () =>
+      selected === null
+        ? []
+        : buildWorkflowVariableSuggestions({
+            graph,
+            nodeId: selected.id,
+            processVariables: history.draft.variables.fields,
+            resolveOutputFields: (nodeType) => catalog.get(nodeType)?.outputFields,
+            locale,
+          }),
+    [catalog, graph, history.draft.variables.fields, locale, selected],
+  );
+
+  const settings = useMemo(() => readWorkflowDefinitionSettings(record), [record]);
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3">
         <div className="mr-auto flex flex-col">
-          <h1 className="text-base font-medium">{definition.name}</h1>
+          <h1 className="text-base font-medium">{record.name}</h1>
           <p className="text-xs text-muted-foreground">
             {latestVersion === null ? "No version yet" : `Draft v${latestVersion}`}
-            {definition.publishedVersion !== null
-              ? ` · published v${definition.publishedVersion}`
+            {record.publishedVersion !== null
+              ? ` · published v${record.publishedVersion}`
               : " · never published"}
             {dirty ? " · unsaved changes" : ""}
           </p>
         </div>
+        <Button
+          variant="ghost"
+          onClick={() => setSettingsOpen(true)}
+          title="Name, description and category. Saved on its own, not as a version."
+        >
+          Settings
+        </Button>
         <Button
           variant="ghost"
           onClick={history.undo}
@@ -869,11 +983,21 @@ function WorkflowEditorSurface({
                   { kind: "config", target: selected.id },
                 )
               }
+              variableSuggestions={variableSuggestions}
             />
           ) : (
-            <p className="p-4 text-sm text-muted-foreground">
-              Select a node to configure it.
-            </p>
+            // Where "select a node to configure it" used to be. Process
+            // variables belong to the definition rather than to any node, so
+            // there is no selection that reveals them — and nothing selected is
+            // exactly when an author is thinking about the workflow rather than
+            // about one step of it.
+            <ProcessVariablesPanel
+              variables={history.draft.variables}
+              graph={graph}
+              onEdit={history.editVariables}
+              readOnly={readOnly}
+              locale={locale}
+            />
           )}
           <WorkflowValidationPanel
             summary={summary}
@@ -882,6 +1006,15 @@ function WorkflowEditorSurface({
           />
         </div>
       </div>
+
+      <DefinitionSettingsSheet
+        open={settingsOpen}
+        settings={settings}
+        readOnly={readOnly}
+        busy={busy !== null}
+        onSave={handleSaveSettings}
+        onOpenChange={setSettingsOpen}
+      />
     </div>
   );
 }

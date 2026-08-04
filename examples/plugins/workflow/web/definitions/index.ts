@@ -28,3 +28,12 @@ export {
   type WorkflowDefinitionVersions,
   type WorkflowTriggerSummary,
 } from "./definition-list";
+export {
+  diffWorkflowDefinitionSettings,
+  readWorkflowDefinitionSettings,
+  WORKFLOW_DEFINITION_CATEGORY_OPTIONS,
+  type WorkflowDefinitionCategoryOption,
+  type WorkflowDefinitionSettings,
+  type WorkflowDefinitionSettingsChange,
+  type WorkflowDefinitionSettingsDiff,
+} from "./definition-settings";

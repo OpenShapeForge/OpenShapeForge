@@ -296,7 +296,13 @@ A new **field** on an existing entity is steps 3–4 only.
 authoring artifact, and — since #182 — is checked rather than merely published:
 
 - `bun run check:authoring-schemas` validates every authoring YAML in this
-  repository against the schema for its `kind`. It runs in CI.
+  repository against the schema for its `kind`. It runs in CI. "In this
+  repository" means every layer `authoring.config.yaml` resolves to — the
+  configured `layers:` **and** the `authoring/` directory of each plugin it
+  loads — taken from `authoringLayerDirs` in
+  `packages/compiler/src/authoring/layers.ts`, the same resolver the compiler
+  uses. A plugin that contributes authoring cannot contribute unvalidated
+  authoring (#237).
 - Artifacts that can arrive from **outside** this repository are validated at
   load instead, because no in-repo gate can see them all. Connector contracts
   are the case that exists today: `connector-loader.ts` validates a contract
@@ -308,6 +314,13 @@ means. Adding an authoring `kind` requires listing it in `SCHEMA_BY_KIND` or in
 `UNSCHEMAD_KINDS` (with the reason) in
 `packages/compiler/src/authoring/schema-validation.ts` — a new kind cannot
 become unvalidated by omission.
+
+The gate also asserts, per schema, **how many** files it validated, against
+`EXPECTED_SCHEMA_COVERAGE` in `scripts/check-authoring-schemas.mjs`. A mapped
+schema matched against nothing used to print the same success line as one
+matched against a full corpus, so adding or removing authoring means bumping
+the count there — the same bookkeeping as `expectedGeneratedCrudEntityCount`
+in `scripts/check-generated-artifacts.mjs`.
 
 Schema validation does **not** replace the identifier allowlists in
 `loader.ts` and `connector-loader.ts`. Those guard names that are spliced

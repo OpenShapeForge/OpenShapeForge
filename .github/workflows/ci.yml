@@ -55,8 +55,14 @@ jobs:
       - name: Generate artifacts
         run: bun run generate
 
+      # typecheck:plugin-web is not redundant with the two projects either side
+      # of it. examples/tsconfig.json EXCLUDES plugins/workflow/web/**, and
+      # apps/web's project is rooted at apps/web — it reaches a plugin module
+      # only when something under apps/web imports it. So a plugin web module
+      # nothing has imported yet, and every test file there, is checked by this
+      # gate alone.
       - name: Typecheck
-        run: bun run typecheck:compiler && bun run typecheck:api && bun run typecheck:web && bun run typecheck:examples && bun run typecheck:layout
+        run: bun run typecheck:compiler && bun run typecheck:api && bun run typecheck:web && bun run typecheck:examples && bun run typecheck:plugin-web && bun run typecheck:layout
 
       # The web app's CRUD pages are compiler output, so a compiler change can
       # break the build without touching a single file under apps/web. Building

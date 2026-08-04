@@ -223,7 +223,7 @@ Two properties worth being explicit about:
 
 ## Authentication / authorization
 
-`resolveSessionContext` (`src/auth/identity.ts`) supports two paths:
+`resolveSessionContext` (`src/auth/identity.ts`) supports three paths:
 
 **1. Keycloak bearer** — active when `OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI`
 and `..._ISSUER` are set (`..._AUDIENCE` optional). When an
@@ -237,7 +237,22 @@ composites like `directie` into per-client entity roles under
 `resource_access`, so realm roles alone would never match the entity role
 lists), and `groups` (requires the group-membership protocol mapper).
 
-**2. Trusted-context HMAC headers (v2)** — the internal service-to-service
+**2. Customer-provisioned API keys** — `Authorization: Bearer osf_live_…`.
+Routed by prefix BEFORE the JWKS path and never falling through, for the same
+non-downgradable reason. A key is not a second source of roles: it names an
+INTEGRATION, whose Keycloak service account is the identity, and the token
+obtained for that service account is verified by the verifier above — same
+JWKS, same pinned audience, same claim parsing. An optional per-key
+`role_subset` is INTERSECTED with the resulting roles, never unioned, so a
+subset written when the integration held more roles cannot resurrect them.
+Requires `OPENSHAPEFORGE_API_KEY_SECRET_KEYS` (its own keyring, deliberately
+not the connector one) and a complete bearer verifier; absent either, keys are
+rejected rather than half-honoured. Provisioning lives at `/api/api-keys` and
+on the GraphQL surface, gated by `Platform.ApiKeys.Manage` and by a privilege
+ceiling — a caller cannot grant roles it does not hold, and an api-key session
+may never manage keys at all.
+
+**3. Trusted-context HMAC headers (v2)** — the internal service-to-service
 path (`packages/auth/src/trusted-context.ts`). Header names:
 
 | Header | Content |
@@ -391,6 +406,21 @@ would hand out a fresh budget per forged token, and verifying the token here
 would put JWKS work in front of the limit that exists to protect it. Per-identity
 budgets for bearer callers belong after session resolution, keyed on the
 verified subject.
+
+**API keys get no tier of their own either**, for the same reason. It is
+tempting: a key is checksum-verifiable with no I/O, so the limiter could
+classify one without a database read. But the CRC32 in an `osf_` key is a
+format check, not a MAC — anyone can mint a syntactically valid key — so a tier
+keyed on it would hand out a second budget to any caller willing to fabricate
+one. API key traffic is therefore counted in the anonymous IP tier alongside
+everything else unverified.
+
+The consequence is worth stating plainly: several external parties behind one
+egress IP share one budget, and a busy integration can crowd out interactive
+traffic from the same address. The levers for that are `API_RATE_LIMIT_MAX` and
+a shared Redis store, not a new tier. A genuine per-key quota belongs after
+session resolution, keyed on the verified key id — the same place per-subject
+bearer budgets belong.
 
 **Across replicas.** With `API_RATE_LIMIT_REDIS_URL` set, all instances share one
 budget (counter and TTL move in a single atomic Redis call). Without it the

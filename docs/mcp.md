@@ -36,8 +36,39 @@ silently.
 
 `POST /api/mcp` — Streamable HTTP transport, stateless (no session
 persistence, so no affinity is needed across replicas). Authentication is the
-same bearer token or signed trusted-context headers every other transport
-takes; an unauthenticated request is `401` before any dispatch.
+same bearer token, customer-provisioned API key, or signed trusted-context
+headers every other transport takes; an unauthenticated request is `401` before
+any dispatch.
+
+### Discovery
+
+The MCP specification makes authorization OPTIONAL and conformance a SHOULD for
+HTTP transports, but a server that participates MUST publish OAuth 2.0
+Protected Resource Metadata (RFC 9728) and clients MUST use it to find the
+authorization server. Two pieces, and neither works alone:
+
+- `GET /.well-known/oauth-protected-resource` (and the path-suffixed
+  `/.well-known/oauth-protected-resource/api/mcp`) returns the resource
+  identifier, the Keycloak realm as `authorization_servers`, and
+  `bearer_methods_supported: ["header"]`. Public and unauthenticated by
+  construction — it is what a client reads precisely because it cannot yet
+  authenticate, and it discloses only the realm URL, already public in every
+  issued token.
+- Every `401` from `/api/mcp` carries
+  `WWW-Authenticate: Bearer resource_metadata="…"` pointing at that document.
+
+The resource identifier is derived from the request (honouring
+`x-forwarded-proto`, so a TLS ingress does not yield an `http://` identifier)
+rather than configured separately: it has to match both what the client sends
+as `resource` and what the token carries as audience, and a mismatch between
+those is the confused-deputy case the parameter exists to prevent.
+
+No `scope` is advertised in the challenge. This deployment authorizes by ROLE,
+resolved per entity from the compiled manifest, not by OAuth scope — naming a
+scope the authorization server does not issue would send clients to request
+something meaningless. The audience half of the spec is already satisfied by
+`OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE`, which is fatal in production when
+unset.
 
 The server is registered inside the rate-limited plugin scope, so the API's
 request-rate boundary applies.

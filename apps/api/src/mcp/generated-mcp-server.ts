@@ -40,6 +40,7 @@ import {
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import rawCatalog from "../generated/mcp/tools.json" with { type: "json" };
 import { resolveSessionContext } from "../auth/identity.js";
+import { buildAuthenticateChallenge } from "./protected-resource-metadata.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
@@ -578,10 +579,16 @@ export function registerGeneratedMcpServer(
       },
     );
 
-    instance.setErrorHandler((error, _request, reply) => {
+    instance.setErrorHandler((error, request, reply) => {
       const { status, body } = toHttpError(error);
       if (status >= 500) {
         instance.log.error({ err: error }, "MCP request failed.");
+      }
+      // RFC 9728 / RFC 6750 §3: a 401 must point the client at where it can
+      // learn how to authenticate. Without this header the metadata document
+      // is undiscoverable and a spec-following client is stuck on a bare 401.
+      if (status === 401) {
+        void reply.header("www-authenticate", buildAuthenticateChallenge(request));
       }
       void reply.status(status).send(body);
     });

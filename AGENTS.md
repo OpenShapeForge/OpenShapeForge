@@ -95,6 +95,12 @@ issues, pull requests, and review comments. Act accordingly.
   layer `authoring.config.yaml` resolves to is validated against the schema for
   its `kind`, and the gate asserts the per-schema file count so a schema cannot
   quietly stop covering its corpus.
+- **Decisions live in the plugin's web half; `apps/web` holds assembly.**
+  `apps/web` has a browser suite (`bun run test:browser`) and still has no
+  test runner: a browser drives the assembled screen and cannot call a
+  function. Anything that could be wrong therefore goes to a plugin's `web/`
+  directory, where `bun test examples` reaches it, and the source comments
+  saying so stay as they are.
 - Prefer extension over modification: authoring overlays
   (`kind: entityPatch`) and compiler plugins exist so behavior can be
   changed without forking base files. See `docs/layers.md` and
@@ -114,6 +120,9 @@ bun run test:compiler
 bun run test:e2e                 # needs the compose Postgres up
 (cd apps/api && bun test src/db) # migration + drift tests
 bun run test:perf                # when touching the API hot path (needs k6)
+bun run test:browser             # when touching apps/web (needs the compose
+                                 # stack AND both apps running — see
+                                 # docs/testing.md)
 ```
 
 ## Licensing

@@ -60,6 +60,8 @@
     "dev:web": "bun run --cwd apps/web dev",
     "build:web": "bun run --cwd apps/web build",
     "test:e2e": "bun run --cwd apps/api test:e2e",
+    "//test:browser": "The browser suite for apps/web. Unlike every other test script here it needs a RUNNING stack — Postgres, Redis, Keycloak, apps/api and apps/web — because it signs in through the real Keycloak login page and drives the assembled screen. See apps/web/playwright.config.ts and .github/workflows/web-e2e.yml.",
+    "test:browser": "bun run --cwd apps/web test:browser",
     "test:e2e:report": "bun scripts/render-e2e-report.ts",
     "test:perf": "bun scripts/run-perf.ts",
     "scan:dependencies": "bash scripts/scan-dependencies.sh",

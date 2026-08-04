@@ -15,6 +15,7 @@ bun run test:e2e                # manifest-driven GraphQL e2e suite (needs Postg
 bun run test:e2e:report         # same suite + HTML report
 bun run --cwd apps/api test:migrations   # migrator vs throwaway scratch DBs
 bun run test:perf               # k6 load suite (needs k6 + a running API)
+bun run test:browser            # apps/web in a real browser (needs a running stack)
 bun run scan:dependencies       # OSV-Scanner scan of the root bun.lock
 ```
 
@@ -172,3 +173,56 @@ against throwaway scratch databases created and dropped on the compose
 Postgres (admin URL `SCRATCH_ADMIN_DATABASE_URL`, defaulting to the compose
 superuser); the live `openshapeforge_dev` database is never touched. See
 [migrations.md](migrations.md).
+
+## The browser suite for `apps/web`
+
+`bun run test:browser` (Playwright, `apps/web/playwright.config.ts`) drives a
+real Chromium against a **running** stack. It is the only suite here that needs
+one, and the reason is the reason it exists: both defects it was written for are
+invisible without a browser and a framework.
+
+- **The editor settles** — loads a definition and asserts the page stops calling
+  its own server. A server action whose effect depended on a prop rebuilt on
+  every server render re-ran because it had run, at roughly seven requests a
+  second, indefinitely. The detector needs no foresight: a page that never
+  settles fails any assertion at all.
+- **A palette drag reaches the canvas** — holds a drag open over the surface and
+  asserts the preview card appears, then drops and asserts the node lands. The
+  mid-drag half is the one that matters: the broken handler called
+  `preventDefault()` before bailing, so the *drop* still worked and only
+  everything during the drag was lost.
+- **Smoke** — list, create, open, place a node, save, and come back through the
+  list to a canvas rebuilt from the stored graph.
+
+A simulated DOM cannot replace it. `dataTransfer.getData()` during `dragover`
+returns the payload under happy-dom, does not exist under jsdom, and returns
+`""` in every real browser — so a component test over the broken handler passes.
+That measurement is recorded on issue #262.
+
+**It does not move the line.** Decisions still live in
+`examples/plugins/workflow/web/`, where `bun test examples` reaches them. This
+suite drives the assembled screen through a browser; it cannot call a function,
+so it is not an argument for putting logic in `apps/web`.
+
+### Running it
+
+```sh
+docker compose -f docker-compose.local.yml up -d   # Postgres, Redis, Keycloak
+bun run generate && bun run db:migrate
+bun run dev:api                                    # or apps/api start, on :3001
+bun run build:web && bun run --cwd apps/web start  # on :3000
+bun run --cwd apps/web exec playwright install chromium   # once
+bun run test:browser
+```
+
+The web app must be served from an origin the dev realm's gateway client accepts
+— `http://localhost:3000` or `http://localhost:3001`, per
+`packages/compiler/config/authoring/authorization.yaml`. Sign-in is the real
+authorization-code flow through the Keycloak login page, because the web session
+is written into Redis by the NextAuth callback and nothing outside that callback
+can produce one. Credentials follow the same convention as the GraphQL e2e
+harness: `E2E_USER_PASSWORD_<USERNAME>`, falling back to the committed dev-realm
+literal. `E2E_WEB_URL` points the suite somewhere other than `:3000`.
+
+CI runs it as its own workflow (`.github/workflows/web-e2e.yml`) rather than
+inside `gates`, which has no Postgres.

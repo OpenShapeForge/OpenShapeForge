@@ -167,7 +167,7 @@ export function registerConnectorRestRoutes(
         "Database is not configured.",
       );
     }
-    const resolved = await resolveSessionContext(headersFromFastify(request.headers));
+    const resolved = await resolveSessionContext(headersFromFastify(request.headers), { db: options.db });
     return {
       db: options.db,
       session: {
@@ -185,7 +185,7 @@ export function registerConnectorRestRoutes(
 
   /** Session shape the authorization helpers take, before the DB is touched. */
   async function sessionFor(request: FastifyRequest) {
-    const resolved = await resolveSessionContext(headersFromFastify(request.headers));
+    const resolved = await resolveSessionContext(headersFromFastify(request.headers), { db: options.db });
     return {
       tenantId: resolved.tenantId,
       userId: resolved.userId,

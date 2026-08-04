@@ -530,7 +530,7 @@ export function registerGeneratedMcpServer(
     db: OpenShapeForgeDatabase;
     session: DbSessionInput;
   }> {
-    const resolved = await resolveSessionContext(headersFromFastify(request.headers));
+    const resolved = await resolveSessionContext(headersFromFastify(request.headers), { db: options.db });
     if (!resolved.tenantId || !resolved.userId) {
       throw new HttpError(
         401,

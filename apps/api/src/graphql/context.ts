@@ -36,7 +36,7 @@ export async function createGraphqlContext(
   headers: Headers,
   options: CreateGraphqlContextOptions = {},
 ): Promise<GraphqlContext> {
-  const resolved = await resolveSessionContext(headers);
+  const resolved = await resolveSessionContext(headers, { db: options.db });
   const session: GraphqlSessionContext = {
     tenantId: resolved.tenantId,
     userId: resolved.userId,

@@ -2,7 +2,7 @@
 import { describe, expect, it } from "bun:test";
 import { randomBytes } from "node:crypto";
 import {
-  ConnectorSecretError,
+  SecretError,
   SECRET_SET_SENTINEL,
   decryptSecret,
   encryptSecret,
@@ -35,7 +35,7 @@ describe("keyring", () => {
   });
 
   it("rejects malformed entries and wrong key sizes", () => {
-    expect(() => keyringFromEnv("nokey")).toThrow(ConnectorSecretError);
+    expect(() => keyringFromEnv("nokey")).toThrow(SecretError);
     expect(() => keyringFromEnv(`k1:${randomBytes(16).toString("base64")}`)).toThrow(
       /must be 32 bytes/,
     );

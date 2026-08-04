@@ -13,12 +13,24 @@ const WORKFLOW_DESIGNER_ITEM: NavItem = {
   route: { en: "/workflow-designer", nl: "/workflow-designer" },
 };
 
-const TOOLING_KEYS = new Set([WORKFLOW_DESIGNER_ITEM.key]);
+/**
+ * Tenant administration. Present for every deployment because the API surface
+ * it configures is always there; the page itself explains its own emptiness to
+ * a user who lacks the management role, rather than the nav guessing.
+ */
+const API_KEYS_ITEM: NavItem = {
+  key: "api-keys",
+  label: { en: "API keys", nl: "API-sleutels" },
+  icon: "KeyRound",
+  route: { en: "/settings/api-keys", nl: "/settings/api-keys" },
+};
+
+const TOOLING_KEYS = new Set([WORKFLOW_DESIGNER_ITEM.key, API_KEYS_ITEM.key]);
 
 function isToolingItem(item: NavItem): boolean {
   if (TOOLING_KEYS.has(item.key)) return true;
   const en = item.route?.en;
-  return en === WORKFLOW_DESIGNER_ITEM.route?.en;
+  return en === WORKFLOW_DESIGNER_ITEM.route?.en || en === API_KEYS_ITEM.route?.en;
 }
 
 function ensureToolingPresent(items: NavItem[]): NavItem[] {
@@ -26,6 +38,10 @@ function ensureToolingPresent(items: NavItem[]): NavItem[] {
 
   if (!result.some((i) => i.key === WORKFLOW_DESIGNER_ITEM.key || i.route?.en === WORKFLOW_DESIGNER_ITEM.route?.en)) {
     result = [...result, WORKFLOW_DESIGNER_ITEM];
+  }
+
+  if (!result.some((i) => i.key === API_KEYS_ITEM.key || i.route?.en === API_KEYS_ITEM.route?.en)) {
+    result = [...result, API_KEYS_ITEM];
   }
 
   return result;

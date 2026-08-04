@@ -56,6 +56,7 @@ const { createApiApp } = await import("../../../roles/api.js");
 const { __resetSessionResolverForTests } = await import("../../identity.js");
 const { __resetExchangeCacheForTests } = await import("../exchange.js");
 const { KeycloakAdmin } = await import("../keycloak-admin.js");
+const { REST_MOUNT_PATH } = await import("../../../rest/rest-paths.js");
 const { createDatabaseRuntime } = await import("../../../db/connection.js");
 const { sql } = await import("kysely");
 
@@ -410,13 +411,22 @@ describe.skipIf(!ready)("API keys end to end", () => {
     });
     expect(mcp.statusCode).not.toBe(401);
 
-    // REST — the generated surface answers rather than rejecting the credential.
+    // REST — a positive assertion, not merely "not 401". An earlier version of
+    // this test used the wrong mount path, got a 404, and passed anyway.
     const rest = await app!.inject({
       method: "GET",
-      url: "/api/rest/relations?limit=1",
+      url: `${REST_MOUNT_PATH}/relations`,
       headers: { authorization: `Bearer ${key}` },
     });
-    expect(rest.statusCode).not.toBe(401);
+    expect(rest.statusCode).toBe(200);
+
+    // And the same path without the credential is refused, so the 200 above is
+    // the key's doing rather than an unauthenticated route.
+    const anonymous = await app!.inject({
+      method: "GET",
+      url: `${REST_MOUNT_PATH}/relations`,
+    });
+    expect(anonymous.statusCode).toBe(401);
   }, 30_000);
 
   test("an unknown, malformed or revoked key authenticates nothing", async () => {
@@ -636,6 +646,94 @@ describe.skipIf(!ready)("API keys end to end", () => {
     expect(refused.status).toBe(403);
     expect(refused.body.error.message).toContain("Not authorized to manage API keys");
   }, 30_000);
+
+  test("the GraphQL surface mirrors REST, ceiling included", async () => {
+    const graphql = (query: string, variables: unknown, bearer = adminToken) =>
+      app!.inject({
+        method: "POST",
+        url: "/api/graphql",
+        headers: { "content-type": "application/json", authorization: `Bearer ${bearer}` },
+        payload: JSON.stringify({ query, variables }),
+      });
+    const parse = (body: string) => JSON.parse(body) as {
+      data?: Record<string, any> | null;
+      errors?: Array<{ message: string; extensions?: { code?: string } }>;
+    };
+
+    // The picker's role list — the caller's own roles, minus the management
+    // role. A convenience, not a control.
+    const roles = parse(
+      (await graphql("{ grantableApiKeyRoles }", {})).body,
+    );
+    expect(roles.errors ?? []).toEqual([]);
+    expect(roles.data!.grantableApiKeyRoles).toContain(WRITE_ROLE);
+    expect(roles.data!.grantableApiKeyRoles).not.toContain(MANAGE_ROLE);
+
+    const CREATE = `
+      mutation($input: CreateApiKeyIntegrationInput!) {
+        createApiKeyIntegration(input: $input) { integrationId keyId token }
+      }`;
+
+    const created = parse(
+      (await graphql(CREATE, {
+        input: { displayName: `gql ${randomUUID().slice(0, 8)}`, roles: [WRITE_ROLE] },
+      })).body,
+    );
+    expect(created.errors ?? []).toEqual([]);
+    const minted = created.data!.createApiKeyIntegration;
+    expect(minted.token).toStartWith("osf_live_");
+    provisionedClients.push(`osf-int-${minted.integrationId}`);
+
+    // The key works, which is the point of mirroring rather than reimplementing.
+    const used = await app!.inject({
+      method: "POST",
+      url: "/api/graphql",
+      headers: { "content-type": "application/json", authorization: `Bearer ${minted.token}` },
+      payload: JSON.stringify({ query: "{ relations(first: 1) { totalCount } }" }),
+    });
+    expect(parse(used.body).errors ?? []).toEqual([]);
+
+    // Listing never returns the credential again.
+    const listed = parse((await graphql("{ apiKeys { id displayName roleSubset } }", {})).body);
+    expect(listed.errors ?? []).toEqual([]);
+    expect(listed.data!.apiKeys.length).toBeGreaterThan(0);
+    expect(JSON.stringify(listed.data)).not.toContain(minted.token);
+
+    // The ceiling is the same one, reached through a different transport.
+    const refused = parse(
+      (await graphql(CREATE, {
+        input: { displayName: "gql escalation", roles: ["Totally.Made.Up"] },
+      })).body,
+    );
+    expect(refused.errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
+    expect(refused.errors?.[0]?.message).toContain("Totally.Made.Up");
+
+    // And an api-key session is refused key management here too.
+    const ladder = parse(
+      (await graphql("{ apiKeys { id } }", {}, minted.token)).body,
+    );
+    expect(ladder.errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
+    expect(ladder.errors?.[0]?.message).toContain("API keys cannot manage API keys");
+
+    // Revoke through GraphQL, and the key stops authenticating.
+    const revoked = parse(
+      (await graphql("mutation($id: ID!) { revokeApiKey(keyId: $id) }", { id: minted.keyId })).body,
+    );
+    expect(revoked.errors ?? []).toEqual([]);
+    expect(revoked.data!.revokeApiKey).toBe(true);
+
+    const after = await app!.inject({
+      method: "POST",
+      url: "/api/mcp",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        authorization: `Bearer ${minted.token}`,
+      },
+      payload: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    });
+    expect(after.statusCode).toBe(401);
+  }, 60_000);
 
   test("the privilege ceiling refuses a role the caller does not hold", async () => {
     const refused = await createKey({

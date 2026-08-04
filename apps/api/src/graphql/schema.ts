@@ -25,6 +25,13 @@ import {
   createConnectorResolvers,
 } from "../connectors/graphql-schema.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
+import {
+  apiKeyMutationFields,
+  apiKeyQueryFields,
+  apiKeyTypeDefs,
+  createApiKeyResolvers,
+} from "../auth/api-key/graphql-schema.js";
+import { readApiKeyProvisioningConfig } from "../auth/api-key/runtime-config.js";
 import type { GraphqlContext } from "./context.js";
 import type { ModuleRuntimeContext, RuntimeModule } from "../modules/contract.js";
 import { composeModuleGraphql, declaredFieldNames } from "../modules/graphql-composition.js";
@@ -34,6 +41,13 @@ import { composeModuleGraphql, declaredFieldNames } from "../modules/graphql-com
 // status: NOT_LICENSED rather than a hole in the schema.
 const connectorResolvers = createConnectorResolvers({
   config: readConnectorRuntimeConfig(),
+});
+
+// The fields stay in the schema whether or not provisioning is configured, so
+// the web client's queries do not change shape per environment; an
+// unconfigured deployment answers NOT_CONFIGURED.
+const apiKeyResolvers = createApiKeyResolvers({
+  config: readApiKeyProvisioningConfig(),
 });
 
 /**
@@ -64,6 +78,8 @@ export function buildGraphqlSchema(
 
     ${connectorNamespaceTypeDefs}
 
+    ${apiKeyTypeDefs}
+
     ${moduleGraphql.typeDefs}
 
     type Health {
@@ -89,6 +105,7 @@ export function buildGraphqlSchema(
 ${generatedEntityQueryFields}
 ${connectorQueryFields}
 ${connectorNamespaceQueryFields}
+${apiKeyQueryFields}
 ${moduleGraphql.queryFields}
     }
 
@@ -96,6 +113,7 @@ ${moduleGraphql.queryFields}
 ${generatedEntityMutationFields}
 ${connectorMutationFields}
 ${connectorNamespaceMutationFields}
+${apiKeyMutationFields}
 ${moduleGraphql.mutationFields}
     }
   `,
@@ -111,6 +129,7 @@ ${moduleGraphql.mutationFields}
     Query: {
       ...generatedEntityResolvers.Query,
       ...connectorResolvers.Query,
+      ...apiKeyResolvers.Query,
       ...moduleGraphql.resolvers.Query,
       health: () => ({
         status: "ok",
@@ -121,6 +140,7 @@ ${moduleGraphql.mutationFields}
     Mutation: {
       ...generatedEntityResolvers.Mutation,
       ...connectorResolvers.Mutation,
+      ...apiKeyResolvers.Mutation,
       ...moduleGraphql.resolvers.Mutation,
     },
   },
@@ -140,11 +160,13 @@ const coreQueryFieldNames = [
   ...declaredFieldNames(generatedEntityQueryFields),
   ...declaredFieldNames(connectorQueryFields),
   ...declaredFieldNames(connectorNamespaceQueryFields),
+  ...declaredFieldNames(apiKeyQueryFields),
 ];
 const coreMutationFieldNames = [
   ...declaredFieldNames(generatedEntityMutationFields),
   ...declaredFieldNames(connectorMutationFields),
   ...declaredFieldNames(connectorNamespaceMutationFields),
+  ...declaredFieldNames(apiKeyMutationFields),
 ];
 
 /** Module-contributed named types, i.e. everything except the root types. */

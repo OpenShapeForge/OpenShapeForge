@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { resolveSessionContext } from "../auth/identity.js";
-import type { SessionScope } from "../auth/trusted-context.js";
+import type { SessionCredential, SessionScope } from "../auth/trusted-context.js";
 
 export type GraphqlSessionContext = {
   tenantId: string | null;
@@ -21,6 +21,12 @@ export type GraphqlSessionContext = {
    * `SessionScope` and `DbSessionScope` are the same "tenant"|"group"|"self".
    */
   scope: SessionScope;
+  /**
+   * Which credential authenticated this request. Threaded through so controls
+   * can depend on it rather than on a convention — API key management refuses
+   * an "api-key" session.
+   */
+  credential: SessionCredential;
 };
 
 export type GraphqlContext = Record<string, unknown> & {
@@ -43,6 +49,7 @@ export async function createGraphqlContext(
     roles: [...resolved.roles],
     groups: [...resolved.groups],
     scope: resolved.scope,
+    credential: resolved.credential,
   };
   return {
     ...(options.db ? { db: options.db } : {}),

@@ -66,6 +66,10 @@ export type SidebarProps = {
   linkComponent?: LinkComponent;
   /** Accessible label for the navigation landmark. */
   "aria-label"?: string;
+  /** Accessible label for the toggle buttons while expanded. Defaults to "Collapse sidebar". */
+  collapseLabel?: string;
+  /** Accessible label for the toggle button while collapsed. Defaults to "Expand sidebar". */
+  expandLabel?: string;
   className?: string;
 };
 
@@ -214,6 +218,8 @@ export function Sidebar({
   onToggle,
   linkComponent,
   "aria-label": ariaLabel = "Primary navigation",
+  collapseLabel = "Collapse sidebar",
+  expandLabel = "Expand sidebar",
   className,
 }: SidebarProps) {
   const isExpanded = state === "expanded";
@@ -232,7 +238,7 @@ export function Sidebar({
       <div className={cn("flex shrink-0 pb-6", isExpanded ? "w-full items-center justify-between" : "items-start")}>
         <button
           type="button"
-          aria-label={isExpanded ? "Zijbalk inklappen" : "Zijbalk uitklappen"}
+          aria-label={isExpanded ? collapseLabel : expandLabel}
           onClick={onToggle}
           className="flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-small)]"
         >
@@ -241,7 +247,7 @@ export function Sidebar({
         {isExpanded ? (
           <button
             type="button"
-            aria-label="Zijbalk inklappen"
+            aria-label={collapseLabel}
             onClick={onToggle}
             className="flex size-6 shrink-0 items-center justify-center text-[var(--color-foreground-muted)]"
           >

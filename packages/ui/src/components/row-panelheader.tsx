@@ -23,9 +23,9 @@ export interface RowPanelheaderProps {
   onChevronClick?: () => void;
   /** Called when the close button is clicked. Omit to render a non-interactive icon. */
   onClose?: () => void;
-  /** Accessible label for the chevron button. Defaults to "Inklappen". */
+  /** Accessible label for the chevron button. Defaults to "Collapse". */
   chevronLabel?: string;
-  /** Accessible label for the close button. Defaults to "Sluiten". */
+  /** Accessible label for the close button. Defaults to "Close". */
   closeLabel?: string;
   className?: string;
 }
@@ -36,8 +36,8 @@ export function RowPanelheader({
   showClose = true,
   onChevronClick,
   onClose,
-  chevronLabel = "Inklappen",
-  closeLabel = "Sluiten",
+  chevronLabel = "Collapse",
+  closeLabel = "Close",
   className,
 }: RowPanelheaderProps) {
   return (

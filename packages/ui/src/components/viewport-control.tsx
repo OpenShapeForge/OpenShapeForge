@@ -20,13 +20,13 @@ export interface ViewportControlProps {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFitView: () => void;
-  /** Accessible label for the surrounding group. Defaults to "Zoom en weergave". */
+  /** Accessible label for the surrounding group. Defaults to "Zoom and view". */
   ariaLabel?: string;
-  /** Accessible label for the zoom-out button. Defaults to "Uitzoomen". */
+  /** Accessible label for the zoom-out button. Defaults to "Zoom out". */
   zoomOutLabel?: string;
-  /** Accessible label for the zoom-in button. Defaults to "Inzoomen". */
+  /** Accessible label for the zoom-in button. Defaults to "Zoom in". */
   zoomInLabel?: string;
-  /** Accessible label for the fit-view button. Defaults to "Pas weergave aan". */
+  /** Accessible label for the fit-view button. Defaults to "Fit view". */
   fitViewLabel?: string;
   className?: string;
 }
@@ -39,10 +39,10 @@ export function ViewportControl({
   onZoomIn,
   onZoomOut,
   onFitView,
-  ariaLabel = "Zoom en weergave",
-  zoomOutLabel = "Uitzoomen",
-  zoomInLabel = "Inzoomen",
-  fitViewLabel = "Pas weergave aan",
+  ariaLabel = "Zoom and view",
+  zoomOutLabel = "Zoom out",
+  zoomInLabel = "Zoom in",
+  fitViewLabel = "Fit view",
   className,
 }: ViewportControlProps) {
   const displayZoom = Math.round(zoom * 100);

@@ -1,7 +1,7 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: conversation.handover
-category: Messaging
+category: messaging
 label:
   en: Hand over to employee
   nl: Zet door naar medewerker

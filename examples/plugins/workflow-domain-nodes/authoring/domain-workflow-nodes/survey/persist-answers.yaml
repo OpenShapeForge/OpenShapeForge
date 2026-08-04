@@ -1,7 +1,7 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: survey.persistAnswers
-category: Vragenlijst
+category: survey
 label:
   en: Persist survey answers
   nl: Antwoorden opslaan

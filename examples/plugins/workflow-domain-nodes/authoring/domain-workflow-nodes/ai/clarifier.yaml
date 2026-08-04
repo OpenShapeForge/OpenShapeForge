@@ -1,7 +1,7 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: aiClarifier
-category: AI
+category: ai
 label:
   nl: AI clarifier
   en: AI clarifier

@@ -1,7 +1,7 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: customer.getRelationContext
-category: Messaging
+category: messaging
 label:
   en: Get customer context
   nl: Haal klantcontext op

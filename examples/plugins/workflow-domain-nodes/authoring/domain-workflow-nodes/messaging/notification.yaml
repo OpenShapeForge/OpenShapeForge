@@ -1,7 +1,7 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: notificatieSend
-category: Messaging
+category: messaging
 label:
   nl: Notificatie
   en: Notification

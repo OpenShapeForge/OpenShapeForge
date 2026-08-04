@@ -1,7 +1,7 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: aiIntakeExtractor
-category: AI
+category: ai
 label:
   nl: AI intake extractor
   en: AI intake extractor

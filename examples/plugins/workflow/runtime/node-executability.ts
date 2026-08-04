@@ -36,10 +36,11 @@
  * palette with no way to start or finish a workflow.
  *
  * The three clauses below are therefore the runtime's own dispatch order, read
- * back: `isEndNode`, then `isTriggerNode`, then the bridge lookup. Those
- * predicates are imported rather than restated so the two cannot drift.
+ * back: `isTerminalNodeType`, then `isEntryNodeType`, then the bridge lookup.
+ * Both predicates are imported from `definition-types.ts` rather than restated
+ * so the copies cannot drift.
  */
-import { isEntryNodeType } from "./definition-types.js";
+import { isEntryNodeType, isTerminalNodeType } from "./definition-types.js";
 import { getWorkflowNodeBridge } from "./node-bridge.js";
 
 /**
@@ -69,14 +70,6 @@ export type WorkflowNodeRuntimeSupport =
 const STRUCTURALLY_UNSUPPORTED_NODE_TYPES: ReadonlySet<string> = new Set(["join", "split"]);
 
 /**
- * Mirrors `isEndNode` in process-runtime.ts, which is module-private. The
- * prefix rule is the runtime's, not ours; if it changes there this must follow.
- */
-function isEndNodeType(nodeType: string): boolean {
-  return nodeType.startsWith("end");
-}
-
-/**
  * Read against the live bridge registry, so this is only truthful once
  * `registerAllWorkflowNodeBridges()` has run. The module contract calls it from
  * `init`, before the process serves traffic, which is the same guarantee the
@@ -90,7 +83,7 @@ function isEndNodeType(nodeType: string): boolean {
  */
 export function getWorkflowNodeRuntimeSupport(nodeType: string): WorkflowNodeRuntimeSupport {
   if (STRUCTURALLY_UNSUPPORTED_NODE_TYPES.has(nodeType)) return "unsupported";
-  if (isEndNodeType(nodeType) || isEntryNodeType(nodeType)) return "executable";
+  if (isTerminalNodeType(nodeType) || isEntryNodeType(nodeType)) return "executable";
   return getWorkflowNodeBridge(nodeType) ? "executable" : "unimplemented";
 }
 

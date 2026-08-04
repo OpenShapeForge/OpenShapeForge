@@ -42,7 +42,7 @@ import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../../../apps/api/src/db/connection.js";
 import { jsonbLiteral } from "../../../../apps/api/src/db/sql-helpers.js";
 import type { DB } from "../../../../apps/api/src/generated/db/types.js";
-import { isEntryNodeType } from "./definition-types.js";
+import { isEntryNodeType, isTerminalNodeType } from "./definition-types.js";
 import { flattenFieldDefinitionSources } from "./field-definitions.js";
 import {
   failInstanceInTransaction,
@@ -173,8 +173,9 @@ function isTriggerNode(node: ProcessRuntimeNode): boolean {
   return isEntryNodeType(node.type);
 }
 
+/** Same argument as `isTriggerNode`: the rule lives in one place, not three. */
 function isEndNode(node: ProcessRuntimeNode): boolean {
-  return node.type.startsWith("end");
+  return isTerminalNodeType(node.type);
 }
 
 function expectedTriggerTypeForTriggerType(

@@ -155,6 +155,21 @@ export function isEntryNodeType(type: string): boolean {
 }
 
 /**
+ * Node types the process runtime STOPS at: the walk ends there, so no bridge
+ * runs, no output handle is produced and nothing is routed onwards.
+ *
+ * Here for the same reason `isEntryNodeType` is. Three modules already asked
+ * it and each answered for itself — the engine deciding when a walk is over,
+ * executability deciding what needs a bridge, and now the designer deciding
+ * which ports to draw. A designer that gets this wrong offers an output on a
+ * node the run never leaves, which is an edge an author can draw, publish, and
+ * never traverse.
+ */
+export function isTerminalNodeType(type: string): boolean {
+  return type.startsWith("end");
+}
+
+/**
  * Normalize a stored graph, enforcing only what the storage layer guarantees.
  *
  * Anything that is not an object with array `nodes` and `edges` becomes an

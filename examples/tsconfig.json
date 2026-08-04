@@ -9,11 +9,20 @@
     "directives; check:ts-nocheck keeps that count from growing.",
     "",
     "Modules here reach across into apps/api and packages/compiler by relative path,",
-    "so the program is rooted at the repo root rather than at examples/."
+    "so the program is rooted at the repo root rather than at examples/.",
+    "",
+    "allowImportingTsExtensions is for one of those reaches. packages/workflow-layout",
+    "is a bundler-resolution project whose own modules import each other with explicit",
+    ".ts extensions, so pulling any of them in from a NodeNext program raises TS5097 on",
+    "the package's INTERNAL imports — a file this project does not own and cannot fix",
+    "by writing its own specifiers differently. Nothing under examples/ uses a .ts",
+    "specifier; the flag only stops a dependency's from being an error here. Safe",
+    "because this project emits nothing, which is also what the flag requires."
   ],
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "types": ["bun"],
+    "allowImportingTsExtensions": true,
     "noEmit": true
   },
   "include": ["**/*.ts"]

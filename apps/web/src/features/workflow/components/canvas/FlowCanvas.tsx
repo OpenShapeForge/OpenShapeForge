@@ -48,12 +48,13 @@ import type {
 } from "./types";
 
 /**
- * Layers a hovered and a selected edge sit in. Any two values above what the
- * other edges use would do; these leave room between them and below React
- * Flow's own overlays.
+ * Layers a hovered, a selected and a drop-target edge sit in. Any three values
+ * above what the other edges use would do; these leave room between them and
+ * below React Flow's own overlays.
  */
 const EDGE_HOVER_Z_INDEX = 1100;
 const EDGE_SELECTED_Z_INDEX = 1150;
+const EDGE_INSERT_TARGET_Z_INDEX = 1200;
 
 export type WorkflowFlowCanvasProps = {
   /** The element a screenshot or an export would capture. */
@@ -77,12 +78,21 @@ export type WorkflowFlowCanvasProps = {
     nodeType: string,
     flowPosition: { x: number; y: number },
   ) => void;
-  /** A palette drag is over the canvas at this point. */
-  onCanvasDragOver?: (
-    nodeType: string,
-    flowPosition: { x: number; y: number },
-  ) => void;
+  /**
+   * A palette drag is over the canvas at this point in flow coordinates.
+   *
+   * The point, and not what is being dragged: while a drag is in flight the
+   * drag data store is protected, so `getData` returns nothing and only the
+   * MIME TYPE can be read. Which node type is on its way is known to whatever
+   * started the drag, and that is where a caller reads it from.
+   */
+  onCanvasDragOver?: (flowPosition: { x: number; y: number }) => void;
   onCanvasDragLeave?: () => void;
+  /**
+   * The edge a drop would be inserted into: drawn as the drop target, and
+   * lifted above its neighbours so it stays legible under the dragged card.
+   */
+  insertTargetEdgeId?: string | null;
   initialViewport?: CanvasViewport | null;
   onViewportChange?: (viewport: CanvasViewport) => void;
   /**
@@ -101,9 +111,10 @@ export type WorkflowFlowCanvasProps = {
 /**
  * Reads the dragged node type out of a palette drag.
  *
- * `dataTransfer` only exposes its *types* during `dragover`, not its contents,
- * which is why the payload is deliberately small: everything the canvas needs
- * to decide is either the MIME type or one string inside it.
+ * Only on `drop`. `dataTransfer` exposes its *types* while a drag is in flight
+ * and its contents only once the drag ends, which is why the payload is
+ * deliberately small: everything the canvas has to decide before then is
+ * answered by the MIME type alone.
  */
 function getDraggedNodeType(event: DragEvent): string | null {
   const raw = event.dataTransfer.getData(PALETTE_MIME_TYPE);
@@ -141,6 +152,7 @@ export function WorkflowFlowCanvas({
   onAddNodeFromDrop,
   onCanvasDragOver,
   onCanvasDragLeave,
+  insertTargetEdgeId = null,
   initialViewport = null,
   onViewportChange,
   readOnly = false,
@@ -209,15 +221,25 @@ export function WorkflowFlowCanvas({
   // SVG paint order is document order — there is no `z-index` on a path. React
   // Flow does group edges into one `<svg>` layer per distinct `zIndex`, so
   // raising an edge's `zIndex` is the only way to bring it to the front.
-  // Selection beats hover, so the edge under discussion stays on top while the
-  // cursor crosses the ones around it.
+  // A drop target beats selection and selection beats hover, so the edge under
+  // discussion stays on top while the cursor crosses the ones around it.
   const edgesWithInteractionElevation = useMemo(() => {
     const hasElevatedEdge =
-      hoveredEdgeId !== null || edges.some((edge) => edge.selected === true);
+      hoveredEdgeId !== null ||
+      insertTargetEdgeId !== null ||
+      edges.some((edge) => edge.selected === true);
     if (!hasElevatedEdge) return edges;
 
     let touched = false;
     const next = edges.map((edge) => {
+      if (edge.id === insertTargetEdgeId) {
+        touched = true;
+        return {
+          ...edge,
+          zIndex: EDGE_INSERT_TARGET_Z_INDEX,
+          className: cn(edge.className, styles.edgeInsertTarget),
+        };
+      }
       const nextZIndex =
         edge.selected === true
           ? EDGE_SELECTED_Z_INDEX
@@ -229,7 +251,7 @@ export function WorkflowFlowCanvas({
       return { ...edge, zIndex: nextZIndex };
     });
     return touched ? next : edges;
-  }, [edges, hoveredEdgeId]);
+  }, [edges, hoveredEdgeId, insertTargetEdgeId]);
 
   const handleDragLeave = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
@@ -265,32 +287,29 @@ export function WorkflowFlowCanvas({
         return;
       }
 
-      const flowPosition = screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY,
-      });
-      // Announce the final position before adding, so anything deriving state
-      // from the drag (a preview, a drop target) sees the point the node is
-      // about to land on rather than the last one the cursor moved over.
-      onCanvasDragOver?.(nodeType, flowPosition);
-      onAddNodeFromDrop?.(nodeType, flowPosition);
+      // The drop point is reported once, here. A caller that tracked the drag
+      // holds the last point the cursor moved over, which is the same place
+      // give or take a pixel, but only this one is where the node lands.
+      onAddNodeFromDrop?.(
+        nodeType,
+        screenToFlowPosition({ x: event.clientX, y: event.clientY }),
+      );
     },
-    [onAddNodeFromDrop, onCanvasDragOver, screenToFlowPosition],
+    [onAddNodeFromDrop, screenToFlowPosition],
   );
 
   const handleDragOver = useCallback(
     (event: DragEvent) => {
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
-      const nodeType = getDraggedNodeType(event);
-      if (!nodeType) {
+      // The payload cannot be read yet — see `onCanvasDragOver` — so a palette
+      // drag is recognised by its type being on the drag rather than by what
+      // that type contains. `drop` is the first moment the contents open up.
+      if (!event.dataTransfer.types.includes(PALETTE_MIME_TYPE)) {
         return;
       }
 
-      onCanvasDragOver?.(
-        nodeType,
-        screenToFlowPosition({ x: event.clientX, y: event.clientY }),
-      );
+      onCanvasDragOver?.(screenToFlowPosition({ x: event.clientX, y: event.clientY }));
     },
     [onCanvasDragOver, screenToFlowPosition],
   );

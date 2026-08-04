@@ -35,6 +35,20 @@
  * So the flag follows the author rather than a constant: it is on once they
  * have placed or moved a node in this session, and off until then. Editing
  * config and wiring cannot disturb layout; touching layout persists it.
+ *
+ * ## Dropping onto an edge inserts, and the drag says so before it happens
+ *
+ * A palette drop over an edge runs the node BETWEEN that edge's endpoints —
+ * `insertCanvasNodeIntoEdge`, which re-points the edge it splits rather than
+ * adding a second one out of the same port. Which edge that is, if any, is
+ * `findCanvasEdgeAtPoint`'s answer, because a step edge does not run in a
+ * straight line between two cards and the endpoints cannot say where it is.
+ *
+ * The node type comes from the palette rather than from the drag: while a drag
+ * is in flight the drag data store is protected, so the canvas can see that one
+ * of ITS drags is overhead but not what is on it. The type is captured when the
+ * drag starts, and the preview card is built by the same `createCanvasNode` the
+ * drop will call, so nothing about the card changes when the author lets go.
  */
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
@@ -57,6 +71,7 @@ import {
   createCanvasNode,
   deleteCanvasEdges,
   deleteCanvasNodes,
+  insertCanvasNodeIntoEdge,
   moveCanvasNode,
   setCanvasNodeConfig,
   setCanvasNodeLabel,
@@ -69,12 +84,20 @@ import {
   toCanvasEdges,
   toCanvasNodes,
   toStoredGraph,
+  type CanvasNode,
 } from "../../../../../../../examples/plugins/workflow/web/graph/index";
+import {
+  EDGE_HIT_TOLERANCE_PX,
+  findCanvasEdgeAtPoint,
+} from "../../../../../../../examples/plugins/workflow/web/canvas/edge-hit-test";
 import {
   isEntryNodeType,
   isTerminalNodeType,
 } from "../../../../../../../examples/plugins/workflow/runtime/definition-types";
-import { resolveWorkflowNodePresentation } from "../../../../../../../examples/plugins/workflow/web/presentation";
+import {
+  resolveWorkflowNodePresentation,
+  type WorkflowNodePresentation,
+} from "../../../../../../../examples/plugins/workflow/web/presentation";
 import { WorkflowNodePalette } from "./NodePalette";
 import { WorkflowNodeInspector } from "./NodeInspector";
 import { WorkflowValidationPanel } from "./ValidationPanel";
@@ -145,6 +168,48 @@ const WARNING_MESSAGE: Record<ConnectionWarning, string> = {
     "That output now has two edges. The graph still saves; publishing will refuse it until one is removed.",
 };
 
+/** The palette drag in flight, and what letting go of it would do. */
+type PaletteDrag = {
+  nodeType: string;
+  /** Where the card would land, in flow coordinates. */
+  position: { x: number; y: number };
+  /** The edge the drop would split, or null for a loose node. */
+  edgeId: string | null;
+};
+
+/**
+ * One card on the canvas, from the graph node the editor holds.
+ *
+ * Shared by the drawn nodes and by the preview of the one being dragged, so a
+ * card cannot look like two different things either side of a drop.
+ */
+function toCanvasCard(
+  node: CanvasNode,
+  presentation: WorkflowNodePresentation,
+  options: { selected?: boolean; preview?: "palette" | "edgeInsert" } = {},
+): WorkflowCanvasNode {
+  return {
+    id: node.id,
+    type: "workflowNode" as const,
+    position: node.position,
+    selected: options.selected === true,
+    // A preview stands for a node that does not exist yet, so nothing may drag
+    // it, select it or delete it.
+    ...(options.preview ? { draggable: false, selectable: false } : {}),
+    data: {
+      label: node.data.label,
+      typeLabel: presentation.typeLabel,
+      iconName: presentation.iconName as LucideIconName,
+      categoryTone: presentation.categoryTone,
+      isTrigger: presentation.isTrigger,
+      isTerminal: presentation.isTerminal,
+      outputHandles: node.data.outputHandles,
+      palettePreview: options.preview === "palette",
+      edgeInsertPreview: options.preview === "edgeInsert",
+    },
+  };
+}
+
 export function WorkflowEditor(props: WorkflowEditorProps) {
   return (
     <ReactFlowProvider>
@@ -164,9 +229,11 @@ function WorkflowEditorSurface({
   lockActions,
   locale = "en",
 }: WorkflowEditorProps) {
-  // The canvas converts a drop point to flow coordinates itself; what is
-  // needed here is only the viewport, for the click-to-add position.
-  const { getViewport } = useReactFlow();
+  // The canvas converts a drop point to flow coordinates itself. What is read
+  // here is the viewport — for the click-to-add position, and for the zoom that
+  // turns a pointer distance into a flow-space one — and the measured node
+  // boxes the edge hit test needs, which only React Flow has.
+  const { getNodes, getViewport } = useReactFlow<WorkflowCanvasNode, WorkflowCanvasEdge>();
 
   const catalog = useMemo(
     () => new Map(nodeTypes.map((entry) => [entry.type, entry] as const)),
@@ -193,6 +260,7 @@ function WorkflowEditorSurface({
   });
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [paletteDrag, setPaletteDrag] = useState<PaletteDrag | null>(null);
   const [expectedUpdatedAt, setExpectedUpdatedAt] = useState(definition.updatedAt);
   const [latestVersion, setLatestVersion] = useState<number | null>(version);
   const [dirty, setDirty] = useState(false);
@@ -227,28 +295,38 @@ function WorkflowEditorSurface({
     [],
   );
 
-  const canvasNodes = useMemo<WorkflowCanvasNode[]>(
+  // Held apart from the preview below so that a drag, which reports a new
+  // position several times a second, does not rebuild every card on the canvas
+  // on every one of those reports.
+  const graphCards = useMemo<WorkflowCanvasNode[]>(
     () =>
-      graph.nodes.map((node) => {
-        const presentation = presentationFor(node.type);
-        return {
-          id: node.id,
-          type: "workflowNode" as const,
-          position: node.position,
+      graph.nodes.map((node) =>
+        toCanvasCard(node, presentationFor(node.type), {
           selected: node.id === selectedNodeId,
-          data: {
-            label: node.data.label,
-            typeLabel: presentation.typeLabel,
-            iconName: presentation.iconName as LucideIconName,
-            categoryTone: presentation.categoryTone,
-            isTrigger: presentation.isTrigger,
-            isTerminal: presentation.isTerminal,
-            outputHandles: node.data.outputHandles,
-          },
-        };
-      }),
+        }),
+      ),
     [graph.nodes, presentationFor, selectedNodeId],
   );
+
+  const canvasNodes = useMemo<WorkflowCanvasNode[]>(() => {
+    if (paletteDrag === null) return graphCards;
+
+    // Built by the function the drop will call, against the graph it will be
+    // added to, so the preview carries the id, label and ports the node is
+    // about to have rather than a placeholder that changes on release.
+    const preview = createCanvasNode({
+      nodeType: paletteDrag.nodeType,
+      position: paletteDrag.position,
+      graph,
+      configFields: configFieldsFor(paletteDrag.nodeType),
+    });
+    return [
+      ...graphCards,
+      toCanvasCard(preview, presentationFor(paletteDrag.nodeType), {
+        preview: paletteDrag.edgeId === null ? "palette" : "edgeInsert",
+      }),
+    ];
+  }, [configFieldsFor, graph, graphCards, paletteDrag, presentationFor]);
 
   const canvasEdges = useMemo<WorkflowCanvasEdge[]>(
     () =>
@@ -333,19 +411,32 @@ function WorkflowEditorSurface({
     [graph],
   );
 
-  const addNodeAt = useCallback(
-    (nodeType: string, position: { x: number; y: number }) => {
-      edit((current) =>
-        addCanvasNode(
-          current,
-          createCanvasNode({
-            nodeType,
-            position,
-            graph: current,
-            configFields: configFieldsFor(nodeType),
-          }),
-        ),
-      );
+  /**
+   * Put a new node on the canvas: loose, or between the endpoints of the edge
+   * it was dropped on.
+   *
+   * The two are one function because they differ only in what happens to the
+   * edges. Splitting re-points the edge it lands on and carries a new one
+   * onward, which is what stops the gesture producing two edges on one source
+   * handle — refused at publish, and fatal at run time.
+   */
+  const placeNode = useCallback(
+    (
+      nodeType: string,
+      position: { x: number; y: number },
+      splitEdgeId: string | null,
+    ) => {
+      edit((current) => {
+        const node = createCanvasNode({
+          nodeType,
+          position,
+          graph: current,
+          configFields: configFieldsFor(nodeType),
+        });
+        return splitEdgeId === null
+          ? addCanvasNode(current, node)
+          : insertCanvasNodeIntoEdge(current, { node, edgeId: splitEdgeId });
+      });
       // The author placed it. That is a statement about layout, so positions
       // are persisted from here on — including this node's own.
       setLayoutTouched(true);
@@ -357,14 +448,18 @@ function WorkflowEditorSurface({
     (nodeType: string) => {
       // A click has no drop point, so the node goes to the middle of what the
       // author is looking at rather than to the graph's origin, which may be
-      // off screen entirely.
+      // off screen entirely. It lands loose: a click chose a type, not a place.
       const viewport = getViewport();
-      addNodeAt(nodeType, {
-        x: -viewport.x / viewport.zoom + 160,
-        y: -viewport.y / viewport.zoom + 120,
-      });
+      placeNode(
+        nodeType,
+        {
+          x: -viewport.x / viewport.zoom + 160,
+          y: -viewport.y / viewport.zoom + 120,
+        },
+        null,
+      );
     },
-    [addNodeAt, getViewport],
+    [getViewport, placeNode],
   );
 
   // ---------------------------------------------------------------------
@@ -478,10 +573,87 @@ function WorkflowEditorSurface({
   // ---------------------------------------------------------------------
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const handleDrop = useCallback(
-    (nodeType: string, position: { x: number; y: number }) => addNodeAt(nodeType, position),
-    [addNodeAt],
+
+  // What is being dragged, kept out of state because nothing renders from it
+  // and because the canvas cannot answer the question: the drag data store is
+  // protected until the drop, so the type is captured when the drag starts.
+  const draggedNodeType = useRef<string | null>(null);
+
+  /**
+   * The edge under a point, measured against the boxes React Flow drew.
+   *
+   * Sizes come from the flow rather than from the graph because only the
+   * renderer knows them — a card grows with its title and its ports — and an
+   * unmeasured node is left out entirely: its edges are not drawn where a
+   * guessed box would put them.
+   */
+  const edgeUnderPoint = useCallback(
+    (point: { x: number; y: number }) =>
+      findCanvasEdgeAtPoint({
+        point,
+        edges: graph.edges,
+        nodes: getNodes().flatMap((node) =>
+          node.measured?.width && node.measured.height
+            ? [
+                {
+                  id: node.id,
+                  position: node.position,
+                  width: node.measured.width,
+                  height: node.measured.height,
+                  outputHandles: node.data.outputHandles,
+                },
+              ]
+            : [],
+        ),
+        // A pointer distance, so it is divided by the zoom: the target stays
+        // the same size under the cursor however far the author has zoomed out.
+        tolerance: EDGE_HIT_TOLERANCE_PX / getViewport().zoom,
+      }),
+    [getNodes, getViewport, graph.edges],
   );
+
+  const handleCanvasDragOver = useCallback(
+    (position: { x: number; y: number }) => {
+      const nodeType = draggedNodeType.current;
+      if (nodeType === null) return;
+      const edgeId = edgeUnderPoint(position);
+      setPaletteDrag((current) =>
+        // `dragover` fires on a timer as well as on movement, so a cursor
+        // resting over the canvas would otherwise re-render it forever.
+        current !== null &&
+        current.nodeType === nodeType &&
+        current.edgeId === edgeId &&
+        current.position.x === position.x &&
+        current.position.y === position.y
+          ? current
+          : { nodeType, position, edgeId },
+      );
+    },
+    [edgeUnderPoint],
+  );
+
+  const endPaletteDrag = useCallback(() => {
+    draggedNodeType.current = null;
+    setPaletteDrag(null);
+  }, []);
+
+  const handleDrop = useCallback(
+    (nodeType: string, position: { x: number; y: number }) => {
+      // Asked again at the drop point rather than read off the last `dragover`.
+      // They agree to within a pixel, and only this one is where the node lands.
+      placeNode(nodeType, position, edgeUnderPoint(position));
+      endPaletteDrag();
+    },
+    [edgeUnderPoint, endPaletteDrag, placeNode],
+  );
+
+  const handlePaletteDragStart = useCallback((nodeType: string) => {
+    draggedNodeType.current = nodeType;
+  }, []);
+
+  // Leaving the canvas ends the preview but not the drag: the cursor can come
+  // back, and the type it is carrying has not changed.
+  const handleCanvasDragLeave = useCallback(() => setPaletteDrag(null), []);
 
   const selected = selectedNodeId
     ? (graph.nodes.find((node) => node.id === selectedNodeId) ?? null)
@@ -540,6 +712,8 @@ function WorkflowEditorSurface({
           groups={palette}
           presentationFor={presentationFor}
           onAddNode={handleAddFromPalette}
+          onDragNodeStart={handlePaletteDragStart}
+          onDragNodeEnd={endPaletteDrag}
           disabled={readOnly}
           className="border-r border-border"
         />
@@ -554,6 +728,9 @@ function WorkflowEditorSurface({
           onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
           onPaneClick={() => setSelectedNodeId(null)}
           onAddNodeFromDrop={handleDrop}
+          onCanvasDragOver={handleCanvasDragOver}
+          onCanvasDragLeave={handleCanvasDragLeave}
+          insertTargetEdgeId={paletteDrag?.edgeId ?? null}
           readOnly={readOnly}
           showMinimap
         />

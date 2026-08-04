@@ -86,6 +86,17 @@
   filter: drop-shadow(0 0 3px color-mix(in srgb, currentColor 35%, transparent));
 }
 
+/*
+ * The edge a palette drop would split. Thicker and tinted rather than dashed:
+ * the card being dragged is already moving, and a second moving thing under it
+ * reads as noise rather than as an answer to "where would this land".
+ */
+.edgeInsertTarget :global(.react-flow__edge-path) {
+  stroke: var(--color-node-selected);
+  stroke-width: 3;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-node-selected) 45%, transparent));
+}
+
 .canvas :global(.react-flow__arrowhead polyline) {
   stroke-dasharray: none;
   stroke-dashoffset: 0;

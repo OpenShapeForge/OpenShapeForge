@@ -171,6 +171,59 @@ Configuring a connector requires the `Platform.ConnectorAdmin` capability, not
 merely a particular caller identity: configuration hands credentials for another
 system to the platform.
 
+A package receives only the secrets **its own contract declares**. The store
+answers with every row an installation holds — which is what key rotation needs
+— and the invocation path narrows that to the contract before anything reaches
+package code. Both halves matter, because the platform keeps rows of its own
+there.
+
+## OAuth
+
+For a provider that speaks OAuth 2.0, the contract declares **where** and the
+platform does **everything else**:
+
+```yaml
+auth:
+  type: oauth2
+  flow: authorizationCode
+  authorizeUrl: https://start.provider.{region}/oauth2/auth
+  tokenUrl: https://start.provider.{region}/oauth2/token
+  clientIdField: clientId          # ordinary config fields, because each
+  clientSecretField: clientSecret  # tenant registers its own application
+```
+
+The platform obtains, stores, refreshes and rotates the tokens; a package is
+handed a `fetch` that already carries the access token and **never receives a
+refresh token at all**. That is strictly less privilege than a package
+authenticating for itself, and it is what makes rotation correct once rather
+than once per connector.
+
+Rotation is not an optional nicety. Some providers issue **single-use** refresh
+tokens and replace them on every refresh — Exact Online among them — so a
+connector that dropped the replacement would authenticate once and fail on its
+next call.
+
+| Decision | Why |
+| --- | --- |
+| Endpoints may interpolate `{fieldKey}` | A provider's endpoint is frequently per-tenant. A literal URL would mean one contract per region, differing only by a hostname. |
+| Interpolated fields must be non-secret | A secret in a URL is written to every log that records the request line. |
+| The client secret field must be `secret: true` | Otherwise it sits in the installation row and is returned by every configuration read. |
+| The token URL's host must be in `network.egress` | The platform performs the exchange through the connector's own allowlist, so a token endpoint it cannot reach is a compile error rather than a runtime mystery. |
+| Tokens live under the reserved `platform.` key prefix | The compiler refuses a contract field in that namespace, and the invocation path withholds it — so a contract can neither shadow the token row nor name its way into reading it. |
+
+**A refresh holds a row lock across the token exchange.** A single-use refresh
+token cannot survive two concurrent refreshes: both callers spend it, one wins,
+and the loser could overwrite the winner's stored set. Optimistic retry is not
+available because the token is already burned by the time the conflict is
+visible. The cost is one database connection held for one HTTPS round trip, once
+per token lifetime per installation — the second waiter re-reads the row and
+finds a valid token rather than issuing a second exchange.
+
+`CONNECTOR_REAUTHORIZATION_REQUIRED` is its own error code, and 409 rather than
+401 over REST. The caller authenticated fine; it is the connector's authorization
+to the provider that lapsed, and a 401 would send a client into its own re-login
+flow, which cannot fix it.
+
 ## Contract evolution
 
 An installation records the contract version and checksum it was configured
@@ -245,12 +298,20 @@ rather than by loosening the in-process path.
 
 ## What does not exist yet
 
-- **Nothing is invoked from a surface.** The executor, loader and reliability
-  policy are in place and tested, but no GraphQL/REST/MCP call dispatches to a
-  package: an authorized MCP tool call reports `CONNECTOR_NOT_EXECUTABLE`.
+- **The OAuth authorize round trip.** The token lifecycle above — storage,
+  refresh, rotation, the bound `fetch` — is in place, but nothing yet walks an
+  operator through the provider's consent screen and writes the first token set.
+  Until that lands, an installation's tokens have to be seeded directly, and a
+  connector with no token set reports `CONNECTOR_REAUTHORIZATION_REQUIRED`.
 - **Events and inbound webhooks.** A platform-owned pipeline with connector
   adapters, designed separately; the vocabulary is reserved and rejected.
 - **Isolated execution**, per the trust model above.
+
+(This section previously said nothing was invoked from a surface. That stopped
+being true when dispatch landed alongside the surfaces in the same change:
+GraphQL, REST and MCP all reach `invokeConnectorOperation`, and
+`CONNECTOR_NOT_EXECUTABLE` now means only that no implementation package
+resolved at boot.)
 
 ## See also
 

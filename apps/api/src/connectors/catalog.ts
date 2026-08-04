@@ -56,6 +56,26 @@ export type ConnectorContract = {
     secretFields: string[];
     schema: Record<string, unknown>;
   };
+  /**
+   * OAuth 2.0, when the contract declares it. Absent means the package
+   * authenticates from its own configuration fields.
+   *
+   * The platform owns the token lifecycle behind this — see `oauth.ts`. A
+   * package is handed a fetch already carrying the access token and never sees
+   * a refresh token, which is what lets a provider that rotates single-use
+   * refresh tokens work at all.
+   */
+  auth?: {
+    type: "oauth2";
+    flow: "authorizationCode";
+    /** May interpolate `{fieldKey}` from non-secret configuration. */
+    authorizeUrl: string;
+    tokenUrl: string;
+    scopes: string[];
+    clientIdField: string;
+    clientSecretField: string;
+    refreshLeewaySeconds: number;
+  };
   network: { egress: string[] };
   operations: ConnectorOperationContract[];
   exposure: {

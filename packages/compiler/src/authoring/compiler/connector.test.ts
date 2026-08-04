@@ -122,6 +122,23 @@ describe("buildConnector — fail closed", () => {
     ).toThrow(/reserved but not implemented/);
   });
 
+  // Secrets are stored one row per (installation, field key), and the platform
+  // keeps rows of its own there. A contract that could name one would either
+  // shadow a token the runtime needs or name its way into reading one.
+  it("rejects a configuration field in the platform-reserved namespace", () => {
+    expect(() =>
+      buildConnector(
+        definition({
+          configuration: {
+            fields: [{ key: "platform.oauth", valueType: "string", secret: true }],
+          },
+        }),
+        "object-store",
+        ORIGIN,
+      ),
+    ).toThrow(/reserved for fields the platform stores/);
+  });
+
   it("rejects a declared events block", () => {
     expect(() =>
       buildConnector(
@@ -489,5 +506,116 @@ describe("buildConnector — timeout budgets", () => {
     expect(() =>
       buildConnector(retryable({ attemptMs: 30_000, totalMs: 999_999 }), "s", ORIGIN),
     ).toThrow(/timeouts\.totalMs 999999; must be <= 300000/);
+  });
+});
+
+/**
+ * The OAuth block, whose whole purpose is that the PLATFORM holds the tokens
+ * and a package never sees one. Everything refused below is refused at compile
+ * time because the alternative surfaces as an opaque provider error during a
+ * token exchange, long after the contract mistake that caused it.
+ */
+describe("buildConnector — oauth", () => {
+  function withAuth(
+    auth: Record<string, unknown>,
+    fields: Record<string, unknown>[] = [
+      { key: "region", valueType: "string" },
+      { key: "clientId", valueType: "string" },
+      { key: "clientSecret", valueType: "string", secret: true },
+    ],
+    egress: string[] = ["*.provider.example"],
+  ) {
+    return definition({
+      configuration: { fields },
+      network: { egress },
+      auth: {
+        type: "oauth2",
+        flow: "authorizationCode",
+        authorizeUrl: "https://auth.provider.example/authorize",
+        tokenUrl: "https://auth.provider.example/token",
+        clientIdField: "clientId",
+        clientSecretField: "clientSecret",
+        ...auth,
+      },
+    } as never);
+  }
+
+  it("normalizes scopes and the refresh leeway", () => {
+    const compiled = buildConnector(withAuth({}), "s", ORIGIN);
+    expect(compiled.auth).toEqual({
+      type: "oauth2",
+      flow: "authorizationCode",
+      authorizeUrl: "https://auth.provider.example/authorize",
+      tokenUrl: "https://auth.provider.example/token",
+      scopes: [],
+      clientIdField: "clientId",
+      clientSecretField: "clientSecret",
+      refreshLeewaySeconds: 60,
+    });
+  });
+
+  it("leaves auth absent when the contract declares none", () => {
+    expect(buildConnector(definition(), "s", ORIGIN).auth).toBeUndefined();
+  });
+
+  // Per-tenant endpoints are the norm, not the exception: one contract per
+  // region would be a copy of the same connector differing by a hostname.
+  it("accepts a per-tenant endpoint template", () => {
+    const compiled = buildConnector(
+      withAuth({ tokenUrl: "https://start.provider.{region}/oauth2/token" }),
+      "s",
+      ORIGIN,
+    );
+    expect(compiled.auth?.tokenUrl).toBe("https://start.provider.{region}/oauth2/token");
+  });
+
+  it("refuses a template naming a field that does not exist", () => {
+    expect(() =>
+      buildConnector(withAuth({ tokenUrl: "https://x.provider.example/{nope}" }), "s", ORIGIN),
+    ).toThrow(/interpolates "\{nope\}".*not a declared configuration field/s);
+  });
+
+  // A secret in a URL is written to every log that records the request line.
+  it("refuses interpolating a secret into an endpoint", () => {
+    expect(() =>
+      buildConnector(
+        withAuth({ tokenUrl: "https://x.provider.example/{clientSecret}" }),
+        "s",
+        ORIGIN,
+      ),
+    ).toThrow(/interpolates the secret field/);
+  });
+
+  it("refuses a client secret held in a non-secret field", () => {
+    expect(() =>
+      buildConnector(
+        withAuth({}, [
+          { key: "clientId", valueType: "string" },
+          { key: "clientSecret", valueType: "string" },
+        ]),
+        "s",
+        ORIGIN,
+      ),
+    ).toThrow(/not marked secret/);
+  });
+
+  it("refuses a client id field that was never declared", () => {
+    expect(() =>
+      buildConnector(withAuth({ clientIdField: "missing" }), "s", ORIGIN),
+    ).toThrow(/auth\.clientIdField "missing".*not a declared configuration field/s);
+  });
+
+  it("refuses a non-https endpoint", () => {
+    expect(() =>
+      buildConnector(withAuth({ tokenUrl: "http://auth.provider.example/token" }), "s", ORIGIN),
+    ).toThrow(/over http\. OAuth/);
+  });
+
+  // The platform performs the exchange through the connector's own allowlist,
+  // so a contract with no egress declares a token endpoint it cannot reach.
+  it("refuses oauth with no egress to reach the provider through", () => {
+    expect(() => buildConnector(withAuth({}, undefined, []), "s", ORIGIN)).toThrow(
+      /but no network\.egress/,
+    );
   });
 });

@@ -24,7 +24,13 @@ export type ConnectorAuditEvent =
   | "connector.secret_set"
   | "connector.enabled"
   | "connector.disabled"
-  | "connector.verified";
+  | "connector.verified"
+  // Written by the platform rather than by a person, so `userId` is null: a
+  // token rotation happens mid-invocation on whoever's behalf the call was
+  // made, and attributing it to that caller would read as an administrative
+  // action they did not take.
+  | "connector.token_refreshed"
+  | "connector.reauthorization_required";
 
 export type ConnectorAuditInput = {
   tenantId: string;

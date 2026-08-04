@@ -39,7 +39,7 @@
  * back: `isEndNode`, then `isTriggerNode`, then the bridge lookup. Those
  * predicates are imported rather than restated so the two cannot drift.
  */
-import { isTriggerNodeType } from "./definition-types.js";
+import { isEntryNodeType } from "./definition-types.js";
 import { getWorkflowNodeBridge } from "./node-bridge.js";
 
 /**
@@ -77,18 +77,16 @@ function isEndNodeType(nodeType: string): boolean {
 }
 
 /**
- * Mirrors `isTriggerNode` in process-runtime.ts: the shared prefix predicate,
- * plus `start`, the one entry node that predates the naming convention.
- */
-function isEntryNodeType(nodeType: string): boolean {
-  return isTriggerNodeType(nodeType) || nodeType === "start";
-}
-
-/**
  * Read against the live bridge registry, so this is only truthful once
  * `registerAllWorkflowNodeBridges()` has run. The module contract calls it from
  * `init`, before the process serves traffic, which is the same guarantee the
  * node catalog store gets.
+ *
+ * Only the executable/unimplemented answer depends on that registry. The first
+ * two clauses read a static set and the runtime's native families, so
+ * `"unsupported"` is the same answer before and after registration — which is
+ * what lets definition validation refuse a graph on it without depending on
+ * boot order. See the severity note in `definition-validation.ts`.
  */
 export function getWorkflowNodeRuntimeSupport(nodeType: string): WorkflowNodeRuntimeSupport {
   if (STRUCTURALLY_UNSUPPORTED_NODE_TYPES.has(nodeType)) return "unsupported";

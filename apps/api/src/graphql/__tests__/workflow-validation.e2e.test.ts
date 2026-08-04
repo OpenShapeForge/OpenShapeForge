@@ -9,28 +9,40 @@
  *
  * **Severity is the contract, not the issue list.** `valid` is false only when
  * an issue is an error, so which rules are errors and which are warnings
- * decides what a caller can save. A node type the catalog does not know is a
- * warning on purpose: a designer may be ahead of the deployment's catalog, and
- * a draft that cannot be saved is a draft that is lost. It still has to be
- * reported, which is why the warning is pinned rather than merely tolerated.
+ * decides what a caller can publish. The two warnings are warnings on purpose,
+ * and both say something about this deployment rather than about the graph: a
+ * node type the catalog does not know may simply mean a designer is ahead of
+ * the catalog, and a catalogued type with no bridge here is what every domain
+ * node pack looks like until a host repo implements it. Both still have to be
+ * reported, which is why the warnings are pinned rather than merely tolerated.
  *
- * **Draft and publish are deliberately asymmetric.** A draft is allowed to be
+ * Every other rule is an error, and each one names a run-time failure it
+ * prevents. The handle rules are the ones worth having a test for: such a graph
+ * is well-formed and walks fine until the unwired branch happens to win, so it
+ * used to publish clean and die later on a path nobody exercised.
+ *
+ * **The three writers are deliberately asymmetric.** A draft is allowed to be
  * broken — half-wired, mid-thought, saved because the author is going home — so
  * `saveWorkflowDefinitionVersion` never validates. A published version is what
- * new runs start from, so publishing the very same version is refused. A patch
- * sits with publish rather than with save: it is a deliberate edit with a known
- * intent, so producing a broken graph means the intent was wrong.
+ * new runs start from, so publishing that very same version is refused on any
+ * error. A patch sits between the two, and `blocksAt` is what places it: it
+ * refuses only the errors that mean the graph is INCOHERENT, because a patch is
+ * an incremental edit and an unwired branch is what a decision node looks like
+ * one gesture after it was dropped on a canvas. Both halves are pinned — the
+ * mid-build patch is written, and the graph it wrote does not publish.
  *
- * **The unchecked properties are pinned too.** Cycles, reachability and the
- * presence of a trigger are outside the pass's documented scope, and a clean
- * result therefore does not mean a workflow that runs. That gap is recorded
- * here so nobody has to rediscover it from a definition that validated and then
- * did nothing.
+ * **What is still not checked is pinned too.** Cycles are outside the pass's
+ * scope, and reachability is inside it only as a warning, so a clean result
+ * still does not mean a workflow that runs. That gap is recorded here so nobody
+ * has to rediscover it from a definition that validated and then did nothing.
  *
  * The node catalog is part of the subject, not scaffolding: an unhydrated store
  * resolves every node type to "unknown", which downgrades the type check to a
  * warning and would let this whole file pass while checking nothing. It is
- * hydrated by the module's own `init`, exactly as it is at boot.
+ * hydrated by the module's own `init`, exactly as it is at boot. The bridge
+ * registry is subject too — `UNIMPLEMENTED_NODE_TYPE` is read off it — and the
+ * same `init` registers it, so what is asserted below is the answer a booted
+ * process gives rather than one an empty registry would.
  *
  * Run (cwd apps/api):
  *   set -o pipefail; bun test src/graphql/__tests__/workflow-validation.e2e.test.ts 2>&1
@@ -338,6 +350,28 @@ const BROKEN_GRAPH = {
   edges: [{ id: "dangling", source: "start", target: "finish" }],
 };
 
+/**
+ * Well-formed, walkable, and one branch short. The decision emits `approved`
+ * and `rejected`; only `approved` is wired, so every run where the condition
+ * holds succeeds and the first one where it does not dies with
+ * NO_EDGE_FOR_HANDLE. This is the graph the orphan-handle promotion exists for.
+ */
+const LATENT_ORPHAN_GRAPH = {
+  nodes: [
+    { id: "start", type: "triggerManual" },
+    {
+      id: "choice",
+      type: "decision",
+      config: { branches: [{ handle: "approved" }], defaultEdgeId: "rejected" },
+    },
+    { id: "finish", type: "end" },
+  ],
+  edges: [
+    { id: "in", source: "start", target: "choice" },
+    { id: "approved", source: "choice", target: "finish", sourceHandle: "approved" },
+  ],
+};
+
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
@@ -435,6 +469,58 @@ describe("validateWorkflowDefinition", () => {
   );
 
   test(
+    "a catalogued node type with no bridge is a warning, so the graph still publishes",
+    async () => {
+      // The distinction that keeps the domain node packs usable. `condition` is
+      // catalogued and has no bridge in this deployment, which is exactly what
+      // a pack node looks like in a host repo that has not implemented it yet.
+      // Refusing here would make shipping a pack pointless; the run fails with
+      // NO_BRIDGE naming the type, which is the honest answer for a capability
+      // nobody supplied.
+      const result = await validate({
+        nodes: [
+          { id: "start", type: "triggerManual" },
+          { id: "gate", type: "condition" },
+          { id: "finish", type: "end" },
+        ],
+        edges: [
+          { id: "in", source: "start", target: "gate" },
+          { id: "out", source: "gate", target: "finish" },
+        ],
+      });
+
+      expect(result.valid).toBe(true);
+      expect(codesOf(result, "warning")).toEqual(["UNIMPLEMENTED_NODE_TYPE"]);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "a node type the engine cannot run at all is an error, bridge or no bridge",
+    async () => {
+      // `join` describes fan-out. The engine holds a single cursor and
+      // `workflow.node_states` has no branch identity, so no bridge would make
+      // this graph runnable — which is why it sits on the other side of the
+      // line from `condition` above.
+      const result = await validate({
+        nodes: [
+          { id: "start", type: "triggerManual" },
+          { id: "gather", type: "join" },
+          { id: "finish", type: "end" },
+        ],
+        edges: [
+          { id: "in", source: "start", target: "gather" },
+          { id: "out", source: "gather", target: "finish" },
+        ],
+      });
+
+      expect(result.valid).toBe(false);
+      expect(codesOf(result, "error")).toEqual(["UNSUPPORTED_NODE_TYPE"]);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
     "two edges on one source handle are ambiguous, and an absent handle IS the default",
     async () => {
       const result = await validate({
@@ -451,8 +537,10 @@ describe("validateWorkflowDefinition", () => {
         ],
       });
 
-      expect(result.valid).toBe(true);
-      expect(codesOf(result, "warning")).toEqual(["AMBIGUOUS_EDGE_HANDLE"]);
+      // An error: `selectNextEdge` raises AMBIGUOUS_EDGES_FOR_HANDLE and fails
+      // the run rather than choosing an arm, so this graph cannot be walked.
+      expect(result.valid).toBe(false);
+      expect(codesOf(result, "error")).toEqual(["AMBIGUOUS_EDGE_HANDLE"]);
     },
     TEST_TIMEOUT,
   );
@@ -478,10 +566,11 @@ describe("validateWorkflowDefinition", () => {
         ],
       });
 
-      expect(result.valid).toBe(true);
-      // Both declared handles are wired, so the sole warning is the stray edge:
+      // A dangling reference, the same class as UNKNOWN_EDGE_TARGET.
+      expect(result.valid).toBe(false);
+      // Both declared handles are wired, so the sole error is the stray edge:
       // an exact list also proves the node-side rule did not fire by accident.
-      expect(codesOf(result, "warning")).toEqual(["ORPHAN_EDGE_HANDLE"]);
+      expect(codesOf(result, "error")).toEqual(["ORPHAN_EDGE_HANDLE"]);
     },
     TEST_TIMEOUT,
   );
@@ -508,11 +597,11 @@ describe("validateWorkflowDefinition", () => {
         ],
       });
 
-      expect(result.valid).toBe(true);
+      expect(result.valid).toBe(false);
       // Three unwired handles: the two branches declared through the fallback
       // spellings plus the named default. The count is what pins the
       // `handle ?? targetEdgeId ?? id` chain — losing a link would leave two.
-      expect(codesOf(result, "warning")).toEqual([
+      expect(codesOf(result, "error")).toEqual([
         "ORPHAN_NODE_HANDLE",
         "ORPHAN_NODE_HANDLE",
         "ORPHAN_NODE_HANDLE",
@@ -536,22 +625,19 @@ describe("validateWorkflowDefinition", () => {
         ],
       });
 
-      expect(result.valid).toBe(true);
+      expect(result.valid).toBe(false);
       // The no-match fallback exists whether or not the author named it.
-      expect(codesOf(result, "warning")).toEqual(["ORPHAN_NODE_HANDLE"]);
+      expect(codesOf(result, "error")).toEqual(["ORPHAN_NODE_HANDLE"]);
     },
     TEST_TIMEOUT,
   );
 
   test(
-    "cycles, unreachable nodes and a missing trigger are NOT checked",
+    "an edge into a trigger node is an error, an edge out of one is how graphs begin",
     async () => {
-      // Guarding the documented scope of the pass, not endorsing it. It answers
-      // one question — can this graph be walked at all — and these three graphs
-      // are walkable and useless. Recorded here so a clean result is never read
-      // as "this workflow runs", and so that widening the scope later has to
-      // come past this test rather than surprise someone.
-      const cyclic = await validate({
+      // A trigger is an entry point, never a step: the engine raises
+      // ENTRY_TYPE_MISMATCH the moment a walk arrives at one along an edge.
+      const backEdge = await validate({
         nodes: [
           { id: "start", type: "triggerManual" },
           { id: "finish", type: "end" },
@@ -561,8 +647,26 @@ describe("validateWorkflowDefinition", () => {
           { id: "back", source: "finish", target: "start" },
         ],
       });
-      expect(cyclic.valid).toBe(true);
 
+      expect(backEdge.valid).toBe(false);
+      expect(codesOf(backEdge, "error")).toEqual(["TRIGGER_NOT_ENTRY"]);
+      expect(
+        backEdge.issues.find((issue) => issue.code === "TRIGGER_NOT_ENTRY")?.edgeId,
+      ).toBe("back");
+
+      // The contrast, because a rule written against the wrong end of the edge
+      // would refuse every workflow ever drawn.
+      expect(codesOf(await validate(LINEAR_GRAPH), "error")).toEqual([]);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "a node no entry node reaches is a warning, and so is a graph with no trigger",
+    async () => {
+      // An unreached node is dead weight rather than a failure — the walk never
+      // arrives — and a half-drawn draft is indistinguishable from a finished
+      // graph with a leftover node, so refusing would refuse ordinary work.
       const unreachable = await validate({
         nodes: [
           { id: "start", type: "triggerManual" },
@@ -572,12 +676,98 @@ describe("validateWorkflowDefinition", () => {
         edges: [{ id: "start-finish", source: "start", target: "finish" }],
       });
       expect(unreachable.valid).toBe(true);
+      expect(codesOf(unreachable, "warning")).toEqual(["UNREACHABLE_NODE"]);
+      expect(
+        unreachable.issues.find((issue) => issue.code === "UNREACHABLE_NODE")?.nodeId,
+      ).toBe("island");
 
+      // A graph with no entry node has no finding of its own: every node comes
+      // back unreachable instead, which names what an author has to attach.
+      // `pickEntryNode` answers null for such a graph and the run is a no-op,
+      // so this stays a warning.
       const triggerless = await validate({
         nodes: [{ id: "finish", type: "end" }],
         edges: [],
       });
       expect(triggerless.valid).toBe(true);
+      expect(codesOf(triggerless, "warning")).toEqual(["UNREACHABLE_NODE"]);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "a decision authored with the `conditions` alias is read the same as `branches`",
+    async () => {
+      // Against the real catalog, so the alias comes from `flow/decision.yaml`
+      // rather than from a fixture. The runtime accepts `conditions` as a
+      // spelling of `branches` and canonicalises it before the bridge runs, so
+      // a validator reading the raw key saw a decision with no branches: the
+      // unwired handle went unreported, and the wired one was reported as an
+      // edge to a handle the node never emits — a false error that, now that
+      // these are errors, would refuse to publish a correct workflow.
+      const wired = await validate({
+        nodes: [
+          { id: "start", type: "triggerManual" },
+          {
+            id: "choice",
+            type: "decision",
+            config: { conditions: [{ handle: "approved" }], defaultEdgeId: "rejected" },
+          },
+          { id: "finish", type: "end" },
+        ],
+        edges: [
+          { id: "in", source: "start", target: "choice" },
+          { id: "approved", source: "choice", target: "finish", sourceHandle: "approved" },
+          { id: "rejected", source: "choice", target: "finish", sourceHandle: "rejected" },
+        ],
+      });
+      expect(wired.valid).toBe(true);
+      expect(wired.issues).toEqual([]);
+
+      // And the other direction: the aliased branch's handle is now owed an
+      // edge, so dropping it is reported exactly as the canonical spelling is.
+      const unwired = await validate({
+        nodes: [
+          { id: "start", type: "triggerManual" },
+          {
+            id: "choice",
+            type: "decision",
+            config: { conditions: [{ handle: "approved" }], defaultEdgeId: "rejected" },
+          },
+          { id: "finish", type: "end" },
+        ],
+        edges: [
+          { id: "in", source: "start", target: "choice" },
+          { id: "rejected", source: "choice", target: "finish", sourceHandle: "rejected" },
+        ],
+      });
+      expect(codesOf(unwired, "error")).toEqual(["ORPHAN_NODE_HANDLE"]);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "cycles are still NOT checked",
+    async () => {
+      // Guarding what is left of the pass's documented scope, not endorsing it.
+      // This graph loops forever and validates clean; the engine's visit cap is
+      // the only thing that stops such a run. Recorded here so a clean result
+      // is never read as "this workflow ends".
+      const cyclic = await validate({
+        nodes: [
+          { id: "start", type: "triggerManual" },
+          { id: "left", type: "timer" },
+          { id: "right", type: "timer" },
+        ],
+        edges: [
+          { id: "in", source: "start", target: "left" },
+          { id: "there", source: "left", target: "right" },
+          { id: "back", source: "right", target: "left" },
+        ],
+      });
+
+      expect(cyclic.valid).toBe(true);
+      expect(codesOf(cyclic, "warning")).toEqual([]);
     },
     TEST_TIMEOUT,
   );
@@ -625,6 +815,46 @@ describe("saving versus publishing", () => {
       });
       expect(data.publishWorkflowDefinitionVersion.version).toBe(2);
       expect((await readDefinition(created.id)).publishedVersion).toBe(2);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "a graph with a latent unwired branch saves, and is refused at publish",
+    async () => {
+      // The behaviour change, end to end. This graph is well-formed: nothing
+      // dangles, every id resolves, and it ran to completion for every input
+      // that took the wired branch. It published clean while the orphan-handle
+      // rules were warnings, and the run it eventually killed failed far from
+      // the edit that caused it.
+      const created = await createDefinition("publish-refuses-latent-orphan");
+      const saved = await saveDraft(created, LATENT_ORPHAN_GRAPH);
+
+      // Saving is untouched, and that asymmetry is deliberate rather than an
+      // oversight: a draft is where an author leaves work half-wired, so a rule
+      // that blocked the save would lose the graph instead of fixing it.
+      expect(saved.latestVersion).toBe(1);
+
+      const code = await expectErrorCode(PUBLISH_VERSION, {
+        input: { definitionId: created.id, version: 1 },
+      });
+      expect(code).toBe("BAD_USER_INPUT");
+      expect((await readDefinition(created.id)).publishedVersion).toBeNull();
+
+      // Wire the branch and the same version's successor publishes, so what is
+      // being refused is the missing edge and not the decision node.
+      const repaired = await saveDraft(saved, {
+        ...LATENT_ORPHAN_GRAPH,
+        edges: [
+          ...LATENT_ORPHAN_GRAPH.edges,
+          { id: "rejected", source: "choice", target: "finish", sourceHandle: "rejected" },
+        ],
+      });
+      expect(repaired.latestVersion).toBe(2);
+      const data = await expectData(PUBLISH_VERSION, {
+        input: { definitionId: created.id, version: 2 },
+      });
+      expect(data.publishWorkflowDefinitionVersion.version).toBe(2);
     },
     TEST_TIMEOUT,
   );
@@ -758,6 +988,60 @@ describe("patchWorkflowDefinition", () => {
   );
 
   test(
+    "a patch may leave a decision node unwired, and that graph then refuses to publish",
+    async () => {
+      // The mid-build gesture. A designer drops a decision on the canvas and
+      // patches it in; its branches are wired on the next gesture. The graph
+      // will not run yet, and `ORPHAN_NODE_HANDLE` says so — but the patch is
+      // an incremental edit, so refusing the WRITE would mean the canvas cannot
+      // save between two gestures and the node is lost on a refresh.
+      const definition = await definitionHolding("patch-mid-build", LINEAR_GRAPH);
+      const data = await expectData(PATCH_DEFINITION, {
+        input: {
+          definitionId: definition.id,
+          expectedUpdatedAt: definition.updatedAt,
+          operations: [
+            {
+              op: "upsertNode",
+              nodeId: "choice",
+              node: {
+                id: "choice",
+                type: "decision",
+                config: { branches: [], defaultEdgeId: "default" },
+              },
+            },
+            // Upsert by id, so the trigger's existing edge is re-pointed at the
+            // new node rather than joined by a second edge on the same handle.
+            {
+              op: "upsertEdge",
+              edgeId: "start-finish",
+              edge: { id: "start-finish", source: "start", target: "choice" },
+            },
+          ],
+        },
+      });
+
+      const patch = data.patchWorkflowDefinition;
+      expect(patch.savedDefinition.latestVersion).toBe(2);
+      // Written, and reported. The issue is not suppressed to make the write
+      // legal — a designer still has to be told the branch needs an edge.
+      expect(patch.validation.valid).toBe(false);
+      expect(
+        patch.validation.issues.filter((issue: { severity: string }) => issue.severity === "error"),
+      ).toEqual([{ severity: "error", code: "ORPHAN_NODE_HANDLE" }]);
+
+      // The other end of the bargain: what was storable is still not runnable,
+      // so publishing that very version is refused.
+      const code = await expectErrorCode(PUBLISH_VERSION, {
+        input: { definitionId: definition.id, version: 2 },
+      });
+      expect(code).toBe("BAD_USER_INPUT");
+      expect((await readDefinition(definition.id)).publishedVersion).toBeNull();
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
     "a patch that would produce an invalid graph is refused and writes nothing",
     async () => {
       const definition = await definitionHolding("patch-invalid-result", LINEAR_GRAPH);
@@ -776,8 +1060,10 @@ describe("patchWorkflowDefinition", () => {
       });
 
       // The asymmetry with a hand-authored draft: the same graph would have
-      // been stored by saveWorkflowDefinitionVersion. A patch states an intent,
-      // so a broken result means the intent was wrong.
+      // been stored by saveWorkflowDefinitionVersion. An edge to a node that is
+      // not there is INCOHERENT rather than unfinished — no later gesture makes
+      // it mean something — so unlike the mid-build case above it refuses the
+      // write itself.
       expect(code).toBe("BAD_USER_INPUT");
       expect((await readDefinition(definition.id)).latestVersion).toBe(1);
     },

@@ -324,9 +324,15 @@ export async function patchWorkflowDefinition(
     };
   }
 
-  const firstError = validation.issues.find((entry) => entry.severity === "error");
-  if (firstError) {
-    throw new WorkflowDefinitionError("BAD_USER_INPUT", firstError.message);
+  // Only the errors that mean the graph is INCOHERENT. A patch is an
+  // incremental edit — drop a decision node now, wire its branches next — so
+  // refusing every error would refuse the ordinary mid-build state: an unwired
+  // handle, a node type this deployment cannot run, an edge into a trigger.
+  // Those are real and they refuse the publish; they must not refuse the write,
+  // or the designer this endpoint exists for cannot save between two gestures.
+  const blocking = validation.issues.find((entry) => entry.blocksAt === "write");
+  if (blocking) {
+    throw new WorkflowDefinitionError("BAD_USER_INPUT", blocking.message);
   }
 
   const savedDefinition = await saveWorkflowDefinitionVersion(db, session, {

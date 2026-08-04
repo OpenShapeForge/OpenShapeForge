@@ -79,6 +79,12 @@
  * The same path covers TRIGGER_FANOUT, NO_EDGE_FOR_HANDLE and
  * EDGE_TARGET_MISSING; the ambiguity test below is what pins all of them.
  *
+ * Authoring refuses such a graph too now, at publish. That does not make this
+ * layer redundant: an already-published version is never re-validated, so the
+ * graphs published before that rule existed still reach the engine, and the
+ * ambiguity test writes its published row directly to keep proving they are
+ * refused.
+ *
  * ## Why it carries its own harness
  *
  * `e2e/harness.ts` drives the shared development database and cleans up through
@@ -366,6 +372,55 @@ async function publishGraph(
   // A run may only start from a PUBLISHED version. A saved draft is a draft,
   // and starting one would execute work nobody released.
   expect(published.publishedAt).not.toBeNull();
+
+  return created.id;
+}
+
+/**
+ * Save a graph and mark its version published by writing the row.
+ *
+ * Needed for AMBIGUOUS_GRAPH alone. `definition-validation.ts` now raises
+ * AMBIGUOUS_EDGE_HANDLE as an error, so `assertPublishable` refuses that graph
+ * and the mutation cannot produce the definition this file's refusal test needs.
+ * That is the validation rule doing its job, and it does not retire the test:
+ * publishing is idempotent and deliberately skips validation for a version that
+ * is already published, so every graph published before the rule existed is
+ * still out there, still startable, and the engine still has to refuse it at run
+ * time rather than pick a branch. Writing the row is how this file reproduces
+ * one of those.
+ *
+ * Saving is untouched by validation and stays on the real mutation, so only the
+ * publish gate is stepped around.
+ */
+async function publishStoredGraphUnvalidated(
+  session: WorkflowSession,
+  name: string,
+  graph: unknown,
+): Promise<string> {
+  const created = (
+    await expectData(session, CREATE_DEFINITION, { input: { name } })
+  ).createWorkflowDefinition as { id: string; updatedAt: string };
+
+  const saved = (
+    await expectData(session, SAVE_VERSION, {
+      input: {
+        definitionId: created.id,
+        expectedUpdatedAt: created.updatedAt,
+        definition: graph,
+      },
+    })
+  ).saveWorkflowDefinitionVersion as { latestVersion: number };
+  expect(saved.latestVersion).toBe(1);
+
+  await withDbSession(suite.runtime.db, session, async (trx, scoped) => {
+    await trx
+      .updateTable("workflow.definition_versions")
+      .set({ published_at: new Date(), published_by: scoped.userId })
+      .where("tenant_id", "=", scoped.tenantId)
+      .where("definition_id", "=", created.id)
+      .where("version", "=", 1)
+      .execute();
+  });
 
   return created.id;
 }
@@ -835,7 +890,13 @@ describe("workflow engine", () => {
     "two edges sharing one output handle refuse the run rather than picking a branch",
     async () => {
       const session = writerSession();
-      const definitionId = await publishGraph(session, "ambiguous", AMBIGUOUS_GRAPH);
+      // Not `publishGraph`: authoring refuses this graph now, and the engine's
+      // refusal still has to hold for the ones published before it did.
+      const definitionId = await publishStoredGraphUnvalidated(
+        session,
+        "ambiguous",
+        AMBIGUOUS_GRAPH,
+      );
 
       const queued = await runWorkflow(session, definitionId, { verdict: "approve" });
 

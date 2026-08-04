@@ -91,6 +91,7 @@ a shared harness:
 | `entity-events.e2e.test.ts` | each mutation appends exactly one `created`/`updated`/`deleted` journal event; reads append none; sequences increase |
 | `entity-security.e2e.test.ts` | unauthenticated rejection; cross-tenant RLS invisibility; cross-tenant deletes fail and journal nothing |
 | `transport-auth.e2e.test.ts` | public health query; invalid bearer fails closed; real Keycloak password-grant token drives CRUD (skipped unless bearer verification is configured — see below) |
+| `control-provisioning.e2e.test.ts` | tenant → root Organization, sub-organisation → child Organization, both through the real SPI, then RLS isolation of the provisioned tenant (skipped unless the control plane is configured — see below) |
 | `coverage.e2e.test.ts` | backstop: every `generatedCrud` entity is exercised |
 | `e2e/harness.ts` | transport, auth helpers, request/event capture, describe/test wrappers, cleanup lifecycle |
 | `e2e/entity-factory.ts` | manifest-driven row factory (recursively satisfies required FKs, mirrors the engine's column rules) |
@@ -127,6 +128,30 @@ Properties worth knowing:
 - Keycloak knobs: `E2E_KEYCLOAK_CLIENT_ID` (default `openshapeforge-gateway`),
   `E2E_KEYCLOAK_CLIENT_SECRET` (`dev-secret`), `E2E_KEYCLOAK_USERNAME`
   (`acme-directie`), `E2E_KEYCLOAK_PASSWORD` (`test`).
+- **The provisioning tests are opt-in the same way**, and for the same reason —
+  they reach a real Keycloak through the identity-configuration SPI, so without
+  one they would prove nothing. They skip unless the control plane is configured
+  *and* an operator token can be obtained from the **control** realm:
+
+  ```sh
+  export OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL=http://localhost:8181
+  export KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API=openshapeforge-auth-api-secret
+  export OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER=http://localhost:8181/realms/openshapeforge-control
+  export OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI=$OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER/protocol/openid-connect/certs
+  export OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID=openshapeforge-admin-gateway
+  ```
+
+  Control-realm knobs mirror the tenant ones: `E2E_CONTROL_CLIENT_ID`,
+  `E2E_CONTROL_CLIENT_SECRET` (`admin-dev-secret`), `E2E_CONTROL_USERNAME`
+  (`platform-operator`), `E2E_CONTROL_PASSWORD` (`test`). The suite creates a
+  tenant with a run-random slug and deletes both the Organizations and the
+  registry rows afterwards, so repeated runs do not accumulate tenants — the
+  control surface has no delete of its own, by design.
+- **Point `DATABASE_URL` at the restricted role** (`openshapeforge_app`) to
+  exercise the RLS assertions for real. The privileged `openshapeforge` role in
+  the compose stack is `SUPERUSER`, which bypasses row-level security outright,
+  so a cross-tenant test that passes under it has only proven the application's
+  own `WHERE` clause.
 
 ## HTML report
 

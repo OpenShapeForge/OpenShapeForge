@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Keep this import before Tailwind's `@source`: CSS imports
+ * after other at-rules can be dropped by the dev CSS pipeline, leaving runtime
+ * `--color-*` variables undefined.
+ *
+ * Path is relative rather than `@openshapeforge/ui/tokens.css` so bundlers that
+ * do not read package.json `exports` for CSS `@import` still resolve it. Same
+ * reasoning, same depth, as apps/web/src/app/globals.css.
+ */
+@import "../../../../packages/ui/src/tokens/index.css";
+
+/*
+ * Shared @openshapeforge/ui components live in a workspace package, so Tailwind
+ * must scan that source too. Without this, package-only arbitrary utilities are
+ * missing from the build.
+ */
+@source "../../../../packages/ui/src";
+
+/*
+ * NOT a copy of apps/web's globals.css, deliberately.
+ *
+ * That file carries ~200 lines of primitive and semantic token plumbing
+ * (`--primitive-*`, a large `@theme inline` block, a dark-mode override set)
+ * built up for the generated CRUD screens. Duplicating it here would fork the
+ * design system: two files, both hand-maintained, silently drifting, and the
+ * admin copy tested by nobody.
+ *
+ * The control plane instead consumes @openshapeforge/ui's tokens DIRECTLY as
+ * `var(--color-*)` in arbitrary-value utilities — which is exactly the idiom
+ * the ui package's own components use, so the shell and the components it
+ * renders resolve the same variables from the same file. When apps/admin grows
+ * enough surface to need semantic aliases, the right move is to lift them into
+ * @openshapeforge/ui where both apps get them, not to copy apps/web's block.
+ */
+
+@layer base {
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif);
+  }
+}

@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  generateAllKeycloakRealmArtifacts,
   generateKeycloakRealmArtifacts,
   isDevRealm,
+  keycloakRealmOutputPath,
   normalizeKeycloakRoleName,
   resolveClientSecret,
 } from "./keycloak.js";
@@ -353,5 +355,211 @@ describe("generated dev realm", () => {
     );
     expect(svc).toBeDefined();
     expect(svc!.clientRoles?.["realm-management"]).toContain("manage-realm");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Multi-realm generation (#288)
+// ---------------------------------------------------------------------------
+
+describe("keycloakRealmOutputPath", () => {
+  it("names the file after the realm", () => {
+    expect(keycloakRealmOutputPath("openshapeforge")).toBe(
+      "keycloak/openshapeforge-realm.json",
+    );
+    expect(keycloakRealmOutputPath("openshapeforge-control")).toBe(
+      "keycloak/openshapeforge-control-realm.json",
+    );
+  });
+
+  // The realm name is authored YAML spliced into an output path. Without this
+  // the authoring decides where on disk the compiler writes — outside the one
+  // root check:generated polices, where no gate can see it.
+  it.each(["../escape", "a/b", "a\\b", ".hidden", "", "with space"])(
+    "refuses %p as a filename segment",
+    (name) => {
+      expect(() => keycloakRealmOutputPath(name)).toThrow(
+        /cannot be used as an output filename/,
+      );
+    },
+  );
+});
+
+describe("realm-derived output path", () => {
+  it("emits to the path named by the realm, not a fixed one", () => {
+    const artifacts = generateKeycloakRealmArtifacts(
+      [],
+      devConfig({}, { name: "some-other-realm" }),
+    );
+    expect(artifacts.map((a) => a.path)).toEqual([
+      "keycloak/some-other-realm-realm.json",
+    ]);
+  });
+
+  it("falls back to the default realm name when none is authored", () => {
+    const config = devConfig();
+    delete config.realm;
+    expect(generateKeycloakRealmArtifacts([], config)[0]!.path).toBe(
+      "keycloak/openshapeforge-realm.json",
+    );
+  });
+});
+
+describe("generateAllKeycloakRealmArtifacts", () => {
+  function controlConfig(): AuthorizationConfigFile {
+    // Shaped like the real control realm: no entityRoleClient, one gateway.
+    return {
+      schemaVersion: 2,
+      kind: "authorizationConfig",
+      realm: { name: "openshapeforge-control", sslRequired: "none" },
+      keycloak: {
+        clients: [
+          {
+            id: "openshapeforge-admin-gateway",
+            kind: "gateway",
+            devSecret: "admin-dev-secret",
+            redirectUris: ["http://localhost:3002/*"],
+            webOrigins: ["http://localhost:3002"],
+          },
+        ],
+      },
+      realmRoles: { "platform-operator": { description: "Platform operator" } },
+    };
+  }
+
+  it("emits one file per authored realm, from one pass over the contracts", () => {
+    const contracts = [entityWithReadRoles("A", "a", ["Cases.All.Read"])];
+    const artifacts = generateAllKeycloakRealmArtifacts(contracts, [
+      devConfig({}, { name: "openshapeforge" }),
+      controlConfig(),
+    ]);
+
+    expect(artifacts.map((a) => a.path)).toEqual([
+      "keycloak/openshapeforge-realm.json",
+      "keycloak/openshapeforge-control-realm.json",
+    ]);
+  });
+
+  // The realms are generated from ONE list of compiled contracts. A realm that
+  // names no entityRoleClient must take nothing from them — otherwise the
+  // control realm ships the tenant realm's entity roles on a client it never
+  // declares, and Keycloak's strict composite validation is the only thing
+  // between that and a broken import.
+  it("gives entity-derived roles only to the realm that names an entityRoleClient", () => {
+    const contracts = [entityWithReadRoles("A", "a", ["Cases.All.Read"])];
+    const [tenant, control] = generateAllKeycloakRealmArtifacts(contracts, [
+      devConfig({}, { name: "openshapeforge" }),
+      controlConfig(),
+    ]).map((artifact) => JSON.parse(artifact.contents) as {
+      realm: string;
+      roles: { client: Record<string, unknown[]> };
+    });
+
+    expect(tenant!.realm).toBe("openshapeforge");
+    expect(tenant!.roles.client["erp-provider"]).toHaveLength(1);
+    expect(control!.realm).toBe("openshapeforge-control");
+    expect(control!.roles.client).toEqual({});
+  });
+
+  // Same output path, so one would silently overwrite the other — handing a
+  // realm another realm's clients, secrets and users.
+  it("refuses two documents that declare the same realm", () => {
+    expect(() =>
+      generateAllKeycloakRealmArtifacts([], [devConfig(), devConfig()]),
+    ).toThrow(/Two authorizationConfig documents declare realm "openshapeforge-dev"/);
+  });
+
+  it("skips a null/absent config without emitting anything for it", () => {
+    const artifacts = generateAllKeycloakRealmArtifacts([], [null, controlConfig()]);
+    expect(artifacts.map((a) => a.path)).toEqual([
+      "keycloak/openshapeforge-control-realm.json",
+    ]);
+  });
+
+  // The secret guard is per-realm and mode-driven, so making generation plural
+  // must not let a second realm slip past it.
+  it("still refuses a dev-only secret on a non-dev realm, for the second realm too", () => {
+    expect(() =>
+      generateAllKeycloakRealmArtifacts(
+        [],
+        [devConfig({}, { name: "tenant-prod" }), controlConfig()],
+        "production",
+      ),
+    ).toThrow(/only a devSecret is configured/);
+  });
+});
+
+describe("a realm that does not participate in entity role generation", () => {
+  function noEntityClientConfig(
+    realmRoles: AuthorizationConfigFile["realmRoles"] = {},
+  ): AuthorizationConfigFile {
+    return {
+      schemaVersion: 2,
+      kind: "authorizationConfig",
+      realm: { name: "control-test" },
+      keycloak: {
+        clients: [{ id: "svc", kind: "serviceAccount", devSecret: "s" }],
+      },
+      realmRoles,
+    };
+  }
+
+  it("emits no client roles even when contracts carry entity authorizations", () => {
+    const contracts = [entityWithReadRoles("A", "a", ["Cases.All.Read"])];
+    const realm = JSON.parse(
+      generateKeycloakRealmArtifacts(contracts, noEntityClientConfig())[0]!.contents,
+    ) as { roles: { client: Record<string, unknown[]> } };
+    expect(realm.roles.client).toEqual({});
+  });
+
+  // `includes` expands entity-derived composites onto the entity-role client.
+  // With no such client the pattern resolves to nothing, which would read as a
+  // grant while conferring none — fail instead of emitting the empty composite.
+  it("refuses a realm role that uses `includes`", () => {
+    const config = noEntityClientConfig({
+      operator: { description: "Operator", includes: ["*:full"] },
+    });
+    expect(() => generateKeycloakRealmArtifacts([], config)).toThrow(
+      /uses `includes`.*authors no.*entityRoleClient/s,
+    );
+  });
+});
+
+describe("generated control realm", () => {
+  const realm = JSON.parse(
+    readFileSync(
+      join(import.meta.dir, "../../../../../keycloak/openshapeforge-control-realm.json"),
+      "utf8",
+    ),
+  ) as {
+    realm: string;
+    organizationsEnabled?: boolean;
+    clients: Array<{ clientId: string; redirectUris?: string[]; webOrigins?: string[] }>;
+    roles: { realm: Array<{ name: string }>; client: Record<string, unknown[]> };
+    users: Array<{ username: string; attributes?: Record<string, string[]> }>;
+  };
+
+  test("is a separate realm carrying no entity-derived client roles", () => {
+    expect(realm.realm).toBe("openshapeforge-control");
+    expect(realm.roles.client).toEqual({});
+  });
+
+  test("declares the platform operator realm role", () => {
+    expect(realm.roles.realm.map((r) => r.name)).toContain("platform-operator");
+  });
+
+  // Operators administer tenants; they are not IN one. A `tid` here would put a
+  // control-plane identity inside a tenant's isolation boundary.
+  test("holds no tenant users — no user carries a tid", () => {
+    expect(realm.users.every((u) => u.attributes?.tid === undefined)).toBe(true);
+  });
+
+  test("exposes exactly one gateway client, with concrete local-dev origins", () => {
+    expect(realm.clients).toHaveLength(1);
+    const gw = realm.clients[0]!;
+    expect(gw.clientId).toBe("openshapeforge-admin-gateway");
+    for (const value of [...(gw.redirectUris ?? []), ...(gw.webOrigins ?? [])]) {
+      expect(value.startsWith("http://localhost:")).toBe(true);
+    }
   });
 });

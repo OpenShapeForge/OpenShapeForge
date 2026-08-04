@@ -20,6 +20,7 @@ import { headersFromFastify } from "../http/headers.js";
 import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
 import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
+import { registerControlRestRoutes } from "../control/rest-routes.js";
 import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
 import { initRuntimeModules, loadRuntimeModules, type ModuleRegistry } from "../modules/registry.js";
 import {
@@ -324,6 +325,10 @@ export function createApiApp(
       config: readConnectorRuntimeConfig(),
     });
     registerGeneratedMcpServer(routes, dbOptions);
+    // The tenant control plane, on its own mount and its own realm. Registered
+    // unconditionally so an unconfigured deployment answers 503 naming what is
+    // missing rather than 404, which reads like a version mismatch.
+    registerControlRestRoutes(routes, dbOptions);
 
     for (const module of initialised.loaded) {
       module.restRoutes?.(routes, dbOptions);

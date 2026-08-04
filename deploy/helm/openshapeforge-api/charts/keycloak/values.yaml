@@ -85,6 +85,30 @@ ingress:
   enabled: false
   className: ""
   annotations: {}
+  # The realm whose OIDC surface should be public. Set this and leave each host's
+  # `paths` unset, and the chart routes exactly four prefixes:
+  #
+  #   /realms/<realm>/.well-known    discovery
+  #   /realms/<realm>/protocol       authorize, token, certs, userinfo, logout
+  #   /realms/<realm>/login-actions  the login form's POST targets
+  #   /resources                     login theme assets
+  #
+  # What that leaves unrouted is the point. `/admin` and `/realms/master` were
+  # already off the internet; so now is `/realms/<realm>/openshapeforge/*`, the
+  # identity-configuration SPI. Its only caller is `apps/api`, which reaches it
+  # in-cluster with the `openshapeforge-auth-api` service-account credential, and
+  # a 2026-07-27 review found it internet-reachable behind the broader
+  # `/realms/<realm>` prefix this replaces.
+  publicRealm: ""
+  # Explicit prefixes per host, overriding the derivation above. A prefix that
+  # would also route the SPI — `/`, `/realms`, `/realms/<realm>`, or anything
+  # naming the `openshapeforge` segment — FAILS the render rather than quietly
+  # publishing it. Kubernetes matches a Prefix path segment by segment, so
+  # `/realms/<realm>` really does match `/realms/<realm>/openshapeforge/...`.
+  #
+  #   hosts:
+  #     - host: auth.example.com
+  #       paths: [/realms/openshapeforge/protocol, /resources]
   hosts: []
   tls: []
   # Merged in (never overriding ingress.annotations) whenever TLS is configured.

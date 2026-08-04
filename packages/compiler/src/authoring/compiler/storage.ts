@@ -57,25 +57,20 @@ export function resolveStorageColumns(
     });
   }
 
-  // belongsTo FK columns.
-  //
-  // Tenant is special: the user-facing tenant identifier across the system
-  // (JWT `tid` claim, RLS `app.tenant_id` session var, `entity_row_access.group_id`)
-  // is the tenant *slug*, not the synthetic UUID primary key. So a `belongsTo: Tenant`
-  // FK is emitted as `text not null` referencing `tenants(slug)`, not `uuid` referencing
-  // `tenants(id)`. This keeps tenant-scoped tables joinable directly against the slug
-  // the JWT delivers, instead of forcing a slug→uuid lookup on every authenticated
-  // request. See generators/db.ts for the matching FK target column.
+  // belongsTo FK columns. Every one is a nullable uuid pointing at the target's
+  // `id`; tenancy is not modelled as a relationship here. A tenant-scoped
+  // entity gets its `tenant_id` uuid column injected by ../backend-manifest.ts,
+  // which also force-overrides the type, so a `belongsTo: Tenant` would be both
+  // redundant and unable to change the outcome.
   for (const rel of relationships) {
     if (rel.kind === "belongsTo" && rel.foreignKey) {
       validateColumnIdentifier(rel.foreignKey, `belongsTo "${rel.key}" foreignKey`);
       if (!columns.some((c) => c.column === rel.foreignKey)) {
-        const isTenantFk = rel.target === "Tenant";
         columns.push({
           field: rel.key + "Id",
           column: rel.foreignKey,
-          type: isTenantFk ? "text" : "uuid",
-          nullable: !isTenantFk,
+          type: "uuid",
+          nullable: true,
           storageClass: "core",
         });
       }

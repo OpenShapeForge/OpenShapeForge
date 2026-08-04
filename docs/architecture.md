@@ -31,7 +31,7 @@ Generated artifacts (all gitignored; reproducible)
   apps/api/src/generated/rest/openapi.json   OpenAPI 3.1 for opted-in entities
   apps/api/src/generated/mcp/tools.json      MCP tool catalog (field schemas)
   packages/compiler/config/referentiedata/core-by-groep.json
-  keycloak/openshapeforge-realm.json         realm import for the compose stack
+  keycloak/<realm>-realm.json                one realm import per authored realm
   apps/web/src/app/(generated)/*             CRUD pages (list/detail/create/edit)
   apps/web/src/actions/generated/*           per-entity server actions
   apps/web/src/compiler/*                    entity manifests + field contract

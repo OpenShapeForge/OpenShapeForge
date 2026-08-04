@@ -15,6 +15,81 @@ tables:
       - { name: applied_at, type: timestamptz, required: true, default: now() }
       - { name: applied_by, type: text }
 
+  # ---------------------------------------------------------------------------
+  # Tenants
+  #
+  # The registry of the tenants themselves. `tenant_id` is load-bearing across
+  # every layer — the `tid` JWT claim, the `app.tenant_id` session GUC that
+  # `app.current_tenant()` reads, and a column on every tenantScoped table in
+  # this file — and until this table existed nothing actually DEFINED one.
+  #
+  # tenantScoped:false is not an oversight: the row IS the tenant, so there is
+  # no enclosing tenant to isolate it to. That is also why this lives here and
+  # not as an authored core entity — backend-manifest.ts derives tenantScoped
+  # from the mere presence of an `authorization:` block, so an authored Tenant
+  # would either be handed a tenant_id column plus tenant-isolation RLS
+  # (meaningless on this table) or forfeit role-based authorization entirely.
+  #
+  # domainInternal + generatedCrud:false follow from the same fact: a tenant
+  # registry is cross-tenant by nature and must never surface on the per-tenant
+  # GraphQL/REST schema, where every other row is fenced by a tenant predicate
+  # this table has no way to satisfy. The control plane reaches it directly.
+  #
+  # tenantScoped:false would normally mean "no RLS policy at all", which is
+  # right for the global configuration catalogs below and WRONG here: the
+  # restricted runtime role holds blanket DML on every table in a
+  # manifest-covered schema (db/migrations/app-role.ts), so a policyless
+  # cross-tenant registry is fully readable from any raw-SQL path an ordinary
+  # tenant session can reach. `tenantIdentityColumn` says that this table's
+  # primary key IS a tenant id, and the emitter turns that into a policy where
+  # a tenant session reads only its own row and writes nothing — every mutation
+  # goes through the audited `withSystemSession` bypass instead.
+  - schema: platform
+    name: tenants
+    tenantScoped: false
+    tenantIdentityColumn: id
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      # The RLS key: this uuid is what the `tid` claim carries, what
+      # applyDbSession puts in app.tenant_id, and therefore what every
+      # `tenant_id = app.current_tenant()` policy compares against.
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      # The human- and Keycloak-facing key: the Organization alias and the URL
+      # segment. Deliberately NOT the RLS key — app.current_tenant() returns
+      # uuid and casts the session var `::uuid` (db/migrations/app-helpers.ts),
+      # and backend-manifest.ts force-overrides any tenant_id column to uuid,
+      # so a text key could not survive the round trip even if we wanted it to.
+      # Treat as immutable after creation: it is mirrored into Keycloak, where
+      # an Organization's alias cannot be rebound in place.
+      - { name: slug, type: text, required: true }
+      - { name: name, type: text, required: true }
+      # Values come from the TENANTSTATUS codetable — active/inactive/suspended,
+      # defined in config/authoring/catalogs/core-referentiedata.yaml. Held as
+      # text rather than a Postgres enum so adding a lifecycle state stays a
+      # catalog edit instead of a migration.
+      - { name: status, type: text, required: true }
+      # The Keycloak Organization this tenant maps to, and the realm it lives
+      # in. Both nullable: the row is created before Keycloak is provisioned and
+      # the link is stamped once the SPI reports the Organization back, so a
+      # half-provisioned tenant is representable rather than un-insertable.
+      - { name: keycloak_organization_id, type: text }
+      - { name: keycloak_realm, type: text }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - name: tenants_slug_uidx
+        columns: [slug]
+        unique: true
+      # Partial, because the link is null until provisioning completes. Postgres
+      # already treats NULLs as distinct, so the predicate is not what keeps
+      # several unprovisioned tenants legal — it states that intent explicitly
+      # and keeps the index to the rows that actually carry a link.
+      - name: tenants_keycloak_organization_uidx
+        columns: [keycloak_organization_id]
+        unique: true
+        where: '"keycloak_organization_id" IS NOT NULL'
+
   # Global, tenant-agnostic page-config catalog for the generated web CRUD
   # pages. Compiler-generated platform config, identical for every tenant — NOT
   # tenant data, so tenantScoped:false (no tenant_id, no RLS), and
@@ -88,11 +163,46 @@ tables:
       # trigger relies on reparent/remove-first — see the versioned migration).
       - { name: parent_id, type: uuid, references: { schema: platform, table: org_unit, column: id, onDelete: RESTRICT } }
       - { name: name, type: text, required: true }
+      # This unit's segment of the Keycloak Organization path: the SPI's
+      # `organizationPath` (packages/keycloak-spi/.../OpenShapeForgeResource.java)
+      # is the root-to-leaf join of these, and the SPI holds it unique within a
+      # root organization. Distinct from `name`, which is a display label and
+      # free to change; the segment is part of an identifier.
+      - { name: slug, type: text }
+      # The child Keycloak Organization mirroring this unit, stamped once the
+      # SPI has created it. Both columns are nullable: units exist before the
+      # Keycloak side is provisioned, and every org_unit row predating the
+      # control plane has neither.
+      - { name: keycloak_organization_id, type: text }
       - { name: created_at, type: timestamptz, required: true, default: now() }
       - { name: updated_at, type: timestamptz, required: true, default: now() }
     indexes:
       - name: org_unit_tenant_parent_idx
         columns: [tenant_id, parent_id]
+      # The provisioning path's idempotency key: a sub-org is identified by its
+      # slug within its parent, which is also what makes the SPI's
+      # `organizationPath` (the root-to-leaf slug chain) unique. Two partial
+      # indexes rather than one, because Postgres treats NULLs as DISTINCT in a
+      # unique index: a single index on (tenant_id, parent_id, slug) would not
+      # constrain the top-level units at all, which are exactly the ones whose
+      # parent_id is NULL. Both exclude slug IS NULL — org_unit rows predating
+      # the control plane have no slug and are not part of this key space.
+      - name: org_unit_tenant_parent_slug_uidx
+        columns: [tenant_id, parent_id, slug]
+        unique: true
+        where: '"slug" IS NOT NULL AND "parent_id" IS NOT NULL'
+      - name: org_unit_tenant_root_slug_uidx
+        columns: [tenant_id, slug]
+        unique: true
+        where: '"slug" IS NOT NULL AND "parent_id" IS NULL'
+      # Mirrors tenants_keycloak_organization_uidx: one child Organization is
+      # mirrored by exactly one org_unit. Realm-global rather than per-tenant
+      # because a Keycloak organization id is a realm-wide uuid, so two tenants
+      # claiming the same one is drift however it arose.
+      - name: org_unit_keycloak_organization_uidx
+        columns: [keycloak_organization_id]
+        unique: true
+        where: '"keycloak_organization_id" IS NOT NULL'
 
   # Transitive-closure table maintained by the org_unit trigger (versioned
   # migration). Self-row (u,u,0) per unit; (a,d,k) for every ancestor a of d at

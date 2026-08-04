@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Loads authoring entities + authorization.yaml from disk and emits the
- * Keycloak realm-export JSON. Mirrors the shape of `generate-ui-artifacts.ts`
- * so the main compiler entrypoint can collect both kinds of artifacts.
+ * Loads authoring entities + every authored `authorizationConfig` from disk and
+ * emits one Keycloak realm-export JSON per realm. Mirrors the shape of
+ * `generate-ui-artifacts.ts` so the main compiler entrypoint can collect both
+ * kinds of artifacts.
  *
  * Output is registered as compiler-owned via
  * `packages/compiler/src/generated-artifact-paths.ts` (root: `keycloak/`).
  */
 // @ts-nocheck
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import YAML from "yaml";
 import {
@@ -19,21 +20,58 @@ import {
 } from "./loader.js";
 import { compile } from "./compiler/index.js";
 import {
-  generateKeycloakRealmArtifacts,
+  generateAllKeycloakRealmArtifacts,
   type KeycloakRealmArtifact,
 } from "./generators/keycloak.js";
 import type { CompiledEntityContract } from "./types/compiled.js";
 import type { AuthorizationConfigFile } from "./types/authoring.js";
 
-function loadAuthorizationConfig(
-  authoringDir: string,
-): AuthorizationConfigFile | null {
-  const path = join(authoringDir, "authorization.yaml");
-  if (!existsSync(path)) {
-    return null;
+/**
+ * Filenames read as realm authoring: `authorization.yaml` and any
+ * `authorization.<something>.yaml` beside it.
+ *
+ * A NAMING convention rather than a directory scan for `kind:
+ * authorizationConfig`, because the resolved authoring tree root also holds
+ * documents this generator has no business parsing, and because the layer
+ * resolver merges by relative path — a convention that is visible in the
+ * filename is one an overlay author can predict. `authorization.yaml` keeps its
+ * exact name: it is the tenant realm, cited by that name across docs, the web
+ * generator's runtime metadata, and the e2e setup.
+ */
+const AUTHORIZATION_FILENAME_RE = /^authorization(\.[^.]+)*\.yaml$/;
+
+/**
+ * Every authored realm config, in filename order.
+ *
+ * Sorted so the emitted artifact list is deterministic regardless of what
+ * order the filesystem happens to enumerate in — `check:generated` hashes two
+ * consecutive generations and fails on any difference.
+ */
+function loadAuthorizationConfigs(authoringDir: string): AuthorizationConfigFile[] {
+  if (!existsSync(authoringDir)) {
+    return [];
   }
-  const raw = readFileSync(path, "utf8");
-  return YAML.parse(raw) as AuthorizationConfigFile;
+  const configs: AuthorizationConfigFile[] = [];
+  for (const entry of readdirSync(authoringDir, { withFileTypes: true }).sort((a, b) =>
+    a.name.localeCompare(b.name),
+  )) {
+    if (!entry.isFile() || !AUTHORIZATION_FILENAME_RE.test(entry.name)) {
+      continue;
+    }
+    const path = join(authoringDir, entry.name);
+    const parsed = YAML.parse(readFileSync(path, "utf8")) as AuthorizationConfigFile | null;
+    if (parsed?.kind !== "authorizationConfig") {
+      // The name reserves the slot; a document that does not fill it is a
+      // mistake worth naming, not a file to skip. Skipping is how a renamed
+      // `kind` turns into a realm that quietly stops being generated.
+      throw new Error(
+        `${path} is named as realm authoring but declares kind ` +
+          `"${parsed?.kind ?? "(none)"}" instead of "authorizationConfig".`,
+      );
+    }
+    configs.push(parsed);
+  }
+  return configs;
 }
 
 function compileAllEntities(authoringDir: string): CompiledEntityContract[] {
@@ -61,10 +99,13 @@ function compileAllEntities(authoringDir: string): CompiledEntityContract[] {
 export function generateAuthoringKeycloakArtifacts(
   authoringDir: string,
 ): KeycloakRealmArtifact[] {
-  const authConfig = loadAuthorizationConfig(authoringDir);
-  if (!authConfig) {
+  const authConfigs = loadAuthorizationConfigs(authoringDir);
+  if (authConfigs.length === 0) {
     return [];
   }
+  // Entities are compiled ONCE and shared across realms. Only a realm that
+  // names an `entityRoleClient` consumes them; the rest see the same contracts
+  // and derive nothing from them.
   const contracts = compileAllEntities(authoringDir);
-  return generateKeycloakRealmArtifacts(contracts, authConfig);
+  return generateAllKeycloakRealmArtifacts(contracts, authConfigs);
 }

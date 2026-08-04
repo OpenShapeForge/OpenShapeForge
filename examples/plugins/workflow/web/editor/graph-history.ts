@@ -7,6 +7,16 @@
  * lives where `bun test examples` reaches it. The hook that drives it is a
  * reducer over these functions and holds no rules of its own.
  *
+ * ## Generic in what an entry is, and it holds no opinion about it
+ *
+ * The default is a canvas graph, which is what every rule below was written
+ * against and what the tests exercise. The editor passes an
+ * `EditableWorkflowDraft` instead — the graph AND the definition's process
+ * variables — because there is one undo stack and an author who edits a
+ * variable and presses `Ctrl`+`Z` means that edit. Nothing here reads a member
+ * of the value: every decision is reference equality, so widening it needed a
+ * type parameter and no logic. See `draft.ts` for why the two are one value.
+ *
  * ## A history entry is a whole graph, held by reference
  *
  * Not a diff, and not a clone. `graph-edit.ts` already returns a new graph for
@@ -109,13 +119,13 @@ export type CanvasEditTag = {
   target: string;
 };
 
-export type CanvasHistory = {
+export type CanvasHistory<TValue = EditableCanvasGraph> = {
   /** The graph as it stands. What the canvas draws. */
-  readonly present: EditableCanvasGraph;
+  readonly present: TValue;
   /** Graphs behind the present one, oldest first. The last is what an undo restores. */
-  readonly past: readonly EditableCanvasGraph[];
+  readonly past: readonly TValue[];
   /** Graphs an undo set aside, oldest first. The last is what a redo restores. */
-  readonly future: readonly EditableCanvasGraph[];
+  readonly future: readonly TValue[];
   /**
    * The tag of the edit that produced {@link present}, while it is still open
    * to being continued. Null once the run has been committed, and for an edit
@@ -126,14 +136,14 @@ export type CanvasHistory = {
    * The graph as it was last written, or as it was loaded. Compared by
    * reference to answer "is there anything to save".
    */
-  readonly saved: EditableCanvasGraph;
+  readonly saved: TValue;
 };
 
 /** Shared, so an empty branch is one value rather than an allocation per edit. */
-const NO_GRAPHS: readonly EditableCanvasGraph[] = [];
+const NO_GRAPHS: readonly never[] = [];
 
 /** A history over a graph as loaded: nothing to undo, nothing to save. */
-export function createCanvasHistory(graph: EditableCanvasGraph): CanvasHistory {
+export function createCanvasHistory<TValue>(graph: TValue): CanvasHistory<TValue> {
   return { present: graph, past: NO_GRAPHS, future: NO_GRAPHS, pending: null, saved: graph };
 }
 
@@ -145,11 +155,11 @@ export function createCanvasHistory(graph: EditableCanvasGraph): CanvasHistory {
  * change nothing, which is what makes this test enough. Without it a delete
  * that removed nothing would still cost an undo and still mark the draft dirty.
  */
-export function recordCanvasEdit(
-  history: CanvasHistory,
-  next: EditableCanvasGraph,
+export function recordCanvasEdit<TValue>(
+  history: CanvasHistory<TValue>,
+  next: TValue,
   tag: CanvasEditTag | null = null,
-): CanvasHistory {
+): CanvasHistory<TValue> {
   if (next === history.present) return history;
 
   const continues =
@@ -168,11 +178,11 @@ export function recordCanvasEdit(
 }
 
 /** {@link recordCanvasEdit} for a caller holding the operation rather than its result. */
-export function applyCanvasEdit(
-  history: CanvasHistory,
-  edit: (current: EditableCanvasGraph) => EditableCanvasGraph,
+export function applyCanvasEdit<TValue>(
+  history: CanvasHistory<TValue>,
+  edit: (current: TValue) => TValue,
   tag: CanvasEditTag | null = null,
-): CanvasHistory {
+): CanvasHistory<TValue> {
   return recordCanvasEdit(history, edit(history.present), tag);
 }
 
@@ -183,12 +193,16 @@ export function applyCanvasEdit(
  * Returns the history it was given when there is no run open, so a caller can
  * commit on every selection change without forcing a render.
  */
-export function commitCanvasHistory(history: CanvasHistory): CanvasHistory {
+export function commitCanvasHistory<TValue>(
+  history: CanvasHistory<TValue>,
+): CanvasHistory<TValue> {
   return history.pending === null ? history : { ...history, pending: null };
 }
 
 /** The graph before the last entry. Returns the history it was given at the end of the stack. */
-export function undoCanvasHistory(history: CanvasHistory): CanvasHistory {
+export function undoCanvasHistory<TValue>(
+  history: CanvasHistory<TValue>,
+): CanvasHistory<TValue> {
   const restored = history.past[history.past.length - 1];
   if (restored === undefined) return history;
   return {
@@ -203,7 +217,9 @@ export function undoCanvasHistory(history: CanvasHistory): CanvasHistory {
 }
 
 /** The graph an undo set aside. Returns the history it was given when there is none. */
-export function redoCanvasHistory(history: CanvasHistory): CanvasHistory {
+export function redoCanvasHistory<TValue>(
+  history: CanvasHistory<TValue>,
+): CanvasHistory<TValue> {
   const restored = history.future[history.future.length - 1];
   if (restored === undefined) return history;
   return {
@@ -227,23 +243,23 @@ export function redoCanvasHistory(history: CanvasHistory): CanvasHistory {
  * canvas, and the next save writes that older graph onto the document the save
  * produced. The document itself is never rewound; see the header.
  */
-export function markCanvasHistorySaved(
-  history: CanvasHistory,
-  graph: EditableCanvasGraph = history.present,
-): CanvasHistory {
+export function markCanvasHistorySaved<TValue>(
+  history: CanvasHistory<TValue>,
+  graph: TValue = history.present,
+): CanvasHistory<TValue> {
   return { ...history, pending: null, saved: graph };
 }
 
-export function canUndoCanvasHistory(history: CanvasHistory): boolean {
+export function canUndoCanvasHistory(history: CanvasHistory<unknown>): boolean {
   return history.past.length > 0;
 }
 
-export function canRedoCanvasHistory(history: CanvasHistory): boolean {
+export function canRedoCanvasHistory(history: CanvasHistory<unknown>): boolean {
   return history.future.length > 0;
 }
 
 /** Whether the present graph differs from what was last written. See the header. */
-export function isCanvasHistoryDirty(history: CanvasHistory): boolean {
+export function isCanvasHistoryDirty(history: CanvasHistory<unknown>): boolean {
   return history.present !== history.saved;
 }
 
@@ -290,10 +306,10 @@ function sameTag(left: CanvasEditTag, right: CanvasEditTag): boolean {
   return left.kind === right.kind && left.target === right.target;
 }
 
-function pushCapped(
-  stack: readonly EditableCanvasGraph[],
-  graph: EditableCanvasGraph,
-): readonly EditableCanvasGraph[] {
+function pushCapped<TValue>(
+  stack: readonly TValue[],
+  graph: TValue,
+): readonly TValue[] {
   const next = [...stack, graph];
   return next.length > MAX_CANVAS_HISTORY_DEPTH
     ? next.slice(next.length - MAX_CANVAS_HISTORY_DEPTH)

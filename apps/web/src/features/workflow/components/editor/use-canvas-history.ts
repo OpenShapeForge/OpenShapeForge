@@ -18,6 +18,16 @@
  * written. See the history module's header for what rewinding both would
  * destroy.
  *
+ * ## One stack over two things
+ *
+ * What an entry holds is an `EditableWorkflowDraft` — the canvas graph AND the
+ * definition's process variables — because there is one undo stack and an
+ * author who declares a variable and presses Ctrl+Z means that. So there are
+ * two ways in, {@link CanvasHistoryController.editGraph} and
+ * {@link CanvasHistoryController.editVariables}, and one history behind them.
+ * Both are still reducers over the plugin's web half; the draft helpers hold
+ * the rule that a change changing nothing returns what it was given.
+ *
  * ## Why the shortcuts are a second hook
  *
  * They need to know whether editing is allowed, which the editor only knows
@@ -36,6 +46,9 @@ import {
   canUndoCanvasHistory,
   commitCanvasHistory,
   createCanvasHistory,
+  createWorkflowDraft,
+  editWorkflowDraftGraph,
+  editWorkflowDraftVariables,
   isCanvasHistoryDirty,
   markCanvasHistorySaved,
   recordCanvasEdit,
@@ -45,12 +58,14 @@ import {
   type CanvasEditTag,
   type CanvasHistory,
   type EditableCanvasGraph,
+  type EditableWorkflowDraft,
+  type ProcessVariableSet,
 } from "../../../../../../../examples/plugins/workflow/web/editor/index";
 
 export type CanvasHistoryController = {
-  /** The graph to draw. */
-  graph: EditableCanvasGraph;
-  /** Whether the graph differs from what was last written. */
+  /** The graph and the process variables as they stand. What a save is built from. */
+  draft: EditableWorkflowDraft;
+  /** Whether the draft differs from what was last written. */
   dirty: boolean;
   canUndo: boolean;
   canRedo: boolean;
@@ -61,58 +76,90 @@ export type CanvasHistoryController = {
    * carrying the same tag replace one another. Pass none for a discrete gesture
    * — adding a node, drawing an edge — which should always stand alone.
    */
-  edit: (
+  editGraph: (
     change: (current: EditableCanvasGraph) => EditableCanvasGraph,
     tag?: CanvasEditTag,
   ) => void;
-  /** {@link edit} for a caller that already computed the graph. */
-  replace: (graph: EditableCanvasGraph, tag?: CanvasEditTag) => void;
+  /**
+   * Change the definition's process variables, onto the same stack.
+   *
+   * Same tagging rule, and it earns its keep here: typing a start value is one
+   * keystroke per call and has to be one undo.
+   */
+  editVariables: (
+    change: (current: ProcessVariableSet) => ProcessVariableSet,
+    tag?: CanvasEditTag,
+  ) => void;
+  /** {@link editGraph} for a caller that already computed the graph. */
+  replaceGraph: (graph: EditableCanvasGraph, tag?: CanvasEditTag) => void;
   /** End the run of same-tag edits: a drag stopped, the author moved on. */
   commit: () => void;
   undo: () => void;
   redo: () => void;
   /**
-   * Record what a save wrote. Takes the graph that was SENT rather than the one
+   * Record what a save wrote. Takes the draft that was SENT rather than the one
    * on screen, so an author who undid while the request was in flight is still
    * told they have something to save.
    */
-  markSaved: (graph: EditableCanvasGraph) => void;
+  markSaved: (draft: EditableWorkflowDraft) => void;
 };
 
 export function useCanvasHistory(
-  initial: () => EditableCanvasGraph,
+  initial: () => { graph: EditableCanvasGraph; variables?: ProcessVariableSet },
 ): CanvasHistoryController {
-  const [history, setHistory] = useState<CanvasHistory>(() =>
-    createCanvasHistory(initial()),
+  const [history, setHistory] = useState<CanvasHistory<EditableWorkflowDraft>>(() =>
+    createCanvasHistory(createWorkflowDraft(initial())),
   );
 
   // Every callback is stable and every update is an updater, so nothing here
   // needs the current history in a dependency array.
-  const edit = useCallback(
+  const editGraph = useCallback(
     (change: (current: EditableCanvasGraph) => EditableCanvasGraph, tag?: CanvasEditTag) => {
-      setHistory((current) => applyCanvasEdit(current, change, tag ?? null));
+      setHistory((current) =>
+        applyCanvasEdit(
+          current,
+          (draft) => editWorkflowDraftGraph(draft, change),
+          tag ?? null,
+        ),
+      );
     },
     [],
   );
 
-  const replace = useCallback((graph: EditableCanvasGraph, tag?: CanvasEditTag) => {
-    setHistory((current) => recordCanvasEdit(current, graph, tag ?? null));
+  const editVariables = useCallback(
+    (change: (current: ProcessVariableSet) => ProcessVariableSet, tag?: CanvasEditTag) => {
+      setHistory((current) =>
+        applyCanvasEdit(
+          current,
+          (draft) => editWorkflowDraftVariables(draft, change),
+          tag ?? null,
+        ),
+      );
+    },
+    [],
+  );
+
+  const replaceGraph = useCallback((graph: EditableCanvasGraph, tag?: CanvasEditTag) => {
+    setHistory((current) =>
+      recordCanvasEdit(current, editWorkflowDraftGraph(current.present, () => graph), tag ?? null),
+    );
   }, []);
 
   const commit = useCallback(() => setHistory(commitCanvasHistory), []);
   const undo = useCallback(() => setHistory(undoCanvasHistory), []);
   const redo = useCallback(() => setHistory(redoCanvasHistory), []);
-  const markSaved = useCallback((graph: EditableCanvasGraph) => {
-    setHistory((current) => markCanvasHistorySaved(current, graph));
+  const markSaved = useCallback((draft: EditableWorkflowDraft) => {
+    setHistory((current) => markCanvasHistorySaved(current, draft));
   }, []);
 
   return {
-    graph: history.present,
+    draft: history.present,
     dirty: isCanvasHistoryDirty(history),
     canUndo: canUndoCanvasHistory(history),
     canRedo: canRedoCanvasHistory(history),
-    edit,
-    replace,
+    editGraph,
+    editVariables,
+    replaceGraph,
     commit,
     undo,
     redo,

@@ -39,6 +39,8 @@ export type WorkflowDefinitionSummary = {
   id: string;
   name: string;
   description: string | null;
+  /** `process` or `orchestrator`; the schema makes it non-null. */
+  category: string;
   /** Doubles as the optimistic-concurrency token on a save. */
   updatedAt: string;
   publishedVersion: number | null;
@@ -81,7 +83,7 @@ export type WorkflowDefinitionLockView = {
   expiresAt: string;
 };
 
-const DEFINITION_FIELDS = `id name description updatedAt publishedVersion latestVersion`;
+const DEFINITION_FIELDS = `id name description category updatedAt publishedVersion latestVersion`;
 const DEFINITION_LIST_FIELDS = `${DEFINITION_FIELDS} triggerTypes`;
 const ISSUE_FIELDS = `severity blocksAt code message path nodeId edgeId`;
 const LOCK_FIELDS = `definitionId lockToken ownerUserId acquiredAt expiresAt`;
@@ -121,8 +123,8 @@ export async function createWorkflowDefinition(
  * `updateWorkflowDefinition` also carries description, category and the ACL;
  * only the name is exposed here because only the name is on the list screen,
  * and an action that could write four fields when the caller means one is an
- * action whose blast radius does not match its name. The rest belongs to the
- * settings sheet, which is its own slice.
+ * action whose blast radius does not match its name. The rest is
+ * {@link updateWorkflowDefinitionSettings}.
  *
  * Renaming stamps `updated_at`, which is the optimistic-concurrency token an
  * open editor is holding — so a rename made while somebody is editing costs
@@ -142,6 +144,51 @@ export async function renameWorkflowDefinition(input: {
         updateWorkflowDefinition(input: $input) { ${DEFINITION_FIELDS} }
       }`,
       variables: { input: { definitionId: input.definitionId, name: input.name } },
+    });
+    return data.updateWorkflowDefinition;
+  });
+}
+
+/**
+ * A definition's metadata: name, description, category.
+ *
+ * Metadata only — `updateWorkflowDefinition` reaches none of the graph, because
+ * changing what a workflow does is a version. The `authorization` field the
+ * mutation also takes is deliberately left out: an ACL is not something to
+ * change from the same sheet as a description, and this repo has no subject
+ * picker to change it with.
+ *
+ * The caller sends only the fields that differ, and the server refuses an
+ * update naming none — see `diffWorkflowDefinitionSettings` in the plugin's web
+ * half, which is where that decision lives and can be tested. **The refreshed
+ * summary carries a new `updatedAt`, and an open editor must adopt it**: this
+ * write stamps the column that editor is holding as `expectedUpdatedAt`, so a
+ * caller that keeps the old one fails every subsequent save.
+ */
+export async function updateWorkflowDefinitionSettings(input: {
+  definitionId: string;
+  name?: string;
+  description?: string | null;
+  category?: string;
+}): Promise<WorkflowActionResult<WorkflowDefinitionSummary>> {
+  return run(async () => {
+    const data = await executeGraphqlRequest<{
+      updateWorkflowDefinition: WorkflowDefinitionSummary;
+    }>({
+      query: `mutation UpdateWorkflowDefinitionSettings($input: UpdateWorkflowDefinitionInput!) {
+        updateWorkflowDefinition(input: $input) { ${DEFINITION_FIELDS} }
+      }`,
+      variables: {
+        input: {
+          definitionId: input.definitionId,
+          // Spread per key, so a field the caller did not name is absent from
+          // the input rather than sent as null — which the server reads as
+          // "clear it" for description and refuses for name.
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.category !== undefined ? { category: input.category } : {}),
+        },
+      },
     });
     return data.updateWorkflowDefinition;
   });

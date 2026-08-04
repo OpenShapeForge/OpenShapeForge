@@ -28,9 +28,13 @@
 import { useCallback, useMemo } from "react";
 import { Renderer } from "@/features/renderer/components/renderer";
 import type { RendererFormDefinition } from "@/features/renderer/form-definition";
+import type { VariableSuggestion } from "@/features/renderer/runtime/variable-suggestions";
 import type { Field } from "@/generated/compiler/field-contract";
 import { Input } from "@/components/ui/forms/input";
-import { buildWorkflowNodeConfigForm } from "../../../../../../../examples/plugins/workflow/web/editor/index";
+import {
+  buildWorkflowNodeConfigForm,
+  type WorkflowVariableSuggestion,
+} from "../../../../../../../examples/plugins/workflow/web/editor/index";
 
 export type WorkflowNodeInspectorProps = {
   nodeId: string;
@@ -42,6 +46,14 @@ export type WorkflowNodeInspectorProps = {
   config: Record<string, unknown>;
   /** The catalog's `configFields` for this node type, as it served them. */
   configFields: unknown;
+  /**
+   * What this node can see, from the graph walk in the plugin's web half.
+   *
+   * Threaded into `params.suggestions`, which is the contract
+   * `workflowGraphVariables` declares: it is a protocol adapter that returns
+   * whatever it is handed, because the server's copy cannot see a canvas.
+   */
+  variableSuggestions?: readonly WorkflowVariableSuggestion[];
   onLabelChange: (label: string) => void;
   onConfigChange: (config: Record<string, unknown>) => void;
   readOnly?: boolean;
@@ -56,16 +68,31 @@ export function WorkflowNodeInspector({
   label,
   config,
   configFields,
+  variableSuggestions,
   onLabelChange,
   onConfigChange,
   readOnly = false,
   lang = "en",
 }: WorkflowNodeInspectorProps) {
+  // The second pin, and the reason the walk's result type is declared
+  // structurally rather than imported: this assignment is what holds a
+  // suggestion to `VariableSuggestion`, so a shape that drifts fails
+  // `typecheck:web` here.
+  const suggestions: VariableSuggestion[] = useMemo(
+    () => [...(variableSuggestions ?? [])],
+    [variableSuggestions],
+  );
+
   // The pin. `buildWorkflowNodeConfigForm` declares its result structurally
   // and this annotation is what holds it to the renderer's own type.
   const definition: RendererFormDefinition | null = useMemo(
-    () => buildWorkflowNodeConfigForm<Field>({ nodeType, configFields }),
-    [nodeType, configFields],
+    () =>
+      buildWorkflowNodeConfigForm<Field>({
+        nodeType,
+        configFields,
+        variableSuggestions: suggestions,
+      }),
+    [nodeType, configFields, suggestions],
   );
 
   const handleChange = useCallback(

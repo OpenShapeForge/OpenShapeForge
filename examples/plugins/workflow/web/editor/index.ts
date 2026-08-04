@@ -55,6 +55,40 @@ export {
   type CanvasHistoryKeyPress,
 } from "./graph-history";
 export {
+  createWorkflowDraft,
+  editWorkflowDraftGraph,
+  editWorkflowDraftVariables,
+  type EditableWorkflowDraft,
+} from "./draft";
+export {
+  addProcessVariable,
+  checkProcessVariableKey,
+  describeProcessVariables,
+  moveProcessVariable,
+  processVariableKeys,
+  readProcessVariableSet,
+  removeProcessVariable,
+  setProcessVariableField,
+  setProcessVariableStartValue,
+  EMPTY_PROCESS_VARIABLE_SET,
+  PROCESS_VARIABLE_VALUE_TYPES,
+  type AddProcessVariableInput,
+  type ProcessVariableKeyCheck,
+  type ProcessVariableKeyRefusal,
+  type ProcessVariableSet,
+  type ProcessVariableValueType,
+  type ProcessVariableView,
+} from "./process-variables";
+export {
+  buildProcessVariableStartValueSuggestions,
+  buildWorkflowVariableSuggestions,
+  upstreamEdgesByTarget,
+  PROCESS_VARIABLE_SOURCE_ID,
+  START_INPUT_SOURCE_ID,
+  type BuildWorkflowVariableSuggestionsInput,
+  type WorkflowVariableSuggestion,
+} from "./variable-suggestions";
+export {
   buildWorkflowNodeConfigForm,
   type BuildWorkflowNodeConfigFormInput,
   type WorkflowNodeConfigFieldConfig,

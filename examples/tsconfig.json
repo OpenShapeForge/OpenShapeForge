@@ -25,5 +25,7 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["**/*.ts"]
+  "//exclude": "plugins/workflow/web is browser code with its own tsconfig (bundler resolution). Including it here would demand .js specifiers that Turbopack cannot resolve.",
+  "include": ["**/*.ts"],
+  "exclude": ["plugins/workflow/web/**"]
 }

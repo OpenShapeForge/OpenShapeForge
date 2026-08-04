@@ -19,9 +19,9 @@ export {
   type CanvasPosition,
   type CanvasSynthesizedFields,
   type ToStoredGraphInput,
-} from "./canvas-graph.js";
+} from "./canvas-graph";
 export {
   resolveCanvasNodeHandles,
   type CanvasOutputHandle,
   type ResolveCanvasNodeHandlesInput,
-} from "./canvas-handles.js";
+} from "./canvas-handles";

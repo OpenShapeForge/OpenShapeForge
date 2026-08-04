@@ -14,6 +14,7 @@
  * unauthenticated request gets nothing rather than a catalog.
  */
 import { executeGraphqlRequest } from "../../../../apps/web/src/lib/server/graphql-client";
+import { WorkflowGraphView } from "../../../../apps/web/src/features/workflow/components/WorkflowGraphView";
 import {
   WorkflowNodeCatalogView,
   type WorkflowNodeTypeView,
@@ -32,9 +33,66 @@ const NODE_TYPES = /* GraphQL */ `
   }
 `;
 
+/**
+ * The most recently published definition, if this deployment has one.
+ *
+ * `publishedWorkflowDefinitions` rather than all of them: an unpublished draft
+ * has no version to read a graph from, so it would render an empty canvas and
+ * look like a bug.
+ */
+const PUBLISHED_DEFINITIONS = /* GraphQL */ `
+  query PublishedWorkflowDefinitions {
+    publishedWorkflowDefinitions {
+      id
+      name
+      publishedVersion
+    }
+  }
+`;
+
+const PUBLISHED_VERSION = /* GraphQL */ `
+  query LatestPublishedVersion($definitionId: ID!) {
+    latestPublishedWorkflowDefinitionVersion(definitionId: $definitionId) {
+      version
+      definition
+    }
+  }
+`;
+
+type PublishedDefinition = { id: string; name: string; publishedVersion: number | null };
+
+/**
+ * Read the graph of whichever definition is published, for the canvas to draw.
+ *
+ * Returns null rather than throwing on any failure: the catalog below is the
+ * page's real content and must render even when there is nothing to draw, or
+ * when the definition surface is unreachable. A canvas is an addition to this
+ * page, not a precondition for it.
+ */
+async function loadPublishedGraph(): Promise<{ name: string; graph: unknown } | null> {
+  try {
+    const list = await executeGraphqlRequest<{
+      publishedWorkflowDefinitions: PublishedDefinition[];
+    }>({ query: PUBLISHED_DEFINITIONS });
+
+    const first = (list.publishedWorkflowDefinitions ?? [])[0];
+    if (!first) return null;
+
+    const version = await executeGraphqlRequest<{
+      latestPublishedWorkflowDefinitionVersion: { definition: unknown } | null;
+    }>({ query: PUBLISHED_VERSION, variables: { definitionId: first.id } });
+
+    const graph = version.latestPublishedWorkflowDefinitionVersion?.definition;
+    return graph ? { name: first.name, graph } : null;
+  } catch {
+    return null;
+  }
+}
+
 export default async function WorkflowPage() {
   let nodes: WorkflowNodeTypeView[] = [];
   let loadError: string | null = null;
+  const published = await loadPublishedGraph();
 
   try {
     const data = await executeGraphqlRequest<{
@@ -59,5 +117,21 @@ export default async function WorkflowPage() {
     );
   }
 
-  return <WorkflowNodeCatalogView nodes={nodes} />;
+  return (
+    <div className="flex flex-col">
+      {published ? (
+        <section className="flex flex-col gap-2 border-b border-border p-6 pb-0">
+          <h2 className="text-lg font-medium">{published.name}</h2>
+          <p className="text-sm text-muted-foreground">
+            The published graph, drawn read-only. Editing needs a definition
+            lock and an undo stack, so the canvas does not move yet.
+          </p>
+          <div className="h-[420px] w-full">
+            <WorkflowGraphView graph={published.graph} nodeTypes={nodes} />
+          </div>
+        </section>
+      ) : null}
+      <WorkflowNodeCatalogView nodes={nodes} />
+    </div>
+  );
 }

@@ -83,11 +83,11 @@ import type {
   WorkflowDefinitionEdge,
   WorkflowDefinitionGraph,
   WorkflowDefinitionNode,
-} from "../../runtime/definition-types.js";
+} from "../../runtime/definition-types";
 import {
   resolveCanvasNodeHandles,
   type CanvasOutputHandle,
-} from "./canvas-handles.js";
+} from "./canvas-handles";
 
 export type CanvasPosition = { x: number; y: number };
 

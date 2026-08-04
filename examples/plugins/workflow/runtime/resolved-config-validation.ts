@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { z, type ZodType } from "zod";
 import { getCatalogEntry } from "./node-catalog-store.js";
+import {
+  canonicalizeFieldAliases as canonicalizeAliasesOnRecord,
+  readFieldAliasSources,
+} from "./field-aliases.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -122,7 +126,7 @@ export function canonicalizeWorkflowNodeConfigAliasesFromFields(
   config: unknown,
   configFields: unknown,
 ): JsonRecord {
-  return canonicalizeFieldAliases(asRecord(config), normalizeFields(configFields));
+  return canonicalizeAliasesOnRecord(asRecord(config), readFieldAliasSources(configFields));
 }
 
 export function formatResolvedConfigValidationIssues(
@@ -314,19 +318,23 @@ function isRuntimeRequired(field: RuntimeField): boolean {
   return field.runtime?.required === true;
 }
 
+/**
+ * Delegates to `field-aliases.ts`, which has no imports and is therefore safe
+ * to bundle for a browser. The designer shares that module, so a config reads
+ * the same here and on a canvas rather than through two derivations that can
+ * drift — which is the failure this rewriting exists to prevent in the first
+ * place.
+ */
 function canonicalizeFieldAliases(config: JsonRecord, fields: RuntimeField[] | null): JsonRecord {
   if (!fields) return config;
-  const next: JsonRecord = { ...config };
-  for (const field of fields) {
-    if (next[field.key] !== undefined) continue;
-    for (const alias of field.runtime?.aliases ?? []) {
-      if (next[alias] !== undefined) {
-        next[field.key] = next[alias];
-        break;
-      }
-    }
-  }
-  return next;
+  return canonicalizeAliasesOnRecord(
+    config,
+    fields.flatMap((field) =>
+      field.runtime?.aliases?.length
+        ? [{ key: field.key, aliases: field.runtime.aliases }]
+        : [],
+    ),
+  );
 }
 
 function normalizeFields(value: unknown): RuntimeField[] {

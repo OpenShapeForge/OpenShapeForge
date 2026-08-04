@@ -30,9 +30,9 @@
  * Pinned against the server's own view by
  * `web/__tests__/canvas-handle-agreement.test.ts`.
  */
-import { defaultHandleLabel, defaultOutputHandles } from "../../../../../packages/workflow-layout/src/defaults.js";
-import { isTerminalNodeType } from "../../runtime/definition-types.js";
-import { canonicalizeWorkflowNodeConfigAliasesFromFields } from "../../runtime/resolved-config-validation.js";
+import { defaultHandleLabel, defaultOutputHandles } from "../../../../../packages/workflow-layout/src/defaults";
+import { isTerminalNodeType } from "../../runtime/definition-types";
+import { canonicalizeConfigAliasesFromFields } from "../../runtime/field-aliases";
 
 /** One drawable port. Structurally the layout package's `WorkflowLayoutOutputHandle`. */
 export type CanvasOutputHandle = {
@@ -92,7 +92,7 @@ function declaredCanvasOutputHandles(
 ): CanvasOutputHandle[] | null {
   if (input.nodeType !== "decision") return null;
 
-  const config = canonicalizeWorkflowNodeConfigAliasesFromFields(
+  const config = canonicalizeConfigAliasesFromFields(
     input.config,
     input.configFields,
   );

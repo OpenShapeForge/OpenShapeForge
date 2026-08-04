@@ -9,7 +9,7 @@
  * something computes route points. It is kept and tested here because the
  * geometry is the hard part and it is the same geometry either way.
  */
-import type { EdgeRoutePoint } from "./edge-route-types.js";
+import type { EdgeRoutePoint } from "./edge-route-types";
 
 /**
  * Inserts an axis-aligned bridge point between any two consecutive points that

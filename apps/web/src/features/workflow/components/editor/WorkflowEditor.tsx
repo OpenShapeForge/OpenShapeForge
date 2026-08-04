@@ -300,23 +300,27 @@ function WorkflowEditorSurface({
 
   const handleConnect = useCallback(
     (connection: { source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }) => {
-      setGraph((current) => {
-        const result = connectCanvasNodes(current, connection, {
-          isEntry: isEntryNodeType,
-          isTerminal: isTerminalNodeType,
-        });
-        setStatus(
-          result.refused
-            ? REFUSAL_MESSAGE[result.refused]
-            : result.warned
-              ? WARNING_MESSAGE[result.warned]
-              : null,
-        );
-        if (result.graph !== current) setDirty(true);
-        return result.graph;
+      // Computed against the graph in scope rather than inside a `setGraph`
+      // updater. An updater has to be pure — React invokes it twice in
+      // development to prove that it is — so a `setStatus` inside one fires
+      // twice and makes a message the user never triggered look like an event.
+      const result = connectCanvasNodes(graph, connection, {
+        isEntry: isEntryNodeType,
+        isTerminal: isTerminalNodeType,
       });
+      setStatus(
+        result.refused
+          ? REFUSAL_MESSAGE[result.refused]
+          : result.warned
+            ? WARNING_MESSAGE[result.warned]
+            : null,
+      );
+      if (result.graph !== graph) {
+        setGraph(result.graph);
+        setDirty(true);
+      }
     },
-    [],
+    [graph],
   );
 
   const addNodeAt = useCallback(

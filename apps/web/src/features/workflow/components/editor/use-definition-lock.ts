@@ -60,13 +60,35 @@ export function useWorkflowDefinitionLock(
   const heldRef = useRef<WorkflowDefinitionLockView | null>(null);
   heldRef.current = held;
 
+  /**
+   * The actions, held where no dependency array can see them.
+   *
+   * This is not a micro-optimisation, it is the fix for a self-sustaining loop,
+   * and the mechanism is worth stating because nothing about it is local:
+   *
+   *   1. The page builds this bag as an object literal in JSX, so a NEW object
+   *      exists on every server render.
+   *   2. Calling a server action makes Next revalidate the current route. The
+   *      server component re-runs and a fresh literal reaches the client.
+   *   3. An effect that lists the bag in its dependencies therefore re-runs
+   *      *because it ran*, acquires again, revalidates again, and never settles.
+   *
+   * Measured at roughly seven GraphQL requests a second with nobody touching
+   * the page. Depending on `definitionId` alone is what stops it: the actions
+   * are stable behaviour reached through an unstable reference, so the
+   * reference is the thing to keep out of the array.
+   */
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+
   useEffect(() => {
     if (!definitionId) return;
     let cancelled = false;
+    const current = actionsRef.current;
 
     setPending(true);
     void (async () => {
-      const acquired = await actions.acquire(definitionId);
+      const acquired = await current.acquire(definitionId);
       if (cancelled) return;
 
       if (acquired.ok) {
@@ -81,10 +103,10 @@ export function useWorkflowDefinitionLock(
       // "X is editing", which is the difference between a dead end and a
       // decision — and the read can fail on its own, so the acquire error is
       // kept as the fallback rather than replaced by silence.
-      const current = await actions.read(definitionId);
+      const holder = await current.read(definitionId);
       if (cancelled) return;
       setHeld(null);
-      setBlockedBy(current.ok ? current.value : null);
+      setBlockedBy(holder.ok ? holder.value : null);
       setError(acquired.error);
       setPending(false);
     })();
@@ -95,15 +117,16 @@ export function useWorkflowDefinitionLock(
       // Released on the way out so the next author does not wait for the TTL.
       // Fire and forget: a failed release expires on its own, and there is no
       // component left to tell.
-      if (lock) void actions.release({ definitionId, lockToken: lock.lockToken });
+      if (lock) void current.release({ definitionId, lockToken: lock.lockToken });
     };
-  }, [definitionId, actions]);
+    // `actions` is deliberately absent — see actionsRef above.
+  }, [definitionId]);
 
   const steal = useCallback(() => {
     if (!definitionId) return;
     setPending(true);
     void (async () => {
-      const stolen = await actions.steal(definitionId);
+      const stolen = await actionsRef.current.steal(definitionId);
       if (stolen.ok) {
         setHeld(stolen.value);
         setBlockedBy(null);
@@ -113,7 +136,8 @@ export function useWorkflowDefinitionLock(
       }
       setPending(false);
     })();
-  }, [definitionId, actions]);
+    // `actions` is deliberately absent — see actionsRef above.
+  }, [definitionId]);
 
   return { held, blockedBy, error, pending, steal };
 }

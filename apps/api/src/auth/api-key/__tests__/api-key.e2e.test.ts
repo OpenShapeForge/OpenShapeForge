@@ -27,6 +27,13 @@ const DATABASE_URL =
 
 const ROLE_CLIENT = "erp-provider";
 const MANAGE_ROLE = "Platform.ApiKeys.Manage";
+/** Read-only entity role. `directie` ships with ReadWrite only, so the suite
+ *  grants this one to prove per-OPERATION enforcement flows through a key. */
+const READ_ROLE = "Relations.All.Read";
+const WRITE_ROLE = "Relations.All.ReadWrite";
+/** Held by `directie`, but no generated entity is gated by it — a key granted
+ *  only this must reach no entity at all. */
+const OTHER_DOMAIN_ROLE = "RealEstate.All.ReadWrite";
 const ADMIN_CLIENT = "openshapeforge-apikey-provisioner";
 const ADMIN_SECRET =
   process.env.E2E_KEYCLOAK_ADMIN_SECRET ?? "openshapeforge-apikey-provisioner-secret";
@@ -49,6 +56,8 @@ const { createApiApp } = await import("../../../roles/api.js");
 const { __resetSessionResolverForTests } = await import("../../identity.js");
 const { __resetExchangeCacheForTests } = await import("../exchange.js");
 const { KeycloakAdmin } = await import("../keycloak-admin.js");
+const { createDatabaseRuntime } = await import("../../../db/connection.js");
+const { sql } = await import("kysely");
 
 type App = Awaited<ReturnType<typeof createApiApp>>;
 
@@ -184,7 +193,10 @@ async function userToken(username: string, password = "test"): Promise<string | 
  * `--import-realm` is a no-op against an existing realm, so the test provisions
  * what it needs rather than requiring a realm reset.
  */
-async function ensureManageRole(admin: InstanceType<typeof KeycloakAdmin>): Promise<boolean> {
+async function ensureUserRoles(
+  admin: InstanceType<typeof KeycloakAdmin>,
+  roleNames: readonly string[],
+): Promise<boolean> {
   const raw = admin as unknown as {
     json: (method: string, path: string, body?: unknown) => Promise<unknown>;
     request: (method: string, path: string, body?: unknown) => Promise<Response>;
@@ -196,11 +208,14 @@ async function ensureManageRole(admin: InstanceType<typeof KeycloakAdmin>): Prom
   const roleClientId = clients[0]?.id;
   if (!roleClientId) return false;
 
-  const roles = (await raw.json("GET", `/clients/${roleClientId}/roles`)) as Array<{
+  const existing = (await raw.json("GET", `/clients/${roleClientId}/roles?max=2000`)) as Array<{
     name: string;
   }>;
-  if (!roles.some((role) => role.name === MANAGE_ROLE)) {
-    await raw.request("POST", `/clients/${roleClientId}/roles`, { name: MANAGE_ROLE });
+  const present = new Set(existing.map((role) => role.name));
+  for (const name of roleNames) {
+    if (!present.has(name)) {
+      await raw.request("POST", `/clients/${roleClientId}/roles`, { name });
+    }
   }
 
   const users = (await raw.json("GET", `/users?username=acme-directie&exact=true`)) as Array<{
@@ -209,41 +224,26 @@ async function ensureManageRole(admin: InstanceType<typeof KeycloakAdmin>): Prom
   const userId = users[0]?.id;
   if (!userId) return false;
 
-  const role = ((await raw.json("GET", `/clients/${roleClientId}/roles`)) as Array<{
+  const all = (await raw.json("GET", `/clients/${roleClientId}/roles?max=2000`)) as Array<{
     id: string;
     name: string;
-  }>).find((entry) => entry.name === MANAGE_ROLE);
-  if (!role) return false;
+  }>;
+  const wanted = all.filter((role) => roleNames.includes(role.name));
+  if (wanted.length !== roleNames.length) return false;
 
-  await raw.request("POST", `/users/${userId}/role-mappings/clients/${roleClientId}`, [role]);
+  await raw.request("POST", `/users/${userId}/role-mappings/clients/${roleClientId}`, wanted);
   return true;
 }
 
-/**
- * A role the acting user actually holds, discovered from its own token.
- *
- * Hardcoding one couples the suite to the seeded realm's composites — and gets
- * it wrong: `directie` carries `Relations.All.ReadWrite`, not the read-only
- * spelling. Reading it back is also a small proof in itself that the ceiling
- * compares against real membership.
- */
-function grantableRole(token: string): string | undefined {
+function decodeClaims(token: string): {
+  resource_access?: Record<string, { roles?: string[] }>;
+} {
   const [, payload] = token.split(".");
-  if (!payload) return undefined;
-  const claims = JSON.parse(
-    Buffer.from(payload.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"),
-  ) as { resource_access?: Record<string, { roles?: string[] }> };
-  const roles = new Set(claims.resource_access?.[ROLE_CLIENT]?.roles ?? []);
-  // Must be a role the `relations` entity lists for `read`, not merely one
-  // whose name starts with "Relations." — `Relations.Bsn.Read` is a
-  // field-level grant and authorizes no entity operation at all.
-  return (
-    ["Relations.All.ReadWrite", "Relations.All.Read"].find((role) => roles.has(role)) ??
-    [...roles][0]
+  return JSON.parse(
+    Buffer.from(payload!.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"),
   );
 }
 
-let grantRole = "Relations.All.ReadWrite";
 let app: App | undefined;
 let admin: InstanceType<typeof KeycloakAdmin> | undefined;
 let adminToken: string | null = null;
@@ -259,17 +259,20 @@ const ready = await (async () => {
     clientSecret: ADMIN_SECRET,
   });
   try {
-    if (!(await ensureManageRole(admin))) return false;
+    if (!(await ensureUserRoles(admin, [MANAGE_ROLE, READ_ROLE]))) return false;
   } catch {
     return false;
   }
   // Fetched AFTER the grant so the token actually carries the role.
   adminToken = await userToken("acme-directie");
   if (!adminToken) return false;
-  const discovered = grantableRole(adminToken);
-  if (!discovered) return false;
-  grantRole = discovered;
-  return true;
+  // The grant only takes effect in a token minted after it, and the suite
+  // asserts against roles it named itself rather than guessing from claims.
+  const claims = decodeClaims(adminToken);
+  const held = new Set(claims.resource_access?.[ROLE_CLIENT]?.roles ?? []);
+  return [MANAGE_ROLE, READ_ROLE, WRITE_ROLE, OTHER_DOMAIN_ROLE].every((role) =>
+    held.has(role),
+  );
 })();
 
 beforeAll(async () => {
@@ -281,8 +284,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  // Realm clients outlive the database rows, so they are cleaned up explicitly;
-  // a leaked one would accumulate across runs against a long-lived dev realm.
+  // BOTH sides, or the run leaks. An earlier version cleaned only Keycloak and
+  // left 114 integration rows behind across a day of runs — the same
+  // two-system asymmetry the reconciler exists for, reproduced in the test
+  // harness. Realm first: a client with no row is inert, while a row with no
+  // client is what the reconciler would otherwise try to rebuild.
   for (const clientId of provisionedClients) {
     try {
       await admin?.deleteClient(clientId);
@@ -290,6 +296,27 @@ afterAll(async () => {
       // Best effort — a failure here must not fail the suite.
     }
   }
+
+  if (provisionedClients.length > 0) {
+    const runtime = createDatabaseRuntime({ databaseUrl: DATABASE_URL });
+    try {
+      // Keys cascade from the integration. The array literal is built by hand:
+      // the bun/kysely driver serializes a JS string[] as a bare comma-joined
+      // scalar with no braces, which Postgres will not read as an array — the
+      // same trap applyDbSession documents for its group UUIDs. Every element
+      // here is `osf-int-<uuid>`, so no escaping is required.
+      const literal = `{${provisionedClients.join(",")}}`;
+      await sql`
+        delete from platform.api_key_integrations
+         where keycloak_client_id = any(${literal}::text[])
+      `.execute(runtime.db);
+    } catch {
+      // Best effort, as above.
+    } finally {
+      await runtime.close();
+    }
+  }
+
   await app?.close();
 });
 
@@ -335,7 +362,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
   test("a customer provisions a key and gets exactly one usable credential back", async () => {
     const created = await createKey({
       displayName: `e2e integration ${randomUUID().slice(0, 8)}`,
-      roles: [grantRole],
+      roles: [WRITE_ROLE],
     });
 
     expect(created.status).toBe(201);
@@ -356,7 +383,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
   test("one key authenticates on GraphQL, REST and MCP with the same effective roles", async () => {
     const created = await createKey({
       displayName: `e2e triple ${randomUUID().slice(0, 8)}`,
-      roles: [grantRole],
+      roles: [WRITE_ROLE],
     });
     expect(created.status).toBe(201);
     const key = (created.body as CreateResponse).token;
@@ -395,7 +422,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
   test("an unknown, malformed or revoked key authenticates nothing", async () => {
     const created = await createKey({
       displayName: `e2e revoke ${randomUUID().slice(0, 8)}`,
-      roles: [grantRole],
+      roles: [WRITE_ROLE],
     });
     const { token, keyId } = created.body as CreateResponse;
 
@@ -441,7 +468,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
     // Full key: the integration's roles, unnarrowed.
     const full = await createKey({
       displayName: `e2e full ${randomUUID().slice(0, 8)}`,
-      roles: [grantRole],
+      roles: [WRITE_ROLE],
     });
     expect(full.status).toBe(201);
 
@@ -464,7 +491,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
     // it did not confer the named role.
     const narrowed = await createKey({
       displayName: `e2e narrowed ${randomUUID().slice(0, 8)}`,
-      roles: [grantRole],
+      roles: [WRITE_ROLE],
       roleSubset: [MANAGE_ROLE],
     });
     expect(narrowed.status).toBe(201);
@@ -478,7 +505,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
   test("the ceiling applies to the subset path too, not just to creation", async () => {
     const created = await createKey({
       displayName: `e2e subset ceiling ${randomUUID().slice(0, 8)}`,
-      roles: [grantRole],
+      roles: [WRITE_ROLE],
     });
     const { integrationId } = created.body as CreateResponse;
 
@@ -491,6 +518,123 @@ describe.skipIf(!ready)("API keys end to end", () => {
     });
     expect(refused.statusCode).toBe(403);
     expect(JSON.parse(refused.body).error.message).toContain("Totally.Made.Up");
+  }, 30_000);
+
+  test("keys with different permissions get different access from the same tenant", async () => {
+    // Four keys, four role shapes, one tenant. The point is that effective
+    // access is decided per key by the role set behind it — not by "is this an
+    // API key", which would be a second authorization model.
+    const readRelations = (credential: string) =>
+      app!.inject({
+        method: "POST",
+        url: "/api/graphql",
+        headers: { "content-type": "application/json", authorization: `Bearer ${credential}` },
+        payload: JSON.stringify({ query: "{ relations(first: 1) { totalCount } }" }),
+      });
+    const createRelation = (credential: string) =>
+      app!.inject({
+        method: "POST",
+        url: "/api/graphql",
+        headers: { "content-type": "application/json", authorization: `Bearer ${credential}` },
+        payload: JSON.stringify({
+          query:
+            "mutation { createRelation(input: { displayName: \"perm-matrix\" }) { id } }",
+        }),
+      });
+    const forbidden = (body: string) =>
+      (JSON.parse(body).errors ?? []).some(
+        (error: { extensions?: { code?: string } }) => error.extensions?.code === "FORBIDDEN",
+      );
+
+    const keys: Record<string, string> = {};
+    for (const [label, body] of [
+      // Full write grant.
+      ["writer", { displayName: "perm writer", roles: [WRITE_ROLE] }],
+      // Read-only entity role: the same entity, one operation less.
+      ["reader", { displayName: "perm reader", roles: [READ_ROLE] }],
+      // A role from another domain — no generated entity is gated by it.
+      ["other-domain", { displayName: "perm other", roles: [OTHER_DOMAIN_ROLE] }],
+      // Write grant on the integration, narrowed by a subset that names only a
+      // role the service account does not hold.
+      [
+        "narrowed-to-nothing",
+        { displayName: "perm narrowed", roles: [WRITE_ROLE], roleSubset: [MANAGE_ROLE] },
+      ],
+    ] as const) {
+      const created = await createKey(body as Record<string, unknown>);
+      expect(created.status).toBe(201);
+      keys[label] = (created.body as CreateResponse).token;
+    }
+
+    // writer: reads and writes.
+    expect(forbidden((await readRelations(keys.writer!)).body)).toBe(false);
+    expect(forbidden((await createRelation(keys.writer!)).body)).toBe(false);
+
+    // reader: reads, but the SAME credential is refused the write. This is the
+    // load-bearing assertion — per-operation enforcement reaches an API key
+    // exactly as it reaches an interactive bearer, because by the time the
+    // guard runs there is no difference between them.
+    expect(forbidden((await readRelations(keys.reader!)).body)).toBe(false);
+    expect(forbidden((await createRelation(keys.reader!)).body)).toBe(true);
+
+    // other-domain: authenticated, and reaches no relation at all.
+    expect(forbidden((await readRelations(keys["other-domain"]!)).body)).toBe(true);
+
+    // narrowed-to-nothing: the subset intersected to empty, so it did NOT
+    // confer the role it named.
+    expect(forbidden((await readRelations(keys["narrowed-to-nothing"]!)).body)).toBe(true);
+  }, 60_000);
+
+  test("two keys on one integration can carry different permissions", async () => {
+    // One external party, one identity, two credentials with different reach —
+    // which is what makes a subset worth having rather than just issuing a
+    // second integration.
+    const created = await createKey({
+      displayName: `e2e split ${randomUUID().slice(0, 8)}`,
+      roles: [WRITE_ROLE, READ_ROLE],
+    });
+    expect(created.status).toBe(201);
+    const { integrationId, token: unrestricted } = created.body as CreateResponse;
+
+    const restricted = await app!.inject({
+      method: "POST",
+      url: `/api/api-keys/${integrationId}/keys`,
+      headers: { "content-type": "application/json", authorization: `Bearer ${adminToken}` },
+      payload: JSON.stringify({ displayName: "read only", roleSubset: [READ_ROLE] }),
+    });
+    expect(restricted.statusCode).toBe(201);
+    const readOnly = JSON.parse(restricted.body).token as string;
+
+    const write = (credential: string) =>
+      app!.inject({
+        method: "POST",
+        url: "/api/graphql",
+        headers: { "content-type": "application/json", authorization: `Bearer ${credential}` },
+        payload: JSON.stringify({
+          query: "mutation { createRelation(input: { displayName: \"split\" }) { id } }",
+        }),
+      });
+    const isForbidden = (body: string) =>
+      (JSON.parse(body).errors ?? []).some(
+        (error: { extensions?: { code?: string } }) => error.extensions?.code === "FORBIDDEN",
+      );
+
+    expect(isForbidden((await write(unrestricted)).body)).toBe(false);
+    expect(isForbidden((await write(readOnly)).body)).toBe(true);
+  }, 60_000);
+
+  test("a user without the management role cannot provision at all", async () => {
+    // A real seeded identity, broadly privileged on business data and holding
+    // no Platform.* role — the shape an ordinary employee has.
+    const consultant = await userToken("acme-verhuurconsulent");
+    expect(consultant).not.toBeNull();
+
+    const refused = await createKey(
+      { displayName: "unauthorized", roles: [] },
+      consultant,
+    );
+    expect(refused.status).toBe(403);
+    expect(refused.body.error.message).toContain("Not authorized to manage API keys");
   }, 30_000);
 
   test("the privilege ceiling refuses a role the caller does not hold", async () => {
@@ -514,7 +658,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
   test("an API key cannot manage API keys", async () => {
     const created = await createKey({
       displayName: `e2e ladder ${randomUUID().slice(0, 8)}`,
-      roles: [grantRole],
+      roles: [WRITE_ROLE],
     });
     const { token } = created.body as CreateResponse;
 
@@ -527,7 +671,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
     expect(listed.statusCode).toBe(403);
 
     const minted = await createKey(
-      { displayName: "escalation", roles: [grantRole] },
+      { displayName: "escalation", roles: [WRITE_ROLE] },
       token,
     );
     expect(minted.status).toBe(403);
@@ -537,7 +681,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
   test("a second key can be issued against one integration, for rotation", async () => {
     const created = await createKey({
       displayName: `e2e rotation ${randomUUID().slice(0, 8)}`,
-      roles: [grantRole],
+      roles: [WRITE_ROLE],
     });
     const { integrationId, token: first } = created.body as CreateResponse;
 
@@ -572,7 +716,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
   test("disabling an integration kills every key under it", async () => {
     const created = await createKey({
       displayName: `e2e disable ${randomUUID().slice(0, 8)}`,
-      roles: [grantRole],
+      roles: [WRITE_ROLE],
     });
     const { integrationId, token } = created.body as CreateResponse;
 

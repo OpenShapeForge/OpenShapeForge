@@ -244,18 +244,34 @@ function entitySlug(relativePath: string): string {
 }
 
 /**
+ * The layer directories this repo authors, in application order: the configured
+ * layers, then each plugin that ships an `authoring/` directory.
+ *
+ * Exported because a caller that needs the SOURCES rather than the merged tree
+ * — `check:authoring-schemas` walks them to validate each file against its
+ * schema — must agree with the compiler about which directories those are. The
+ * gate used to name one path literally, so the plugin-shipped layers were
+ * outside everything it could see (#237); deriving both from here means a
+ * plugin that contributes authoring cannot contribute unvalidated authoring.
+ */
+export function authoringLayerDirs(repoRoot: string, config?: AuthoringConfig): string[] {
+  const { layers, plugins = [] } = config ?? loadAuthoringConfig(repoRoot);
+  const dirs = layers.map((layer) => resolveLayerDir(repoRoot, layer));
+  for (const spec of plugins) {
+    const authoring = pluginAuthoringDir(repoRoot, spec);
+    if (authoring) {
+      dirs.push(authoring);
+    }
+  }
+  return dirs;
+}
+
+/**
  * Resolves the configured layers into a single authoring directory.
  * Single layer without patches -> that directory, untouched (fast path).
  */
 export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfig): string {
-  const { layers, plugins = [] } = config ?? loadAuthoringConfig(repoRoot);
-  const layerDirs = layers.map((layer) => resolveLayerDir(repoRoot, layer));
-  for (const spec of plugins) {
-    const authoring = pluginAuthoringDir(repoRoot, spec);
-    if (authoring) {
-      layerDirs.push(authoring);
-    }
-  }
+  const layerDirs = authoringLayerDirs(repoRoot, config);
 
   if (layerDirs.length === 1) {
     return layerDirs[0]!;

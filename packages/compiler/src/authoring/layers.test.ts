@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import YAML from "yaml";
-import { resolveAuthoringLayers, strategicMerge } from "./layers.js";
+import { authoringLayerDirs, resolveAuthoringLayers, strategicMerge } from "./layers.js";
 
 describe("strategicMerge", () => {
   test("objects deep-merge and null deletes a property", () => {
@@ -386,5 +386,84 @@ describe("resolveAuthoringLayers — appShellPatch", () => {
     const first = readFileSync(join(resolveAuthoringLayers(root), "appShell.yaml"), "utf8");
     const second = readFileSync(join(resolveAuthoringLayers(root), "appShell.yaml"), "utf8");
     expect(first).toBe(second);
+  });
+});
+
+/**
+ * The scan roots `check:authoring-schemas` walks. The gate named one directory
+ * literally, so plugin-shipped authoring was validated by nothing (#237);
+ * pinning the source list here is what keeps the gate's idea of "this
+ * repository's authoring" equal to the compiler's.
+ */
+describe("authoringLayerDirs", () => {
+  const roots: string[] = [];
+
+  function makeRepo(): string {
+    const root = mkdtempSync(join(tmpdir(), "openshapeforge-layer-dirs-"));
+    roots.push(root);
+    return root;
+  }
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  function writeConfig(root: string, config: { layers: string[]; plugins?: string[] }) {
+    writeFileSync(join(root, "authoring.config.yaml"), YAML.stringify(config), "utf8");
+  }
+
+  function writePlugin(root: string, dir: string, options: { authoring: boolean }) {
+    mkdirSync(join(root, dir), { recursive: true });
+    writeFileSync(join(root, dir, "index.ts"), "export default {};\n", "utf8");
+    if (options.authoring) mkdirSync(join(root, dir, "authoring"), { recursive: true });
+  }
+
+  test("returns the configured layers followed by each plugin's authoring directory", () => {
+    const root = makeRepo();
+    mkdirSync(join(root, "base"), { recursive: true });
+    mkdirSync(join(root, "overlay"), { recursive: true });
+    writePlugin(root, "plugins/alpha", { authoring: true });
+    writePlugin(root, "plugins/beta", { authoring: true });
+    writeConfig(root, {
+      layers: ["base", "overlay"],
+      plugins: ["./plugins/alpha/index.ts", "./plugins/beta/index.ts"],
+    });
+
+    // Order is the contract: layers apply in sequence, and a later one patches
+    // an earlier one.
+    expect(authoringLayerDirs(root)).toEqual([
+      join(root, "base"),
+      join(root, "overlay"),
+      join(root, "plugins/alpha/authoring"),
+      join(root, "plugins/beta/authoring"),
+    ]);
+  });
+
+  test("omits a plugin that ships no authoring directory", () => {
+    const root = makeRepo();
+    mkdirSync(join(root, "base"), { recursive: true });
+    writePlugin(root, "plugins/codeonly", { authoring: false });
+    writePlugin(root, "plugins/withlayer", { authoring: true });
+    writeConfig(root, {
+      layers: ["base"],
+      plugins: ["./plugins/codeonly/index.ts", "./plugins/withlayer/index.ts"],
+    });
+
+    expect(authoringLayerDirs(root)).toEqual([
+      join(root, "base"),
+      join(root, "plugins/withlayer/authoring"),
+    ]);
+  });
+
+  test("agrees with resolveAuthoringLayers on the single-layer fast path", () => {
+    const root = makeRepo();
+    mkdirSync(join(root, "base"), { recursive: true });
+    writeConfig(root, { layers: ["base"] });
+
+    const dirs = authoringLayerDirs(root);
+    expect(dirs).toEqual([join(root, "base")]);
+    expect(resolveAuthoringLayers(root)).toBe(dirs[0]!);
   });
 });

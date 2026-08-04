@@ -78,7 +78,10 @@ Loading is memoized per repo root.
 A plugin may also ship an **authoring layer**: an `authoring/` directory next
 to the plugin module (for path specifiers) or at the package root (for
 package specifiers) is appended to the configured layers automatically — see
-[layers.md](layers.md).
+[layers.md](layers.md). It is held to the same schemas as the base layer:
+`bun run check:authoring-schemas` derives its scan roots from the same
+resolver, so shipping authoring through a plugin is not a way around the gate
+([authoring.md](authoring.md#the-schemas-are-enforced)).
 
 ### The compile-once context
 

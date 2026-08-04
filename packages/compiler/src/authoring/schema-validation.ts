@@ -76,6 +76,10 @@ export const UNSCHEMAD_KINDS: Readonly<Record<string, string>> = Object.freeze({
   componentCatalog: "render-component registry",
   coreReferentiedataCatalog: "reference-data seed catalog",
   fieldAuthoringProfileCatalog: "field authoring presets",
+  entityPatch:
+    "a strategic-merge fragment, not a document: it restates only what it changes, so core-entity.schema.json rejects it for the properties it deliberately omits. The base it merges into is validated as coreEntity",
+  appShellPatch:
+    "the same strategic-merge fragment against appShell.yaml, whose base kind has no schema either",
 });
 
 export type AuthoringValidator = {

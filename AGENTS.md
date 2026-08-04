@@ -89,6 +89,12 @@ issues, pull requests, and review comments. Act accordingly.
   `scripts/check-generated-artifacts.mjs`, run `bun run generate` and
   `bun run db:migrate`. E2E, load tests, and reports derive coverage from
   the manifest automatically — do not hand-write per-entity tests.
+- **New authoring YAML of any kind**, in the base layer or in a plugin's own
+  `authoring/` layer: bump that schema's entry in
+  `EXPECTED_SCHEMA_COVERAGE` in `scripts/check-authoring-schemas.mjs`. Every
+  layer `authoring.config.yaml` resolves to is validated against the schema for
+  its `kind`, and the gate asserts the per-schema file count so a schema cannot
+  quietly stop covering its corpus.
 - Prefer extension over modification: authoring overlays
   (`kind: entityPatch`) and compiler plugins exist so behavior can be
   changed without forking base files. See `docs/layers.md` and

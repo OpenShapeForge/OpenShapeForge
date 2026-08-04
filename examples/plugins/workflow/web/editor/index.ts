@@ -38,6 +38,23 @@ export {
   type NodePredicates,
 } from "./graph-edit";
 export {
+  applyCanvasEdit,
+  canRedoCanvasHistory,
+  canUndoCanvasHistory,
+  commitCanvasHistory,
+  createCanvasHistory,
+  isCanvasHistoryDirty,
+  markCanvasHistorySaved,
+  recordCanvasEdit,
+  redoCanvasHistory,
+  resolveCanvasHistoryShortcut,
+  undoCanvasHistory,
+  MAX_CANVAS_HISTORY_DEPTH,
+  type CanvasEditTag,
+  type CanvasHistory,
+  type CanvasHistoryKeyPress,
+} from "./graph-history";
+export {
   buildWorkflowNodeConfigForm,
   type BuildWorkflowNodeConfigFormInput,
   type WorkflowNodeConfigFieldConfig,

@@ -14,6 +14,13 @@
  * over. That comparison is by reference for `config`; editing a config object
  * in place would make an edit invisible to the save path.
  *
+ * The complement holds too, and `graph-history.ts` depends on it: **an
+ * operation that changes nothing returns the graph it was GIVEN.** Reference
+ * inequality is therefore exactly "something happened", which is what decides
+ * whether an edit costs an undo entry and whether a draft is dirty. A delete
+ * naming an id the graph does not hold, or a move to the position a node is
+ * already at, must not look like an edit merely because a new array was built.
+ *
  * ## What this refuses, and what it merely reports
  *
  * The line is the server's, not this module's invention: **a canvas refuses
@@ -341,6 +348,13 @@ export function setCanvasNodeConfig(
     configFields?: unknown;
   },
 ): EditableCanvasGraph {
+  const current = graph.nodes.find((node) => node.id === input.nodeId);
+  // Nothing to change, or the caller handed back the object it was given. A
+  // rebuilt but equal config is still an edit — see the header — but the same
+  // object is not, and treating it as one would cost an undo entry for a form
+  // that re-rendered.
+  if (!current || current.data.config === input.config) return graph;
+
   return {
     nodes: graph.nodes.map((node) =>
       node.id === input.nodeId
@@ -370,6 +384,9 @@ export function setCanvasNodeLabel(
   graph: EditableCanvasGraph,
   input: { nodeId: string; label: string },
 ): EditableCanvasGraph {
+  const current = graph.nodes.find((node) => node.id === input.nodeId);
+  if (!current || current.data.label === input.label) return graph;
+
   return {
     nodes: graph.nodes.map((node) =>
       node.id === input.nodeId
@@ -384,6 +401,17 @@ export function moveCanvasNode(
   graph: EditableCanvasGraph,
   input: { nodeId: string; position: CanvasPosition },
 ): EditableCanvasGraph {
+  const current = graph.nodes.find((node) => node.id === input.nodeId);
+  // A drag that ends where it started, and a click a canvas reports as a
+  // position change, are not statements about layout. Recording them would
+  // fill the undo stack with entries that restore nothing.
+  if (
+    !current ||
+    (current.position.x === input.position.x && current.position.y === input.position.y)
+  ) {
+    return graph;
+  }
+
   return {
     nodes: graph.nodes.map((node) =>
       node.id === input.nodeId
@@ -413,8 +441,12 @@ export function deleteCanvasNodes(
 ): EditableCanvasGraph {
   const removed = new Set(nodeIds);
   if (removed.size === 0) return graph;
+  const nodes = graph.nodes.filter((node) => !removed.has(node.id));
+  // Named nodes the graph does not hold. Nothing went, so no edge can have gone
+  // with it either.
+  if (nodes.length === graph.nodes.length) return graph;
   return {
-    nodes: graph.nodes.filter((node) => !removed.has(node.id)),
+    nodes,
     edges: graph.edges.filter(
       (edge) => !removed.has(edge.source) && !removed.has(edge.target),
     ),
@@ -427,10 +459,12 @@ export function deleteCanvasEdges(
 ): EditableCanvasGraph {
   const removed = new Set(edgeIds);
   if (removed.size === 0) return graph;
-  return {
-    nodes: graph.nodes,
-    edges: graph.edges.filter((edge) => !removed.has(edge.id)),
-  };
+  const edges = graph.edges.filter((edge) => !removed.has(edge.id));
+  // Deleting a node cascades to its edges here AND is reported by a canvas as
+  // an edge removal in the same gesture, so this arrives a second time with
+  // nothing left to remove. It must not read as an edit.
+  if (edges.length === graph.edges.length) return graph;
+  return { nodes: graph.nodes, edges };
 }
 
 // ---------------------------------------------------------------------------

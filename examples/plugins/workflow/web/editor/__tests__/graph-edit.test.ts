@@ -462,6 +462,59 @@ describe("deleteCanvasNodes", () => {
   });
 });
 
+describe("an operation that changes nothing returns the graph it was given", () => {
+  // Reference inequality is what `graph-history.ts` reads as "something
+  // happened", so a call that removes, moves or writes nothing must not look
+  // like an edit merely because it rebuilt an array. Each of these is reachable
+  // from the editor: a canvas reports the edges of a deleted node separately
+  // from the node, and a drag that ends where it started still reports a
+  // position.
+  const graph = canvasGraph({
+    nodes: [
+      { id: "a", type: "triggerManual", position: { x: 10, y: 20 } },
+      { id: "b", type: "end" },
+    ],
+    edges: [{ id: "ab", source: "a", target: "b" }],
+  });
+
+  test("removing ids the graph does not hold", () => {
+    expect(deleteCanvasNodes(graph, ["gone"])).toBe(graph);
+    expect(deleteCanvasEdges(graph, ["gone"])).toBe(graph);
+  });
+
+  test("the edges of a node whose deletion already cascaded", () => {
+    const deleted = deleteCanvasNodes(graph, ["b"]);
+    expect(deleted.edges).toHaveLength(0);
+    // The canvas reports the edge removal too. It has already happened.
+    expect(deleteCanvasEdges(deleted, ["ab"])).toBe(deleted);
+  });
+
+  test("a move to the position a node already occupies", () => {
+    expect(moveCanvasNode(graph, { nodeId: "a", position: { x: 10, y: 20 } })).toBe(graph);
+    expect(moveCanvasNode(graph, { nodeId: "gone", position: { x: 1, y: 1 } })).toBe(graph);
+    expect(moveCanvasNode(graph, { nodeId: "a", position: { x: 10, y: 21 } })).not.toBe(graph);
+  });
+
+  test("a label or a config written to a node that is not there", () => {
+    expect(setCanvasNodeLabel(graph, { nodeId: "gone", label: "x" })).toBe(graph);
+    expect(setCanvasNodeConfig(graph, { nodeId: "gone", config: {} })).toBe(graph);
+  });
+
+  test("the label a node already carries", () => {
+    const labelled = setCanvasNodeLabel(graph, { nodeId: "a", label: "Start" });
+    expect(setCanvasNodeLabel(labelled, { nodeId: "a", label: "Start" })).toBe(labelled);
+  });
+
+  test("the config object a node was handed", () => {
+    // Handing the same object back is not an edit. A rebuilt but equal one
+    // still is — see the module header; the save path compares by reference and
+    // cannot tell a rebuild from a change.
+    const config = graph.nodes[0]?.data.config as Record<string, unknown>;
+    expect(setCanvasNodeConfig(graph, { nodeId: "a", config })).toBe(graph);
+    expect(setCanvasNodeConfig(graph, { nodeId: "a", config: { ...config } })).not.toBe(graph);
+  });
+});
+
 describe("round trip through toStoredGraph", () => {
   const stored = {
     name: "Approval",

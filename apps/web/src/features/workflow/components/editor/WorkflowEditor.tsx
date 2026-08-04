@@ -101,6 +101,7 @@ import {
 import { WorkflowNodePalette } from "./NodePalette";
 import { WorkflowNodeInspector } from "./NodeInspector";
 import { WorkflowValidationPanel } from "./ValidationPanel";
+import { useCanvasHistory, useCanvasHistoryShortcuts } from "./use-canvas-history";
 import {
   useWorkflowDefinitionLock,
   type DefinitionLockActions,
@@ -167,6 +168,19 @@ const WARNING_MESSAGE: Record<ConnectionWarning, string> = {
   HANDLE_OCCUPIED:
     "That output now has two edges. The graph still saves; publishing will refuse it until one is removed.",
 };
+
+/**
+ * The delete gesture, as a coalescing tag that names no element on purpose.
+ *
+ * Deleting a node arrives twice: React Flow reports the edges first, through
+ * `onEdgesChange`, and then the node through `onNodesChange`, where
+ * `deleteCanvasNodes` finds the edges already gone. One keypress has to be one
+ * undo, so both halves carry this and collapse into a single entry.
+ *
+ * Two deletions in a row stay apart because selecting the second node commits
+ * first — a delete needs a selection, and a selection ends the open run.
+ */
+const DELETE_EDIT = { kind: "delete", target: "" };
 
 /** The palette drag in flight, and what letting go of it would do. */
 type PaletteDrag = {
@@ -251,19 +265,27 @@ function WorkflowEditorSurface({
   const [base, setBase] = useState<Record<string, unknown>>(
     () => (storedGraph && typeof storedGraph === "object" ? storedGraph : { nodes: [], edges: [] }) as Record<string, unknown>,
   );
-  const [graph, setGraph] = useState<EditableCanvasGraph>(() => {
+  // The canvas graph, and the graphs behind it. `base` is deliberately NOT on
+  // that stack: an undo restores a canvas, and the document it merges onto is
+  // whatever was last written. Rewinding both would resurrect the keys a save
+  // removed — see the history module's header.
+  const history = useCanvasHistory(() => {
     const source = (storedGraph ?? { nodes: [], edges: [] }) as Parameters<typeof toCanvasNodes>[0];
     return {
       nodes: toCanvasNodes(source, { resolveConfigFields: (type) => catalog.get(type)?.configFields }),
       edges: toCanvasEdges(source),
     };
   });
+  const graph: EditableCanvasGraph = history.graph;
+  // Not a flag anybody has to remember to set: the present graph differs from
+  // the one that was written, or it does not. Undoing back to what was saved
+  // therefore stops offering a save with nothing in it.
+  const dirty = history.dirty;
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [paletteDrag, setPaletteDrag] = useState<PaletteDrag | null>(null);
   const [expectedUpdatedAt, setExpectedUpdatedAt] = useState(definition.updatedAt);
   const [latestVersion, setLatestVersion] = useState<number | null>(version);
-  const [dirty, setDirty] = useState(false);
   const [layoutTouched, setLayoutTouched] = useState(false);
   const [busy, setBusy] = useState<"save" | "publish" | "validate" | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -271,6 +293,10 @@ function WorkflowEditorSurface({
 
   const lock = useWorkflowDefinitionLock(definition.id, lockActions);
   const readOnly = lock.held === null;
+
+  // Not gated on `busy`: a save records the graph it SENT, so undoing while one
+  // is in flight leaves the editor correctly dirty rather than racing it.
+  useCanvasHistoryShortcuts({ enabled: !readOnly, undo: history.undo, redo: history.redo });
 
   const summary = useMemo(() => summarizeWorkflowValidation(issues), [issues]);
   const palette = useMemo(
@@ -283,16 +309,30 @@ function WorkflowEditorSurface({
     [catalog, locale],
   );
 
-  /** Every graph change goes through here, so "dirty" cannot be forgotten. */
-  const edit = useCallback(
-    (next: (current: EditableCanvasGraph) => EditableCanvasGraph) => {
-      setGraph((current) => {
-        const updated = next(current);
-        if (updated !== current) setDirty(true);
-        return updated;
-      });
+  /**
+   * Every graph change goes through here, so nothing can move the canvas
+   * without the history seeing it — which is what keeps both "dirty" and the
+   * undo stack honest without a flag to remember.
+   *
+   * The optional second argument is the coalescing tag: consecutive edits
+   * carrying the same one replace each other rather than stacking, which is
+   * what makes a drag one undo. A gesture that happens once passes none.
+   */
+  const edit = history.edit;
+
+  /**
+   * Choose what to work on, which is also where a run of edits ends.
+   *
+   * Selecting something else is the boundary between two label edits, two
+   * config edits or two deletions of the same kind, so it commits: without it,
+   * renaming one node and then another would be a single undo.
+   */
+  const selectNode = useCallback(
+    (nodeId: string | null) => {
+      history.commit();
+      setSelectedNodeId(nodeId);
     },
-    [],
+    [history.commit],
   );
 
   // Held apart from the preview below so that a drag, which reports a new
@@ -349,9 +389,23 @@ function WorkflowEditorSurface({
 
   const handleNodesChange = useCallback(
     (changes: NodeChange<WorkflowCanvasNode>[]) => {
+      // Collected rather than applied one at a time. Dragging several nodes
+      // reports one change per node per frame, and the tag has to name the
+      // whole gesture: applied singly, consecutive frames would look like edits
+      // to different targets and each would cost its own undo entry.
+      const dragging: string[] = [];
+      const moves: { nodeId: string; position: { x: number; y: number } }[] = [];
+      const removed: string[] = [];
+      let dragEnded = false;
+
       for (const change of changes) {
-        if (change.type === "position" && change.position) {
-          const position = change.position;
+        if (change.type === "position") {
+          dragging.push(change.id);
+          // The release, which React Flow reports as a position change carrying
+          // `dragging: false` — on the abort path as well as the ordinary one.
+          if (change.dragging === false) dragEnded = true;
+          if (!change.position) continue;
+
           // A position change that moves nothing is not a statement about
           // layout, and this is where that distinction is load-bearing rather
           // than tidy: `layoutTouched` is what turns `writePositions` on, so a
@@ -360,28 +414,50 @@ function WorkflowEditorSurface({
           // some other reason. Clicking a card must not do that, and neither
           // must a drag that ends where it started.
           const at = graph.nodes.find((node) => node.id === change.id)?.position;
-          if (at && at.x === position.x && at.y === position.y) continue;
-
-          // Applied on every frame, not only on drop: the nodes React Flow
-          // draws come from this state, so a card that only moved at drag-stop
-          // would not follow the cursor.
-          edit((current) => moveCanvasNode(current, { nodeId: change.id, position }));
-          setLayoutTouched(true);
+          if (at && at.x === change.position.x && at.y === change.position.y) continue;
+          moves.push({ nodeId: change.id, position: change.position });
         } else if (change.type === "remove") {
-          edit((current) => deleteCanvasNodes(current, [change.id]));
-          setSelectedNodeId((current) => (current === change.id ? null : current));
+          removed.push(change.id);
         } else if (change.type === "select" && change.selected) {
-          setSelectedNodeId(change.id);
+          selectNode(change.id);
         }
       }
+
+      if (moves.length > 0) {
+        // Applied on every frame, not only on drop: the nodes React Flow draws
+        // come from this state, so a card that only moved at drag-stop would
+        // not follow the cursor. Still one undo — the tag names the nodes under
+        // the cursor and does not change while they are under it.
+        edit(
+          (current) => moves.reduce((next, move) => moveCanvasNode(next, move), current),
+          { kind: "move", target: dragging.join(" ") },
+        );
+        setLayoutTouched(true);
+      }
+
+      // After the move, so the frame carrying the release belongs to the drag
+      // it ends rather than starting the next one.
+      if (dragEnded) history.commit();
+
+      if (removed.length > 0) {
+        // One call rather than one per node: `deleteCanvasNodes` sweeps the
+        // edges itself, and a multi-node delete is one gesture.
+        edit((current) => deleteCanvasNodes(current, removed), DELETE_EDIT);
+        setSelectedNodeId((current) =>
+          current !== null && removed.includes(current) ? null : current,
+        );
+      }
     },
-    [edit, graph.nodes],
+    [edit, graph.nodes, history.commit, selectNode],
   );
 
   const handleEdgesChange = useCallback(
     (changes: EdgeChange<WorkflowCanvasEdge>[]) => {
       const removed = changes.filter((change) => change.type === "remove").map((change) => change.id);
-      if (removed.length > 0) edit((current) => deleteCanvasEdges(current, removed));
+      // Tagged like the node deletion it usually arrives with. Deleting an edge
+      // on its own is one entry either way; deleting a node is reported here
+      // first and through `onNodesChange` second, and is one gesture.
+      if (removed.length > 0) edit((current) => deleteCanvasEdges(current, removed), DELETE_EDIT);
     },
     [edit],
   );
@@ -403,12 +479,11 @@ function WorkflowEditorSurface({
             ? WARNING_MESSAGE[result.warned]
             : null,
       );
-      if (result.graph !== graph) {
-        setGraph(result.graph);
-        setDirty(true);
-      }
+      // No tag: drawing an edge happens once, so it is always its own undo. A
+      // refusal returns the graph it was given and records nothing.
+      history.replace(result.graph);
     },
-    [graph],
+    [graph, history.replace],
   );
 
   /**
@@ -510,6 +585,11 @@ function WorkflowEditorSurface({
     setBusy("save");
     setStatus(null);
     void (async () => {
+      // Captured alongside the document built from it. A save is asynchronous
+      // and an author can undo while it is in flight; marking what was SENT is
+      // what leaves them correctly dirty instead of telling them the screen is
+      // what the server holds.
+      const sent = graph;
       const document = buildDocument();
       const result = await save({
         definitionId: definition.id,
@@ -531,14 +611,22 @@ function WorkflowEditorSurface({
       setExpectedUpdatedAt(result.value.updatedAt);
       setLatestVersion(result.value.latestVersion);
       setBase(document as Record<string, unknown>);
-      setDirty(false);
+      history.markSaved(sent);
       setStatus(`Saved as version ${result.value.latestVersion ?? "?"}.`);
       // Saving is the moment an author most wants to know what still stands
       // between this draft and a publish.
       await runValidation(document);
       setBusy(null);
     })();
-  }, [buildDocument, definition.id, expectedUpdatedAt, runValidation, save]);
+  }, [
+    buildDocument,
+    definition.id,
+    expectedUpdatedAt,
+    graph,
+    history.markSaved,
+    runValidation,
+    save,
+  ]);
 
   const handlePublish = useCallback(() => {
     if (latestVersion === null) {
@@ -672,6 +760,22 @@ function WorkflowEditorSurface({
             {dirty ? " · unsaved changes" : ""}
           </p>
         </div>
+        <Button
+          variant="ghost"
+          onClick={history.undo}
+          disabled={readOnly || !history.canUndo}
+          title="Undo (Ctrl+Z, ⌘Z)"
+        >
+          Undo
+        </Button>
+        <Button
+          variant="ghost"
+          onClick={history.redo}
+          disabled={readOnly || !history.canRedo}
+          title="Redo (Shift+Ctrl+Z, ⇧⌘Z)"
+        >
+          Redo
+        </Button>
         <Button variant="ghost" onClick={handleValidate} disabled={busy !== null}>
           {busy === "validate" ? "Checking…" : "Check"}
         </Button>
@@ -725,8 +829,8 @@ function WorkflowEditorSurface({
           onNodesChange={handleNodesChange}
           onEdgesChange={handleEdgesChange}
           onConnect={handleConnect}
-          onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
-          onPaneClick={() => setSelectedNodeId(null)}
+          onNodeClick={(_event, node) => selectNode(node.id)}
+          onPaneClick={() => selectNode(null)}
           onAddNodeFromDrop={handleDrop}
           onCanvasDragOver={handleCanvasDragOver}
           onCanvasDragLeave={handleCanvasDragLeave}
@@ -745,16 +849,24 @@ function WorkflowEditorSurface({
               config={selected.data.config}
               configFields={configFieldsFor(selected.type)}
               readOnly={readOnly}
+              // Both are reported per keystroke, and both are tagged by the
+              // node they are about, so typing a name is one undo rather than
+              // one per letter. Selecting something else ends the run.
               onLabelChange={(label) =>
-                edit((current) => setCanvasNodeLabel(current, { nodeId: selected.id, label }))
+                edit((current) => setCanvasNodeLabel(current, { nodeId: selected.id, label }), {
+                  kind: "label",
+                  target: selected.id,
+                })
               }
               onConfigChange={(config) =>
-                edit((current) =>
-                  setCanvasNodeConfig(current, {
-                    nodeId: selected.id,
-                    config,
-                    configFields: configFieldsFor(selected.type),
-                  }),
+                edit(
+                  (current) =>
+                    setCanvasNodeConfig(current, {
+                      nodeId: selected.id,
+                      config,
+                      configFields: configFieldsFor(selected.type),
+                    }),
+                  { kind: "config", target: selected.id },
                 )
               }
             />
@@ -766,7 +878,7 @@ function WorkflowEditorSurface({
           <WorkflowValidationPanel
             summary={summary}
             checked={issues !== null}
-            onSelectNode={setSelectedNodeId}
+            onSelectNode={selectNode}
           />
         </div>
       </div>

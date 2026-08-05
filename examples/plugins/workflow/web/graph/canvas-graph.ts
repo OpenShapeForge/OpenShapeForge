@@ -57,6 +57,16 @@
  *    edge is inserted above it. A stored id is used verbatim and never
  *    renumbered, and a derived one is never written into the document.
  *
+ * ## The two top-level keys this DOES write
+ *
+ * `processVariables` and `processVariableInitializers` used to reach the spread
+ * like every other key nothing here understands. They no longer do, because the
+ * designer edits them — see {@link ToStoredGraphInput.variables} — and the same
+ * rule applies to them as to a node's `config`: the caller is handed the stored
+ * array BY REFERENCE, and a key is assigned only when what comes back is a
+ * different array. Handing the list straight back therefore writes nothing, and
+ * every other top-level key is still carried by the spread and by nothing else.
+ *
  * ## What is deliberately NOT translated
  *
  * - **A node's `type` is identity, not content.** It is never written back for
@@ -183,6 +193,28 @@ export type ToStoredGraphInput = {
    * not, and then cannot disturb layout at all.
    */
   writePositions?: boolean;
+  /**
+   * The definition's process variables, as the caller is holding them.
+   *
+   * Structural rather than imported, so this module keeps depending on nothing:
+   * `ProcessVariableSet` in `editor/process-variables.ts` satisfies it, and the
+   * dependency runs editor → graph like every other one in this folder.
+   *
+   * **Omit it and neither key is touched**, which is the same asymmetry
+   * {@link writePositions} has and is there for the same reason: a tool that
+   * edits wiring has nothing to say about a definition's variables, and a
+   * caller that passes nothing must not be able to erase them.
+   *
+   * Passed, each list is written only when it is a DIFFERENT array from the one
+   * `readProcessVariableSet` returned off `base` — which is the stored array
+   * itself, by reference. A list handed straight back writes nothing. An empty
+   * list is written only for a document that already carried the key, so a
+   * definition that never had variables does not acquire an empty declaration.
+   */
+  variables?: {
+    readonly fields: readonly unknown[];
+    readonly initializers: readonly unknown[];
+  };
 };
 
 // ---------------------------------------------------------------------------
@@ -297,9 +329,65 @@ export function toStoredGraph(input: ToStoredGraphInput): WorkflowDefinitionGrap
     // about comes back, in place. Overwriting `nodes` and `edges` keeps their
     // original position, because they already exist on `base`.
     ...input.base,
+    ...mergeProcessVariables(input),
     nodes: mergeNodes(input),
     edges: mergeEdges(input),
   };
+}
+
+/**
+ * The two process-variable keys, when the caller edited them.
+ *
+ * Returns an object to spread rather than assigning, so a key that is not
+ * written is not present at all — assigning `undefined` would put the key on
+ * the document with nothing in it, which is a different document from one that
+ * never had it.
+ *
+ * The comparison is the one `mergeNode` makes for `config`, for the same
+ * reason: the caller was handed the stored array, so a different array is an
+ * edit and the same array is not. See {@link ToStoredGraphInput.variables}.
+ */
+function mergeProcessVariables(
+  input: ToStoredGraphInput,
+): Partial<WorkflowDefinitionGraph> {
+  const variables = input.variables;
+  if (!variables) return {};
+
+  const base = input.base as Record<string, unknown>;
+  const merged: Record<string, unknown> = {};
+
+  // The caller's array itself, not a copy. Copying would make the document this
+  // produces hold a list the caller no longer recognises, so an editor that
+  // adopted it as its new `base` — which is what a save does — would present
+  // the variables as edited on the NEXT save and rewrite them every time. The
+  // same reason a node's `config` is carried by reference rather than cloned.
+  const storedFields = asStoredList(base.processVariables);
+  if (
+    variables.fields !== storedFields &&
+    (storedFields !== undefined || variables.fields.length > 0)
+  ) {
+    merged.processVariables = variables.fields;
+  }
+
+  const storedInitializers = asStoredList(base.processVariableInitializers);
+  if (
+    variables.initializers !== storedInitializers &&
+    (storedInitializers !== undefined || variables.initializers.length > 0)
+  ) {
+    merged.processVariableInitializers = variables.initializers;
+  }
+
+  return merged as Partial<WorkflowDefinitionGraph>;
+}
+
+/**
+ * The stored list BY REFERENCE, or undefined when the document holds nothing
+ * usable — which is a different fact from an empty list, exactly as it is for a
+ * node's `config`. A value of the wrong type reads as undefined and is left to
+ * the spread rather than replaced.
+ */
+function asStoredList(value: unknown): readonly unknown[] | undefined {
+  return Array.isArray(value) ? (value as readonly unknown[]) : undefined;
 }
 
 function mergeNodes(input: ToStoredGraphInput): WorkflowDefinitionNode[] {

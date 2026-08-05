@@ -93,6 +93,10 @@ export const connectorTypeDefs = /* GraphQL */ `
     "Compiled configuration field contract; the configuration form renders from this."
     configFields: JSON!
     instances: String!
+    "Whether the contract declares a connectivity check, so a surface knows to offer one."
+    supportsVerify: Boolean!
+    "Whether the contract declares OAuth, so a surface offers Connect rather than a credential field."
+    usesOAuth: Boolean!
     installations: [ConnectorInstallation!]!
   }
 

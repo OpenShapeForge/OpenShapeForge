@@ -57,6 +57,13 @@ import {
   toCanvasNodes,
   toStoredGraph,
 } from "../graph/index.js";
+import {
+  addProcessVariable,
+  readProcessVariableSet,
+  removeProcessVariable,
+  setProcessVariableStartValue,
+  type ProcessVariableSet,
+} from "../editor/index.js";
 
 /**
  * A stored graph, as a document rather than as a typed value.
@@ -81,6 +88,23 @@ function roundTrip(base: WorkflowDefinitionGraph): WorkflowDefinitionGraph {
     base,
     nodes: toCanvasNodes(base),
     edges: toCanvasEdges(base),
+  });
+}
+
+/**
+ * The same trip made by a caller that CAN edit process variables.
+ *
+ * A designer passes `variables`, so those two top-level keys stop reaching the
+ * spread and start being decided. Everything above still has to hold: the whole
+ * point of handing the stored lists back by reference is that a screen which
+ * merely showed them writes exactly what a screen without one does.
+ */
+function roundTripWithVariables(base: WorkflowDefinitionGraph): WorkflowDefinitionGraph {
+  return toStoredGraph({
+    base,
+    nodes: toCanvasNodes(base),
+    edges: toCanvasEdges(base),
+    variables: readProcessVariableSet(base),
   });
 }
 
@@ -292,6 +316,14 @@ describe("a canvas trip that changes nothing writes nothing", () => {
       // diff of a saved version, and a re-ordered document is a version whose
       // changelog is a lie. `JSON.stringify` is the cheapest available proxy
       // for "the same bytes land in the column".
+      expect(JSON.stringify(result)).toBe(JSON.stringify(base));
+    });
+
+    test(`${fixture.name}, through a caller that edits process variables`, () => {
+      const base = graph(fixture.document);
+      const result = roundTripWithVariables(base);
+
+      expect(result).toEqual(base);
       expect(JSON.stringify(result)).toBe(JSON.stringify(base));
     });
   }
@@ -722,5 +754,127 @@ describe("edge ids are content, not a counter", () => {
     expect(ids[0]).toBe("same");
     expect(ids[1]).not.toBe("same");
     expect(roundTrip(base)).toEqual(base);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// processVariables: the first two top-level keys a designer writes
+// ---------------------------------------------------------------------------
+
+describe("the designer writes the two variable keys and nothing else", () => {
+  const base = graph({
+    id: "def-1",
+    name: "Onboarding",
+    processVariables: [
+      { key: "total", valueType: "number", semanticType: "amount", authoring: { profile: "x" } },
+    ],
+    processVariableInitializers: [{ targetKey: "total", value: "{{input.amount}}" }],
+    canvasViewport: { x: -120, y: 40, zoom: 0.75 },
+    nodes: [{ id: "t", type: "triggerManual" }],
+    edges: [],
+  });
+
+  function save(variables: ProcessVariableSet): WorkflowDefinitionGraph {
+    return toStoredGraph({
+      base,
+      nodes: toCanvasNodes(base),
+      edges: toCanvasEdges(base),
+      variables,
+    });
+  }
+
+  test("a caller that omits `variables` cannot touch either key", () => {
+    // The asymmetry `writePositions` has, for the same reason: a tool that
+    // edits wiring has nothing to say about a definition's variables, so it
+    // must not be able to erase them by not mentioning them.
+    const result = toStoredGraph({ base, nodes: [], edges: [] });
+    expect(result.processVariables).toBe(base.processVariables);
+    expect(result.processVariableInitializers).toBe(base.processVariableInitializers);
+  });
+
+  test("an added variable is written, and the rest of the document is not", () => {
+    const added = addProcessVariable(readProcessVariableSet(base), {
+      key: "channel",
+      valueType: "string",
+      label: "Channel",
+    });
+    expect(added.refused).toBeNull();
+
+    const result = save(added.set);
+    // The stored entry comes back whole. `semanticType` and `authoring` are
+    // read by `runtime/field-definitions.ts` and by an authoring pass, and by
+    // nothing in this editor — an add that rebuilt the list would drop them.
+    expect(result.processVariables).toEqual([
+      { key: "total", valueType: "number", semanticType: "amount", authoring: { profile: "x" } },
+      { key: "channel", valueType: "string", label: { en: "Channel" } },
+    ]);
+    // Untouched, and still the same array: only the key that changed is
+    // assigned, so the initializers reach the document through the spread.
+    expect(result.processVariableInitializers).toBe(base.processVariableInitializers);
+    expect((result as Record<string, unknown>).canvasViewport).toBe(
+      (base as Record<string, unknown>).canvasViewport,
+    );
+  });
+
+  test("undeclaring a variable takes its initializer with it", () => {
+    // The engine's declared set is closed, so an initializer targeting an
+    // undeclared key is a line that can never run — and one that would come
+    // back to life if the key were ever declared again.
+    const removed = removeProcessVariable(readProcessVariableSet(base), "total");
+    expect(save(removed).processVariables).toEqual([]);
+    expect(save(removed).processVariableInitializers).toEqual([]);
+  });
+
+  test("a start value cleared to blank removes the initializer rather than storing an empty one", () => {
+    const cleared = setProcessVariableStartValue(readProcessVariableSet(base), {
+      key: "total",
+      value: "   ",
+    });
+    expect(save(cleared).processVariableInitializers).toEqual([]);
+    // No initializer leaves the declaration's own `value ?? defaultValue`
+    // standing; an empty one would overwrite it with "".
+    expect(save(cleared).processVariables).toBe(base.processVariables);
+  });
+
+  test("the written list is the caller's own, so the save after it writes nothing", () => {
+    // A save adopts the document it produced as its new base. Copying the list
+    // on the way out would make the very next save see a different array and
+    // rewrite the variables, forever, for every subsequent edit.
+    const added = addProcessVariable(readProcessVariableSet(base), { key: "channel" });
+    const written = save(added.set);
+    expect(written.processVariables as unknown).toBe(added.set.fields);
+    expect(
+      toStoredGraph({
+        base: written,
+        nodes: toCanvasNodes(written),
+        edges: toCanvasEdges(written),
+        variables: readProcessVariableSet(written),
+      }),
+    ).toEqual(written);
+  });
+
+  test("a document that never had variables does not acquire an empty declaration", () => {
+    const bare = graph({ nodes: [], edges: [] });
+    const result = toStoredGraph({
+      base: bare,
+      nodes: [],
+      edges: [],
+      variables: readProcessVariableSet(bare),
+    });
+    expect("processVariables" in result).toBe(false);
+    expect("processVariableInitializers" in result).toBe(false);
+  });
+
+  test("a malformed stored value survives a trip that does not edit it", () => {
+    // The column is jsonb and enforces only that `nodes` and `edges` are
+    // arrays, so this is a document somebody has rather than a hypothetical.
+    const broken = graph({ nodes: [], edges: [], processVariables: "nonsense" });
+    const result = toStoredGraph({
+      base: broken,
+      nodes: [],
+      edges: [],
+      variables: readProcessVariableSet(broken),
+    });
+    expect(result.processVariables as unknown).toBe("nonsense");
   });
 });

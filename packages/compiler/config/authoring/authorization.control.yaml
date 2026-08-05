@@ -1,0 +1,148 @@
+schemaVersion: 2
+kind: authorizationConfig
+
+# The CONTROL realm: the issuer platform operators authenticate against.
+#
+# Why a second realm at all. `apps/admin` administers tenants, so its operators
+# must not be tenant users — an identity that can create and suspend tenants has
+# no business existing in the realm those tenants log into, where a tenant admin
+# can see the user list and where every misconfigured group or composite reaches
+# it. Keeping operators out of `openshapeforge` is the whole point; everything
+# else here follows from it.
+#
+# This realm is deliberately minimal:
+#   - no entity model, so no `keycloak.entityRoleClient` and no entity-derived
+#     client roles (the generator treats an absent entityRoleClient as "this
+#     realm does not participate in entity role generation")
+#   - no tenant users, no groups, no `tid` attribute — there is no tenant to be
+#     in
+#   - one interactive client, for `apps/admin` and nothing else
+#
+# It is emitted to `keycloak/openshapeforge-control-realm.json`, alongside the
+# tenant realm; Keycloak's `--import-realm` imports every file in its import
+# directory.
+#
+# Cross-realm is forced, not chosen: the Keycloak SPI is a
+# RealmResourceProvider that authenticates the bearer against the TARGET realm,
+# so a control-realm token can never call it on the tenant realm. `apps/admin`
+# reaches the tenant realm server-side with the `openshapeforge-auth-api`
+# service account (authored in authorization.yaml, holding realm-management
+# `manage-realm`). The operator's own token is never forwarded to the SPI.
+
+realm:
+  name: openshapeforge-control
+  displayName: OpenShapeForge Control Plane
+  enabled: true
+  # Local-dev only. Production mode (OPENSHAPEFORGE_REALM_MODE=production)
+  # overrides this to `external` and forces bruteForceProtected on, so the
+  # published control realm gets the same hardening as the tenant realm — it is
+  # NOT a second `openshapeforge-dev`-style realm left reachable over plain HTTP
+  # with no lockout.
+  sslRequired: none
+  # Operators are provisioned, never self-registered, and never recover their
+  # own account: this realm is the control plane's front door and anything that
+  # lets an unauthenticated visitor influence an account here is a way in.
+  registrationAllowed: false
+  loginWithEmailAllowed: true
+  duplicateEmailsAllowed: false
+  resetPasswordAllowed: false
+  editUsernameAllowed: false
+  bruteForceProtected: false
+  # Organizations live in the TENANT realm — they are the projection of
+  # `platform.tenants`. This realm holds operators, which belong to no
+  # organization, so the feature stays off here even though the server-wide
+  # `organization` feature flag is on for the tenant realm's sake.
+  organizationsEnabled: false
+  accessTokenLifespan: 900
+  ssoSessionIdleTimeout: 28800
+  ssoSessionMaxLifespan: 86400
+
+  # Same audit posture as the tenant realm. A control plane whose admin events
+  # are not recorded is the one place that trail is least optional.
+  events:
+    enabled: true
+    adminEnabled: true
+    listeners:
+      - jboss-logging
+
+keycloak:
+  # NOTE: no `entityRoleClient`. There is no entity model behind this realm, so
+  # it takes no compiler-generated entity roles. Naming a client here would push
+  # the tenant realm's entity roles onto a client this realm never declares.
+
+  # SECURITY: exactly as in authorization.yaml — redirectUris/webOrigins are an
+  # explicit allow-list, never "*" (the generator refuses wildcards and refuses
+  # a standard-flow gateway with no concrete list), and the secret is a
+  # `devSecret` (dev-only literal) plus a `${env:VAR}` reference for real
+  # deployments. A non-dev realm carrying only a literal/dev secret fails
+  # generation — that rule is per-realm, so it applies here unchanged.
+  clients:
+    - id: openshapeforge-admin-gateway
+      kind: gateway
+      name: OpenShapeForge Admin Console
+      # Dev-only credential — never reuse outside local development. A real
+      # deployment supplies KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_ADMIN_GATEWAY.
+      devSecret: admin-dev-secret
+      secret: ${env:KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_ADMIN_GATEWAY}
+      # Concrete local-dev URIs for the compose stack: `apps/admin` on :3002
+      # (deliberately not apps/web's :3000 — the two apps are different
+      # audiences on different realms and must not share an origin), plus this
+      # realm's own account console.
+      redirectUris:
+        - http://localhost:3002/*
+        - http://localhost:8181/realms/openshapeforge-control/account/*
+      webOrigins:
+        - http://localhost:3002
+        - http://localhost:8181
+
+# One realm role, and only one.
+#
+# `platform-operator` is the marker `apps/admin` authorizes on: holding it means
+# "may use the control plane". It carries no composites, because there is
+# nothing in this realm to compose — the authority to change anything lives on
+# the far side of a server-side call, not in this token.
+#
+# Two roles it deliberately does NOT compose, both of which would look natural
+# here and both of which would be wrong:
+#
+#   - `realm-management.realm-admin`. In the tenant realm that built-in client
+#     role is how cross-tenant platform admin is granted (see authorization.yaml
+#     — it replaced a bespoke `system-admin` realm role). But `realm-management`
+#     is per-realm: granting it HERE confers administration of the control realm
+#     itself — the operator directory — which is authority over who may operate
+#     the platform, not authority to operate it. The tenant realm's
+#     realm-management capability is reached by the `openshapeforge-auth-api`
+#     service account instead, which is where `manage-realm` already lives.
+#   - `Platform.SystemBypass`, the role `withSystemSession` requires. The
+#     control plane's DB access is a server-side concern of the API (S3); which
+#     principal presents that role is that issue's decision, not something this
+#     realm should pre-empt by minting it into an interactive login token.
+realmRoles:
+  platform-operator:
+    description: "Platform operator: may use the apps/admin control plane (tenant and sub-organisation management)"
+
+# Dev test accounts. Passwords plain text — FINE for dev, NOT for prod; the
+# generator holds them to the same rule as client secrets, so the `${env:VAR}`
+# form is what makes a production realm supply real ones.
+#
+# No `tid`: an operator belongs to no tenant. That is the difference this realm
+# exists to express, so it is worth being explicit that the omission is
+# deliberate rather than unfinished.
+users:
+  - username: platform-operator
+    email: operator@openshapeforge.example
+    firstName: Olivia
+    lastName: Operator
+    password: ${env:E2E_USER_PASSWORD_PLATFORM_OPERATOR:-test}
+    realmRoles: [platform-operator]
+
+  # Holds no role at all. Mirrors `acme-noaccess` in the tenant realm: without
+  # an authenticated-but-unauthorized identity there is no way to tell "the
+  # control plane checks the operator role" from "the control plane lets in
+  # anyone who can reach the login page".
+  - username: platform-noaccess
+    email: noaccess@openshapeforge.example
+    firstName: Nora
+    lastName: Nogroepen
+    password: ${env:E2E_USER_PASSWORD_PLATFORM_NOACCESS:-test}
+    realmRoles: []

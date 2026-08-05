@@ -19,7 +19,9 @@ import { createGraphqlYoga } from "../graphql/yoga.js";
 import { headersFromFastify } from "../http/headers.js";
 import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
 import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
+import { registerConnectorOAuthRoutes } from "../connectors/oauth-routes.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
+import { registerControlRestRoutes } from "../control/rest-routes.js";
 import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
 import { registerProtectedResourceMetadata } from "../mcp/protected-resource-metadata.js";
 import { registerApiKeyRestRoutes } from "../auth/api-key/rest-routes.js";
@@ -326,12 +328,24 @@ export function createApiApp(
       ...dbOptions,
       config: readConnectorRuntimeConfig(),
     });
+    // Inside the same child plugin, so the callback an unauthenticated stranger
+    // can reach sits behind the rate limiter like everything else.
+    registerConnectorOAuthRoutes(routes, {
+      ...dbOptions,
+      config: readConnectorRuntimeConfig(),
+      publicOrigin: process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN,
+      appOrigin: process.env.OPENSHAPEFORGE_APP_ORIGIN,
+    });
     registerGeneratedMcpServer(routes, dbOptions);
     registerProtectedResourceMetadata(routes);
     registerApiKeyRestRoutes(routes, {
       ...dbOptions,
       config: readApiKeyProvisioningConfig(),
     });
+    // The tenant control plane, on its own mount and its own realm. Registered
+    // unconditionally so an unconfigured deployment answers 503 naming what is
+    // missing rather than 404, which reads like a version mismatch.
+    registerControlRestRoutes(routes, dbOptions);
 
     for (const module of initialised.loaded) {
       module.restRoutes?.(routes, dbOptions);

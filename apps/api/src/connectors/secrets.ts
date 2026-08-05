@@ -30,6 +30,34 @@ export {
  */
 export const SECRET_SET_SENTINEL = "__set__";
 
+
+/**
+ * Narrow decrypted secrets to the ones a contract declares.
+ *
+ * `readSecrets` answers with every row stored against an installation, which is
+ * the right shape for a rotation walk and the wrong shape for an invocation.
+ * The context this feeds promises a package "only the secrets this connector's
+ * own contract declares" — and until this existed, that promise held only
+ * because `configureConnector` rejects unknown keys, so no other row could be
+ * written. True by construction is not the same as enforced, and the difference
+ * starts to matter the moment the PLATFORM stores its own fields against an
+ * installation: OAuth tokens the connector must never see are exactly that.
+ *
+ * Filtering here rather than in `readSecrets` keeps rotation able to see
+ * everything it must re-encrypt, including platform-managed rows.
+ */
+export function contractSecrets(
+  secrets: Record<string, string>,
+  declaredSecretFields: readonly string[],
+): Record<string, string> {
+  const allowed = new Set(declaredSecretFields);
+  const narrowed: Record<string, string> = {};
+  for (const [field, value] of Object.entries(secrets)) {
+    if (allowed.has(field)) narrowed[field] = value;
+  }
+  return narrowed;
+}
+
 /**
  * Strip secret values out of a configuration object for any read path.
  *

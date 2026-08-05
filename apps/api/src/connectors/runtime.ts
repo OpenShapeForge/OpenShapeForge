@@ -20,11 +20,21 @@
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import type { ConnectorContract, ConnectorOperationContract } from "./catalog.js";
-import { ConnectorExecutionError, invokeOperation } from "./executor.js";
+import {
+  ConnectorExecutionError,
+  createBoundFetch,
+  invokeOperation,
+  type FetchLike,
+} from "./executor.js";
+import {
+  ensureAccessToken,
+  toExecutionError,
+  withOAuthAuthorization,
+} from "./oauth.js";
 import type { ConnectorRegistry } from "./loader.js";
 import { ConnectorGovernor } from "./reliability.js";
 import { describeContractDrift, isUsable } from "./status.js";
-import type { SecretKeyring } from "./secrets.js";
+import { contractSecrets, type SecretKeyring } from "./secrets.js";
 import { listInstallations, readSecrets } from "./store.js";
 
 export class ConnectorInvocationError extends Error {
@@ -120,19 +130,32 @@ export async function invokeConnectorOperation(
     );
   }
 
-  // 4. Secrets, last and narrowest: only now, only this installation's.
+  // 4. Secrets, last and narrowest: only now, only this installation's, and
+  // only the fields THIS contract declares. The store answers with every row —
+  // which is what rotation needs — so the narrowing is applied here, on the one
+  // path that hands values to package code.
   if (!context.keyring) {
     throw new ConnectorInvocationError(
       "CONNECTOR_SECRETS_NOT_CONFIGURED",
       "Connector secret encryption is not configured on this deployment.",
     );
   }
-  const secrets = await readSecrets(
-    context.db,
-    context.session,
-    context.keyring,
-    installation.id,
+  const secrets = contractSecrets(
+    await readSecrets(context.db, context.session, context.keyring, installation.id),
+    contract.configuration.secretFields,
   );
+
+  // 4b. OAuth, when the contract declares it: the PLATFORM holds the tokens,
+  // refreshes them, and hands the package a fetch already carrying the access
+  // token. The package is never given a refresh token, so it cannot fail to
+  // persist a rotated one. Inside the governor, so a refresh storm against a
+  // failing token endpoint is rate-limited and broken like any other call.
+  const wrapFetch = await oauthFetchWrapper({
+    ...context,
+    contract,
+    installation,
+    secrets,
+  });
 
   // 5 + 6. Policy around a validated, redacted execution.
   return context.governor.run(
@@ -152,9 +175,62 @@ export async function invokeConnectorOperation(
         config: installation.config,
         secrets,
         input,
+        ...(wrapFetch ? { wrapFetch } : {}),
         ...(context.log ? { log: context.log } : {}),
       }),
   );
+}
+
+/**
+ * Obtain an access token and return the wrapper that attaches it, or undefined
+ * for a contract that does not use OAuth.
+ *
+ * The token is resolved BEFORE the package runs rather than lazily inside the
+ * wrapper: a refresh needs its own transaction, and starting one underneath a
+ * package's `fetch` would nest it inside whatever the caller already holds.
+ */
+async function oauthFetchWrapper(input: {
+  db: OpenShapeForgeDatabase;
+  session: DbSessionInput;
+  keyring?: SecretKeyring | undefined;
+  contract: ConnectorContract;
+  installation: { id: string; instanceKey: string; config: Record<string, unknown> };
+  secrets: Record<string, string>;
+  log?: ((message: string, fields?: Record<string, unknown>) => void) | undefined;
+}): Promise<((bound: FetchLike) => FetchLike) | undefined> {
+  if (!input.contract.auth) return undefined;
+  if (!input.keyring) {
+    throw new ConnectorInvocationError(
+      "CONNECTOR_SECRETS_NOT_CONFIGURED",
+      "Connector secret encryption is not configured on this deployment.",
+    );
+  }
+
+  // The refresh reaches the provider's token endpoint through the connector's
+  // OWN egress allowlist. The compiler already refused a contract whose token
+  // URL has no egress to reach it, so a denial here is a misconfigured
+  // installation rather than an unreachable design.
+  const controller = new AbortController();
+  const refreshFetch = createBoundFetch(input.contract, controller.signal);
+
+  try {
+    const accessToken = await ensureAccessToken({
+      db: input.db,
+      session: input.session,
+      keyring: input.keyring,
+      contract: input.contract,
+      installationId: input.installation.id,
+      instanceKey: input.installation.instanceKey,
+      config: input.installation.config,
+      secrets: input.secrets,
+      boundFetch: refreshFetch,
+    });
+    return (bound) => withOAuthAuthorization(bound, accessToken);
+  } catch (error) {
+    const mapped = toExecutionError(input.contract, error);
+    if (mapped) throw mapped;
+    throw error;
+  }
 }
 
 /**
@@ -202,11 +278,11 @@ export async function verifyConnectorInstallation(
     );
   }
 
-  const secrets = await readSecrets(
-    context.db,
-    context.session,
-    context.keyring,
-    installation.id,
+  // Narrowed exactly as the invocation path narrows it: verify runs the same
+  // package code with the same context, so it must not be the looser door.
+  const secrets = contractSecrets(
+    await readSecrets(context.db, context.session, context.keyring, installation.id),
+    contract.configuration.secretFields,
   );
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10_000);

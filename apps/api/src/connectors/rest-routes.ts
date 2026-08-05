@@ -65,6 +65,11 @@ const STATUS_BY_CODE: Record<string, number> = {
   CONNECTOR_TIMEOUT: 504,
   CONNECTOR_RATE_LIMITED: 429,
   CONNECTOR_CIRCUIT_OPEN: 503,
+  CONNECTOR_OAUTH_FAILED: 502,
+  // 409 rather than 401: the caller authenticated fine, it is the connector's
+  // own authorization to the provider that lapsed. A 401 would send a client
+  // into its own re-login flow, which cannot fix this.
+  CONNECTOR_REAUTHORIZATION_REQUIRED: 409,
   CONNECTOR_INVALID_INPUT: 400,
   CONNECTOR_INVALID_OUTPUT: 502,
   CONNECTOR_CONTRACT_MISMATCH: 500,

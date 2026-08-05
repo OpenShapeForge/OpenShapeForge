@@ -1,0 +1,24 @@
+# Source must diff as text.
+#
+# git decides binary-ness by sniffing for a NUL byte, so one embedded control
+# character anywhere in a file makes every change to it render as
+# "Bin 6872 -> 8474 bytes" — in review, in blame, in `git log -p`. That is a bad
+# outcome for any source file and a genuinely dangerous one for the modules that
+# handle credentials, which are exactly where an unreviewable diff should never
+# be possible. `connectors/secrets.ts` was in that state, because a NUL is the
+# right separator for its AES-GCM additional authenticated data.
+#
+# `diff` and not `text`: this settles how git RENDERS these files and nothing
+# else. `text` would additionally normalize line endings on checkin, which is a
+# repo-wide rewrite nobody asked this change to make.
+*.ts    diff
+*.tsx   diff
+*.js    diff
+*.mjs   diff
+*.json  diff
+*.yaml  diff
+*.yml   diff
+*.md    diff
+*.sql   diff
+*.css   diff
+*.ejs   diff

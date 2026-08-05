@@ -42,8 +42,9 @@ check-script ownership model travels with it.
 All artifact paths are repo-root-relative and fixed:
 `apps/api/src/generated/db/{schema.sql,types.ts,manifest.json}`,
 `packages/compiler/config/referentiedata/core-by-groep.json`,
-`keycloak/<realm>-realm.json` (when the resolved authoring tree has an
-`authorization.yaml`), plus whatever registered plugins emit. The host repo
+`keycloak/<realm>-realm.json` (one per `authorization.yaml` /
+`authorization.<realm>.yaml` in the resolved authoring tree), plus whatever
+registered plugins emit. The host repo
 is expected to gitignore these and gate them with its own copies of the
 check scripts (or by invoking `collectAllArtifacts(repoRoot)` — the same
 in-memory entry point `scripts/check-generated-artifacts.mjs` uses here).

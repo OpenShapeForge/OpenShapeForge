@@ -528,6 +528,101 @@ describe("platform schema generator", () => {
     );
   });
 
+  // ── tenant registry (#289) ──
+  //
+  // The one policy on a table that is NOT tenantScoped. `platform.tenants`
+  // cannot be tenant-scoped — the row IS the tenant — but it is cross-tenant
+  // data sitting in a schema the restricted runtime role holds blanket DML on,
+  // so "no policy" is the wrong default for it.
+
+  const registryManifest = (
+    tenantIdentityColumn: string | undefined,
+    extra: Partial<PlatformSchemaManifest["tables"][number]> = {},
+  ): PlatformSchemaManifest => ({
+    version: 1,
+    tables: [
+      {
+        schema: "platform",
+        name: "tenants",
+        tenantScoped: false,
+        columns: [
+          { name: "id", type: "uuid", primaryKey: true },
+          { name: "slug", type: "text", required: true },
+        ],
+        ...(tenantIdentityColumn === undefined ? {} : { tenantIdentityColumn }),
+        ...extra,
+      },
+    ],
+  });
+
+  it("emits a self-read, bypass-write policy for a tenant registry", () => {
+    const sql = schemaSqlFor(registryManifest("id"));
+
+    expect(sql).toContain('ALTER TABLE "platform"."tenants" ENABLE ROW LEVEL SECURITY;');
+    expect(sql).toContain('ALTER TABLE "platform"."tenants" FORCE ROW LEVEL SECURITY;');
+    // Asymmetric on purpose: a tenant session may read the row that IS its own
+    // tenant, and may write nothing. Writes go through withSystemSession, which
+    // sets app.bypass_rls and audits the invocation.
+    expect(sql).toContain(
+      'CREATE POLICY "tenants_tenant_registry" ON "platform"."tenants"\n' +
+        '  USING (app.bypass_rls() OR ("id" = app.current_tenant()))\n' +
+        "  WITH CHECK (app.bypass_rls());",
+    );
+  });
+
+  it("emits no policy for a global table without tenantIdentityColumn", () => {
+    // The configuration catalogs are identical for every tenant and have
+    // nothing to fence; this feature must not start policing them.
+    const sql = schemaSqlFor(registryManifest(undefined));
+
+    expect(sql).not.toContain("ROW LEVEL SECURITY");
+    expect(sql).not.toContain("CREATE POLICY");
+  });
+
+  it("rejects tenantIdentityColumn on a tenantScoped table", () => {
+    // Both would answer "which tenant owns this row", and they would not agree.
+    expect(() =>
+      generateArtifacts(
+        registryManifest("id", {
+          tenantScoped: true,
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true },
+            { name: "tenant_id", type: "uuid", required: true },
+          ],
+        }),
+      ),
+    ).toThrow(/declares tenantIdentityColumn "id" but is tenantScoped/);
+  });
+
+  it("rejects a tenantIdentityColumn that is not a column of the table", () => {
+    expect(() => generateArtifacts(registryManifest("tenant_id"))).toThrow(
+      /declares tenantIdentityColumn "tenant_id" but the column is not defined/,
+    );
+  });
+
+  it("rejects an empty tenantIdentityColumn", () => {
+    expect(() => generateArtifacts(registryManifest("  "))).toThrow(
+      /declares an empty tenantIdentityColumn/,
+    );
+  });
+
+  it("determinism: the shipped tenant registry is RLS-protected", () => {
+    // The committed generated schema.sql is the source of truth. If
+    // platform.tenants ever loses this policy, the cross-tenant registry is
+    // readable in full by any raw-SQL path a tenant session can reach.
+    const schemaSql = readFileSync(
+      join(import.meta.dir, "../../../apps/api/src/generated/db/schema.sql"),
+      "utf8",
+    );
+
+    expect(schemaSql).toContain('ALTER TABLE "platform"."tenants" FORCE ROW LEVEL SECURITY;');
+    expect(schemaSql).toContain(
+      'CREATE POLICY "tenants_tenant_registry" ON "platform"."tenants"\n' +
+        '  USING (app.bypass_rls() OR ("id" = app.current_tenant()))\n' +
+        "  WITH CHECK (app.bypass_rls());",
+    );
+  });
+
   it("determinism: the 3 shipped entities emit plain tenant-wide policies with bypass support", () => {
     // The committed generated schema.sql is the source of truth. The 3 shipped
     // entities declare rowAccess { enabled: true, empty: public } with no owner
@@ -844,6 +939,65 @@ tables:
           },
         ],
       });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a non-uuid tenantIdentityColumn", async () => {
+    // app.current_tenant() returns uuid, so the comparison in the emitted
+    // policy would not even typecheck at the database — better to fail the
+    // build than ship a policy that errors on first evaluation.
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: platform
+    name: tenants
+    tenantScoped: false
+    tenantIdentityColumn: slug
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: slug, type: text, required: true }
+`,
+      "utf8",
+    );
+
+    try {
+      await expect(loadManifest(path)).rejects.toThrow(
+        /tenantIdentityColumn "slug" must be uuid/,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects tenantIdentityColumn on a tenant-scoped table at load time", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: erp
+    name: cases
+    tenantScoped: true
+    tenantIdentityColumn: id
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: tenant_id, type: uuid, required: true }
+`,
+      "utf8",
+    );
+
+    try {
+      await expect(loadManifest(path)).rejects.toThrow(
+        /tenantIdentityColumn requires tenantScoped: false/,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -47,6 +47,14 @@ const STATUS_BY_CODE: Record<string, number> = {
   CONNECTOR_TIMEOUT: 504,
   CONNECTOR_RATE_LIMITED: 429,
   CONNECTOR_CIRCUIT_OPEN: 503,
+  // The token exchange itself failed at the provider — the same family as any
+  // other bad answer from upstream.
+  CONNECTOR_OAUTH_FAILED: 502,
+  // 409, alongside NOT_CONFIGURED and NEEDS_REPAIR: the installation exists and
+  // is in a state a person has to resolve. Not 401 — the CALLER authenticated
+  // fine; it is the connector's own authorization to the provider that lapsed,
+  // and answering 401 would send a client into its own re-login flow.
+  CONNECTOR_REAUTHORIZATION_REQUIRED: 409,
 };
 
 /**

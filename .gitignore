@@ -38,3 +38,10 @@ cookies.txt
 .e2e-report/
 .perf-report/
 docs/entities.generated.md
+
+# Browser e2e. `.auth/` holds a live signed-in session cookie for whatever realm
+# the run was pointed at, which is precisely the thing that must never be
+# committed; the other two are traces and screenshots from a failed run.
+apps/web/e2e/.auth/
+apps/web/test-results/
+apps/web/playwright-report/

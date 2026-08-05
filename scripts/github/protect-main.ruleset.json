@@ -30,7 +30,8 @@
           { "context": "Database migration tests" },
           { "context": "Dependency and secret scan (Trivy)" },
           { "context": "Build, smoke test, push the API image" },
-          { "context": "Build, smoke test, push the Keycloak image" }
+          { "context": "Build, smoke test, push the Keycloak image" },
+          { "context": "Browser e2e (apps/web)" }
         ]
       }
     }

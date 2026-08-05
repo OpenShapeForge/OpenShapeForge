@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import {
   SecretError,
   SECRET_SET_SENTINEL,
+  contractSecrets,
   decryptSecret,
   encryptSecret,
   keyringFromEnv,
@@ -159,5 +160,36 @@ describe("redaction", () => {
   it("removes a secret value even when the caller never marked it as set", () => {
     const redacted = redactConfiguration({ apiKey: "leaked" }, ["apiKey"], new Set());
     expect(redacted.apiKey).toBeUndefined();
+  });
+});
+
+/**
+ * The narrowing that makes the context's promise enforced rather than merely
+ * true. `readSecrets` answers with every row an installation holds, because
+ * rotation has to see all of them; the invocation path must hand a package only
+ * what its own contract declared.
+ */
+describe("narrowing to the contract", () => {
+  it("keeps the declared fields and drops everything else", () => {
+    expect(
+      contractSecrets(
+        { apiKey: "mine", token: "also-mine", "oauth.tokens": "platform-owned" },
+        ["apiKey", "token"],
+      ),
+    ).toEqual({ apiKey: "mine", token: "also-mine" });
+  });
+
+  // The case the narrowing exists for: a platform-managed row stored against
+  // the same installation must never reach package code, whatever it is named.
+  it("withholds a platform-managed row from a contract that declares no secrets", () => {
+    const narrowed = contractSecrets({ "oauth.tokens": "refresh-token" }, []);
+    expect(narrowed).toEqual({});
+    expect(JSON.stringify(narrowed)).not.toContain("refresh-token");
+  });
+
+  it("does not invent a field the installation has no row for", () => {
+    expect(contractSecrets({ apiKey: "mine" }, ["apiKey", "neverStored"])).toEqual({
+      apiKey: "mine",
+    });
   });
 });

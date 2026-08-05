@@ -158,14 +158,17 @@ describe("generated schema migration", () => {
         expect(first.checksum).toBe(manifest.checksum);
         expect(first.rollForward).toBeUndefined();
         // Phase 2 ships the org-unit closure trigger as a versioned migration,
-        // 0003 hardens it against a cross-tenant/nonexistent parent_id and 0004
-        // hardens its reparent branch with a cycle guard, so a fresh install
-        // applies all three in order. The list mirrors the registry in
+        // 0003 hardens it against a cross-tenant/nonexistent parent_id, 0004
+        // hardens its reparent branch with a cycle guard, and 0005 adds the
+        // org-unit Keycloak link columns that 0002's own `create table if not
+        // exists` would otherwise hide from a fresh install. A fresh install
+        // applies all four in order; the list mirrors the registry in
         // migrations/versioned/index.ts.
         expect(first.versionedApplied).toEqual([
           "0002_org-unit-closure-trigger",
           "0003_org-unit-parent-tenant-guard",
           "0004_org-unit-reparent-cycle-guard",
+          "0005_org-unit-keycloak-link",
         ]);
 
         await withDb(url, async (db) => {
@@ -173,8 +176,16 @@ describe("generated schema migration", () => {
             await recordedChecksum(db, generatedSchemaMigrationVersion),
           ).toBe(manifest.checksum);
           expect(await tableExists(db, "erp", "relations")).toBe(true);
+          expect(await tableExists(db, "platform", "tenants")).toBe(true);
           expect(await tableExists(db, "platform", "org_unit")).toBe(true);
           expect(await tableExists(db, "platform", "org_unit_closure")).toBe(true);
+          // 0005's whole reason to exist: on a fresh install schema.sql no-ops
+          // against the org_unit that 0002 already created, so without the
+          // versioned ALTER these two columns would never appear here.
+          expect(await columnExists(db, "platform", "org_unit", "slug")).toBe(true);
+          expect(
+            await columnExists(db, "platform", "org_unit", "keycloak_organization_id"),
+          ).toBe(true);
         });
 
         const second = await runChain(url);

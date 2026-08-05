@@ -116,6 +116,138 @@ resolved per session, so a caller is never shown a tool it lacks the roles for,
 and classified fields are withheld from the advertised schemas as well as
 redacted from responses. See [mcp.md](mcp.md).
 
+## The tenant control surface
+
+| Route | Does |
+| --- | --- |
+| `GET /api/control/v1/tenants` | The registry, ordered by slug, capped with a `truncated` flag. |
+| `GET /api/control/v1/tenants/{slug}` | One tenant, plus the Keycloak Organization read back as it actually is. |
+| `POST /api/control/v1/tenants` | Provision a tenant. `201` on create, `200` with `"created": false` on replay. |
+| `PATCH /api/control/v1/tenants/{slug}` | Change `status` and/or `name`. Nothing else is mutable. |
+| `GET /api/control/v1/tenants/{slug}/organizations` | The tenant's sub-organisation tree, nested, in one query off `org_unit` + `org_unit_closure`. |
+| `POST /api/control/v1/tenants/{slug}/organizations` | Provision a sub-organisation. |
+| `PATCH /api/control/v1/tenants/{slug}/organizations/{orgUnitId}` | Rename and/or reparent one. `parentOrgUnitId: null` means the top level; the slug is refused. |
+
+Everything about this surface is deliberately unlike the three above, because it
+is the one surface that is **not** per-tenant.
+
+- **Not on the GraphQL schema.** Every type there is fenced by a tenant
+  predicate, and a registry whose rows *are* tenants has no predicate to
+  satisfy. Its own mount rather than a segment of `/api/rest/v1`, so keeping the
+  control plane off a public ingress is a path rule rather than an exception
+  list.
+- **Its own realm.** Operators authenticate against `openshapeforge-control`,
+  never the tenant realm, and must hold the `platform-operator` realm role. The
+  pin is on `azp` rather than `aud`: the control realm has no resource-server
+  client, so operator tokens carry no audience, and without the pin a token from
+  Keycloak's built-in public `admin-cli` client would be accepted.
+- **DB-first, Keycloak-second, link-third.** The row is written, then the
+  Organization is created through the identity-configuration SPI, then
+  `keycloak_organization_id` is stamped back. A failure between steps leaves a
+  row with a null link — a state that is queryable and that replaying the
+  identical request heals. Both halves are upsert-shaped, so a replay is a no-op
+  that answers `200` with `"created": false` instead of `201`.
+- **Audited — reads included.** Every database access runs inside
+  `withSystemSession`, so each one leaves a `platform.system_bypass_audit` row
+  naming the operation, its target, and the issuer-qualified operator. Reads go
+  through it for two reasons: `platform.tenants` carries
+  `USING (app.bypass_rls() OR id = app.current_tenant())`, so a session with no
+  tenant sees nothing at all without the bypass; and a cross-tenant *read* of
+  the registry is not a lesser act than a write to it.
+  `Platform.SystemBypass` is never minted into a login token; mapping an
+  authenticated operator onto it is a server-side decision made in one place
+  (`src/control/authorization.ts`).
+- **Cross-realm is structural.** The SPI authenticates its bearer against the
+  *target* realm and requires `realm-management` `manage-realm`, so an operator
+  token can never call it. `apps/api` reaches it as the
+  `openshapeforge-auth-api` service account; the operator's token is never
+  forwarded.
+- **Not deployed.** The routes are registered unconditionally, but the Helm
+  chart sets none of the `OPENSHAPEFORGE_CONTROL_*` variables and does not
+  deploy `apps/admin` or the control realm, so `/api/control/v1` answers `503`
+  in every deployment the chart produces. `apps/admin` is dev and CI only —
+  see [deploy/README.md](../deploy/README.md) for the reasoning and for what
+  configuring the control plane would require first.
+
+Keycloak constrains the identifiers more than the SPI does: organization names
+and aliases are both unique per realm, the alias validator rejects `/`, and an
+alias **cannot be changed once set** (`PUT` with a different one answers
+`400 "Cannot change the alias"`). So the derivation splits in two:
+
+- `organizationPath` is the root-to-leaf slug chain — `acme/emea/nl` — and is
+  the only derived value that MOVES. A reparent recomputes it for the moved node
+  and every descendant.
+- alias = name is a value that never moves: the tenant slug for a root
+  Organization (`acme`, and a tenant slug is immutable), and
+  `<tenant-slug>--<org_unit id>` for a sub-organisation. Binding it to the path
+  instead would make a reparent impossible — the alias could not follow, and the
+  stale one would still be claimed.
+
+The human-readable name stays in `platform.tenants` / `platform.org_unit`, which
+are the system of record for it. Slugs are lowercase alphanumerics in
+single-hyphen groups, which is what makes `--` an unambiguous separator.
+
+### Moving a sub-organisation
+
+A reparent is atomic in the registry — one `UPDATE platform.org_unit SET
+parent_id`, with the closure trigger rewriting `platform.org_unit_closure` in the
+same transaction — and a depth-ordered best effort in Keycloak, which cannot join
+that transaction. Everything refusable is refused before the write (unknown unit,
+foreign or unprovisioned parent, cycle, the depth cap measured at the deepest
+descendant, sibling slug collision). If a node's reprojection then fails, the
+call answers `409 CONTROL_ORG_UNIT_PROJECTION_INCOMPLETE` naming each node that
+did not land: the move is committed, the mirror is behind, and re-sending the
+identical request finishes it. The expected `organizationPath` of every node is
+derivable from the registry alone, which is what makes that state reportable.
+
+### What a tenant's lifecycle state means
+
+`status` holds a TENANTSTATUS value — `active`, `inactive` or `suspended` — and
+the registry is authoritative for it. The Keycloak projection is one rule: **the
+tenant's Organization is enabled if and only if the tenant is `active`.** One
+rule rather than a per-status table, so a state added to the catalog cannot land
+on "enabled" by omission.
+
+It is applied through **Keycloak's own admin API**
+(`PUT /admin/realms/{realm}/organizations/{id}`), not through a new SPI route.
+`OrganizationModel.enabled` is a native field with a native endpoint; the SPI
+exists for what Keycloak has no concept of, and every method added to it costs a
+jar and image rebuild against a runtime whose non-public server SPIs have no
+cross-minor stability. The same `openshapeforge-auth-api` service account
+reaches both, and its `realm-management` `manage-realm` is exactly what the
+organizations admin resource requires. Writes are read-modify-write so the
+`openshapeforge.*` hierarchy attributes ride along untouched.
+
+What disabling an Organization does, verified against Keycloak 26.5.3 rather
+than inferred: it stops the organization's identity configuration — its identity
+providers and the org-aware login flow — from being used. It is **not** a
+session kill, and a member can still obtain a token with its own password.
+Refusing sign-in for a suspended tenant is an application-side gate and nothing
+reads `tenants.status` at session setup yet.
+
+Two consequences worth knowing:
+
+- Provisioning re-applies the projection. The SPI calls `setEnabled(true)` on
+  every create and is upsert-shaped, so replaying the create of a suspended
+  tenant would otherwise re-enable its Organization silently.
+- `PATCH` writes the row first and mirrors second. If Keycloak fails, the status
+  is already changed and the call reports why — the same recoverable, replayable
+  half-applied state provisioning produces, not a rollback that would pretend
+  Keycloak participates in a transaction.
+
+`slug` is **immutable**, in the surface and not only in the console: it is the
+Organization alias, the segment every descendant sub-org's path is built from,
+and the URL key. A `PATCH` body carrying `slug` (or `id`, or either
+`keycloak_*` column) is refused with `400 CONTROL_INVALID_INPUT` naming the
+reason, rather than silently dropped — a caller that sends one and receives
+`200` would reasonably believe it took effect.
+
+The surface refuses every request with `503 CONTROL_PLANE_NOT_CONFIGURED`,
+naming each missing variable, unless the whole `OPENSHAPEFORGE_CONTROL_*` block
+is set. There is no partial mode: the dangerous shape is a working operator
+login with an unset SPI secret, where provisioning writes the database and
+Keycloak silently never happens.
+
 ## The page-config catalog
 
 One hand-written query sits beside the generated entity surface:
@@ -378,6 +510,9 @@ compose stack):
 | `OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI` / `_ISSUER` / `_AUDIENCE` | Keycloak bearer verification (unset ⇒ bearer ignored) |
 | `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` | trusted-context HMAC secret; the example default matches the repo's signing scripts (unset ⇒ trusted-context rejected) |
 | `APP_TENANT_BYPASS_ROLES` | comma-separated roles that grant `tenant` scope |
+| `OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER` / `_JWKS_URI` / `_CLIENT_ID` | control-realm operator verification; `_CLIENT_ID` pins `azp`, not `aud` |
+| `OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL` + `KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API` | how provisioning reaches the SPI in the tenant realm; the secret shares its name with the realm generator's |
+| `OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM` / `_CLIENT_ID` | optional overrides (default `openshapeforge` / `openshapeforge-auth-api`) |
 | `API_RATE_LIMIT_MAX` / `_WINDOW_MS` | anonymous budget per window (default 600 / 60s) |
 | `API_RATE_LIMIT_MAX_TRUSTED` | budget for a signed trusted-context caller (default 5× the anonymous budget) |
 | `API_RATE_LIMIT_REDIS_URL` | shared limiter store; unset ⇒ in-memory, budget enforced per instance |
@@ -442,14 +577,26 @@ Health and readiness probes are never throttled.
 | `keycloak-db` | `postgres:17-alpine` | internal | Keycloak's own DB |
 | `keycloak` | built from `packages/keycloak-spi` | **8181**→8080 (`KEYCLOAK_PORT`) | `start-dev --import-realm`, org feature on, admin `admin`/`admin` |
 
-Keycloak imports the **generated** realm
-`keycloak/openshapeforge-realm.json` (realm `openshapeforge`) — regenerate it
-with `bun run generate` before first compose up. Dev users (password `test`)
-carry a `tid` tenant attribute: `acme-directie`, `acme-vastgoedbeheerder`,
-`acme-wijkbeheerder`, `acme-verhuurconsulent`, `acme-noaccess` (tenant
-`11111111-…`), and `beta-verhuurconsulent` (tenant `33333333-…`). The
-interactive client is `openshapeforge-gateway` (secret `dev-secret`) — the e2e
-suite uses it for the password-grant bearer test.
+Keycloak imports **two generated** realms — regenerate both with `bun run
+generate` before first compose up. `--import-realm` imports every file in the
+import directory, and the compose file mounts one bind per realm.
+
+`keycloak/openshapeforge-realm.json` (realm `openshapeforge`) is the **tenant**
+realm. Dev users (password `test`) carry a `tid` tenant attribute:
+`acme-directie`, `acme-vastgoedbeheerder`, `acme-wijkbeheerder`,
+`acme-verhuurconsulent`, `acme-noaccess` (tenant `11111111-…`), and
+`beta-verhuurconsulent` (tenant `33333333-…`). The interactive client is
+`openshapeforge-gateway` (secret `dev-secret`) — the e2e suite uses it for the
+password-grant bearer test.
+
+`keycloak/openshapeforge-control-realm.json` (realm `openshapeforge-control`)
+is the **control** realm `apps/admin` signs platform operators in against —
+separate on purpose, so no operator identity exists in the realm tenants log
+into. Dev users (password `test`): `platform-operator` (holds the
+`platform-operator` realm role) and `platform-noaccess` (holds none). The
+interactive client is `openshapeforge-admin-gateway` (secret
+`admin-dev-secret`). No user here carries a `tid` — an operator is in no
+tenant.
 
 `bun scripts/e2e-crud-proof.ts` walks a full signed-header CRUD lifecycle
 against a running API and doubles as a live smoke test (remember to set the

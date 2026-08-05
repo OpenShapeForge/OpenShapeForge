@@ -202,6 +202,59 @@ function renderWorkerAccessDisjunct(table: TableDefinition): string {
   return ` OR app.current_worker_role() = ${quoteSqlString(workerRole)}`;
 }
 
+/**
+ * The tenant-registry policy lines for a global table that declares
+ * `tenantIdentityColumn`, or `undefined` when it declares none.
+ *
+ * Deliberately asymmetric — reads are self-scoped, writes are bypass-only:
+ *   USING       app.bypass_rls() OR "<col>" = app.current_tenant()
+ *   WITH CHECK  app.bypass_rls()
+ *
+ * A tenant session may read exactly the row that IS its own tenant (an id it
+ * already holds, so this discloses nothing it did not present) and may write
+ * nothing at all. Mutating the registry therefore requires `withSystemSession`,
+ * which sets `app.bypass_rls` and writes a `platform.system_bypass_audit` row
+ * around the call — so a tenant record cannot change off the audited path.
+ *
+ * Validation is repeated here rather than left to the manifest loader because
+ * plugin `contributePlatformTables` hooks never pass through it.
+ */
+function renderTenantRegistryPolicy(table: TableDefinition): string[] | undefined {
+  const identityColumn = table.tenantIdentityColumn;
+  if (identityColumn === undefined) {
+    return undefined;
+  }
+  if (typeof identityColumn !== "string" || identityColumn.trim().length === 0) {
+    throw new Error(
+      `Table ${table.schema}.${table.name} declares an empty tenantIdentityColumn. ` +
+        `Name the uuid column holding the tenant id, or remove the field.`,
+    );
+  }
+  if (table.tenantScoped) {
+    throw new Error(
+      `Table ${table.schema}.${table.name} declares tenantIdentityColumn "${identityColumn}" but is tenantScoped. ` +
+        `A tenant-scoped table already carries the tenant predicate; declaring both gives one row two answers to which tenant owns it.`,
+    );
+  }
+  if (!columnNames(table).has(identityColumn)) {
+    throw new Error(
+      `Table ${table.schema}.${table.name} declares tenantIdentityColumn "${identityColumn}" but the column is not defined.`,
+    );
+  }
+
+  const policyName = quoteIdent(`${table.name}_tenant_registry`);
+  const readPredicate = `app.bypass_rls() OR (${quoteIdent(identityColumn)} = app.current_tenant())`;
+  return [
+    "",
+    `ALTER TABLE ${tableIdent(table)} ENABLE ROW LEVEL SECURITY;`,
+    `ALTER TABLE ${tableIdent(table)} FORCE ROW LEVEL SECURITY;`,
+    `DROP POLICY IF EXISTS ${policyName} ON ${tableIdent(table)};`,
+    `CREATE POLICY ${policyName} ON ${tableIdent(table)}`,
+    `  USING (${readPredicate})`,
+    `  WITH CHECK (app.bypass_rls());`,
+  ];
+}
+
 function renderRowScopePredicate(
   table: TableDefinition,
   workerAccess: string,
@@ -314,6 +367,10 @@ function renderTableSql(table: TableDefinition): string {
   // at all there, and a declaration that quietly does nothing reads like a
   // grant that was made.
   const workerAccess = renderWorkerAccessDisjunct(table);
+  // Same reasoning, opposite direction: resolved before the branch so a
+  // tenantIdentityColumn on a TENANT-SCOPED table is rejected rather than
+  // silently ignored by a branch that never looks at it.
+  const tenantRegistryPolicy = renderTenantRegistryPolicy(table);
   const lines = [
     `CREATE SCHEMA IF NOT EXISTS ${quoteIdent(table.schema)};`,
     "",
@@ -348,6 +405,11 @@ function renderTableSql(table: TableDefinition): string {
         `  WITH CHECK (${tenantExpression});`,
       );
     }
+  } else if (tenantRegistryPolicy) {
+    // A global table normally emits no policy — the configuration catalogs are
+    // identical for every tenant and have nothing to fence. A tenant REGISTRY
+    // is the exception, and says so with `tenantIdentityColumn`.
+    lines.push(...tenantRegistryPolicy);
   }
 
   for (const index of deriveRowScopeIndexes(table)) {

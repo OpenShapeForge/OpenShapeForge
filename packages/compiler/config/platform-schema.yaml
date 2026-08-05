@@ -262,11 +262,10 @@ tables:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
       - { name: connector_slug, type: text, required: true }
-      # Written in the cast form Postgres reports back ('default'::text). The
-      # drift comparator matches the manifest default against the live column
-      # default verbatim, so a bare 'default' reads as non-additive drift and
-      # blocks every roll-forward. Same reason the jsonb defaults elsewhere are
-      # spelled '{}'::jsonb.
+      # Written in the cast form Postgres reports back ('default'::text) to
+      # match the rest of the tree; a bare 'default' compiles and compares
+      # identically — the drift comparator normalizes a redundant cast on a
+      # quoted literal away before comparing (see docs/migrations.md).
       - { name: instance_key, type: text, required: true, default: "'default'::text" }
       - { name: display_name, type: text }
       # Non-secret configuration values only. Secret-marked fields live in

@@ -21,7 +21,12 @@ import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
-import { generatedSchemaMigrationVersion } from "../migrations/generated-schema.js";
+import {
+  diffManifestAgainstDatabase,
+  generatedSchemaMigrationVersion,
+  type ManifestColumn,
+  type ManifestTable,
+} from "../migrations/generated-schema.js";
 import {
   applyVersionedMigrations,
   validateVersionedRegistry,
@@ -353,6 +358,164 @@ describe("generated schema migration", () => {
           expect(
             await recordedChecksum(db, generatedSchemaMigrationVersion),
           ).toBe("simulated-old");
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+});
+
+/**
+ * Column-default drift (issue #210). The bundled manifest cannot exhibit both
+ * spellings of the same default at once, so these tests drive the classifier
+ * against a purpose-built schema instead — the `tables` parameter exists for
+ * exactly that, the way MigrationChainOptions.versioned does for the runner.
+ * The DDL below is written the way the generated schema.sql would render each
+ * authoring spelling, so what is compared is a real live column, not a string.
+ */
+function probeColumn(
+  name: string,
+  type: string,
+  columnDefault: string,
+  overrides: Partial<ManifestColumn> = {},
+): ManifestColumn {
+  return {
+    name,
+    type,
+    required: true,
+    primaryKey: false,
+    generated: null,
+    default: columnDefault,
+    ...overrides,
+  };
+}
+
+describe("generated schema column defaults", () => {
+  test(
+    "a default authored without the redundant cast Postgres adds is not drift",
+    async () => {
+      await withScratchDb(async (url) => {
+        await withDb(url, async (db) => {
+          // Every quoted default here is authored BARE in the DDL. Postgres
+          // stores each one with a cast to the column type appended, so the
+          // live column_default never matches the authored spelling verbatim.
+          await sql`create schema drift_probe`.execute(db);
+          await sql`
+            create table drift_probe.equivalent_defaults (
+              id uuid primary key default gen_random_uuid(),
+              category text not null default 'process',
+              quoted_label text not null default 'it''s',
+              external_ref uuid not null default '00000000-0000-0000-0000-000000000001',
+              payload jsonb not null default '{}',
+              effective_on date not null default '2020-01-01',
+              instance_key text not null default 'default',
+              created_at timestamptz not null default now(),
+              enabled boolean not null default false,
+              attempts integer not null default 0
+            )
+          `.execute(db);
+
+          const table: ManifestTable = {
+            name: "drift_probe.equivalent_defaults",
+            schema: "drift_probe",
+            table: "equivalent_defaults",
+            columns: [
+              probeColumn("id", "uuid", "gen_random_uuid()", {
+                primaryKey: true,
+              }),
+              // The issue's exact case: a text default with no ::text.
+              probeColumn("category", "text", "'process'"),
+              // Escaped quotes must survive the literal scan intact.
+              probeColumn("quoted_label", "text", "'it''s'"),
+              probeColumn(
+                "external_ref",
+                "uuid",
+                "'00000000-0000-0000-0000-000000000001'",
+              ),
+              probeColumn("payload", "jsonb", "'{}'"),
+              probeColumn("effective_on", "date", "'2020-01-01'"),
+              // The other direction: authored WITH the cast, live column
+              // created bare. Either spelling must compare equal to either.
+              probeColumn("instance_key", "text", "'default'::text"),
+              // Non-literal defaults are untouched and still match.
+              probeColumn("created_at", "timestamptz", "now()"),
+              probeColumn("enabled", "boolean", "false"),
+              probeColumn("attempts", "integer", "0"),
+            ],
+          };
+
+          const diff = await diffManifestAgainstDatabase(db, [table]);
+          expect(diff.nonAdditive).toEqual([]);
+          expect(diff.missingTables).toEqual([]);
+          expect(diff.missingColumns).toEqual([]);
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "a genuinely changed default expression is still non-additive drift",
+    async () => {
+      await withScratchDb(async (url) => {
+        await withDb(url, async (db) => {
+          await sql`create schema drift_probe`.execute(db);
+          await sql`
+            create table drift_probe.changed_defaults (
+              changed_literal text not null default 'draft',
+              wrapped_call text not null default upper('process'),
+              foreign_cast text not null default 'process'::varchar,
+              concatenated text not null default 'a' || '',
+              shifted_clock timestamptz not null default now() - interval '1 day',
+              unchanged text not null default 'process'
+            )
+          `.execute(db);
+
+          const table: ManifestTable = {
+            name: "drift_probe.changed_defaults",
+            schema: "drift_probe",
+            table: "changed_defaults",
+            columns: [
+              probeColumn("changed_literal", "text", "'process'"),
+              probeColumn("wrapped_call", "text", "'process'"),
+              // The cast must name the column's OWN type to be redundant;
+              // ::varchar on a text column is a different expression.
+              probeColumn("foreign_cast", "text", "'process'"),
+              probeColumn("concatenated", "text", "'a'"),
+              probeColumn("shifted_clock", "timestamptz", "now()"),
+              // Control: proves the five above are not drifting for some
+              // unrelated reason.
+              probeColumn("unchanged", "text", "'process'"),
+            ],
+          };
+
+          const diff = await diffManifestAgainstDatabase(db, [table]);
+          const drifted = diff.nonAdditive;
+          expect(drifted).toHaveLength(5);
+          for (const column of [
+            "changed_literal",
+            "wrapped_call",
+            "foreign_cast",
+            "concatenated",
+            "shifted_clock",
+          ]) {
+            expect(
+              drifted.some((line) =>
+                line.startsWith(
+                  `drift_probe.changed_defaults.${column}: default mismatch`,
+                ),
+              ),
+            ).toBe(true);
+          }
+          expect(drifted.some((line) => line.includes("unchanged"))).toBe(false);
+
+          // The report quotes both sides verbatim; normalization is for the
+          // comparison only, so a reader still sees what the database holds.
+          const foreignCast = drifted.find((line) =>
+            line.includes("foreign_cast"),
+          );
+          expect(foreignCast).toContain("DEFAULT 'process'");
+          expect(foreignCast).toContain("'process'::character varying");
         });
       });
     },

@@ -49,7 +49,7 @@ export type GeneratedSchemaMigrationResult = {
   rollForward?: GeneratedSchemaRollForwardSummary;
 };
 
-type ManifestColumn = {
+export type ManifestColumn = {
   name: string;
   type: string;
   required: boolean;
@@ -59,7 +59,7 @@ type ManifestColumn = {
   default?: string;
 };
 
-type ManifestTable = {
+export type ManifestTable = {
   /** Qualified name, e.g. "erp.relations". */
   name: string;
   schema: string;
@@ -108,16 +108,105 @@ function quoteIdent(value: string): string {
 }
 
 /**
- * Normalize a SQL default expression for drift comparison. The manifest records
- * the verbatim authoring default (e.g. `now()`, `'{}'::jsonb`) while Postgres
- * re-serializes information_schema.column_default in its own canonical form.
- * For the scalar defaults this schema uses those forms coincide; we still trim
- * surrounding whitespace so cosmetic differences never register as drift.
+ * Type names a redundant cast may spell, per manifest scalar type: the
+ * manifest's own token (what an author writes) and the information_schema
+ * spelling (what Postgres reports back — they differ only for timestamptz,
+ * reported as "timestamp with time zone"). A cast naming anything else is a
+ * different expression and is never stripped.
  */
-function normalizeDefault(value: string | null | undefined): string | null {
+const redundantCastTargets: Record<string, ReadonlySet<string>> =
+  Object.fromEntries(
+    Object.entries(informationSchemaDataType).map(([manifestType, dataType]) => [
+      manifestType,
+      new Set([manifestType, dataType]),
+    ]),
+  );
+
+/**
+ * Trim a SQL default expression, collapsing "absent" and "blank" to null.
+ * Used verbatim in drift messages so the reader sees what was authored and
+ * what the database reports, not a rewritten form.
+ */
+function trimDefault(value: string | null | undefined): string | null {
   if (value === undefined || value === null) return null;
   const trimmed = value.trim();
   return trimmed.length === 0 ? null : trimmed;
+}
+
+/**
+ * End index (exclusive) of the single-quoted literal starting at index 0, or
+ * -1 when `value` does not start with a terminated literal. `''` inside the
+ * literal is an escaped quote, not the terminator.
+ */
+function quotedLiteralEnd(value: string): number {
+  if (!value.startsWith("'")) return -1;
+  let index = 1;
+  while (index < value.length) {
+    if (value[index] !== "'") {
+      index += 1;
+      continue;
+    }
+    if (value[index + 1] === "'") {
+      index += 2;
+      continue;
+    }
+    return index + 1;
+  }
+  return -1;
+}
+
+/**
+ * Normalize a SQL default expression for drift comparison.
+ *
+ * The manifest records the verbatim authoring default (`now()`, `'{}'::jsonb`,
+ * `false`) while Postgres re-serializes information_schema.column_default into
+ * its own canonical form. For a bare quoted literal on a text/uuid/jsonb/date
+ * column Postgres appends a cast to the column type and leaves the literal
+ * byte-identical — so authoring `'process'` on a text column and reading back
+ * `'process'::text` are the same default, and comparing them verbatim reports
+ * drift that does not exist (issue #210).
+ *
+ * The only rewrite performed is therefore: drop a trailing `::<type>` cast from
+ * an expression that is EXACTLY one single-quoted literal followed by that
+ * cast, and only when the cast names the column's own type. That case is
+ * provably a no-op — an unadorned literal in a DEFAULT is coerced to the column
+ * type anyway — and it is applied to both sides, so either spelling compares
+ * equal to either spelling.
+ *
+ * Everything else stays strict, because a normalizer that accepts real drift is
+ * worse than the bug it fixes:
+ * - anything that is not a lone literal (`now()`, `gen_random_uuid()`,
+ *   `CURRENT_DATE`, `now() - interval '1 day'`, `upper('x'::text)`,
+ *   `('a'::text || 'b'::text)`, a parenthesised or dollar-quoted expression);
+ * - a cast naming any other type (`'x'::character varying` on a text column),
+ *   or a chain of casts;
+ * - the literal's own content, which is compared byte for byte.
+ *
+ * Two Postgres canonicalisations are deliberately NOT papered over, since
+ * neither is a redundant cast and both would need the literal itself
+ * rewritten: boolean/integer/numeric literals are const-folded to an unquoted
+ * token (`'false'::boolean` -> `false`, `'0'::integer` -> `0`), and a
+ * timestamptz literal is re-rendered into Postgres' own timestamp spelling.
+ * Authoring those in the folded form (`false`, `0`, `now()`) is what the tree
+ * already does and round-trips exactly; anything else is reported as drift.
+ */
+function normalizeDefault(
+  value: string | null | undefined,
+  columnType: string,
+): string | null {
+  const trimmed = trimDefault(value);
+  if (trimmed === null) return null;
+
+  const literalEnd = quotedLiteralEnd(trimmed);
+  if (literalEnd === -1) return trimmed;
+
+  const rest = trimmed.slice(literalEnd).trim();
+  if (!rest.startsWith("::")) return trimmed;
+
+  const castTarget = rest.slice(2).trim().toLowerCase().replace(/\s+/g, " ");
+  if (redundantCastTargets[columnType]?.has(castTarget) !== true) return trimmed;
+
+  return trimmed.slice(0, literalEnd);
 }
 
 /**
@@ -147,7 +236,7 @@ function renderAddColumnSql(table: ManifestTable, column: ManifestColumn): strin
 
 type AdditiveColumn = { table: ManifestTable; column: ManifestColumn };
 
-type ManifestSchemaDiff = {
+export type ManifestSchemaDiff = {
   missingTables: ManifestTable[];
   missingColumns: AdditiveColumn[];
   /** Human-readable descriptions of every non-additive difference. */
@@ -177,11 +266,17 @@ type ManifestSchemaDiff = {
  * superuser/owner used by db:migrate. If a FORCE-RLS policy ever hid rows
  * from a non-superuser migration role, misclassification is fail-safe — the
  * subsequent ADD COLUMN ... NOT NULL would be rejected by Postgres itself.
+ *
+ * `tables` defaults to the bundled manifest; it is a parameter so the drift
+ * classification can be exercised against a purpose-built schema in tests
+ * (same reason MigrationChainOptions.versioned exists). Production callers
+ * never pass it.
  */
-async function diffManifestAgainstDatabase(
+export async function diffManifestAgainstDatabase(
   db: OpenShapeForgeDatabase,
+  tables: readonly ManifestTable[] = manifestTables,
 ): Promise<ManifestSchemaDiff> {
-  const schemas = [...new Set(manifestTables.map((table) => table.schema))];
+  const schemas = [...new Set(tables.map((table) => table.schema))];
 
   const liveTables = (
     await sql<{ table_schema: string; table_name: string }>`
@@ -253,7 +348,7 @@ async function diffManifestAgainstDatabase(
     return hasRows;
   };
 
-  for (const table of manifestTables) {
+  for (const table of tables) {
     if (!liveTableNames.has(table.name)) {
       missingTables.push(table);
       continue;
@@ -312,11 +407,19 @@ async function diffManifestAgainstDatabase(
       // non-additive difference that hard-errors with remediation instructions
       // rather than silently persisting the stale default.
       if (column.default !== undefined) {
-        const expectedDefault = normalizeDefault(column.default);
-        const liveDefault = normalizeDefault(liveColumn.columnDefault);
+        const expectedDefault = normalizeDefault(column.default, column.type);
+        const liveDefault = normalizeDefault(
+          liveColumn.columnDefault,
+          column.type,
+        );
         if (expectedDefault !== liveDefault) {
+          // Reported verbatim (trimmed only): the normalized forms exist to
+          // compare, not to show — a reader must see what was authored and
+          // what the database actually holds.
+          const expectedShown = trimDefault(column.default);
+          const liveShown = trimDefault(liveColumn.columnDefault);
           nonAdditive.push(
-            `${table.name}.${column.name}: default mismatch — manifest expects DEFAULT ${expectedDefault ?? "(none)"}, database column has ${liveDefault ? `DEFAULT ${liveDefault}` : "no default"}`,
+            `${table.name}.${column.name}: default mismatch — manifest expects DEFAULT ${expectedShown ?? "(none)"}, database column has ${liveShown ? `DEFAULT ${liveShown}` : "no default"}`,
           );
         }
       }
@@ -331,7 +434,7 @@ async function diffManifestAgainstDatabase(
     }
   }
 
-  const manifestTableNames = new Set(manifestTables.map((table) => table.name));
+  const manifestTableNames = new Set(tables.map((table) => table.name));
   for (const tableName of liveTableNames) {
     if (
       !manifestTableNames.has(tableName) &&

@@ -39,3 +39,25 @@ export type TrustedContextHeaderNames = {
   timestamp: string;
   signature: string;
 };
+
+/**
+ * The read side of the Fetch `Headers` interface, spelled structurally rather
+ * than by naming the ambient `Headers` global.
+ *
+ * Same treatment, and the same reason, as `FetchLike` in
+ * `apps/api/src/connectors/executor.ts`: `Headers` exists only once some lib
+ * or `@types` package puts it in scope, and nothing in this package's build
+ * config guarantees one — `tsconfig.build.json` inherits `lib: ["ES2023"]` and
+ * declares no `types`, so naming the global made the build depend on whichever
+ * ambient declaration the compiler happened to pick up. A real `Headers`
+ * satisfies this.
+ */
+export type ReadonlyHeadersLike = {
+  get(name: string): string | null;
+};
+
+/** Adds the mutation this package performs when it signs a bundle. */
+export type HeadersLike = ReadonlyHeadersLike & {
+  set(name: string, value: string): void;
+  delete(name: string): void;
+};

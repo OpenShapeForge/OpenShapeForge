@@ -2,6 +2,8 @@
 export type {
   AuthIdentity,
   AuthProfile,
+  HeadersLike,
+  ReadonlyHeadersLike,
   TrustedContextHeaderNames,
 } from "./types.js";
 

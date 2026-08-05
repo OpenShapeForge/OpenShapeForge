@@ -53,6 +53,7 @@ export type TextInputProps = SharedInputProps & {
   suggestionHeaderLabel?: string;
   behavior?: TextInputBehavior;
   variant?: TextInputVariant;
+  lang?: "nl" | "en";
 };
 
 export type TextInputControlProps = Omit<TextInputProps, "behavior">;

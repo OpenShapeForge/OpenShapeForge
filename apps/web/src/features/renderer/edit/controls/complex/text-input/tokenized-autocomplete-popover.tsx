@@ -15,6 +15,7 @@ export function TokenizedAutocompletePopover({
   expandedFieldTree,
   expandedGroups,
   groupedSuggestions,
+  lang,
   listboxId,
   queryActive,
   setActiveTarget,
@@ -24,6 +25,7 @@ export function TokenizedAutocompletePopover({
   activeTarget: NavigationTarget | null;
   applySuggestion: (suggestion: VariableSuggestion) => void;
   emptyMessage?: string;
+  lang: "nl" | "en";
   expandedFieldTree: Record<string, boolean>;
   expandedGroups: Record<string, boolean>;
   groupedSuggestions: WorkflowVariableSuggestionGroup[];
@@ -47,6 +49,7 @@ export function TokenizedAutocompletePopover({
         suggestionGroups={groupedSuggestions}
         activeTarget={activeTarget}
         emptyMessage={emptyMessage ?? "Geen variabelen gevonden."}
+        lang={lang}
         queryActive={queryActive}
         expandedGroups={expandedGroups}
         expandedFieldTree={expandedFieldTree}

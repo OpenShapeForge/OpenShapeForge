@@ -105,6 +105,12 @@ issues, pull requests, and review comments. Act accordingly.
   (`kind: entityPatch`) and compiler plugins exist so behavior can be
   changed without forking base files. See `docs/layers.md` and
   `docs/plugins.md`.
+- **UI copy is English.** Strings a user or screen reader sees default to
+  English; where a surface is bilingual, switch on the `lang`/`activeLang` in
+  scope rather than hard-coding one language. The only deliberate exception is
+  the Dutch **sample datasets** in `packages/ui` (the relation detail screen,
+  inbox message handling, and the sidebar's default groups), which are Dutch on
+  purpose and stay that way.
 - Match the surrounding code style; comments only for constraints the code
   cannot express.
 

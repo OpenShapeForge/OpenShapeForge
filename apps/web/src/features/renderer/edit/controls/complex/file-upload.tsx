@@ -18,6 +18,7 @@ type FileUploadProps = {
   "aria-invalid"?: boolean;
   value: string;
   disabled?: boolean;
+  lang?: "nl" | "en";
   fileNameField?: string;
   mimeTypeField?: string;
   checksumField?: string;
@@ -31,6 +32,7 @@ function FileUpload({
   "aria-invalid": ariaInvalid,
   value,
   disabled = false,
+  lang = "nl",
   fileNameField,
   mimeTypeField,
   checksumField,
@@ -50,6 +52,8 @@ function FileUpload({
       setError(undefined);
       setUploading(true);
 
+      const failureMessage = lang === "nl" ? "Upload mislukt." : "Upload failed.";
+
       try {
         const response = await fetch("/api/documents/upload", {
           method: "POST",
@@ -60,8 +64,11 @@ function FileUpload({
         if (!response.ok) {
           const body = await response.json().catch(() => null);
           const message =
-            body?.error?.message ?? `Upload mislukt (${response.status}).`;
-          setError(typeof message === "string" ? message : "Upload mislukt.");
+            body?.error?.message ??
+            (lang === "nl"
+              ? `Upload mislukt (${response.status}).`
+              : `Upload failed (${response.status}).`);
+          setError(typeof message === "string" ? message : failureMessage);
           return;
         }
 
@@ -79,7 +86,7 @@ function FileUpload({
           onSiblingChange(checksumField, data.checksum);
         }
       } catch {
-        setError("Upload mislukt.");
+        setError(failureMessage);
       } finally {
         setUploading(false);
       }
@@ -87,6 +94,7 @@ function FileUpload({
     [
       onValueChange,
       onSiblingChange,
+      lang,
       fileNameField,
       mimeTypeField,
       checksumField,
@@ -156,8 +164,12 @@ function FileUpload({
   ]);
 
   const displayName =
-    uploadedFileName ?? (value ? value.split("/").pop() ?? "bestand" : undefined);
+    uploadedFileName ??
+    (value
+      ? value.split("/").pop() ?? (lang === "nl" ? "bestand" : "file")
+      : undefined);
   const hasFile = value.length > 0;
+  const uploadingLabel = lang === "nl" ? "Uploaden..." : "Uploading...";
 
   return (
     <div className="space-y-2">
@@ -191,7 +203,11 @@ function FileUpload({
               disabled={disabled || uploading}
               onClick={() => inputRef.current?.click()}
             >
-              {uploading ? "Uploaden..." : "Vervangen"}
+              {uploading
+                ? uploadingLabel
+                : lang === "nl"
+                  ? "Vervangen"
+                  : "Replace"}
             </Button>
             <Button
               type="button"
@@ -200,7 +216,7 @@ function FileUpload({
               disabled={disabled || uploading}
               onClick={handleRemove}
             >
-              Verwijderen
+              {lang === "nl" ? "Verwijderen" : "Remove"}
             </Button>
           </div>
         </div>
@@ -237,10 +253,12 @@ function FileUpload({
           onDragLeave={handleDragLeave}
         >
           {uploading ? (
-            <span className="text-muted-foreground">Uploaden...</span>
+            <span className="text-muted-foreground">{uploadingLabel}</span>
           ) : (
             <span className="text-muted-foreground">
-              Sleep een bestand hierheen of klik om te selecteren
+              {lang === "nl"
+                ? "Sleep een bestand hierheen of klik om te selecteren"
+                : "Drag a file here or click to select"}
             </span>
           )}
         </div>

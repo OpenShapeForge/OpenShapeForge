@@ -13,11 +13,13 @@ export function SettingsPanel({
   onClose,
   onNavigate,
   groups,
+  activeLang,
 }: {
   expanded: boolean;
   onClose: () => void;
   onNavigate?: () => void;
   groups: SettingsPanelGroup[];
+  activeLang: "en" | "nl";
 }) {
   const pathname = usePathname() ?? "/";
 
@@ -30,13 +32,13 @@ export function SettingsPanel({
     >
       <div className="flex items-center justify-between border-b px-3 py-2">
         <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          Configuratie
+          {activeLang === "nl" ? "Configuratie" : "Configuration"}
         </span>
         <button
           type="button"
           onClick={onClose}
           className="text-muted-foreground hover:text-foreground"
-          aria-label="Sluiten"
+          aria-label={activeLang === "nl" ? "Sluiten" : "Close"}
         >
           <X className="size-3.5" />
         </button>

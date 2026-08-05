@@ -40,6 +40,7 @@ export function TokenizedTextInputControl({
   suggestions = [],
   onValueChange,
   emptyMessage,
+  lang = "nl",
   className,
   placeholder,
   disabled,
@@ -372,6 +373,7 @@ export function TokenizedTextInputControl({
         activeTarget={activeTarget}
         applySuggestion={applySuggestion}
         emptyMessage={emptyMessage}
+        lang={lang}
         expandedFieldTree={expandedFieldTree}
         expandedGroups={expandedGroups}
         groupedSuggestions={groupedSuggestions}

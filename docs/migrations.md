@@ -49,8 +49,9 @@ it plus the ledger update runs in one explicit `BEGIN`/`COMMIT`.
   rows** (needs a backfill).
 - A database column that is absent from the manifest (dropped/renamed
   fields).
-- A **type, nullability, or identity mismatch** between the live column and
-  the manifest.
+- A **type, nullability, identity, or default mismatch** between the live
+  column and the manifest (defaults are only compared where the manifest
+  declares one — see [Column defaults](#column-defaults)).
 - A database table in a manifest-covered schema that is not in the manifest
   (except the explicitly non-manifest-managed `platform.schema_migrations`
   and `platform.system_bypass_audit`).
@@ -145,16 +146,36 @@ statuses `ok` / `behind` / `unmigrated`):
   the recorded vs bundled checksums and "run `bun run db:migrate`" guidance,
   instead of letting a stale schema produce confusing downstream failures.
 
+## Column defaults
+
+`manifest.json` carries each column's **verbatim authoring default**, and the
+diff compares it against `information_schema.column_default`. A **changed**
+default is non-additive: the roll-forward cannot `ALTER` a default in place
+(the idempotent `CREATE TABLE IF NOT EXISTS` skips existing tables), so it is
+surfaced as a hard error rather than silently left stale. Change a default on
+an existing table with a versioned migration.
+
+Postgres re-serializes `column_default` into its own canonical form, so the
+authored spelling and the reported one need not be identical. **A redundant
+cast on a quoted literal is normalized away before comparing**, on both sides
+and only when the cast names the column's own type — so on a `text` column
+`'process'` and `'process'::text` are the same default, and either spelling is
+accepted. The same holds for the other types Postgres canonicalises this way
+(`uuid`, `jsonb`, `date`).
+
+Nothing else is normalized. A cast naming a different type, a chain of casts,
+a parenthesised or dollar-quoted expression, or anything that is not exactly
+one quoted literal plus a cast (`now()`, `gen_random_uuid()`,
+`upper('x'::text)`, `now() - interval '1 day'`) is compared as written, so a
+genuine expression change still registers as drift. Two Postgres rewrites are
+therefore **not** absorbed and are best avoided in authoring: boolean, integer
+and numeric literals are const-folded to an unquoted token (`'false'::boolean`
+is reported as `false`), and a `timestamptz` literal is re-rendered into
+Postgres' own timestamp spelling. Author those in the folded form (`false`,
+`0`, `now()`).
+
 ## Caveats
 
-- **Column defaults are invisible to the diff.** The serialized
-  `manifest.json` does not carry column defaults, so (a) changing a default
-  produces no detectable drift and is **not** applied to existing tables by
-  the roll-forward (the idempotent `CREATE TABLE IF NOT EXISTS` skips
-  existing tables), and (b) a new **required** column is classified by the
-  backfill rule as if it had no default — on a populated table it is
-  non-additive even when the authored SQL default would have made the `ADD
-  COLUMN` safe. Handle both with a versioned migration.
 - **Type equivalents are non-additive.** The diff compares
   `information_schema.data_type` strings through a fixed exact map
   (`text`→`text`, `timestamptz`→`timestamp with time zone`, …). A live

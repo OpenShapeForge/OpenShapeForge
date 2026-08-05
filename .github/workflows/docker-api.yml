@@ -3,9 +3,10 @@ name: API image
 # Builds the API container image (apps/api/Dockerfile), smoke-tests it, and
 # publishes it to the GitHub Container Registry.
 #
-#   pull_request -> build + smoke test only, never push
-#   push to main -> push :main and :sha-<commit>
-#   tag v*       -> push :<version>, :<major>.<minor> and :latest
+#   pull request (any base) -> build + smoke test only, never push
+#   push to main            -> push :main and :sha-<commit>
+#   tag v*                  -> push :<version>, :<major>.<minor> and :latest
+#   manual run on any other ref -> build + smoke test only, never push
 #
 # The image path matches what the Helm chart defaults to
 # (deploy/helm/openshapeforge-api/values.yaml) and what deploy/README.md
@@ -15,8 +16,11 @@ name: API image
 # independently. Merges to main are already gated by CI on the pull request.
 
 on:
+  # Every pull request, whatever its base branch, for the reason in ci.yml:
+  # a stacked PR used to match no trigger and so reported no checks at all
+  # (#269). Building and smoke-testing an intermediate branch is the point;
+  # PUBLISH below is what keeps it out of the registry.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
     tags: ["v*"]
@@ -33,6 +37,25 @@ env:
   # Lowercase literal: GHCR rejects the mixed-case ${{ github.repository_owner }}
   # (OpenShapeForge), and this is the path values.yaml already ships.
   IMAGE: ghcr.io/openshapeforge/openshapeforge-api
+
+  # WHETHER THIS RUN MAY PUBLISH. Every step that authenticates to GHCR, derives
+  # tags, or pushes is gated on this and on nothing else — one rule, stated once.
+  #
+  # It names the two refs allowed to publish rather than the events that must
+  # not, because "not a pull request" stopped being a statement about which code
+  # this is the moment the trigger above widened to every base branch (#269).
+  # A pull request runs with github.ref = refs/pull/<n>/merge, which matches
+  # neither arm, so it cannot publish however it is based — and the event check
+  # says so a second time, independently.
+  #
+  # It also closes a hole that predates #269: workflow_dispatch on a feature
+  # branch would have pushed :<branch> and :sha-<commit> (metadata-action's
+  # type=ref and type=sha) out of unreviewed code. Dispatch on main or on a
+  # release tag still publishes, which is what that escape hatch is for.
+  #
+  # Fail-closed by construction: any mistake in this expression yields false and
+  # publishes nothing, rather than publishing from somewhere it should not.
+  PUBLISH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
 
 jobs:
   build:
@@ -98,7 +121,7 @@ jobs:
       # Only authenticate when we actually publish. PR builds (especially from
       # forks) get a read-only GITHUB_TOKEN and must not push.
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
+        if: env.PUBLISH == 'true'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
@@ -106,7 +129,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Derive tags and labels
-        if: github.event_name != 'pull_request'
+        if: env.PUBLISH == 'true'
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
@@ -128,7 +151,7 @@ jobs:
       # provenance/sbom attestations are why this is a separate step — the local
       # docker exporter used above cannot carry them.
       - name: Push to GHCR
-        if: github.event_name != 'pull_request'
+        if: env.PUBLISH == 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .

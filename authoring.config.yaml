@@ -5,6 +5,12 @@
 # own authoring layers (see packages/compiler/src/plugins.ts).
 layers:
   - packages/compiler/config/authoring
+  # One layer per connector, so a connector directory is self-contained: its
+  # contract sits beside the package that implements it, and adding or dropping
+  # an integration is one directory and one line here rather than an edit in
+  # two trees. The shape mirrors how a plugin ships its own `authoring/`.
+  - connectors/afas-profit/authoring
+  - connectors/exact-online/authoring
 plugins:
   - ./examples/plugins/entity-docs.ts
   # Workflow node catalogs: contributes the platform workflow catalog tables,

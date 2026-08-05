@@ -67,7 +67,7 @@ jobs:
       # source root — so without it the app would be built by the step below
       # with no type gate of its own.
       - name: Typecheck
-        run: bun run typecheck:compiler && bun run typecheck:api && bun run typecheck:web && bun run typecheck:admin && bun run typecheck:examples && bun run typecheck:plugin-web && bun run typecheck:layout
+        run: bun run typecheck:compiler && bun run typecheck:api && bun run typecheck:web && bun run typecheck:admin && bun run typecheck:examples && bun run typecheck:connectors && bun run typecheck:plugin-web && bun run typecheck:layout
 
       # The web app's CRUD pages are compiler output, so a compiler change can
       # break the build without touching a single file under apps/web. Building
@@ -96,6 +96,12 @@ jobs:
       # worse than no test, because it reads as coverage.
       - name: Example plugin unit tests
         run: bun run test:examples
+
+      # The connector packages, for the same reason: they moved out of examples/
+      # when connectors became a top level directory, and test:examples stopped
+      # covering them the moment they did.
+      - name: Connector package unit tests
+        run: bun run test:connectors
 
       # Graph auto-layout, which has no dependency on the app, the API or the
       # database and so is not reached by any other job here.

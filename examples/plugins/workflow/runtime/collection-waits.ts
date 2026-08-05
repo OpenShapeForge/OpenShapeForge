@@ -774,6 +774,10 @@ export function startWorkflowCollectionWaitWorker(
     stop: async () => {
       stopped = true;
       clearInterval(interval);
+      // Settle only after the in-flight tick finishes. Both sweeps claim in a
+      // transaction that commits before the resume is enqueued — the wait is
+      // already 'matched' or 'timed_out', so no later scan selects it. A tick
+      // killed in that gap leaves the run parked with nothing left to sweep it.
       while (active) {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }

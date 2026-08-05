@@ -16,6 +16,12 @@
  * the whole design rests on — the cross-tenant surface is the queue, not the
  * work.
  *
+ * The later tests pin the *other* poll loops the role owns, and they name none
+ * of them on purpose: they seed a due schedule or an expired wait, start the
+ * role, and wait for the effect. A loop the role stops starting fails them —
+ * which is exactly what #235 was, a pair of collection-wait sweeps with no call
+ * site outside their own file: correct, and never run.
+ *
  * Run (cwd apps/api):
  *   set -o pipefail; bun test src/db/__tests__/workflow-worker-role.test.ts 2>&1
  */
@@ -297,6 +303,110 @@ describe("the workflow-worker role", () => {
             `.execute(db);
             expect(schedule.rows[0]!.next_occurrence).toBe(2);
             expect(schedule.rows[0]!.locked_by).toBeNull();
+          });
+        } finally {
+          await handle.stop();
+        }
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "times out every tenant's expired collection wait, because that sweep runs in this role too",
+    async () => {
+      const tenantA = randomUUID();
+      const tenantB = randomUUID();
+
+      await withScratchDb(async (name) => {
+        await withDb(scratchUrl(name, false), async (db) => {
+          const modules = await loadRuntimeModules();
+          expect(modules.failures).toEqual([]);
+          const moduleSeeds = modules.loaded.flatMap((module) => module.seeds ?? []);
+          await db.connection().execute((conn) => runMigrationChain(conn, { moduleSeeds }));
+
+          await db.connection().execute(async (conn) => {
+            const typed = conn as unknown as Kysely<DB>;
+            // Two tenants, because one proves nothing: the sweep claims without a
+            // tenant scope, and a sweep that had somehow acquired one would still
+            // pass a single-tenant test.
+            for (const [tenant, label] of [
+              [tenantA, "tenant-a"],
+              [tenantB, "tenant-b"],
+            ] as const) {
+              const definition = await sql<{ id: string }>`
+                insert into workflow.definitions (tenant_id, name, is_active)
+                values (${tenant}::uuid, ${label}, true)
+                returning id::text
+              `.execute(typed);
+              const instance = await sql<{ id: string }>`
+                insert into workflow.instances (tenant_id, definition_id, status)
+                values (${tenant}::uuid, ${definition.rows[0]!.id}::uuid, ${"running"})
+                returning id::text
+              `.execute(typed);
+              // A run parked on a collection wait whose deadline has passed. The
+              // event it was collecting never arrived, so the timeout is the only
+              // thing that can ever move it — nothing else in the system looks at
+              // this row.
+              await sql`
+                insert into workflow.collection_waits (
+                  tenant_id, instance_id, node_id, wait_token,
+                  entity_type, event_type, filter_hash, timeout_at
+                )
+                values (
+                  ${tenant}::uuid, ${instance.rows[0]!.id}::uuid, ${"collect-1"},
+                  ${`${label}-expired`}, ${"relations"}, ${"created"}, ${"h1"},
+                  now() - interval '1 minute'
+                )
+              `.execute(typed);
+            }
+          });
+        });
+
+        // The same single role as the tests above, and — the point of this test
+        // — nothing here names the collection-wait worker or calls its sweep. If
+        // the role does not start it, both runs stay parked and this fails.
+        const handle = await startWorkerRole(WORKER_ROLE, {
+          databaseUrl: scratchUrl(name, true),
+          log: { info: () => {}, warn: () => {}, error: () => {} },
+        });
+
+        try {
+          await withDb(scratchUrl(name, false), async (db) => {
+            const waits = await until("both tenants' expired waits to be timed out", async () => {
+              const rows = await sql<{ wait_token: string; status: string }>`
+                select wait_token, status
+                from workflow.collection_waits
+                order by wait_token
+              `.execute(db);
+              return rows.rows.length === 2 &&
+                rows.rows.every((row) => row.status === "timed_out")
+                ? rows.rows
+                : null;
+            });
+            expect(waits).toEqual([
+              { wait_token: "tenant-a-expired", status: "timed_out" },
+              { wait_token: "tenant-b-expired", status: "timed_out" },
+            ]);
+
+            // ...and each claim enqueued a resume for its own tenant — the work
+            // half, which runs in a session scoped to that wait's tenant because
+            // `workflow.instances` deliberately carries no worker axis. Claiming
+            // without enqueueing would be the worse failure: the row is no longer
+            // 'pending', so no later sweep would ever see it again.
+            const commands = await until("a resume enqueued for each tenant", async () => {
+              const rows = await sql<{ tenant_id: string; command_type: string }>`
+                select tenant_id::text, command_type
+                from workflow.control_commands
+              `.execute(db);
+              return rows.rows.length === 2 ? rows.rows : null;
+            });
+            expect(commands.every((row) => row.command_type === "workflow.instance.resume")).toBe(
+              true,
+            );
+            expect(new Set(commands.map((row) => row.tenant_id))).toEqual(
+              new Set([tenantA, tenantB]),
+            );
           });
         } finally {
           await handle.stop();

@@ -33,6 +33,7 @@
  */
 import type { RuntimeModule } from "../../../apps/api/src/modules/contract.js";
 import { applyWorkflowCatalogsSeed } from "../../../apps/api/src/db/migrations/workflow-catalogs-seed.js";
+import { startWorkflowCollectionWaitWorker } from "./runtime/collection-waits.js";
 import {
   createWorkflowControlCommandDispatcher,
   readWorkflowRestateDispatchConfig,
@@ -110,12 +111,13 @@ const plugin: RuntimeModule = {
    * `apps/api` does not know this role exists; a repo that drops the workflow
    * plugin loses it with the plugin.
    *
-   * The schedule and timer workers run in this same role, because all three are
-   * one pipeline. Neither of the other two touches a run directly: a due
-   * schedule enqueues a `workflow.instance.start` command and a due timer
-   * enqueues a `workflow.instance.resume`, and the control-command worker is
-   * what drains both. Split across roles, a deployment could run half of that
-   * and watch schedules fire and timers expire into a queue nothing reads.
+   * The schedule, timer and collection-wait workers run in this same role,
+   * because all four are one pipeline. None of the other three touches a run
+   * directly: a due schedule enqueues a `workflow.instance.start` command, and a
+   * due timer, a matched collection wait and an expired one all enqueue a
+   * `workflow.instance.resume` — the control-command worker is what drains them
+   * all. Split across roles, a deployment could run half of that and watch
+   * schedules fire and waits expire into a queue nothing reads.
    *
    * That is also why the timer is swept here rather than slept on. A deployment
    * may configure an external durable-execution service to dispatch commands,
@@ -125,12 +127,14 @@ const plugin: RuntimeModule = {
    * it enqueues is dispatched by whichever dispatcher is configured, so the two
    * compose rather than compete.
    *
-   * All three are poll loops, so the role owns three intervals and stops them
+   * All four are poll loops, so the role owns four intervals and stops them
    * all. `stop()` must settle only after each has finished its in-flight tick:
    * the schedule worker holds claimed `workflow.schedules` rows with `locked_by`
-   * set, and the timer sweep may have claimed waits whose resume is not
-   * enqueued yet — those runs would stay parked with `resumed_at` already
-   * written, so nothing would ever sweep them again.
+   * set, and both wait sweeps claim rows in a transaction that commits before
+   * the resume is enqueued — a timer wait with `resumed_at` written, a
+   * collection wait moved to `matched` or `timed_out`. A tick killed in that
+   * gap leaves the run parked and the row no longer selectable, so no later
+   * sweep would ever pick it up again.
    */
   workers: {
     [WORKFLOW_WORKER_ROLE]: {
@@ -145,7 +149,7 @@ const plugin: RuntimeModule = {
             dispatch: restate ? "restate" : "in-process",
             ...(restate ? { service: restate.workflowCommandServiceName } : {}),
           },
-          "Draining workflow.control_commands, firing due workflow.schedules and resuming due timer waits.",
+          "Draining workflow.control_commands, firing due workflow.schedules and resuming due timer and collection waits.",
         );
 
         const commands = startWorkflowControlCommandWorker(
@@ -154,15 +158,17 @@ const plugin: RuntimeModule = {
         );
         const schedules = startWorkflowScheduleWorker(db);
         const timers = startWorkflowTimerWaitWorker(db);
+        const collectionWaits = startWorkflowCollectionWaitWorker(db);
 
         return {
           stop: async () => {
-            // Producers first, drain last: both enqueue commands, so stopping
-            // them before the drain means the queue is not being refilled while
-            // it empties. Sequential rather than Promise.all for that ordering
-            // — none rejects, each only awaits its own tick.
+            // Producers first, drain last: all three enqueue commands, so
+            // stopping them before the drain means the queue is not being
+            // refilled while it empties. Sequential rather than Promise.all for
+            // that ordering — none rejects, each only awaits its own tick.
             await schedules.stop();
             await timers.stop();
+            await collectionWaits.stop();
             await commands.stop();
           },
         };

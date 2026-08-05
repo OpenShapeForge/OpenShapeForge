@@ -1,16 +1,28 @@
 name: CI
 
-# Gate every PR to main (and pushes to main) with the project's own proof
-# gates: the compiler generator + determinism checks, typechecks, unit tests,
-# the third-party notices check, the Keycloak SPI build, the Helm chart, and
-# the database migration tests. These mirror the gates documented in AGENTS.md.
+# Gate every PR (and pushes to main) with the project's own proof gates: the
+# compiler generator + determinism checks, typechecks, unit tests, the
+# third-party notices check, the Keycloak SPI build, the Helm chart, and the
+# database migration tests. These mirror the gates documented in AGENTS.md.
 #
 # NOTE: wiring these jobs as required_status_checks in branch protection is a
 # separate repo-admin step tracked in issue #47.
 
 on:
+  # EVERY pull request, whatever its base branch — deliberately not
+  # `branches: [main]`. A PR stacked on another feature branch is the shape
+  # #240 produces on purpose, and under a base filter it matched no trigger at
+  # all: `gh pr checks` answered "no checks reported", which reads as pending
+  # rather than as never-going-to-run (#269). The concurrency block below
+  # bounds the cost by cancelling superseded runs.
+  #
+  # Nothing in this workflow publishes, deploys, or writes to a registry — the
+  # only outward-facing jobs in this repository are the two image builds, which
+  # gate publishing on the ref (see docker-api.yml). So widening the base here
+  # has no effect beyond running the checks on more pull requests.
   pull_request:
-    branches: [main]
+  # Not widened: a branch with an open PR is already covered by the trigger
+  # above, and widening this would run every job twice on every push.
   push:
     branches: [main]
 

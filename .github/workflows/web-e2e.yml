@@ -12,7 +12,11 @@ name: Web browser e2e
 # pull request. Unlike that one this workflow builds and pushes NO image.
 #
 # Trigger matches ci.yml exactly. Issue #269 is the reason it is spelled out:
-# a workflow that does not run on pull requests to main is not a gate.
+# a workflow that does not run on a pull request is not a gate, and one that
+# runs only on pull requests to main is not a gate on the stacked PRs #240
+# produces. This is a required status check, so leaving it base-filtered while
+# the others widened would put a stacked PR back in the state #269 describes —
+# a check that reads as pending and never runs.
 #
 # `bun run generate` is not optional here and is not just for types. Both the
 # realm JSON Keycloak imports and the `/workflow` route files themselves are
@@ -20,7 +24,6 @@ name: Web browser e2e
 
 on:
   pull_request:
-    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:

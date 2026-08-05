@@ -7,9 +7,10 @@ name: Keycloak image
 # Trigger/tag behaviour mirrors the API image workflow exactly, so a given git
 # tag produces a matching pair of images:
 #
-#   pull_request -> build + smoke test only, never push
-#   push to main -> push :main and :sha-<commit>
-#   tag v*       -> push :<version>, :<major>.<minor> and :latest
+#   pull request (any base) -> build + smoke test only, never push
+#   push to main            -> push :main and :sha-<commit>
+#   tag v*                  -> push :<version>, :<major>.<minor> and :latest
+#   manual run on any other ref -> build + smoke test only, never push
 #
 # There is deliberately NO paths filter: a tag push must publish this image even
 # when the tagged commit changed nothing under packages/keycloak-spi, otherwise
@@ -21,8 +22,11 @@ name: Keycloak image
 # serves every environment.
 
 on:
+  # Every pull request, whatever its base branch, for the reason in ci.yml:
+  # a stacked PR used to match no trigger and so reported no checks at all
+  # (#269). Building and smoke-testing an intermediate branch is the point;
+  # PUBLISH below is what keeps it out of the registry.
   pull_request:
-    branches: [main]
   push:
     branches: [main]
     tags: ["v*"]
@@ -38,6 +42,21 @@ permissions:
 env:
   # Lowercase literal: GHCR rejects the mixed-case ${{ github.repository_owner }}.
   IMAGE: ghcr.io/openshapeforge/openshapeforge-keycloak
+
+  # WHETHER THIS RUN MAY PUBLISH — identical rule to docker-api.yml, and
+  # deliberately so: the two images are deployed as a pair against one tag, so a
+  # ref that publishes one must publish the other. Every step that authenticates
+  # to GHCR, derives tags, or pushes is gated on this and on nothing else.
+  #
+  # It names the two refs allowed to publish rather than the events that must
+  # not, because "not a pull request" stopped being a statement about which code
+  # this is the moment the trigger above widened to every base branch (#269).
+  # A pull request runs with github.ref = refs/pull/<n>/merge, which matches
+  # neither arm, so it cannot publish however it is based — and the event check
+  # says so a second time, independently. It also stops a workflow_dispatch on a
+  # feature branch from pushing :<branch> and :sha-<commit> out of unreviewed
+  # code; dispatch on main or a release tag still publishes.
+  PUBLISH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
 
 jobs:
   build:
@@ -160,7 +179,7 @@ jobs:
           exit 1
 
       - name: Log in to GHCR
-        if: github.event_name != 'pull_request'
+        if: env.PUBLISH == 'true'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
@@ -168,7 +187,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Derive tags and labels
-        if: github.event_name != 'pull_request'
+        if: env.PUBLISH == 'true'
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
@@ -188,7 +207,7 @@ jobs:
       # Separate from the load build because the local docker exporter cannot
       # carry provenance/SBOM attestations.
       - name: Push to GHCR
-        if: github.event_name != 'pull_request'
+        if: env.PUBLISH == 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: packages/keycloak-spi

@@ -8,11 +8,19 @@ The API is a Bun service. It expects an **external Postgres** and an
 Images are published to GHCR automatically by
 [`.github/workflows/docker-api.yml`](../.github/workflows/docker-api.yml):
 
-| Trigger          | Tags pushed                                       |
-| ---------------- | ------------------------------------------------- |
-| pull request     | none — build + smoke test only                    |
-| push to `main`   | `main`, `sha-<commit>`                            |
-| tag `v0.1.0`     | `0.1.0`, `0.1`, `latest`                          |
+| Trigger                            | Tags pushed                    |
+| ---------------------------------- | ------------------------------ |
+| pull request (whatever its base)   | none — build + smoke test only |
+| push to `main`                     | `main`, `sha-<commit>`         |
+| tag `v0.1.0`                       | `0.1.0`, `0.1`, `latest`       |
+| manual run on any other ref        | none — build + smoke test only |
+
+Publishing is gated on the **ref**, not on the event: only `refs/heads/main` and
+`refs/tags/v*` authenticate to GHCR at all. A feature branch builds and
+smoke-tests the image — that is the gate — but nothing it produces reaches the
+registry, however the workflow was triggered. `.github/workflows/ci.yml` and the
+image workflows run on pull requests to *any* base branch so that a stacked PR
+is gated too (issue #269), which is what makes that distinction load-bearing.
 
 `latest` follows the newest release tag, not the newest `main` commit. Pin an
 explicit version in the chart (`image.tag`) for anything but scratch testing.

@@ -18,6 +18,16 @@ Port-forward to try it locally:
   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "openshapeforge-api.fullname" . }} 3001:{{ .Values.service.port }}
   curl http://127.0.0.1:3001/api/health
 
+{{- if .Values.workers.enabled }}
+
+The {{ .Values.workers.role }} role runs as a separate Deployment
+({{ include "openshapeforge-api.workerFullname" . }}, {{ .Values.workers.replicaCount }} replica(s)). It serves no
+traffic, so it has no Service, no Ingress and no probes — its log is the only
+signal that it is draining the queue:
+
+  kubectl logs -n {{ .Release.Namespace }} deploy/{{ include "openshapeforge-api.workerFullname" . }}
+{{- end }}
+
 {{- if eq (default "" .Values.auth.bearer.audience) "" }}
 
 WARNING: auth.bearer.audience is empty. With NODE_ENV=production the API will
@@ -44,6 +54,9 @@ Secret will NOT roll the pods — they keep the credential injected at their las
 start. After rotating, restart them explicitly:
 
   kubectl rollout restart -n {{ .Release.Namespace }} deploy/{{ include "openshapeforge-api.fullname" . }}
+{{- if .Values.workers.enabled }}
+  kubectl rollout restart -n {{ .Release.Namespace }} deploy/{{ include "openshapeforge-api.workerFullname" . }}
+{{- end }}
 
 (With chart-managed credentials a checksum/secret pod annotation does this for
 you on every `helm upgrade`.)

@@ -55,3 +55,62 @@ spec:
           port: {{ .Values.service.targetPort }}
   {{- end }}
 {{- end -}}
+{{- if and .Values.networkPolicy.enabled .Values.workers.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "openshapeforge-api.workerFullname" . }}
+  labels:
+    {{- include "openshapeforge-api.workerLabels" . | nindent 4 }}
+spec:
+  # Worker pods only. They carry their own selector labels (see _helpers.tpl),
+  # so the policy above does not reach them and this one does not reach the API
+  # or the migrate Job.
+  podSelector:
+    matchLabels:
+      {{- include "openshapeforge-api.workerSelectorLabels" . | nindent 6 }}
+  # Egress only. Ingress is absent from policyTypes rather than present with an
+  # empty rule list: the worker listens on nothing, so there is no port to admit
+  # anyone to, and stating a deny-all on traffic that cannot exist would only
+  # suggest there is something to protect.
+  policyTypes:
+    - Egress
+  egress:
+    # DNS resolution, from the API's setting — same cluster, same resolver.
+    {{- if .Values.networkPolicy.egress.allowDNS }}
+    - to:
+        {{- with .Values.networkPolicy.egress.dnsSelector }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- end }}
+    # Postgres, from the API's setting: the worker claims from the same
+    # database, so the endpoint is named once, above.
+    - to:
+        {{- with .Values.networkPolicy.egress.database }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.networkPolicy.egress.databasePort }}
+    {{- if .Values.workers.networkPolicy.egress.durableExecution.enabled }}
+    # The durable-execution ingress a claimed command is posted to, when one is
+    # configured. Worker-only: the dispatcher is chosen in the worker's start
+    # path, and nothing on the request path ever posts to it.
+    - to:
+        {{- with .Values.workers.networkPolicy.egress.durableExecution.peers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.workers.networkPolicy.egress.durableExecution.port }}
+    {{- end }}
+    {{- with .Values.workers.networkPolicy.egress.extra }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end -}}

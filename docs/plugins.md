@@ -256,6 +256,12 @@ runtime sends) drains before exiting; a `stop()` that returned early would
 leave one claimed command per replica `processing` until the visibility timeout
 reclaimed it — every redeploy, costing the next worker a delay and an attempt.
 
+In a cluster that contract is what `terminationGracePeriodSeconds` has to be
+sized against. The Helm chart deploys a worker role as its own Deployment —
+`workers.enabled=true`, `workers.role=<role>`, off by default — with no Service,
+no Ingress and no probes, because a worker serves no traffic. See
+[`deploy/README.md`](../deploy/README.md#worker-workload-optional-off-by-default).
+
 ## Shipped example 1: `entity-docs`
 
 `examples/plugins/entity-docs.ts` — the minimal single-file plugin

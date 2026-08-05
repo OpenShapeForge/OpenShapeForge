@@ -227,6 +227,86 @@ jobs:
             --set 'global.imagePullSecrets[0].name=ghcr-pull' \
             --set-file keycloak.realm.json=/tmp/ci-realm.json
 
+      # The worker workload is off by default, so neither render above touches
+      # worker-deployment.yaml or the worker's NetworkPolicy. Template them
+      # explicitly — and assert what makes the workload CORRECT rather than
+      # merely renderable, since a chart that renders wrong manifests passes a
+      # render check: exactly one extra Deployment, the role variable actually
+      # set, no container port (it listens on nothing, and a Service selector is
+      # a subset match, so anything port-shaped is a step towards the worker
+      # being sent a share of every request), and the empty-role guard still
+      # failing closed.
+      - name: Helm template with the worker workload enabled
+        run: |
+          set -o pipefail
+          common=(
+            --set database.url="postgres://app:app@db:5432/app"
+            --set database.migrateUrl="postgres://mig:mig@db:5432/app"
+            --set database.appPassword="ci-template-only"
+            --set database.workerPassword="ci-template-only-worker"
+            --set auth.internalContextSecret="ci-template-only"
+          )
+          # A worker connects as its own role (#223) and refuses to fall back to
+          # DATABASE_URL, so every worker-enabled render below needs this too.
+          # It is NOT in `common`: the worker-disabled render must stay exactly
+          # what a chart without a worker produces.
+          worker_url=(--set database.workerUrl="postgres://openshapeforge_worker:w@db:5432/app")
+          helm template ./deploy/helm/openshapeforge-api "${common[@]}" > /tmp/worker-off.yaml
+          helm template ./deploy/helm/openshapeforge-api "${common[@]}" "${worker_url[@]}" \
+            --set workers.enabled=true \
+            --set networkPolicy.enabled=true \
+            --set workers.networkPolicy.egress.durableExecution.enabled=true \
+            > /tmp/worker-on.yaml
+
+          off_deployments=$(grep -c '^kind: Deployment' /tmp/worker-off.yaml || true)
+          on_deployments=$(grep -c '^kind: Deployment' /tmp/worker-on.yaml || true)
+          if [ "$on_deployments" -ne "$((off_deployments + 1))" ]; then
+            echo "::error::enabling the worker changed the Deployment count by $((on_deployments - off_deployments)), expected 1"
+            exit 1
+          fi
+
+          helm template ./deploy/helm/openshapeforge-api "${common[@]}" "${worker_url[@]}" \
+            --set workers.enabled=true \
+            --show-only templates/worker-deployment.yaml > /tmp/worker.yaml
+          if ! grep -q 'name: OPENSHAPEFORGE_ROLE' /tmp/worker.yaml; then
+            echo "::error::the worker Deployment does not set OPENSHAPEFORGE_ROLE"
+            exit 1
+          fi
+          if grep -q 'containerPort' /tmp/worker.yaml; then
+            echo "::error::the worker Deployment declares a container port; it serves no traffic"
+            exit 1
+          fi
+          # The worker must take its OWN connection string. Mounting the API's
+          # would make the pod exit at boot (#223), and is the shape this
+          # template had before that landed.
+          if ! grep -q 'key: OPENSHAPEFORGE_WORKER_DATABASE_URL' /tmp/worker.yaml; then
+            echo "::error::the worker Deployment does not mount OPENSHAPEFORGE_WORKER_DATABASE_URL"
+            exit 1
+          fi
+          if grep -q 'name: DATABASE_URL' /tmp/worker.yaml; then
+            echo "::error::the worker Deployment mounts DATABASE_URL; it must not"
+            exit 1
+          fi
+
+          # Each guard below is proven with every OTHER required value supplied,
+          # so a render that fails does so for the reason under test and not
+          # incidentally — a guard test that passes for the wrong reason proves
+          # nothing.
+          #
+          # An empty role would start a second copy of the API instead.
+          if helm template ./deploy/helm/openshapeforge-api "${common[@]}" "${worker_url[@]}" \
+               --set workers.enabled=true --set workers.role="" > /dev/null 2>&1; then
+            echo "::error::workers.role='' rendered; it must fail closed"
+            exit 1
+          fi
+          # An enabled worker with no connection string of its own would start
+          # and immediately exit; fail at render instead.
+          if helm template ./deploy/helm/openshapeforge-api "${common[@]}" \
+               --set workers.enabled=true > /dev/null 2>&1; then
+            echo "::error::workers.enabled with an empty database.workerUrl rendered; it must fail closed"
+            exit 1
+          fi
+
   db-tests:
     name: Database migration tests
     runs-on: ubuntu-latest

@@ -239,6 +239,8 @@ resources:
   limits:
     memory: 512Mi
 
+# Scales the API Deployment on CPU, and ONLY the API Deployment. It does not
+# cover the worker workload below, deliberately — see the note there.
 autoscaling:
   enabled: false
   minReplicas: 2
@@ -303,6 +305,200 @@ tolerations: []
 affinity: {}
 # Extra environment variables (name/value) appended to the API container.
 extraEnv: []
+
+# --- Worker workload (optional, OFF by default) ------------------------------
+# One image, several roles: `OPENSHAPEFORGE_ROLE` picks which one
+# `apps/api/src/index.ts` starts. `api` is the default and is the HTTP server
+# every template above deploys; any other value names a background worker role
+# contributed by a runtime module. The workflow plugin contributes
+# `workflow-worker` — the process that drains `workflow.control_commands`,
+# fires due schedules and resumes due timer waits.
+#
+# It is a separate Deployment rather than a thread inside the API because a poll
+# loop and a request path have unrelated failure modes and unrelated scaling
+# needs, and because its database session is deliberately different: it presents
+# `app.worker_role`, a GUC the request path never sets (docs/api.md#the-worker-axis).
+#
+# OFF by default, so an existing install does not silently gain a pod. With it
+# off nothing else changes — the rendered manifests are byte-identical to a
+# chart that had no worker support at all.
+#
+# Everything the worker shares with the API is configured ONCE, above: `image`,
+# `imagePullSecrets`, `serviceAccount`, `podSecurityContext`, `securityContext`,
+# `tmpVolume`, and the same Secret (`database.existingSecret`, or the
+# chart-managed one). Only what genuinely differs is listed here.
+workers:
+  enabled: false
+
+  # Which role to start. A value rather than a literal in the template, for the
+  # same reason `apps/api` names no worker role: roles are CONTRIBUTED by
+  # runtime modules, and a repo that drops the workflow plugin loses
+  # `workflow-worker` with it. The default names the only role the shipped
+  # plugin set contributes, which makes it a convenience, not a coupling.
+  #
+  # Empty — or `api` — fails the render rather than being defaulted: index.ts
+  # reads `OPENSHAPEFORGE_ROLE?.trim() || "api"`, so either would start a
+  # second copy of the HTTP server here, with no Service in front of it.
+  role: workflow-worker
+
+  # Two, and the chart says so rather than leaving it to whoever installs it.
+  #
+  # N replicas are safe by construction: a poll claims rows with
+  # `for update skip locked`, so a contended row is claimed by exactly one
+  # worker, and a redelivery is idempotent because the command row is consumed
+  # conditionally and the instance row is taken `for update` before anything is
+  # decided. So this number is purely an availability choice.
+  #
+  # Two is the smallest number that keeps the queue moving through a node drain,
+  # an image pull or a crash-loop backoff — and, given there are no probes (see
+  # below), the smallest number for which one wedged worker means half the
+  # throughput rather than none. It is also the availability `replicaCount`
+  # above already assumes for the API, so the chart stays consistent about what
+  # kind of cluster it expects.
+  #
+  # One is the smallest that costs nothing. Set it where a queue that pauses
+  # while a node is replaced is acceptable.
+  replicaCount: 2
+
+  # --- Probes: there are none, on purpose ------------------------------------
+  # The worker has no HTTP surface, so the API's `httpGet` probes do not
+  # transfer, and the two alternatives both fail on inspection today:
+  #
+  #   - an `exec` probe has nothing to observe. The worker writes no heartbeat
+  #     and opens no socket, so a probe could only assert that PID 1 exists —
+  #     something the kubelet already knows. A liveness check that cannot fail
+  #     is worse than none, because it reads as coverage.
+  #   - a real liveness signal (the worker publishing a tick timestamp a probe
+  #     can read) is a change to the `ModuleWorkerHandle` contract in
+  #     `apps/api/src/modules/contract.ts` and to every contributed worker. That
+  #     is a runtime change, not a chart one.
+  #
+  # The trade-off accepted: a worker that is alive but WEDGED — a tick blocked
+  # on a connection Postgres never answers, say — is invisible to Kubernetes and
+  # will not be restarted. What bounds the damage is the queue itself: a claim
+  # older than the worker's visibility timeout (`processingTimeoutMs`, 120s by
+  # default) is reclaimed and redispatched by another replica, so a wedged
+  # worker costs throughput rather than commands. That is only true while a
+  # second replica exists, which is what replicaCount above is for.
+  #
+  # A consequence worth knowing: with no readinessProbe a worker pod is Ready as
+  # soon as its container is running. A worker that crash-loops (a bad
+  # DATABASE_URL, an unknown role) still fails `helm upgrade --wait`, because a
+  # backing-off container is not running — but one that starts and does nothing
+  # would not.
+
+  # Long enough for an in-flight tick to drain. `stop()` settles only after the
+  # in-flight tick by contract, and SIGTERM is what a container runtime sends:
+  # a grace period shorter than a dispatch turns a clean redeploy into one
+  # abandoned command per replica, left `processing` until the visibility
+  # timeout reclaims it.
+  #
+  # 150 = 120 + 30, both halves grounded in the worker's own code:
+  #
+  #   - 120s is where waiting stops buying anything:
+  #     `DEFAULT_PROCESSING_TIMEOUT_MS` in
+  #     `examples/plugins/workflow/runtime/control-command-worker.ts`, past
+  #     which a claim is reclaimable by another replica anyway. The longest a
+  #     single dispatch can take is bounded at the same 120s by
+  #     `DEFAULT_RESTATE_TIMEOUT_MS`, the `AbortSignal.timeout` on a post to a
+  #     durable-execution ingress — so one dispatch fits inside the window in
+  #     which finishing it is still worth more than handing it over.
+  #   - 30s covers what `stop()` drains BEFORE the command worker: the schedule
+  #     sweep and the timer sweep, each awaiting its own in-flight tick, plus
+  #     the 25ms granularity they poll at and closing the connection pool.
+  #
+  # A full batch (`DEFAULT_BATCH_SIZE` = 10) of dispatches each taking the full
+  # 120s would exceed this, and deliberately so: by then the first command has
+  # outlived its own visibility timeout and another replica may take it, so
+  # waiting is strictly worse than exiting. With the default in-process
+  # dispatcher a tick is bounded by Postgres and 30-60s is usually plenty; the
+  # default is sized for the durable-execution path because the chart cannot see
+  # which dispatcher the worker chose.
+  terminationGracePeriodSeconds: 150
+
+  # Same shape as the API's, and for the same reason no CPU limit is set: the
+  # poll loop reschedules with NO delay while it is still finding work
+  # (`nextDelayMs = result.processed > 0 ? 0 : pollIntervalMs`), so a backlog
+  # should drain at whatever rate the node has spare.
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+  # No autoscaling block, and no HorizontalPodAutoscaler — `autoscaling` above
+  # targets the API Deployment by name and does not reach this one.
+  #
+  # CPU is the wrong signal for a poll loop, not merely an imprecise one. An
+  # idle worker sleeps `pollIntervalMs` between claims and sits near zero; a
+  # worker blocked on a slow database also sits near zero, which is precisely
+  # when a backlog is building. So utilisation tracks "is Postgres answering
+  # quickly", inverted against the thing worth scaling on. Worse, every replica
+  # added runs another `for update skip locked` scan per second against the same
+  # three tables, so if the database IS the bottleneck, scaling out makes it
+  # slower while CPU stays flat and the autoscaler keeps going.
+  #
+  # The signal that matters is queue depth — pending rows in
+  # `workflow.control_commands` — which needs a metrics adapter (Prometheus
+  # plus KEDA, or an external-metrics API) that this chart neither deploys nor
+  # can assume. Fixed replicas until then.
+
+  # Extra environment variables (name/value) appended to the worker container.
+  # Separate from `extraEnv` above rather than added to it: the two containers
+  # run different roles, and silently giving the worker the API's overrides is
+  # how a request-path setting ends up changing a queue drain.
+  #
+  # This is where a durable-execution service is configured, if there is one.
+  # Both halves are required, and the contract token exists so an ingress URL
+  # arriving from a shared environment cannot move workflows onto a service
+  # nobody chose:
+  #
+  #   extraEnv:
+  #     - name: OPENSHAPEFORGE_WORKFLOW_RESTATE_CONTRACT
+  #       value: workflow-command-v1
+  #     - name: OPENSHAPEFORGE_WORKFLOW_RESTATE_INGRESS_URL
+  #       value: http://restate.restate.svc:8080
+  #
+  # Absent both, the worker uses its in-process dispatcher, which is the
+  # default and is correct on its own — durable execution is the upgrade.
+  extraEnv: []
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  # Egress the worker needs ON TOP of the API's. Rendered only when
+  # `networkPolicy.enabled` is also true, as a SECOND policy selecting only
+  # worker pods (they carry their own labels, so the API's policy does not
+  # reach them). It has no `ingress` rules and does not name Ingress in
+  # policyTypes: the worker listens on nothing, so there is no port to admit
+  # anyone to.
+  #
+  # DNS and Postgres are NOT repeated here — the worker claims from the same
+  # database as the API, so `networkPolicy.egress.database`, `.databasePort`,
+  # `.allowDNS` and `.dnsSelector` above stay the one place the endpoint is
+  # named. `networkPolicy.egress.extra` is deliberately not inherited: those
+  # rules are written for the API (a JWKS host, say), and the worker verifies
+  # no tokens.
+  networkPolicy:
+    egress:
+      # The durable-execution service the worker posts claimed commands to,
+      # when `extraEnv` above configures one. Worker-only: the dispatcher is
+      # chosen in the worker's start path and nothing on the request path ever
+      # calls it.
+      durableExecution:
+        enabled: false
+        # Restate's default ingress port.
+        port: 8080
+        # NetworkPolicyPeer entries identifying the ingress. Empty => allow the
+        # port to any destination (still narrows the port), matching how
+        # networkPolicy.egress.database behaves.
+        peers: []
+      # Additional raw egress rules appended verbatim to the worker's policy.
+      extra: []
 
 # --- Keycloak subchart (optional) --------------------------------------------
 # OFF by default: the documented posture is an EXTERNAL OIDC issuer, and that

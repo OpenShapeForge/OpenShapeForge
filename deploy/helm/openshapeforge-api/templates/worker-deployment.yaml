@@ -1,0 +1,101 @@
+{{- if .Values.workers.enabled -}}
+{{- if and (not .Values.database.existingSecret) (not .Values.database.workerUrl) -}}
+{{- fail "workers.enabled is true but database.workerUrl is empty. Since #223 a worker connects as openshapeforge_worker and refuses to fall back to DATABASE_URL, so the pod would start and exit. Set database.workerUrl (its password must equal database.workerPassword), or supply database.existingSecret carrying OPENSHAPEFORGE_WORKER_DATABASE_URL." -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openshapeforge-api.workerFullname" . }}
+  labels:
+    {{- include "openshapeforge-api.workerLabels" . | nindent 4 }}
+spec:
+  # Unconditional, unlike the API's — no HorizontalPodAutoscaler targets this
+  # Deployment. CPU is the wrong signal for a poll loop; see values.yaml.
+  replicas: {{ .Values.workers.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "openshapeforge-api.workerSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- include "openshapeforge-api.secretChecksumAnnotation" . | nindent 8 }}
+        {{- with .Values.workers.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "openshapeforge-api.workerSelectorLabels" . | nindent 8 }}
+        {{- with .Values.workers.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- include "openshapeforge-api.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "openshapeforge-api.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # SIGTERM is what a container runtime sends, and the worker's stop() only
+      # settles after the in-flight tick. Kubernetes' 30s default would truncate
+      # a dispatch the code allows to run for 120s. See values.yaml for how this
+      # number is derived.
+      terminationGracePeriodSeconds: {{ .Values.workers.terminationGracePeriodSeconds }}
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          # No `ports`, no Service and no Ingress: this container listens on
+          # nothing. PORT and HOST arrive below with the shared env and are inert
+          # here, exactly as they are in the migrate Job.
+          env:
+            # The same block the API container and the migrate Job take, so the
+            # image's environment has one definition and a variable added for
+            # both cannot be forgotten here.
+            {{- include "openshapeforge-api.commonEnv" . | nindent 12 }}
+            # The whole difference between this workload and the API one.
+            - name: OPENSHAPEFORGE_ROLE
+              value: {{ include "openshapeforge-api.workerRole" . | quote }}
+            # Same Secret as the API, but a DIFFERENT restricted role. Since
+            # #223 the queue policies compare `current_user` against
+            # openshapeforge_worker, so the connected role — not a session
+            # variable — is what authorizes a cross-tenant claim, and the API's
+            # role can no longer make one. The process refuses to start on
+            # DATABASE_URL, including when it is copied into this variable, so
+            # this key is not interchangeable with the API's.
+            - name: OPENSHAPEFORGE_WORKER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openshapeforge-api.secretName" . }}
+                  key: OPENSHAPEFORGE_WORKER_DATABASE_URL
+            {{- with .Values.workers.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if .Values.tmpVolume.enabled }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          {{- end }}
+          # No livenessProbe and no readinessProbe. The worker exposes nothing a
+          # probe could observe, so the only honest check is none — the process
+          # exits on a fatal error and restartPolicy handles it. values.yaml
+          # states the trade-off this accepts.
+          resources:
+            {{- toYaml .Values.workers.resources | nindent 12 }}
+      {{- if .Values.tmpVolume.enabled }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: {{ .Values.tmpVolume.sizeLimit }}
+      {{- end }}
+      {{- with .Values.workers.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.workers.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.workers.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end -}}

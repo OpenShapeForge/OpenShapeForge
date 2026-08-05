@@ -82,6 +82,11 @@ export type Connector = {
   configFields: ConnectorConfigField[];
   instances: "single" | "multiple";
   supportsVerify: boolean;
+  /**
+   * True when the contract declares OAuth, so the installation is authorized
+   * through a provider consent screen rather than by typing a credential.
+   */
+  usesOAuth: boolean;
   installations: ConnectorInstallation[];
 };
 

@@ -87,6 +87,12 @@ export type ConnectorView = {
    * CONNECTOR_VERIFY_UNSUPPORTED.
    */
   supportsVerify: boolean;
+  /**
+   * Whether the contract declares OAuth. Surfaced so a configuration screen can
+   * offer a "Connect" action instead of a credential field it has no way to
+   * fill — the tokens are the platform's, and never typed by an operator.
+   */
+  usesOAuth: boolean;
   installations: ConnectorInstallationView[];
 };
 
@@ -183,6 +189,7 @@ export async function listConnectors(context: CatalogContext): Promise<Connector
       configFields: contract.configuration.fields,
       instances: contract.configuration.instances,
       supportsVerify: contract.configuration.verify,
+      usesOAuth: contract.auth !== undefined,
       installations: own.map((installation) => viewInstallation(contract, installation)),
     };
   });

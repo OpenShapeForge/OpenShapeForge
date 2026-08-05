@@ -44,6 +44,22 @@ const RESERVED_CAPABILITIES = new Set<ConnectorCapabilityKey>([
 
 const ENTITLEMENT_PATTERN = /^[a-z][a-z0-9]*([.-][a-z0-9]+)*$/;
 
+/**
+ * Configuration field keys the PLATFORM owns.
+ *
+ * Secrets are stored one row per (installation, field key), and the platform
+ * keeps rows of its own there — OAuth tokens it refreshes and rotates on a
+ * connector's behalf, which package code must never receive. Nothing in the
+ * field vocabulary constrains a key, so without this a contract could declare
+ * `platform.oauth` and collide with one, either shadowing a token the runtime
+ * needs or naming its way into reading one.
+ *
+ * Refused at compile time rather than resolved at write time, for the same
+ * reason the reserved capabilities are: a contract must not be able to describe
+ * something the platform will then have to disambiguate at runtime.
+ */
+const RESERVED_CONFIG_KEY_PREFIX = "platform.";
+
 /** Platform defaults for reaching a remote system. Authoring only overrides. */
 const DEFAULT_ATTEMPT_TIMEOUT_MS = 30_000;
 const MAX_ATTEMPT_TIMEOUT_MS = 120_000;
@@ -286,6 +302,116 @@ function buildExposure(
   return { graphql, ...(rest ? { rest } : {}), ...(mcp ? { mcp } : {}) };
 }
 
+/** `{fieldKey}` placeholders in an OAuth endpoint template. */
+const URL_TEMPLATE_PLACEHOLDER = /\{([^}]*)\}/g;
+
+/**
+ * Validate and normalize the OAuth block.
+ *
+ * Every check here exists because the alternative failure is invisible until a
+ * token exchange fails in production, by which time the reason is an opaque
+ * provider error rather than the contract mistake that caused it.
+ */
+function compileAuth(
+  definition: ConnectorDefinition,
+  configFields: ConnectorConfigField[],
+  egress: string[],
+  origin: string,
+): CompiledConnectorContract["auth"] {
+  const authored = definition.auth;
+  if (!authored) return undefined;
+
+  const byKey = new Map(configFields.map((field) => [field.key, field]));
+
+  function requireConfigField(key: string, role: string, mustBeSecret: boolean) {
+    const field = byKey.get(key);
+    if (!field) {
+      throw new Error(
+        `Connector ${origin} names ${role} "${key}", which is not a declared configuration field.`,
+      );
+    }
+    // A client secret in a non-secret field would be stored in the installation
+    // row in plaintext and returned by every configuration read.
+    if (mustBeSecret && field.secret !== true) {
+      throw new Error(
+        `Connector ${origin} names ${role} "${key}", which is not marked secret. A client ` +
+          "secret stored outside encrypted storage is readable from every configuration read.",
+      );
+    }
+    if (!mustBeSecret && field.secret === true) {
+      throw new Error(
+        `Connector ${origin} names ${role} "${key}", which is marked secret. It is ` +
+          "interpolated into an endpoint URL, so it must not be a credential.",
+      );
+    }
+    return field;
+  }
+
+  requireConfigField(authored.clientIdField, "auth.clientIdField", false);
+  requireConfigField(authored.clientSecretField, "auth.clientSecretField", true);
+
+  for (const [name, template] of [
+    ["auth.authorizeUrl", authored.authorizeUrl],
+    ["auth.tokenUrl", authored.tokenUrl],
+  ] as const) {
+    expectNonEmptyString(template, name, origin);
+    for (const match of template.matchAll(URL_TEMPLATE_PLACEHOLDER)) {
+      const key = match[1] ?? "";
+      const field = byKey.get(key);
+      if (!field) {
+        throw new Error(
+          `Connector ${origin} interpolates "{${key}}" into ${name}, which is not a declared ` +
+            "configuration field.",
+        );
+      }
+      // Interpolating a secret into a URL puts it in a request line, and from
+      // there into every proxy log between here and the provider.
+      if (field.secret === true) {
+        throw new Error(
+          `Connector ${origin} interpolates the secret field "{${key}}" into ${name}. A secret ` +
+            "in a URL is written to every log that records the request line.",
+        );
+      }
+    }
+    // A template still has to be a URL once the placeholders are gone, and the
+    // literal host has to be one the contract may reach: a token endpoint the
+    // bound fetch refuses is a connector that can never authenticate.
+    const probe = template.replace(URL_TEMPLATE_PLACEHOLDER, "x");
+    let url: URL;
+    try {
+      url = new URL(probe);
+    } catch {
+      throw new Error(
+        `Connector ${origin} declares ${name} ${JSON.stringify(template)}, which is not a URL ` +
+          "once its placeholders are filled.",
+      );
+    }
+    if (url.protocol !== "https:") {
+      throw new Error(
+        `Connector ${origin} declares ${name} over ${url.protocol.replace(":", "")}. OAuth ` +
+          "credentials and tokens require https.",
+      );
+    }
+    if (egress.length === 0) {
+      throw new Error(
+        `Connector ${origin} declares ${name} but no network.egress. The platform performs the ` +
+          "token exchange through the same allowlist a connector's own calls use.",
+      );
+    }
+  }
+
+  return {
+    type: authored.type,
+    flow: authored.flow,
+    authorizeUrl: authored.authorizeUrl,
+    tokenUrl: authored.tokenUrl,
+    scopes: [...(authored.scopes ?? [])],
+    clientIdField: authored.clientIdField,
+    clientSecretField: authored.clientSecretField,
+    refreshLeewaySeconds: authored.refreshLeewaySeconds ?? 60,
+  };
+}
+
 export function buildConnector(
   definition: ConnectorDefinition,
   slug: string,
@@ -357,6 +483,17 @@ export function buildConnector(
     origin,
   ) as ConnectorConfigField[];
   assertUnique(configFields.map((field) => field.key), "configuration field key", origin);
+
+  for (const field of configFields) {
+    if (field.key.startsWith(RESERVED_CONFIG_KEY_PREFIX)) {
+      throw new Error(
+        `Connector ${origin} declares configuration field "${field.key}". The ` +
+          `"${RESERVED_CONFIG_KEY_PREFIX}" prefix is reserved for fields the platform stores ` +
+          "against an installation itself, such as OAuth tokens it refreshes on a connector's " +
+          "behalf. Choose a key without it.",
+      );
+    }
+  }
 
   const entitlement = definition.availability?.entitlement;
   if (entitlement !== undefined && !ENTITLEMENT_PATTERN.test(entitlement)) {
@@ -468,6 +605,13 @@ export function buildConnector(
     origin,
   );
 
+  const auth = compileAuth(
+    definition,
+    configFields,
+    [...(definition.network?.egress ?? [])],
+    origin,
+  );
+
   const contract: Omit<CompiledConnectorContract, "checksum"> = {
     slug,
     connector: definition.connector,
@@ -489,6 +633,7 @@ export function buildConnector(
         .sort(),
       schema: connectorObjectSchema(configFields),
     },
+    ...(auth ? { auth } : {}),
     network: { egress: [...(definition.network?.egress ?? [])].sort() },
     operations: compiledOperations,
     events: [],

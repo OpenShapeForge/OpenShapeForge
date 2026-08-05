@@ -171,6 +171,102 @@ Configuring a connector requires the `Platform.ConnectorAdmin` capability, not
 merely a particular caller identity: configuration hands credentials for another
 system to the platform.
 
+A package receives only the secrets **its own contract declares**. The store
+answers with every row an installation holds — which is what key rotation needs
+— and the invocation path narrows that to the contract before anything reaches
+package code. Both halves matter, because the platform keeps rows of its own
+there.
+
+## OAuth
+
+For a provider that speaks OAuth 2.0, the contract declares **where** and the
+platform does **everything else**:
+
+```yaml
+auth:
+  type: oauth2
+  flow: authorizationCode
+  authorizeUrl: https://start.provider.{region}/oauth2/auth
+  tokenUrl: https://start.provider.{region}/oauth2/token
+  clientIdField: clientId          # ordinary config fields, because each
+  clientSecretField: clientSecret  # tenant registers its own application
+```
+
+The platform obtains, stores, refreshes and rotates the tokens; a package is
+handed a `fetch` that already carries the access token and **never receives a
+refresh token at all**. That is strictly less privilege than a package
+authenticating for itself, and it is what makes rotation correct once rather
+than once per connector.
+
+Rotation is not an optional nicety. Some providers issue **single-use** refresh
+tokens and replace them on every refresh — Exact Online among them — so a
+connector that dropped the replacement would authenticate once and fail on its
+next call.
+
+| Decision | Why |
+| --- | --- |
+| Endpoints may interpolate `{fieldKey}` | A provider's endpoint is frequently per-tenant. A literal URL would mean one contract per region, differing only by a hostname. |
+| Interpolated fields must be non-secret | A secret in a URL is written to every log that records the request line. |
+| The client secret field must be `secret: true` | Otherwise it sits in the installation row and is returned by every configuration read. |
+| The token URL's host must be in `network.egress` | The platform performs the exchange through the connector's own allowlist, so a token endpoint it cannot reach is a compile error rather than a runtime mystery. |
+| Tokens live under the reserved `platform.` key prefix | The compiler refuses a contract field in that namespace, and the invocation path withholds it — so a contract can neither shadow the token row nor name its way into reading it. |
+
+**A refresh holds a row lock across the token exchange.** A single-use refresh
+token cannot survive two concurrent refreshes: both callers spend it, one wins,
+and the loser could overwrite the winner's stored set. Optimistic retry is not
+available because the token is already burned by the time the conflict is
+visible. The cost is one database connection held for one HTTPS round trip, once
+per token lifetime per installation — the second waiter re-reads the row and
+finds a valid token rather than issuing a second exchange.
+
+`CONNECTOR_REAUTHORIZATION_REQUIRED` is its own error code, and 409 rather than
+401 over REST. The caller authenticated fine; it is the connector's authorization
+to the provider that lapsed, and a 401 would send a client into its own re-login
+flow, which cannot fix it.
+
+### The authorize round trip
+
+Two routes, with deliberately different threat models:
+
+| Route | Auth |
+| --- | --- |
+| `POST …/connectors/:slug/installations/:key/authorize` | `Platform.ConnectorAdmin`. Mints a state and **returns** the provider URL rather than redirecting, so the authenticated half never becomes a cross-site navigation. |
+| `GET …/connectors/oauth/callback` | **None, by necessity.** The provider sends the user's browser here, so no cookie or header of ours is attached. |
+
+Everything that makes the callback safe is the `state` parameter, which is
+`<tenantId>.<userId>.<secret>`:
+
+- **Unguessable** — 32 random bytes.
+- **Single-use** — `consumed_at` is stamped by the same `UPDATE` that claims the
+  row, so a replay finds nothing. Reading, deciding, then marking would leave a
+  window where two callbacks both pass.
+- **Expiring** — ten minutes.
+- **Stored as a hash** — a read of the table yields nothing presentable back.
+- **Carries its own routing** — so the callback opens a normal tenant-scoped
+  session and finds the row under RLS. The alternative was bypassing RLS on the
+  one endpoint an unauthenticated stranger can reach, which is a far worse trade
+  than two ids in a URL that already round-trips through the provider. Neither
+  id authorizes anything: forge them and the hash matches no row that tenant can
+  see. The user id is there because `createDbSessionContext` refuses an
+  anonymous session, and carrying the ConnectorAdmin who started the flow is the
+  accurate answer rather than inventing a system identity.
+
+The callback trusts **nothing else** in its own query string. The connector, the
+installation and the redirect URI all come from the claimed row — one that read
+its target from the URL would let anyone holding a state write tokens into
+another tenant's installation. It always answers with a 302 to a fixed path on
+our own configured origin, never a URL derived from the request: an open
+redirect here is the exact shape phishing wants.
+
+PKCE (S256) is always sent. The verifier is stored encrypted under the row id as
+additional authenticated data, because PKCE only binds a code to the client that
+requested it while the verifier stays secret.
+
+Two settings are required for any of this: `OPENSHAPEFORGE_PUBLIC_ORIGIN` (the
+origin the provider redirects back to — configured, not derived from `Host`,
+which a forged header could aim anywhere) and `OPENSHAPEFORGE_APP_ORIGIN` (where
+the browser lands afterwards).
+
 ## Contract evolution
 
 An installation records the contract version and checksum it was configured
@@ -245,12 +341,15 @@ rather than by loosening the in-process path.
 
 ## What does not exist yet
 
-- **Nothing is invoked from a surface.** The executor, loader and reliability
-  policy are in place and tested, but no GraphQL/REST/MCP call dispatches to a
-  package: an authorized MCP tool call reports `CONNECTOR_NOT_EXECUTABLE`.
 - **Events and inbound webhooks.** A platform-owned pipeline with connector
   adapters, designed separately; the vocabulary is reserved and rejected.
 - **Isolated execution**, per the trust model above.
+
+(This section previously said nothing was invoked from a surface. That stopped
+being true when dispatch landed alongside the surfaces in the same change:
+GraphQL, REST and MCP all reach `invokeConnectorOperation`, and
+`CONNECTOR_NOT_EXECUTABLE` now means only that no implementation package
+resolved at boot.)
 
 ## See also
 

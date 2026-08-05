@@ -26,6 +26,7 @@ import {
   saveConnectorConfiguration,
   setConnectorEnabled,
   setConnectorSecret,
+  startConnectorAuthorization,
   verifyConnector,
 } from "@/actions/integrations";
 import { ConnectorFieldControl, localized } from "./connector-field-control";
@@ -56,6 +57,13 @@ const COPY = {
     en: "Supply the missing required fields before enabling this installation.",
     nl: "Vul de ontbrekende verplichte velden in voordat je deze installatie inschakelt.",
   },
+  connect: { en: "Connect", nl: "Koppelen" },
+  reconnect: { en: "Reconnect", nl: "Opnieuw koppelen" },
+  connecting: { en: "Opening provider…", nl: "Provider openen…" },
+  oauthHint: {
+    en: "This integration is authorized at the provider. Save the client details first, then connect.",
+    nl: "Deze integratie wordt bij de provider geautoriseerd. Sla eerst de clientgegevens op en koppel daarna.",
+  },
 } satisfies Record<string, Record<string, string>>;
 
 export function InstallationPanel({
@@ -79,6 +87,7 @@ export function InstallationPanel({
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [pending, startTransition] = useTransition();
   const [checking, setChecking] = useState(false);
+  const [connecting, setConnecting] = useState(false);
 
   const health = installation.contract;
   const missing = new Set(health.missingRequiredFields);
@@ -161,6 +170,37 @@ export function InstallationPanel({
     }
   }
 
+  /**
+   * Hand the browser to the provider.
+   *
+   * A full navigation rather than a popup or a fetch: the consent screen is the
+   * provider's page, it sets its own cookies, and many refuse to render in a
+   * frame. The API returns the URL rather than redirecting, so this is where the
+   * navigation is decided.
+   */
+  async function onConnect() {
+    setFeedback(null);
+    setConnecting(true);
+    try {
+      const result = await startConnectorAuthorization({
+        slug: connector.slug,
+        instanceKey: installation.instanceKey,
+      });
+      if (!result.ok) {
+        setFeedback({ tone: "error", message: result.error });
+        setConnecting(false);
+        return;
+      }
+      window.location.assign(result.authorizeUrl);
+    } catch (error) {
+      setFeedback({
+        tone: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      setConnecting(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between gap-3">
@@ -231,6 +271,10 @@ export function InstallationPanel({
           <p className="text-sm text-destructive">{say("repairBlocked")}</p>
         ) : null}
 
+        {connector.usesOAuth ? (
+          <p className="text-sm text-muted-foreground">{say("oauthHint")}</p>
+        ) : null}
+
         <div className="flex flex-wrap gap-2">
           <Button onClick={onSave} disabled={pending}>
             {pending ? say("saving") : say("save")}
@@ -241,6 +285,19 @@ export function InstallationPanel({
           {persisted && connector.supportsVerify ? (
             <Button variant="outline" onClick={onVerify} disabled={checking || pending}>
               {checking ? say("testing") : say("test")}
+            </Button>
+          ) : null}
+
+          {/* Only for OAuth contracts, and only once the installation exists:
+              the flow needs the stored client id, and there is nothing to
+              authorize before a save. */}
+          {persisted && connector.usesOAuth ? (
+            <Button onClick={onConnect} disabled={connecting || pending}>
+              {connecting
+                ? say("connecting")
+                : installation.enabled
+                  ? say("reconnect")
+                  : say("connect")}
             </Button>
           ) : null}
 

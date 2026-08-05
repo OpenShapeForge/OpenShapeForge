@@ -87,6 +87,56 @@ export interface ConnectorConfiguration {
 }
 
 /**
+ * OAuth 2.0, declared by the contract and driven by the PLATFORM.
+ *
+ * The division is the point. A contract says where the provider's endpoints are
+ * and which flow it speaks; the platform obtains, stores, refreshes and rotates
+ * the tokens, and a package never receives one — it is handed a `fetch` that
+ * already carries the access token. So a connector cannot mishandle a refresh
+ * token it never sees, and rotation is solved once rather than once per
+ * connector.
+ *
+ * That matters because rotation is not optional for some providers. Exact
+ * Online issues a single-use refresh token and replaces it on every refresh: a
+ * connector that failed to persist the replacement would authenticate once and
+ * break on its next call.
+ *
+ * CLIENT CREDENTIALS ARE NOT DECLARED HERE. Each tenant registers its own
+ * application with the provider, so the client id and secret are ordinary
+ * configuration fields on the installation — named below rather than assumed,
+ * because nothing makes "clientId" a universal spelling.
+ */
+export interface ConnectorOAuth {
+  type: "oauth2";
+  /** Only the authorization-code flow today; others are a later decision. */
+  flow: "authorizationCode";
+  /**
+   * Endpoints, which may interpolate `{fieldKey}` from NON-SECRET
+   * configuration.
+   *
+   * Templated rather than literal because a provider's endpoint is frequently
+   * per-tenant: Exact Online runs a separate instance per country
+   * (`start.exactonline.nl`, `.be`, `.de`), and AFAS a separate host per
+   * environment. A literal URL would mean one contract per region — a copy of
+   * the same connector whose only difference is a hostname.
+   */
+  authorizeUrl: string;
+  tokenUrl: string;
+  /** Sent on the authorize request; omitted when a provider takes no scopes. */
+  scopes?: string[];
+  /** Configuration field holding the client id issued by the provider. */
+  clientIdField: string;
+  /** Configuration field holding the client secret. Must be `secret: true`. */
+  clientSecretField: string;
+  /**
+   * Seconds of headroom before expiry at which the platform refreshes anyway.
+   * A token that is valid when checked and expired when it arrives is a race
+   * nobody can see in a log.
+   */
+  refreshLeewaySeconds?: number;
+}
+
+/**
  * A configuration field. `secret: true` is the only addition over the shared
  * field vocabulary: it routes the value to encrypted storage, keeps it out of
  * every read path, and marks it for redaction in logs and errors.
@@ -241,6 +291,8 @@ export interface ConnectorDefinition {
   implementation: ConnectorImplementation;
   availability?: ConnectorAvailability;
   configuration?: ConnectorConfiguration;
+  /** Absent means the package authenticates from its own config fields. */
+  auth?: ConnectorOAuth;
   network?: ConnectorNetwork;
   operations?: ConnectorOperation[];
   events?: ConnectorEvent[];
@@ -316,6 +368,10 @@ export interface CompiledConnectorContract {
      * is rendered from and what the write path enforces cannot diverge.
      */
     schema: Record<string, unknown>;
+  };
+  /** Normalized with defaults applied; absent when the contract declares none. */
+  auth?: Required<Pick<ConnectorOAuth, "type" | "flow" | "authorizeUrl" | "tokenUrl" | "clientIdField" | "clientSecretField" | "refreshLeewaySeconds">> & {
+    scopes: string[];
   };
   network: { egress: string[] };
   operations: CompiledConnectorOperation[];

@@ -38,7 +38,12 @@ export type ConnectorExecutionErrorCode =
   | "CONNECTOR_TIMEOUT"
   | "CONNECTOR_RATE_LIMITED"
   | "CONNECTOR_CIRCUIT_OPEN"
-  | "CONNECTOR_UPSTREAM_ERROR";
+  | "CONNECTOR_UPSTREAM_ERROR"
+  | "CONNECTOR_OAUTH_FAILED"
+  // Distinct from every other failure because it is the only one a retry can
+  // never fix and a person can always fix: the refresh token is spent or
+  // revoked, and somebody has to authorize the installation again.
+  | "CONNECTOR_REAUTHORIZATION_REQUIRED";
 
 export class ConnectorExecutionError extends Error {
   readonly code: ConnectorExecutionErrorCode;
@@ -190,6 +195,15 @@ export type InvokeInput = {
   log?: (message: string, fields?: Record<string, unknown>) => void;
   /** Injectable for tests. */
   fetchImpl?: FetchLike;
+  /**
+   * Wraps the egress-bound fetch before the package receives it.
+   *
+   * The seam OAuth uses to attach an access token the package never sees.
+   * Applied OUTSIDE the egress binding rather than inside, so a wrapper cannot
+   * widen where a connector may reach — it decorates a fetch that is already
+   * refusing every host the contract does not declare.
+   */
+  wrapFetch?: (bound: FetchLike) => FetchLike;
 };
 
 /**
@@ -221,10 +235,11 @@ export async function invokeOperation(input: InvokeInput): Promise<unknown> {
    */
   const overran = () => Date.now() - startedAt > attemptMs;
 
+  const boundFetch = createBoundFetch(contract, controller.signal, input.fetchImpl);
   const context: ConnectorContext = {
     config: Object.freeze({ ...input.config }),
     secrets: Object.freeze({ ...input.secrets }),
-    fetch: createBoundFetch(contract, controller.signal, input.fetchImpl),
+    fetch: input.wrapFetch ? input.wrapFetch(boundFetch) : boundFetch,
     signal: controller.signal,
     log: input.log ?? (() => {}),
   };

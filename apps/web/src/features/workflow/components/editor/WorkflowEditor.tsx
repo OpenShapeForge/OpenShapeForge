@@ -247,7 +247,22 @@ function toCanvasCard(
     selected: options.selected === true,
     // A preview stands for a node that does not exist yet, so nothing may drag
     // it, select it or delete it.
-    ...(options.preview ? { draggable: false, selectable: false } : {}),
+    //
+    // `pointerEvents: none` is the one that is not cosmetic. The preview is
+    // drawn UNDER the cursor of the drag that created it, so without this the
+    // browser treats it as the element the pointer has moved onto: it fires
+    // `dragleave` on the canvas, then `dragleave` on the preview with no new
+    // target, and the drop is refused — `dragend` arrives instead of `drop`,
+    // the preview disappears, and nothing is placed. The drag looks like it
+    // worked right up until the release does nothing.
+    //
+    // It survives only because a moving cursor produces another `dragover` that
+    // re-arms the canvas. Pause over the spot, or run on a machine slow enough
+    // that the preview renders between the last move and the release, and the
+    // drop is lost. `apps/web/e2e/palette-drag.spec.ts` is the detector.
+    ...(options.preview
+      ? { draggable: false, selectable: false, style: { pointerEvents: "none" as const } }
+      : {}),
     data: {
       label: node.data.label,
       typeLabel: presentation.typeLabel,

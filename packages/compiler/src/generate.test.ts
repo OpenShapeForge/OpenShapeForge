@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
-import { generateArtifacts } from "./generate.js";
+import { generateArtifacts, WORKER_DATABASE_ROLE } from "./generate.js";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -426,12 +426,18 @@ describe("platform schema generator", () => {
     );
   });
 
-  // ── worker axis (#218) ──
+  // ── worker axis (#218, #223) ──
   //
   // The one axis that WIDENS. `workerAccess` admits a named worker role across
   // tenants on the table that declares it, so a queue-draining worker reads the
   // queue because a policy says so rather than by setting app.bypass_rls, which
   // is all-or-nothing over every tenant-scoped table in the manifest.
+  //
+  // #223 made the disjunct check the CONNECTED ROLE and not only the GUC. The
+  // GUC is set by whoever holds the connection, so on its own it authenticated
+  // nothing; `current_user` is a fact about the connection. The GUC stays as an
+  // AND so two plugins' workers, sharing one login role, keep their separate
+  // queues.
 
   const workerAccessManifest = (
     workerAccess: string | undefined,
@@ -458,14 +464,28 @@ describe("platform schema generator", () => {
     generateArtifacts(manifest).find((artifact) => artifact.path.endsWith("schema.sql"))
       ?.contents ?? "";
 
+  const workerDisjunct = (role: string) =>
+    `(current_user = '${WORKER_DATABASE_ROLE}' AND app.current_worker_role() = '${role}')`;
+
   it("emits the worker-role disjunct on the plain tenant-isolation policy", () => {
     const sql = schemaSqlFor(workerAccessManifest("workflow-worker"));
 
-    const predicate =
-      "app.bypass_rls() OR app.current_worker_role() = 'workflow-worker' OR (tenant_id = app.current_tenant())";
+    const predicate = `app.bypass_rls() OR ${workerDisjunct("workflow-worker")} OR (tenant_id = app.current_tenant())`;
     expect(sql).toContain(
       `CREATE POLICY "control_commands_tenant_isolation" ON "workflow"."control_commands"\n  USING (${predicate})\n  WITH CHECK (${predicate});`,
     );
+  });
+
+  it("names the connected role, so the GUC alone can no longer claim the queue", () => {
+    // The #223 property, asserted as a shape rather than as a substring: the
+    // GUC comparison must never appear without the role comparison AND-ed to
+    // it, or a session that can set a GUC is back to being a worker.
+    const sql = schemaSqlFor(workerAccessManifest("workflow-worker"));
+
+    const gucOccurrences = sql.split("app.current_worker_role()").length - 1;
+    const pairedOccurrences = sql.split(workerDisjunct("workflow-worker")).length - 1;
+    expect(gucOccurrences).toBeGreaterThan(0);
+    expect(pairedOccurrences).toBe(gucOccurrences);
   });
 
   it("emits the worker-role disjunct on the rowScope policy too", () => {
@@ -475,8 +495,7 @@ describe("platform schema generator", () => {
       workerAccessManifest("workflow-worker", { rowScope: { userColumns: ["owner_id"] } }),
     );
 
-    const predicate =
-      "app.bypass_rls() OR app.current_worker_role() = 'workflow-worker' OR (tenant_id = app.current_tenant() AND (\"owner_id\" = app.current_user_id()))";
+    const predicate = `app.bypass_rls() OR ${workerDisjunct("workflow-worker")} OR (tenant_id = app.current_tenant() AND ("owner_id" = app.current_user_id()))`;
     expect(sql).toContain(
       `CREATE POLICY "control_commands_row_scope" ON "workflow"."control_commands"\n  USING (${predicate})\n  WITH CHECK (${predicate});`,
     );
@@ -493,12 +512,81 @@ describe("platform schema generator", () => {
       `CREATE POLICY "control_commands_tenant_isolation" ON "workflow"."control_commands"\n  USING (${predicate})\n  WITH CHECK (${predicate});`,
     );
     expect(sql).not.toContain("app.current_worker_role()");
+    expect(sql).not.toContain("current_user");
   });
 
   it("escapes a single quote in a worker role name", () => {
     const sql = schemaSqlFor(workerAccessManifest("worker's-role"));
 
     expect(sql).toContain("app.current_worker_role() = 'worker''s-role'");
+  });
+
+  it("publishes the worker login role in the manifest, so provisioning cannot drift", () => {
+    // apps/api provisions the role by reading this. A role the policies name
+    // and nothing creates fails silently — the queue simply reads as empty —
+    // so the name is emitted once and consumed, never retyped.
+    const manifestJson = JSON.parse(
+      generateArtifacts(workerAccessManifest("workflow-worker")).find((artifact) =>
+        artifact.path.endsWith("manifest.json"),
+      )!.contents,
+    ) as { workerDatabaseRole: string; tables: Array<Record<string, unknown>> };
+
+    expect(manifestJson.workerDatabaseRole).toBe(WORKER_DATABASE_ROLE);
+    expect(
+      schemaSqlFor(workerAccessManifest("workflow-worker")),
+    ).toContain(`current_user = '${manifestJson.workerDatabaseRole}'`);
+  });
+
+  it("publishes workerAccess and the workerDml it implies", () => {
+    // The grant sweep reads both off the manifest. `workerAccess` implying
+    // `workerDml` is what stops a queue table from being widened for a role
+    // that was never granted the table.
+    const manifestJson = JSON.parse(
+      generateArtifacts(workerAccessManifest("workflow-worker")).find((artifact) =>
+        artifact.path.endsWith("manifest.json"),
+      )!.contents,
+    ) as { tables: Array<{ workerAccess?: string; workerDml?: boolean }> };
+
+    expect(manifestJson.tables[0]?.workerAccess).toBe("workflow-worker");
+    expect(manifestJson.tables[0]?.workerDml).toBe(true);
+  });
+
+  it("publishes workerDml on a table that declares it alone, and emits no policy change", () => {
+    // workerDml is a GRANT, not a widening — including on a global table, where
+    // there is no policy at all and the grant is the only gate there is.
+    const artifacts = generateArtifacts({
+      version: 1,
+      tables: [
+        {
+          schema: "platform",
+          name: "workflow_node_catalog_entries",
+          tenantScoped: false,
+          columns: [{ name: "node_type", type: "text", primaryKey: true }],
+          workerDml: true,
+        },
+      ],
+    });
+    const sql = artifacts.find((artifact) => artifact.path.endsWith("schema.sql"))!.contents;
+    const manifestJson = JSON.parse(
+      artifacts.find((artifact) => artifact.path.endsWith("manifest.json"))!.contents,
+    ) as { tables: Array<{ workerDml?: boolean }> };
+
+    expect(manifestJson.tables[0]?.workerDml).toBe(true);
+    expect(sql).not.toContain("CREATE POLICY");
+    expect(sql).not.toContain("current_worker_role");
+  });
+
+  it("rejects a workerDml that is a role name rather than a boolean", () => {
+    // The plausible mistake is writing it by analogy with workerAccess. A
+    // truthy string would be silently accepted by every `=== true` check that
+    // matters, so it is refused at the emitter.
+    expect(() =>
+      generateArtifacts(
+        workerAccessManifest(undefined, {
+          workerDml: "workflow-worker" as unknown as boolean,
+        }),
+      ),
+    ).toThrow(/declares workerDml "workflow-worker", which is not a boolean/);
   });
 
   it("rejects workerAccess on a table that is not tenantScoped", () => {
@@ -1367,6 +1455,61 @@ tables:
     try {
       const manifest = await loadManifest(path);
       expect(manifest.tables[0]?.workerAccess).toBe("workflow-worker");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads a workerDml declaration from YAML, including on a global table", async () => {
+    // Unlike workerAccess it widens nothing, so a global table may declare it —
+    // and must be able to, since a global table has no policy and the grant is
+    // its only gate.
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: platform
+    name: workflow_node_catalog_entries
+    tenantScoped: false
+    workerDml: true
+    columns:
+      - { name: node_type, type: text, primaryKey: true }
+`,
+      "utf8",
+    );
+
+    try {
+      const manifest = await loadManifest(path);
+      expect(manifest.tables[0]?.workerDml).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a YAML workerDml that names a role instead of saying true", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: workflow
+    name: instances
+    tenantScoped: true
+    workerDml: workflow-worker
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: tenant_id, type: uuid, required: true }
+`,
+      "utf8",
+    );
+
+    try {
+      await expect(loadManifest(path)).rejects.toThrow(/workerDml must be a boolean/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

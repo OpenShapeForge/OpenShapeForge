@@ -6,8 +6,12 @@
 # Security posture (see SECURITY.md):
 #   - the API connects to Postgres as a RESTRICTED (NOSUPERUSER NOBYPASSRLS)
 #     role via database.url, so FORCE ROW LEVEL SECURITY is enforced;
+#   - a WORKER connects as a SECOND restricted role via database.workerUrl.
+#     The workflow queue policies compare current_user against that role, so a
+#     worker process must not be given the API's credentials — and never falls
+#     back to them (apps/api/src/roles/worker.ts refuses);
 #   - migrations run as a PRIVILEGED role via database.migrateUrl in a
-#     pre-upgrade Job (it also provisions the restricted role);
+#     pre-upgrade Job (it also provisions both restricted roles);
 #   - NODE_ENV=production is always set, so the API refuses to start unless a
 #     bearer audience and a strong internal context secret are configured
 #     (assertProductionEnv).
@@ -30,7 +34,12 @@ fullnameOverride: ""
 database:
   # If set, all secret env is read from this existing Secret. It must contain
   # keys: DATABASE_URL, OPENSHAPEFORGE_MIGRATE_DATABASE_URL,
-  # OPENSHAPEFORGE_APP_PASSWORD, OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET.
+  # OPENSHAPEFORGE_APP_PASSWORD, OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET — and,
+  # when any worker workload is deployed, OPENSHAPEFORGE_WORKER_DATABASE_URL
+  # and OPENSHAPEFORGE_WORKER_PASSWORD as well. The chart cannot check the
+  # contents of a Secret it does not own; a worker started without the worker
+  # URL refuses to boot rather than falling back to DATABASE_URL, so the
+  # omission surfaces as a CrashLoopBackOff with an explicit message.
   existingSecret: ""
   # Used only when existingSecret is empty (chart-managed Secret):
   url: "" # postgres://openshapeforge_app:<pw>@<host>:5432/openshapeforge  (restricted role)
@@ -47,6 +56,41 @@ database:
   # Set to true for a SINGLE upgrade to rotate the restricted role's password to
   # database.appPassword. Leave false for routine upgrades.
   appPasswordRotate: false
+
+  # WORKER connection string, for any workload running OPENSHAPEFORGE_ROLE=<a
+  # worker role>. A SECOND restricted role, not a second URL for the same one:
+  #
+  #   postgres://openshapeforge_worker:<pw>@<host>:5432/openshapeforge
+  #
+  # The workflow queue policies read
+  #   current_user = 'openshapeforge_worker'
+  #   AND app.current_worker_role() = '<role>'
+  # so the connected role is what authorizes the cross-tenant claim. Giving a
+  # worker database.url instead would leave both processes on one database
+  # identity — the property this exists to remove — and the worker would drain
+  # nothing while reporting healthy. apps/api/src/roles/worker.ts therefore
+  # refuses to start when this is unset, when it equals DATABASE_URL, and when
+  # it names any role other than openshapeforge_worker.
+  #
+  # Empty is valid and means "this install deploys no worker": the Secret key is
+  # still written (empty), the migrate Job still provisions the role, and only a
+  # worker pod would notice. Leave it empty until a worker workload is enabled.
+  workerUrl: ""
+  # Password for the restricted openshapeforge_worker role. Same first-creation
+  # contract as appPassword, and it MUST equal <pw> in database.workerUrl. Keep
+  # it distinct from appPassword — one credential shared by both roles is one
+  # credential, and the whole point of the second role is that holding one does
+  # not get you the other.
+  #
+  # REQUIRED, even with workerUrl empty, when the chart manages the Secret. The
+  # migrate Job provisions the role on every install because the emitted queue
+  # policies name it either way, and a role the policies name but nothing
+  # creates fails silently — the queue simply reads as empty. An upgrade from a
+  # chart version before #223 therefore has to set this once.
+  workerPassword: ""
+  # Set to true for a SINGLE upgrade to rotate the worker role's password to
+  # database.workerPassword. Leave false for routine upgrades.
+  workerPasswordRotate: false
 
 # --- Authentication (OIDC / Keycloak) ----------------------------------------
 # Non-secret bearer verification config. Audience is REQUIRED in production.

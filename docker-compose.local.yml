@@ -5,6 +5,16 @@ networks:
     driver: bridge
 
 services:
+  # The superuser below is the PRIVILEGED migrate role. `bun run db:migrate`
+  # connects as it and provisions the two restricted runtime roles inside this
+  # database — `openshapeforge_app` for the API and `openshapeforge_worker` for
+  # a worker process, each NOSUPERUSER NOBYPASSRLS, each with its own password
+  # and its own grants. Nothing here creates them; the defaults that connect as
+  # them are DATABASE_URL and OPENSHAPEFORGE_WORKER_DATABASE_URL in
+  # apps/api/.env.example. `trust` auth means the local passwords are never
+  # checked, so the two roles are still distinct identities to Postgres — which
+  # is what the workflow queue policies compare — without local credential
+  # juggling.
   platform-db:
     image: pgvector/pgvector:pg17
     container_name: openshapeforge-platform-db

@@ -5,11 +5,13 @@
  * Two things are being pinned, and only one of them is the sweep.
  *
  * **The sweep reads across tenants.** `workflow.waits` carries the worker axis,
- * so a session presenting `app.worker_role` may claim due rows in any tenant.
- * Two tenants are seeded because one proves nothing: a sweep that had somehow
- * acquired a tenant scope would still pass a single-tenant test. Connecting as
- * the restricted, non-superuser `openshapeforge_app` role is what makes the
- * policy the real gate — as a superuser this passes with the axis removed.
+ * so a session connected as `openshapeforge_worker` and presenting
+ * `app.worker_role` may claim due rows in any tenant. Two tenants are seeded
+ * because one proves nothing: a sweep that had somehow acquired a tenant scope
+ * would still pass a single-tenant test. Connecting as the restricted,
+ * non-superuser worker role is what makes the policy the real gate — as a
+ * superuser this passes with the axis removed, and as the app role it fails
+ * even with the GUC set (#223).
  *
  * **The deadline is computed once.** The runtime re-executes a parked node on
  * every resume, so a bridge that recomputed its own deadline would slide it
@@ -27,14 +29,16 @@ import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime, type OpenShapeForgeDatabase } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
-import { APP_ROLE } from "../migrations/app-role.js";
+import {
+  DEV_WORKER_ROLE_PASSWORD_DEFAULT,
+  WORKER_ROLE,
+} from "../migrations/worker-role.js";
 import { loadRuntimeModules } from "../../modules/registry.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 
-const APP_ROLE_PASSWORD = "openshapeforge_app";
 const TEST_TIMEOUT = 90_000;
 
 /**
@@ -73,14 +77,20 @@ type TimerBridgeModule = {
   timerNodeBridge: (context: Record<string, unknown>) => Promise<BridgeOutput>;
 };
 
-function scratchUrl(name: string, asAppRole: boolean): string {
+/**
+ * `asWorkerRole` connects as `openshapeforge_worker`, which since #223 is the
+ * role the wait policies compare `current_user` against — the app role sets the
+ * same GUC and sees an empty sweep. Everything else connects as the privileged
+ * role, which seeds and asserts.
+ */
+function scratchUrl(name: string, asWorkerRole: boolean): string {
   const url = new URL(ADMIN_URL);
   if (url.pathname === "/openshapeforge_dev") {
     throw new Error("admin URL must not point at openshapeforge_dev");
   }
-  if (asAppRole) {
-    url.username = APP_ROLE;
-    url.password = APP_ROLE_PASSWORD;
+  if (asWorkerRole) {
+    url.username = WORKER_ROLE;
+    url.password = DEV_WORKER_ROLE_PASSWORD_DEFAULT;
   }
   url.pathname = `/${name}`;
   return url.toString();

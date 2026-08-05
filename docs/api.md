@@ -326,20 +326,32 @@ which emits one extra disjunct in **that table's** policy and nowhere else:
 
 ```sql
 USING (app.bypass_rls()
-       OR app.current_worker_role() = 'workflow-worker'
+       OR (current_user = 'openshapeforge_worker'
+           AND app.current_worker_role() = 'workflow-worker')
        OR (tenant_id = app.current_tenant()))
 ```
 
-`app.current_worker_role()` reads the `app.worker_role` GUC, which a worker
-sets on its own transaction (`applyWorkerSession` in the workflow plugin's
-`control-command-worker.ts`). Nothing is bypassed, so nothing is audited —
-the break-glass trail stays readable rather than being buried under a poll
-loop's heartbeat.
+The two conditions answer different questions, and only one of them is a
+question the database can answer.
 
-Three tables declare it today: `workflow.control_commands`,
-`workflow.schedules` and `workflow.schedule_fires`. Notably *not*
-`workflow.instances` or `workflow.node_states` — those are reached only after
-a command is claimed, from a session scoped to that command's tenant.
+- `current_user` is the **connected login role**. A worker process connects as
+  `openshapeforge_worker`, provisioned by the same migrate chain that
+  provisions `openshapeforge_app` and equally `NOSUPERUSER NOBYPASSRLS`. A
+  session cannot assume it: no membership is granted, so `SET ROLE
+  openshapeforge_worker` from the app role is refused by PostgreSQL.
+- `app.current_worker_role()` reads the `app.worker_role` GUC, which a worker
+  sets on its own transaction (`applyWorkerSession` in the workflow plugin's
+  `control-command-worker.ts`). It says *which* worker, so two plugins' workers
+  sharing one login role keep separate queues.
+
+Nothing is bypassed, so nothing is audited — the break-glass trail stays
+readable rather than being buried under a poll loop's heartbeat.
+
+Five tables declare it today: `workflow.control_commands`,
+`workflow.schedules`, `workflow.schedule_fires`, `workflow.waits` and
+`workflow.collection_waits`. Notably *not* `workflow.instances` or
+`workflow.node_states` — those are reached only after a command is claimed,
+from a session scoped to that command's tenant.
 
 Two properties worth being explicit about:
 
@@ -347,11 +359,50 @@ Two properties worth being explicit about:
   the boundary. It belongs on queue-shaped tables a worker drains, never on
   one holding tenant business data. The compiler rejects it on a table that is
   not `tenantScoped`, where it would grant nothing while reading as a grant.
-- **It is not authentication.** `app.worker_role` is a GUC, so anything that
-  can set a GUC can claim to be a worker — exactly as true of
-  `app.bypass_rls`. The boundary is that the request path never sets it and a
-  worker's boot path does: a code boundary, not a database one. Making it a
-  database boundary means a separate Postgres role with its own grants.
+- **It is a database boundary, since #223.** It was not always: with the GUC
+  alone, anything that could set a GUC could claim to be a worker, and the
+  only thing holding the line was that the API's request path never set it —
+  a code boundary. Both processes connected as the same role, so PostgreSQL
+  could not tell them apart. The role comparison is what changed that. The
+  verification is a raw count: connected as `openshapeforge_app` with
+  `app.worker_role = 'workflow-worker'` set by hand, `workflow.control_commands`
+  counts **0** (`db/__tests__/worker-role-rls.test.ts`).
+
+### The worker's grants
+
+A second role is only worth having if it holds less. `openshapeforge_app` gets a
+whole-schema DML sweep, so a newly generated entity is covered without a bespoke
+migration; `openshapeforge_worker` gets an **enumeration** derived from the
+manifest instead (`db/migrations/worker-role.ts`):
+
+| source | what it covers |
+| --- | --- |
+| `workerAccess` | the queue a worker claims across tenants |
+| `workerDml: true` | everything reached inside one tenant's session — run tables, node catalog, trigger registry |
+| `generatedCrud` | the business entities, because a generated `entity.<slug>.<action>` node exists for every one of them |
+
+`workerDml` is the second declaration, a boolean rather than a role name: the
+grant is made to the single worker LOGIN role, and it is legal on a **global**
+table, where there is no policy at all and the grant is the only gate.
+
+What that leaves out is the point. The worker holds nothing in the platform
+control plane — `platform.connector_secrets`, `platform.api_keys`,
+`platform.api_key_integrations`, `platform.tenants`,
+`platform.entity_page_configs`, `platform.org_unit`,
+`platform.entity_field_suggestions` and the connector installation tables. It
+also gets **no `ALTER DEFAULT PRIVILEGES`**: that is what makes the app role's
+sweep future-proof, and giving the worker the same would auto-grant it every
+table generated from that day on. A new table reaches the worker by declaring
+`workerDml` and being picked up by the next migrate.
+
+### The worker's connection string
+
+`OPENSHAPEFORGE_WORKER_DATABASE_URL`, and `apps/api/src/roles/worker.ts`
+**refuses to fall back to `DATABASE_URL`** — unset, set to the same value, or
+naming any role other than `openshapeforge_worker` are all fatal at boot. A
+silent fallback would put both processes back on one database identity, and it
+would do it invisibly: the queue reads as empty and the poll loop reports
+healthy.
 
 ## Authentication / authorization
 

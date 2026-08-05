@@ -13,9 +13,10 @@
  * picked up a tenant scope would still pass a single-tenant test. Seeing both
  * tenants' waits in one sweep is the assertion.
  *
- * Connects as the restricted, non-superuser `openshapeforge_app` role, so the
- * policy is the real gate. As a superuser this test passes with the defect
- * present, which is the trap that made the original failure invisible.
+ * Connects as the restricted, non-superuser `openshapeforge_worker` role, so
+ * the policy is the real gate. As a superuser this test passes with the defect
+ * present, which is the trap that made the original failure invisible; as the
+ * app role it now fails even with the GUC set, which is #223.
  *
  * Run (cwd apps/api):
  *   set -o pipefail; bun test src/db/__tests__/workflow-collection-wait-sweeps.test.ts 2>&1
@@ -27,7 +28,10 @@ import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
-import { APP_ROLE } from "../migrations/app-role.js";
+import {
+  DEV_WORKER_ROLE_PASSWORD_DEFAULT,
+  WORKER_ROLE,
+} from "../migrations/worker-role.js";
 import { loadRuntimeModules } from "../../modules/registry.js";
 import type { OpenShapeForgeDatabase } from "../connection.js";
 
@@ -57,17 +61,22 @@ const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 
-const APP_ROLE_PASSWORD = "openshapeforge_app";
 const TEST_TIMEOUT = 90_000;
 
-function scratchUrl(name: string, asAppRole: boolean): string {
+/**
+ * `asWorkerRole` connects as `openshapeforge_worker`, which since #223 is the
+ * role the wait policies compare `current_user` against — the app role sets the
+ * same GUC and sweeps nothing. Everything else connects as the privileged role,
+ * which seeds and asserts.
+ */
+function scratchUrl(name: string, asWorkerRole: boolean): string {
   const url = new URL(ADMIN_URL);
   if (url.pathname === "/openshapeforge_dev") {
     throw new Error("admin URL must not point at openshapeforge_dev");
   }
-  if (asAppRole) {
-    url.username = APP_ROLE;
-    url.password = APP_ROLE_PASSWORD;
+  if (asWorkerRole) {
+    url.username = WORKER_ROLE;
+    url.password = DEV_WORKER_ROLE_PASSWORD_DEFAULT;
   }
   url.pathname = `/${name}`;
   return url.toString();

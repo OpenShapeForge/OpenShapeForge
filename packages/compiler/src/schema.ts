@@ -357,8 +357,11 @@ export type TableDefinition = {
   rowScope?: RowScopePolicy;
   /**
    * The worker role permitted to reach this table ACROSS tenants — rendered as
-   * an extra `app.current_worker_role() = '<role>'` disjunct in the emitted
-   * policy, next to the existing `app.bypass_rls()` short-circuit.
+   * an extra disjunct in the emitted policy, next to the existing
+   * `app.bypass_rls()` short-circuit:
+   *
+   *   OR (current_user = 'openshapeforge_worker'
+   *       AND app.current_worker_role() = '<role>')
    *
    * This axis WIDENS, unlike every other one here: `rowScope`'s group and user
    * axes narrow within a tenant, and the tenant predicate is always required
@@ -374,14 +377,48 @@ export type TableDefinition = {
    * boundary to widen, so accepting it would imply a guarantee that is not
    * there.
    *
-   * What this is NOT: authentication. `app.worker_role` is a GUC, so anything
-   * that can set a GUC can claim to be a worker — exactly as true of
-   * `app.bypass_rls`. The boundary is that the API's request path never sets it
-   * and a worker's boot path does; that is a code boundary, not a database one.
-   * Making it a database boundary means a separate Postgres role with its own
-   * grants.
+   * The two conditions answer different questions, and only the first is one
+   * the database can answer. `current_user` is the connected login role, which
+   * a session cannot assume (the app role is not a member of the worker role,
+   * so `SET ROLE` is refused); `app.current_worker_role()` reads a GUC, which
+   * anything holding a connection can set. Before #223 the GUC stood alone and
+   * the policy authenticated nothing — the boundary was that the API's request
+   * path never set it, which is a code boundary rather than a database one.
+   * The role comparison is now the boundary; the GUC only says WHICH worker,
+   * so two plugins' workers stay distinguishable while sharing one login role.
+   *
+   * Implies {@link workerDml}: the worker role is granted DML on every table
+   * that declares this.
    */
   workerAccess?: string;
+  /**
+   * A worker needs DML on this table, WITHOUT any policy widening.
+   *
+   * The other half of the worker surface. `workerAccess` covers the queue a
+   * worker drains across tenants; this covers everything a worker touches
+   * afterwards, inside a session scoped to the claimed row's tenant — its run
+   * tables, its node catalog, its trigger registry. Those need a GRANT, because
+   * the worker connects as its own PostgreSQL role and that role is deliberately
+   * NOT given the whole-schema sweep the app role gets, but they must not gain a
+   * cross-tenant disjunct: a worker reaches them one tenant at a time, and the
+   * tenant predicate is what keeps that true.
+   *
+   * Legal on a global table, unlike `workerAccess`, and that is the point: a
+   * node catalog has no tenant predicate at all, so a grant is the only gate
+   * there is and withholding it is the whole control.
+   *
+   * A boolean rather than a role name, unlike `workerAccess`, because a grant
+   * is made to the one PostgreSQL LOGIN role every worker shares — and because
+   * the tables the core itself must expose (the org-unit closure every session
+   * expands its groups through) belong to no plugin and cannot name one.
+   *
+   * Not needed on `generatedCrud` tables: a generated entity workflow node
+   * exists for every one of them, so the grant sweep derives that set rather
+   * than making each entity author name a worker they have never heard of.
+   * `workerAccess` implies it too — a queue a worker claims from is a queue it
+   * writes the outcome back to.
+   */
+  workerDml?: boolean;
   /**
    * The column whose value IS a tenant id, for a global table that registers
    * tenants themselves (`platform.tenants`). Names the uuid column holding the

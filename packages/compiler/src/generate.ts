@@ -14,6 +14,18 @@ type GroupExpand = NonNullable<RowScopePolicy["group"]>["expand"];
 
 const defaultSource = "packages/compiler/config/platform-schema.yaml";
 
+/**
+ * The PostgreSQL login role a background worker connects as.
+ *
+ * Declared here because the emitter is what puts the name into an RLS policy,
+ * and it is re-published in the generated manifest
+ * (`manifest.workerDatabaseRole`) so `apps/api`'s provisioning migration reads
+ * the same string rather than repeating it. A policy naming a role nothing
+ * creates, or a role no policy names, is the failure this single source of
+ * truth exists to make impossible.
+ */
+export const WORKER_DATABASE_ROLE = "openshapeforge_worker";
+
 export type GenerateArtifactsOptions = {
   source?: string;
 };
@@ -173,6 +185,26 @@ function groupFunctionForExpand(expand: GroupExpand): string {
  * security role: the bypass admits every tenant-scoped table in the manifest,
  * this admits exactly the table that asked for it.
  *
+ * TWO CONDITIONS, AND-ed, and each answers a different question:
+ *
+ *   current_user = 'openshapeforge_worker'      -- IS this a worker?
+ *   AND app.current_worker_role() = '<role>'    -- WHICH worker is it?
+ *
+ * The first is the one the database can verify. `app.worker_role` is a GUC, and
+ * anything holding a connection can set a GUC, so on its own it authenticated
+ * nothing: any session that reached SQL execution through the API could widen
+ * itself across every tenant's queue by naming the role. The connected role
+ * cannot be assumed — the app role is not a member of the worker role, so
+ * `SET ROLE` is refused — which is what turns this policy into a statement the
+ * database enforces rather than one it merely records (#223).
+ *
+ * The second stays because `workerAccess` is a per-role authoring surface, not
+ * a per-deployment one. Dropping it would make every worker role in the
+ * deployment equivalent: a second plugin's worker, connected as the same
+ * PostgreSQL role, would inherit the workflow plugin's queue for free. Keeping
+ * it as an AND costs one comparison and preserves the distinction the compiler
+ * already expresses.
+ *
  * The empty string is load-bearing. Every table that does not declare
  * `workerAccess` must emit the predicate it emitted before this field existed,
  * byte for byte; interpolating "" into the same template is what guarantees
@@ -199,7 +231,34 @@ function renderWorkerAccessDisjunct(table: TableDefinition): string {
         `workerAccess widens a tenant policy; a global table has no tenant boundary to widen, so accepting it would imply a guarantee that is not there.`,
     );
   }
-  return ` OR app.current_worker_role() = ${quoteSqlString(workerRole)}`;
+  return (
+    ` OR (current_user = ${quoteSqlString(WORKER_DATABASE_ROLE)}` +
+    ` AND app.current_worker_role() = ${quoteSqlString(workerRole)})`
+  );
+}
+
+/**
+ * Validate `workerDml`, the second half of the worker surface: the tables the
+ * worker role is granted DML on WITHOUT any policy widening.
+ *
+ * It emits no SQL — the grant sweep in `apps/api/src/db/migrations/worker-role.ts`
+ * reads it off the manifest — but it is validated here, next to `workerAccess`,
+ * for the same reason: a plugin's `contributePlatformTables` hook never passes
+ * through the manifest loader, and a `workerDml: "workflow-worker"` written by
+ * analogy with `workerAccess` would otherwise be a truthy string that nothing
+ * ever questioned.
+ *
+ * Unlike `workerAccess` this is legal on a GLOBAL table, and that is the point:
+ * a worker's node catalog and trigger registry are global, carry no tenant
+ * predicate, and so are gated by grants alone.
+ */
+function validateWorkerDml(table: TableDefinition): void {
+  if (table.workerDml !== undefined && typeof table.workerDml !== "boolean") {
+    throw new Error(
+      `Table ${table.schema}.${table.name} declares workerDml ${JSON.stringify(table.workerDml)}, which is not a boolean. ` +
+        `workerDml grants DML to the single worker LOGIN role; it names no worker — use workerAccess for that.`,
+    );
+  }
 }
 
 /**
@@ -367,6 +426,9 @@ function renderTableSql(table: TableDefinition): string {
   // at all there, and a declaration that quietly does nothing reads like a
   // grant that was made.
   const workerAccess = renderWorkerAccessDisjunct(table);
+  // Emits nothing; validated here so a malformed declaration fails the build
+  // rather than quietly costing the worker a grant at migrate time.
+  validateWorkerDml(table);
   // Same reasoning, opposite direction: resolved before the branch so a
   // tenantIdentityColumn on a TENANT-SCOPED table is rejected rather than
   // silently ignored by a branch that never looks at it.
@@ -540,6 +602,16 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
       ...(column.sourceField === undefined ? {} : { sourceField: column.sourceField }),
       ...(column.classification === undefined ? {} : { classification: column.classification }),
     })),
+    // The worker surface, republished so the migrate chain can derive the
+    // worker role's grants from the same declarations the policy was emitted
+    // from. `workerAccess` is the cross-tenant queue (policy widened AND
+    // granted); `workerDml` is granted only.
+    ...(table.workerAccess === undefined ? {} : { workerAccess: table.workerAccess }),
+    // `workerAccess` implies it: a worker that claims a row writes the outcome
+    // back to the same table, so the queue never has to say so twice.
+    ...(table.workerDml === true || table.workerAccess !== undefined
+      ? { workerDml: true }
+      : {}),
     ...(table.retention === undefined ? {} : { retention: table.retention }),
     ...(table.source === undefined ? {} : { source: table.source }),
   }));
@@ -586,6 +658,10 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
       generatedBy: "@openshapeforge/compiler",
       source,
       checksum,
+      // The login role the emitted `workerAccess` policies compare
+      // `current_user` against. Read by the migrate chain so the role that is
+      // provisioned and the role the policies name can never drift apart.
+      workerDatabaseRole: WORKER_DATABASE_ROLE,
       capabilities: {
         generatedEntities,
       },

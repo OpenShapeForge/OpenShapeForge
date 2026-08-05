@@ -107,12 +107,14 @@ function startIdempotencyKey(schedule: ClaimedSchedule) {
  *
  * Nothing here is bypassed. `workflow.schedules` and `workflow.schedule_fires`
  * declare `workerAccess: WORKFLOW_WORKER_ROLE` (see the plugin's `index.ts`),
- * so their policies admit a session presenting that role directly. The grant
- * stops there: `workflow.definitions` and `workflow.definition_versions` do NOT
- * declare it, and this worker reads them only after `tenantId` is known and set
- * below — through the ordinary tenant predicate, exactly as a user session
- * would. Setting `app.bypass_rls` instead would have granted read AND write on
- * every tenant-scoped table in the manifest.
+ * so their policies admit a worker directly — connected as
+ * `openshapeforge_worker` AND presenting this role. The widening stops there:
+ * `workflow.definitions` and `workflow.definition_versions` do NOT declare it
+ * (only `workerDml`, which grants without widening), and this worker reads them
+ * only after `tenantId` is known and set below — through the ordinary tenant
+ * predicate, exactly as a user session would. Setting `app.bypass_rls` instead
+ * would have granted read AND write on every tenant-scoped table in the
+ * manifest.
  *
  * No audit row, because there is no bypass to audit — which is also why the
  * poll loop's rate stops being a problem for the break-glass trail.

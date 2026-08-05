@@ -105,9 +105,9 @@ const plugin: RuntimeModule = {
    * The `workflow-worker` role: one process draining `workflow.control_commands`.
    *
    * It runs here rather than alongside GraphQL because it is a poll loop with
-   * its own failure modes, and because its database session is deliberately
-   * different from a request's — it presents `app.worker_role`, which the three
-   * queue tables' RLS policies name and the API's request path never sets.
+   * its own failure modes, and because its database identity is deliberately
+   * different from a request's — it connects as `openshapeforge_worker` and
+   * presents `app.worker_role`, and the queue tables' RLS policies name both.
    * `apps/api` does not know this role exists; a repo that drops the workflow
    * plugin loses it with the plugin.
    *

@@ -66,6 +66,24 @@ spec:
             - name: OPENSHAPEFORGE_APP_PASSWORD_ROTATE
               value: "1"
             {{- end }}
+            # Password the SECOND restricted role — openshapeforge_worker, the
+            # one the workflow queue policies compare current_user against — is
+            # provisioned with (first creation only). The migrate Job is what
+            # creates that role and enumerates its grants, so it needs this even
+            # on an install that deploys no worker workload: the policies name
+            # the role either way, and a role the policies name but nothing
+            # creates fails silently as an empty queue.
+            - name: OPENSHAPEFORGE_WORKER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "openshapeforge-api.secretName" . }}
+                  key: OPENSHAPEFORGE_WORKER_PASSWORD
+            {{- if .Values.database.workerPasswordRotate }}
+            # One-shot rotation, exactly as above. Update database.workerUrl in
+            # lockstep or every worker pod loses its connection.
+            - name: OPENSHAPEFORGE_WORKER_PASSWORD_ROTATE
+              value: "1"
+            {{- end }}
           {{- if .Values.tmpVolume.enabled }}
           volumeMounts:
             - name: tmp

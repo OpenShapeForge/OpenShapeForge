@@ -10,6 +10,10 @@
  *      first (privileged migrate chain) so RLS is actually enforced against
  *      the app role; the table-grant SWEEP runs last (step 5) once tables
  *      exist.
+ *   0b. worker role           — the SECOND restricted role, the one the
+ *      `workerAccess` policies compare `current_user` against. Same position
+ *      and same reason as the app role; its grants are enumerated rather than
+ *      swept, and also land in step 5.
  *   1. app helpers            — RLS helper functions every policy references.
  *   2. system bypass audit    — break-glass audit table (not manifest-managed).
  *   3. versioned bespoke      — hand-written transformations; run BEFORE the
@@ -18,8 +22,9 @@
  *   4. generated roll-forward — manifest-driven schema apply/diff.
  *   5. app role grants        — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically,
- *      and re-apply the `app` schema USAGE/EXECUTE grants that step 0 had to
- *      skip because step 1 had not created the schema yet.
+ *      re-apply the `app` schema USAGE/EXECUTE grants that step 0 had to skip
+ *      because step 1 had not created the schema yet, then grant the worker
+ *      role the enumerated subset it is allowed.
  *   6. catalog seeds          — load the compiler's global configuration
  *      catalogs into their platform tables: the entity page configs, then
  *      whatever the loaded runtime modules contribute, in registration order.
@@ -36,6 +41,7 @@
 import type { Kysely } from "kysely";
 import type { DB } from "../generated/db/types.js";
 import { applyAppRoleMigration, applyAppRoleGrants } from "./migrations/app-role.js";
+import { applyWorkerRoleMigration, applyWorkerRoleGrants } from "./migrations/worker-role.js";
 import { applyAppHelpersMigration } from "./migrations/app-helpers.js";
 import { applySystemBypassAuditMigration } from "./migrations/system-bypass-audit.js";
 import {
@@ -82,6 +88,7 @@ export async function runMigrationChain(
   options: MigrationChainOptions = {},
 ): Promise<MigrationChainResult> {
   await applyAppRoleMigration(db);
+  await applyWorkerRoleMigration(db);
   await applyAppHelpersMigration(db);
   await applySystemBypassAuditMigration(db);
   const versioned = await applyVersionedMigrations(
@@ -91,6 +98,11 @@ export async function runMigrationChain(
   const generated = await applyGeneratedSchemaMigration(db, options.appliedBy);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
+  // The worker role's grants are enumerated from the manifest rather than
+  // swept, and re-evaluated here on every migrate so a table that newly
+  // declares (or stops declaring) workerDml is picked up without a bespoke
+  // migration.
+  await applyWorkerRoleGrants(db);
   const pageConfigs = await applyEntityPageConfigsSeed(db);
   const moduleSeeds: Record<string, CatalogSeedResult> = {};
   for (const seed of options.moduleSeeds ?? []) {

@@ -11,8 +11,9 @@
  *
  * The claim is cross-tenant: one worker drains every tenant's due timers, so a
  * tenant with none needs no worker of its own. `workflow.waits` declares
- * `workerAccess`, so its policy admits a session presenting `app.worker_role`
- * directly — nothing is bypassed, and the grant stops at that table.
+ * `workerAccess`, so its policy admits a session connected as
+ * `openshapeforge_worker` and presenting `app.worker_role` — nothing is
+ * bypassed, and the widening stops at that table.
  *
  * The resuming is not. `enqueueWorkflowInstanceResume` reads
  * `workflow.instances`, which deliberately carries no worker axis, so it runs

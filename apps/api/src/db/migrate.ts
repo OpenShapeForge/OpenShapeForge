@@ -19,6 +19,12 @@ function seedReport(name: string, result: CatalogSeedResult): Record<string, str
 
 // Migrations run as the PRIVILEGED role (CREATE ROLE, DDL, GRANT) via
 // OPENSHAPEFORGE_MIGRATE_DATABASE_URL, NOT the restricted runtime DATABASE_URL role.
+// It provisions BOTH restricted roles — openshapeforge_app (password:
+// OPENSHAPEFORGE_APP_PASSWORD) and openshapeforge_worker
+// (OPENSHAPEFORGE_WORKER_PASSWORD) — on every run, whether or not this
+// deployment starts a worker: the emitted queue policies name the worker role
+// either way, and a role the policies name but nothing creates fails silently
+// as an empty queue.
 // Modules are resolved before the connection opens: a plugin whose runtime half
 // will not load must not leave a migration half-run. Load failures are reported
 // with the result rather than thrown — a broken plugin costs its own seed, not

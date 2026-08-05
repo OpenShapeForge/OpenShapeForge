@@ -113,11 +113,20 @@ Two shape details worth knowing when consuming the manifest in a plugin:
   [api.md](api.md#the-worker-axis). The manifest loader validates the field
   for YAML-authored tables; the emitter repeats both checks, because
   `contributePlatformTables` never passes through the loader.
+- A contributed table must declare **`workerDml: true`** if a worker touches it
+  at all, even inside a single tenant's session. A worker connects as its own
+  PostgreSQL role, and that role gets an enumerated grant rather than the app
+  role's whole-schema sweep — so a table nobody declares is a table a worker
+  gets `permission denied` on. Legal on a global table, unlike `workerAccess`,
+  and implied by it. `generatedCrud` tables need no declaration: a generated
+  entity node exists for each, so the sweep derives them.
 
 Schemas are covered automatically: `applyAppRoleGrants` derives the schema
 list from the generated manifest, so a schema your plugin introduces gets
 USAGE and DML grants for the restricted runtime role on the next
-`bun run db:migrate` without a bespoke migration.
+`bun run db:migrate` without a bespoke migration. The **worker** role is the
+deliberate exception: `applyWorkerRoleGrants` enumerates tables rather than
+sweeping schemas, so a plugin's table reaches a worker only by saying so.
 
 ### `ownedPaths` and the gates
 
@@ -216,16 +225,20 @@ workers: {
 A worker is its own process rather than a timer inside the API, for three
 reasons: a poll loop and a request path have unrelated failure modes and
 unrelated scaling needs; a wedged worker must not take GraphQL down with it;
-and the database session differs — the workflow worker presents
-`app.worker_role`, a GUC the request path never sets
-([api.md](api.md#the-worker-axis)).
+and the database connection differs — a worker connects as the
+`openshapeforge_worker` role and presents `app.worker_role`, and the queue
+policies check both ([api.md](api.md#the-worker-axis)).
 
 Where the API role degrades, the worker role fails closed:
 
-- **No `DATABASE_URL` is fatal.** GraphQL without a database can still answer
+- **No `OPENSHAPEFORGE_WORKER_DATABASE_URL` is fatal, and there is no fallback
+  to `DATABASE_URL`.** GraphQL without a database can still answer
   `DATABASE_NOT_CONFIGURED`; a queue-draining worker without one has nothing to
   do, and a process that idles while looking healthy is the worst outcome
-  available.
+  available. `DATABASE_URL` carries the API's role, which the queue policies do
+  not admit, so falling back to it would produce exactly that process — the
+  same value copied into the worker variable, and a URL naming any other role,
+  are refused for the same reason.
 - **A module that failed to load or initialise is fatal *if it owns the
   requested role*.** The API tolerates a missing module because its other
   surfaces still work; here the module *is* the process. The error names the
@@ -281,16 +294,21 @@ authoritative over its own slice only — the mechanics live in
 `apps/api/src/db/migrations/catalog-seed.ts`.
 
 It also contributes the tenant-scoped `workflow.*` data and execution tables.
-Three of those — `control_commands`, `schedules`, `schedule_fires` — declare
-`workerAccess: "workflow-worker"`, the queue a worker claims across tenants;
-the rest get the plain tenant-isolation policy. See
-[api.md](api.md#the-worker-axis).
+Five of those — `control_commands`, `schedules`, `schedule_fires`, `waits`,
+`collection_waits` — declare `workerAccess: "workflow-worker"`, the queue a
+worker claims across tenants; the rest get the plain tenant-isolation policy
+and declare `workerDml: true` so the worker role can reach them one tenant at a
+time. See [api.md](api.md#the-worker-axis).
 
 **Contributed worker role** (`workers`) — `workflow-worker`, one process
-draining `workflow.control_commands`:
+draining `workflow.control_commands`. It connects as the `openshapeforge_worker`
+database role, so it needs its own connection string and will not start on the
+API's:
 
 ```sh
-OPENSHAPEFORGE_ROLE=workflow-worker bun apps/api/src/index.ts
+OPENSHAPEFORGE_ROLE=workflow-worker \
+OPENSHAPEFORGE_WORKER_DATABASE_URL=postgres://openshapeforge_worker:openshapeforge_worker@localhost:5434/openshapeforge_dev \
+  bun apps/api/src/index.ts
 ```
 
 Whether it dispatches in-process or through a durable-execution service is the

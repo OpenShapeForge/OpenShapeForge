@@ -585,6 +585,15 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
       }
     }
 
+    // workerDml says a worker needs DML on this table inside a tenant-scoped
+    // session. It widens no policy, so it is legal on a global table — a
+    // worker's node catalog is one, and a grant is the only gate a global table
+    // has. A boolean, not a role name: the grant is made to the one worker
+    // LOGIN role, and `workerAccess` is where a worker is named.
+    if (table.workerDml !== undefined && typeof table.workerDml !== "boolean") {
+      throw new Error(`${currentTableKey}.workerDml must be a boolean.`);
+    }
+
     // tenantIdentityColumn names the uuid column that IS a tenant id on a
     // GLOBAL table registering tenants. Rejected on a tenant-scoped table
     // because the tenant predicate already exists there, and two answers to

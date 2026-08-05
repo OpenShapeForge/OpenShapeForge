@@ -205,6 +205,7 @@ jobs:
             --set database.url="postgres://app:app@db:5432/app" \
             --set database.migrateUrl="postgres://mig:mig@db:5432/app" \
             --set database.appPassword="ci-template-only" \
+            --set database.workerPassword="ci-template-only-worker" \
             --set auth.internalContextSecret="ci-template-only"
 
       # The Keycloak subchart is disabled by default, so the render above never
@@ -217,6 +218,7 @@ jobs:
             --set database.url="postgres://app:app@db:5432/app" \
             --set database.migrateUrl="postgres://mig:mig@db:5432/app" \
             --set database.appPassword="ci-template-only" \
+            --set database.workerPassword="ci-template-only-worker" \
             --set auth.internalContextSecret="ci-template-only" \
             --set keycloak.enabled=true \
             --set keycloak.database.jdbcUrl="jdbc:postgresql://db:5432/keycloak" \

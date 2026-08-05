@@ -1,22 +1,37 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The worker axis, proved against a real database (#218).
+ * The worker axis, proved against a real database (#218, #223).
  *
  * A workflow worker claims commands across every tenant. It used to do that by
  * setting `app.bypass_rls`, which is a single boolean honoured by all 20
  * tenant-scoped policies in the manifest — so a worker that needed 3 tables was
- * granted read AND write on every tenant's `erp.relations` too. The three queue
- * tables now declare `workerAccess: "workflow-worker"`, which puts an
- * `app.current_worker_role() = 'workflow-worker'` disjunct in THEIR policies and
- * nowhere else, and the workers set `app.worker_role` instead of the bypass.
+ * granted read AND write on every tenant's `erp.relations` too. #218 replaced
+ * that with `workerAccess`, which puts a worker disjunct in the queue tables'
+ * policies and nowhere else.
  *
- * Everything below runs as the restricted, non-superuser `openshapeforge_app`
- * role against a throwaway scratch database, because RLS is only real for a role
- * that cannot bypass it. Every visibility assertion is a RAW `count(*)` with no
- * app-layer WHERE, so the numbers themselves are the proof.
+ * #218 stated its own limit: `app.current_worker_role()` reads a GUC, and
+ * anything holding a connection can set a GUC, so the policy authenticated
+ * nothing. What held the line was that the API's request path never set it —
+ * a code boundary, not a database one, and both processes connected as the
+ * same `openshapeforge_app` role.
  *
- * The negative half is the point of the change. A worker that can claim the
- * queue and still read `erp.relations` has gained nothing over the bypass.
+ * #223 made it a database boundary. A worker connects as its own PostgreSQL
+ * role, `openshapeforge_worker`, and the disjunct now reads
+ *
+ *   (current_user = 'openshapeforge_worker'
+ *    AND app.current_worker_role() = 'workflow-worker')
+ *
+ * so the GUC only says WHICH worker and the connected role says whether it is
+ * one at all. The two roles are what the two halves of this file connect as,
+ * and the difference between them is the whole point:
+ *
+ *   - as `openshapeforge_worker`: the queue is visible across tenants, and
+ *     nothing else is;
+ *   - as `openshapeforge_app`, setting `app.worker_role` by hand: the queue
+ *     counts 0. Before #223 that returned 2, by design.
+ *
+ * Every visibility assertion is a RAW `count(*)` with no app-layer WHERE, so
+ * the numbers themselves are the proof.
  *
  * Run (cwd apps/api):
  *   set -o pipefail; bun test src/db/__tests__/worker-role-rls.test.ts 2>&1
@@ -29,6 +44,11 @@ import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime, type OpenShapeForgeDatabase } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
+import {
+  DEV_WORKER_ROLE_PASSWORD_DEFAULT,
+  WORKER_ROLE,
+  workerGrantedTables,
+} from "../migrations/worker-role.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -38,7 +58,7 @@ const APP_ROLE_PASSWORD = "openshapeforge_app";
 const TEST_TIMEOUT = 90_000;
 
 /** The role name the queue policies name, and the workers present. */
-const WORKER_ROLE = "workflow-worker";
+const WORKER_GUC_ROLE = "workflow-worker";
 
 /**
  * `apps/api/tsconfig.json` roots its program at `src`, so the worker cannot be
@@ -75,6 +95,19 @@ function scratchAppUrl(name: string): string {
   const url = new URL(ADMIN_URL);
   url.username = APP_ROLE;
   url.password = APP_ROLE_PASSWORD;
+  url.pathname = `/${name}`;
+  return url.toString();
+}
+
+/**
+ * Same scratch DB again, connecting AS the worker role. This is what a worker
+ * process gets from OPENSHAPEFORGE_WORKER_DATABASE_URL, and the only connection
+ * the queue policies admit.
+ */
+function scratchWorkerUrl(name: string): string {
+  const url = new URL(ADMIN_URL);
+  url.username = WORKER_ROLE;
+  url.password = DEV_WORKER_ROLE_PASSWORD_DEFAULT;
   url.pathname = `/${name}`;
   return url.toString();
 }
@@ -173,7 +206,7 @@ async function seed(db: Kysely<DB>): Promise<Fixture> {
 
 describe("worker-role RLS axis", () => {
   test(
-    "a session holding only app.worker_role claims the queue across tenants and can read nothing else",
+    "a worker connected as openshapeforge_worker claims the queue across tenants and can read nothing else",
     async () => {
       await withScratchDb(async (name) => {
         const fixture = await withDb(scratchAdminUrl(name), async (db) => {
@@ -185,13 +218,14 @@ describe("worker-role RLS axis", () => {
           `${WORKFLOW_RUNTIME_DIR}control-command-worker.ts`
         )) as ControlCommandWorkerModule;
 
-        await withDb(scratchAppUrl(name), async (db) => {
-          // (a) The runtime role must NOT be a superuser, or none of this means
+        await withDb(scratchWorkerUrl(name), async (db) => {
+          // (a) The worker role must NOT be a superuser, or none of this means
           // anything: a superuser is exempt from RLS entirely.
-          const superuser = await sql<{ is_superuser: string }>`
-            select current_setting('is_superuser') as is_superuser
+          const identity = await sql<{ is_superuser: string; who: string }>`
+            select current_setting('is_superuser') as is_superuser, current_user as who
           `.execute(db);
-          expect(superuser.rows[0]?.is_superuser).toBe("off");
+          expect(identity.rows[0]?.is_superuser).toBe("off");
+          expect(identity.rows[0]?.who).toBe(WORKER_ROLE);
 
           // (b) The REAL worker code path — applyWorkerSession sets
           // app.worker_role and nothing else — claims both tenants' commands.
@@ -207,10 +241,10 @@ describe("worker-role RLS axis", () => {
             [fixture.tenantA, fixture.tenantB].sort(),
           );
 
-          // (c) The grant is exactly the three queue tables. Same GUC, RAW
-          // counts, no tenant set — business data stays invisible.
+          // (c) The widening is exactly the tables that declared it. Same GUC,
+          // RAW counts, no tenant set — business data stays invisible.
           await db.connection().execute(async (conn) => {
-            await sql`select set_config('app.worker_role', ${WORKER_ROLE}, false)`.execute(conn);
+            await sql`select set_config('app.worker_role', ${WORKER_GUC_ROLE}, false)`.execute(conn);
 
             const count = async (table: string) => {
               const rows = await sql<{ n: number }>`
@@ -225,10 +259,117 @@ describe("worker-role RLS axis", () => {
             expect(await count("workflow.schedule_fires")).toBe(1);
 
             // NOT declared → invisible. This is the half that makes the change
-            // worth making: under app.bypass_rls every one of these was 1.
+            // worth making: under app.bypass_rls every one of these was 1. The
+            // worker is GRANTED these tables (it reaches them one tenant at a
+            // time) and still sees nothing without a tenant, because the grant
+            // and the policy are different questions.
             expect(await count("erp.relations")).toBe(0);
             expect(await count("workflow.instances")).toBe(0);
             expect(await count("workflow.definitions")).toBe(0);
+          });
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "the API's role cannot claim to be a worker, however it sets the GUC",
+    async () => {
+      // The #223 verification, stated as the issue states it: connected as
+      // openshapeforge_app, set app.worker_role by hand and the queue still
+      // counts 0. Before this change it counted 2 — the GUC was the only thing
+      // the policy compared, and anything holding a connection can set a GUC.
+      await withScratchDb(async (name) => {
+        await withDb(scratchAdminUrl(name), async (db) => {
+          await db.connection().execute((conn) => runMigrationChain(conn));
+          await seed(db);
+        });
+
+        await withDb(scratchAppUrl(name), async (db) => {
+          await db.connection().execute(async (conn) => {
+            const identity = await sql<{ who: string }>`select current_user as who`.execute(conn);
+            expect(identity.rows[0]?.who).toBe(APP_ROLE);
+
+            const count = async (table: string) => {
+              const rows = await sql<{ n: number }>`
+                select count(*)::int as n from ${sql.raw(table)}
+              `.execute(conn);
+              return rows.rows[0]?.n ?? -1;
+            };
+
+            await sql`select set_config('app.worker_role', ${WORKER_GUC_ROLE}, false)`.execute(conn);
+            await sql`select set_config('app.tenant_id', '', false)`.execute(conn);
+
+            // Every table #218 widened, enumerated. The GUC says the right
+            // thing; the connection does not.
+            expect(await count("workflow.control_commands")).toBe(0);
+            expect(await count("workflow.schedules")).toBe(0);
+            expect(await count("workflow.schedule_fires")).toBe(0);
+            expect(await count("workflow.waits")).toBe(0);
+            expect(await count("workflow.collection_waits")).toBe(0);
+
+            // The GUC still reads back as set, so this is the policy refusing
+            // the claim rather than the GUC failing to take.
+            const guc = await sql<{ worker_role: string | null }>`
+              select nullif(current_setting('app.worker_role', true), '') as worker_role
+            `.execute(conn);
+            expect(guc.rows[0]?.worker_role).toBe(WORKER_GUC_ROLE);
+          });
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "the app role cannot become the worker role",
+    async () => {
+      // The rejected third option from #223, asserted rather than assumed.
+      // `GRANT openshapeforge_worker TO openshapeforge_app` would make the role
+      // comparison meaningless — the app role could SET ROLE and satisfy it —
+      // so no membership is ever granted and PostgreSQL refuses the switch.
+      await withScratchDb(async (name) => {
+        await withDb(scratchAdminUrl(name), async (db) => {
+          await db.connection().execute((conn) => runMigrationChain(conn));
+        });
+
+        await withDb(scratchAppUrl(name), async (db) => {
+          await db.connection().execute(async (conn) => {
+            await expect(
+              sql`set role ${sql.ref(WORKER_ROLE)}`.execute(conn),
+            ).rejects.toThrow(/permission denied to set role/i);
+          });
+        });
+
+        // ...and the membership genuinely does not exist, rather than the
+        // switch failing for some incidental reason.
+        await withDb(scratchAdminUrl(name), async (db) => {
+          const members = await sql<{ member: string }>`
+            select member_role.rolname as member
+            from pg_auth_members
+            join pg_roles as worker_role on worker_role.oid = pg_auth_members.roleid
+            join pg_roles as member_role on member_role.oid = pg_auth_members.member
+            where worker_role.rolname = ${WORKER_ROLE}
+          `.execute(db);
+          expect(members.rows.map((row) => row.member)).not.toContain(APP_ROLE);
+
+          // The attributes the whole thing rests on. A worker that could bypass
+          // RLS would read every tenant's business data, which is the outcome
+          // `workerAccess` exists to avoid — so this is asserted about the role
+          // itself, not only about what a session happened to see.
+          const attributes = await sql<{
+            rolcanlogin: boolean;
+            rolsuper: boolean;
+            rolbypassrls: boolean;
+          }>`
+            select rolcanlogin, rolsuper, rolbypassrls
+            from pg_roles where rolname = ${WORKER_ROLE}
+          `.execute(db);
+          expect(attributes.rows[0]).toEqual({
+            rolcanlogin: true,
+            rolsuper: false,
+            rolbypassrls: false,
           });
         });
       });
@@ -245,7 +386,7 @@ describe("worker-role RLS axis", () => {
           await seed(db);
         });
 
-        await withDb(scratchAppUrl(name), async (db) => {
+        await withDb(scratchWorkerUrl(name), async (db) => {
           await db.connection().execute(async (conn) => {
             const commands = async () => {
               const rows = await sql<{ n: number }>`
@@ -254,21 +395,23 @@ describe("worker-role RLS axis", () => {
               return rows.rows[0]?.n ?? -1;
             };
 
-            // No worker role and no tenant: the policy admits nothing. Worth
-            // asserting explicitly — the ported workers set a GUC no policy read,
-            // and the failure mode was an empty queue rather than an error.
+            // No worker role and no tenant: the policy admits nothing, even on
+            // the worker's own connection. Worth asserting explicitly — being
+            // the worker role is necessary and not sufficient.
             await sql`select set_config('app.worker_role', '', false)`.execute(conn);
             expect(await commands()).toBe(0);
 
             // A DIFFERENT worker role: the policy compares the value, so another
-            // plugin's worker does not inherit this one's queue.
+            // plugin's worker does not inherit this one's queue — and that is
+            // exactly what the AND buys over dropping the GUC entirely. Both
+            // plugins' workers share one LOGIN role; only the GUC separates them.
             await sql`select set_config('app.worker_role', ${"some-other-worker"}, false)`.execute(
               conn,
             );
             expect(await commands()).toBe(0);
 
             // The declared role, and only then.
-            await sql`select set_config('app.worker_role', ${WORKER_ROLE}, false)`.execute(conn);
+            await sql`select set_config('app.worker_role', ${WORKER_GUC_ROLE}, false)`.execute(conn);
             expect(await commands()).toBe(2);
           });
         });
@@ -289,6 +432,10 @@ describe("worker-role RLS axis", () => {
       // absent — and the worker would deactivate a perfectly good schedule as
       // `definition_not_schedulable` rather than raise anything.
       //
+      // Since #223 it also proves the other half of the grant: the worker role
+      // is granted `workflow.definitions` (it declares `workerDml`), so the
+      // tenant-scoped read succeeds rather than failing with permission denied.
+      //
       // Asserted at the session level rather than by running the worker: the
       // schedule worker cannot complete a fire today for an unrelated reason
       // (it writes `schedule_fires.version_id` / `.command_id`, neither of which
@@ -300,7 +447,7 @@ describe("worker-role RLS axis", () => {
           return seed(db);
         });
 
-        await withDb(scratchAppUrl(name), async (db) => {
+        await withDb(scratchWorkerUrl(name), async (db) => {
           await db.connection().execute(async (conn) => {
             const count = async (table: string) => {
               const rows = await sql<{ n: number }>`
@@ -310,11 +457,11 @@ describe("worker-role RLS axis", () => {
             };
 
             // Step 1 — the claim. Worker role, no tenant.
-            await sql`select set_config('app.worker_role', ${WORKER_ROLE}, false)`.execute(conn);
+            await sql`select set_config('app.worker_role', ${WORKER_GUC_ROLE}, false)`.execute(conn);
             await sql`select set_config('app.tenant_id', '', false)`.execute(conn);
             expect(await count("workflow.schedules")).toBe(1);
             // The definition the schedule points at is NOT reachable yet, which
-            // is the grant being narrow rather than an accident.
+            // is the policy being narrow rather than an accident.
             expect(await count("workflow.definitions")).toBe(0);
 
             // Step 2 — the fire. Same worker role, tenant now known.
@@ -326,6 +473,105 @@ describe("worker-role RLS axis", () => {
             // role: another tenant's definitions stay invisible throughout.
             await sql`select set_config('app.tenant_id', ${fixture.tenantB}, false)`.execute(conn);
             expect(await count("workflow.definitions")).toBe(0);
+          });
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "the worker role holds the tables a worker needs and none of the control plane",
+    async () => {
+      // The grant half of #223. The app role gets a whole-schema DML sweep so a
+      // new entity is covered without a bespoke migration; the worker gets an
+      // enumeration derived from the manifest instead. What that leaves out is
+      // the point — several of these are GLOBAL tables with no policy at all,
+      // where a grant is the only gate there is.
+      await withScratchDb(async (name) => {
+        await withDb(scratchAdminUrl(name), async (db) => {
+          await db.connection().execute((conn) => runMigrationChain(conn));
+        });
+
+        await withDb(scratchWorkerUrl(name), async (db) => {
+          await db.connection().execute(async (conn) => {
+            const reachable = async (table: string) => {
+              try {
+                await sql`select 1 from ${sql.raw(table)} limit 1`.execute(conn);
+                return true;
+              } catch (error) {
+                if (/permission denied for table/i.test(String(error))) return false;
+                throw error;
+              }
+            };
+
+            // Granted: the queue, the run tables, the catalogs a worker boots
+            // from, and the business entities its generated entity nodes reach.
+            for (const table of [
+              "workflow.control_commands",
+              "workflow.schedules",
+              "workflow.schedule_fires",
+              "workflow.waits",
+              "workflow.collection_waits",
+              "workflow.instances",
+              "workflow.node_states",
+              "workflow.definitions",
+              "workflow.definition_versions",
+              "workflow.definition_locks",
+              "platform.workflow_node_catalog_entries",
+              "platform.entity_trigger_registry",
+              "platform.entity_events",
+              "platform.org_unit_closure",
+              "erp.relations",
+            ]) {
+              expect([table, await reachable(table)]).toEqual([table, true]);
+            }
+
+            // Withheld: the platform control plane. `connector_secrets` holds
+            // third-party credentials and `api_keys` is GLOBAL — no tenant
+            // predicate stands between a worker and either of them, so the
+            // absent grant is the entire control.
+            for (const table of [
+              "platform.connector_secrets",
+              "platform.connector_installations",
+              "platform.connector_entitlements",
+              "platform.connector_oauth_states",
+              "platform.api_keys",
+              "platform.api_key_integrations",
+              "platform.tenants",
+              "platform.entity_page_configs",
+              "platform.entity_field_suggestions",
+              "platform.org_unit",
+              "platform.system_bypass_audit",
+            ]) {
+              expect([table, await reachable(table)]).toEqual([table, false]);
+            }
+          });
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "the grant enumeration and the live grants agree",
+    async () => {
+      // Reads what PostgreSQL actually holds, not what the migration meant to
+      // grant. The enumeration is derived from the manifest, so this is the
+      // assertion that catches a derivation that quietly stopped matching.
+      await withScratchDb(async (name) => {
+        await withDb(scratchAdminUrl(name), async (db) => {
+          await db.connection().execute(async (conn) => {
+            await runMigrationChain(conn);
+
+            const live = await sql<{ qualified: string }>`
+              select distinct table_schema || '.' || table_name as qualified
+              from information_schema.role_table_grants
+              where grantee = ${WORKER_ROLE}
+              order by 1
+            `.execute(conn);
+
+            expect(live.rows.map((row) => row.qualified)).toEqual(workerGrantedTables());
           });
         });
       });
@@ -364,10 +610,17 @@ describe("worker-role RLS axis", () => {
               "workflow.schedules",
               "workflow.waits",
             ]);
-            // USING and WITH CHECK move together, so a claim can also write back.
+            // USING and WITH CHECK move together, so a claim can also write back
+            // — and neither may name the GUC without the connected role beside
+            // it, which is the property #223 added.
             for (const row of policies.rows) {
-              expect(row.qual).toContain(WORKER_ROLE);
-              expect(row.withcheck).toContain(WORKER_ROLE);
+              for (const predicate of [row.qual, row.withcheck]) {
+                expect(predicate).toContain(WORKER_GUC_ROLE);
+                expect(predicate).toContain(`CURRENT_USER = '${WORKER_ROLE}'`);
+                expect(predicate).not.toMatch(
+                  /\(current_worker_role\(\) = '[^']*'::text\)(?!\))/i,
+                );
+              }
             }
 
             // Run data stays off the axis — the queue/work split the whole
@@ -400,6 +653,7 @@ describe("worker-role RLS axis", () => {
             expect(untouched.rows.length).toBeGreaterThan(0);
             for (const row of untouched.rows) {
               expect(row.qual).not.toContain("current_worker_role");
+              expect(row.qual).not.toContain("CURRENT_USER");
               expect(row.qual).toContain("bypass_rls");
             }
           });

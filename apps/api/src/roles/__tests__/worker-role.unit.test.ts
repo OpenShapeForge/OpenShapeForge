@@ -16,7 +16,8 @@ import type {
   RuntimeModule,
 } from "../../modules/contract.js";
 import type { ModuleRegistry } from "../../modules/registry.js";
-import { indexModuleWorkers, startWorkerRole } from "../worker.js";
+import { WORKER_ROLE } from "../../db/migrations/worker-role.js";
+import { indexModuleWorkers, resolveWorkerDatabaseUrl, startWorkerRole } from "../worker.js";
 
 const silentLog: ModuleWorkerLogger = {
   info: () => {},
@@ -62,6 +63,77 @@ describe("indexModuleWorkers", () => {
   });
 });
 
+/**
+ * The connection-string contract (#223).
+ *
+ * A worker connects as the `openshapeforge_worker` database role, because that
+ * is the role the queue policies compare `current_user` against. `DATABASE_URL`
+ * carries the API's role, so a fallback to it would put both processes back on
+ * one identity — the exact property the second role was introduced to buy — and
+ * would do it silently: the queue reads as empty, the poll loop reports
+ * healthy. Every shape of that fallback is refused at boot instead.
+ */
+describe("resolveWorkerDatabaseUrl", () => {
+  const workerUrl = `postgres://${WORKER_ROLE}:secret@db:5432/openshapeforge`;
+  const apiUrl = "postgres://openshapeforge_app:secret@db:5432/openshapeforge";
+
+  test("returns the worker URL when it is set and names the worker role", () => {
+    expect(
+      resolveWorkerDatabaseUrl("workflow-worker", {
+        OPENSHAPEFORGE_WORKER_DATABASE_URL: workerUrl,
+        DATABASE_URL: apiUrl,
+      }),
+    ).toBe(workerUrl);
+  });
+
+  test("refuses to fall back to DATABASE_URL when the worker URL is unset", () => {
+    // The whole point. DATABASE_URL is present and perfectly usable — and is
+    // still not used, because using it would connect as the API's role.
+    expect(() =>
+      resolveWorkerDatabaseUrl("workflow-worker", { DATABASE_URL: apiUrl }),
+    ).toThrow(/requires OPENSHAPEFORGE_WORKER_DATABASE_URL, and does not fall back to DATABASE_URL/);
+  });
+
+  test("refuses a blank worker URL rather than treating it as unset-and-fine", () => {
+    expect(() =>
+      resolveWorkerDatabaseUrl("workflow-worker", {
+        OPENSHAPEFORGE_WORKER_DATABASE_URL: "   ",
+        DATABASE_URL: apiUrl,
+      }),
+    ).toThrow(/requires OPENSHAPEFORGE_WORKER_DATABASE_URL/);
+  });
+
+  test("refuses the fallback written out by hand", () => {
+    // Not reading DATABASE_URL is worth nothing if an operator can paste it
+    // into the worker variable, so the equal-value case is its own refusal.
+    expect(() =>
+      resolveWorkerDatabaseUrl("workflow-worker", {
+        OPENSHAPEFORGE_WORKER_DATABASE_URL: apiUrl,
+        DATABASE_URL: apiUrl,
+      }),
+    ).toThrow(/set to the same value as DATABASE_URL/);
+  });
+
+  test("refuses a worker URL connecting as some other role", () => {
+    // Same mistake, different password. The policies compare current_user, so
+    // this one fails as an empty queue rather than as an error — which is why
+    // it has to be caught here.
+    expect(() =>
+      resolveWorkerDatabaseUrl("workflow-worker", {
+        OPENSHAPEFORGE_WORKER_DATABASE_URL:
+          "postgres://openshapeforge_app:other@db:5432/openshapeforge",
+      }),
+    ).toThrow(new RegExp(`connecting as "openshapeforge_app", not "${WORKER_ROLE}"`));
+  });
+
+  test("accepts a URL that names no user, leaving it to PGUSER", () => {
+    const url = "postgres://db:5432/openshapeforge";
+    expect(resolveWorkerDatabaseUrl("workflow-worker", {
+      OPENSHAPEFORGE_WORKER_DATABASE_URL: url,
+    })).toBe(url);
+  });
+});
+
 describe("startWorkerRole", () => {
   // Deliberately unreachable. Nothing below issues a query — the stub workers
   // do no work — and `createDatabaseRuntime` opens no connection until one is
@@ -78,7 +150,19 @@ describe("startWorkerRole", () => {
         modules: registry([moduleWith("workflow", ["workflow-worker"])]),
         log: silentLog,
       }),
-    ).rejects.toThrow(/requires DATABASE_URL/);
+    ).rejects.toThrow(/requires OPENSHAPEFORGE_WORKER_DATABASE_URL/);
+  });
+
+  test("reads the worker URL from the environment, never DATABASE_URL", async () => {
+    // The boot path, not just the helper: startWorkerRole with no injected URL
+    // resolves one, and an environment holding only DATABASE_URL is refused.
+    await expect(
+      startWorkerRole("workflow-worker", {
+        env: { DATABASE_URL: "postgres://openshapeforge_app:secret@db:5432/openshapeforge" },
+        modules: registry([moduleWith("workflow", ["workflow-worker"])]),
+        log: silentLog,
+      }),
+    ).rejects.toThrow(/does not fall back to DATABASE_URL/);
   });
 
   test("names the contributed roles when asked for one that does not exist", async () => {

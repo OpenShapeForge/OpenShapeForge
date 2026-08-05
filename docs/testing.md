@@ -218,16 +218,56 @@ invisible without a browser and a framework.
   everything during the drag was lost.
 - **Smoke** — list, create, open, place a node, save, and come back through the
   list to a canvas rebuilt from the stored graph.
+- **Publish** — a graph with an unwired output handle saves and cannot be
+  published, with the panel naming the node; a runnable one publishes and the
+  version it minted is what the list reports. `disabled` on that button is four
+  conditions OR-ed together, so the spec rules the other three out before
+  asserting the fourth — otherwise it would pass while the save was still in
+  flight and prove nothing about the graph.
 
-A simulated DOM cannot replace it. `dataTransfer.getData()` during `dragover`
-returns the payload under happy-dom, does not exist under jsdom, and returns
-`""` in every real browser — so a component test over the broken handler passes.
-That measurement is recorded on issue #262.
+Together those cover **create, edit, save, publish** — the designer journey
+[#240](https://github.com/OpenShapeForge/OpenShapeForge/issues/240) §6 names as
+S7's verification gate, minus **run**: the instance console (§6 S5) is not in
+the tree, so there is no screen to drive. That leg lands with it.
+
+### Why `apps/web` still has no test runner
+
+This is the decision issue
+[#262](https://github.com/OpenShapeForge/OpenShapeForge/issues/262) asked for,
+and it is settled: **a browser suite, not a unit/DOM runner in `apps/web`.**
+Recorded here rather than only on the issue because the issue closes and the
+constraint does not.
+
+A simulated DOM cannot replace this suite. `dataTransfer.getData()` during
+`dragover` returns the payload under happy-dom, does not exist under jsdom, and
+returns `""` in every real browser — so the component test somebody would
+plausibly have written for `onCanvasDragOver` **passes against the broken
+handler**. Both defects the suite was written for shipped past `typecheck:web`,
+`build:web` and every unit and API e2e suite in the repo; only a browser and a
+real framework see them. A DOM simulation is an excellent regression lock and a
+near-worthless detector for this class, and its fidelity has already been wrong
+once on the exact browser API this designer depends on.
 
 **It does not move the line.** Decisions still live in
 `examples/plugins/workflow/web/`, where `bun test examples` reaches them. This
 suite drives the assembled screen through a browser; it cannot call a function,
-so it is not an argument for putting logic in `apps/web`.
+so it is not an argument for putting logic in `apps/web`. The rule in
+[AGENTS.md](../AGENTS.md) — *decisions live in the plugin's web half; `apps/web`
+holds assembly* — stands on that, and on a reason that survives any runner: a
+decision in the plugin is covered by a runner every consumer of that plugin
+already has, while a decision in `apps/web` would be covered only by a
+simulation. The line in practice:
+
+| Question | Where it is tested |
+| --- | --- |
+| Does this graph publish? Which issues block what? | `bun test examples` — the plugin's `web/` half |
+| Is the Publish button wired to that answer, refreshed by a save, and explained beside it? | `bun run test:browser` |
+
+A unit runner in `apps/web` is therefore not forbidden forever — but it would be
+a regression lock over code that is already pure, never a substitute for this
+gate, and it does not satisfy S7's verification. Adding one means +22 packages
+and a `THIRD-PARTY-NOTICES` regeneration, so it needs something concrete to lock
+that neither column above already reaches.
 
 ### Running it
 
@@ -250,4 +290,7 @@ harness: `E2E_USER_PASSWORD_<USERNAME>`, falling back to the committed dev-realm
 literal. `E2E_WEB_URL` points the suite somewhere other than `:3000`.
 
 CI runs it as its own workflow (`.github/workflows/web-e2e.yml`) rather than
-inside `gates`, which has no Postgres.
+inside `gates`, which has no Postgres. It runs on pull requests to `main` and on
+pushes to `main`, and its job name — `Browser e2e (apps/web)` — is a required
+status check in `scripts/github/protect-main.ruleset.json`, which
+`check:required-checks` keeps in step with the workflow.

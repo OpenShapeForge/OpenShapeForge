@@ -100,7 +100,8 @@ issues, pull requests, and review comments. Act accordingly.
   test runner: a browser drives the assembled screen and cannot call a
   function. Anything that could be wrong therefore goes to a plugin's `web/`
   directory, where `bun test examples` reaches it, and the source comments
-  saying so stay as they are.
+  saying so stay as they are. [docs/testing.md](docs/testing.md) records why
+  that was decided and where the line falls; read it before proposing a runner.
 - Prefer extension over modification: authoring overlays
   (`kind: entityPatch`) and compiler plugins exist so behavior can be
   changed without forking base files. See `docs/layers.md` and

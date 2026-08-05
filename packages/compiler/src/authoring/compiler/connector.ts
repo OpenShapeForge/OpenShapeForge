@@ -26,6 +26,7 @@ import type {
   ConnectorDefinition,
   ConnectorOperation,
 } from "../types/connector.js";
+import { CONNECTOR_EGRESS_PATTERN } from "../connector-loader.js";
 import { buildOperationSchemas, connectorObjectSchema } from "./connector-schemas.js";
 import { deriveToolPrefix } from "./mcp.js";
 
@@ -304,6 +305,30 @@ function buildExposure(
 
 /** `{fieldKey}` placeholders in an OAuth endpoint template. */
 const URL_TEMPLATE_PLACEHOLDER = /\{([^}]*)\}/g;
+
+/**
+ * Refuse an egress entry that is not a bare hostname pattern.
+ *
+ * Shape is checked from the SAME constant the load-time path uses, so an
+ * in-repo contract and one shipped by a package cannot be judged by two
+ * different regexes. They had drifted: adding `**.` to one and forgetting the
+ * other made a contract that compiled from a layer fail from a package, citing
+ * a pattern nobody had edited.
+ *
+ * That pattern also carries the only depth floor there is — it requires at
+ * least two labels, so `**.com` is refused as a matter of shape rather than by
+ * a separate breadth rule. Worth being plain that this is NOT public-suffix
+ * aware: `**.co.uk` satisfies it while granting as much as `**.com` would.
+ * Closing that needs the public suffix list as a dependency.
+ */
+function assertEgressPattern(entry: string, origin: string): void {
+  if (CONNECTOR_EGRESS_PATTERN.test(entry)) return;
+  throw new Error(
+    `Connector ${origin} declares egress ${JSON.stringify(entry)}, which is not a hostname ` +
+      "optionally prefixed with `*.` (one label) or `**.` (any depth). Schemes, ports, paths, " +
+      "CIDR and a bare suffix widen the grant against a resolved request host.",
+  );
+}
 
 /**
  * Validate and normalize the OAuth block.
@@ -605,12 +630,10 @@ export function buildConnector(
     origin,
   );
 
-  const auth = compileAuth(
-    definition,
-    configFields,
-    [...(definition.network?.egress ?? [])],
-    origin,
-  );
+  const egressAllowlist = [...(definition.network?.egress ?? [])].sort();
+  for (const entry of egressAllowlist) assertEgressPattern(entry, origin);
+
+  const auth = compileAuth(definition, configFields, egressAllowlist, origin);
 
   const contract: Omit<CompiledConnectorContract, "checksum"> = {
     slug,
@@ -634,7 +657,7 @@ export function buildConnector(
       schema: connectorObjectSchema(configFields),
     },
     ...(auth ? { auth } : {}),
-    network: { egress: [...(definition.network?.egress ?? [])].sort() },
+    network: { egress: egressAllowlist },
     operations: compiledOperations,
     events: [],
     exposure,

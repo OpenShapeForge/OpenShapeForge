@@ -181,6 +181,35 @@ describe("egress allowlist", () => {
     expect(hostAllowed("attacker.com", list)).toBe(false);
   });
 
+  // `**.` exists for vendors whose API host is not fixed: Twinfield reports a
+  // per-organisation cluster as api.<cluster>.twinfield.com, and a Dynamics
+  // sandbox sits two labels deep. `*.` covers one, so without this a contract
+  // has to enumerate every host a customer might land on.
+  it("matches any depth under a deep wildcard", () => {
+    const list = ["**.twinfield.com"];
+    expect(hostAllowed("login.twinfield.com", list)).toBe(true);
+    expect(hostAllowed("api.accounting.twinfield.com", list)).toBe(true);
+    expect(hostAllowed("api.accounting1.twinfield.com", list)).toBe(true);
+    expect(hostAllowed("a.b.c.d.twinfield.com", list)).toBe(true);
+  });
+
+  // The two properties `*.` has, which `**.` must not give up in exchange for
+  // depth: no apex, and no lookalike.
+  it("still refuses the apex and a lookalike under a deep wildcard", () => {
+    const list = ["**.example.com"];
+    expect(hostAllowed("example.com", list)).toBe(false);
+    expect(hostAllowed("evil-example.com", list)).toBe(false);
+    expect(hostAllowed("notexample.com", list)).toBe(false);
+    expect(hostAllowed("example.com.attacker.net", list)).toBe(false);
+  });
+
+  // Widening `*.` instead of adding a second form would have broadened the
+  // egress of every contract already written, with no diff to review.
+  it("leaves the single-label wildcard exactly as narrow as it was", () => {
+    expect(hostAllowed("a.b.example.com", ["*.example.com"])).toBe(false);
+    expect(hostAllowed("a.b.example.com", ["**.example.com"])).toBe(true);
+  });
+
   it("denies everything when the contract declares no egress", () => {
     expect(hostAllowed("api.example.com", [])).toBe(false);
   });

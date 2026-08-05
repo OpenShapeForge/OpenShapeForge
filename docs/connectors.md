@@ -91,6 +91,35 @@ platform-owned and designed separately, and a contract must not advertise
 delivery guarantees nothing enforces. The `events:` block is rejected for the
 same reason.
 
+### Egress
+
+The allowlist is the grant, not a filter over an open door: omitting
+`network.egress` means no outbound HTTP at all. Three forms, narrowest first:
+
+| Pattern | Matches |
+| --- | --- |
+| `example.com` | that host, exactly |
+| `*.example.com` | exactly one extra label — `api.example.com`, not `a.b.example.com` |
+| `**.example.com` | any depth — `api.example.com` **and** `api.eu.example.com` |
+
+`**.` exists because some vendors do not put their API on a fixed host.
+Twinfield reports a per-organisation cluster as `api.<cluster>.twinfield.com`
+and a Dynamics sandbox sits at `<env>.sandbox.operations.dynamics.com` — both
+two labels deep, where `*.` covers one. Enumerating hosts works until the vendor
+adds one nobody here knew about, and the connector then fails in a way that
+looks like an outage at the far end.
+
+It is a **separate form**, not a widening of `*.`. Changing what `*.` meant
+would have broadened the egress of every contract already written, with no diff
+for anyone to review.
+
+Neither wildcard matches the bare apex or a lookalike: `**.example.com` is
+neither `example.com` nor `evil-example.com`. And a `**.` pattern must name at
+least a domain and its suffix — `**.com` is a compile error, because that is not
+a vendor, it is the internet. The check is not public-suffix aware, so `**.co.uk`
+passes it while being just as broad; closing that needs the public suffix list
+as a dependency.
+
 ### Reliability
 
 `kind` alone is not enough to operate a remote system, so the operating policy

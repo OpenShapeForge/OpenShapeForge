@@ -23,6 +23,7 @@ import { listConnectorContracts } from "../../apps/api/src/connectors/catalog.js
 import { loadConnectorPackages } from "../../apps/api/src/connectors/loader.js";
 import {
   ConnectorExecutionError,
+  hostAllowed,
   invokeOperation,
   type FetchLike,
 } from "../../apps/api/src/connectors/executor.js";
@@ -108,15 +109,22 @@ describe("environment resolution", () => {
     expect(stub.calls[0]?.url.host).toBe(host);
   });
 
-  test("all three hosts are inside the contract's egress allowlist", async () => {
-    // The contract declares three wildcards; a missing one would surface as an
-    // egress denial that looks exactly like an AFAS outage.
+  // One entry covering AFAS's domain at any depth. A host missing from the
+  // allowlist surfaces as an egress denial that looks exactly like an AFAS
+  // outage, which is why this is asserted per environment rather than by
+  // eyeballing the contract.
+  test.each([
+    ["production", "12345.rest.afas.online"],
+    ["accept", "12345.restaccept.afas.online"],
+    ["test", "12345.resttest.afas.online"],
+  ])("the %s host is inside the contract's egress allowlist", (_label, host) => {
+    expect(hostAllowed(host, contractFor().network.egress)).toBe(true);
+  });
+
+  test("and a lookalike domain is not", () => {
     const egress = contractFor().network.egress;
-    expect(egress).toEqual([
-      "*.rest.afas.online",
-      "*.restaccept.afas.online",
-      "*.resttest.afas.online",
-    ]);
+    expect(hostAllowed("afas.online.attacker.example", egress)).toBe(false);
+    expect(hostAllowed("evil-afas.online", egress)).toBe(false);
   });
 
   test("an unknown environment is refused before any request", async () => {

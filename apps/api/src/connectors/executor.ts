@@ -129,11 +129,42 @@ export function assertExecutable(contract: ConnectorContract): void {
   }
 }
 
-/** `*.example.com` matches one leftmost label; `example.com` matches exactly. */
+/**
+ * Host matching for `network.egress`. Three forms, narrowest first:
+ *
+ * | Pattern | Matches |
+ * | --- | --- |
+ * | `example.com` | that host, exactly |
+ * | `*.example.com` | exactly one extra label — `api.example.com`, not `a.b.example.com` |
+ * | `**.example.com` | any depth — `api.example.com` AND `api.eu.example.com` |
+ *
+ * `**.` exists because some vendors do not put their API on a fixed host.
+ * Twinfield reports a per-organisation cluster as `api.<cluster>.twinfield.com`,
+ * and Dynamics sandboxes sit at `<env>.sandbox.operations.dynamics.com` — two
+ * labels deep, where `*.` covers one. Without it a contract has to enumerate
+ * every cluster a customer might land on, and an unlisted one presents as an
+ * outage.
+ *
+ * It is a SEPARATE form rather than a widening of `*.`, deliberately. Changing
+ * what `*.` means would silently broaden the egress of every contract already
+ * written, which is the kind of security regression nobody reviews because no
+ * diff shows it.
+ *
+ * Neither wildcard matches the bare apex, and neither matches a lookalike:
+ * `**.example.com` is not `example.com` and not `evil-example.com`. Both
+ * properties come from requiring the dot to be part of the suffix.
+ */
 export function hostAllowed(host: string, allowlist: readonly string[]): boolean {
   const candidate = host.toLowerCase();
   return allowlist.some((entry) => {
     const pattern = entry.toLowerCase();
+    if (pattern.startsWith("**.")) {
+      const suffix = pattern.slice(2); // ".example.com"
+      if (!candidate.endsWith(suffix)) return false;
+      // At least one label, of any depth. The apex is excluded because the
+      // prefix would be empty.
+      return candidate.length > suffix.length;
+    }
     if (pattern.startsWith("*.")) {
       const suffix = pattern.slice(1); // ".example.com"
       // A wildcard covers exactly one extra label, not arbitrary depth, and

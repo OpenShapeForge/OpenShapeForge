@@ -22,6 +22,7 @@ const EMPTY = {
   roles: [] as string[],
   groups: [] as string[],
   scope: "self" as const,
+  credential: "none" as const,
 };
 
 describe("resolveSessionContext bearer fail-closed", () => {

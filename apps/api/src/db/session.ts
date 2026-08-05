@@ -199,6 +199,46 @@ export async function withDbSession<TDatabase, TResult>(
   return result;
 }
 
+/**
+ * A tenant-scoped transaction with NO user identity, for the one caller that
+ * cannot have one yet: API key resolution.
+ *
+ * `withDbSession` refuses a session without a user, and it is right to — every
+ * other caller in the system has already authenticated by the time it opens a
+ * transaction. Credential resolution is the exception by construction: it reads
+ * the integration row in order to PRODUCE an identity, so requiring one first
+ * is circular. The tenant is already known at that point (it comes from the
+ * credential row, which carries no RLS of its own), so the tenant policy can
+ * still be satisfied.
+ *
+ * This is strictly narrower than `withSystemSession`: RLS stays ON and the
+ * tenant GUC is set, so the callback sees exactly one tenant's rows. It grants
+ * no cross-tenant reach and therefore writes no bypass audit row. Do not reach
+ * for it anywhere an authenticated session is available — it exists to close a
+ * bootstrap gap, not to skip supplying a user.
+ */
+export async function withCredentialResolutionSession<TDatabase, TResult>(
+  db: Kysely<TDatabase>,
+  tenantId: string,
+  callback: (trx: Transaction<TDatabase>) => Promise<TResult>,
+): Promise<TResult> {
+  assertUuid(tenantId, "tenantId");
+
+  return db.transaction().execute(async (trx) => {
+    const statementTimeoutMs = readStatementTimeoutMs();
+    if (statementTimeoutMs > 0) {
+      await sql`select set_config('statement_timeout', ${String(statementTimeoutMs)}, true)`.execute(
+        trx,
+      );
+    }
+    await sql`select set_config('app.tenant_id', ${tenantId}, true)`.execute(trx);
+    // Deliberately no app.user_id, no app.roles, no app.scope: nothing this
+    // callback reads is user- or role-predicated, and setting a placeholder
+    // would make a later rowScope policy silently match the wrong rows.
+    return callback(trx);
+  });
+}
+
 export const SYSTEM_BYPASS_ROLE = "Platform.SystemBypass";
 
 export type SystemSessionInput = {

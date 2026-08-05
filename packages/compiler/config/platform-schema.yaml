@@ -311,6 +311,116 @@ tables:
         columns: [tenant_id, installation_id, field_key]
         unique: true
 
+  # ---------------------------------------------------------------------------
+  # API keys — customer-provisioned credentials for external parties
+  #
+  # A customer hands an external party (an integrator, a contractor, a data
+  # supplier) one opaque string. That string is NOT a role container: it names
+  # an INTEGRATION, whose Keycloak serviceAccount client is the identity the
+  # roles actually hang off. A key may narrow those roles, never widen them.
+  # ---------------------------------------------------------------------------
+
+  # One row per external party. `keycloak_client_id` is the serviceAccount
+  # client provisioned for it; the client secret is encrypted with the same
+  # AES-256-GCM keyring the connector secrets use, so the customer never holds
+  # it and only the API can exchange it for a token.
+  #
+  # tenantScoped + domainInternal, matching the connector tables: every
+  # management read and write is gated by {table}_tenant_isolation, and no
+  # generated CRUD surface is emitted for it.
+  #
+  # `status` records a cross-system write that has no shared transaction:
+  # 'pending' is written BEFORE the realm mutation, so a crash leaves a row the
+  # reconciler can finish or sweep rather than a live key pointing at a client
+  # that does not exist.
+  - schema: platform
+    name: api_key_integrations
+    tenantScoped: true
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: display_name, type: text, required: true }
+      - { name: keycloak_client_id, type: text, required: true }
+      # 'pending' | 'active' | 'disabled'
+      - { name: status, type: text, required: true, default: "'pending'::text" }
+      # Null until the realm mutation completes and the secret comes back.
+      - { name: client_secret_ciphertext, type: text }
+      - { name: client_secret_key_id, type: text }
+      - { name: client_secret_algorithm, type: text }
+      # The roles requested for this integration's service account, as the
+      # provisioning caller authorized them. Kept so the reconciler can rebuild
+      # the realm client after a realm reset without re-asking the customer.
+      - { name: granted_roles, type: jsonb, required: true, default: "'[]'::jsonb" }
+      # Scope the provisioned service account is intended to operate at. Nothing
+      # reads it until row scoping ships; recorded now so that decision has
+      # somewhere to land instead of silently defaulting to "self".
+      - { name: intended_scope, type: text, required: true, default: "'tenant'::text" }
+      - { name: created_by, type: uuid, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - name: api_key_integrations_tenant_client_uidx
+        columns: [tenant_id, keycloak_client_id]
+        unique: true
+      - name: api_key_integrations_tenant_status_idx
+        columns: [tenant_id, status]
+
+  # One row per credential. N keys per integration, which is what makes rotation
+  # an INSERT now and a DELETE after the grace window — a Keycloak client holds
+  # exactly one secret, so key material lives here and not there.
+  #
+  # tenantScoped: FALSE, deliberately, and this is the only table in this file
+  # that carries a tenant_id without an RLS policy over it. The authentication
+  # path resolves a credential BEFORE any tenant is known — `tenant_id` here is
+  # an OUTPUT of authentication, not an input to it, and `withDbSession`
+  # (correctly) refuses to open a session without a tenant and a user. The same
+  # reasoning makes platform.system_bypass_audit non-tenant-scoped.
+  #
+  # The management surface does not rely on that: every provisioning read joins
+  # through platform.api_key_integrations, whose tenant policy gates the whole
+  # join, and carries an explicit tenant_id predicate on top. What lives here is
+  # only what authentication needs — no display name, no actor, no audit trail
+  # beyond use timestamps.
+  #
+  # `secret_hash` is SHA-256 of the secret half; the plaintext is returned once
+  # at creation and never again. `role_subset` NULL means "whatever the
+  # integration's service account holds"; non-null intersects with it.
+  - schema: platform
+    name: api_keys
+    tenantScoped: false
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: integration_id, type: uuid, required: true, references: { schema: platform, table: api_key_integrations, column: id, onDelete: CASCADE } }
+      # The public half of the credential, carried in the token itself and the
+      # only column the authentication path searches on.
+      - { name: lookup_id, type: text, required: true }
+      - { name: secret_hash, type: text, required: true }
+      - { name: display_name, type: text, required: true }
+      - { name: role_subset, type: jsonb }
+      # NULL means no expiry. Provisioning defaults to a finite value; a
+      # non-expiring key takes an explicit choice.
+      - { name: expires_at, type: timestamptz }
+      - { name: revoked_at, type: timestamptz }
+      - { name: created_by, type: uuid, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      # first_used_at finds keys minted and never activated; last_used_at finds
+      # keys that have gone quiet and can be retired.
+      - { name: first_used_at, type: timestamptz }
+      - { name: last_used_at, type: timestamptz }
+    indexes:
+      - name: api_keys_lookup_uidx
+        columns: [lookup_id]
+        unique: true
+      - name: api_keys_integration_idx
+        columns: [integration_id]
+      - name: api_keys_tenant_idx
+        columns: [tenant_id]
+
   # Per-tenant entitlement grants. The signed deployment license is the CEILING
   # (what this deployment may offer at all); a row here is the GRANT (what this
   # tenant actually has). Effective availability is the intersection, so neither

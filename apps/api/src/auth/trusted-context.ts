@@ -7,6 +7,19 @@ import {
 
 export type SessionScope = "tenant" | "group" | "self";
 
+/**
+ * Which credential produced a session.
+ *
+ * Carried so a control can depend on it rather than on a convention. The one
+ * that does today: API key management refuses an "api-key" session, because a
+ * credential that can mint or widen credentials is a privilege-escalation
+ * ladder (Immich GHSA-237r-x578-h5mv is that bug, shipped).
+ *
+ * "none" is the unauthenticated empty session. It is spelled out rather than
+ * left undefined so no consumer can read a missing value as a permissive one.
+ */
+export type SessionCredential = "none" | "bearer" | "api-key" | "trusted-context";
+
 export type TrustedSessionContext = {
   tenantId: string | null;
   userId: string | null;
@@ -23,6 +36,8 @@ export type TrustedSessionContext = {
    * resolution determines otherwise.
    */
   scope: SessionScope;
+  /** Which credential authenticated this session. */
+  credential: SessionCredential;
 };
 
 type AppOptions = {
@@ -51,6 +66,7 @@ export function readTrustedSessionContext(
     roles: base.roles,
     groups: base.groups ?? [],
     scope: "self",
+    credential: "trusted-context",
   };
 }
 

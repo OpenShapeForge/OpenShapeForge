@@ -1,10 +1,23 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { createBearerVerifier, type BearerVerifier } from "@openshapeforge/auth";
+import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import { keyringFromEnv, type SecretKeyring } from "../platform/secrets.js";
+import { looksLikeApiKey } from "./api-key/format.js";
+import { resolveApiKeySession } from "./api-key/resolve.js";
 import {
   readTrustedSessionContext,
   type SessionScope,
   type TrustedSessionContext,
 } from "./trusted-context.js";
+
+export type ResolveSessionOptions = {
+  /**
+   * Required for the API key path only — it is the only credential that has to
+   * be read back from storage. Omitted, API keys are rejected and the bearer
+   * and trusted-context paths are unaffected.
+   */
+  db?: OpenShapeForgeDatabase | undefined;
+};
 
 const EMPTY_SESSION: TrustedSessionContext = {
   tenantId: null,
@@ -12,6 +25,7 @@ const EMPTY_SESSION: TrustedSessionContext = {
   roles: [],
   groups: [],
   scope: "self",
+  credential: "none",
 };
 
 let verifierInitialized = false;
@@ -83,10 +97,59 @@ export function __resetSessionResolverForTests(): void {
   verifierInitialized = false;
   cachedVerifier = null;
   cachedTenantBypassRoles = null;
+  apiKeyKeyringInitialized = false;
+  cachedApiKeyKeyring = null;
 }
 
 /** Matches an `Authorization: Bearer <token>` header (case-insensitive). */
 const BEARER_AUTHORIZATION = /^Bearer\s+(.+)$/i;
+
+let apiKeyKeyringInitialized = false;
+let cachedApiKeyKeyring: SecretKeyring | null = null;
+
+/**
+ * The keyring protecting API key integrations' Keycloak client secrets.
+ *
+ * Deliberately its OWN key material rather than the connector keyring: the two
+ * subsystems encrypt different things for different reasons, and a compromise
+ * of one should not decrypt the other. No fallback — an unset value means API
+ * key authentication is simply not configured, and every key presented is
+ * rejected.
+ */
+function getApiKeyKeyring(): SecretKeyring | null {
+  if (apiKeyKeyringInitialized) return cachedApiKeyKeyring;
+  apiKeyKeyringInitialized = true;
+  try {
+    cachedApiKeyKeyring = keyringFromEnv(process.env.OPENSHAPEFORGE_API_KEY_SECRET_KEYS) ?? null;
+  } catch (error) {
+    // A malformed keyring must not half-configure the subsystem.
+    console.warn(
+      "[auth] OPENSHAPEFORGE_API_KEY_SECRET_KEYS is malformed; API key authentication is disabled:",
+      error instanceof Error ? error.message : String(error),
+    );
+    cachedApiKeyKeyring = null;
+  }
+  return cachedApiKeyKeyring;
+}
+
+/**
+ * Verify a Keycloak token through the ordinary bearer path and flatten it to
+ * the fields the API key resolver needs. Shared with the interactive path on
+ * purpose: there is exactly one place where a token becomes an identity.
+ */
+async function verifyBearerIdentity(token: string) {
+  const verifier = getBearerVerifier();
+  if (!verifier) {
+    throw new Error("Bearer verifier is not configured.");
+  }
+  const { identity } = await verifier(token);
+  return {
+    tenantId: identity.tenantId,
+    userId: identity.userId,
+    roles: mergeIdentityRoles(identity),
+    groups: identity.groups ?? [],
+  };
+}
 
 /**
  * Effective roles for a bearer identity = realm roles ∪ every
@@ -113,8 +176,14 @@ export function mergeIdentityRoles(identity: {
 /**
  * Resolves the canonical session context for a request.
  *
- * - If `Authorization: Bearer …` is present, it is the caller's explicit
- *   signal to authenticate by bearer. That signal must not be
+ * - If `Authorization: Bearer …` carries an `osf_`-prefixed API key, it is
+ *   resolved ONLY by the API key path (see api-key/resolve.ts). A key is
+ *   ultimately verified as a Keycloak token by the same verifier below, so it
+ *   introduces no second source of roles; what it adds is a credential that can
+ *   be handed to an external party and revoked without touching the realm.
+ *   Like the bearer path, it never falls through on failure.
+ * - Otherwise, if `Authorization: Bearer …` is present, it is the caller's
+ *   explicit signal to authenticate by bearer. That signal must not be
  *   downgrade-attackable, so it is resolved ONLY by the bearer verifier:
  *     - Verifier configured + token valid → use the resulting identity.
  *     - Verifier configured + verification fails → fail closed (EMPTY_SESSION).
@@ -134,10 +203,45 @@ export function mergeIdentityRoles(identity: {
  */
 export async function resolveSessionContext(
   headers: Headers,
+  options: ResolveSessionOptions = {},
 ): Promise<TrustedSessionContext> {
   const authorization = headers.get("authorization");
 
   if (authorization && BEARER_AUTHORIZATION.test(authorization)) {
+    const presented = BEARER_AUTHORIZATION.exec(authorization)![1]!;
+
+    // An API key is routed by its prefix BEFORE the JWKS path, and once routed
+    // it never falls through: a credential shaped like ours is ours to accept
+    // or reject. Falling through would let a caller who knows the prefix probe
+    // the JWKS verifier with arbitrary strings, and — worse — a deployment that
+    // forgot to configure the keyring would silently start treating API keys as
+    // JWTs, which is the same downgrade the bearer path already refuses.
+    if (looksLikeApiKey(presented)) {
+      const keyring = getApiKeyKeyring();
+      const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+
+      if (!options.db || !keyring || !issuer || !getBearerVerifier()) {
+        console.warn(
+          "[auth] An API key was presented but the key path is not fully configured " +
+            "(needs a database, OPENSHAPEFORGE_API_KEY_SECRET_KEYS, and a complete " +
+            "bearer verifier). Rejecting.",
+        );
+        return EMPTY_SESSION;
+      }
+
+      const session = await resolveApiKeySession(
+        {
+          db: options.db,
+          keyring,
+          issuer,
+          verifyToken: verifyBearerIdentity,
+          resolveScope,
+        },
+        presented,
+      );
+      return session ?? EMPTY_SESSION;
+    }
+
     const verifier = getBearerVerifier();
     if (!verifier) {
       // A bearer credential was presented but no verifier is configured. Fail
@@ -162,6 +266,7 @@ export async function resolveSessionContext(
         roles,
         groups,
         scope: resolveScope(roles, groups),
+        credential: "bearer",
       };
     } catch (error) {
       console.warn(

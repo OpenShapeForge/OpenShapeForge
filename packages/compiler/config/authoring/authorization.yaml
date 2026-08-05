@@ -103,6 +103,28 @@ keycloak:
     - id: openshapeforge-realtime
       kind: bearerOnly
 
+    - id: openshapeforge-apikey-provisioner
+      kind: serviceAccount
+      name: OpenShapeForge API Key Provisioner
+      devSecret: openshapeforge-apikey-provisioner-secret
+      secret: ${env:KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_APIKEY_PROVISIONER}
+      # Customer-provisioned API keys create one serviceAccount client per
+      # external party and map entity roles onto its service-account user.
+      # Both are Admin REST API operations, and Keycloak's fine-grained admin
+      # roles gate them separately from `manage-realm` — which covers realm
+      # SETTINGS and grants neither. A dedicated client rather than more roles
+      # on openshapeforge-auth-api: that one configures identity for the
+      # product's own users, this one mints machine identities for third
+      # parties, and a compromise of either should not confer the other.
+      #
+      # Deliberately NOT realm-admin: these two are what provisioning needs and
+      # nothing here should be able to edit realm settings or identity
+      # providers.
+      serviceAccountClientRoles:
+        realm-management:
+          - manage-clients
+          - manage-users
+
     - id: openshapeforge-auth-api
       kind: serviceAccount
       name: OpenShapeForge Auth API Service
@@ -144,6 +166,7 @@ realmRoles:
         - HousingAllocation.All.ReadWrite
         - Cases.All.ReadWrite
         - Relations.Bsn.Read
+        - Platform.ApiKeys.Manage
       openshapeforge-support:
         - Support.Issues.All
       openshapeforge-audit:
@@ -469,6 +492,10 @@ clientRoles:
     - Cases.All.ReadWrite
     - Cases.All.Read
     - Relations.Bsn.Read
+    # Grants the holder the API key provisioning surface (/api/api-keys). A
+    # Platform.* role, so it is never emitted by an entity's authorization
+    # block and cannot be acquired through ordinary business access.
+    - Platform.ApiKeys.Manage
     - CaseFile.All.Read
     - Energy.All.Read
     - Maintenance.All.Read

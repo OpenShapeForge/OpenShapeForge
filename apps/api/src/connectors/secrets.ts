@@ -1,26 +1,27 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Connector secret encryption.
+ * Connector-side secret handling.
  *
- * Connector configuration holds credentials for other people's systems. They
- * are encrypted at rest with AES-256-GCM, and the ciphertext record carries the
- * key id so a rotation can re-encrypt row by row while both keys are live.
+ * The encryption primitive itself lives in `../platform/secrets.js` — it is
+ * shared with API key integrations, which encrypt a Keycloak client secret the
+ * same way. What stays here is the part that is genuinely about connector
+ * CONFIGURATION rather than about cryptography: the sentinel a read path
+ * returns in place of a secret, and the redaction that applies it.
  *
- * GCM is authenticated encryption: a tampered ciphertext fails to decrypt
- * rather than yielding attacker-chosen plaintext. The installation id and field
- * key are bound in as additional authenticated data, so a ciphertext cannot be
- * moved from one field or one installation to another — a stolen row is useless
- * anywhere but where it came from.
- *
- * The read path is deliberately one-way for callers: `SECRET_SET_SENTINEL` is
- * what any configuration read returns, and only the invocation path decrypts.
+ * The crypto names are re-exported so connector call sites keep importing from
+ * one place.
  */
-import { createCipheriv, createDecipheriv, randomBytes, timingSafeEqual } from "node:crypto";
-
-export const SECRET_ALGORITHM = "aes-256-gcm";
-const KEY_BYTES = 32;
-const IV_BYTES = 12;
-const TAG_BYTES = 16;
+export {
+  SECRET_ALGORITHM,
+  SecretError,
+  encryptSecret,
+  decryptSecret,
+  keyringFromEnv,
+  needsRotation,
+  secretsEqual,
+  type SecretKeyring,
+  type StoredSecret,
+} from "../platform/secrets.js";
 
 /**
  * What a configuration read returns in place of a secret. A sentinel rather
@@ -29,164 +30,6 @@ const TAG_BYTES = 16;
  */
 export const SECRET_SET_SENTINEL = "__set__";
 
-export type SecretKeyring = {
-  /** Key id used for new writes. */
-  activeKeyId: string;
-  /** All keys still able to decrypt, including the active one. */
-  keys: ReadonlyMap<string, Buffer>;
-};
-
-export class ConnectorSecretError extends Error {
-  readonly code = "CONNECTOR_SECRET_ERROR";
-  constructor(message: string) {
-    super(message);
-    this.name = "ConnectorSecretError";
-  }
-}
-
-/**
- * Build a keyring from environment configuration.
- *
- * Format: `<keyId>:<base64 32-byte key>`, comma-separated, the first being
- * active. Keeping retired keys present is what makes rotation possible without
- * a downtime window.
- */
-export function keyringFromEnv(raw: string | undefined): SecretKeyring | undefined {
-  if (!raw || raw.trim() === "") return undefined;
-  const keys = new Map<string, Buffer>();
-  let activeKeyId: string | undefined;
-
-  for (const entry of raw.split(",")) {
-    const trimmed = entry.trim();
-    if (trimmed === "") continue;
-    const separator = trimmed.indexOf(":");
-    if (separator <= 0) {
-      throw new ConnectorSecretError(
-        "Connector secret key entry must be <keyId>:<base64 key>.",
-      );
-    }
-    const keyId = trimmed.slice(0, separator);
-    const material = Buffer.from(trimmed.slice(separator + 1), "base64");
-    if (material.length !== KEY_BYTES) {
-      throw new ConnectorSecretError(
-        `Connector secret key "${keyId}" must be ${KEY_BYTES} bytes (base64-encoded).`,
-      );
-    }
-    if (keys.has(keyId)) {
-      throw new ConnectorSecretError(`Duplicate connector secret key id "${keyId}".`);
-    }
-    keys.set(keyId, material);
-    activeKeyId ??= keyId;
-  }
-
-  if (!activeKeyId || keys.size === 0) return undefined;
-  return { activeKeyId, keys };
-}
-
-export type StoredSecret = {
-  ciphertext: string;
-  keyId: string;
-  algorithm: string;
-};
-
-/**
- * Bind a ciphertext to where it lives. Without this an operator (or an attacker
- * with write access) could copy the ciphertext of a low-value field into a
- * high-value one and have it decrypt cleanly.
- */
-function additionalData(installationId: string, fieldKey: string): Buffer {
-  // The separator is a NUL byte, assembled here rather than written as a source
-  // literal. Byte-for-byte identical either way — but an embedded NUL makes git
-  // treat this file as binary, and the module that encrypts credentials is the
-  // last one whose diffs should read "Bin 6872 -> 8090 bytes" in review.
-  return Buffer.concat([
-    Buffer.from(installationId, "utf8"),
-    Buffer.from([0]),
-    Buffer.from(fieldKey, "utf8"),
-  ]);
-}
-
-export function encryptSecret(
-  keyring: SecretKeyring,
-  installationId: string,
-  fieldKey: string,
-  plaintext: string,
-): StoredSecret {
-  const key = keyring.keys.get(keyring.activeKeyId);
-  if (!key) {
-    throw new ConnectorSecretError(
-      `Active connector secret key "${keyring.activeKeyId}" is not in the keyring.`,
-    );
-  }
-  const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv(SECRET_ALGORITHM, key, iv);
-  cipher.setAAD(additionalData(installationId, fieldKey));
-  const encrypted = Buffer.concat([
-    cipher.update(Buffer.from(plaintext, "utf8")),
-    cipher.final(),
-  ]);
-  const tag = cipher.getAuthTag();
-
-  return {
-    // iv || tag || ciphertext, so the record is one opaque column value.
-    ciphertext: Buffer.concat([iv, tag, encrypted]).toString("base64"),
-    keyId: keyring.activeKeyId,
-    algorithm: SECRET_ALGORITHM,
-  };
-}
-
-export function decryptSecret(
-  keyring: SecretKeyring,
-  installationId: string,
-  fieldKey: string,
-  stored: StoredSecret,
-): string {
-  if (stored.algorithm !== SECRET_ALGORITHM) {
-    throw new ConnectorSecretError(
-      `Unsupported connector secret algorithm "${stored.algorithm}".`,
-    );
-  }
-  const key = keyring.keys.get(stored.keyId);
-  if (!key) {
-    throw new ConnectorSecretError(
-      `Connector secret was encrypted with key "${stored.keyId}", which is not in the keyring.`,
-    );
-  }
-
-  const raw = Buffer.from(stored.ciphertext, "base64");
-  if (raw.length <= IV_BYTES + TAG_BYTES) {
-    throw new ConnectorSecretError("Connector secret ciphertext is truncated.");
-  }
-  const iv = raw.subarray(0, IV_BYTES);
-  const tag = raw.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
-  const encrypted = raw.subarray(IV_BYTES + TAG_BYTES);
-
-  const decipher = createDecipheriv(SECRET_ALGORITHM, key, iv);
-  decipher.setAAD(additionalData(installationId, fieldKey));
-  decipher.setAuthTag(tag);
-  try {
-    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
-  } catch {
-    // Never surface the underlying reason: it distinguishes a wrong key from a
-    // tampered tag, which is an oracle.
-    throw new ConnectorSecretError(
-      "Connector secret could not be decrypted (wrong key or tampered value).",
-    );
-  }
-}
-
-/** True when a secret needs re-encrypting under the active key. */
-export function needsRotation(keyring: SecretKeyring, stored: StoredSecret): boolean {
-  return stored.keyId !== keyring.activeKeyId;
-}
-
-/** Constant-time compare, for callers verifying a submitted secret. */
-export function secretsEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a, "utf8");
-  const right = Buffer.from(b, "utf8");
-  if (left.length !== right.length) return false;
-  return timingSafeEqual(left, right);
-}
 
 /**
  * Narrow decrypted secrets to the ones a contract declares.

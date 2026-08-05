@@ -164,6 +164,114 @@ async function requestRefresh(
   };
 }
 
+/**
+ * Exchange an authorization code for the first token set.
+ *
+ * The counterpart of `requestRefresh`, and deliberately a separate function
+ * rather than a flag on it: the grant type, the required parameters and the
+ * failure meanings all differ, and the one thing they must NOT share is the
+ * refresh path's assumption that a refresh token already exists.
+ */
+export async function exchangeAuthorizationCode(input: {
+  contract: ConnectorContract;
+  tokenUrl: string;
+  code: string;
+  codeVerifier: string;
+  redirectUri: string;
+  clientId: string;
+  clientSecret: string;
+  boundFetch: FetchLike;
+  now?: number;
+}): Promise<OAuthTokens> {
+  const now = input.now ?? Date.now();
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    code: input.code,
+    // PKCE. The provider hashed the challenge we sent at authorize time and
+    // compares it against this; without it an intercepted code is redeemable by
+    // whoever intercepted it.
+    code_verifier: input.codeVerifier,
+    redirect_uri: input.redirectUri,
+    client_id: input.clientId,
+    client_secret: input.clientSecret,
+  });
+
+  const response = await input.boundFetch(input.tokenUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      accept: "application/json",
+    },
+    body: body.toString(),
+  });
+
+  if (!response.ok) {
+    throw new ConnectorOAuthError(
+      "CONNECTOR_OAUTH_FAILED",
+      `Connector "${input.contract.slug}" could not exchange its authorization code ` +
+        `(status ${response.status}).`,
+    );
+  }
+
+  const payload = (await response.json()) as {
+    access_token?: unknown;
+    refresh_token?: unknown;
+    expires_in?: unknown;
+  };
+  if (typeof payload.access_token !== "string") {
+    throw new ConnectorOAuthError(
+      "CONNECTOR_OAUTH_FAILED",
+      `Connector "${input.contract.slug}" token endpoint returned no access token.`,
+    );
+  }
+  const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : 3600;
+
+  return {
+    accessToken: payload.access_token,
+    ...(typeof payload.refresh_token === "string"
+      ? { refreshToken: payload.refresh_token }
+      : {}),
+    expiresAt: Math.floor(now / 1000) + expiresIn,
+  };
+}
+
+/**
+ * Store a token set against an installation, replacing whatever was there.
+ *
+ * An upsert rather than an insert, because re-authorizing an installation that
+ * already has tokens is the normal way to recover one whose refresh token was
+ * revoked — and failing that with a unique-violation would leave the only
+ * recovery path blocked.
+ */
+export async function writeOAuthTokens(input: {
+  db: OpenShapeForgeDatabase;
+  session: DbSessionInput;
+  keyring: SecretKeyring;
+  installationId: string;
+  tokens: OAuthTokens;
+}): Promise<void> {
+  const encrypted = encryptSecret(
+    input.keyring,
+    input.installationId,
+    PLATFORM_OAUTH_FIELD,
+    JSON.stringify(input.tokens),
+  );
+  await withDbSession(input.db, input.session, async (trx) => {
+    await sql`
+      insert into platform.connector_secrets
+        (tenant_id, installation_id, field_key, ciphertext, key_id, algorithm)
+      values (${input.session.tenantId}::uuid, ${input.installationId}::uuid,
+              ${PLATFORM_OAUTH_FIELD}, ${encrypted.ciphertext}, ${encrypted.keyId},
+              ${encrypted.algorithm})
+      on conflict (tenant_id, installation_id, field_key)
+      do update set ciphertext = excluded.ciphertext,
+                    key_id = excluded.key_id,
+                    algorithm = excluded.algorithm,
+                    updated_at = now()
+    `.execute(trx);
+  });
+}
+
 export type EnsureTokenInput = {
   db: OpenShapeForgeDatabase;
   session: DbSessionInput;

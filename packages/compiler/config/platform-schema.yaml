@@ -331,3 +331,57 @@ tables:
       - name: connector_entitlements_tenant_key_uidx
         columns: [tenant_id, entitlement]
         unique: true
+
+  # One row per in-flight OAuth authorization, alive for minutes.
+  #
+  # The `state` parameter is the ONLY thing binding a provider's callback to the
+  # tenant and installation that started the flow — the callback arrives from
+  # the user's browser with no session of ours attached, because the redirect
+  # comes from the provider. So the row has to carry that binding, and it has to
+  # be single-use: without `consumed_at`, a state value that leaked (a Referer
+  # header, browser history, a shared screen) could be replayed to attach an
+  # attacker's provider account to somebody else's installation.
+  #
+  # What is stored is a HASH of the state, never the state itself. A read of
+  # this table — a backup, a support query, a compromised replica — then yields
+  # nothing that can be presented to the callback.
+  - schema: platform
+    name: connector_oauth_states
+    tenantScoped: true
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: connector_slug, type: text, required: true }
+      - { name: instance_key, type: text, required: true }
+      # SHA-256 of the state parameter. Unique, so a duplicate is a collision or
+      # a replay rather than a second valid flow.
+      - { name: state_hash, type: text, required: true }
+      # The PKCE verifier, encrypted under the connector keyring with this row's
+      # id as additional authenticated data. PKCE only binds the code to the
+      # client that requested it if the verifier stays secret; storing it in the
+      # clear would leave the protection on paper.
+      - { name: code_verifier_ciphertext, type: text, required: true }
+      - { name: code_verifier_key_id, type: text, required: true }
+      - { name: code_verifier_algorithm, type: text, required: true }
+      # Echoed back to the provider on the exchange. Recorded rather than
+      # recomputed, because a redirect_uri that differs by one character between
+      # the two calls is refused by the provider with no useful reason.
+      - { name: redirect_uri, type: text, required: true }
+      # Who started the flow. Not an authorization input — the callback is
+      # authorized by the state alone — but the audit trail is worthless
+      # without it.
+      - { name: created_by, type: uuid }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: expires_at, type: timestamptz, required: true }
+      # Stamped on first use. Presence, not absence, is what a replay hits.
+      - { name: consumed_at, type: timestamptz }
+    indexes:
+      - name: connector_oauth_states_hash_uidx
+        columns: [state_hash]
+        unique: true
+      # Drives the expiry sweep, which has to be able to find dead rows without
+      # scanning every tenant's history.
+      - name: connector_oauth_states_expires_idx
+        columns: [expires_at]

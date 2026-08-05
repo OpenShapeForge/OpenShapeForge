@@ -224,6 +224,49 @@ finds a valid token rather than issuing a second exchange.
 to the provider that lapsed, and a 401 would send a client into its own re-login
 flow, which cannot fix it.
 
+### The authorize round trip
+
+Two routes, with deliberately different threat models:
+
+| Route | Auth |
+| --- | --- |
+| `POST …/connectors/:slug/installations/:key/authorize` | `Platform.ConnectorAdmin`. Mints a state and **returns** the provider URL rather than redirecting, so the authenticated half never becomes a cross-site navigation. |
+| `GET …/connectors/oauth/callback` | **None, by necessity.** The provider sends the user's browser here, so no cookie or header of ours is attached. |
+
+Everything that makes the callback safe is the `state` parameter, which is
+`<tenantId>.<userId>.<secret>`:
+
+- **Unguessable** — 32 random bytes.
+- **Single-use** — `consumed_at` is stamped by the same `UPDATE` that claims the
+  row, so a replay finds nothing. Reading, deciding, then marking would leave a
+  window where two callbacks both pass.
+- **Expiring** — ten minutes.
+- **Stored as a hash** — a read of the table yields nothing presentable back.
+- **Carries its own routing** — so the callback opens a normal tenant-scoped
+  session and finds the row under RLS. The alternative was bypassing RLS on the
+  one endpoint an unauthenticated stranger can reach, which is a far worse trade
+  than two ids in a URL that already round-trips through the provider. Neither
+  id authorizes anything: forge them and the hash matches no row that tenant can
+  see. The user id is there because `createDbSessionContext` refuses an
+  anonymous session, and carrying the ConnectorAdmin who started the flow is the
+  accurate answer rather than inventing a system identity.
+
+The callback trusts **nothing else** in its own query string. The connector, the
+installation and the redirect URI all come from the claimed row — one that read
+its target from the URL would let anyone holding a state write tokens into
+another tenant's installation. It always answers with a 302 to a fixed path on
+our own configured origin, never a URL derived from the request: an open
+redirect here is the exact shape phishing wants.
+
+PKCE (S256) is always sent. The verifier is stored encrypted under the row id as
+additional authenticated data, because PKCE only binds a code to the client that
+requested it while the verifier stays secret.
+
+Two settings are required for any of this: `OPENSHAPEFORGE_PUBLIC_ORIGIN` (the
+origin the provider redirects back to — configured, not derived from `Host`,
+which a forged header could aim anywhere) and `OPENSHAPEFORGE_APP_ORIGIN` (where
+the browser lands afterwards).
+
 ## Contract evolution
 
 An installation records the contract version and checksum it was configured
@@ -298,11 +341,6 @@ rather than by loosening the in-process path.
 
 ## What does not exist yet
 
-- **The OAuth authorize round trip.** The token lifecycle above — storage,
-  refresh, rotation, the bound `fetch` — is in place, but nothing yet walks an
-  operator through the provider's consent screen and writes the first token set.
-  Until that lands, an installation's tokens have to be seeded directly, and a
-  connector with no token set reports `CONNECTOR_REAUTHORIZATION_REQUIRED`.
 - **Events and inbound webhooks.** A platform-owned pipeline with connector
   adapters, designed separately; the vocabulary is reserved and rejected.
 - **Isolated execution**, per the trust model above.

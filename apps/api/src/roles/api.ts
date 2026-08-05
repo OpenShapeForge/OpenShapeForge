@@ -19,6 +19,7 @@ import { createGraphqlYoga } from "../graphql/yoga.js";
 import { headersFromFastify } from "../http/headers.js";
 import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
 import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
+import { registerConnectorOAuthRoutes } from "../connectors/oauth-routes.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import { registerControlRestRoutes } from "../control/rest-routes.js";
 import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
@@ -323,6 +324,14 @@ export function createApiApp(
     registerConnectorRestRoutes(routes, {
       ...dbOptions,
       config: readConnectorRuntimeConfig(),
+    });
+    // Inside the same child plugin, so the callback an unauthenticated stranger
+    // can reach sits behind the rate limiter like everything else.
+    registerConnectorOAuthRoutes(routes, {
+      ...dbOptions,
+      config: readConnectorRuntimeConfig(),
+      publicOrigin: process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN,
+      appOrigin: process.env.OPENSHAPEFORGE_APP_ORIGIN,
     });
     registerGeneratedMcpServer(routes, dbOptions);
     // The tenant control plane, on its own mount and its own realm. Registered

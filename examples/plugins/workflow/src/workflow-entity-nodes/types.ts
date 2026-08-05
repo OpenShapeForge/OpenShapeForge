@@ -66,15 +66,16 @@ export type DesignerLazyRegistryEntry = {
   type: string;
   action: WorkflowAction;
   /**
-   * Localized, not a display string. These land in the jsonb `label` and
-   * `description` columns of platform.workflow_node_catalog_entries, where the
-   * standard catalog and the runtime `CatalogEntry` type both model them as
-   * Record<string, string>. Collapsing to one locale here would store a bare
-   * jsonb string that no reader can index by locale.
+   * Localized, not a display string. These land in the jsonb `label`,
+   * `description` and `category` columns of
+   * platform.workflow_node_catalog_entries, where the standard catalog and the
+   * runtime `CatalogEntry` type all model them as Record<string, string>.
+   * Collapsing to one locale here would store a bare jsonb string that no
+   * reader can index by locale.
    */
   label: Record<string, string>;
   description: Record<string, string>;
-  category: string;
+  category: Record<string, string>;
   defaultConfig: Record<string, unknown>;
 };
 

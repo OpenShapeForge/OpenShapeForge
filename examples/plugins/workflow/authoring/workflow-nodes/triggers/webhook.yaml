@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: triggerWebhook
-category: triggers
+category:
+  en: Triggers
+  nl: Triggers
 label:
   nl: Webhook
   en: Webhook

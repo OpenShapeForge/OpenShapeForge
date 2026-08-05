@@ -33,7 +33,6 @@ import type { Json } from "../../../../apps/api/src/generated/db/types.js";
 export type EntityPaletteEntry = {
   type: string;
   action: string | null;
-  category: string;
   /**
    * The whole locale map, never one string. The standard node catalog and the
    * trigger registry both hand labels back this way; a palette that flattened
@@ -41,7 +40,12 @@ export type EntityPaletteEntry = {
    * what a label is — an accident, not a decision. Choosing a locale belongs to
    * whatever renders the text, and a catalog read that chooses has made that
    * choice for every caller, including the ones that wanted the other one.
+   *
+   * `category` joined them in #260. It was the entity's Dutch label, chosen by
+   * the generator, so an English reader got a Dutch palette heading with
+   * nothing downstream able to do anything about it.
    */
+  category: Record<string, string>;
   label: Record<string, string>;
   description: Record<string, string>;
   defaultConfig: Record<string, unknown>;
@@ -107,7 +111,7 @@ export async function getEntityPalette(
     (row): EntityPaletteEntry => ({
       type: row.node_type,
       action: row.action,
-      category: row.category,
+      category: jsonObject<string>(row.category),
       label: jsonObject<string>(row.label),
       description: jsonObject<string>(row.description),
       defaultConfig: jsonObject<unknown>(row.default_config),

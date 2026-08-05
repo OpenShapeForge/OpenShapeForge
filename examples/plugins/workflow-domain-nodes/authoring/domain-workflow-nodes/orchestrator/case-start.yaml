@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: case.start
-category: case
+category:
+  en: Case
+  nl: Zaak
 label:
   en: Start case
   nl: Start zaak

@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: date.validateNoticePeriod
-category: date
+category:
+  en: Date
+  nl: Datum
 label:
   en: Validate notice period
   nl: Opzegtermijn valideren

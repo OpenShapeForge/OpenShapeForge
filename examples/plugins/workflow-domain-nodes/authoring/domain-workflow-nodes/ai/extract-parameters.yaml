@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: ai.extractParameters
-category: ai
+category:
+  en: AI
+  nl: AI
 label:
   en: Extract parameters from conversation
   nl: Parameters uit conversatie halen

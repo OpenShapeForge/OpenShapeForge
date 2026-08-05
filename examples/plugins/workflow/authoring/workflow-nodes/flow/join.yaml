@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: join
-category: flow
+category:
+  en: Flow
+  nl: Stroom
 label:
   nl: Samenvoegen
   en: Join

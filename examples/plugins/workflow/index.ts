@@ -205,7 +205,11 @@ function workflowPlatformTables(): TableDefinition[] {
         { name: "node_type", type: "text", primaryKey: true },
         { name: "catalog", type: "text", required: true }, // 'standard' | 'entity' | 'domain'
         { name: "action", type: "text" },
-        { name: "category", type: "text", required: true },
+        // A locale map, like `label` and `description` beside it — this is the
+        // palette's group heading, and text a reader sees has to be able to
+        // follow their locale (#260). 0006_workflow-node-category-localized
+        // retypes the column on databases that already hold the bare text.
+        { name: "category", type: "jsonb", required: true, default: "'{}'::jsonb" },
         { name: "label", type: "jsonb", required: true, default: "'{}'::jsonb" },
         { name: "description", type: "jsonb" },
         { name: "config_fields", type: "jsonb", required: true, default: "'[]'::jsonb" },

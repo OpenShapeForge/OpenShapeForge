@@ -70,23 +70,37 @@ describe("resolveWorkflowNodePresentation", () => {
   });
 
   test("category tone ignores capitalisation", () => {
-    // `category` is authored free text. `Triggers` against `triggers` has
-    // already shipped once; a tone that only matched one spelling would have
-    // drawn that node in the wrong colour with nothing reporting it.
-    for (const category of ["triggers", "Triggers", " TRIGGERS "]) {
+    // `category` is authored free text with an open set. `Triggers` against
+    // `triggers` has already shipped once; a tone that only matched one
+    // spelling would have drawn that node in the wrong colour with nothing
+    // reporting it.
+    for (const en of ["triggers", "Triggers", " TRIGGERS "]) {
       expect(
         resolveWorkflowNodePresentation({
           nodeType: "triggerManual",
-          entry: { type: "triggerManual", category },
+          entry: { type: "triggerManual", category: { en } },
         }).categoryTone,
       ).toBe("trigger");
     }
     expect(
       resolveWorkflowNodePresentation({
         nodeType: "decision",
-        entry: { type: "decision", category: "flow" },
+        entry: { type: "decision", category: { en: "Flow", nl: "Stroom" } },
       }).categoryTone,
     ).toBe("default");
+  });
+
+  test("the tone does not change with the reader's language", () => {
+    // `category` is a locale map since #260, so it carries a translation the
+    // tone must not read: a card that turned a different colour in Dutch would
+    // be the same drift the fold was introduced to stop, one locale further on.
+    const entry = { type: "triggerManual", category: { en: "Triggers", nl: "Aanjagers" } };
+    for (const locale of ["en", "nl", "fr"]) {
+      expect(
+        resolveWorkflowNodePresentation({ nodeType: "triggerManual", entry, locale })
+          .categoryTone,
+      ).toBe("trigger");
+    }
   });
 
   test("the label follows the requested locale, then English, then anything", () => {

@@ -233,7 +233,8 @@ export const workflowTypeDefs = /* GraphQL */ `
     type: String!
     "Which pack authored it: standard, entity or domain. Provenance, not capability."
     catalog: String!
-    category: String!
+    "The palette's group heading. Localized; the client picks a locale."
+    category: JSON!
     "Localized; the client picks a locale."
     label: JSON!
     description: JSON
@@ -246,7 +247,8 @@ export const workflowTypeDefs = /* GraphQL */ `
   type WorkflowEntityNodePaletteEntry {
     type: String!
     action: String!
-    category: String!
+    "The palette's group heading. Localized; the client picks a locale."
+    category: JSON!
     label: JSON!
     description: JSON
   }

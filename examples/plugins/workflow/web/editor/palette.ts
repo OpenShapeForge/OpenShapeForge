@@ -26,11 +26,20 @@
  * rules live where `bun test examples` can reach them and the component that
  * draws them stays assembly.
  */
+import {
+  mergeWorkflowNodeCategories,
+  workflowNodeCategoryKey,
+  type WorkflowNodeCategory,
+} from "../node-category";
 
 /** The slice of a catalog entry a palette reads. */
 export type WorkflowPaletteNodeType = {
   type: string;
-  category?: string | null;
+  /**
+   * Localized, like the label — the catalog serves a locale map and the
+   * compiler is the only place that ever sees a bare string (#260).
+   */
+  category?: Record<string, string> | null;
   /** Localized; the caller picks a locale. */
   label?: Record<string, string> | null;
   description?: Record<string, string> | null;
@@ -52,9 +61,13 @@ export type WorkflowPaletteItem = {
 };
 
 export type WorkflowPaletteGroup = {
-  /** The case-folded category. Stable across spellings, and the React key. */
+  /**
+   * The category's identity: its English spelling, case-folded. Stable across
+   * spellings and across locales, and the React key. `web/node-category.ts`
+   * derives it and says why it is not the heading.
+   */
   key: string;
-  /** What to show for the group. Derived from {@link key}, see below. */
+  /** The heading, in the reader's locale. Authored, not reconstructed. */
   label: string;
   items: WorkflowPaletteItem[];
 };
@@ -81,14 +94,24 @@ const UNCATEGORIZED_KEY = "other";
  * Not a general priority list — one entry, for one reason: a workflow cannot
  * start without a trigger, so the group that holds them is the one a reader
  * needs first. Everything else sorts alphabetically.
+ *
+ * Matched against the key, which is the English spelling case-folded, so this
+ * does not have to be restated per locale — a Dutch reader's `Triggers` group
+ * is hoisted by the same line.
  */
 const FIRST_GROUP_KEY = "triggers";
+
+/** A group under construction: its members, and every spelling of its name. */
+type PaletteGroupDraft = {
+  items: WorkflowPaletteItem[];
+  categories: Array<{ type: string; category: WorkflowNodeCategory }>;
+};
 
 export function buildWorkflowPalette(
   input: BuildWorkflowPaletteInput,
 ): WorkflowPaletteGroup[] {
   const locale = input.locale ?? "en";
-  const byKey = new Map<string, WorkflowPaletteItem[]>();
+  const byKey = new Map<string, PaletteGroupDraft>();
 
   for (const entry of input.nodeTypes) {
     const type = asString(entry?.type);
@@ -101,68 +124,52 @@ export function buildWorkflowPalette(
     // dies on its first run.
     if (support !== "EXECUTABLE" && support !== "UNIMPLEMENTED") continue;
 
-    const key = categoryKey(entry.category);
-    const items = byKey.get(key) ?? [];
-    items.push({
+    const key = workflowNodeCategoryKey(entry.category) ?? UNCATEGORIZED_KEY;
+    const draft = byKey.get(key) ?? { items: [], categories: [] };
+    draft.items.push({
       type,
       label: localized(entry.label, locale) ?? type,
       description: localized(entry.description, locale),
       catalog: asString(entry.catalog),
       unavailable: support === "UNIMPLEMENTED" ? "UNIMPLEMENTED" : null,
     });
-    byKey.set(key, items);
+    draft.categories.push({ type, category: entry.category });
+    byKey.set(key, draft);
   }
 
   const groups: WorkflowPaletteGroup[] = [];
-  for (const [key, items] of byKey) {
-    groups.push({ key, label: groupLabel(key), items: items.sort(compareItems) });
+  for (const [key, draft] of byKey) {
+    groups.push({
+      key,
+      label: groupLabel(key, draft, locale),
+      items: draft.items.sort(compareItems),
+    });
   }
   return groups.sort(compareGroups);
 }
 
 /**
- * The grouping key: the category, case-folded.
+ * What the group is shown as: the category, in the reader's locale.
  *
- * Folding is not tidiness. `category` is authored free text and the shipped
- * catalogs already spell one category two ways — `flow` in the standard pack
- * and `Flow` in a domain pack — so grouping on the raw string puts the same
- * category in two buckets. The same lesson `presentation.ts` learned for tone.
+ * Authored now rather than reconstructed. The heading used to be the grouping
+ * key with its first letter capitalised, plus a hand-kept map that turned `ai`
+ * back into `AI` — a second description of a category, and untranslatable, both
+ * because `category` was one bare word (#260). It is a locale map now, so the
+ * heading is text somebody wrote in the language it is read in.
+ *
+ * The fallback is that same capitalised key, for the group that has no heading
+ * to show: a catalog row whose `category` went missing, or one carrying only
+ * locales this reader does not have. `Other` is what an absent category folds
+ * to and reads correctly; an acronym does not, which is the honest limit of
+ * capitalising a fold and the reason it is a fallback rather than the rule.
  */
-function categoryKey(category: string | null | undefined): string {
-  return asString(category)?.toLowerCase() ?? UNCATEGORIZED_KEY;
-}
-
-/**
- * Headings the fold cannot reconstruct.
- *
- * Folding is what stops one category becoming two buckets, and it is not
- * reversible: `ai` capitalised is `Ai`, which reads as a typo rather than as an
- * acronym. Nothing in a lowercase string says which letters were capitals.
- *
- * This is a second place a category is described, which is a real cost and the
- * same one `presentation.ts` records for its icon map. It exists because the
- * catalog serves `category` as a bare word with no display form beside it —
- * so **delete this map when that mechanism lands** (#260). It is a stopgap for
- * a missing field, not a feature.
- */
-const GROUP_LABEL_OVERRIDES: Readonly<Record<string, string>> = {
-  ai: "AI",
-};
-
-/**
- * What the group is shown as.
- *
- * Derived from the folded key rather than from whichever spelling happened to
- * arrive first, because "first" depends on catalog row order and would make
- * the heading flip between deployments. Capitalising the fold is a heading
- * every spelling of the category agrees on.
- *
- * It is also, unavoidably, untranslated: `category` is a bare string in the
- * authoring schema with no locale map beside it, unlike `label` and
- * `description`. A palette cannot localize what it was handed as one word.
- */
-function groupLabel(key: string): string {
-  return GROUP_LABEL_OVERRIDES[key] ?? key.charAt(0).toUpperCase() + key.slice(1);
+function groupLabel(
+  key: string,
+  draft: PaletteGroupDraft,
+  locale: string,
+): string {
+  const merged = mergeWorkflowNodeCategories(draft.categories);
+  return localized(merged, locale) ?? key.charAt(0).toUpperCase() + key.slice(1);
 }
 
 /**
@@ -181,6 +188,14 @@ function compareItems(left: WorkflowPaletteItem, right: WorkflowPaletteItem): nu
   return left.label.localeCompare(right.label) || left.type.localeCompare(right.type);
 }
 
+/**
+ * Triggers first, then the reader's own alphabet.
+ *
+ * Ordered by the heading rather than by the key, so the list reads as sorted in
+ * the language it is shown in — `Stroom` after `Integraties` in Dutch where
+ * `Flow` comes before `Integrations` in English. The hoist is the one part that
+ * cannot move with the locale, which is why it matches on the key.
+ */
 function compareGroups(left: WorkflowPaletteGroup, right: WorkflowPaletteGroup): number {
   if (left.key !== right.key) {
     if (left.key === FIRST_GROUP_KEY) return -1;

@@ -67,7 +67,7 @@ export function buildDesignerLazyRegistrySource(entries: DesignerLazyRegistryEnt
     '  action: "create" | "getOne" | "list" | "update" | "delete" | "wait" | "awaitAction";',
     "  label: string;",
     "  description: string;",
-    "  category: string;",
+    "  category: Record<string, string>;",
     "  defaultConfig: Record<string, unknown>;",
     "};",
     "",

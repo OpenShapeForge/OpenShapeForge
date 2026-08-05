@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: router
-category: ai
+category:
+  en: AI
+  nl: AI
 label:
   en: Router
   nl: Router

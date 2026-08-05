@@ -103,7 +103,11 @@ export function generateWorkflowEntityNodeArtifacts(
         // Record<string, string>. See DesignerLazyRegistryEntry.
         label: getActionLabel(entityLabels, action),
         description: getActionDescription(entityLabels, action),
-        category: entityLabels.nl,
+        // The whole map, not `.nl`. An entity's own labels are already both
+        // locales and `category` is now a locale map like `label`, so picking
+        // one here would hand a Dutch heading to an English reader — which is
+        // exactly what it did, and what #260 is.
+        category: entityLabels,
         defaultConfig: buildDesignerDefaultConfig(action, action === "list" ? listDefaultSort : undefined),
       });
       designerDetailEntries.push({

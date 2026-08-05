@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: triggerManual
-category: triggers
+category:
+  en: Triggers
+  nl: Triggers
 label:
   nl: Handmatige start
   en: Manual start

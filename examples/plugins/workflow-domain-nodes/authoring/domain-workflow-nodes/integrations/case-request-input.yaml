@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: case.requestInput
-category: integrations
+category:
+  en: Integrations
+  nl: Integraties
 label:
   nl: Zaakinput vragen
   en: Request case input

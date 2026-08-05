@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: triggerEntity
-category: triggers
+category:
+  en: Triggers
+  nl: Triggers
 label:
   nl: Entiteit-event
   en: Entity event

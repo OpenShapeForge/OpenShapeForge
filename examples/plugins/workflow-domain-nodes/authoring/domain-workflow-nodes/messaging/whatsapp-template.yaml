@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: message.whatsappTemplate
-category: messaging
+category:
+  en: Messaging
+  nl: Berichten
 label:
   en: Send WhatsApp template
   nl: Stuur WhatsApp-template

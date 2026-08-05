@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: kb.answer
-category: ai
+category:
+  en: AI
+  nl: AI
 label:
   nl: Kennisbank-antwoord
   en: Knowledge-base answer

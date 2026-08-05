@@ -32,7 +32,8 @@ type WorkflowNodeConfigAuthoring = {
   schemaVersion: number;
   kind: "workflowNode";
   nodeType: string;
-  category: string;
+  /** Always a locale map by the time it leaves the loader; see `readCategory`. */
+  category: LocalizedText;
   label: LocalizedText;
   description?: LocalizedText;
   configFields: Field[];
@@ -88,11 +89,6 @@ function validateWorkflowNodeConfig(parsed: unknown, filePath: string): Workflow
   if (typeof node.nodeType !== "string" || node.nodeType.length === 0) {
     throw new Error(`Workflow-node authoring file ${filePath} is missing a non-empty "nodeType".`);
   }
-  if (typeof node.category !== "string" || node.category.length === 0) {
-    throw new Error(
-      `Workflow-node authoring file ${filePath} (${node.nodeType}) is missing a non-empty "category".`,
-    );
-  }
   if (!node.label || typeof node.label !== "object") {
     throw new Error(
       `Workflow-node authoring file ${filePath} (${node.nodeType}) is missing a "label" object.`,
@@ -114,7 +110,52 @@ function validateWorkflowNodeConfig(parsed: unknown, filePath: string): Workflow
     validateFields(node.outputFields as unknown[], filePath, node.nodeType, "outputFields");
   }
 
-  return node as WorkflowNodeConfigAuthoring;
+  return {
+    ...node,
+    category: readCategory(node.category, filePath, node.nodeType),
+  } as WorkflowNodeConfigAuthoring;
+}
+
+/**
+ * `category` as a locale map, whatever the author wrote.
+ *
+ * It is a locale map like `label`, because it is the palette's group heading
+ * and a heading that cannot follow the reader's locale is the one piece of
+ * text on that screen that cannot (#260).
+ *
+ * **A bare string is still accepted, and read as English.** Every pack in this
+ * repository authors a map, so the coercion has no user here — it exists for a
+ * pack outside it. `category` was a bare string until this change, and failing
+ * `bun run generate` on a host repo's pack would make a widening that adds
+ * information behave like a removal. Reading it as `{ en: … }` is what the
+ * palette already assumed, since it capitalised the string and showed it
+ * untranslated.
+ *
+ * The coercion lives here and only here: the seed, the column, the GraphQL
+ * type and the palette are handed a locale map and never a union, so nothing
+ * downstream has to know both shapes exist.
+ */
+function readCategory(value: unknown, filePath: string, nodeType: string): LocalizedText {
+  if (typeof value === "string" && value.length > 0) {
+    return { en: value };
+  }
+  if (isLocalizedText(value)) {
+    return value;
+  }
+  throw new Error(
+    `Workflow-node authoring file ${filePath} (${nodeType}) is missing a non-empty "category". ` +
+      'Expected a locale map such as { en: "Flow", nl: "Stroom" }, or a bare string read as English.',
+  );
+}
+
+/** A non-empty mapping of locale to non-empty string. */
+function isLocalizedText(value: unknown): value is LocalizedText {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return (
+    entries.length > 0 &&
+    entries.every(([, text]) => typeof text === "string" && text.length > 0)
+  );
 }
 
 /** Recursively assert every field carries a `key` and a known `valueType`. */
@@ -310,7 +351,7 @@ function buildGeneratedModuleSource(
     "",
     "export type GeneratedWorkflowNodeConfigEntry = {",
     "  nodeType: string;",
-    "  category: string;",
+    "  category: LocalizedText;",
     "  label: LocalizedText;",
     "  description?: LocalizedText;",
     "  configFields: Field[];",
@@ -345,7 +386,7 @@ function buildApiCatalogSource(
     "",
     "export type GeneratedWorkflowNodeCatalogEntry = {",
     "  nodeType: string;",
-    "  category: string;",
+    "  category: Record<string, string>;",
     "  label: Record<string, string>;",
     "  description?: Record<string, string>;",
     "  configFields: unknown[];",

@@ -32,9 +32,9 @@ import type { OpenShapeForgeDatabase } from "../../../../apps/api/src/db/connect
 import type { Json } from "../../../../apps/api/src/generated/db/types.js";
 
 /**
- * One catalog row, in the shape the compiler authored it. `label` and
- * `description` are locale maps; `configFields` and `outputFields` are opaque
- * here and interpreted by whatever renders or validates a node's config.
+ * One catalog row, in the shape the compiler authored it. `category`, `label`
+ * and `description` are locale maps; `configFields` and `outputFields` are
+ * opaque here and interpreted by whatever renders or validates a node's config.
  */
 export type CatalogEntry = {
   nodeType: string;
@@ -44,7 +44,12 @@ export type CatalogEntry = {
    * node-executability.ts for why a palette must not confuse the two.
    */
   catalog: string;
-  category: string;
+  /**
+   * The palette's group heading, localized. A locale map rather than a bare
+   * word since #260: it is text a reader sees, so which spelling they get is
+   * the request's business and not the catalog's.
+   */
+  category: Record<string, string>;
   label: Record<string, string>;
   description?: Record<string, string>;
   configFields: unknown[];
@@ -63,7 +68,7 @@ let store: CatalogStore | null = null;
 type CatalogRow = {
   node_type: string;
   catalog: string;
-  category: string;
+  category: Json;
   label: Json;
   description: Json | null;
   config_fields: Json;
@@ -74,7 +79,7 @@ function toEntry(row: CatalogRow): CatalogEntry {
   const entry: CatalogEntry = {
     nodeType: row.node_type,
     catalog: row.catalog,
-    category: row.category,
+    category: (row.category ?? {}) as Record<string, string>,
     label: (row.label ?? {}) as Record<string, string>,
     configFields: (row.config_fields ?? []) as unknown[],
   };

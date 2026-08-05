@@ -40,7 +40,8 @@ const NODE_CATALOGS = [
 
 type NodeCatalogEntry = {
   nodeType: string;
-  category: string;
+  /** A locale map, like `label` and `description`; the jsonb column holds it whole. */
+  category: unknown;
   label: unknown;
   action?: string;
   description?: unknown;
@@ -131,7 +132,7 @@ async function applyNodeCatalog(
             node_type: entry.nodeType,
             catalog: expectedCatalog,
             action: entry.action ?? null,
-            category: entry.category,
+            category: (entry.category ?? {}) as Json,
             label: (entry.label ?? {}) as Json,
             description: (entry.description ?? null) as Json | null,
             config_fields: (entry.configFields ?? []) as Json,

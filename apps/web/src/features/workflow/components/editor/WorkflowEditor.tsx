@@ -138,7 +138,8 @@ import type {
 export type WorkflowEditorNodeType = {
   type: string;
   catalog: string;
-  category: string;
+  /** Localized like the label: it is the palette's group heading. */
+  category: Record<string, string> | null;
   label: Record<string, string> | null;
   description: Record<string, string> | null;
   runtimeSupport: string;

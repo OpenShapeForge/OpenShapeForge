@@ -1,0 +1,9 @@
+{
+  "name": "@openshapeforge/connector-exact-online",
+  "version": "0.1.0",
+  "private": true,
+  "license": "BUSL-1.1",
+  "type": "module",
+  "description": "Connector implementation package for the exact-online contract: Exact Online's OData REST API, authorized through platform-held OAuth 2.0 tokens.",
+  "module": "index.ts"
+}

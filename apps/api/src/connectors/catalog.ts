@@ -28,6 +28,12 @@ export type ConnectorOperationContract = {
     retry: { eligible: boolean; maxAttempts: number; backoff: string };
     idempotency?: { strategy: string; keyInput?: string; header?: string };
     concurrency: { perTenant: number };
+    // Both optional in the compiled contract, and both were missing here: this
+    // type is a hand-maintained mirror of the emitted JSON, so a field the
+    // compiler emits but nobody declares is invisible to every consumer rather
+    // than a type error.
+    rateLimit?: { perTenantPerMinute: number };
+    circuitBreaker?: { failureThreshold: number; resetAfterMs: number };
     limits: { requestBytes: number; responseBytes: number };
     pagination: { style: string };
   };

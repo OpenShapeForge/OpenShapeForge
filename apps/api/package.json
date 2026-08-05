@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@openshapeforge/connector-afas-profit": "workspace:*",
+    "@openshapeforge/connector-exact-online": "workspace:*",
     "@openshapeforge/connector-example-object-store": "workspace:*",
     "@types/bun": "^1.3.5",
     "typescript": "^5.9.0"

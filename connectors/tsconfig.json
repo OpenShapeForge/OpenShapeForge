@@ -1,0 +1,23 @@
+{
+  "//": [
+    "Typechecks the shipped connector packages and their tests.",
+    "",
+    "Separate from examples/tsconfig.json because these moved out of examples/ when",
+    "connectors became a top level directory. A package that nothing typechecks is a",
+    "package whose contract handshake fails at API boot instead of at build time.",
+    "",
+    "Modules here reach across into apps/api by relative path — the tests drive the",
+    "real executor — so the program is rooted at the repo root rather than at",
+    "connectors/.",
+    "",
+    "No DOM lib, deliberately: a connector package declares its own ConnectorContext",
+    "structurally and depends on nothing, and keeping that honest is what caught",
+    "apps/api naming the ambient RequestInfo global in a module examples had to import."
+  ],
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": ["**/*.ts"]
+}

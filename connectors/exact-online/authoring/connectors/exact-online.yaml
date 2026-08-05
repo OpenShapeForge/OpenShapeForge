@@ -1,0 +1,300 @@
+# Exact Online — the connector the platform's OAuth support was built for.
+#
+# Exact issues a SINGLE-USE refresh token and replaces it on every refresh. A
+# connector that authenticated for itself would have to persist the replacement,
+# and `ConnectorContext` hands packages a frozen secrets object with no
+# write-back — which is why the token lifecycle is platform-owned. This contract
+# declares only WHERE the endpoints are; the platform obtains, stores, refreshes
+# and rotates, and this package is handed a fetch already carrying the access
+# token. It never sees a refresh token at all.
+#
+# ## Two things Exact does that shape everything below
+#
+# **A separate instance per country.** start.exactonline.nl, .be, .de and the
+# rest are different deployments with different data, and OAuth is per instance.
+# That is what the `{region}` interpolation in the endpoints is for — the
+# alternative was one identical contract per country, differing by a hostname.
+#
+# **A division in every call.** An Exact account holds several administrations
+# and `/api/v1/{division}/...` names which one. It is configuration rather than
+# per-call input because an installation points at one administration; the
+# package resolves it from /current/Me when an operator has not filled it in,
+# which costs one extra round trip and saves them hunting for a number.
+schemaVersion: 1
+kind: connector
+connector: ExactOnline
+title: Exact Online
+labels:
+  en: Exact Online
+  nl: Exact Online
+description:
+  en: Read and write Exact Online administrations through its OData REST API.
+  nl: Lees en schrijf Exact Online-administraties via de OData REST API.
+category: erp
+domains: [finance]
+
+capabilities: [operations]
+
+implementation:
+  package: "@openshapeforge/connector-exact-online"
+  contractVersion: 1
+  provenance: firstParty
+  license:
+    spdx: LicenseRef-BatterAI-Commercial
+    notice: >-
+      The implementation package ships separately under its own license and is
+      not covered by the BUSL-1.1 grant on this repository.
+
+availability:
+  entitlement: connector.exact-online
+
+configuration:
+  # Multiple: an organisation routinely holds several administrations, and each
+  # is its own installation with its own division rather than a setting toggled
+  # on one.
+  instances: multiple
+  # /api/v1/current/Me is authenticated and reads no business data — exactly the
+  # round trip a connectivity check wants, and it doubles as proof the OAuth
+  # tokens are live.
+  verify: true
+  fields:
+    - key: region
+      valueType: string
+      required: true
+      defaultValue: nl
+      label: { en: Country, nl: Land }
+      description:
+        en: Selects which Exact Online instance this installation talks to.
+        nl: Bepaalt met welke Exact Online-omgeving deze installatie praat.
+      help:
+        en: >-
+          Exact runs a separate instance per country, each with its own data and
+          its own login. This is the ending of the address you sign in at.
+        nl: >-
+          Exact draait per land een aparte omgeving, elk met eigen gegevens en
+          een eigen login. Dit is het einde van het adres waarop je inlogt.
+      options:
+        type: static
+        items:
+          - { value: nl, label: { en: Netherlands, nl: Nederland } }
+          - { value: be, label: { en: Belgium, nl: België } }
+          - { value: de, label: { en: Germany, nl: Duitsland } }
+          - { value: fr, label: { en: France, nl: Frankrijk } }
+          - { value: es, label: { en: Spain, nl: Spanje } }
+          - { value: co.uk, label: { en: United Kingdom, nl: Verenigd Koninkrijk } }
+          - { value: com, label: { en: United States, nl: Verenigde Staten } }
+
+    - key: clientId
+      valueType: string
+      required: true
+      label: { en: Client ID, nl: Client-ID }
+      description:
+        en: From the app you registered in the Exact App Centre.
+        nl: Van de app die je in het Exact App Center hebt geregistreerd.
+
+    - key: clientSecret
+      valueType: string
+      required: true
+      secret: true
+      label: { en: Client secret, nl: Client secret }
+      description:
+        en: The secret issued alongside the client ID. Never read back once stored.
+        nl: Het secret dat bij de client-ID hoort. Na opslaan niet meer op te vragen.
+
+    - key: division
+      valueType: integer
+      label: { en: Division, nl: Administratie }
+      description:
+        en: The administration this installation works in. Left empty, the current one is used.
+        nl: De administratie waarin deze installatie werkt. Leeg gelaten wordt de huidige gebruikt.
+      help:
+        en: >-
+          Every Exact call names a division. Leaving this empty costs one extra
+          request per operation to look the current one up, so fill it in once
+          the right administration is known — currentDivision reports it.
+        nl: >-
+          Elke Exact-aanroep noemt een administratie. Leeg laten kost één extra
+          aanroep per operatie om de huidige op te zoeken; vul hem in zodra de
+          juiste administratie bekend is — currentDivision toont die.
+
+auth:
+  type: oauth2
+  flow: authorizationCode
+  # `{region}` is filled from the configuration field above. Exact's OAuth lives
+  # on the same per-country host as its API.
+  authorizeUrl: https://start.exactonline.{region}/api/oauth2/auth
+  tokenUrl: https://start.exactonline.{region}/api/oauth2/token
+  clientIdField: clientId
+  clientSecretField: clientSecret
+  # Exact's access token lives ten minutes. A minute of headroom keeps a token
+  # that was valid when checked from being expired when it arrives.
+  refreshLeewaySeconds: 60
+
+network:
+  # One entry per instance, because the region varies in the TLD rather than in
+  # a label a single wildcard could cover. Listing only .nl would make every
+  # other country unreachable in a way that looks like an Exact outage.
+  egress:
+    - "*.exactonline.nl"
+    - "*.exactonline.be"
+    - "*.exactonline.de"
+    - "*.exactonline.fr"
+    - "*.exactonline.es"
+    - "*.exactonline.co.uk"
+    - "*.exactonline.com"
+
+operations:
+  - key: currentDivision
+    kind: query
+    label: { en: Current division, nl: Huidige administratie }
+    description:
+      en: Report the division the authorized user is currently working in.
+      nl: Toon de administratie waarin de geautoriseerde gebruiker nu werkt.
+    authorization:
+      roles:
+        invoke: [Connectors.All.Read]
+    input: []
+    output:
+      cardinality: one
+      fields:
+        - key: division
+          valueType: integer
+          required: true
+          label: { en: Division, nl: Administratie }
+        - key: userName
+          valueType: string
+          label: { en: User, nl: Gebruiker }
+    reliability:
+      timeouts:
+        attemptMs: 15000
+      retry:
+        eligible: true
+        maxAttempts: 3
+
+  - key: getRecords
+    kind: query
+    label: { en: Read records, nl: Records lezen }
+    description:
+      en: Read an Exact entity set, with OData select, filter and paging.
+      nl: Lees een Exact-entiteitsset, met OData select, filter en paginering.
+    authorization:
+      roles:
+        invoke: [Connectors.All.Read]
+    input:
+      - key: endpoint
+        valueType: string
+        required: true
+        label: { en: Endpoint, nl: Endpoint }
+        description:
+          en: The entity set path, for example salesinvoice/SalesInvoices.
+          nl: Het pad van de entiteitsset, bijvoorbeeld salesinvoice/SalesInvoices.
+        validation:
+          minLength: 1
+          maxLength: 256
+      - key: select
+        valueType: string
+        label: { en: Fields, nl: Velden }
+        description:
+          en: Comma-separated $select. Exact returns everything when omitted, which is slow.
+          nl: Kommagescheiden $select. Zonder dit geeft Exact alles terug, wat traag is.
+        validation:
+          maxLength: 2048
+      - key: filter
+        valueType: string
+        label: { en: Filter, nl: Filter }
+        description:
+          en: An OData $filter expression.
+          nl: Een OData $filter-expressie.
+        validation:
+          maxLength: 4096
+      - key: top
+        valueType: integer
+        defaultValue: 60
+        label: { en: Maximum records, nl: Maximum aantal records }
+        validation:
+          min: 1
+          max: 1000
+      # Exact pages with an opaque continuation token rather than an offset, so
+      # this is echoed back from a previous response, never computed.
+      - key: skipToken
+        valueType: string
+        label: { en: Continuation token, nl: Vervolgtoken }
+        validation:
+          maxLength: 2048
+    output:
+      cardinality: one
+      fields:
+        - key: records
+          valueType: object
+          cardinality: collection
+          required: true
+          label: { en: Records, nl: Records }
+        - key: nextSkipToken
+          valueType: string
+          label: { en: Next continuation token, nl: Volgend vervolgtoken }
+          description:
+            en: Present when Exact has more records; pass it back as skipToken.
+            nl: Aanwezig als Exact meer records heeft; geef die terug als skipToken.
+    reliability:
+      timeouts:
+        attemptMs: 30000
+      retry:
+        eligible: true
+        maxAttempts: 3
+      # Exact allows 60 calls a minute per app; exceeding it is answered with a
+      # 429 that counts against the daily budget too.
+      rateLimit:
+        perTenantPerMinute: 60
+      pagination:
+        style: cursor
+
+  - key: createRecord
+    kind: mutation
+    label: { en: Create a record, nl: Record aanmaken }
+    description:
+      en: Post a new record to an Exact entity set.
+      nl: Plaats een nieuw record in een Exact-entiteitsset.
+    authorization:
+      roles:
+        invoke: [Connectors.All.ReadWrite]
+    input:
+      - key: endpoint
+        valueType: string
+        required: true
+        label: { en: Endpoint, nl: Endpoint }
+        validation:
+          minLength: 1
+          maxLength: 256
+      - key: payload
+        valueType: object
+        required: true
+        label: { en: Payload, nl: Payload }
+        description:
+          en: The record, shaped as the entity set expects it.
+          nl: Het record, in de vorm die de entiteitsset verwacht.
+    output:
+      cardinality: one
+      fields:
+        - key: record
+          valueType: object
+          required: true
+          label: { en: Record, nl: Record }
+    reliability:
+      timeouts:
+        attemptMs: 60000
+      rateLimit:
+        perTenantPerMinute: 60
+      # NOT retry-eligible. Exact's OData endpoints take no idempotency key, so
+      # a retried POST creates a second invoice and nothing afterwards undoes
+      # it. The compiler refuses a retry-eligible mutation without a declared
+      # strategy, and declaring `natural` to unlock retries would be claiming a
+      # safety Exact does not offer.
+      retry:
+        eligible: false
+
+exposure:
+  graphql: true
+  rest:
+    enabled: true
+    basePath: exact-online
+  mcp: true

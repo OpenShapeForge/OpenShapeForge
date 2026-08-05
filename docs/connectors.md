@@ -5,11 +5,20 @@ exposes it — while the code that talks to the remote system ships as a separat
 package under its own license and its own release cycle.
 
 ```
-connectors/<slug>.yaml     the CONTRACT      compiled here, source-available
-@scope/connector-<slug>    the PACKAGE       ships separately, own license
-platform.connector_*       the CONFIG        per tenant, RLS'd, secrets encrypted
-generated/connectors/      the PROJECTION    GraphQL + REST + MCP
+connectors/<slug>/authoring/connectors/<slug>.yaml   the CONTRACT
+connectors/<slug>/                                   the PACKAGE
+platform.connector_*                                 the CONFIG   per tenant, RLS'd, encrypted
+apps/api/src/generated/connectors/                   the PROJECTION  GraphQL + REST + MCP
 ```
+
+A connector is **one directory**. Its contract sits beside the package that
+implements it, and `authoring.config.yaml` lists that directory's `authoring/`
+as a layer — the same shape a plugin uses to ship its own authoring. Adding or
+dropping an integration is one directory and one line, rather than an edit in
+two trees that can drift apart.
+
+`examples/connectors/object-store` is the exception and stays where it is: it
+has no real upstream and exists to prove the package shape is implementable.
 
 **Contract-first, implementation-optional.** The compiler never resolves the
 implementation package: doing so would make output depend on `node_modules` and
@@ -20,9 +29,11 @@ product before anyone buys it.
 
 ## Authoring a contract
 
-One YAML file per connector under `connectors/` in an authoring layer. The slug
-is the file stem and must be unique across the tree, like entity slugs. Worked
-example: `packages/compiler/config/authoring/connectors/example-object-store.yaml`.
+One YAML file per connector under `connectors/` in an authoring layer — for a
+shipped connector that means `connectors/<slug>/authoring/connectors/<slug>.yaml`.
+The slug is the file stem and must be unique across the tree, like entity slugs.
+Worked examples: `connectors/exact-online/` (OAuth, per-country endpoints) and
+`connectors/afas-profit/` (a static token).
 
 ```yaml
 schemaVersion: 1

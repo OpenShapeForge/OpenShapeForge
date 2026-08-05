@@ -11,21 +11,21 @@
  * forwarded, what `hasMore` means when the upstream reports no total, and which
  * HTTP verb an insert is.
  *
- * It lives beside the package rather than under `apps/api` because `bun test
- * examples` runs in CI and the enumerated API unit-test paths do not include
+ * It lives beside the package rather than under `apps/api` because the
+ * connector suites run in CI and the enumerated API unit-test paths do not include
  * `src/connectors` — a test nothing executes reads as coverage without being
  * any.
  *
  * Needs no database: nothing here touches tenant state.
  */
 import { describe, expect, test } from "bun:test";
-import { listConnectorContracts } from "../../../apps/api/src/connectors/catalog.js";
-import { loadConnectorPackages } from "../../../apps/api/src/connectors/loader.js";
+import { listConnectorContracts } from "../../apps/api/src/connectors/catalog.js";
+import { loadConnectorPackages } from "../../apps/api/src/connectors/loader.js";
 import {
   ConnectorExecutionError,
   invokeOperation,
   type FetchLike,
-} from "../../../apps/api/src/connectors/executor.js";
+} from "../../apps/api/src/connectors/executor.js";
 
 const SLUG = "afas-profit";
 
@@ -286,7 +286,7 @@ describe("the connectivity check", () => {
       verify(context: unknown): Promise<{ ok: boolean; message?: string }>;
     }).verify;
     const { createBoundFetch } = await import(
-      "../../../apps/api/src/connectors/executor.js"
+      "../../apps/api/src/connectors/executor.js"
     );
     return {
       result: await verify({

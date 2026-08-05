@@ -79,7 +79,7 @@ jobs:
       # `bun run generate`, which needs the compiler, its config, the workspace
       # plugins and authoring.config.yaml (see .dockerignore).
       - name: Build image for testing
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: apps/api/Dockerfile
@@ -152,7 +152,7 @@ jobs:
       # docker exporter used above cannot carry them.
       - name: Push to GHCR
         if: env.PUBLISH == 'true'
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: apps/api/Dockerfile

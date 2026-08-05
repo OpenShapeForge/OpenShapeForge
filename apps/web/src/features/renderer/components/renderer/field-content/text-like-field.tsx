@@ -107,6 +107,7 @@ export function renderTextLikeField(
         }
         multiline
         suggestions={textInputSuggestions}
+        lang={lang === "en" ? "en" : "nl"}
         onValueChange={(nextValue) => onChange(nextValue)}
       />
     );
@@ -171,6 +172,7 @@ export function renderTextLikeField(
       }
       placeholder={translateRendererText(field.placeholder, lang) || undefined}
       suggestions={textInputSuggestions}
+      lang={lang === "en" ? "en" : "nl"}
       autoComplete={
         typeof field.render?.props?.autoComplete === "string"
           ? field.render.props.autoComplete

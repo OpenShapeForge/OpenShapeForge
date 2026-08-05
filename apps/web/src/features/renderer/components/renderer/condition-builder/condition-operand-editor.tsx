@@ -113,6 +113,7 @@ export function ConditionOperandEditor({
             }}
             readOnly={readOnly}
             disabled={disabled}
+            lang={lang}
             placeholder={lang === "nl" ? "Zoek variabele" : "Search variable"}
           />
         ) : literalOptions && literalOptions.length > 0 && operator && LIST_LITERAL_OPERATORS.has(operator) ? (

@@ -26,6 +26,7 @@ export function AutocompleteListbox({
   onActivateGroup,
   onActivateSuggestion,
   headerLabel,
+  lang,
   alwaysExpanded = false,
   showSourceLabel = false,
   portaled = false,
@@ -44,6 +45,7 @@ export function AutocompleteListbox({
   onActivateGroup?: (groupId: string) => void;
   onActivateSuggestion?: (suggestion: VariableSuggestion) => void;
   headerLabel?: string;
+  lang: "nl" | "en";
   alwaysExpanded?: boolean;
   portaled?: boolean;
   showSourceLabel?: boolean;
@@ -122,7 +124,15 @@ export function AutocompleteListbox({
               isItemActive ? "hover:bg-black/5" : "hover:bg-accent/80",
             )}
             aria-expanded={branch.isExpanded}
-            aria-label={branch.isExpanded ? "Inklappen" : "Uitklappen"}
+            aria-label={
+              branch.isExpanded
+                ? lang === "nl"
+                  ? "Inklappen"
+                  : "Collapse"
+                : lang === "nl"
+                  ? "Uitklappen"
+                  : "Expand"
+            }
             onPointerDown={(event) => {
               event.preventDefault();
               event.stopPropagation();

@@ -187,6 +187,7 @@ export function renderLeafFieldControl({
         aria-invalid={controlProps["aria-invalid"]}
         value={typeof value === "string" ? value : ""}
         disabled={ctx.isSubmitting}
+        lang={ctx.lang === "en" ? "en" : "nl"}
         fileNameField={
           typeof field.render?.props?.fileNameField === "string"
             ? field.render.props.fileNameField
@@ -270,6 +271,7 @@ export function renderLeafFieldControl({
         value={typeof resolvedValue === "string" ? resolvedValue : ""}
         suggestions={suggestions}
         disabled={ctx.isSubmitting}
+        lang={ctx.lang === "en" ? "en" : "nl"}
         onValueChange={(nextValue) => handleChange(nextValue)}
       />
     );

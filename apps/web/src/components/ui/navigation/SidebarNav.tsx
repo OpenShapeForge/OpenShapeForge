@@ -83,6 +83,7 @@ export function SidebarNav({
           onClose={() => setSettingsOpen(false)}
           onNavigate={onNavigate}
           groups={settingsPanelGroups}
+          activeLang={activeLang}
         />
       ) : null}
       <Sidebar

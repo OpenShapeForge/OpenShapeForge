@@ -65,6 +65,7 @@ export function PlainTextInputControl({
   onFocus,
   onClick,
   suggestionHeaderLabel: _suggestionHeaderLabel,
+  lang = "nl",
   ...props
 }: TextInputControlProps) {
   const inputRef = useRef<NativeTextElement | null>(null);
@@ -231,6 +232,7 @@ export function PlainTextInputControl({
               : null
           }
           emptyMessage={emptyMessage ?? "Geen variabelen gevonden."}
+          lang={lang}
           queryActive={queryActive}
           expandedGroups={{}}
           expandedFieldTree={{}}

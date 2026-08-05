@@ -30,6 +30,7 @@ export function VariableSelectTextInputControl({
   onValueChange,
   emptyMessage,
   suggestionHeaderLabel,
+  lang = "nl",
   className,
   onKeyDown,
   onBlur,
@@ -282,6 +283,7 @@ export function VariableSelectTextInputControl({
           }
           emptyMessage={emptyMessage ?? "Geen variabelen gevonden."}
           headerLabel={suggestionHeaderLabel}
+          lang={lang}
           queryActive={queryActive}
           expandedGroups={expandedGroups}
           expandedFieldTree={expandedFieldTree}

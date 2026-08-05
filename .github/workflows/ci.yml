@@ -227,6 +227,58 @@ jobs:
             --set 'global.imagePullSecrets[0].name=ghcr-pull' \
             --set-file keycloak.realm.json=/tmp/ci-realm.json
 
+      # The worker workload is off by default, so neither render above touches
+      # worker-deployment.yaml or the worker's NetworkPolicy. Template them
+      # explicitly — and assert what makes the workload CORRECT rather than
+      # merely renderable, since a chart that renders wrong manifests passes a
+      # render check: exactly one extra Deployment, the role variable actually
+      # set, no container port (it listens on nothing, and a Service selector is
+      # a subset match, so anything port-shaped is a step towards the worker
+      # being sent a share of every request), and the empty-role guard still
+      # failing closed.
+      - name: Helm template with the worker workload enabled
+        run: |
+          set -o pipefail
+          common=(
+            --set database.url="postgres://app:app@db:5432/app"
+            --set database.migrateUrl="postgres://mig:mig@db:5432/app"
+            --set database.appPassword="ci-template-only"
+            --set auth.internalContextSecret="ci-template-only"
+          )
+          helm template ./deploy/helm/openshapeforge-api "${common[@]}" > /tmp/worker-off.yaml
+          helm template ./deploy/helm/openshapeforge-api "${common[@]}" \
+            --set workers.enabled=true \
+            --set networkPolicy.enabled=true \
+            --set workers.networkPolicy.egress.durableExecution.enabled=true \
+            > /tmp/worker-on.yaml
+
+          off_deployments=$(grep -c '^kind: Deployment' /tmp/worker-off.yaml || true)
+          on_deployments=$(grep -c '^kind: Deployment' /tmp/worker-on.yaml || true)
+          if [ "$on_deployments" -ne "$((off_deployments + 1))" ]; then
+            echo "::error::enabling the worker changed the Deployment count by $((on_deployments - off_deployments)), expected 1"
+            exit 1
+          fi
+
+          helm template ./deploy/helm/openshapeforge-api "${common[@]}" \
+            --set workers.enabled=true \
+            --show-only templates/worker-deployment.yaml > /tmp/worker.yaml
+          if ! grep -q 'name: OPENSHAPEFORGE_ROLE' /tmp/worker.yaml; then
+            echo "::error::the worker Deployment does not set OPENSHAPEFORGE_ROLE"
+            exit 1
+          fi
+          if grep -q 'containerPort' /tmp/worker.yaml; then
+            echo "::error::the worker Deployment declares a container port; it serves no traffic"
+            exit 1
+          fi
+
+          # An empty role would start a second copy of the API instead, so the
+          # chart refuses to render it. Prove the guard is live.
+          if helm template ./deploy/helm/openshapeforge-api "${common[@]}" \
+               --set workers.enabled=true --set workers.role="" > /dev/null 2>&1; then
+            echo "::error::workers.role='' rendered; it must fail closed"
+            exit 1
+          fi
+
   db-tests:
     name: Database migration tests
     runs-on: ubuntu-latest

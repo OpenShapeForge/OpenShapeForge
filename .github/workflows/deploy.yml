@@ -535,7 +535,11 @@ jobs:
         if: failure()
         run: |
           kubectl -n "$NAMESPACE" describe pods || true
-          for c in api keycloak migrate; do
+          # `worker` is only present when workers.enabled=true; the selector is
+          # the release, and worker pods carry it, so this reaches them. Without
+          # the name here a failed worker rollout would produce no logs at all —
+          # it has no probes and no Service, so its log is the only signal.
+          for c in api keycloak migrate worker; do
             echo "=== logs: $c ==="
             kubectl -n "$NAMESPACE" logs -l app.kubernetes.io/instance="$RELEASE" \
               -c "$c" --tail=200 --all-containers=false || true

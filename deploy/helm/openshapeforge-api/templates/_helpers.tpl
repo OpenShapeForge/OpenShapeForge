@@ -28,6 +28,57 @@ app.kubernetes.io/name: {{ include "openshapeforge-api.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
+{{/*
+Names and labels for the worker workload (templates/worker-deployment.yaml).
+
+`app.kubernetes.io/name` deliberately DIFFERS from the API's rather than being
+distinguished only by `app.kubernetes.io/component`. A Service selector is a
+SUBSET match: a pod carrying `name` + `instance` is an endpoint of the API
+Service no matter what else is on it, so a worker labelled like the API would
+be sent a share of every request and refuse all of it — it listens on nothing.
+The alternative, narrowing the API Service's selector, is not available: a
+Deployment's `spec.selector` is immutable once installed, so existing releases
+could not be upgraded into it, and it would change the render even with the
+worker disabled.
+*/}}
+{{- define "openshapeforge-api.workerName" -}}
+{{- printf "%s-worker" (include "openshapeforge-api.name" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "openshapeforge-api.workerFullname" -}}
+{{- printf "%s-worker" (include "openshapeforge-api.fullname" .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{- define "openshapeforge-api.workerSelectorLabels" -}}
+app.kubernetes.io/name: {{ include "openshapeforge-api.workerName" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: worker
+{{- end -}}
+
+{{- define "openshapeforge-api.workerLabels" -}}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{ include "openshapeforge-api.workerSelectorLabels" . }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}
+
+{{/*
+The worker role, refused rather than defaulted when it names no worker.
+
+`apps/api/src/index.ts` reads `OPENSHAPEFORGE_ROLE?.trim() || "api"`, so an
+empty value — or a literal `api` — starts a second copy of the HTTP server
+instead of a worker: no Service in front of it, no probes, and a grace period
+sized for a queue drain. That is silent in every place an operator would look,
+which is exactly what the chart's other fail-closed guards exist for.
+*/}}
+{{- define "openshapeforge-api.workerRole" -}}
+{{- $role := .Values.workers.role | default "" | trim -}}
+{{- if or (not $role) (eq $role "api") -}}
+{{- fail "workers.enabled=true requires workers.role to name a module-contributed worker role (e.g. workflow-worker). Empty, or \"api\", would start a second copy of the HTTP server with no Service and no probes." -}}
+{{- end -}}
+{{- $role -}}
+{{- end -}}
+
 {{- define "openshapeforge-api.serviceAccountName" -}}
 {{- if .Values.serviceAccount.create -}}
 {{- default (include "openshapeforge-api.fullname" .) .Values.serviceAccount.name -}}

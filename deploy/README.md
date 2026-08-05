@@ -99,7 +99,76 @@ hostname, or with the hosts left empty for a ClusterIP-only release.
 ## Helm chart
 
 The chart (`deploy/helm/openshapeforge-api`) deploys the API Deployment + Service
-and runs migrations as a **pre-install/pre-upgrade Job**.
+and runs migrations as a **pre-install/pre-upgrade Job**. It can also deploy a
+**worker workload**, off by default.
+
+### Worker workload (optional, off by default)
+
+The image is one entry point with several roles: `OPENSHAPEFORGE_ROLE` picks
+which one `apps/api/src/index.ts` starts. `api` is the default and is the HTTP
+server. Any other value names a background worker role contributed by a runtime
+module — the workflow plugin contributes `workflow-worker`, the process that
+drains `workflow.control_commands`, fires due `workflow.schedules` and resumes
+due timer waits. Without it those queues fill and nothing reads them.
+
+```sh
+helm upgrade --install openshapeforge deploy/helm/openshapeforge-api \
+  --set workers.enabled=true            # off by default
+  # --set workers.role=workflow-worker  # the default; a value, not a literal
+  # --set workers.replicaCount=2        # the default
+```
+
+It renders one extra Deployment (`<release>-openshapeforge-api-worker`) and
+nothing else. Decisions worth knowing before you enable it — all of them
+restated at their setting in `values.yaml`:
+
+- **No Service, no Ingress, no probes.** The worker listens on nothing, so the
+  API's `httpGet` probes do not transfer, an `exec` probe would have nothing to
+  observe, and a real liveness signal would mean the worker publishing a tick
+  timestamp — a change to the `ModuleWorkerHandle` contract, not to this chart.
+  What that accepts: a worker that is alive but **wedged** is invisible to
+  Kubernetes. What bounds it: a claim older than the queue's visibility timeout
+  is reclaimed by another replica, so a wedged worker costs throughput rather
+  than commands.
+- **Two replicas, and the chart says so.** `for update skip locked` plus a
+  conditional consume make N replicas safe by construction, so the number is
+  purely an availability choice: two keeps the queue moving through a node
+  drain and turns one wedged worker into half the throughput instead of none.
+  Set `workers.replicaCount=1` if a queue that pauses while a node is replaced
+  is acceptable.
+- **No autoscaling.** `autoscaling.enabled` scales the API Deployment and does
+  not reach the worker. CPU is the wrong signal for a poll loop — an idle
+  worker and a worker blocked on a slow database both sit near zero, and every
+  replica added runs another claim scan per second against the same tables. The
+  signal that matters is queue depth, which needs a metrics adapter this chart
+  does not deploy.
+- **`terminationGracePeriodSeconds: 150`.** `stop()` settles only after the
+  in-flight tick, so too short a grace period turns a clean redeploy into one
+  abandoned command per replica. 120s is where waiting stops buying anything
+  (the queue's own visibility timeout, and the dispatch timeout to a
+  durable-execution ingress — the same number in the worker's code); 30s covers
+  the schedule and timer sweeps that `stop()` drains first, plus closing the
+  pool.
+- **Same image, same Secret, same restricted database role** as the API. The
+  worker reaches the three queue tables through their RLS policies by presenting
+  `app.worker_role` — nothing is bypassed (see
+  [`../docs/api.md`](../docs/api.md#the-worker-axis)).
+- **`workers.role` fails the render when empty**, or when set to `api`:
+  `index.ts` reads `OPENSHAPEFORGE_ROLE?.trim() || "api"`, so either would
+  quietly start a second copy of the HTTP server with no Service in front of it.
+
+With `networkPolicy.enabled=true` the worker gets its own policy: **egress
+only** — DNS and Postgres from the API's settings (one place names the
+database), plus the durable-execution ingress when
+`workers.networkPolicy.egress.durableExecution.enabled=true`. It has no ingress
+rules, because it has no port to admit anyone to.
+
+A durable-execution service is configured through `workers.extraEnv`, not
+through a chart-specific setting, for the same reason the role name is a value:
+`OPENSHAPEFORGE_WORKFLOW_RESTATE_*` belongs to the workflow plugin, and the
+chart should not know a plugin's variable names any better than it knows its
+role names. Absent it, the worker uses its in-process dispatcher, which is the
+default and correct on its own.
 
 ### Keycloak subchart (optional, off by default)
 
@@ -262,7 +331,8 @@ helm template openshapeforge deploy/helm/openshapeforge-api \
   with a strong random value distinct from `<prefix>-app-password`. The workflow
   fails naming the missing entry rather than proceeding.
 - Enable autoscaling with `autoscaling.enabled=true`, ingress with
-  `ingress.enabled=true`.
+  `ingress.enabled=true`, the background worker with `workers.enabled=true`
+  (see above — autoscaling covers the API Deployment only).
 - **Ingress requires TLS.** `ingress.enabled=true` with an empty `ingress.tls`
   fails the render instead of serving bearer tokens and signed context headers
   over plaintext HTTP. Supply a `tls` entry (with a cert-manager annotation, or

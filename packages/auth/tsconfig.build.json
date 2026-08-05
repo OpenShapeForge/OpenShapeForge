@@ -1,12 +1,21 @@
 {
   "extends": "../../tsconfig.base.json",
+  "//types": [
+    "Named rather than left to automatic @types discovery. This package uses",
+    "node globals it genuinely depends on (node:crypto, Buffer, URL); which",
+    "@types directories discovery reaches depends on the compiler version and",
+    "on how the installer laid out node_modules, and TypeScript 7 does not",
+    "reach the ones TypeScript 5 did. Globals the package does NOT depend on",
+    "are spelled structurally instead — see ReadonlyHeadersLike in src/types.ts."
+  ],
   "compilerOptions": {
     "noEmit": false,
     "rootDir": "src",
     "outDir": "dist",
     "declaration": true,
     "declarationMap": true,
-    "sourceMap": true
+    "sourceMap": true,
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"]

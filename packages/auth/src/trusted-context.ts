@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { AuthIdentity, TrustedContextHeaderNames } from "./types.js";
+import type {
+  AuthIdentity,
+  HeadersLike,
+  ReadonlyHeadersLike,
+  TrustedContextHeaderNames,
+} from "./types.js";
 
 export const TRUSTED_CONTEXT_HEADERS: TrustedContextHeaderNames = {
   tenantId: "x-tenant-id",
@@ -101,7 +106,7 @@ type IdentityInput = Pick<AuthIdentity, "tenantId" | "userId" | "roles" | "group
  * cleared first so a client cannot smuggle their own.
  */
 export function applyTrustedContextHeaders(
-  headers: Headers,
+  headers: HeadersLike,
   identity: IdentityInput,
   options: ApplyTrustedContextOptions = {},
 ): void {
@@ -131,7 +136,7 @@ export function applyTrustedContextHeaders(
 }
 
 function verifySignature(
-  headers: Headers,
+  headers: ReadonlyHeadersLike,
   identity: IdentityInput,
   options: ReadTrustedContextOptions,
 ): boolean {
@@ -167,7 +172,7 @@ function verifySignature(
   return signaturesMatch(signature, expected);
 }
 
-function readIdentityHeaders(headers: Headers): IdentityInput {
+function readIdentityHeaders(headers: ReadonlyHeadersLike): IdentityInput {
   return {
     tenantId: headers.get(TRUSTED_CONTEXT_HEADERS.tenantId),
     userId: headers.get(TRUSTED_CONTEXT_HEADERS.userId),
@@ -193,7 +198,7 @@ const EMPTY_IDENTITY: IdentityInput = {
  * OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET is intentionally unset.
  */
 export function readTrustedContext(
-  headers: Headers,
+  headers: ReadonlyHeadersLike,
   options: ReadTrustedContextOptions = {},
 ): IdentityInput {
   const identity = readIdentityHeaders(headers);
@@ -208,7 +213,7 @@ export function readTrustedContext(
 
 /** True iff the inbound headers carry a valid signature over the identity they claim. */
 export function hasValidTrustedContextSignature(
-  headers: Headers,
+  headers: ReadonlyHeadersLike,
   options: ReadTrustedContextOptions = {},
 ): boolean {
   return verifySignature(headers, readIdentityHeaders(headers), options);

@@ -38,12 +38,16 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
  * OPENSHAPEFORGE_APP_PASSWORD_ROTATE=1 for a single migrate run alongside the
  * new OPENSHAPEFORGE_APP_PASSWORD (and update DATABASE_URL in lockstep).
  *
- * The GRANT ON ALL … statements only cover objects that EXIST at grant time,
- * so `applyAppRoleGrants` (the ON ALL sweep) must run AFTER the generated
- * schema has created its tables — see the migration chain ordering. This
- * function (role + schema-usage + function grants + default privileges) is
- * safe to run before the generated schema; `applyAppRoleGrants` re-runs the
- * table/sequence sweep afterwards so newly-generated entities are covered
+ * ORDERING
+ * --------
+ * `applyAppRoleMigration` runs FIRST in the chain, before any schema exists, so
+ * every grant it issues is guarded on its schema being present and is a no-op
+ * on a fresh database. GRANT ON ALL … only covers objects that EXIST at grant
+ * time for the same reason. `applyAppRoleGrants` therefore runs AFTER the
+ * helpers migration and the generated schema and re-applies BOTH halves — the
+ * `app` schema grants and the table/sequence sweep — so the role ends up with
+ * the same effective privileges on a database migrated from empty as on one
+ * migrated incrementally, and newly-generated entities are covered
  * automatically on every migrate.
  */
 
@@ -126,17 +130,53 @@ const MANAGED_SCHEMAS: readonly string[] = [
   .sort();
 
 /**
- * Schemas the app role needs USAGE on. `app` holds the RLS helper functions;
- * the rest hold the tenant-scoped and platform tables. Only schemas that
- * actually exist are touched (guarded per-statement below).
+ * USAGE on `app` and EXECUTE on the RLS helper functions it holds
+ * (app.current_tenant(), etc.), for the restricted role.
+ *
+ * Split out because it has to run TWICE. `applyAppRoleMigration` runs first in
+ * the chain — before `applyAppHelpersMigration` creates `app` — so the guard
+ * below is false there on a fresh database and the grants are silently skipped.
+ * Without the second call from {@link applyAppRoleGrants} (which runs after the
+ * schema exists) the role was left holding EXECUTE on the helpers, which
+ * functions grant to PUBLIC by default, and NO USAGE on the schema containing
+ * them: every application statement naming `app.…` failed with
+ * `permission denied for schema app` on a freshly migrated database while
+ * working on one where `app` happened to pre-date the role (#295). RLS itself
+ * was never affected — policy expressions are evaluated with the table owner's
+ * privileges.
+ *
+ * The guard stays in both call sites: it is what makes this safe to call before
+ * the schema exists, and re-granting is idempotent.
+ *
+ * USAGE and EXECUTE only, deliberately. `app` is excluded from
+ * {@link MANAGED_SCHEMAS} so the DML sweep never reaches it — it holds no
+ * tables — and CREATE is never granted: the restricted role must not be able to
+ * define objects in the schema every RLS policy resolves its helpers through.
  */
-const APP_SCHEMAS: readonly string[] = ["app", ...MANAGED_SCHEMAS];
+async function applyAppSchemaGrants(db: OpenShapeForgeDatabase) {
+  await sql`
+    do $$
+    begin
+      if exists (select 1 from information_schema.schemata where schema_name = 'app') then
+        execute format('grant usage on schema app to %I', ${sql.lit(APP_ROLE)});
+        execute format('grant execute on all functions in schema app to %I', ${sql.lit(APP_ROLE)});
+        execute format(
+          'alter default privileges in schema app grant execute on functions to %I',
+          ${sql.lit(APP_ROLE)}
+        );
+      end if;
+    end
+    $$;
+  `.execute(db);
+}
 
 /**
- * Create/repair the role and grant schema usage, function execute, and default
- * privileges. Safe to run at any point in the chain; call BEFORE the generated
- * schema so `app` helpers and schema usage are in place, then run
- * {@link applyAppRoleGrants} after the generated schema to sweep table grants.
+ * Create/repair the role and grant database connect, schema usage, function
+ * execute, and default privileges. Safe to run at any point in the chain —
+ * every grant is guarded on its schema existing — and it runs FIRST, so on a
+ * fresh database only the role itself and the CONNECT grant actually land.
+ * {@link applyAppRoleGrants}, which runs after the schema steps, is what makes
+ * the rest take effect.
  */
 export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
   const appRolePassword = readAppRolePassword();
@@ -187,8 +227,8 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
     $$;
   `.execute(db);
 
-  // 3. Grant USAGE on every schema that exists.
-  for (const schema of APP_SCHEMAS) {
+  // 3. Grant USAGE on every table-bearing schema that exists.
+  for (const schema of MANAGED_SCHEMAS) {
     await sql`
       do $$
       begin
@@ -200,22 +240,10 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
     `.execute(db);
   }
 
-  // 4. EXECUTE on the app.* RLS helper functions (app.current_tenant(), etc.).
-  //    Applying to ALL functions in `app` is broad but the schema only holds
-  //    those helpers. Default privileges below cover future helpers.
-  await sql`
-    do $$
-    begin
-      if exists (select 1 from information_schema.schemata where schema_name = 'app') then
-        execute format('grant execute on all functions in schema app to %I', ${sql.lit(APP_ROLE)});
-        execute format(
-          'alter default privileges in schema app grant execute on functions to %I',
-          ${sql.lit(APP_ROLE)}
-        );
-      end if;
-    end
-    $$;
-  `.execute(db);
+  // 4. USAGE on `app` + EXECUTE on its RLS helpers. A no-op here on a fresh
+  //    database (the schema is created by the NEXT chain step);
+  //    applyAppRoleGrants re-applies it once it exists.
+  await applyAppSchemaGrants(db);
 
   // 5. ALTER DEFAULT PRIVILEGES for the migrate (current) role so any table or
   //    sequence it creates LATER — including newly generated entities — is
@@ -250,8 +278,14 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
  * The restricted role gets SELECT/INSERT/UPDATE/DELETE (enough for the app; RLS
  * still filters every row) and USAGE/SELECT on sequences (identity columns).
  * It deliberately gets NO privileges that would let it bypass RLS.
+ *
+ * Also the point at which the `app` schema grants finally land on a fresh
+ * migrate — see {@link applyAppSchemaGrants}. That is USAGE and EXECUTE only;
+ * `app` is not in the DML sweep below.
  */
 export async function applyAppRoleGrants(db: OpenShapeForgeDatabase) {
+  await applyAppSchemaGrants(db);
+
   for (const schema of MANAGED_SCHEMAS) {
     await sql`
       do $$

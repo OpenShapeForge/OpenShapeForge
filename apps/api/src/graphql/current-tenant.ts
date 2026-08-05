@@ -61,16 +61,18 @@
  * right way to fail.
  *
  * The predicate is a BOUND PARAMETER rather than a call to `app.current_tenant()`
- * in the query text, and that is forced rather than chosen: the restricted
- * runtime role holds EXECUTE on the `app.*` helpers but NOT `USAGE` on the `app`
- * schema (`provisionAppRole` grants it only if the schema already exists, and on
- * a fresh migrate it does not yet), so any application query naming `app.…`
- * fails with `permission denied for schema app`. Established by running this
- * resolver against a freshly migrated database as `openshapeforge_app`, not
- * inferred. The POLICY is unaffected — PostgreSQL evaluates RLS policy
- * expressions with the table owner's privileges, which is why every
- * `tenant_id = app.current_tenant()` policy in the schema works for a role that
- * cannot name the function itself.
+ * in the query text. That was once forced as well as chosen: the restricted
+ * runtime role held EXECUTE on the `app.*` helpers but no `USAGE` on the `app`
+ * schema containing them on a freshly migrated database, so any application
+ * statement naming `app.…` failed with `permission denied for schema app`. That
+ * gap was #295 and is fixed — `db/migrations/app-role.ts` re-applies the schema
+ * grants after the schema exists — so the binding is now only a choice, and it
+ * is made for the reason above: it puts the query's scope in the query rather
+ * than in the connection's session state. The POLICY never depended on either;
+ * PostgreSQL evaluates RLS policy expressions with the table owner's
+ * privileges, which is why every `tenant_id = app.current_tenant()` policy in
+ * the schema worked even while the runtime role could not name the function
+ * itself.
  *
  * The asymmetric policy (`WITH CHECK (app.bypass_rls())`) means this path can
  * never write: every mutation of the registry goes through the control plane's

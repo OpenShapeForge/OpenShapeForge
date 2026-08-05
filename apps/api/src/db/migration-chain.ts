@@ -17,7 +17,9 @@
  *      before the roll-forward evaluates it.
  *   4. generated roll-forward — manifest-driven schema apply/diff.
  *   5. app role grants        — sweep DML grants over ALL now-existing tables
- *      and sequences so newly-generated entities are covered automatically.
+ *      and sequences so newly-generated entities are covered automatically,
+ *      and re-apply the `app` schema USAGE/EXECUTE grants that step 0 had to
+ *      skip because step 1 had not created the schema yet.
  *   6. catalog seeds          — load the compiler's global configuration
  *      catalogs into their platform tables: the entity page configs, then
  *      whatever the loaded runtime modules contribute, in registration order.

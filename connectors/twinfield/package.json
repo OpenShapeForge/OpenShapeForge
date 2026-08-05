@@ -1,0 +1,9 @@
+{
+  "name": "@openshapeforge/connector-twinfield",
+  "version": "0.1.0",
+  "private": true,
+  "license": "BUSL-1.1",
+  "type": "module",
+  "description": "Connector implementation package for the twinfield contract: Twinfield's SOAP web services, authorized through platform-held OAuth 2.0 tokens.",
+  "module": "index.ts"
+}

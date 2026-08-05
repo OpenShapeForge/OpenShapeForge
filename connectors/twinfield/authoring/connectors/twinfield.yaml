@@ -1,0 +1,404 @@
+# Twinfield — the first connector whose upstream speaks SOAP rather than REST.
+#
+# Its OAuth needs no new vocabulary: authorization code at login.twinfield.com
+# with refresh tokens, which is what #281 gave the platform. The platform
+# obtains, stores, refreshes and rotates; the package is handed a fetch already
+# carrying the access token and never sees a refresh token. Everything below is
+# about the other three things Twinfield does differently.
+#
+# ## One: the request is an XML document, not a URL
+#
+# Twinfield exposes a handful of .asmx web services rather than an addressable
+# resource tree. `ProcessXmlDocument` takes an arbitrary XML document — a
+# `<read>`, a `<list>`, a `<transaction>`, a `<dimension>` — and answers with
+# another one. There is no path to compose and no query string to build, so the
+# generic endpoint/select/filter shape the OData connectors share does not carry
+# over. The operations below are Twinfield's own web services, named as such.
+#
+# ## Two: the company travels in the SOAP header
+#
+# An Exact call names its division in the path. A Twinfield call names its
+# company in a SOAP header element beside the request body, which is why
+# `companyCode` is configuration rather than a path segment the package builds.
+# It is OPTIONAL because `listOffices` is how an operator finds the code in the
+# first place — the same reason Exact's division may be left empty.
+#
+# ## Three: the cluster is configured, not discovered
+#
+# The access token does not say which host to call: an organisation lives on a
+# cluster, and every call after authorization goes there. Twinfield reports it
+# from `/auth/authentication/connect/accesstokenvalidation?token=<access token>`
+# — an endpoint that authenticates by carrying the ACCESS TOKEN IN THE QUERY
+# STRING. This package never holds that token (the platform sets the
+# Authorization header and overrides anything a package sets), so it cannot make
+# that call at all; and this repository already refuses a secret in a URL,
+# because a URL is written to every log that records a request line.
+#
+# So the cluster is a configuration field with a default, filled in once. That
+# also avoids a discovery round trip on every operation — and unlike Exact's
+# "current division", which genuinely changes, an organisation's cluster is
+# stable. A wrong value cannot reach an arbitrary host: it is constrained to
+# twinfield.com by validation here and by network.egress at runtime, and
+# `verify` proves it before anyone relies on it.
+schemaVersion: 1
+kind: connector
+connector: Twinfield
+title: Twinfield
+labels:
+  en: Twinfield
+  nl: Twinfield
+description:
+  en: Read and write Twinfield administrations through its SOAP web services.
+  nl: Lees en schrijf Twinfield-administraties via de SOAP-webservices.
+category: erp
+domains: [finance]
+
+capabilities: [operations]
+
+implementation:
+  package: "@openshapeforge/connector-twinfield"
+  contractVersion: 1
+  provenance: firstParty
+  license:
+    spdx: LicenseRef-BatterAI-Commercial
+    notice: >-
+      The implementation package ships separately under its own license and is
+      not covered by the BUSL-1.1 grant on this repository.
+
+availability:
+  entitlement: connector.twinfield
+
+configuration:
+  # Multiple: an organisation routinely holds several administrations, and a
+  # company code is per installation rather than a setting toggled on one.
+  instances: multiple
+  # `listOffices` is authenticated, reads no business data, and answers with the
+  # companies this authorization can reach — the cheapest proof that the tokens
+  # are live AND that the configured cluster is the right one.
+  verify: true
+  fields:
+    - key: clusterHost
+      valueType: string
+      required: true
+      defaultValue: accounting.twinfield.com
+      label: { en: Cluster host, nl: Clusterhost }
+      description:
+        en: The Twinfield host this organisation's data lives on.
+        nl: De Twinfield-host waarop de gegevens van deze organisatie staan.
+      help:
+        en: >-
+          Twinfield places each organisation on a cluster and every call after
+          sign-in goes there. Most organisations are on accounting.twinfield.com;
+          if yours is not, Twinfield reports the cluster with your access token
+          and support can tell you. Test connection fails plainly when it is
+          wrong, rather than returning somebody else's books.
+        nl: >-
+          Twinfield plaatst elke organisatie op een cluster en elke aanroep na
+          het inloggen gaat daarheen. De meeste organisaties staan op
+          accounting.twinfield.com; staat de jouwe ergens anders, dan meldt
+          Twinfield het cluster bij je access token en kan support het vertellen.
+          Verbinding testen faalt duidelijk als dit verkeerd staat.
+      validation:
+        # Constrained to the vendor's own domain. network.egress refuses
+        # anything else at runtime anyway, but a typo deserves an answer while
+        # somebody is still looking at the form rather than a denied egress
+        # hours later that reads like an outage.
+        pattern: "^([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+twinfield\\.com$"
+
+    - key: companyCode
+      valueType: string
+      label: { en: Company code, nl: Administratiecode }
+      description:
+        en: The administration this installation works in. Left empty, each document names its own.
+        nl: De administratie waarin deze installatie werkt. Leeg gelaten noemt elk document zijn eigen.
+      help:
+        en: >-
+          Twinfield sends this in the SOAP header of every call, which is how it
+          selects the administration. Leave it empty until you know the code —
+          listOffices reports the ones this authorization can reach.
+        nl: >-
+          Twinfield stuurt dit mee in de SOAP-header van elke aanroep en kiest
+          daarmee de administratie. Laat het leeg tot je de code kent —
+          listOffices toont de administraties die deze autorisatie kan bereiken.
+      validation:
+        maxLength: 30
+        pattern: "^[A-Za-z0-9._-]+$"
+
+    - key: clientId
+      valueType: string
+      required: true
+      label: { en: Client ID, nl: Client-ID }
+      description:
+        en: From the application you registered with Twinfield.
+        nl: Van de applicatie die je bij Twinfield hebt geregistreerd.
+
+    - key: clientSecret
+      valueType: string
+      required: true
+      secret: true
+      label: { en: Client secret, nl: Client secret }
+      description:
+        en: The secret issued alongside the client ID. Never read back once stored.
+        nl: Het secret dat bij de client-ID hoort. Na opslaan niet meer op te vragen.
+
+auth:
+  type: oauth2
+  flow: authorizationCode
+  # Fixed hosts, unlike Exact: Twinfield's sign-in is one place for everyone and
+  # only the DATA host varies per organisation, which is the clusterHost field
+  # above rather than an interpolation here.
+  authorizeUrl: https://login.twinfield.com/auth/authentication/connect/authorize
+  tokenUrl: https://login.twinfield.com/auth/authentication/connect/token
+  # `offline_access` is the load-bearing one: without it Twinfield issues no
+  # refresh token, and the installation would need a person at a consent screen
+  # again every time the access token expired.
+  scopes:
+    - openid
+    - twf.user
+    - twf.organisation
+    - twf.organisationUser
+    - offline_access
+  clientIdField: clientId
+  clientSecretField: clientSecret
+  refreshLeewaySeconds: 60
+
+network:
+  # ONE entry, and `**.` rather than `*.` deliberately. Sign-in is at
+  # login.twinfield.com while the data is on a per-organisation cluster host,
+  # and a cluster is not always a single label — `*.twinfield.com` covers
+  # accounting.twinfield.com and refuses api.accounting.twinfield.com. Enumerating
+  # clusters instead would work until Twinfield adds one nobody here knew about,
+  # and that organisation's connector would then fail like an outage at the far
+  # end. `**.` matches neither the bare apex nor a lookalike, so the grant is
+  # still this vendor's domain and nothing else.
+  egress:
+    - "**.twinfield.com"
+
+operations:
+  - key: listOffices
+    kind: query
+    label: { en: List companies, nl: Administraties tonen }
+    description:
+      en: List the Twinfield companies this authorization can reach.
+      nl: Toon de Twinfield-administraties die deze autorisatie kan bereiken.
+    authorization:
+      roles:
+        invoke: [Connectors.All.Read]
+    input: []
+    output:
+      cardinality: one
+      fields:
+        - key: offices
+          valueType: object
+          cardinality: collection
+          required: true
+          label: { en: Companies, nl: Administraties }
+          description:
+            en: Each with a code and a name; the code is what companyCode wants.
+            nl: Elk met een code en een naam; de code is wat companyCode verwacht.
+    reliability:
+      timeouts:
+        attemptMs: 15000
+      retry:
+        eligible: true
+        maxAttempts: 3
+
+  - key: readDocument
+    kind: query
+    label: { en: Read a document, nl: Document lezen }
+    description:
+      en: Send a Twinfield read document to ProcessXmlDocument and return the answer.
+      nl: Stuur een Twinfield-leesdocument naar ProcessXmlDocument en geef het antwoord terug.
+    authorization:
+      roles:
+        invoke: [Connectors.All.Read]
+    input:
+      - key: document
+        valueType: string
+        required: true
+        label: { en: Request document, nl: Aanvraagdocument }
+        description:
+          en: An XML read document, for example <read><type>dimension</type>…</read>.
+          nl: Een XML-leesdocument, bijvoorbeeld <read><type>dimension</type>…</read>.
+        help:
+          en: >-
+            Its root element must be a read verb — read, list or columns. A
+            document that writes is refused here and belongs in submitDocument,
+            so that a read can stay retryable and stay marked read-only to the
+            clients that ask.
+          nl: >-
+            Het hoofdelement moet een leeswerkwoord zijn — read, list of columns.
+            Een schrijvend document wordt hier geweigerd en hoort in
+            submitDocument, zodat een leesoperatie herhaalbaar blijft en
+            alleen-lezen blijft heten.
+        validation:
+          minLength: 1
+          maxLength: 131072
+    output:
+      cardinality: one
+      fields:
+        - key: document
+          valueType: string
+          required: true
+          label: { en: Response document, nl: Antwoorddocument }
+          description:
+            en: Twinfield's answer, verbatim, because its shape is per document type.
+            nl: Het antwoord van Twinfield, letterlijk, omdat de vorm per documenttype verschilt.
+        - key: succeeded
+          valueType: boolean
+          required: true
+          label: { en: Accepted, nl: Geaccepteerd }
+        - key: messages
+          valueType: string
+          cardinality: collection
+          required: true
+          label: { en: Messages, nl: Meldingen }
+    reliability:
+      timeouts:
+        attemptMs: 30000
+      retry:
+        eligible: true
+        maxAttempts: 3
+
+  - key: search
+    kind: query
+    label: { en: Search, nl: Zoeken }
+    description:
+      en: Search Twinfield's finder for codes — dimensions, offices, articles.
+      nl: Zoek via de Twinfield-finder naar codes — dimensies, administraties, artikelen.
+    authorization:
+      roles:
+        invoke: [Connectors.All.Read]
+    input:
+      - key: type
+        valueType: string
+        required: true
+        label: { en: Search type, nl: Zoektype }
+        description:
+          en: A Twinfield finder type, for example DIM for dimensions or OFF for offices.
+          nl: Een Twinfield-findertype, bijvoorbeeld DIM voor dimensies of OFF voor administraties.
+        validation:
+          minLength: 1
+          maxLength: 32
+      - key: pattern
+        valueType: string
+        defaultValue: "*"
+        label: { en: Pattern, nl: Patroon }
+        validation:
+          maxLength: 256
+      - key: field
+        valueType: integer
+        defaultValue: 0
+        label: { en: Field, nl: Veld }
+        description:
+          en: Which of the type's fields the pattern matches; 0 searches all of them.
+          nl: Op welk veld van het type het patroon zoekt; 0 zoekt op alle velden.
+        validation:
+          min: 0
+          max: 32
+      - key: firstRow
+        valueType: integer
+        defaultValue: 1
+        label: { en: First row, nl: Eerste rij }
+        validation:
+          min: 1
+      - key: maxRows
+        valueType: integer
+        defaultValue: 100
+        label: { en: Maximum rows, nl: Maximum aantal rijen }
+        validation:
+          min: 1
+          max: 1000
+    output:
+      cardinality: one
+      fields:
+        - key: rows
+          valueType: object
+          cardinality: collection
+          required: true
+          label: { en: Rows, nl: Rijen }
+          description:
+            en: One object per row, each carrying the row's column values in order.
+            nl: Eén object per rij, met de kolomwaarden van die rij op volgorde.
+        - key: totalRows
+          valueType: integer
+          required: true
+          label: { en: Total rows, nl: Totaal aantal rijen }
+          description:
+            en: How many rows match in total; page with firstRow.
+            nl: Hoeveel rijen er in totaal matchen; blader verder met firstRow.
+    reliability:
+      timeouts:
+        attemptMs: 30000
+      retry:
+        eligible: true
+        maxAttempts: 3
+      # The finder pages by row offset rather than by an opaque token.
+      pagination:
+        style: page
+
+  - key: submitDocument
+    kind: mutation
+    label: { en: Submit a document, nl: Document indienen }
+    description:
+      en: Send a Twinfield write document — a transaction, a dimension, an invoice.
+      nl: Stuur een Twinfield-schrijfdocument — een transactie, een dimensie, een factuur.
+    authorization:
+      roles:
+        invoke: [Connectors.All.ReadWrite]
+    input:
+      - key: document
+        valueType: string
+        required: true
+        label: { en: Request document, nl: Aanvraagdocument }
+        description:
+          en: The XML document to submit, shaped as its Twinfield document type expects.
+          nl: Het XML-document dat wordt ingediend, in de vorm die het documenttype verwacht.
+        validation:
+          minLength: 1
+          maxLength: 131072
+    output:
+      cardinality: one
+      fields:
+        - key: document
+          valueType: string
+          required: true
+          label: { en: Response document, nl: Antwoorddocument }
+        # Required, and the reason this operation has an output shape at all:
+        # Twinfield answers a REJECTED write with HTTP 200 and reports the
+        # outcome as a result attribute inside the document. A caller reading
+        # only the status code books nothing and is told it worked.
+        - key: succeeded
+          valueType: boolean
+          required: true
+          label: { en: Accepted, nl: Geaccepteerd }
+          description:
+            en: False when Twinfield rejected the document — its HTTP status says 200 either way.
+            nl: Onwaar als Twinfield het document heeft geweigerd — de HTTP-status is hoe dan ook 200.
+        - key: messages
+          valueType: string
+          cardinality: collection
+          required: true
+          label: { en: Messages, nl: Meldingen }
+          description:
+            en: What Twinfield said about the elements it refused.
+            nl: Wat Twinfield zei over de elementen die het weigerde.
+    reliability:
+      timeouts:
+        attemptMs: 60000
+      # NOT retry-eligible. ProcessXmlDocument accepts no idempotency key: the
+      # SOAP header carries the company and nothing else, and a document carries
+      # no client-supplied id Twinfield deduplicates on. A retried <transaction>
+      # books a second journal entry and nothing afterwards undoes it. The
+      # compiler refuses a retry-eligible mutation without a declared strategy,
+      # and declaring `natural` to unlock retries would be claiming a safety
+      # Twinfield does not offer.
+      retry:
+        eligible: false
+
+exposure:
+  graphql: true
+  rest:
+    enabled: true
+    basePath: twinfield
+  mcp: true

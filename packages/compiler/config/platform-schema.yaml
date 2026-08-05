@@ -130,6 +130,11 @@ tables:
     tenantScoped: true
     domainInternal: true
     generatedCrud: false
+    # A workflow collection-wait is satisfied by events, so the sweep that
+    # resolves waits reads this table inside each wait's own tenant. workerDml
+    # (a grant) and not workerAccess (a policy widening): the sweep never reads
+    # it across tenants, and the tenant predicate stays the boundary.
+    workerDml: true
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -213,6 +218,11 @@ tables:
     tenantScoped: true
     domainInternal: true
     generatedCrud: false
+    # Every tenant-scoped session expands its groups through this table in
+    # applyDbSession, before any policy applies — a worker's included. Without
+    # the grant a worker's own tenant-scoped session fails at setup rather than
+    # at the statement that needed it.
+    workerDml: true
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }

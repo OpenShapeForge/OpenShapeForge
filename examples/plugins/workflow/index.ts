@@ -196,6 +196,11 @@ function workflowPlatformTables(): TableDefinition[] {
       tenantScoped: false,
       domainInternal: true,
       generatedCrud: false,
+      // A worker's boot reads it: `init` calls `hydrateNodeCatalog`, and a
+      // worker that skipped that would claim commands and fail every one with
+      // NO_BRIDGE. Global, so no policy gates it — the grant is the only gate,
+      // which is why it has to be declared rather than inferred.
+      workerDml: true,
       columns: [
         { name: "node_type", type: "text", primaryKey: true },
         { name: "catalog", type: "text", required: true }, // 'standard' | 'entity' | 'domain'
@@ -221,6 +226,9 @@ function workflowPlatformTables(): TableDefinition[] {
       tenantScoped: false,
       domainInternal: true,
       generatedCrud: false,
+      // Read while a claimed command runs: an entity trigger resolves which
+      // definitions a row change may start.
+      workerDml: true,
       columns: [
         { name: "id", type: "text", primaryKey: true }, // "<module>:<entity_type>"
         { name: "module", type: "text", required: true },
@@ -250,6 +258,10 @@ function workflowPlatformTables(): TableDefinition[] {
       tenantScoped: false,
       domainInternal: true,
       generatedCrud: false,
+      // Deliberately NO workerDml. This one is read by the designer's GraphQL
+      // surface and written by a seed; nothing on a worker's path names it, so
+      // the worker role is not granted it. The narrow grant is only worth
+      // having if a table that is not needed is actually left out.
       columns: [
         { name: "id", type: "text", primaryKey: true }, // PascalCase entity name
         { name: "entity", type: "text", required: true },
@@ -290,6 +302,9 @@ function workflowDataTables(): TableDefinition[] {
       tenantScoped: true,
       domainInternal: true,
       generatedCrud: false,
+      // A schedule fire and a start command both read the definition they are
+      // firing, from a session scoped to that row's tenant.
+      workerDml: true,
       columns: [
         { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
         { name: "tenant_id", type: "uuid", required: true },
@@ -330,6 +345,8 @@ function workflowDataTables(): TableDefinition[] {
       tenantScoped: true,
       domainInternal: true,
       generatedCrud: false,
+      // The graph a run executes. Pinned at start and re-read on every resume.
+      workerDml: true,
       columns: [
         { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
         { name: "tenant_id", type: "uuid", required: true },
@@ -370,6 +387,9 @@ function workflowDataTables(): TableDefinition[] {
       tenantScoped: true,
       domainInternal: true,
       generatedCrud: false,
+      // The run itself: written by the worker that claimed the command, inside
+      // that command's tenant. No workerAccess — see the note above.
+      workerDml: true,
       columns: [
         { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
         { name: "tenant_id", type: "uuid", required: true },
@@ -434,6 +454,9 @@ function workflowDataTables(): TableDefinition[] {
       tenantScoped: true,
       domainInternal: true,
       generatedCrud: false,
+      // Read during a run, not only after it — placeholders resolve out of
+      // shared_output — so the worker needs it on both sides.
+      workerDml: true,
       columns: [
         { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
         { name: "tenant_id", type: "uuid", required: true },
@@ -481,6 +504,8 @@ function workflowDataTables(): TableDefinition[] {
       tenantScoped: true,
       domainInternal: true,
       generatedCrud: false,
+      // An edit lock is checked wherever a definition is read for execution.
+      workerDml: true,
       columns: [
         { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
         { name: "tenant_id", type: "uuid", required: true },
@@ -547,6 +572,14 @@ function workflowDataTables(): TableDefinition[] {
  * queue, not the work — which is why the stalled-wait counter in
  * `runtime/collection-waits.ts` resolves its tenants first and only then reads
  * instance status per tenant, rather than joining `instances` in one sweep.
+ *
+ * They do carry `workerDml: true`, which is a different statement and the
+ * distinction is the point. Since #223 a worker connects as its own PostgreSQL
+ * role, and that role gets no whole-schema grant sweep — so every table a
+ * worker touches must say so, whether or not it is reached across tenants.
+ * `workerAccess` means "a worker may see every tenant's rows here";
+ * `workerDml` means "a worker may touch this table at all, one tenant at a
+ * time". The run tables are the second and not the first.
  */
 function workflowExecutionTables(): TableDefinition[] {
   return [

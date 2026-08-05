@@ -5,31 +5,35 @@
  * A worker is its own process rather than a timer inside the API. A poll loop
  * and a request path have unrelated failure modes and unrelated scaling needs,
  * and a wedged worker must not take GraphQL down with it. It is also what keeps
- * the database sessions distinct: the workflow worker presents
- * `app.worker_role`, a GUC the API's request path never sets, and that
- * separation is the only boundary standing between "a worker may drain the
- * queue" and "a request may claim to be a worker" (see
- * docs/api.md#the-worker-axis).
+ * the database sessions distinct: the workflow worker connects as
+ * `openshapeforge_worker` and presents `app.worker_role`, and the queue
+ * policies check both — the first is what the database can verify, the second
+ * says which worker it is (see docs/api.md#the-worker-axis).
  *
  * Which worker runs is `OPENSHAPEFORGE_ROLE`. No worker is hardcoded here —
  * `apps/api` names none of them, exactly as it names none of the contributed
  * GraphQL types.
  *
  * Fail-closed where the API role degrades:
- *   - no DATABASE_URL is fatal. A GraphQL surface without a database can still
- *     answer DATABASE_NOT_CONFIGURED; a queue-draining worker without one has
- *     nothing to do, and a process that idles while looking healthy is the
- *     worst of the three outcomes.
+ *   - no OPENSHAPEFORGE_WORKER_DATABASE_URL is fatal, and it never falls back
+ *     to DATABASE_URL. A GraphQL surface without a database can still answer
+ *     DATABASE_NOT_CONFIGURED; a queue-draining worker without one has nothing
+ *     to do, and a process that idles while looking healthy is the worst of the
+ *     three outcomes. See {@link resolveWorkerDatabaseUrl} for why the fallback
+ *     is refused rather than merely absent.
  *   - a module that failed to load or initialise is fatal IF it owns the
  *     requested role. The API tolerates a missing module because its other
  *     surfaces still work; here the module IS the process.
  */
 import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js";
+import { WORKER_ROLE } from "../db/migrations/worker-role.js";
 import type { ModuleWorker, ModuleWorkerHandle, ModuleWorkerLogger } from "../modules/contract.js";
 import { initRuntimeModules, loadRuntimeModules, type ModuleRegistry } from "../modules/registry.js";
 
 export type StartWorkerRoleOptions = {
   databaseUrl?: string;
+  /** Injectable for tests; production reads process.env. */
+  env?: NodeJS.ProcessEnv;
   /** Injectable for tests; production loads from the generated registry. */
   modules?: ModuleRegistry;
   log?: ModuleWorkerLogger;
@@ -78,14 +82,86 @@ export function indexModuleWorkers(registry: ModuleRegistry): Map<string, Resolv
   return byRole;
 }
 
+/**
+ * The worker's connection string — and the three ways it is refused.
+ *
+ * A worker must connect as `openshapeforge_worker`, because that is the role
+ * the queue policies compare `current_user` against. `DATABASE_URL` carries the
+ * API's `openshapeforge_app` credentials, so reading it here would hand the
+ * worker the API's identity: the queue would read as empty, the process would
+ * report healthy, and the boundary #223 bought would be gone — not because the
+ * policy was wrong but because the two processes were back on one role.
+ *
+ * So the fallback is not merely absent, it is REFUSED, and refused in three
+ * shapes because a fallback can arrive by more than one route:
+ *
+ *   1. unset — the operator has not provisioned a worker credential at all;
+ *   2. set to the same string as DATABASE_URL — the fallback, written out by
+ *      hand, which no amount of "we don't read DATABASE_URL" would catch;
+ *   3. carrying a username that is not the worker role — the same mistake with
+ *      a different password. Only checked when the URL names a user; a URL
+ *      that leaves it to PGUSER cannot be judged here, and (2) is what covers
+ *      the realistic copy-paste in that case.
+ *
+ * Each is fatal at boot rather than at the first empty poll, because "drained
+ * nothing" and "was never allowed to drain anything" are indistinguishable from
+ * the outside.
+ */
+export function resolveWorkerDatabaseUrl(
+  role: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const workerDatabaseUrl = env.OPENSHAPEFORGE_WORKER_DATABASE_URL?.trim();
+
+  if (!workerDatabaseUrl) {
+    throw new Error(
+      `Worker role "${role}" requires OPENSHAPEFORGE_WORKER_DATABASE_URL, and does not fall back to DATABASE_URL. ` +
+        `A worker connects as the "${WORKER_ROLE}" database role; the queue policies check that role, so connecting ` +
+        `with the API's credentials would drain nothing while reporting healthy.`,
+    );
+  }
+
+  if (env.DATABASE_URL !== undefined && workerDatabaseUrl === env.DATABASE_URL.trim()) {
+    throw new Error(
+      `Worker role "${role}" has OPENSHAPEFORGE_WORKER_DATABASE_URL set to the same value as DATABASE_URL. ` +
+        `That is the DATABASE_URL fallback written out by hand: both would connect as the API's role, and the ` +
+        `queue policies would admit neither. Provision "${WORKER_ROLE}" its own credential.`,
+    );
+  }
+
+  // A malformed URL is left to the driver, which reports it better than a
+  // rewritten message would.
+  let username: string | undefined;
+  try {
+    username = new URL(workerDatabaseUrl).username;
+  } catch {
+    return workerDatabaseUrl;
+  }
+
+  if (username && decodeURIComponent(username) !== WORKER_ROLE) {
+    throw new Error(
+      `Worker role "${role}" has OPENSHAPEFORGE_WORKER_DATABASE_URL connecting as "${decodeURIComponent(username)}", ` +
+        `not "${WORKER_ROLE}". The queue policies compare current_user against "${WORKER_ROLE}", so any other role ` +
+        `sees an empty queue rather than an error.`,
+    );
+  }
+
+  return workerDatabaseUrl;
+}
+
 export async function startWorkerRole(
   role: string,
   options: StartWorkerRoleOptions = {},
 ): Promise<WorkerRoleHandle> {
-  const databaseUrl = options.databaseUrl ?? process.env.DATABASE_URL;
+  // An explicit override is an injection point for tests, not an env fallback:
+  // it never reads DATABASE_URL, and an empty string is still refused below.
+  const databaseUrl =
+    options.databaseUrl === undefined
+      ? resolveWorkerDatabaseUrl(role, options.env)
+      : options.databaseUrl;
   if (!databaseUrl) {
     throw new Error(
-      `Worker role "${role}" requires DATABASE_URL. A worker with no database would poll nothing while reporting healthy.`,
+      `Worker role "${role}" requires OPENSHAPEFORGE_WORKER_DATABASE_URL. A worker with no database would poll nothing while reporting healthy.`,
     );
   }
 

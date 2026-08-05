@@ -5,6 +5,14 @@
 across replicas with a Postgres advisory lock and a bounded 5s `lock_timeout`
 for the DDL itself:
 
+0. **Runtime roles** — the two restricted, non-superuser login roles the
+   application connects as: `openshapeforge_app` (the API) and
+   `openshapeforge_worker` (any worker). Both `NOSUPERUSER NOBYPASSRLS`, both
+   operator-passworded (`OPENSHAPEFORGE_APP_PASSWORD` /
+   `OPENSHAPEFORGE_WORKER_PASSWORD`, applied on first creation only). The worker
+   role is created even where no worker runs, because the emitted queue policies
+   name it either way and a role the policies name but nothing creates fails
+   silently as an empty queue.
 1. **App helpers** — the `app` schema and the STABLE RLS helper functions
    (`app.current_tenant()`, `app.current_user_id()`, `app.current_groups()`,
    `app.has_scope()`, `app.bypass_rls()`, `app.current_worker_role()`).
@@ -14,6 +22,12 @@ for the DDL itself:
    They run **before** the generated step precisely so a bespoke migration
    can eliminate non-additive drift before the roll-forward evaluates it.
 4. **Generated roll-forward** — the manifest-driven apply/diff.
+5. **Grants** — the app role's whole-schema DML sweep, then the worker role's
+   enumerated grants. The worker's are re-evaluated from the manifest on every
+   run (revoke-then-grant within the schemas it holds), so a table that newly
+   declares — or stops declaring — `workerDml` is picked up without a bespoke
+   migration, and the role gets no `ALTER DEFAULT PRIVILEGES` that would widen
+   it automatically.
 
 ## The roll-forward additive migrator
 

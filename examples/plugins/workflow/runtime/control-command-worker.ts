@@ -206,17 +206,24 @@ export function createWorkflowControlCommandDispatcher(
  *
  * Nothing here is bypassed. `workflow.control_commands` declares
  * `workerAccess: WORKFLOW_WORKER_ROLE` (see the plugin's `index.ts`), so its
- * policy admits a session presenting that role directly:
+ * policy admits a worker directly:
  *
  *   USING (app.bypass_rls()
- *          OR app.current_worker_role() = 'workflow-worker'
+ *          OR (current_user = 'openshapeforge_worker'
+ *              AND app.current_worker_role() = 'workflow-worker')
  *          OR (tenant_id = app.current_tenant()))
  *
- * That is the whole grant. A session holding only `app.worker_role` reaches the
- * three queue tables that asked for it and no others — reading `erp.relations`
- * from here returns nothing, which is the property that makes this worth doing.
- * Setting `app.bypass_rls` instead would have granted read AND write on every
- * tenant-scoped table in the manifest, to read a queue.
+ * That is the whole grant. A worker reaches the queue tables that asked for it
+ * and no others — reading `erp.relations` from here returns nothing, which is
+ * the property that makes this worth doing. Setting `app.bypass_rls` instead
+ * would have granted read AND write on every tenant-scoped table in the
+ * manifest, to read a queue.
+ *
+ * This function sets only the GUC, and that is deliberate: the other half of
+ * the predicate is the connection, not the session. The process connects as
+ * `openshapeforge_worker` via OPENSHAPEFORGE_WORKER_DATABASE_URL, which nothing
+ * in a transaction can change (#223) — which is exactly why the policy can be
+ * read as an authorization statement now and could not before.
  *
  * No audit row, because there is no bypass to audit — which is also why the
  * poll loop's rate stops being a problem for the break-glass trail.

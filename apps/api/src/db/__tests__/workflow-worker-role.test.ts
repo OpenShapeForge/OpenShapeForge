@@ -4,17 +4,21 @@
  *
  * Nothing is stubbed: the module registry is the generated one, the role is
  * resolved out of whatever the workflow plugin contributes, and the process
- * connects as the restricted, non-superuser `openshapeforge_app` role — so the
- * RLS policy is the real gate, not a formality. What this proves that the unit
- * tests cannot is the whole chain holding at once:
+ * connects as the restricted, non-superuser `openshapeforge_worker` role
+ * through OPENSHAPEFORGE_WORKER_DATABASE_URL — so the RLS policy is the real
+ * gate, not a formality, and so are the worker role's enumerated grants. What
+ * this proves that the unit tests cannot is the whole chain holding at once:
  *
- *   registry -> module init -> worker role -> RLS policy -> claim -> dispatch
+ *   registry -> module init -> worker connection string -> worker role
+ *            -> RLS policy -> claim -> dispatch
  *
  * The command is a cancel because it is the shortest command that does real
- * work. The claim is cross-tenant (the worker sets `app.worker_role`); the work
- * itself opens `withDbSession` on the command's own tenant, which is the split
- * the whole design rests on — the cross-tenant surface is the queue, not the
- * work.
+ * work. The claim is cross-tenant (connected as the worker role, presenting
+ * `app.worker_role`); the work itself opens `withDbSession` on the command's
+ * own tenant, which is the split the whole design rests on — the cross-tenant
+ * surface is the queue, not the work. Since #223 that second half also proves
+ * the grant: the tenant-scoped session reaches `workflow.instances` because
+ * that table declares `workerDml`, not because the role holds a schema sweep.
  *
  * The later tests pin the *other* poll loops the role owns, and they name none
  * of them on purpose: they seed a due schedule or an expired wait, start the
@@ -32,7 +36,10 @@ import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
-import { APP_ROLE } from "../migrations/app-role.js";
+import {
+  DEV_WORKER_ROLE_PASSWORD_DEFAULT,
+  WORKER_ROLE as WORKER_DB_ROLE,
+} from "../migrations/worker-role.js";
 import { loadRuntimeModules } from "../../modules/registry.js";
 import { startWorkerRole } from "../../roles/worker.js";
 
@@ -40,18 +47,23 @@ const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 
-const APP_ROLE_PASSWORD = "openshapeforge_app";
 const TEST_TIMEOUT = 90_000;
 const WORKER_ROLE = "workflow-worker";
 
-function scratchUrl(name: string, asAppRole: boolean): string {
+/**
+ * `asWorkerRole` connects as `openshapeforge_worker` — since #223 the role the
+ * queue policies compare `current_user` against, and the one a worker process
+ * gets from OPENSHAPEFORGE_WORKER_DATABASE_URL. Everything else connects as the
+ * privileged role, which seeds and asserts.
+ */
+function scratchUrl(name: string, asWorkerRole: boolean): string {
   const url = new URL(ADMIN_URL);
   if (url.pathname === "/openshapeforge_dev") {
     throw new Error("admin URL must not point at openshapeforge_dev");
   }
-  if (asAppRole) {
-    url.username = APP_ROLE;
-    url.password = APP_ROLE_PASSWORD;
+  if (asWorkerRole) {
+    url.username = WORKER_DB_ROLE;
+    url.password = DEV_WORKER_ROLE_PASSWORD_DEFAULT;
   }
   url.pathname = `/${name}`;
   return url.toString();
@@ -145,8 +157,11 @@ describe("the workflow-worker role", () => {
         // Exactly what `OPENSHAPEFORGE_ROLE=workflow-worker bun src/index.ts`
         // does, minus the signal wait — including connecting as the restricted
         // role, which is what makes the RLS policy load-bearing here.
+        // Through the environment, not an injected URL: resolving
+        // OPENSHAPEFORGE_WORKER_DATABASE_URL (and refusing to fall back to
+        // DATABASE_URL) is part of the chain being proved.
         const handle = await startWorkerRole(WORKER_ROLE, {
-          databaseUrl: scratchUrl(name, true),
+          env: { OPENSHAPEFORGE_WORKER_DATABASE_URL: scratchUrl(name, true) },
           log: { info: () => {}, warn: () => {}, error: () => {} },
         });
 
@@ -252,8 +267,11 @@ describe("the workflow-worker role", () => {
 
         // The same single role as the test above. Nothing here names the
         // schedule worker: if it is not started by the role, nothing fires.
+        // Through the environment, not an injected URL: resolving
+        // OPENSHAPEFORGE_WORKER_DATABASE_URL (and refusing to fall back to
+        // DATABASE_URL) is part of the chain being proved.
         const handle = await startWorkerRole(WORKER_ROLE, {
-          databaseUrl: scratchUrl(name, true),
+          env: { OPENSHAPEFORGE_WORKER_DATABASE_URL: scratchUrl(name, true) },
           log: { info: () => {}, warn: () => {}, error: () => {} },
         });
 

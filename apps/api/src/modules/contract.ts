@@ -103,9 +103,10 @@ export type ModuleWorkerHandle = {
  *
  * Separate processes on purpose: a poll loop and a request path have unrelated
  * failure modes and unrelated scaling needs, and a worker that wedges must not
- * take GraphQL down with it. It is also what lets a worker's database session
- * differ from a request's — the workflow worker presents `app.worker_role`,
- * which the API's request path never sets.
+ * take GraphQL down with it. It is also what lets a worker's database identity
+ * differ from a request's: a worker connects as `openshapeforge_worker` (its
+ * own OPENSHAPEFORGE_WORKER_DATABASE_URL, never the API's) and presents
+ * `app.worker_role` on top, and the queue policies check both.
  */
 export type ModuleWorker = {
   start(context: ModuleWorkerContext): ModuleWorkerHandle | Promise<ModuleWorkerHandle>;

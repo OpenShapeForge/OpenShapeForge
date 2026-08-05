@@ -126,6 +126,12 @@ presentation flag — it selects a display component instead of an input one —
 no transport enforces it, so honouring it here would advertise a narrower write
 surface than REST and GraphQL actually accept.
 
+Authored `immutable` **is** consulted, and only on update: the field appears in
+the create schema and is absent from the update schema. That is the flag which
+carries the API contract, and it reaches the CRUD layer through the manifest
+column, so the advertised update schema and the server's `400` come from one
+authored fact rather than two rules that can drift (#177).
+
 ### Enumerations
 
 `options.type: referentiedata` expands to concrete values at compile time from

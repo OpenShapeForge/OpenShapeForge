@@ -167,7 +167,14 @@
         "variables": { "type": "string", "enum": ["none", "whole", "template", "both"], "default": "none" },
         "sortable": { "type": "boolean" },
         "required": { "type": "boolean" },
-        "readOnly": { "type": "boolean" },
+        "readOnly": {
+          "type": "boolean",
+          "description": "Presentation only: render the field with its display component instead of its input component. Not an API contract — use `immutable` for that."
+        },
+        "immutable": {
+          "type": "boolean",
+          "description": "API contract: the field may be set when the record is created and is refused by every generated transport afterwards (REST 400; absent from the GraphQL update input and the MCP update schema). Use it for provenance links and other values that must not be re-pointed once written."
+        },
         "label": { "$ref": "#/$defs/localizedText" },
         "description": { "$ref": "#/$defs/localizedText" },
         "placeholder": { "$ref": "#/$defs/localizedText" },

@@ -88,7 +88,7 @@ export type GeneratedCrudAuthorization = {
   roles: Record<GeneratedCrudOperation, string[]>;
 };
 
-type GeneratedCrudColumn = {
+export type GeneratedCrudColumn = {
   name: string;
   type: string;
   required: boolean;
@@ -101,6 +101,12 @@ type GeneratedCrudColumn = {
    * column from readers who lack a write grant on the entity (#96/#101).
    */
   classification?: "confidential" | "pii" | "bsn";
+  /**
+   * Authored `immutable: true` on the backing field: settable at create,
+   * refused on update (#177). Reaches the runtime the way `classification`
+   * does, so all three transports inherit it from one authored fact.
+   */
+  immutable?: boolean;
 };
 
 export type GeneratedCrudRelationship = {
@@ -610,16 +616,49 @@ async function fetchGeneratedEntityRow(
   });
 }
 
-function writableColumnMap(table: GeneratedCrudTable) {
+/**
+ * The single writability rule every transport shares. REST body validation,
+ * the GraphQL input types, the OpenAPI bodies and the MCP tool schemas all
+ * resolve to this predicate, so a field cannot be advertised as writable by one
+ * transport and refused by another (#177).
+ *
+ * Two rules, deliberately not merged:
+ *
+ * - The **column-shaped** clauses are absolute. `id` (primary key), identity
+ *   columns, `tenant_id`, `created_at` and `updated_at` are server-managed at
+ *   create AND update. They cannot be folded into the authored flag below:
+ *   `tenant_id` is injected by the manifest compiler and has no authoring field
+ *   at all (no `sourceField`), so no YAML property could ever cover it, and the
+ *   `_base.yaml` timestamps must stay unsettable on create, which an
+ *   update-only flag does not achieve.
+ * - The **authored** clause carries `immutable: true` from the field YAML. It
+ *   bites on update only: the value is a caller's to set once and the server's
+ *   to protect thereafter.
+ *
+ * Authored `readOnly` is NOT consulted here — in this vocabulary it selects a
+ * display component over an input one (docs/mcp.md, #180).
+ */
+export function isWritableColumn(
+  column: GeneratedCrudColumn,
+  operation: "create" | "update",
+) {
+  return (
+    !column.primaryKey &&
+    column.generated !== "identity" &&
+    column.name !== "tenant_id" &&
+    column.name !== "created_at" &&
+    column.name !== "updated_at" &&
+    !(operation === "update" && column.immutable === true)
+  );
+}
+
+function writableColumnMap(
+  table: GeneratedCrudTable,
+  operation: "create" | "update",
+) {
   return new Map(
     table.columns
-      .filter((column) =>
-        !column.primaryKey &&
-        column.generated !== "identity" &&
-        column.name !== "tenant_id" &&
-        column.name !== "created_at" &&
-        column.name !== "updated_at",
-      )
+      .filter((column) => isWritableColumn(column, operation))
       .map((column) => [fieldNameForColumn(column), column]),
   );
 }
@@ -627,8 +666,9 @@ function writableColumnMap(table: GeneratedCrudTable) {
 function normalizeWritableValues(
   table: GeneratedCrudTable,
   input: Record<string, unknown>,
+  operation: "create" | "update",
 ) {
-  const writable = writableColumnMap(table);
+  const writable = writableColumnMap(table, operation);
   const values = new Map<GeneratedCrudColumn, unknown>();
   for (const [field, value] of Object.entries(input)) {
     if (field === "id") {
@@ -652,7 +692,7 @@ export async function createGeneratedEntity(
   },
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
-  const values = normalizeWritableValues(table, input.values);
+  const values = normalizeWritableValues(table, input.values, "create");
 
   return withDbSession(db, session, async (trx, dbSession) => {
     const columns = [...values.keys()];
@@ -693,7 +733,7 @@ export async function updateGeneratedEntity(
   },
 ): Promise<GeneratedEntityRow | null> {
   const table = readGeneratedCrudTable(input.table, "update", session);
-  const values = normalizeWritableValues(table, input.values);
+  const values = normalizeWritableValues(table, input.values, "update");
   const updatedAt = table.columns.find((column) => column.name === "updated_at");
   const assignments = [...values.entries()].map(([column, value]) =>
     sql`${sql.id(column.name)} = ${value}`,

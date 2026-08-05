@@ -10,6 +10,7 @@ import {
   getGeneratedEntity,
   createGeneratedEntity,
   deleteGeneratedEntity,
+  isWritableColumn,
   listGeneratedEntities,
   listGeneratedEntityRelation,
   updateGeneratedEntity,
@@ -93,16 +94,6 @@ function relationFieldType(relationship: GeneratedCrudRelationship) {
     : relationship.target;
 }
 
-function isMutableColumn(column: GeneratedTable["columns"][number]) {
-  return (
-    !column.primaryKey &&
-    column.generated !== "identity" &&
-    column.name !== "tenant_id" &&
-    column.name !== "created_at" &&
-    column.name !== "updated_at"
-  );
-}
-
 /**
  * Exported for tests: the shipped manifest declares no classified column, so
  * the nullability rule above (#168) has nothing to act on in
@@ -125,15 +116,24 @@ export function renderTypeDefinition(table: GeneratedTable) {
       `      ${relationship.name}: ${relationFieldType(relationship)}`,
       `      ${relationship.name}Aggregate: AggregateResult!`,
     ]);
-  const mutableColumns = table.columns.filter(isMutableColumn);
-  const createInputBody = mutableColumns.length === 0
+  // Create and update inputs are rendered from the CRUD layer's own
+  // writability predicate, per operation: a column authored `immutable` is
+  // offered on create and absent from the update input, so a mutation naming it
+  // fails GraphQL validation rather than being silently dropped (#177).
+  const creatableColumns = table.columns.filter((column) =>
+    isWritableColumn(column, "create"),
+  );
+  const updatableColumns = table.columns.filter((column) =>
+    isWritableColumn(column, "update"),
+  );
+  const createInputBody = creatableColumns.length === 0
     ? "      _empty: String"
-    : mutableColumns
+    : creatableColumns
         .map((column) => `      ${fieldNameForColumn(column)}: ${graphqlScalarForColumn(column)}`)
         .join("\n");
   const updateInputBody = [
     "      id: ID!",
-    ...mutableColumns.map(
+    ...updatableColumns.map(
       (column) => `      ${fieldNameForColumn(column)}: ${graphqlScalarForColumn(column)}`,
     ),
   ].join("\n");

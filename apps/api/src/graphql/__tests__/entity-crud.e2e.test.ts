@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import {
   describe,
   expectData,
+  gql,
   registerSuiteLifecycle,
   seed,
   tenantA,
@@ -17,7 +18,9 @@ import {
 import {
   createRow,
   fieldName,
+  foreignKeyTargets,
   tables,
+  tablesByName,
   textColumnFor,
   untrackRow,
 } from "./e2e/entity-factory.js";
@@ -184,5 +187,51 @@ for (const table of tables) {
       );
       expect(data[graphql.deleteMutationName]).toBe(false);
     });
+
+    /**
+     * Authored `immutable` over GraphQL (#177). The update input is rendered
+     * from the same writability rule REST and MCP consult, so the field is
+     * offered on create and simply is not a member of the update input — a
+     * mutation naming it fails schema validation rather than being silently
+     * dropped. Manifest-driven: a table with no immutable column contributes no
+     * test and keeps exactly the surface it had.
+     */
+    const immutable = table.columns.find((column) => column.immutable);
+    if (immutable) {
+      const immutableField = fieldName(immutable);
+      const fkTarget = foreignKeyTargets(table).get(immutable.name);
+      const read = `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { ${immutableField} } }`;
+
+      test(`create accepts ${immutableField}; update naming it is refused`, async () => {
+        const value = fkTarget
+          ? await createRow(tablesByName.get(fkTarget)!, tenantA)
+          : randomUUID();
+        const id = await createRow(table, tenantA, { [immutableField]: value });
+
+        const created = await expectData(tenantA, read, { id });
+        expect(created[graphql.singleQueryName][immutableField]).toBe(value);
+
+        // Re-pointing the record at a different parent is the integrity gap.
+        // The value offered is one the column would otherwise accept, so this
+        // fails for the schema's reason and not the database's.
+        const repointed = fkTarget
+          ? await createRow(tablesByName.get(fkTarget)!, tenantA)
+          : randomUUID();
+        const refused = await gql(
+          tenantA,
+          `mutation($input: Update${typeName}Input!) {
+             ${graphql.updateMutationName}(input: $input) { id }
+           }`,
+          { input: { id, [immutableField]: repointed } },
+        );
+        expect(refused.data ?? null).toBeNull();
+        expect(JSON.stringify(refused.errors)).toContain(
+          `Field \\"${immutableField}\\" is not defined by type \\"Update${typeName}Input\\"`,
+        );
+
+        const after = await expectData(tenantA, read, { id });
+        expect(after[graphql.singleQueryName][immutableField]).toBe(value);
+      });
+    }
   });
 }

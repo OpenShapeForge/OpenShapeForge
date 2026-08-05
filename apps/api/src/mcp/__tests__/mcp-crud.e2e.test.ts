@@ -293,5 +293,64 @@ describe("generated MCP server", () => {
       });
       expect(toolError(body)).toMatch(/BAD_USER_INPUT/);
     });
+
+    /**
+     * Authored `immutable` over MCP (#177). The advertised schema and the
+     * server's answer come from the same authored fact, so a model that reads
+     * the catalog and a model that guesses both learn the same rule. A table
+     * with no immutable column asserts the unaffected case: create and update
+     * advertise the same properties.
+     */
+    const immutable = table.columns.find((column) => column.immutable);
+
+    test(`${prefix}: the update schema ${immutable ? "withholds" : "matches create on"} immutable fields`, async () => {
+      const { body } = await rpc(tenantA, "tools/list");
+      const tools = body.result.tools as { name: string; inputSchema: any }[];
+      const create = tools.find((tool) => tool.name === `${prefix}_create`)!;
+      const update = tools.find((tool) => tool.name === `${prefix}_update`)!;
+      const creatable = Object.keys(create.inputSchema.properties);
+      const updatable = Object.keys(update.inputSchema.properties.values.properties);
+
+      if (!immutable) {
+        expect(updatable).toEqual(creatable);
+        return;
+      }
+      const field = fieldName(immutable);
+      expect(creatable).toContain(field);
+      expect(updatable).not.toContain(field);
+      expect(updatable).toEqual(creatable.filter((key) => key !== field));
+    });
+
+    if (immutable) {
+      const field = fieldName(immutable);
+      const fkTarget = foreignKeyTargets(table).get(immutable.name);
+
+      test(`${prefix}: accepts ${field} on create and refuses it on update`, async () => {
+        const value = fkTarget
+          ? await createRow(tablesByName.get(fkTarget)!, tenantA)
+          : sampleValue(immutable, seed);
+        const args = await buildCreateArgs(table, tenantA);
+        const created = await callTool(tenantA, `${prefix}_create`, {
+          ...args,
+          [field]: value,
+        });
+        expect(toolError(created.body)).toBeUndefined();
+        const row = toolPayload(created.body);
+        createdRows.push({ table, id: row.id, identity: tenantA });
+        expect(row[field]).toBe(value);
+
+        const { body } = await callTool(tenantA, `${prefix}_update`, {
+          id: row.id,
+          values: { [field]: value },
+        });
+        expect(toolError(body)).toMatch(/BAD_USER_INPUT/);
+        expect(toolError(body)).toMatch(new RegExp(field));
+
+        const after = toolPayload(
+          (await callTool(tenantA, `${prefix}_get`, { id: row.id })).body,
+        );
+        expect(after[field]).toBe(value);
+      });
+    }
   }
 });

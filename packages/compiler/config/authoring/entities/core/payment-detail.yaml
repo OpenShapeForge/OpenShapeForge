@@ -172,6 +172,10 @@ fields:
     valueType: string
     required: false
     readOnly: true
+    # The provenance link to the owning relation. Settable when the payment
+    # detail is created; refused afterwards, so bank details cannot be
+    # re-pointed at a different subject inside the tenant (#177).
+    immutable: true
     label:
       en: Relation ID
       nl: Relatie ID

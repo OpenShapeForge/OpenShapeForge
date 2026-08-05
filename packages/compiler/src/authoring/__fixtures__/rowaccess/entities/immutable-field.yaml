@@ -1,0 +1,58 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ImmutableField
+title: Immutable Field
+description: >-
+  Test fixture — carries an authored immutable field (and a readOnly one that is
+  not immutable) to prove which flag reaches the manifest column. Not part of
+  the shipped slice.
+language: en
+displayTemplate: "{{label}}"
+filterField: label
+labels:
+  en: Immutable Field
+  nl: Immutable Field
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+      - Relaties.All.ReadWrite
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+fields:
+  - key: label
+    valueType: string
+    required: true
+    label:
+      en: Label
+      nl: Label
+    persisted:
+      column: label
+      storageClass: core
+  - key: provenanceKey
+    valueType: string
+    required: false
+    immutable: true
+    label:
+      en: Provenance key
+      nl: Provenance key
+    persisted:
+      column: provenance_key
+      storageClass: core
+  - key: displayOnly
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: Display only
+      nl: Display only
+    persisted:
+      column: display_only
+      storageClass: core

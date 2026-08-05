@@ -388,6 +388,27 @@ function collectFieldSensitivities(
   return result;
 }
 
+/**
+ * Flatten compiled fields into the set of keys authored `immutable: true`.
+ * Used to stamp each backing column so the runtime's writability rule can
+ * refuse the field on update (#177) — the same route `classification` takes,
+ * for the same reason: an authored flag is worth nothing until the manifest
+ * carries it to the transports.
+ */
+function collectImmutableFieldKeys(
+  fields: CompiledField[] | undefined,
+  result = new Set<string>(),
+): Set<string> {
+  for (const field of fields ?? []) {
+    if (field.immutable) result.add(field.key);
+    collectImmutableFieldKeys(field.children, result);
+    if (field.item) {
+      collectImmutableFieldKeys([field.item], result);
+    }
+  }
+  return result;
+}
+
 function sortTablesByDependencies(tables: TableDefinition[]): TableDefinition[] {
   const pending = new Map(tables.map((table) => [tableKey(table), table]));
   const sorted: TableDefinition[] = [];
@@ -929,6 +950,9 @@ export function compileAuthoringBackendManifest(
     // Field-key → restricting data-classification (pii/bsn/confidential), used
     // to stamp each backing column so the runtime can redact it (#96/#101).
     const fieldSensitivities = collectFieldSensitivities(candidate.contract.model.fields);
+    // Field keys authored `immutable: true`, stamped onto their backing column
+    // so the transports can refuse them on update (#177).
+    const immutableFields = collectImmutableFieldKeys(candidate.contract.model.fields);
 
     for (const storageColumn of candidate.contract.storage.columns) {
       const field = candidate.fieldsByKey.get(storageColumn.field);
@@ -941,6 +965,7 @@ export function compileAuthoringBackendManifest(
         ...(primaryKey || !storageColumn.nullable ? { required: true } : {}),
         sourceField: storageColumn.field,
         ...(sensitivity ? { classification: sensitivity } : {}),
+        ...(immutableFields.has(storageColumn.field) ? { immutable: true as const } : {}),
       };
       const defaultValue = defaultSql(field, column);
       if (defaultValue !== undefined) {

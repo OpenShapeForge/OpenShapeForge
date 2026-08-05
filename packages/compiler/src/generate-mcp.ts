@@ -189,10 +189,21 @@ function schemaForField(
  * it as one here omitted PaymentDetail.relationId, the only link between a
  * payment detail and its relation, so an agent could not create the attached
  * record that REST and GraphQL create happily.
+ *
+ * Authored `immutable` IS consulted, and only on update: it means "settable at
+ * create, fixed afterwards" (#177). The CRUD layer reads the same flag off the
+ * manifest column, so the advertised update schema and the server's refusal
+ * come from one authored fact.
  */
-function writableFields(fields: CompiledField[]): CompiledField[] {
+function writableFields(
+  fields: CompiledField[],
+  operation: "create" | "update",
+): CompiledField[] {
   return fields.filter(
-    (field) => !SERVER_MANAGED_FIELDS.has(field.key) && field.computed === undefined,
+    (field) =>
+      !SERVER_MANAGED_FIELDS.has(field.key) &&
+      field.computed === undefined &&
+      !(operation === "update" && field.immutable === true),
   );
 }
 
@@ -272,7 +283,8 @@ function buildToolsForEntity(
   if (!mcp) return [];
 
   const fields = contract.model.fields;
-  const writable = writableFields(fields);
+  const creatable = writableFields(fields, "create");
+  const updatable = writableFields(fields, "update");
   const label = entityLabel(contract);
   const description = entityDescription(contract);
   const sortable = sortableFieldKeys(fields);
@@ -364,7 +376,7 @@ function buildToolsForEntity(
       table,
       title: `Create ${label}`,
       description: `${description} Creates a new record.`,
-      inputSchema: objectSchema(writable, referentiedata, { requireRequired: true }),
+      inputSchema: objectSchema(creatable, referentiedata, { requireRequired: true }),
       annotations: annotationsFor("create"),
     });
   }
@@ -372,7 +384,7 @@ function buildToolsForEntity(
   if (mcp.operations.update) {
     // Update is a partial: nothing is required beyond the id, because omitting
     // a field means "leave it alone", not "clear it".
-    const patch = objectSchema(writable, referentiedata, { requireRequired: false });
+    const patch = objectSchema(updatable, referentiedata, { requireRequired: false });
     tools.push({
       name: named("update"),
       operation: "update",

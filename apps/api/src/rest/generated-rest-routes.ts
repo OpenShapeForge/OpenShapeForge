@@ -27,6 +27,7 @@ import {
   deleteGeneratedEntity,
   getGeneratedEntity,
   getGeneratedCrudTables,
+  isWritableColumn,
   listGeneratedEntities,
   updateGeneratedEntity,
 } from "../graphql/generated-crud.js";
@@ -53,18 +54,6 @@ function fieldNameForColumn(column: GeneratedColumn) {
   return column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase());
 }
 
-// Mirrors writableColumnMap in generated-crud.ts: server-managed columns are
-// never accepted in request bodies.
-function isWritableColumn(column: GeneratedColumn) {
-  return (
-    !column.primaryKey &&
-    column.generated !== "identity" &&
-    column.name !== "tenant_id" &&
-    column.name !== "created_at" &&
-    column.name !== "updated_at"
-  );
-}
-
 function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
   return Object.fromEntries(
     table.columns.map((column) => [fieldNameForColumn(column), row[column.name]]),
@@ -75,16 +64,24 @@ function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
  * REST bodies are stricter than GraphQL parity: unknown keys are rejected
  * with 400 instead of being silently dropped by normalizeWritableValues —
  * a typo'd field name in a JSON body would otherwise appear to succeed.
+ *
+ * The writable set comes from the CRUD layer's own predicate rather than a
+ * local copy, so a field REST accepts is exactly a field the CRUD layer will
+ * store — including the create/update asymmetry an authored `immutable` field
+ * introduces (#177).
  */
 function assertWritableBody(
   table: GeneratedTable,
   body: unknown,
+  operation: "create" | "update",
 ): Record<string, unknown> {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     throw new HttpError(400, "BAD_USER_INPUT", "Request body must be a JSON object.");
   }
   const writable = new Set(
-    table.columns.filter(isWritableColumn).map(fieldNameForColumn),
+    table.columns
+      .filter((column) => isWritableColumn(column, operation))
+      .map(fieldNameForColumn),
   );
   for (const key of Object.keys(body)) {
     if (!writable.has(key)) {
@@ -321,7 +318,7 @@ export function registerGeneratedRestRoutes(
       if (rest.operations.create) {
         instance.post(base, async (request, reply) => {
           const context = await requireRestContext(request);
-          const values = assertWritableBody(table, request.body ?? {});
+          const values = assertWritableBody(table, request.body ?? {}, "create");
           const row = await createGeneratedEntity(context.db, context.session, {
             table: table.name,
             values,
@@ -334,7 +331,7 @@ export function registerGeneratedRestRoutes(
         instance.patch(`${base}/:id`, async (request, reply) => {
           const context = await requireRestContext(request);
           const { id } = request.params as { id: string };
-          const values = assertWritableBody(table, request.body ?? {});
+          const values = assertWritableBody(table, request.body ?? {}, "update");
           const row = await updateGeneratedEntity(context.db, context.session, {
             table: table.name,
             id,

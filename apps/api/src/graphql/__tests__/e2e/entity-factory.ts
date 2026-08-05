@@ -7,7 +7,7 @@
  */
 import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { getGeneratedCrudTables } from "../../generated-crud.js";
+import { getGeneratedCrudTables, isWritableColumn } from "../../generated-crud.js";
 import {
   createdRows,
   expectData,
@@ -31,14 +31,17 @@ export function fieldName(column: Column): string {
   );
 }
 
-export function isMutableColumn(column: Column): boolean {
-  return (
-    !column.primaryKey &&
-    column.generated !== "identity" &&
-    column.name !== "tenant_id" &&
-    column.name !== "created_at" &&
-    column.name !== "updated_at"
-  );
+/**
+ * Delegates to the engine's own predicate rather than restating it, so the
+ * suite cannot drift from the API. `create` is the right default here: the
+ * factory's job is building rows, and a column authored `immutable` is settable
+ * exactly then (#177). Tests that build an update body ask for "update".
+ */
+export function isMutableColumn(
+  column: Column,
+  operation: "create" | "update" = "create",
+): boolean {
+  return isWritableColumn(column, operation);
 }
 
 /** FK column name -> target table name (e.g. relation_group_id -> erp.relation_groups). */
@@ -151,8 +154,10 @@ export function textColumnFor(
   table: GeneratedTable,
   preferredField?: string,
 ): Column | undefined {
+  // "update": callers plant a value at create and then change it, so the
+  // column has to be writable in both directions.
   const mutableText = table.columns.filter(
-    (column) => isMutableColumn(column) && column.type === "text",
+    (column) => isMutableColumn(column, "update") && column.type === "text",
   );
   return mutableText.find((column) => fieldName(column) === preferredField) ?? mutableText[0];
 }
@@ -175,7 +180,7 @@ export function textColumnFor(
  */
 export function redactableColumnFor(table: GeneratedTable): Column | undefined {
   return table.columns.find(
-    (column) => isMutableColumn(column) && column.type === "text" && !column.required,
+    (column) => isMutableColumn(column, "update") && column.type === "text" && !column.required,
   );
 }
 

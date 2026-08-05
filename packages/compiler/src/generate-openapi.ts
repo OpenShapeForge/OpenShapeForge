@@ -53,15 +53,20 @@ function schemaForScalar(type: ScalarType): JsonObject {
 }
 
 // Mirrors the writable-column predicate of the API's generated CRUD layer
-// (writableColumnMap in apps/api/src/graphql/generated-crud.ts): server-managed
-// columns are never accepted in request bodies.
-function isWritableColumn(column: TableDefinition["columns"][number]): boolean {
+// (isWritableColumn in apps/api/src/graphql/generated-crud.ts): server-managed
+// columns are never accepted in request bodies, and a column authored
+// `immutable` is accepted on create only (#177).
+function isWritableColumn(
+  column: TableDefinition["columns"][number],
+  operation: "create" | "update",
+): boolean {
   return (
     column.primaryKey !== true &&
     column.generated !== "identity" &&
     column.name !== "tenant_id" &&
     column.name !== "created_at" &&
-    column.name !== "updated_at"
+    column.name !== "updated_at" &&
+    !(operation === "update" && column.immutable === true)
   );
 }
 
@@ -143,7 +148,17 @@ export function renderOpenApiSpec(
     const rest = table.source!.rest!;
     const name = entitySchemaName(table);
     const read = columnProperties(table.columns);
-    const writable = columnProperties(table.columns.filter(isWritableColumn));
+    const creatableColumns = table.columns.filter((column) =>
+      isWritableColumn(column, "create"),
+    );
+    const updatableColumns = table.columns.filter((column) =>
+      isWritableColumn(column, "update"),
+    );
+    const writable = columnProperties(creatableColumns);
+    // A second body schema only where the two differ, so an entity with no
+    // immutable column keeps exactly the spec it had.
+    const hasImmutable = updatableColumns.length !== creatableColumns.length;
+    const updateSchemaName = hasImmutable ? `${name}UpdateInput` : `${name}Input`;
 
     schemas[name] = {
       type: "object",
@@ -155,6 +170,16 @@ export function renderOpenApiSpec(
       additionalProperties: false,
       properties: writable.properties,
     };
+    if (hasImmutable) {
+      schemas[updateSchemaName] = {
+        type: "object",
+        additionalProperties: false,
+        properties: columnProperties(updatableColumns).properties,
+        description:
+          "PATCH body. Fields authored immutable are settable at create only " +
+          "and are rejected here.",
+      };
+    }
     schemas[`${name}List`] = {
       type: "object",
       required: ["items", "totalCount", "nextCursor"],
@@ -255,7 +280,7 @@ export function renderOpenApiSpec(
           required: true,
           content: {
             "application/json": {
-              schema: { $ref: `#/components/schemas/${name}Input` },
+              schema: { $ref: `#/components/schemas/${updateSchemaName}` },
             },
           },
         },

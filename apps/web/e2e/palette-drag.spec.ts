@@ -79,6 +79,22 @@ test("dragging a palette node onto the canvas previews it and then places it", a
     "no preview appeared while the drag was over the canvas, so onCanvasDragOver never fired",
   ).toHaveCount(1);
 
+  // The preview is drawn UNDER the cursor of the drag that created it, so it
+  // must not be something the pointer can move onto. Without this the browser
+  // treats it as the new drop target, fires `dragleave` on the canvas and then
+  // `dragleave` on the preview with no target left, and refuses the drop:
+  // `dragend` arrives instead of `drop`, the preview vanishes, and nothing is
+  // placed.
+  //
+  // Asserted here rather than left to the drop below, because the drop only
+  // fails when the preview happens to render between the last move and the
+  // release. That made this spec fail about one CI run in nine and pass every
+  // time locally. This assertion fails every time instead.
+  await expect(
+    canvasNodes.first(),
+    "the drag preview accepts pointer events, so it steals the drop target from the canvas",
+  ).toHaveCSS("pointer-events", "none");
+
   await page.mouse.up();
 
   // The preview is replaced by the node it stood for: still one card, now the

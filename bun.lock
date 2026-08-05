@@ -58,6 +58,7 @@
         "@openshapeforge/connector-dynamics-finance": "workspace:*",
         "@openshapeforge/connector-exact-online": "workspace:*",
         "@openshapeforge/connector-example-object-store": "workspace:*",
+        "@openshapeforge/connector-twinfield": "workspace:*",
         "@types/bun": "^1.3.5",
         "typescript": "^5.9.0",
       },
@@ -114,6 +115,10 @@
     },
     "connectors/exact-online": {
       "name": "@openshapeforge/connector-exact-online",
+      "version": "0.1.0",
+    },
+    "connectors/twinfield": {
+      "name": "@openshapeforge/connector-twinfield",
       "version": "0.1.0",
     },
     "examples/connectors/object-store": {
@@ -392,6 +397,8 @@
     "@openshapeforge/connector-exact-online": ["@openshapeforge/connector-exact-online@workspace:connectors/exact-online"],
 
     "@openshapeforge/connector-example-object-store": ["@openshapeforge/connector-example-object-store@workspace:examples/connectors/object-store"],
+
+    "@openshapeforge/connector-twinfield": ["@openshapeforge/connector-twinfield@workspace:connectors/twinfield"],
 
     "@openshapeforge/example-plugin-workflow": ["@openshapeforge/example-plugin-workflow@workspace:examples/plugins/workflow"],
 

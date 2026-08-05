@@ -52,10 +52,10 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // Two realms: the tenant realm (authorization.yaml) and the control realm
   // operators sign in against (authorization.control.yaml).
   "authorization-config.schema.json": 2,
-  // The example object store, plus AFAS Profit, Exact Online and Dynamics
-  // Finance, each shipping its contract from its own
+  // The example object store, plus AFAS Profit, Exact Online, Dynamics Finance
+  // and Twinfield, each shipping its contract from its own
   // connectors/<slug>/authoring layer.
-  "connector.schema.json": 4,
+  "connector.schema.json": 5,
   "core-entity.schema.json": 4,
   "retention-policy-catalog.schema.json": 1,
   "semantic-type-catalog.schema.json": 1,

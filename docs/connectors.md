@@ -32,8 +32,10 @@ product before anyone buys it.
 One YAML file per connector under `connectors/` in an authoring layer — for a
 shipped connector that means `connectors/<slug>/authoring/connectors/<slug>.yaml`.
 The slug is the file stem and must be unique across the tree, like entity slugs.
-Worked examples: `connectors/exact-online/` (OAuth, per-country endpoints) and
-`connectors/afas-profit/` (a static token).
+Worked examples: `connectors/exact-online/` (OAuth, per-country endpoints),
+`connectors/afas-profit/` (a static token) and `connectors/twinfield/` (OAuth
+over SOAP, where the request is an XML document rather than a URL and the
+administration travels in a SOAP header).
 
 ```yaml
 schemaVersion: 1

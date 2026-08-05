@@ -15,7 +15,11 @@
  * saving must not be answered from a copy taken before it.
  */
 import { revalidatePath } from "next/cache";
-import { executeGraphqlRequest } from "@/lib/server/graphql-client";
+import {
+  buildGraphqlGatewayRequestContext,
+  executeGraphqlRequest,
+} from "@/lib/server/graphql-client";
+import { buildGatewayUrl } from "@/lib/server/gateway";
 import type { Connector } from "@/features/integrations/types";
 
 const CONNECTOR_FIELDS = /* GraphQL */ `
@@ -34,6 +38,7 @@ const CONNECTOR_FIELDS = /* GraphQL */ `
   configFields
   instances
   supportsVerify
+  usesOAuth
   installations {
     instanceKey
     displayName
@@ -229,5 +234,45 @@ export async function verifyConnector(input: {
       : { ok: false, error: result.message ?? "Connectivity check failed." };
   } catch (error) {
     return toActionResult(error) as VerifyResult;
+  }
+}
+
+/**
+ * Start an OAuth authorization.
+ *
+ * The API answers with the provider URL rather than redirecting, so the browser
+ * navigation stays the front end's decision — a redirect from the API would
+ * make the authenticated half of the flow a cross-site navigation and lose the
+ * session that authorizes it.
+ *
+ * This is the one connector call that is REST rather than GraphQL, because the
+ * flow it starts is a browser round trip that ends at a REST callback. Putting
+ * half of it behind a GraphQL mutation would split one flow across two
+ * transports for no gain.
+ */
+export async function startConnectorAuthorization(input: {
+  slug: string;
+  instanceKey: string;
+}): Promise<{ ok: true; authorizeUrl: string } | { ok: false; error: string }> {
+  try {
+    const { headers } = await buildGraphqlGatewayRequestContext();
+    const url = buildGatewayUrl(
+      `/api/rest/v1/connectors/${encodeURIComponent(input.slug)}/installations/` +
+        `${encodeURIComponent(input.instanceKey)}/authorize`,
+    );
+    const response = await fetch(url, { method: "POST", headers, cache: "no-store" });
+    const payload = (await response.json().catch(() => ({}))) as {
+      authorizeUrl?: string;
+      error?: { message?: string };
+    };
+    if (!response.ok || typeof payload.authorizeUrl !== "string") {
+      return {
+        ok: false,
+        error: payload.error?.message ?? `Could not start authorization (${response.status}).`,
+      };
+    }
+    return { ok: true, authorizeUrl: payload.authorizeUrl };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
 }

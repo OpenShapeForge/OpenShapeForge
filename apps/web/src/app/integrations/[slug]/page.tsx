@@ -47,10 +47,17 @@ function blankInstallation(instanceKey: string): ConnectorInstallation {
 
 export default async function IntegrationDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ oauth?: string | string[] }>;
 }) {
   const { slug } = await params;
+  // The OAuth callback lands here with an outcome. It carries no reason: a
+  // provider's error text can name the code, the client id or an account, so
+  // the detail stays in the audit trail and the logs.
+  const oauthParam = (await searchParams).oauth;
+  const oauth = Array.isArray(oauthParam) ? oauthParam[0] : oauthParam;
   const lang = await getActiveLang();
   const connector = await getConnector(slug);
   if (!connector) notFound();
@@ -77,6 +84,26 @@ export default async function IntegrationDetailPage({
           { href: "/integrations", label: lang === "nl" ? "Integraties" : "Integrations" },
         ]}
       />
+
+      {oauth === "connected" || oauth === "failed" ? (
+        <Card>
+          <CardContent
+            className={
+              oauth === "connected"
+                ? "py-4 text-sm text-muted-foreground"
+                : "py-4 text-sm text-destructive"
+            }
+          >
+            {oauth === "connected"
+              ? lang === "nl"
+                ? "Koppeling geslaagd. De tokens zijn opgeslagen."
+                : "Connected. The tokens are stored."
+              : lang === "nl"
+                ? "Koppelen is niet gelukt. Probeer het opnieuw; de details staan in het auditspoor."
+                : "Connecting failed. Try again — the details are in the audit trail."}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {connector.status === "NOT_LICENSED" ? (
         <Card>

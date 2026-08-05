@@ -377,6 +377,13 @@ jobs:
           emit database-url            "  url"
           emit migrate-database-url    "  migrateUrl"
           emit app-password            "  appPassword"
+          # Required on every install since #223, worker workload or not: the
+          # emitted RLS policies name openshapeforge_worker either way and the
+          # migrate Job is what creates it. Fetching it here fails with the
+          # secret's name; omitting it would fail later inside `helm template`,
+          # which says less. Needs a `${SECRET_PREFIX}-worker-password` entry in
+          # Secret Manager, distinct from app-password.
+          emit worker-password         "  workerPassword"
           echo "auth:" >> secrets.values.yaml
           emit internal-context-secret "  internalContextSecret"
           echo "keycloak:" >> secrets.values.yaml

@@ -257,6 +257,10 @@ helm template openshapeforge deploy/helm/openshapeforge-api \
   message saying so. `database.workerUrl` stays empty until a worker workload is
   deployed; a worker pod without it refuses to boot rather than falling back to
   the API's credentials.
+  **`deploy.yml` reads it from Secret Manager as `<prefix>-worker-password`, so
+  that entry must exist before the first deploy past this change** — create it
+  with a strong random value distinct from `<prefix>-app-password`. The workflow
+  fails naming the missing entry rather than proceeding.
 - Enable autoscaling with `autoscaling.enabled=true`, ingress with
   `ingress.enabled=true`.
 - **Ingress requires TLS.** `ingress.enabled=true` with an empty `ingress.tls`

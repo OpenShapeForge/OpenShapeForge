@@ -574,8 +574,17 @@ Health and readiness probes are never throttled.
 | Service | Image / build | Port | Notes |
 | --- | --- | --- | --- |
 | `platform-db` | `pgvector/pgvector:pg17` | **5434**→5432 | `openshapeforge` / `openshapeforge` / db `openshapeforge_dev` |
-| `keycloak-db` | `postgres:17-alpine` | internal | Keycloak's own DB |
+| `keycloak-db` | `postgres:18-alpine` | internal | Keycloak's own DB |
 | `keycloak` | built from `packages/keycloak-spi` | **8181**→8080 (`KEYCLOAK_PORT`) | `start-dev --import-realm`, org feature on, admin `admin`/`admin` |
+
+Both database volumes carry the Postgres major version they hold
+(`platform-db-data-pg17`, `keycloak-db-data-pg18`), because a major version bump
+needs a fresh volume rather than an in-place upgrade. A machine that ran an
+earlier revision of the compose file still has the unsuffixed
+`openshapeforge_platform-db-data` / `openshapeforge_keycloak-db-data` volumes:
+those are stale, and `docker volume rm` them once you have confirmed you do not
+want what is in them. The platform DB starts empty on its new volume — rerun
+`bun run db:migrate`.
 
 Keycloak imports **two generated** realms — regenerate both with `bun run
 generate` before first compose up. `--import-realm` imports every file in the

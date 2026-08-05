@@ -17,7 +17,7 @@ services:
       POSTGRES_PASSWORD: openshapeforge
       POSTGRES_HOST_AUTH_METHOD: trust
     volumes:
-      - platform-db-data:/var/lib/postgresql/data
+      - platform-db-data-pg17:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U openshapeforge -d openshapeforge_dev"]
       interval: 5s
@@ -57,9 +57,8 @@ services:
       # Mount the whole data root, not `/var/lib/postgresql/data`. Postgres 18+
       # images set PGDATA to a major-version subdirectory
       # (`/var/lib/postgresql/18/docker`) and declare their volume one level up;
-      # mounting the pre-18 path makes the container exit on start. A major
-      # version bump still needs a fresh volume — there is no in-place upgrade.
-      - keycloak-db-data:/var/lib/postgresql
+      # mounting the pre-18 path makes the container exit on start.
+      - keycloak-db-data-pg18:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
       interval: 5s
@@ -117,5 +116,9 @@ services:
       - service-net
 
 volumes:
-  platform-db-data:
-  keycloak-db-data:
+  # Suffixed with the Postgres major version the data belongs to. A major
+  # version bump needs a fresh volume — there is no in-place upgrade — so the
+  # name has to change with the image, or compose silently hands the new image
+  # the old layout and the container exits on start.
+  platform-db-data-pg17:
+  keycloak-db-data-pg18:

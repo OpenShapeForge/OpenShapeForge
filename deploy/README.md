@@ -149,10 +149,15 @@ restated at their setting in `values.yaml`:
   durable-execution ingress — the same number in the worker's code); 30s covers
   the schedule and timer sweeps that `stop()` drains first, plus closing the
   pool.
-- **Same image, same Secret, same restricted database role** as the API. The
-  worker reaches the three queue tables through their RLS policies by presenting
-  `app.worker_role` — nothing is bypassed (see
-  [`../docs/api.md`](../docs/api.md#the-worker-axis)).
+- **Same image and same Secret as the API, but its own database role.** Since
+  #223 the queue policies compare `current_user` against `openshapeforge_worker`,
+  so the pod takes `OPENSHAPEFORGE_WORKER_DATABASE_URL` and the API's role can no
+  longer claim work. Nothing is bypassed — the worker still reaches the queue
+  tables through their RLS policies (see
+  [`../docs/api.md`](../docs/api.md#the-worker-axis)). `database.workerUrl` is
+  therefore **required** whenever `workers.enabled` is true and the chart manages
+  the Secret: the process refuses to fall back to `DATABASE_URL`, so an empty
+  value would start a pod that exits, and the render fails instead.
 - **`workers.role` fails the render when empty**, or when set to `api`:
   `index.ts` reads `OPENSHAPEFORGE_ROLE?.trim() || "api"`, so either would
   quietly start a second copy of the HTTP server with no Service in front of it.

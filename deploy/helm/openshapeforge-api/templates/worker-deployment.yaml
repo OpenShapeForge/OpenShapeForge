@@ -1,4 +1,7 @@
 {{- if .Values.workers.enabled -}}
+{{- if and (not .Values.database.existingSecret) (not .Values.database.workerUrl) -}}
+{{- fail "workers.enabled is true but database.workerUrl is empty. Since #223 a worker connects as openshapeforge_worker and refuses to fall back to DATABASE_URL, so the pod would start and exit. Set database.workerUrl (its password must equal database.workerPassword), or supply database.existingSecret carrying OPENSHAPEFORGE_WORKER_DATABASE_URL." -}}
+{{- end -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -51,14 +54,18 @@ spec:
             # The whole difference between this workload and the API one.
             - name: OPENSHAPEFORGE_ROLE
               value: {{ include "openshapeforge-api.workerRole" . | quote }}
-            # Same Secret, same restricted (NOSUPERUSER NOBYPASSRLS) role as the
-            # API: the worker reaches the three queue tables through their RLS
-            # policies, by presenting `app.worker_role`, not by bypassing them.
-            - name: DATABASE_URL
+            # Same Secret as the API, but a DIFFERENT restricted role. Since
+            # #223 the queue policies compare `current_user` against
+            # openshapeforge_worker, so the connected role — not a session
+            # variable — is what authorizes a cross-tenant claim, and the API's
+            # role can no longer make one. The process refuses to start on
+            # DATABASE_URL, including when it is copied into this variable, so
+            # this key is not interchangeable with the API's.
+            - name: OPENSHAPEFORGE_WORKER_DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ include "openshapeforge-api.secretName" . }}
-                  key: DATABASE_URL
+                  key: OPENSHAPEFORGE_WORKER_DATABASE_URL
             {{- with .Values.workers.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

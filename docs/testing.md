@@ -11,7 +11,8 @@ bun run check:generated         # artifacts fresh + deterministic, no orphans
 bun run check:ts-nocheck        # compiler/workflow @ts-nocheck baseline does not grow
 bun run typecheck:compiler && bun run typecheck:api
 bun run test:compiler           # compiler unit tests (bun test packages/compiler)
-bun run test:e2e                # manifest-driven GraphQL e2e suite (needs Postgres)
+bun run test:e2e                # manifest-driven GraphQL e2e suite (needs Postgres,
+                                # shared across worktrees — see below)
 bun run test:e2e:report         # same suite + HTML report
 bun run --cwd apps/api test:migrations   # migrator vs throwaway scratch DBs
 bun run test:perf               # k6 load suite (needs k6 + a running API)
@@ -85,7 +86,7 @@ a shared harness:
 
 | File | Concern |
 | --- | --- |
-| `schema-drift.e2e.test.ts` | preflight: DB schema matches the bundled manifest, else fail fast with `bun run db:migrate` guidance |
+| `schema-drift.e2e.test.ts` | preflight: DB schema matches the bundled manifest, else fail fast with the remedy that fits the direction of the drift (see [One Postgres, many worktrees](#one-postgres-many-worktrees)) |
 | `entity-crud.e2e.test.ts` | per entity: create, get, filtered list, sort, update, delete |
 | `entity-relationships.e2e.test.ts` | belongsTo/hasMany traversal + aggregates |
 | `entity-events.e2e.test.ts` | each mutation appends exactly one `created`/`updated`/`deleted` journal event; reads append none; sequences increase |
@@ -152,6 +153,47 @@ Properties worth knowing:
   the compose stack is `SUPERUSER`, which bypasses row-level security outright,
   so a cross-tenant test that passes under it has only proven the application's
   own `WHERE` clause.
+
+### One Postgres, many worktrees
+
+`bun run test:e2e` connects to `DATABASE_URL`, which defaults to
+`openshapeforge_dev` on the compose Postgres. **Every git worktree on the
+machine shares that one database**, and `bun run db:migrate` stamps the
+migrating branch's manifest checksum into it. So a checkout that declares one
+entity more than yours leaves `openshapeforge_dev` holding a table your branch
+does not declare, and `schema-drift.e2e.test.ts` then fails the whole suite on
+your branch — which has changed nothing.
+
+The preflight tells the two directions apart and prints only the remedy that
+fits:
+
+- **The database is behind your manifest.** Nothing in it is outside what your
+  branch declares, so `bun run db:migrate` rolls it forward: new tables and new
+  columns are additive and apply without touching data.
+- **The database carries schema your branch does not declare.** The message
+  names the offending tables and columns. `db:migrate` cannot fix this and will
+  refuse — rolling forward has no way to drop a table — so rerunning it is
+  wasted time. Point the suite at a scratch database instead, which leaves
+  everyone else's `openshapeforge_dev` where it is:
+
+  ```sh
+  ADMIN="${OPENSHAPEFORGE_MIGRATE_DATABASE_URL:-$DATABASE_URL}"
+  psql "${ADMIN%/*}/postgres" -c 'create database openshapeforge_e2e'
+  OPENSHAPEFORGE_MIGRATE_DATABASE_URL="${ADMIN%/*}/openshapeforge_e2e" bun run db:migrate
+  DATABASE_URL="${DATABASE_URL%/*}/openshapeforge_e2e" bun run test:e2e
+  ```
+
+  The two URLs stay separate on purpose: creating and migrating need the
+  privileged role, while the suite keeps running as whatever `DATABASE_URL`
+  names, so the RLS point above survives the move to a scratch database.
+
+  Recreating `openshapeforge_dev` works too, at the cost of its data — and only
+  until the next worktree migrates it.
+
+Either way the failure is **not** a regression in the branch under test. Drop
+the scratch database when you are done (`drop database … with (force)`) —
+abandoned ones accumulate on the compose Postgres and are indistinguishable
+from live ones to the next person.
 
 ## HTML report
 

@@ -64,6 +64,12 @@ const COPY = {
     en: "This integration is authorized at the provider. Save the client details first, then connect.",
     nl: "Deze integratie wordt bij de provider geautoriseerd. Sla eerst de clientgegevens op en koppel daarna.",
   },
+  // No Connect button for this flow, so the hint has to say why one is absent
+  // rather than leaving an operator looking for it.
+  appAuthHint: {
+    en: "This integration signs in as an application. Save the client details and it is ready — there is nothing to connect.",
+    nl: "Deze integratie logt in als applicatie. Sla de clientgegevens op en hij is klaar — er valt niets te koppelen.",
+  },
 } satisfies Record<string, Record<string, string>>;
 
 export function InstallationPanel({
@@ -272,7 +278,9 @@ export function InstallationPanel({
         ) : null}
 
         {connector.usesOAuth ? (
-          <p className="text-sm text-muted-foreground">{say("oauthHint")}</p>
+          <p className="text-sm text-muted-foreground">
+            {connector.requiresAuthorization ? say("oauthHint") : say("appAuthHint")}
+          </p>
         ) : null}
 
         <div className="flex flex-wrap gap-2">
@@ -291,7 +299,7 @@ export function InstallationPanel({
           {/* Only for OAuth contracts, and only once the installation exists:
               the flow needs the stored client id, and there is nothing to
               authorize before a save. */}
-          {persisted && connector.usesOAuth ? (
+          {persisted && connector.requiresAuthorization ? (
             <Button onClick={onConnect} disabled={connecting || pending}>
               {connecting
                 ? say("connecting")

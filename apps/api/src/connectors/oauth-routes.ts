@@ -143,6 +143,20 @@ export function registerConnectorOAuthRoutes(
             },
           });
         }
+        // Client credentials authenticate the application itself. There is no
+        // consent screen to send anyone to, and the token is minted on first
+        // use — so this route has nothing to do rather than something to do
+        // badly.
+        if (contract.auth.flow !== "authorizationCode" || !contract.auth.authorizeUrl) {
+          return reply.status(400).send({
+            error: {
+              code: "CONNECTOR_OAUTH_FAILED",
+              message:
+                `Connector "${slug}" authenticates as an application and needs no ` +
+                "authorization; configure its client credentials instead.",
+            },
+          });
+        }
 
         const session = {
           tenantId: resolved.tenantId ?? "",
@@ -263,6 +277,13 @@ export function registerConnectorOAuthRoutes(
       slug = record.connectorSlug;
 
       const contract = findConnectorContract(record.connectorSlug);
+      if (contract?.auth && contract.auth.flow !== "authorizationCode") {
+        request.log.error(
+          { slug: record.connectorSlug },
+          "Connector OAuth callback for a contract that no longer uses the authorization-code flow.",
+        );
+        return reply.redirect(landingUrl(options, slug, "failed"), 302);
+      }
       if (!contract?.auth) {
         request.log.error(
           { slug: record.connectorSlug },

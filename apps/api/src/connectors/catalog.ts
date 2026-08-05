@@ -73,9 +73,10 @@ export type ConnectorContract = {
    */
   auth?: {
     type: "oauth2";
-    flow: "authorizationCode";
-    /** May interpolate `{fieldKey}` from non-secret configuration. */
-    authorizeUrl: string;
+    /** `clientCredentials` has no consent screen, no callback and no refresh token. */
+    flow: "authorizationCode" | "clientCredentials";
+    /** May interpolate `{fieldKey}` from non-secret configuration. Authorization code only. */
+    authorizeUrl?: string;
     tokenUrl: string;
     scopes: string[];
     clientIdField: string;

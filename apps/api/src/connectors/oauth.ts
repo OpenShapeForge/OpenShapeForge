@@ -26,9 +26,10 @@
  * halves are needed: one stops a contract naming its way in, the other stops
  * the invocation path handing it over by accident.
  */
-import { sql } from "kysely";
+import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
+import type { DB } from "../generated/db/types.js";
 import { recordConnectorAudit } from "./audit.js";
 import type { ConnectorContract } from "./catalog.js";
 import { ConnectorExecutionError, type FetchLike } from "./executor.js";
@@ -272,6 +273,74 @@ export async function writeOAuthTokens(input: {
   });
 }
 
+/**
+ * Request a token as the application itself.
+ *
+ * No refresh token comes back and none is sent: the client credentials ARE the
+ * durable secret, so an expired access token is simply asked for again. That
+ * makes this flow strictly simpler than a refresh — there is nothing single-use
+ * to lose a race over, which is why the caller does not need to serialise it.
+ */
+async function requestClientCredentialsToken(
+  contract: ConnectorContract,
+  tokenUrl: string,
+  clientId: string,
+  clientSecret: string,
+  scopes: readonly string[],
+  boundFetch: FetchLike,
+  now: number,
+): Promise<OAuthTokens> {
+  const body = new URLSearchParams({
+    grant_type: "client_credentials",
+    client_id: clientId,
+    client_secret: clientSecret,
+    scope: scopes.join(" "),
+  });
+
+  const response = await boundFetch(tokenUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      accept: "application/json",
+    },
+    body: body.toString(),
+  });
+
+  if (!response.ok) {
+    // A refused client-credentials grant is a CONFIGURATION problem — a wrong
+    // secret, an expired one, a scope the application was never granted — and
+    // it is fixed by an administrator rather than by re-authorizing, because
+    // there is nobody to re-authorize as.
+    if (response.status === 400 || response.status === 401) {
+      throw new ConnectorOAuthError(
+        "CONNECTOR_OAUTH_FAILED",
+        `Connector "${contract.slug}" was refused a client-credentials token; check the client ` +
+          "id, secret and scope on this installation.",
+      );
+    }
+    throw new ConnectorOAuthError(
+      "CONNECTOR_OAUTH_FAILED",
+      `Connector "${contract.slug}" token request failed with status ${response.status}.`,
+    );
+  }
+
+  const payload = (await response.json()) as {
+    access_token?: unknown;
+    expires_in?: unknown;
+  };
+  if (typeof payload.access_token !== "string") {
+    throw new ConnectorOAuthError(
+      "CONNECTOR_OAUTH_FAILED",
+      `Connector "${contract.slug}" token endpoint returned no access token.`,
+    );
+  }
+  const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : 3600;
+  return {
+    accessToken: payload.access_token,
+    expiresAt: Math.floor(now / 1000) + expiresIn,
+  };
+}
+
 export type EnsureTokenInput = {
   db: OpenShapeForgeDatabase;
   session: DbSessionInput;
@@ -330,13 +399,21 @@ export async function ensureAccessToken(input: EnsureTokenInput): Promise<string
          and field_key = ${PLATFORM_OAUTH_FIELD}
     `.execute(trx);
 
+    const clientCredentials = auth.flow === "clientCredentials";
     const row = stored.rows[0];
-    if (!row) {
+
+    if (!row && !clientCredentials) {
       throw new ConnectorOAuthError(
         "CONNECTOR_REAUTHORIZATION_REQUIRED",
         `Connector "${input.contract.slug}" has no OAuth tokens for this installation; it must ` +
           "be authorized before it can be used.",
       );
+    }
+    // Client credentials have nothing to authorize: an installation with no
+    // stored token is not broken, it has simply never asked for one. Mint it
+    // here rather than reporting a state an operator cannot act on.
+    if (!row) {
+      return mintClientCredentialsToken(trx, input, auth, now);
     }
 
     const tokens = parseTokens(
@@ -351,6 +428,12 @@ export async function ensureAccessToken(input: EnsureTokenInput): Promise<string
     // time it arrives — a race that shows up as a random 401 and nothing else.
     const deadline = Math.floor(now / 1000) + auth.refreshLeewaySeconds;
     if (tokens.expiresAt > deadline) return tokens.accessToken;
+
+    // An expired application token is re-requested, not refreshed. There is no
+    // grant to keep alive and nothing single-use to spend.
+    if (clientCredentials) {
+      return mintClientCredentialsToken(trx, input, auth, now);
+    }
 
     if (!tokens.refreshToken) {
       throw new ConnectorOAuthError(
@@ -426,6 +509,78 @@ export async function ensureAccessToken(input: EnsureTokenInput): Promise<string
 
     return refreshed.accessToken;
   });
+}
+
+/**
+ * Obtain and store an application token, inside the caller's transaction.
+ *
+ * Shared by the "never had one" and the "expired" paths, which are the same
+ * thing for this flow: the client credentials are the durable secret, so there
+ * is no state to recover and nothing an operator has to re-authorize.
+ *
+ * It still runs under the installation's row lock, not because a race would be
+ * incorrect here — two callers minting concurrently would each get a valid
+ * token — but because the alternative is two code paths through this function,
+ * and one of them would be the one nobody tested.
+ */
+async function mintClientCredentialsToken(
+  trx: Transaction<DB>,
+  input: EnsureTokenInput,
+  auth: NonNullable<ConnectorContract["auth"]>,
+  now: number,
+): Promise<string> {
+  const clientId = input.config[auth.clientIdField];
+  const clientSecret = input.secrets[auth.clientSecretField];
+  if (typeof clientId !== "string" || typeof clientSecret !== "string") {
+    throw new ConnectorOAuthError(
+      "CONNECTOR_OAUTH_FAILED",
+      `Connector "${input.contract.slug}" is missing the client credentials its OAuth ` +
+        "configuration names.",
+    );
+  }
+
+  const minted = await requestClientCredentialsToken(
+    input.contract,
+    resolveEndpoint(auth.tokenUrl, input.config),
+    clientId,
+    clientSecret,
+    // Scopes interpolate like endpoints. Entra's audience arrives as a scope,
+    // so an unfilled placeholder here is a token for the wrong audience rather
+    // than an obvious failure.
+    auth.scopes.map((scope) => resolveEndpoint(scope, input.config)),
+    input.boundFetch,
+    now,
+  );
+
+  const encrypted = encryptSecret(
+    input.keyring,
+    input.installationId,
+    PLATFORM_OAUTH_FIELD,
+    JSON.stringify(minted),
+  );
+  await sql`
+    insert into platform.connector_secrets
+      (tenant_id, installation_id, field_key, ciphertext, key_id, algorithm)
+    values (${input.session.tenantId}::uuid, ${input.installationId}::uuid,
+            ${PLATFORM_OAUTH_FIELD}, ${encrypted.ciphertext}, ${encrypted.keyId},
+            ${encrypted.algorithm})
+    on conflict (tenant_id, installation_id, field_key)
+    do update set ciphertext = excluded.ciphertext,
+                  key_id = excluded.key_id,
+                  algorithm = excluded.algorithm,
+                  updated_at = now()
+  `.execute(trx);
+
+  await recordConnectorAudit(trx, {
+    tenantId: String(input.session.tenantId),
+    userId: null,
+    connectorSlug: input.contract.slug,
+    instanceKey: input.instanceKey,
+    event: "connector.token_refreshed",
+    secretFields: [PLATFORM_OAUTH_FIELD],
+  });
+
+  return minted.accessToken;
 }
 
 /**

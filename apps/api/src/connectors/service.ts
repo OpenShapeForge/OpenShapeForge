@@ -93,6 +93,13 @@ export type ConnectorView = {
    * fill — the tokens are the platform's, and never typed by an operator.
    */
   usesOAuth: boolean;
+  /**
+   * Whether a person has to complete a consent screen before this connector
+   * works. False for `clientCredentials`, which authenticates as the
+   * application — offering a Connect button there would send an operator to a
+   * flow that does not exist.
+   */
+  requiresAuthorization: boolean;
   installations: ConnectorInstallationView[];
 };
 
@@ -190,6 +197,7 @@ export async function listConnectors(context: CatalogContext): Promise<Connector
       instances: contract.configuration.instances,
       supportsVerify: contract.configuration.verify,
       usesOAuth: contract.auth !== undefined,
+      requiresAuthorization: contract.auth?.flow === "authorizationCode",
       installations: own.map((installation) => viewInstallation(contract, installation)),
     };
   });

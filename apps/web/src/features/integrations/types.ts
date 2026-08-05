@@ -87,6 +87,8 @@ export type Connector = {
    * through a provider consent screen rather than by typing a credential.
    */
   usesOAuth: boolean;
+  /** False for client credentials: there is no consent screen to send anyone to. */
+  requiresAuthorization: boolean;
   installations: ConnectorInstallation[];
 };
 

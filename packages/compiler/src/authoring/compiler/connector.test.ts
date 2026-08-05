@@ -667,3 +667,79 @@ describe("buildConnector — egress patterns", () => {
     },
   );
 });
+
+/**
+ * The client-credentials flow, which authenticates the APPLICATION rather than
+ * a person. Everything refused here is refused because the alternative surfaces
+ * as a token that is valid but wrong — accepted by the provider and rejected by
+ * the API much later, as a 401 explaining nothing.
+ */
+describe("buildConnector — oauth client credentials", () => {
+  function appAuth(auth: Record<string, unknown> = {}) {
+    return definition({
+      configuration: {
+        fields: [
+          { key: "host", valueType: "string" },
+          { key: "clientId", valueType: "string" },
+          { key: "clientSecret", valueType: "string", secret: true },
+        ],
+      },
+      network: { egress: ["*.provider.example"] },
+      auth: {
+        type: "oauth2",
+        flow: "clientCredentials",
+        tokenUrl: "https://auth.provider.example/token",
+        scopes: ["https://{host}/.default"],
+        clientIdField: "clientId",
+        clientSecretField: "clientSecret",
+        ...auth,
+      },
+    } as never);
+  }
+
+  it("compiles without an authorize URL", () => {
+    const compiled = buildConnector(appAuth(), "s", ORIGIN);
+    expect(compiled.auth?.flow).toBe("clientCredentials");
+    expect(compiled.auth?.authorizeUrl).toBeUndefined();
+    expect(compiled.auth?.scopes).toEqual(["https://{host}/.default"]);
+  });
+
+  // There is no browser round trip for an authorize URL to be the start of.
+  it("refuses an authorize URL, which would describe a flow that never runs", () => {
+    expect(() =>
+      buildConnector(
+        appAuth({ authorizeUrl: "https://auth.provider.example/authorize" }),
+        "s",
+        ORIGIN,
+      ),
+    ).toThrow(/no consent screen and no callback/);
+  });
+
+  // The scope is the only thing saying which resource the token is for.
+  it("refuses the flow with no scopes", () => {
+    expect(() => buildConnector(appAuth({ scopes: [] }), "s", ORIGIN)).toThrow(
+      /no other way to say which resource/,
+    );
+  });
+
+  it("refuses a scope naming a field that does not exist", () => {
+    expect(() =>
+      buildConnector(appAuth({ scopes: ["https://{nope}/.default"] }), "s", ORIGIN),
+    ).toThrow(/interpolates "\{nope\}" into auth\.scopes/);
+  });
+
+  // A scope is sent to the provider and logged with the token request.
+  it("refuses a secret interpolated into a scope", () => {
+    expect(() =>
+      buildConnector(appAuth({ scopes: ["https://{clientSecret}/.default"] }), "s", ORIGIN),
+    ).toThrow(/secret field "\{clientSecret\}" into auth\.scopes/);
+  });
+
+  // The mirror of the first refusal: authorization code without an authorize
+  // URL has nowhere to send anyone.
+  it("refuses authorization code with no authorize URL", () => {
+    expect(() =>
+      buildConnector(appAuth({ flow: "authorizationCode" }), "s", ORIGIN),
+    ).toThrow(/starts at the provider's consent screen/);
+  });
+});

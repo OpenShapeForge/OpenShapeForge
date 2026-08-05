@@ -108,8 +108,16 @@ export interface ConnectorConfiguration {
  */
 export interface ConnectorOAuth {
   type: "oauth2";
-  /** Only the authorization-code flow today; others are a later decision. */
-  flow: "authorizationCode";
+  /**
+   * Who the token represents.
+   *
+   * `authorizationCode` acts on behalf of a PERSON: a consent screen, a
+   * callback, and a refresh token to keep the grant alive. `clientCredentials`
+   * acts as the APPLICATION itself — no consent, no callback, and no refresh
+   * token, because an expired access token is simply requested again with the
+   * same client credentials.
+   */
+  flow: "authorizationCode" | "clientCredentials";
   /**
    * Endpoints, which may interpolate `{fieldKey}` from NON-SECRET
    * configuration.
@@ -120,9 +128,14 @@ export interface ConnectorOAuth {
    * environment. A literal URL would mean one contract per region — a copy of
    * the same connector whose only difference is a hostname.
    */
-  authorizeUrl: string;
+  /** Authorization code only; declaring it for client credentials is refused. */
+  authorizeUrl?: string;
   tokenUrl: string;
-  /** Sent on the authorize request; omitted when a provider takes no scopes. */
+  /**
+   * Required for `clientCredentials`, which has no other way to say which
+   * resource the token is for — Entra wants `{resource}/.default`. Optional for
+   * authorization code, where a provider may take none.
+   */
   scopes?: string[];
   /** Configuration field holding the client id issued by the provider. */
   clientIdField: string;
@@ -370,8 +383,15 @@ export interface CompiledConnectorContract {
     schema: Record<string, unknown>;
   };
   /** Normalized with defaults applied; absent when the contract declares none. */
-  auth?: Required<Pick<ConnectorOAuth, "type" | "flow" | "authorizeUrl" | "tokenUrl" | "clientIdField" | "clientSecretField" | "refreshLeewaySeconds">> & {
+  auth?: Required<
+    Pick<
+      ConnectorOAuth,
+      "type" | "flow" | "tokenUrl" | "clientIdField" | "clientSecretField" | "refreshLeewaySeconds"
+    >
+  > & {
     scopes: string[];
+    /** Present for `authorizationCode` only. */
+    authorizeUrl?: string;
   };
   network: { egress: string[] };
   operations: CompiledConnectorOperation[];

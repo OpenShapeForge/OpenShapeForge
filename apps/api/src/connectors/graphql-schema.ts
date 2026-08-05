@@ -97,6 +97,8 @@ export const connectorTypeDefs = /* GraphQL */ `
     supportsVerify: Boolean!
     "Whether the contract declares OAuth, so a surface offers Connect rather than a credential field."
     usesOAuth: Boolean!
+    "Whether a person must complete a consent screen. False for client credentials, which needs none."
+    requiresAuthorization: Boolean!
     installations: [ConnectorInstallation!]!
   }
 

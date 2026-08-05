@@ -1,0 +1,218 @@
+# Microsoft Dynamics 365 Finance and Operations.
+#
+# The first connector that authenticates as an APPLICATION rather than on behalf
+# of a person. Entra ID issues it a token from the client credentials alone —
+# no consent screen, no callback, and no refresh token, because an expired
+# access token is simply requested again. That is why `flow: clientCredentials`
+# exists; before it, this contract could not be authored at all.
+#
+# ## Two hosts, which is new
+#
+# Every other connector so far talks to one vendor domain. Here the token comes
+# from Entra (`login.microsoftonline.com`) and the data lives on the customer's
+# own environment (`*.dynamics.com`), so both are in `network.egress` — and the
+# environment host is a per-installation value interpolated into the endpoint,
+# the same way Exact interpolates its country.
+schemaVersion: 1
+kind: connector
+connector: DynamicsFinance
+title: Microsoft Dynamics 365 Finance
+labels:
+  en: Microsoft Dynamics 365 Finance
+  nl: Microsoft Dynamics 365 Finance
+description:
+  en: Read and write Dynamics 365 Finance and Operations data through its OData API.
+  nl: Lees en schrijf gegevens uit Dynamics 365 Finance and Operations via de OData-API.
+category: erp
+domains: [finance]
+
+capabilities: [operations]
+
+implementation:
+  package: "@openshapeforge/connector-dynamics-finance"
+  contractVersion: 1
+  provenance: firstParty
+  license:
+    spdx: LicenseRef-BatterAI-Commercial
+    notice: >-
+      The implementation package ships separately under its own license and is
+      not covered by the BUSL-1.1 grant on this repository.
+
+availability:
+  entitlement: connector.dynamics-finance
+
+configuration:
+  instances: multiple
+  # /data/$metadata is authenticated and returns the service document rather
+  # than business data — the cheapest proof that both the token and the
+  # environment are right.
+  verify: true
+  fields:
+    - key: environmentHost
+      valueType: string
+      required: true
+      label: { en: Environment host, nl: Omgevingshost }
+      description:
+        en: The host of your Dynamics environment, without https://.
+        nl: De host van je Dynamics-omgeving, zonder https://.
+      help:
+        en: >-
+          Production looks like contoso.operations.dynamics.com; a sandbox is
+          usually deeper, such as contoso-uat.sandbox.operations.dynamics.com.
+          Both are covered.
+        nl: >-
+          Productie ziet eruit als contoso.operations.dynamics.com; een sandbox
+          is meestal dieper, bijvoorbeeld contoso-uat.sandbox.operations.dynamics.com.
+          Beide worden ondersteund.
+      validation:
+        pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
+
+    - key: tenantId
+      valueType: string
+      required: true
+      label: { en: Entra tenant ID, nl: Entra-tenant-ID }
+      description:
+        en: The directory the application is registered in.
+        nl: De directory waarin de applicatie is geregistreerd.
+      validation:
+        pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+
+    - key: clientId
+      valueType: string
+      required: true
+      label: { en: Application (client) ID, nl: Applicatie-(client-)ID }
+
+    - key: clientSecret
+      valueType: string
+      required: true
+      secret: true
+      label: { en: Client secret, nl: Client secret }
+      description:
+        en: A client secret from the app registration. Never read back once stored.
+        nl: Een client secret uit de app-registratie. Na opslaan niet meer op te vragen.
+
+auth:
+  type: oauth2
+  # No consent screen and no callback: the application authenticates as itself.
+  flow: clientCredentials
+  tokenUrl: https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token
+  # Required for this flow, and load-bearing. Entra issues a token for whatever
+  # audience the scope names; get it wrong and the token is valid but rejected
+  # by the API much later, as a 401 that says nothing about why.
+  scopes:
+    - https://{environmentHost}/.default
+  clientIdField: clientId
+  clientSecretField: clientSecret
+  refreshLeewaySeconds: 60
+
+network:
+  # Two vendors' domains, both Microsoft's. `**.` because a Dynamics sandbox
+  # sits two labels deep (contoso-uat.sandbox.operations.dynamics.com) where a
+  # single-label wildcard covers only production.
+  egress:
+    - "login.microsoftonline.com"
+    - "**.dynamics.com"
+
+operations:
+  - key: getRecords
+    kind: query
+    label: { en: Read records, nl: Records lezen }
+    description:
+      en: Read a Dynamics data entity, with OData select, filter and paging.
+      nl: Lees een Dynamics-data-entiteit, met OData select, filter en paginering.
+    authorization:
+      roles:
+        invoke: [Connectors.All.Read]
+    input:
+      - key: entity
+        valueType: string
+        required: true
+        label: { en: Data entity, nl: Data-entiteit }
+        description:
+          en: The entity set name, for example CustomersV3.
+          nl: De naam van de entiteitsset, bijvoorbeeld CustomersV3.
+        validation:
+          minLength: 1
+          maxLength: 256
+      - key: select
+        valueType: string
+        label: { en: Fields, nl: Velden }
+        validation:
+          maxLength: 2048
+      - key: filter
+        valueType: string
+        label: { en: Filter, nl: Filter }
+        validation:
+          maxLength: 4096
+      - key: top
+        valueType: integer
+        defaultValue: 100
+        label: { en: Maximum records, nl: Maximum aantal records }
+        validation:
+          min: 1
+          max: 1000
+      - key: skipToken
+        valueType: string
+        label: { en: Continuation token, nl: Vervolgtoken }
+        validation:
+          maxLength: 4096
+    output:
+      cardinality: one
+      fields:
+        - key: records
+          valueType: object
+          cardinality: collection
+          required: true
+          label: { en: Records, nl: Records }
+        - key: nextSkipToken
+          valueType: string
+          label: { en: Next continuation token, nl: Volgend vervolgtoken }
+    reliability:
+      timeouts:
+        attemptMs: 30000
+      retry:
+        eligible: true
+        maxAttempts: 3
+      pagination:
+        style: cursor
+
+  - key: createRecord
+    kind: mutation
+    label: { en: Create a record, nl: Record aanmaken }
+    authorization:
+      roles:
+        invoke: [Connectors.All.ReadWrite]
+    input:
+      - key: entity
+        valueType: string
+        required: true
+        label: { en: Data entity, nl: Data-entiteit }
+        validation:
+          minLength: 1
+          maxLength: 256
+      - key: payload
+        valueType: object
+        required: true
+        label: { en: Payload, nl: Payload }
+    output:
+      cardinality: one
+      fields:
+        - key: record
+          valueType: object
+          required: true
+          label: { en: Record, nl: Record }
+    reliability:
+      timeouts:
+        attemptMs: 60000
+      # NOT retry-eligible. A Dynamics data entity takes no idempotency key, so
+      # a retried POST creates a second journal entry and nothing afterwards
+      # undoes it.
+      retry:
+        eligible: false
+
+exposure:
+  graphql: true
+  rest:
+    enabled: true
+    basePath: dynamics-finance
+  mcp: true

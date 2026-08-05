@@ -55,6 +55,7 @@
       },
       "devDependencies": {
         "@openshapeforge/connector-afas-profit": "workspace:*",
+        "@openshapeforge/connector-dynamics-finance": "workspace:*",
         "@openshapeforge/connector-exact-online": "workspace:*",
         "@openshapeforge/connector-example-object-store": "workspace:*",
         "@types/bun": "^1.3.5",
@@ -105,6 +106,10 @@
     },
     "connectors/afas-profit": {
       "name": "@openshapeforge/connector-afas-profit",
+      "version": "0.1.0",
+    },
+    "connectors/dynamics-finance": {
+      "name": "@openshapeforge/connector-dynamics-finance",
       "version": "0.1.0",
     },
     "connectors/exact-online": {
@@ -381,6 +386,8 @@
     "@openshapeforge/compiler": ["@openshapeforge/compiler@workspace:packages/compiler"],
 
     "@openshapeforge/connector-afas-profit": ["@openshapeforge/connector-afas-profit@workspace:connectors/afas-profit"],
+
+    "@openshapeforge/connector-dynamics-finance": ["@openshapeforge/connector-dynamics-finance@workspace:connectors/dynamics-finance"],
 
     "@openshapeforge/connector-exact-online": ["@openshapeforge/connector-exact-online@workspace:connectors/exact-online"],
 

@@ -11,6 +11,7 @@ layers:
   # two trees. The shape mirrors how a plugin ships its own `authoring/`.
   - connectors/afas-profit/authoring
   - connectors/exact-online/authoring
+  - connectors/dynamics-finance/authoring
 plugins:
   - ./examples/plugins/entity-docs.ts
   # Workflow node catalogs: contributes the platform workflow catalog tables,

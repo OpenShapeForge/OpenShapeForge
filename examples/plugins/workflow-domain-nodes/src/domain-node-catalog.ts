@@ -60,7 +60,8 @@ export const DOMAIN_NODE_CATALOG_SEED_FILE = "node-catalog.seed.json";
 
 type DomainWorkflowNodeConfig = {
   nodeType: string;
-  category: string;
+  /** Always a locale map by the time it leaves the loader; see `readCategory`. */
+  category: LocalizedText;
   label: LocalizedText;
   description?: LocalizedText;
   configFields: Field[];
@@ -153,11 +154,6 @@ function validateNodeConfig(parsed: unknown, filePath: string): DomainWorkflowNo
       `Domain workflow-node authoring file ${filePath} is missing a non-empty "nodeType".`,
     );
   }
-  if (typeof node.category !== "string" || node.category.length === 0) {
-    throw new Error(
-      `Domain workflow-node authoring file ${filePath} (${node.nodeType}) is missing a non-empty "category".`,
-    );
-  }
   if (!node.label || typeof node.label !== "object") {
     throw new Error(
       `Domain workflow-node authoring file ${filePath} (${node.nodeType}) is missing a "label" object.`,
@@ -181,7 +177,7 @@ function validateNodeConfig(parsed: unknown, filePath: string): DomainWorkflowNo
 
   const config: DomainWorkflowNodeConfig = {
     nodeType: node.nodeType,
-    category: node.category,
+    category: readCategory(node.category, filePath, node.nodeType),
     label: node.label as LocalizedText,
     configFields: node.configFields as Field[],
   };
@@ -192,6 +188,42 @@ function validateNodeConfig(parsed: unknown, filePath: string): DomainWorkflowNo
     config.outputFields = node.outputFields as Field[];
   }
   return config;
+}
+
+/**
+ * `category` as a locale map, whatever the author wrote.
+ *
+ * The same reader the standard catalog applies, for the same reason: `category`
+ * is the palette's group heading, and these packs are where an untranslatable
+ * heading was first visible — five of them were authored in Dutch, with no key
+ * to put an English spelling under (#260).
+ *
+ * **A bare string is still accepted, and read as English**, so a pack outside
+ * this repository written against the old bare-string field still compiles.
+ * The coercion is the only place the union exists; the seed and everything
+ * reading it are handed a locale map.
+ */
+function readCategory(value: unknown, filePath: string, nodeType: string): LocalizedText {
+  if (typeof value === "string" && value.length > 0) {
+    return { en: value };
+  }
+  if (isLocalizedText(value)) {
+    return value;
+  }
+  throw new Error(
+    `Domain workflow-node authoring file ${filePath} (${nodeType}) is missing a non-empty "category". ` +
+      'Expected a locale map such as { en: "Messaging", nl: "Berichten" }, or a bare string read as English.',
+  );
+}
+
+/** A non-empty mapping of locale to non-empty string. */
+function isLocalizedText(value: unknown): value is LocalizedText {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return (
+    entries.length > 0 &&
+    entries.every(([, text]) => typeof text === "string" && text.length > 0)
+  );
 }
 
 /**

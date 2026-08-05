@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: end
-category: flow
+category:
+  en: Flow
+  nl: Stroom
 label:
   nl: Einde
   en: End

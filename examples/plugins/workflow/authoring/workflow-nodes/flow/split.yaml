@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: split
-category: flow
+category:
+  en: Flow
+  nl: Stroom
 label:
   nl: Splitsing
   en: Split

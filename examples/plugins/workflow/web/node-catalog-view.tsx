@@ -38,7 +38,8 @@ import {
 export type WorkflowNodeTypeView = {
   type: string;
   catalog: string;
-  category: string;
+  /** Localized like the label, so the badge reads in the reader's language. */
+  category: Record<string, string> | null;
   label: Record<string, string> | null;
   description: Record<string, string> | null;
   runtimeSupport: "EXECUTABLE" | "UNIMPLEMENTED" | "UNSUPPORTED";
@@ -79,6 +80,10 @@ function text(value: Record<string, string> | null, fallback: string): string {
 }
 
 function NodeRow({ node }: { node: WorkflowNodeTypeView }) {
+  // Empty rather than a placeholder: a badge is the category's name, and a row
+  // whose category went missing has no name to print. An empty outline badge
+  // would read as a category spelled with no letters.
+  const category = text(node.category, "");
   return (
     <li className="flex flex-col gap-1 border-b border-border/60 py-3 last:border-b-0">
       <div className="flex flex-wrap items-center gap-2">
@@ -86,7 +91,7 @@ function NodeRow({ node }: { node: WorkflowNodeTypeView }) {
         <code className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
           {node.type}
         </code>
-        <Badge variant="outline">{node.category}</Badge>
+        {category ? <Badge variant="outline">{category}</Badge> : null}
         {/*
           Provenance, shown only when it is not the repo's own catalog. A
           `domain` badge answers "why is this here if nothing runs it" without

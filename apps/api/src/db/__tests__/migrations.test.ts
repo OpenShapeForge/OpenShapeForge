@@ -161,14 +161,18 @@ describe("generated schema migration", () => {
         // 0003 hardens it against a cross-tenant/nonexistent parent_id, 0004
         // hardens its reparent branch with a cycle guard, and 0005 adds the
         // org-unit Keycloak link columns that 0002's own `create table if not
-        // exists` would otherwise hide from a fresh install. A fresh install
-        // applies all four in order; the list mirrors the registry in
-        // migrations/versioned/index.ts.
+        // exists` would otherwise hide from a fresh install. 0006 retypes the
+        // workflow node catalog's `category` to jsonb and is a no-op here — the
+        // table does not exist yet on a fresh install — but it is still
+        // RECORDED, which is what stops it running against the first database
+        // that later grows the table. A fresh install applies all five in
+        // order; the list mirrors the registry in migrations/versioned/index.ts.
         expect(first.versionedApplied).toEqual([
           "0002_org-unit-closure-trigger",
           "0003_org-unit-parent-tenant-guard",
           "0004_org-unit-reparent-cycle-guard",
           "0005_org-unit-keycloak-link",
+          "0006_workflow-node-category-localized",
         ]);
 
         await withDb(url, async (db) => {
@@ -353,6 +357,97 @@ describe("generated schema migration", () => {
           expect(
             await recordedChecksum(db, generatedSchemaMigrationVersion),
           ).toBe("simulated-old");
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "0006 retypes an existing text category to jsonb, keeping the word as English",
+    async () => {
+      // The only path this migration has. On a fresh install it is a recorded
+      // no-op — schema.sql creates the column jsonb before the table exists for
+      // it to alter — so a database that was migrated BEFORE #260 is the one
+      // case it runs, and the one case nothing else here covers.
+      await withScratchDb(async (url) => {
+        await runChain(url);
+
+        await withDb(url, async (db) => {
+          // Put the column back the way the workflow plugin declared it before
+          // #260: NOT NULL text holding the bare word, no default. Then forget
+          // 0006 ran, and stale the generated checksum so the roll-forward has
+          // to re-diff rather than take its no-op path.
+          await sql`
+            alter table platform.workflow_node_catalog_entries
+              alter column "category" drop default
+          `.execute(db);
+          await sql`
+            alter table platform.workflow_node_catalog_entries
+              alter column "category" type text using ("category" ->> 'en')
+          `.execute(db);
+          // A row of the shape a pre-#260 deployment holds. The catalog seeds
+          // are module seeds and this chain runs without them, so the table is
+          // empty otherwise — and a backfill with no row to carry proves
+          // nothing.
+          await sql`
+            insert into platform.workflow_node_catalog_entries
+              (node_type, catalog, category, label, catalog_checksum)
+            values (${"decision"}, ${"standard"}, ${"flow"}, '{}'::jsonb, ${"stale"})
+          `.execute(db);
+          await sql`
+            delete from platform.schema_migrations
+            where version = ${"0006_workflow-node-category-localized"}
+          `.execute(db);
+          await sql`
+            update platform.schema_migrations
+            set checksum = ${"simulated-old"}
+            where version = ${generatedSchemaMigrationVersion}
+          `.execute(db);
+        });
+
+        const result = await runChain(url);
+        expect(result.versionedApplied).toEqual([
+          "0006_workflow-node-category-localized",
+        ]);
+        // No non-additive complaint: the retype happened before the diff ran.
+        expect(result.rollForward?.addedColumns).toEqual([]);
+
+        await withDb(url, async (db) => {
+          const column = await sql<{ data_type: string; column_default: string | null }>`
+            select data_type, column_default
+            from information_schema.columns
+            where table_schema = 'platform'
+              and table_name = 'workflow_node_catalog_entries'
+              and column_name = 'category'
+          `.execute(db);
+          expect(column.rows[0]?.data_type).toBe("jsonb");
+          expect(column.rows[0]?.column_default).toBe("'{}'::jsonb");
+
+          // The word survives as English rather than being dropped, and as an
+          // object rather than a bare jsonb string — `to_jsonb('flow')` is
+          // valid jsonb and unreadable as a locale map.
+          const row = await sql<{ category: unknown }>`
+            select "category" from platform.workflow_node_catalog_entries
+            where node_type = ${"decision"}
+          `.execute(db);
+          expect(row.rows[0]?.category).toEqual({ en: "flow" });
+        });
+
+        // Idempotent: the column is jsonb now, so a rerun of up() does nothing.
+        await withDb(url, async (db) => {
+          await sql`
+            delete from platform.schema_migrations
+            where version = ${"0006_workflow-node-category-localized"}
+          `.execute(db);
+        });
+        await runChain(url);
+        await withDb(url, async (db) => {
+          const row = await sql<{ category: unknown }>`
+            select "category" from platform.workflow_node_catalog_entries
+            where node_type = ${"decision"}
+          `.execute(db);
+          expect(row.rows[0]?.category).toEqual({ en: "flow" });
         });
       });
     },

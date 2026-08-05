@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: createCase
-category: integrations
+category:
+  en: Integrations
+  nl: Integraties
 label:
   nl: Zaak aanmaken
   en: Create case

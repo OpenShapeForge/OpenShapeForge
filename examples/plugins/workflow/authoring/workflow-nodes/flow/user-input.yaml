@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: flow.userInput
-category: flow
+category:
+  en: Flow
+  nl: Stroom
 label:
   nl: Gebruikersinvoer
   en: User input

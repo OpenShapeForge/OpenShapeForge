@@ -1,10 +1,13 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: triggerEvent
-# Lowercase, matching the other four trigger nodes. `category` is served raw on
-# WorkflowNodeType and a palette groups on it verbatim, so "Triggers" here put
-# this node in a second, one-item bucket beside the other triggers.
-category: triggers
+# Spelled exactly as the other four trigger nodes spell it. The palette groups
+# on the English value case-folded, so capitalisation alone can no longer split
+# a category — but two different words still would, and a heading only ever
+# reads as one of them.
+category:
+  en: Triggers
+  nl: Triggers
 label:
   en: Events
   nl: Events

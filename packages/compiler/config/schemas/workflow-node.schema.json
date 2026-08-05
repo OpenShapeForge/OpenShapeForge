@@ -27,8 +27,16 @@
       "description": "Workflow node type, e.g. ai.extractParameters or legacy designer names such as triggerManual."
     },
     "category": {
-      "type": "string",
-      "minLength": 1
+      "description": "The palette group this node type belongs to, as display text. A locale map like `label`, so a reader sees the heading in their own language. A bare string is still accepted for packs authored before this became a locale map: the compiler reads it as English and emits `{ \"en\": <string> }`, so the seed, the column, the GraphQL type and the palette only ever see a locale map.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "$ref": "https://openshapeforge.example/schema-phase0/core-entity.schema.json#/$defs/localizedText"
+        }
+      ]
     },
     "label": {
       "$ref": "https://openshapeforge.example/schema-phase0/core-entity.schema.json#/$defs/localizedText"

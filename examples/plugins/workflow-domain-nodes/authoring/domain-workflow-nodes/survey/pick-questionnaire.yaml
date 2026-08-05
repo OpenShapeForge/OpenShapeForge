@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: survey.pickQuestionnaire
-category: survey
+category:
+  en: Survey
+  nl: Vragenlijst
 label:
   en: Pick questionnaire
   nl: Vragenlijst kiezen

@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: decision
-category: flow
+category:
+  en: Flow
+  nl: Stroom
 label:
   en: Decision
   nl: Keuze

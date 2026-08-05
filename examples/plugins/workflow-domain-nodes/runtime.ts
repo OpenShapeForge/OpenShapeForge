@@ -65,7 +65,8 @@ const SEED_PATH = join(
  */
 type DomainCatalogEntry = {
   nodeType: string;
-  category: string;
+  /** A locale map, like `label` and `description`; the jsonb column holds it whole. */
+  category?: unknown;
   label?: unknown;
   description?: unknown;
   configFields?: unknown;
@@ -137,7 +138,7 @@ const domainNodeCatalogSeed: CatalogSeedSpec<DomainCatalogSeed> = {
           // this insert can land on a row that arrived from another slice and
           // would otherwise keep that slice's values.
           action: null,
-          category: entry.category,
+          category: (entry.category ?? {}) as Json,
           label: (entry.label ?? {}) as Json,
           description: (entry.description ?? null) as Json | null,
           config_fields: (entry.configFields ?? []) as Json,

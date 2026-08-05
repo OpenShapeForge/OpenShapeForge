@@ -7,10 +7,10 @@
  * resolver never has to. It hands back one flat record per node type and
  * nothing else.
  *
- * `label` and `description` stay `Record<string, string>` rather than being
- * resolved to a single string. Which locale a caller wants depends on the
- * request, not on the catalog, and a layer that picked one here would have
- * every other caller re-deriving what it discarded.
+ * `category`, `label` and `description` stay `Record<string, string>` rather
+ * than being resolved to a single string. Which locale a caller wants depends
+ * on the request, not on the catalog, and a layer that picked one here would
+ * have every other caller re-deriving what it discarded.
  *
  * Two fields describe a node type's standing rather than its shape, and they
  * answer different questions. `catalog` is provenance — which pack authored it.
@@ -30,7 +30,12 @@ import {
 export type WorkflowNodeType = {
   type: string;
   catalog: string;
-  category: string;
+  /**
+   * The palette's group heading, localized. Grouping on it needs one spelling
+   * per category that does not vary by locale, which is the palette's own
+   * business — `web/editor/palette.ts` derives it and says how.
+   */
+  category: Record<string, string>;
   label: Record<string, string>;
   description: Record<string, string> | null;
   configFields: unknown[];

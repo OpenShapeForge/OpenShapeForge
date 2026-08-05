@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: timer
-category: flow
+category:
+  en: Flow
+  nl: Stroom
 label:
   nl: Timer
   en: Timer

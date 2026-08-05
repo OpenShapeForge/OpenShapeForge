@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: ruleNormalizer
-category: ai
+category:
+  en: AI
+  nl: AI
 label:
   nl: Rule normalizer
   en: Rule normalizer

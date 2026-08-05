@@ -54,7 +54,13 @@ import { resetNodeCatalogForTests, type CatalogEntry } from "../node-catalog-sto
 const NEVER_RUNS = async () => ({ outputHandle: "completed", payload: {} });
 
 function catalogued(nodeType: string, configFields: unknown[] = []): CatalogEntry {
-  return { nodeType, catalog: "standard", category: "flow", label: {}, configFields };
+  return {
+    nodeType,
+    catalog: "standard",
+    category: { en: "Flow", nl: "Stroom" },
+    label: {},
+    configFields,
+  };
 }
 
 /**

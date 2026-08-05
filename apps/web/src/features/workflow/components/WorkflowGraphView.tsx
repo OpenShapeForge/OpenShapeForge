@@ -38,7 +38,7 @@ import type { LucideIconName } from "@/components/ui/icons/LucideIconByName";
 /** The catalog slice this view needs, as the page fetched it. */
 export type WorkflowNodeTypeSummary = {
   type: string;
-  category?: string | null;
+  category?: Record<string, string> | null;
   label?: Record<string, string> | null;
 };
 

@@ -7,7 +7,12 @@
  * question "which node types are refused outright" has one answer rather than
  * two that can drift. The category-folding test pins the lesson that a free-text
  * field with two spellings produced two buckets for one category — which is
- * already in the shipped catalogs, not a hypothetical.
+ * already in the shipped catalogs, not a hypothetical. The set is still open
+ * after #260, so the fold is still what stops it recurring.
+ *
+ * The heading tests pin the other half of #260: it is authored text now, in a
+ * locale map, so it follows the reader — and it must not depend on which
+ * catalog row arrived first, because the catalog is read unordered.
  *
  * Run (repo root):
  *   set -o pipefail; bun test examples/plugins/workflow/web/editor/__tests__/palette.test.ts 2>&1
@@ -25,7 +30,7 @@ function entry(
 ): WorkflowPaletteNodeType {
   return {
     type,
-    category: "flow",
+    category: { en: "Flow", nl: "Stroom" },
     label: { en: type },
     runtimeSupport: "EXECUTABLE",
     ...overrides,
@@ -91,13 +96,15 @@ describe("buildWorkflowPalette", () => {
   });
 
   test("categories that differ only in case are one group", () => {
-    // Both spellings ship today: `flow` in the standard pack, `Flow` in a
-    // domain pack. Grouping on the raw string splits one category in two.
+    // Both spellings shipped once: `flow` in the standard pack, `Flow` in a
+    // domain pack. Grouping on the raw string splits one category in two, and
+    // the set is still open after #260 — a host repo's pack can spell it either
+    // way — so the fold is what keeps this from recurring.
     const groups = buildWorkflowPalette({
       nodeTypes: [
-        entry("a", { category: "flow" }),
-        entry("b", { category: "Flow" }),
-        entry("c", { category: " FLOW " }),
+        entry("a", { category: { en: "flow" } }),
+        entry("b", { category: { en: "Flow" } }),
+        entry("c", { category: { en: " FLOW " } }),
       ],
     });
     expect(groups).toHaveLength(1);
@@ -106,29 +113,73 @@ describe("buildWorkflowPalette", () => {
   });
 
   test("the group heading does not depend on which spelling arrived first", () => {
-    // Catalog row order is not something a palette should be able to see.
+    // Catalog row order is not something a palette should be able to see: the
+    // rows are selected with no `order by`. Resolved by node type, which is the
+    // table's primary key.
     const forward = buildWorkflowPalette({
-      nodeTypes: [entry("a", { category: "FLOW" }), entry("b", { category: "flow" })],
+      nodeTypes: [entry("a", { category: { en: "FLOW" } }), entry("b", { category: { en: "flow" } })],
     });
     const reversed = buildWorkflowPalette({
-      nodeTypes: [entry("b", { category: "flow" }), entry("a", { category: "FLOW" })],
+      nodeTypes: [entry("b", { category: { en: "flow" } }), entry("a", { category: { en: "FLOW" } })],
     });
-    expect(forward[0]?.label).toBe("Flow");
+    expect(forward[0]?.label).toBe("FLOW");
     expect(reversed[0]?.label).toBe(forward[0]?.label);
   });
 
-  test("an acronym heading survives the fold", () => {
-    // Folding is not reversible: `ai` capitalised is `Ai`, which reads as a
-    // typo. Nothing in a lowercase string says which letters were capitals, so
-    // the override map is the only place that knows — and it is a second
-    // description of a category, which is why it goes away when the catalog
-    // serves a display form (#260).
+  test("the heading is the category in the reader's locale", () => {
+    // The whole point of #260. The group headings were the only text on this
+    // screen that could not follow the reader, because `category` was one bare
+    // word with no key to put a translation under.
+    const [group] = buildWorkflowPalette({
+      locale: "nl",
+      nodeTypes: [entry("a", { category: { en: "Billing", nl: "Facturatie" } })],
+    });
+    expect(group?.key).toBe("billing");
+    expect(group?.label).toBe("Facturatie");
+  });
+
+  test("two packs naming one category contribute their locales to one heading", () => {
+    // The standard pack can carry `en` alone where a domain pack carries both.
+    // Picking one row's map whole would hand a Dutch reader the English word
+    // depending on which row the catalog returned first.
+    const [group] = buildWorkflowPalette({
+      locale: "nl",
+      nodeTypes: [
+        entry("standard", { category: { en: "Flow" } }),
+        entry("domain", { category: { en: "Flow", nl: "Stroom" } }),
+      ],
+    });
+    expect(group?.key).toBe("flow");
+    expect(group?.label).toBe("Stroom");
+  });
+
+  test("an acronym is authored, not reconstructed", () => {
+    // This used to need a hand-kept override map: folding is not reversible, so
+    // `ai` capitalised is `Ai`, which reads as a typo. The catalog serves the
+    // display form now, so the map is gone and the heading is what somebody
+    // wrote.
     const groups = buildWorkflowPalette({
-      nodeTypes: [entry("a", { category: "ai" }), entry("b", { category: "AI" })],
+      nodeTypes: [entry("a", { category: { en: "AI" } }), entry("b", { category: { en: "ai" } })],
     });
     expect(groups).toHaveLength(1);
     expect(groups[0]?.key).toBe("ai");
     expect(groups[0]?.label).toBe("AI");
+  });
+
+  test("a category with no English spelling still groups, by one locale", () => {
+    // The identity has to come from somewhere, and every map in this repository
+    // carries `en`. A pack that omits it groups consistently — by the
+    // alphabetically first locale — rather than collapsing into `other`.
+    const groups = buildWorkflowPalette({
+      locale: "nl",
+      nodeTypes: [
+        entry("a", { category: { nl: "Berichten" } }),
+        entry("b", { category: { nl: "berichten" } }),
+      ],
+    });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.key).toBe("berichten");
+    expect(groups[0]?.label).toBe("Berichten");
   });
 
   test("triggers come first, everything else alphabetically", () => {
@@ -136,12 +187,29 @@ describe("buildWorkflowPalette", () => {
     // one a reader needs first.
     const groups = buildWorkflowPalette({
       nodeTypes: [
-        entry("z", { category: "integrations" }),
-        entry("y", { category: "flow" }),
-        entry("x", { category: "triggers" }),
+        entry("z", { category: { en: "Integrations", nl: "Integraties" } }),
+        entry("y", { category: { en: "Flow", nl: "Stroom" } }),
+        entry("x", { category: { en: "Triggers", nl: "Triggers" } }),
       ],
     });
     expect(groups.map((group) => group.key)).toEqual(["triggers", "flow", "integrations"]);
+  });
+
+  test("the alphabet is the reader's, not English's", () => {
+    // A consequence of headings being localized, and the intended one: the list
+    // is sorted by what is on screen. `Stroom` sorts after `Integraties` in
+    // Dutch where `Flow` sorts before `Integrations` in English. Only the hoist
+    // is locale-independent, because it is matched on the key.
+    const groups = buildWorkflowPalette({
+      locale: "nl",
+      nodeTypes: [
+        entry("z", { category: { en: "Integrations", nl: "Integraties" } }),
+        entry("y", { category: { en: "Flow", nl: "Stroom" } }),
+        entry("x", { category: { en: "Triggers", nl: "Triggers" } }),
+      ],
+    });
+    expect(groups.map((group) => group.key)).toEqual(["triggers", "integrations", "flow"]);
+    expect(groups.map((group) => group.label)).toEqual(["Triggers", "Integraties", "Stroom"]);
   });
 
   test("available items sort ahead of unavailable ones", () => {

@@ -189,7 +189,7 @@ describe("workflow catalog seeds", () => {
               node_type: "ghost.node",
               catalog: "standard",
               action: null,
-              category: "ghost",
+              category: { en: "Ghost" } as never,
               label: {} as never,
               description: null,
               config_fields: [] as never,

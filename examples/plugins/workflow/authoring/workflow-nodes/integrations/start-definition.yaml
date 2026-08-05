@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: workflow.startDefinition
-category: integrations
+category:
+  en: Integrations
+  nl: Integraties
 label:
   nl: Workflow starten
   en: Start workflow

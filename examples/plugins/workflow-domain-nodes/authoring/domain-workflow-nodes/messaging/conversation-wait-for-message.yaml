@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: conversation.waitForMessage
-category: messaging
+category:
+  en: Messaging
+  nl: Berichten
 label:
   en: Wait for message
   nl: Wacht op bericht

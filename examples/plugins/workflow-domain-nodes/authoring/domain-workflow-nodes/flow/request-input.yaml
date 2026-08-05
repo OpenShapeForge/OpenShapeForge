@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: flow.requestInput
-category: flow
+category:
+  en: Flow
+  nl: Stroom
 label:
   en: Wait for input
   nl: Wacht op input

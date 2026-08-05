@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: billing.runProlongation
-category: billing
+category:
+  en: Billing
+  nl: Facturatie
 label:
   en: Run billing prolongation
   nl: Facturatie-prolongatie uitvoeren

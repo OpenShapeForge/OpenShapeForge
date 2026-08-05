@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: triggerSchedule
-category: triggers
+category:
+  en: Triggers
+  nl: Triggers
 label:
   nl: Planning
   en: Schedule

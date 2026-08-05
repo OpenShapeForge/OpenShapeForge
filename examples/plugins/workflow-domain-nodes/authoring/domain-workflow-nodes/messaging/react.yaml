@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: message.react
-category: messaging
+category:
+  en: Messaging
+  nl: Berichten
 label:
   nl: Reactie op bericht
   en: Message reaction

@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: action
-category: integrations
+category:
+  en: Integrations
+  nl: Integraties
 label:
   nl: Action
   en: Action

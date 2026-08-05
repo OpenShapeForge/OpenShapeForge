@@ -1,7 +1,9 @@
 schemaVersion: 1
 kind: workflowNode
 nodeType: identity.requireAssurance
-category: identity
+category:
+  en: Identity
+  nl: Identiteit
 label:
   en: Require assurance level
   nl: Vereis identificatieniveau

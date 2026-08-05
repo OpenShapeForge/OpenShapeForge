@@ -164,9 +164,9 @@
           "type": "array",
           "items": {
             "type": "string",
-            "pattern": "^(\\*\\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
+            "pattern": "^(\\*{1,2}\\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
           },
-          "description": "Hostnames the connector may reach, enforced by the runtime's bound fetch. Omitted means no outbound HTTP at all: the allowlist is the grant, not a filter over an open door."
+          "description": "Hostnames the connector may reach, enforced by the runtime's bound fetch. Three forms: `example.com` exactly; `*.example.com` for exactly one extra label; `**.example.com` for any depth, which is what a vendor needs when its API host is not fixed. Neither wildcard matches the bare apex or a lookalike. A `**.` pattern must name at least a domain and its suffix — `**.com` is refused. Omitted means no outbound HTTP at all: the allowlist is the grant, not a filter over an open door."
         }
       }
     },

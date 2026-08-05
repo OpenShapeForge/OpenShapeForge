@@ -112,14 +112,19 @@ configuration:
           vragen.
 
 network:
-  # All three hosts, because the environment field selects between them at
-  # runtime and egress is enforced against the contract, not against the
-  # installation. Listing only production would make a test installation
-  # unreachable in a way that looks like an AFAS outage.
+  # One entry, at any depth under AFAS's own domain.
+  #
+  # The environment field selects between production, acceptance and test at
+  # runtime, and egress is enforced against the CONTRACT rather than against the
+  # installation — so all three hosts have to be reachable, and listing only
+  # production would make a test installation fail in a way that looks like an
+  # AFAS outage. Enumerating them worked until AFAS added a host nobody here
+  # knew about, at which point the same failure returns.
+  #
+  # `**.` is deliberately broader than the three patterns it replaces: the trust
+  # boundary is "AFAS's domain", which is what an egress allowlist is for.
   egress:
-    - "*.rest.afas.online"
-    - "*.restaccept.afas.online"
-    - "*.resttest.afas.online"
+    - "**.afas.online"
 
 operations:
   - key: getConnector

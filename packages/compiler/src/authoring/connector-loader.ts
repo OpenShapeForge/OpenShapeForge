@@ -33,13 +33,21 @@ const CONNECTOR_TOOL_PREFIX_PATTERN = /^[a-z][a-z0-9_]*$/;
 /** File stems. Also the catalog key and the installation's connector_slug. */
 const CONNECTOR_SLUG_PATTERN = /^[a-z][a-z0-9-]*$/;
 /**
- * Egress allowlist entries: a hostname, optionally with a single leftmost `*`
- * label. Anything else — schemes, ports, paths, CIDR, bare `*` — is refused,
- * because the entry is compared against a resolved request host and a loose
- * pattern silently widens the grant.
+ * Egress allowlist entries: a hostname, optionally prefixed with `*.` (one
+ * leftmost label) or `**.` (any depth). Anything else — schemes, ports, paths,
+ * CIDR, bare `*` — is refused, because the entry is compared against a resolved
+ * request host and a loose pattern silently widens the grant.
+ *
+ * Exported so the compiler's own guard and this load-time check cannot drift.
+ * They had: adding `**.` here and forgetting this copy made a contract that
+ * compiled from an in-repo layer fail from a packaged one, for a reason that
+ * named a pattern nobody had edited.
+ *
+ * How DEEP a `**.` may reach is checked in the compiler rather than here — that
+ * is a judgement about breadth (`**.com` is not a vendor), not about shape.
  */
-const CONNECTOR_EGRESS_PATTERN =
-  /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+export const CONNECTOR_EGRESS_PATTERN =
+  /^(\*{1,2}\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
 function fail(
   value: unknown,

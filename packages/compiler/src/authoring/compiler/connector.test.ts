@@ -619,3 +619,51 @@ describe("buildConnector — oauth", () => {
     );
   });
 });
+
+/**
+ * `**.` matches at any depth, which is what makes it useful for a vendor whose
+ * API host is not fixed — and what makes it worth refusing when it is pointed
+ * at a whole suffix rather than a domain.
+ */
+describe("buildConnector — egress patterns", () => {
+  function withEgress(egress: string[]) {
+    return definition({ network: { egress } } as never);
+  }
+
+  it("accepts a deep wildcard over a vendor domain", () => {
+    const compiled = buildConnector(withEgress(["**.twinfield.com"]), "s", ORIGIN);
+    expect(compiled.network.egress).toEqual(["**.twinfield.com"]);
+  });
+
+  it("still accepts the existing forms", () => {
+    const compiled = buildConnector(
+      withEgress(["api.example.com", "*.example.com"]),
+      "s",
+      ORIGIN,
+    );
+    expect(compiled.network.egress).toEqual(["*.example.com", "api.example.com"]);
+  });
+
+  // `**.com` is not a vendor, it is the internet. Refused as a matter of shape:
+  // the pattern requires at least two labels, for every form.
+  it.each([["**.com"], ["**.online"], ["*.nl"], ["com"]])(
+    "refuses an egress entry over a bare suffix: %s",
+    (entry) => {
+      expect(() => buildConnector(withEgress([entry]), "s", ORIGIN)).toThrow(
+        /not a hostname optionally prefixed/,
+      );
+    },
+  );
+
+  // Everything that is not a hostname: the entry is compared against a resolved
+  // request host, so a scheme or a path would never match anything, and a bare
+  // wildcard would match everything.
+  it.each([["https://example.com"], ["example.com:443"], ["example.com/path"], ["*"]])(
+    "refuses a non-hostname entry: %s",
+    (entry) => {
+      expect(() => buildConnector(withEgress([entry]), "s", ORIGIN)).toThrow(
+        /not a hostname optionally prefixed/,
+      );
+    },
+  );
+});

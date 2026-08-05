@@ -30,7 +30,7 @@ import {
   mergeWorkflowNodeCategories,
   workflowNodeCategoryKey,
   type WorkflowNodeCategory,
-} from "../node-category.js";
+} from "../node-category";
 
 /** The slice of a catalog entry a palette reads. */
 export type WorkflowPaletteNodeType = {

@@ -117,7 +117,12 @@ bun run check:authoring-local
 bun run check:notices:linux      # THIRD-PARTY-NOTICES matches deps, as CI runs it (see below)
 bun run typecheck:compiler && bun run typecheck:api && bun run typecheck:examples
 bun run test:compiler
-bun run test:e2e                 # needs the compose Postgres up
+bun run test:e2e                 # needs the compose Postgres up — and that database
+                                 # is shared with every other worktree, so another
+                                 # branch's db:migrate can fail the drift preflight
+                                 # with nothing wrong on yours. The preflight says
+                                 # which case you are in; docs/testing.md, "One
+                                 # Postgres, many worktrees", has the recipe
 (cd apps/api && bun test src/db) # migration + drift tests
 bun run test:perf                # when touching the API hot path (needs k6)
 bun run test:browser             # when touching apps/web (needs the compose

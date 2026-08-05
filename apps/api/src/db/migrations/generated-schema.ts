@@ -74,8 +74,13 @@ const manifestTables = manifest.tables as unknown as ManifestTable[];
  * migrations rather than the generated manifest. They are never treated as
  * "disappeared from the manifest" drift. platform.schema_migrations is
  * currently in the manifest too; keeping it here is defensive.
+ *
+ * Exported because ../schema-drift.ts must apply the identical exemption: it
+ * answers "does this database carry schema the branch does not declare?", and
+ * a divergent allowlist there would report these two tables as foreign on
+ * every database.
  */
-const nonManifestManagedTables = new Set<string>([
+export const nonManifestManagedTables = new Set<string>([
   "platform.schema_migrations",
   "platform.system_bypass_audit",
 ]);

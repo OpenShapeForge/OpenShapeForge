@@ -220,7 +220,25 @@ there.
 ## OAuth
 
 For a provider that speaks OAuth 2.0, the contract declares **where** and the
-platform does **everything else**:
+platform does **everything else**. Two flows, and which one a contract declares
+changes what an operator has to do:
+
+| `flow` | Represents | Consent screen | Refresh token | Setup |
+| --- | --- | --- | --- | --- |
+| `authorizationCode` | a person | yes | yes, often rotating | save, then **Connect** |
+| `clientCredentials` | the application | **none** | **none** | save; the token is minted on first use |
+
+`clientCredentials` is the simpler of the two: there is no callback, nothing
+single-use to lose a race over, and no `CONNECTOR_REAUTHORIZATION_REQUIRED`
+state to recover from — an expired token is simply requested again. Its scope is
+**required**, because it is the only thing saying which resource the token is
+for; Entra issues a token for whatever audience the scope names, and a wrong one
+is accepted by the provider and rejected by the API much later.
+
+Both flows interpolate `{fieldKey}` into endpoints **and scopes** from
+non-secret configuration.
+
+The authorization-code shape:
 
 ```yaml
 auth:

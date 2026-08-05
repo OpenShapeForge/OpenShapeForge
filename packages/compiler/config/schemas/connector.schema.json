@@ -116,13 +116,13 @@
     "auth": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "flow", "authorizeUrl", "tokenUrl", "clientIdField", "clientSecretField"],
+      "required": ["type", "flow", "tokenUrl", "clientIdField", "clientSecretField"],
       "description": "OAuth 2.0, declared by the contract and driven by the platform: it obtains, stores, refreshes and rotates the tokens, and a package is handed a fetch already carrying the access token rather than a refresh token it could mishandle. Absent means the package authenticates from its own configuration fields.",
       "properties": {
         "type": { "enum": ["oauth2"] },
         "flow": {
-          "enum": ["authorizationCode"],
-          "description": "Only the authorization-code flow today; others are a later decision."
+          "enum": ["authorizationCode", "clientCredentials"],
+          "description": "authorizationCode acts on behalf of a person and needs a consent screen, a callback and a refresh token. clientCredentials acts as the application itself: no consent, no callback, no refresh token — an expired access token is simply requested again."
         },
         "authorizeUrl": {
           "type": "string",
@@ -137,7 +137,7 @@
         "scopes": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Sent on the authorize request. Omit when the provider takes no scopes."
+          "description": "Sent on the authorize request for authorization code, and on the token request for client credentials \u2014 where it is REQUIRED, because that flow has no other way to say which resource the token is for (Entra wants {resource}/.default)."
         },
         "clientIdField": {
           "type": "string",

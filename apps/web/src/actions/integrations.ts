@@ -39,6 +39,7 @@ const CONNECTOR_FIELDS = /* GraphQL */ `
   instances
   supportsVerify
   usesOAuth
+  requiresAuthorization
   installations {
     instanceKey
     displayName

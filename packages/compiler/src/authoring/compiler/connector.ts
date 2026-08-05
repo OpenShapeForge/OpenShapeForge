@@ -375,10 +375,69 @@ function compileAuth(
   requireConfigField(authored.clientIdField, "auth.clientIdField", false);
   requireConfigField(authored.clientSecretField, "auth.clientSecretField", true);
 
-  for (const [name, template] of [
+  const clientCredentials = authored.flow === "clientCredentials";
+
+  // A consent screen that never happens. Client credentials authenticate the
+  // APPLICATION, so there is no browser round trip for an authorize URL to be
+  // the start of — declaring one means somebody expects a flow the platform
+  // will not run.
+  if (clientCredentials && authored.authorizeUrl !== undefined) {
+    throw new Error(
+      `Connector ${origin} declares auth.authorizeUrl with flow: clientCredentials. That flow ` +
+        "has no consent screen and no callback, so an authorize endpoint would never be used.",
+    );
+  }
+  if (!clientCredentials && authored.authorizeUrl === undefined) {
+    throw new Error(
+      `Connector ${origin} declares flow: authorizationCode without auth.authorizeUrl. That ` +
+        "flow starts at the provider's consent screen, and nothing else says where it is.",
+    );
+  }
+  // Client credentials carry no user and no consent, so the scope is the only
+  // thing saying which resource the token is for. Entra issues a token for the
+  // wrong audience rather than failing, and the wrongness only shows up as a
+  // 401 from the API much later.
+  if (clientCredentials && (authored.scopes ?? []).length === 0) {
+    throw new Error(
+      `Connector ${origin} declares flow: clientCredentials without auth.scopes. That flow has ` +
+        "no other way to say which resource the token is for.",
+    );
+  }
+
+  /**
+   * Scopes are interpolated too, and have to be checked like endpoints.
+   *
+   * Entra's audience arrives as a scope (`https://{host}/.default`), so a
+   * placeholder that nothing fills is not a broken URL anyone notices — it is a
+   * token issued for the wrong audience, which the provider returns happily and
+   * the API rejects much later as a 401 that explains nothing.
+   */
+  for (const scope of authored.scopes ?? []) {
+    for (const match of scope.matchAll(URL_TEMPLATE_PLACEHOLDER)) {
+      const key = match[1] ?? "";
+      const field = byKey.get(key);
+      if (!field) {
+        throw new Error(
+          `Connector ${origin} interpolates "{${key}}" into auth.scopes, which is not a ` +
+            "declared configuration field.",
+        );
+      }
+      if (field.secret === true) {
+        throw new Error(
+          `Connector ${origin} interpolates the secret field "{${key}}" into auth.scopes. A ` +
+            "scope is sent to the provider and logged with the token request.",
+        );
+      }
+    }
+  }
+
+  const endpoints: [string, string | undefined][] = [
     ["auth.authorizeUrl", authored.authorizeUrl],
     ["auth.tokenUrl", authored.tokenUrl],
-  ] as const) {
+  ];
+
+  for (const [name, template] of endpoints) {
+    if (template === undefined) continue;
     expectNonEmptyString(template, name, origin);
     for (const match of template.matchAll(URL_TEMPLATE_PLACEHOLDER)) {
       const key = match[1] ?? "";
@@ -428,7 +487,7 @@ function compileAuth(
   return {
     type: authored.type,
     flow: authored.flow,
-    authorizeUrl: authored.authorizeUrl,
+    ...(authored.authorizeUrl !== undefined ? { authorizeUrl: authored.authorizeUrl } : {}),
     tokenUrl: authored.tokenUrl,
     scopes: [...(authored.scopes ?? [])],
     clientIdField: authored.clientIdField,

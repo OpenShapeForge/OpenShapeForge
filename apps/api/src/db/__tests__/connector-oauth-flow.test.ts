@@ -289,6 +289,173 @@ describe("the authorization state", () => {
   );
 });
 
+/**
+ * Client credentials: the application authenticates as itself. No consent, no
+ * callback, and no refresh token — so the interesting question is what happens
+ * when there is nothing stored, which for authorization code is an error and
+ * here is simply the first call.
+ */
+describe("the client-credentials flow", () => {
+  const APP_CONTRACT = {
+    ...CONTRACT,
+    slug: "probe-oauth",
+    auth: {
+      ...CONTRACT.auth,
+      flow: "clientCredentials",
+      authorizeUrl: undefined,
+      scopes: ["https://{host}/.default"],
+    },
+  } as unknown as ConnectorContract;
+
+  const APP_CONFIG = { clientId: "client-abc", host: "contoso.example" };
+
+  test(
+    "mints a token on first use rather than demanding authorization",
+    async () => {
+      await withMigratedDb(async (db) => {
+        const tenantId = randomUUID();
+        const session = { tenantId, userId: randomUUID(), roles: [] };
+        const installationId = await seedInstallation(db, tenantId);
+
+        const sent: string[] = [];
+        const boundFetch: FetchLike = async (_url, init) => {
+          sent.push(String(init?.body ?? ""));
+          return Response.json({ access_token: "app-1", expires_in: 600 });
+        };
+
+        const token = await ensureAccessToken({
+          db,
+          session,
+          keyring: KEYRING,
+          contract: APP_CONTRACT,
+          installationId,
+          instanceKey: "default",
+          config: APP_CONFIG,
+          secrets: { clientSecret: "secret-abc" },
+          boundFetch,
+        });
+
+        expect(token).toBe("app-1");
+        expect(sent[0]).toContain("grant_type=client_credentials");
+        // The scope template is filled from configuration. Unfilled, Entra
+        // issues a token for the wrong audience and the API rejects it later
+        // as a 401 that explains nothing.
+        expect(decodeURIComponent(sent[0]!)).toContain("https://contoso.example/.default");
+        // And no refresh token was sent, because there is none.
+        expect(sent[0]).not.toContain("refresh_token");
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "stores the minted token encrypted, and withholds it from the package",
+    async () => {
+      await withMigratedDb(async (db) => {
+        const tenantId = randomUUID();
+        const session = { tenantId, userId: randomUUID(), roles: [] };
+        const installationId = await seedInstallation(db, tenantId);
+
+        await ensureAccessToken({
+          db,
+          session,
+          keyring: KEYRING,
+          contract: APP_CONTRACT,
+          installationId,
+          instanceKey: "default",
+          config: APP_CONFIG,
+          secrets: { clientSecret: "secret-abc" },
+          boundFetch: async () => Response.json({ access_token: "app-1", expires_in: 600 }),
+        });
+
+        const all = await readSecrets(db, session, KEYRING, installationId);
+        expect(all[PLATFORM_OAUTH_FIELD]).toBeDefined();
+        const narrowed = contractSecrets(all, APP_CONTRACT.configuration.secretFields);
+        expect(narrowed[PLATFORM_OAUTH_FIELD]).toBeUndefined();
+        expect(JSON.stringify(narrowed)).not.toContain("app-1");
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "reuses a valid token, and re-requests an expired one",
+    async () => {
+      await withMigratedDb(async (db) => {
+        const tenantId = randomUUID();
+        const session = { tenantId, userId: randomUUID(), roles: [] };
+        const installationId = await seedInstallation(db, tenantId);
+
+        let issued = 0;
+        const boundFetch: FetchLike = async () => {
+          issued += 1;
+          return Response.json({ access_token: `app-${issued}`, expires_in: 600 });
+        };
+        const call = () =>
+          ensureAccessToken({
+            db,
+            session,
+            keyring: KEYRING,
+            contract: APP_CONTRACT,
+            installationId,
+            instanceKey: "default",
+            config: APP_CONFIG,
+            secrets: { clientSecret: "secret-abc" },
+            boundFetch,
+          });
+
+        expect(await call()).toBe("app-1");
+        // Still valid: no second request.
+        expect(await call()).toBe("app-1");
+        expect(issued).toBe(1);
+
+        // Expire it, and the next call mints again — no refresh token involved.
+        await writeOAuthTokens({
+          db,
+          session,
+          keyring: KEYRING,
+          installationId,
+          tokens: { accessToken: "app-1", expiresAt: Math.floor(Date.now() / 1000) - 10 },
+        });
+        expect(await call()).toBe("app-2");
+        expect(issued).toBe(2);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  // A refused grant here is a configuration problem an administrator fixes —
+  // there is nobody to re-authorize as, so it must NOT report
+  // CONNECTOR_REAUTHORIZATION_REQUIRED.
+  test(
+    "reports a refused grant as a configuration failure, not as needing authorization",
+    async () => {
+      await withMigratedDb(async (db) => {
+        const tenantId = randomUUID();
+        const session = { tenantId, userId: randomUUID(), roles: [] };
+        const installationId = await seedInstallation(db, tenantId);
+
+        const error = await ensureAccessToken({
+          db,
+          session,
+          keyring: KEYRING,
+          contract: APP_CONTRACT,
+          installationId,
+          instanceKey: "default",
+          config: APP_CONFIG,
+          secrets: { clientSecret: "wrong" },
+          boundFetch: async () =>
+            new Response(JSON.stringify({ error: "invalid_client" }), { status: 401 }),
+        }).catch((caught: unknown) => caught);
+
+        expect((error as { code?: string }).code).toBe("CONNECTOR_OAUTH_FAILED");
+        expect(String((error as Error).message)).toMatch(/check the client id, secret and scope/);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+});
+
 describe("token storage and refresh", () => {
   test(
     "tokens are stored encrypted, and withheld from the connector's own secrets",

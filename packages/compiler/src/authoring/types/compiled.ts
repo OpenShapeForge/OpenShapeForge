@@ -67,7 +67,14 @@ export interface CompiledField {
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
   required: boolean;
+  /** Presentation only — picks the display component over the input one. */
   readOnly?: boolean;
+  /**
+   * API contract: settable at create, refused on update by every generated
+   * transport. Reaches the runtime through the manifest column, the way
+   * `classification` does (#177).
+   */
+  immutable?: boolean;
   label: LocalizedText;
   description?: LocalizedText;
   help?: LocalizedText;

@@ -92,9 +92,13 @@ REST-specific semantics:
   (`?status=a&status=b`) or naming it explicitly (`?statusIn=a`, single or
   repeated — the GraphQL filter convention) becomes the `<field>In`
   IN-filter. Values are coerced to the column type; unknown fields are `400`.
-- **Bodies** — stricter than GraphQL parity: unknown or read-only keys in a
+- **Bodies** — stricter than GraphQL parity: unknown or non-writable keys in a
   JSON body are rejected with `400` instead of being silently dropped.
-  Malformed JSON is `400`.
+  Malformed JSON is `400`. Server-managed fields (`id`, `tenantId`,
+  `createdAt`, `updatedAt`) are non-writable on both `POST` and `PATCH`; a field
+  authored `immutable` is accepted on `POST` and rejected on `PATCH`, and
+  `openapi.json` carries the difference as a separate `<Entity>UpdateInput`
+  schema (#177).
 - **Errors** — `{ "error": { "code", "message" } }`; the CRUD layer's
   GraphQL error codes map to statuses in `src/rest/http-error.ts`
   (`BAD_USER_INPUT` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403,

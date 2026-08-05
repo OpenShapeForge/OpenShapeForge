@@ -43,6 +43,7 @@ export function resolveModelFields(
       semanticType: field.semanticType,
     };
     if (field.readOnly) compiled.readOnly = true;
+    if (field.immutable) compiled.immutable = true;
     if (field.description) compiled.description = field.description;
     if (field.help) compiled.help = field.help;
     // Validation: field-level overrides semantic type defaults

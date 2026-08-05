@@ -121,6 +121,15 @@ Notes on what the compiler does with this:
 
 - **Only `persisted` fields produce columns.** A field without a `persisted`
   block is model/UI-only.
+- **`readOnly` is presentation; `immutable` is the contract.** `readOnly: true`
+  makes the renderer pick a field's display component over its input one and
+  says nothing about the API — every transport still accepts the field.
+  `immutable: true` is the API contract: the value is settable when the record
+  is created and refused on update by REST (`400`), GraphQL (absent from the
+  update input) and MCP (absent from the update tool schema). It is the flag for
+  a provenance link — `PaymentDetail.relationId` is authored with it, so a
+  payment detail cannot be re-pointed at a different relation after the fact
+  (#177). The two are independent: a field may be either, both, or neither.
 - **`tenant_id` is injected automatically** when the entity has an
   `authorization` block (that is what makes it tenant-scoped and gives it an
   RLS policy). `created_at`/`updated_at` are appended automatically when not

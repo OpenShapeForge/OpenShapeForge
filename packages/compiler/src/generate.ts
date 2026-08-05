@@ -601,6 +601,9 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
       ...(column.default === undefined ? {} : { default: column.default }),
       ...(column.sourceField === undefined ? {} : { sourceField: column.sourceField }),
       ...(column.classification === undefined ? {} : { classification: column.classification }),
+      // Authored `immutable: true` — the runtime's writability rule refuses the
+      // column on update on every transport (#177).
+      ...(column.immutable === undefined ? {} : { immutable: column.immutable }),
     })),
     // The worker surface, republished so the migrate chain can derive the
     // worker role's grants from the same declarations the policy was emitted
@@ -649,6 +652,7 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
         required: column.required,
         primaryKey: column.primaryKey,
         ...(column.classification === undefined ? {} : { classification: column.classification }),
+        ...(column.immutable === undefined ? {} : { immutable: column.immutable }),
       })),
     }))
     .sort((a, b) => a.slug.localeCompare(b.slug));

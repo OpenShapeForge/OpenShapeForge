@@ -445,3 +445,68 @@ for (const table of restTables) {
     );
   });
 }
+
+/**
+ * Authored `immutable` over REST (#177). The flag reaches the runtime on the
+ * manifest column, so REST refuses the field on PATCH exactly the way it
+ * refuses any other non-writable key — while still accepting it on POST, which
+ * is the one moment the caller owns the value.
+ *
+ * Manifest-driven: a table with no immutable column contributes no test, which
+ * is also the "unaffected entity" case (every other table keeps the create and
+ * update surface it had).
+ */
+for (const table of restTables) {
+  const rest_ = table.source!.rest!;
+  const base = `${REST_MOUNT_PATH}/${rest_.basePath}`;
+  const immutable = table.columns.find((column) => column.immutable);
+  if (!immutable) continue;
+  const field = fieldName(immutable);
+  const fkTarget = foreignKeyTargets(table).get(immutable.name);
+
+  /** A value the column will accept: a real parent row for an FK, else a sample. */
+  const valueFor = async (identity: Identity) => {
+    if (!fkTarget) return sampleValue(immutable, `rest-immutable-${seed}`);
+    const targetTable = tablesByName.get(fkTarget);
+    if (!targetTable) throw new Error(`immutable FK targets unknown table ${fkTarget}`);
+    return await createRow(targetTable, identity);
+  };
+
+  describe(`${rest_.basePath} immutable fields`, () => {
+    test(`POST accepts ${field}; PATCH rejects it with 400 and the value stands`, async () => {
+      const value = await valueFor(tenantA);
+      const body = await buildCreateBody(table, tenantA, { [field]: value });
+      const created = await rest(tenantA, "POST", base, body);
+      expect(created.status).toBe(201);
+      const id = created.body.id as string;
+      trackRestRow(table, id, tenantA);
+      expect(created.body[field]).toBe(value);
+
+      // Re-pointing the record at a different parent is the integrity gap.
+      const repointed = await valueFor(tenantA);
+      const patched = await rest(tenantA, "PATCH", `${base}/${id}`, { [field]: repointed });
+      expect(patched.status).toBe(400);
+      expect(patched.body.error.code).toBe("BAD_USER_INPUT");
+      expect(patched.body.error.message).toContain(field);
+
+      const after = await rest(tenantA, "GET", `${base}/${id}`);
+      expect(after.status).toBe(200);
+      expect(after.body[field]).toBe(value);
+    });
+
+    test(`openapi.json advertises ${field} on POST only`, async () => {
+      const spec = await rest(null, "GET", REST_OPENAPI_PATH);
+      expect(spec.status).toBe(200);
+      const schemaFor = (operation: "post" | "patch", path: string) => {
+        const ref = spec.body.paths[path][operation].requestBody.content["application/json"]
+          .schema.$ref as string;
+        return spec.body.components.schemas[ref.replace("#/components/schemas/", "")];
+      };
+      const create = schemaFor("post", `${REST_MOUNT_PATH}/${rest_.basePath}`);
+      const update = schemaFor("patch", `${REST_MOUNT_PATH}/${rest_.basePath}/{id}`);
+
+      expect(Object.keys(create.properties)).toContain(field);
+      expect(Object.keys(update.properties)).not.toContain(field);
+    });
+  });
+}

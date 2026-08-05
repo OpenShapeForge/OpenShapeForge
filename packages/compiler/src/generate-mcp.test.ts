@@ -217,6 +217,53 @@ describe("buildMcpCatalog", () => {
       expect(Object.keys(create.inputSchema.properties as object)).toEqual(["slug", "name"]);
     });
 
+    it("offers an immutable field on create and withholds it on update (#177)", () => {
+      const catalog = buildMcpCatalog(
+        [
+          input(
+            contract({
+              fields: [
+                field({ key: "name" }),
+                field({ key: "displayOnly", readOnly: true }),
+                field({ key: "relationId", readOnly: true, immutable: true }),
+              ],
+            }),
+          ),
+        ],
+        "test",
+      );
+      const create = catalog.tools.find((tool) => tool.operation === "create")!;
+      const update = catalog.tools.find((tool) => tool.operation === "update")!;
+      const values = (update.inputSchema.properties as Record<string, Record<string, unknown>>)
+        .values!;
+
+      // Settable once: the create schema still advertises it, so an agent can
+      // create the attached record (#180).
+      expect(Object.keys(create.inputSchema.properties as object)).toEqual([
+        "name",
+        "displayOnly",
+        "relationId",
+      ]);
+      // Fixed afterwards: absent from the update patch, which the runtime
+      // validates arguments against.
+      expect(Object.keys(values.properties as object)).toEqual(["name", "displayOnly"]);
+    });
+
+    it("leaves an entity with no immutable field identical across create and update", () => {
+      const catalog = buildMcpCatalog(
+        [input(contract({ fields: [field({ key: "name" }), field({ key: "slug" })] }))],
+        "test",
+      );
+      const create = catalog.tools.find((tool) => tool.operation === "create")!;
+      const update = catalog.tools.find((tool) => tool.operation === "update")!;
+      const values = (update.inputSchema.properties as Record<string, Record<string, unknown>>)
+        .values!;
+
+      expect(Object.keys(values.properties as object)).toEqual(
+        Object.keys(create.inputSchema.properties as object),
+      );
+    });
+
     it("models a collection as an array carrying the item constraints", () => {
       const catalog = buildMcpCatalog(
         [

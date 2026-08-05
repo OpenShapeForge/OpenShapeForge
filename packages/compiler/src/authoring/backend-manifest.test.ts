@@ -386,6 +386,35 @@ describe("field classification → column classification (#96/#101)", () => {
   });
 });
 
+describe("field immutable → column immutable (#177)", () => {
+  it("stamps the authored flag on the backing column, and only that flag", () => {
+    const manifest = compileFixtures(["immutable-field"]);
+    const table = tableByName(manifest, "immutable_fields");
+    const byName = new Map((table?.columns ?? []).map((c) => [c.name, c]));
+
+    // The authored contract reaches the manifest, which is the only way the
+    // transports can see it.
+    expect(byName.get("provenance_key")?.immutable).toBe(true);
+
+    // `readOnly` is a presentation flag and must not leak into the contract.
+    expect(byName.get("display_only")?.immutable).toBeUndefined();
+    expect(byName.get("label")?.immutable).toBeUndefined();
+
+    // Server-managed columns stay unflagged: they are excluded by the
+    // column-shaped half of the rule, at create as well as update.
+    expect(byName.get("id")?.immutable).toBeUndefined();
+    expect(byName.get("tenant_id")?.immutable).toBeUndefined();
+    expect(byName.get("created_at")?.immutable).toBeUndefined();
+    expect(byName.get("updated_at")?.immutable).toBeUndefined();
+  });
+
+  it("leaves an entity with no immutable field byte-identical", () => {
+    const manifest = compileFixtures(["classified-field"]);
+    const table = tableByName(manifest, "classified_fields");
+    expect((table?.columns ?? []).some((column) => "immutable" in column)).toBe(false);
+  });
+});
+
 describe("retention clock and crypto-delete compilation", () => {
   it("resolves createdAt and updatedAt strategies to operational timestamptz columns", () => {
     const manifest = compileFixtures([

@@ -212,6 +212,15 @@ export type ColumnDefinition = {
    * so byte-identical output is preserved for unclassified columns.
    */
   classification?: ColumnSensitivity;
+  /**
+   * Authored `immutable: true` on the field that backs this column: the value
+   * may be set when the row is created and is refused on update by every
+   * generated transport (#177). Takes the same route as `classification` —
+   * authoring field → compiled contract → manifest column → the one writability
+   * rule the transports share. Only `true` is emitted, so unflagged columns
+   * keep byte-identical output.
+   */
+  immutable?: true;
 };
 
 export type LocalizedTextManifest = {

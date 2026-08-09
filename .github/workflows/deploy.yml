@@ -201,6 +201,14 @@ jobs:
               project-id="$SCW_DEFAULT_PROJECT_ID" -o json | jq -r '.data' | base64 -d
           }
           # secret-name -> env var the compiler reads.
+          #
+          # This list must name EVERY ${env:KEYCLOAK_CLIENT_SECRET_*} the
+          # authored realms reference, minus the control-realm ones the
+          # placeholder step below covers. A client added to
+          # authorization.yaml without an entry here — and a matching secret in
+          # Secret Manager — fails `bun run generate` in this workflow, which is
+          # the first deploy after it merges rather than the PR that added it
+          # (#324). Nothing enforces that yet.
           while IFS='|' read -r name var; do
             [ -z "$name" ] && continue
             value="$(fetch "$name")"
@@ -216,6 +224,7 @@ jobs:
           ${{ env.SECRET_PREFIX }}-realm-client-openshapeforge-timeline|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_TIMELINE
           ${{ env.SECRET_PREFIX }}-realm-client-seed-service|KEYCLOAK_CLIENT_SECRET_SEED_SERVICE
           ${{ env.SECRET_PREFIX }}-realm-client-openshapeforge-auth-api|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API
+          ${{ env.SECRET_PREFIX }}-realm-client-openshapeforge-apikey-provisioner|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_APIKEY_PROVISIONER
           ${{ env.SECRET_PREFIX }}-realm-user-acme-directie|E2E_USER_PASSWORD_ACME_DIRECTIE
           ${{ env.SECRET_PREFIX }}-realm-user-acme-vastgoedbeheerder|E2E_USER_PASSWORD_ACME_VASTGOEDBEHEERDER
           ${{ env.SECRET_PREFIX }}-realm-user-acme-wijkbeheerder|E2E_USER_PASSWORD_ACME_WIJKBEHEERDER

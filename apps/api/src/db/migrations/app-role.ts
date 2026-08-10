@@ -198,10 +198,23 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
     $$;
   `.execute(db);
 
-  // Re-assert the load-bearing RLS attributes every run so a tampered or legacy
-  // role is repaired. These are NOT secrets, so re-asserting them is safe.
-  // LOGIN is re-asserted too (a NOLOGIN role would break the runtime pool).
-  await sql`alter role ${sql.ref(APP_ROLE)} login nosuperuser nobypassrls`.execute(db);
+  // Repair the load-bearing RLS attributes after tampering or a legacy manual
+  // role creation, but do not rewrite the cluster-wide pg_authid row on every
+  // routine migrate. Concurrent scratch-database migrations share that row,
+  // and unconditional ALTER ROLE statements contend there (#309).
+  await sql`
+    do $$
+    begin
+      if exists (
+        select 1 from pg_roles
+        where rolname = ${sql.lit(APP_ROLE)}
+          and (not rolcanlogin or rolsuper or rolbypassrls)
+      ) then
+        execute format('alter role %I login nosuperuser nobypassrls', ${sql.lit(APP_ROLE)});
+      end if;
+    end
+    $$;
+  `.execute(db);
 
   // Rotate the password ONLY when explicitly requested for this run. This is
   // the sole path that overwrites an existing role's password; the default

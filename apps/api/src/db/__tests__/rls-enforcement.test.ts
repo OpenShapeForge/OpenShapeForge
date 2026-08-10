@@ -26,7 +26,7 @@ import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
-import { APP_ROLE } from "../migrations/app-role.js";
+import { APP_ROLE, applyAppRoleMigration } from "../migrations/app-role.js";
 
 /**
  * Privileged admin URL (superuser) used to create/drop the scratch database
@@ -95,6 +95,36 @@ async function withDb<T>(
 }
 
 describe("RLS enforcement against the restricted app role", () => {
+  test(
+    "migration repairs drifted login and RLS role attributes",
+    async () => {
+      await withScratchDb(async (name) => {
+        await withDb(scratchAdminUrl(name), async (db) => {
+          await db.connection().execute(async (conn) => {
+            await runMigrationChain(conn);
+            await sql`alter role ${sql.ref(APP_ROLE)} nologin superuser bypassrls`.execute(conn);
+            await applyAppRoleMigration(conn);
+
+            const attributes = await sql<{
+              rolcanlogin: boolean;
+              rolsuper: boolean;
+              rolbypassrls: boolean;
+            }>`
+              select rolcanlogin, rolsuper, rolbypassrls
+              from pg_roles where rolname = ${APP_ROLE}
+            `.execute(conn);
+            expect(attributes.rows[0]).toEqual({
+              rolcanlogin: true,
+              rolsuper: false,
+              rolbypassrls: false,
+            });
+          });
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
   test(
     "openshapeforge_app is non-superuser and RLS blocks cross-tenant reads",
     async () => {

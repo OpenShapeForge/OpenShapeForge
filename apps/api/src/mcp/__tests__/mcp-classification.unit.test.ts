@@ -22,6 +22,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   __assertWritableValuesForTests as assertWritableValues,
+  __assertEnumValuesForTests as assertEnumValues,
   __describeToolForTests as describeTool,
   __sessionMayInvokeForTests as sessionMayInvoke,
   __withholdClassifiedForTests as withholdClassified,
@@ -90,6 +91,13 @@ const CREATE_SCHEMA: AnyRecord = {
   },
   required: ["accountHolder", "iban"],
   additionalProperties: false,
+};
+
+const ENUM_SCHEMA: AnyRecord = {
+  type: "object",
+  properties: {
+    relationType: { type: "string", enum: ["person", "organization", "group"] },
+  },
 };
 
 describe("withholdClassified", () => {
@@ -237,6 +245,29 @@ describe("assertWritableValues", () => {
       expect((error as Error).message).toContain("PaymentDetail");
     }
   });
+});
+
+describe("assertEnumValues", () => {
+  it("accepts an advertised enum value", () => {
+    expect(() =>
+      assertEnumValues(
+        { relationType: "person" },
+        ENUM_SCHEMA,
+        entity([]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects a value outside the advertised enum", () => {
+    expect(() =>
+      assertEnumValues(
+        { relationType: "spaceship" },
+        ENUM_SCHEMA,
+        entity([]),
+      ),
+    ).toThrow(/Invalid value for field "relationType"/);
+  });
+
 });
 
 describe("sessionMayInvoke", () => {

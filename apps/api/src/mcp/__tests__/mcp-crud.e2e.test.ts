@@ -128,6 +128,9 @@ async function buildCreateArgs(
   identity: Identity,
 ): Promise<Record<string, unknown>> {
   const fkTargets = foreignKeyTargets(table);
+  const createTool = catalog.tools.find(
+    (tool) => tool.name === `${table.source!.mcp!.toolPrefix}_create`,
+  ) as { inputSchema?: { properties?: Record<string, { enum?: unknown[] }> } } | undefined;
   const args: Record<string, unknown> = {};
   for (const column of table.columns) {
     if (!column.required || column.primaryKey) continue;
@@ -137,7 +140,9 @@ async function buildCreateArgs(
       args[fieldName(column)] = await createRow(tablesByName.get(target)!, identity);
       continue;
     }
-    args[fieldName(column)] = sampleValue(column, seed);
+    const field = fieldName(column);
+    const enumeration = createTool?.inputSchema?.properties?.[field]?.enum;
+    args[field] = enumeration?.[0] ?? sampleValue(column, seed);
   }
   return args;
 }
@@ -170,6 +175,14 @@ describe("generated MCP server", () => {
       "organization",
       "group",
     ]);
+  });
+
+  test("rejects a value outside an advertised enum", async () => {
+    const { body } = await callTool(tenantA, "relation_create", {
+      displayName: "invalid-enum",
+      relationType: "spaceship",
+    });
+    expect(toolError(body)).toMatch(/BAD_USER_INPUT: Invalid value for field "relationType"/);
   });
 
   test("annotates read-only and destructive tools", async () => {

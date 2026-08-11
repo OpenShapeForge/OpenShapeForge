@@ -13,6 +13,8 @@ export interface Relationship {
   kind: "belongsTo" | "hasMany" | "manyToMany";
   target: string;
   foreignKey?: string;
+  /** Explicit physical FK behaviour for a belongsTo relationship. */
+  onDelete?: "CASCADE" | "RESTRICT" | "SET NULL";
   via?: string;
   label?: LocalizedText;
 }

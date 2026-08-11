@@ -37,6 +37,10 @@ retention:
     fields:
       - validUntil
       - validFrom
+  erasure:
+    subjectScoped: true
+    subjectColumns: [relation_id]
+    anonymizeColumns: [iban, bic, account_holder]
 fields:
   - key: type
     valueType: string
@@ -98,6 +102,15 @@ fields:
     persisted:
       column: bic
       storageClass: core
+    retention:
+      mode: fieldOverride
+      scope: field
+      duration: P7Y
+      startsFrom:
+        strategy: firstNonNull
+        fields: [validUntil, validFrom]
+      disposition:
+        action: anonymize
   - key: accountHolder
     valueType: string
     required: false
@@ -112,6 +125,15 @@ fields:
     persisted:
       column: account_holder
       storageClass: core
+    retention:
+      mode: fieldOverride
+      scope: field
+      duration: P7Y
+      startsFrom:
+        strategy: firstNonNull
+        fields: [validUntil, validFrom]
+      disposition:
+        action: anonymize
   - key: status
     valueType: string
     required: false
@@ -193,6 +215,9 @@ relationships:
     kind: belongsTo
     target: Relation
     foreignKey: relation_id
+    # The erasure primitive clears PII and the provenance link explicitly;
+    # ordinary deletes must remain blocked while payment data exists.
+    onDelete: RESTRICT
     label:
       en: Relation
       nl: Relatie

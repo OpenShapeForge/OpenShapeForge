@@ -170,6 +170,11 @@ export type RetentionErasure = {
     /** Column on the dependent table referencing this table. */
     via: string;
   }>;
+  /**
+   * Explicit statutory-retention fields that are cleared while their record
+   * remains. The runtime rejects any other anonymisation.
+   */
+  anonymizeColumns?: string[];
 };
 
 export type RetentionDefinition = {

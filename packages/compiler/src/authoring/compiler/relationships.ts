@@ -24,6 +24,7 @@ export function resolveRelationships(artifacts: LoadedArtifacts): CompiledRelati
         kind: rel.kind,
         target: rel.target,
         foreignKey: rel.foreignKey,
+        onDelete: rel.onDelete,
         via: rel.via,
         label: rel.label,
       });
@@ -38,6 +39,7 @@ export function resolveRelationships(artifacts: LoadedArtifacts): CompiledRelati
         kind: rel.kind,
         target: rel.target,
         foreignKey: rel.foreignKey,
+        onDelete: rel.onDelete,
         via: rel.via,
         label: rel.label,
       });

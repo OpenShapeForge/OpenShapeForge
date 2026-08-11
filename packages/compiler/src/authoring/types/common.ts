@@ -188,6 +188,25 @@ export interface RetentionPolicy {
     allowExtension?: boolean;
     allowShortening?: boolean;
   };
+  /**
+   * Subject-erasure metadata. This is deliberately separate from a retention
+   * clock: an erasure request can be actionable even when no scheduled
+   * retention rule applies to the entity.
+   */
+  erasure?: {
+    subjectScoped?: boolean;
+    subjectColumns?: string[];
+    cascades?: Array<{
+      schema: string;
+      table: string;
+      via: string;
+    }>;
+    /**
+     * PII columns that may be cleared while retaining a statutory record.
+     * Each must itself carry `retention.disposition.action: anonymize`.
+     */
+    anonymizeColumns?: string[];
+  };
   reason?: LocalizedText;
 }
 

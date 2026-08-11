@@ -30,6 +30,15 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+retention:
+  # An erasure request is actionable independently of any scheduled retention
+  # rule. The runtime accepts only this authored subject root.
+  erasure:
+    subjectScoped: true
+    subjectColumns: [id]
+    cascades:
+      - { schema: erp, table: contact_details, via: relation_id }
+      - { schema: erp, table: payment_details, via: relation_id }
 fields:
   - key: displayName
     valueType: string

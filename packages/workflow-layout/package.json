@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "elkjs": "^0.11.1",
+    "elkjs": "^0.12.0",
     "web-worker": "^1.5.0"
   },
   "//dependencies": "elkjs is the layered-graph engine; its licence was settled in issue #202. It is loaded lazily and per runtime — the bundled build in a browser, lib/main.js plus a worker path under Bun — so `elk.ts` is the only importer and a caller that never lays out never pays for it. web-worker looks unused because nothing here imports it: elkjs reaches for it by name when constructed with a workerUrl, and without it prints 'Web worker requested but web-worker package not installed' and silently runs layout on the calling thread. Declared so the server path is the one we chose rather than the one we fell back to (Apache-2.0).",

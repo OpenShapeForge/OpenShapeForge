@@ -65,17 +65,34 @@ export interface StoredSession {
 }
 
 const SESSION_PREFIX = "openshapeforge-admin:session:";
-const SESSION_CACHE_TTL_MS = 1_000;
-
 /** Default TTL when refreshExpiresAt is unknown (30 minutes). */
 const DEFAULT_SESSION_TTL_S = 1800;
+export const SESSION_ATOMIC_COMMAND_KEY_COUNT = 1;
+export const SESSION_COMPARE_AND_SET_SCRIPT =
+  "if redis.call('get', KEYS[1]) == ARGV[1] then redis.call('set', KEYS[1], ARGV[2], 'EX', ARGV[3]); return 1 else return 0 end";
+export const SESSION_GET_AND_DELETE_SCRIPT =
+  "local value = redis.call('get', KEYS[1]); if value then redis.call('del', KEYS[1]) end; return value";
+
+function sessionTtlSeconds(data: StoredSession): number {
+  const nowS = Math.floor(Date.now() / 1000);
+  return data.refreshExpiresAt
+    ? Math.max(data.refreshExpiresAt - nowS, 60)
+    : DEFAULT_SESSION_TTL_S;
+}
+
+function parseStoredSession(raw: unknown): StoredSession | null {
+  if (typeof raw !== "string") {
+    return null;
+  }
+  try {
+    return JSON.parse(raw) as StoredSession;
+  } catch {
+    return null;
+  }
+}
 
 // Lazy singleton — connection is created on first use.
 let client: RedisClient | null = null;
-const sessionCache = new Map<
-  string,
-  { value: StoredSession | null; expiresAt: number }
->();
 
 function resetRedisClient(): void {
   const current = client as (RedisClient & { disconnect?: () => void }) | null;
@@ -98,29 +115,6 @@ async function withRedis<T>(operation: (redis: RedisClient) => Promise<T>): Prom
     resetRedisClient();
     return operation(getRedis());
   }
-}
-
-function readSessionCache(sessionId: string): StoredSession | null | undefined {
-  const cached = sessionCache.get(sessionId);
-  if (!cached) return undefined;
-
-  if (cached.expiresAt <= Date.now()) {
-    sessionCache.delete(sessionId);
-    return undefined;
-  }
-
-  return cached.value;
-}
-
-function writeSessionCache(sessionId: string, value: StoredSession | null): void {
-  sessionCache.set(sessionId, {
-    value,
-    expiresAt: Date.now() + SESSION_CACHE_TTL_MS,
-  });
-}
-
-function clearSessionCache(sessionId: string): void {
-  sessionCache.delete(sessionId);
 }
 
 function getRedis(): RedisClient {
@@ -181,44 +175,76 @@ export async function setSession(
   data: StoredSession,
 ): Promise<void> {
   const key = `${SESSION_PREFIX}${sessionId}`;
-  const nowS = Math.floor(Date.now() / 1000);
-  const ttl = data.refreshExpiresAt
-    ? Math.max(data.refreshExpiresAt - nowS, 60)
-    : DEFAULT_SESSION_TTL_S;
-  await withRedis((redis) => redis.set(key, JSON.stringify(data), "EX", ttl));
-  writeSessionCache(sessionId, data);
+  await withRedis((redis) =>
+    redis.set(key, JSON.stringify(data), "EX", sessionTtlSeconds(data)),
+  );
 }
 
-/** Retrieve a session payload from Redis. Returns null if missing or expired. */
+/** Cluster-safe compare-and-set; see apps/web's equivalent for the race. */
+export async function replaceSessionIfUnchanged(
+  sessionId: string,
+  expected: StoredSession,
+  replacement: StoredSession,
+): Promise<boolean> {
+  const key = `${SESSION_PREFIX}${sessionId}`;
+  const result = await withRedis((redis) =>
+    redis.eval(
+      SESSION_COMPARE_AND_SET_SCRIPT,
+      SESSION_ATOMIC_COMMAND_KEY_COUNT,
+      key,
+      JSON.stringify(expected),
+      JSON.stringify(replacement),
+      String(sessionTtlSeconds(replacement)),
+    ),
+  );
+  return result === 1;
+}
+
+/**
+ * Retrieve a session payload from Redis. Returns null if missing or expired.
+ * This intentionally has no per-process cache so logout is immediate across
+ * control-plane replicas.
+ */
 export async function getSession(
   sessionId: string,
 ): Promise<StoredSession | null> {
-  const cached = readSessionCache(sessionId);
-  if (cached !== undefined) {
-    return cached;
-  }
-
   const key = `${SESSION_PREFIX}${sessionId}`;
   const raw = await withRedis((redis) => redis.get(key));
-  if (!raw) {
-    writeSessionCache(sessionId, null);
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(raw) as StoredSession;
-    writeSessionCache(sessionId, parsed);
-    return parsed;
-  } catch {
-    clearSessionCache(sessionId);
-    return null;
-  }
+  return parseStoredSession(raw);
 }
 
 /** Delete a session from Redis immediately (used on logout). */
 export async function deleteSession(sessionId: string): Promise<void> {
   const key = `${SESSION_PREFIX}${sessionId}`;
   await withRedis((redis) => redis.del(key));
-  clearSessionCache(sessionId);
+}
+
+/** See apps/web's equivalent for the refresh/logout race this lock closes. */
+export async function consumeSessionForLogout(
+  sessionId: string,
+): Promise<StoredSession | null> {
+  const lockOwnerToken = await acquireRefreshLock(sessionId);
+  if (!lockOwnerToken) {
+    throw new Error("Session refresh is in progress; logout can be retried.");
+  }
+
+  try {
+    const key = `${SESSION_PREFIX}${sessionId}`;
+    const raw = await withRedis((redis) =>
+      redis.eval(
+        SESSION_GET_AND_DELETE_SCRIPT,
+        SESSION_ATOMIC_COMMAND_KEY_COUNT,
+        key,
+      ),
+    );
+    return parseStoredSession(raw);
+  } finally {
+    try {
+      await releaseRefreshLock(sessionId, lockOwnerToken);
+    } catch {
+      console.warn("[admin-auth:logout] Session lock release did not complete.");
+    }
+  }
 }
 
 const REFRESH_LOCK_PREFIX = "openshapeforge-admin:refresh-lock:";

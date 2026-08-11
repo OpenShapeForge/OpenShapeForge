@@ -7,8 +7,8 @@ import {
   acquireRefreshLock,
   REFRESH_LOCK_TTL_MS,
   getSession,
+  replaceSessionIfUnchanged,
   releaseRefreshLock,
-  setSession,
 } from "../redis";
 import type { StoredSession } from "../redis";
 import {
@@ -157,39 +157,94 @@ export async function refreshSessionInRedis(
   const existing = refreshPromises.get(sessionId);
   if (existing) return existing;
 
-  const promise = (async () => {
-    // Layer 2: distributed lock via Redis SET NX
-    let lockOwnerToken = await acquireRefreshLock(sessionId);
-    if (!lockOwnerToken) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      const updated = await getSession(sessionId);
-      if (updated && !updated.error && hasUsableAccessWindow(updated)) return updated;
-
-      lockOwnerToken = await acquireRefreshLock(sessionId);
-      if (!lockOwnerToken) {
-        return { ...(updated ?? stored), error: "RefreshTokenError" };
-      }
-    }
-
-    try {
-      const refreshed = await doRefreshAccessToken(stored);
-      const current = await getSession(sessionId);
-      if (current && !current.error && hasUsableAccessWindow(current)) {
-        return current;
-      }
-      await setSession(sessionId, refreshed);
-      return refreshed;
-    } finally {
-      if (lockOwnerToken) {
-        await releaseRefreshLockSafely(sessionId, lockOwnerToken);
-      }
-    }
-  })().finally(() => {
+  const promise = refreshSessionWithDistributedLock(sessionId, stored, {
+    acquireLock: acquireRefreshLock,
+    getSession,
+    refresh: doRefreshAccessToken,
+    replaceSession: replaceSessionIfUnchanged,
+    releaseLock: releaseRefreshLockSafely,
+    wait: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
+  }).finally(() => {
     refreshPromises.delete(sessionId);
   });
 
   refreshPromises.set(sessionId, promise);
   return promise;
+}
+
+export interface RefreshSessionLockDependencies {
+  acquireLock: (sessionId: string) => Promise<string | null>;
+  getSession: (sessionId: string) => Promise<StoredSession | null>;
+  refresh: (stored: StoredSession) => Promise<StoredSession>;
+  replaceSession: (
+    sessionId: string,
+    expected: StoredSession,
+    replacement: StoredSession,
+  ) => Promise<boolean>;
+  releaseLock: (sessionId: string, ownerToken: string) => Promise<void>;
+  wait: (delayMs: number) => Promise<void>;
+}
+
+export async function refreshSessionWithDistributedLock(
+  sessionId: string,
+  stored: StoredSession,
+  dependencies: RefreshSessionLockDependencies,
+): Promise<StoredSession> {
+  let updated: StoredSession | null = null;
+  let lockOwnerToken = await dependencies.acquireLock(sessionId);
+  if (!lockOwnerToken) {
+    await dependencies.wait(2000);
+    updated = await dependencies.getSession(sessionId);
+    if (updated && !updated.error && hasUsableAccessWindow(updated)) {
+      return updated;
+    }
+
+    lockOwnerToken = await dependencies.acquireLock(sessionId);
+    if (!lockOwnerToken) {
+      return { ...(updated ?? stored), error: "RefreshTokenError" };
+    }
+  }
+
+  try {
+    const lockedSession = await dependencies.getSession(sessionId);
+    if (!lockedSession) {
+      return { ...(updated ?? stored), error: "RefreshTokenError" };
+    }
+    if (lockedSession.error) {
+      return { ...lockedSession, error: "RefreshTokenError" };
+    }
+    if (hasUsableAccessWindow(lockedSession)) {
+      return lockedSession;
+    }
+
+    const refreshed = await dependencies.refresh(lockedSession);
+    const latest = await dependencies.getSession(sessionId);
+    if (!latest) {
+      return { ...lockedSession, error: "RefreshTokenError" };
+    }
+    if (latest.error) {
+      return { ...latest, error: "RefreshTokenError" };
+    }
+    if (hasUsableAccessWindow(latest)) {
+      return latest;
+    }
+
+    const replaced = await dependencies.replaceSession(
+      sessionId,
+      latest,
+      refreshed,
+    );
+    if (!replaced) {
+      const current = await dependencies.getSession(sessionId);
+      if (current && !current.error && hasUsableAccessWindow(current)) {
+        return current;
+      }
+      return { ...(current ?? latest), error: "RefreshTokenError" };
+    }
+    return refreshed;
+  } finally {
+    await dependencies.releaseLock(sessionId, lockOwnerToken);
+  }
 }
 
 async function fetchWithRefreshTimeout(

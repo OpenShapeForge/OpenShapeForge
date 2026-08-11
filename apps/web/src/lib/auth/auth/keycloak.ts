@@ -15,6 +15,9 @@ export const issuerInternal = process.env.AUTH_KEYCLOAK_ISSUER_INTERNAL ?? issue
 export const keycloakClientSecret =
   process.env.AUTH_KEYCLOAK_SECRET ?? "dev-secret";
 
+export const keycloakClientId =
+  process.env.AUTH_KEYCLOAK_ID ?? "openshapeforge-gateway";
+
 /** NextAuth session encryption; production requires env via validateProductionEnv. */
 export const authSecret =
   process.env.AUTH_SECRET
@@ -22,13 +25,23 @@ export const authSecret =
     ?? "dev-auth-secret-change-in-production";
 
 export const keycloakLogoutUrl = `${issuer}/protocol/openid-connect/logout`;
+export const keycloakServerLogoutUrl = `${issuerInternal}/protocol/openid-connect/logout`;
+
+export const authCookieNames = {
+  sessionToken: "openshapeforge.session-token",
+  callbackUrl: "openshapeforge.callback-url",
+  csrfToken: "openshapeforge.csrf-token",
+  pkceCodeVerifier: "openshapeforge.pkce.code_verifier",
+  state: "openshapeforge.state",
+  nonce: "openshapeforge.nonce",
+} as const;
 
 export const strictSameSite = "strict" as const;
 export const oauthFlowSameSite = "lax" as const;
 
 export const providers = [
   Keycloak({
-    clientId: process.env.AUTH_KEYCLOAK_ID ?? "openshapeforge-gateway",
+    clientId: keycloakClientId,
     clientSecret: keycloakClientSecret,
     issuer,
     authorization: {

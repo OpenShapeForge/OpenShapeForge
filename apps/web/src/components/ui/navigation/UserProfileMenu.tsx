@@ -9,6 +9,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/overlay/popover";
+import { requestLogout } from "@/lib/auth/logout-client";
 
 type ShellLang = "en" | "nl";
 
@@ -41,6 +42,11 @@ function buildRedirectTarget(pathname: string, searchParams: URLSearchParams): s
 export function UserProfileMenu({ name, role, activeLang }: UserProfileMenuProps) {
   const pathname = usePathname() ?? "/";
   const searchParams = useSearchParams();
+  const [loggingOut, setLoggingOut] = React.useState(false);
+  const [logoutFailed, setLogoutFailed] = React.useState(false);
+  const logoutCopy = activeLang === "nl"
+    ? { action: "Uitloggen", pending: "Bezig...", error: "Uitloggen is niet gelukt." }
+    : { action: "Log out", pending: "Logging out...", error: "Logout failed." };
 
   const switchLanguage = React.useCallback(
     (nextLang: ShellLang) => {
@@ -81,6 +87,29 @@ export function UserProfileMenu({ name, role, activeLang }: UserProfileMenuProps
               onChange={switchLanguage}
               ariaLabel="Interface taal"
             />
+          </div>
+
+          <div className="border-t pt-3">
+            <button
+              type="button"
+              disabled={loggingOut}
+              className="w-full rounded-md border px-3 py-2 text-left text-sm font-medium text-foreground hover:bg-muted disabled:cursor-wait disabled:opacity-60"
+              onClick={async () => {
+                setLoggingOut(true);
+                setLogoutFailed(false);
+                if (!await requestLogout()) {
+                  setLoggingOut(false);
+                  setLogoutFailed(true);
+                }
+              }}
+            >
+              {loggingOut ? logoutCopy.pending : logoutCopy.action}
+            </button>
+            {logoutFailed ? (
+              <p className="mt-2 text-xs text-destructive" role="alert">
+                {logoutCopy.error}
+              </p>
+            ) : null}
           </div>
         </div>
       </PopoverContent>

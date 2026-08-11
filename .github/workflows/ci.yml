@@ -102,6 +102,17 @@ jobs:
       - name: Compiler unit tests
         run: bun test packages/compiler
 
+      # Server-side session logout and refresh fencing are framework-specific.
+      # Keep both app variants under the main unit-test gate.
+      - name: Session logout unit tests
+        run: >-
+          bun test apps/web/src/lib/auth/auth/logout.test.ts
+          apps/web/src/lib/auth/auth/token-refresh-lock.test.ts
+          apps/web/src/lib/auth/auth/session-hydration.test.ts
+          apps/web/src/lib/auth/redis-fencing.test.ts
+          apps/admin/src/lib/auth/auth/token-refresh-lock.test.ts
+          apps/admin/src/lib/auth/auth/session-hydration.test.ts
+
       # The shipped example plugins carry unit tests that nothing ran until
       # now: `test:compiler` is scoped to packages/compiler and the db/e2e jobs
       # only reach plugin code through the API. A test that never executes is

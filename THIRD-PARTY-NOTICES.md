@@ -4,23 +4,23 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 433 packages.
+Regenerate with `bun run notices`. 445 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 366 |
+| MIT | 372 |
 | ISC | 27 |
-| Apache-2.0 | 17 |
+| Apache-2.0 | 19 |
 | BSD-3-Clause | 7 |
+| MPL-2.0 | 6 |
 | BlueOak-1.0.0 | 5 |
-| MPL-2.0 | 4 |
-| LGPL-3.0-or-later | 2 |
+| LGPL-3.0-or-later | 4 |
 | 0BSD | 1 |
 | BSD-2-Clause | 1 |
 | CC-BY-4.0 | 1 |
-| EPL-2.0 | 1 |
+| EPL-2.0 OR GPL-3.0-or-later | 1 |
 | Unlicense | 1 |
 
 ## Packages
@@ -187,7 +187,15 @@ Regenerate with `bun run notices`. 433 packages.
 ### @img/colour@1.1.0
 - License: **MIT** — git+https://github.com/lovell/colour.git
 
+### @img/sharp-libvips-linux-arm64@1.3.2
+- License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
+- Author: Lovell Fuller <npm@lovell.info>
+
 ### @img/sharp-libvips-linux-x64@1.3.2
+- License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
+- Author: Lovell Fuller <npm@lovell.info>
+
+### @img/sharp-libvips-linuxmusl-arm64@1.3.2
 - License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
@@ -195,7 +203,15 @@ Regenerate with `bun run notices`. 433 packages.
 - License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
+### @img/sharp-linux-arm64@0.35.3
+- License: **Apache-2.0** — https://sharp.pixelplumbing.com
+- Author: Lovell Fuller <npm@lovell.info>
+
 ### @img/sharp-linux-x64@0.35.3
+- License: **Apache-2.0** — https://sharp.pixelplumbing.com
+- Author: Lovell Fuller <npm@lovell.info>
+
+### @img/sharp-linuxmusl-arm64@0.35.3
 - License: **Apache-2.0** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
@@ -235,14 +251,20 @@ Regenerate with `bun run notices`. 433 packages.
 - License: **MIT** — https://modelcontextprotocol.io
 - Author: Anthropic, PBC (https://anthropic.com)
 
-### @next/env@16.2.11
+### @next/env@16.3.0
 - License: **MIT** — https://github.com/vercel/next.js
 - Author: Next.js Team <support@vercel.com>
 
-### @next/swc-linux-x64-gnu@16.2.11
+### @next/swc-linux-arm64-gnu@16.3.0
 - License: **MIT** — https://github.com/vercel/next.js
 
-### @next/swc-linux-x64-musl@16.2.11
+### @next/swc-linux-arm64-musl@16.3.0
+- License: **MIT** — https://github.com/vercel/next.js
+
+### @next/swc-linux-x64-gnu@16.3.0
+- License: **MIT** — https://github.com/vercel/next.js
+
+### @next/swc-linux-x64-musl@16.3.0
 - License: **MIT** — https://github.com/vercel/next.js
 
 ### @panva/hkdf@1.2.1
@@ -368,11 +390,11 @@ Regenerate with `bun run notices`. 433 packages.
 ### @repeaterjs/repeater@3.1.0
 - License: **MIT** — git+https://github.com/repeaterjs/repeater.git
 
-### @restatedev/restate-sdk@1.16.2
+### @restatedev/restate-sdk@1.16.4
 - License: **MIT** — https://github.com/restatedev/sdk-typescript#readme
 - Author: Restate Developers
 
-### @restatedev/restate-sdk-core@1.16.2
+### @restatedev/restate-sdk-core@1.16.4
 - License: **MIT** — https://github.com/restatedev/sdk-typescript#readme
 - Author: Restate Developers
 
@@ -388,6 +410,12 @@ Regenerate with `bun run notices`. 433 packages.
 - License: **MIT** — https://tailwindcss.com
 
 ### @tailwindcss/oxide@4.3.3
+- License: **MIT** — git+https://github.com/tailwindlabs/tailwindcss.git
+
+### @tailwindcss/oxide-linux-arm64-gnu@4.3.3
+- License: **MIT** — git+https://github.com/tailwindlabs/tailwindcss.git
+
+### @tailwindcss/oxide-linux-arm64-musl@4.3.3
 - License: **MIT** — git+https://github.com/tailwindlabs/tailwindcss.git
 
 ### @tailwindcss/oxide-linux-x64-gnu@4.3.3
@@ -452,10 +480,13 @@ Regenerate with `bun run notices`. 433 packages.
 ### @types/node@26.1.1
 - License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node
 
-### @types/react@19.2.17
+### @types/node@26.1.2
+- License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/node
+
+### @types/react@19.2.18
 - License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react
 
-### @types/react-dom@19.2.3
+### @types/react-dom@19.2.4
 - License: **MIT** — https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/react-dom
 
 ### @types/unist@2.0.11
@@ -637,7 +668,7 @@ Regenerate with `bun run notices`. 433 packages.
 - License: **MIT** — expressjs/cors
 - Author: Troy Goode <troygoode@gmail.com> (https://github.com/troygoode/)
 
-### cron-parser@5.6.2
+### cron-parser@5.7.0
 - License: **MIT** — https://github.com/harrisiirak/cron-parser.git
 - Author: Harri Siirak
 
@@ -733,8 +764,8 @@ Regenerate with `bun run notices`. 433 packages.
 - License: **Apache-2.0** — https://github.com/mde/ejs
 - Author: Matthew Eernisse <matthew.eernisse@gmail.com>
 
-### elkjs@0.11.1
-- License: **EPL-2.0** — https://github.com/kieler/elkjs.git
+### elkjs@0.12.0
+- License: **EPL-2.0 OR GPL-3.0-or-later** — https://github.com/kieler/elkjs.git
 - Author: Ulf Rüegg
 
 ### encodeurl@2.0.0
@@ -810,7 +841,7 @@ Regenerate with `bun run notices`. 433 packages.
 - License: **BSD-3-Clause** — https://github.com/fastify/fast-uri
 - Author: Vincent Le Goff <vince.legoff@gmail.com> (https://github.com/zekth)
 
-### fastify@5.10.0
+### fastify@5.11.2
 - License: **MIT** — https://fastify.dev/
 - Author: Matteo Collina <hello@matteocollina.com>
 
@@ -960,6 +991,10 @@ Regenerate with `bun run notices`. 433 packages.
 - License: **MIT** — https://github.com/panva/jose
 - Author: Filip Skokan <panva.ip@gmail.com>
 
+### jose@6.2.8
+- License: **MIT** — https://github.com/panva/jose
+- Author: Filip Skokan <panva.ip@gmail.com>
+
 ### json-schema-ref-resolver@3.0.0
 - License: **MIT** — https://github.com/fastify/json-schema-ref-resolver#readme
 - Author: Ivan Tymoshenko <ivan@tymoshenko.me>
@@ -990,6 +1025,12 @@ Regenerate with `bun run notices`. 433 packages.
 ### lightningcss@1.32.0
 - License: **MPL-2.0** — https://github.com/parcel-bundler/lightningcss.git
 
+### lightningcss-linux-arm64-gnu@1.32.0
+- License: **MPL-2.0** — https://github.com/parcel-bundler/lightningcss.git
+
+### lightningcss-linux-arm64-musl@1.32.0
+- License: **MPL-2.0** — https://github.com/parcel-bundler/lightningcss.git
+
 ### lightningcss-linux-x64-gnu@1.32.0
 - License: **MPL-2.0** — https://github.com/parcel-bundler/lightningcss.git
 
@@ -1008,7 +1049,7 @@ Regenerate with `bun run notices`. 433 packages.
 - License: **BlueOak-1.0.0** — git+ssh://git@github.com/isaacs/node-lru-cache.git
 - Author: Isaac Z. Schlueter <i@izs.me>
 
-### lucide-react@1.28.0
+### lucide-react@1.29.0
 - License: **ISC** — https://lucide.dev
 - Author: Eric Fennis
 
@@ -1171,7 +1212,7 @@ Regenerate with `bun run notices`. 433 packages.
 ### negotiator@1.0.0
 - License: **MIT** — jshttp/negotiator
 
-### next@16.2.11
+### next@16.3.0
 - License: **MIT** — https://nextjs.org
 
 ### next-auth@5.0.0-beta.32
@@ -1305,13 +1346,13 @@ Regenerate with `bun run notices`. 433 packages.
 - License: **MIT** — stream-utils/raw-body
 - Author: Jonathan Ong <me@jongleberry.com> (http://jongleberry.com)
 
-### react@19.2.7
+### react@19.2.8
 - License: **MIT** — https://react.dev/
 
-### react-dom@19.2.7
+### react-dom@19.2.8
 - License: **MIT** — https://react.dev/
 
-### react-is@19.3.0-canary-3f0b9e61-20260317
+### react-is@19.3.0-canary-cbb046ab-20260731
 - License: **MIT** — https://react.dev/
 
 ### react-markdown@10.1.0
@@ -1493,7 +1534,7 @@ Regenerate with `bun run notices`. 433 packages.
 ### styled-jsx@5.1.6
 - License: **MIT** — vercel/styled-jsx
 
-### swagger-ui-dist@5.32.11
+### swagger-ui-dist@5.32.12
 - License: **Apache-2.0** — git@github.com:swagger-api/swagger-ui.git
 
 ### tailwind-merge@3.6.0
@@ -2167,7 +2208,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ```
 </details>
 
-<details><summary>@img/sharp-linux-x64@0.35.3, @img/sharp-linuxmusl-x64@0.35.3, sharp@0.35.3</summary>
+<details><summary>@img/sharp-linux-arm64@0.35.3, @img/sharp-linux-x64@0.35.3, @img/sharp-linuxmusl-arm64@0.35.3, @img/sharp-linuxmusl-x64@0.35.3, sharp@0.35.3</summary>
 
 ```
 Apache License
@@ -2786,7 +2827,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ```
 </details>
 
-<details><summary>@restatedev/restate-sdk@1.16.2, @restatedev/restate-sdk-core@1.16.2</summary>
+<details><summary>@restatedev/restate-sdk@1.16.4, @restatedev/restate-sdk-core@1.16.4</summary>
 
 ```
 MIT License
@@ -3227,7 +3268,7 @@ limitations under the License.
 ```
 </details>
 
-<details><summary>@tailwindcss/node@4.3.3, @tailwindcss/oxide@4.3.3, @tailwindcss/oxide-linux-x64-gnu@4.3.3, @tailwindcss/oxide-linux-x64-musl@4.3.3, @tailwindcss/postcss@4.3.3, tailwindcss@4.3.3</summary>
+<details><summary>@tailwindcss/node@4.3.3, @tailwindcss/oxide@4.3.3, @tailwindcss/oxide-linux-arm64-gnu@4.3.3, @tailwindcss/oxide-linux-arm64-musl@4.3.3, @tailwindcss/oxide-linux-x64-gnu@4.3.3, @tailwindcss/oxide-linux-x64-musl@4.3.3, @tailwindcss/postcss@4.3.3, tailwindcss@4.3.3</summary>
 
 ```
 MIT License
@@ -3281,7 +3322,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>@types/bun@1.3.14, @types/d3-color@3.1.3, @types/d3-drag@3.0.7, @types/d3-interpolate@3.0.4, @types/d3-selection@3.0.11, @types/d3-transition@3.0.9, @types/d3-zoom@3.0.8, @types/debug@4.1.13, @types/ejs@3.1.5, @types/estree@1.0.9, @types/estree-jsx@1.0.5, @types/hast@3.0.5, @types/mdast@4.0.4, @types/ms@2.1.0, @types/node@26.1.1, @types/react@19.2.17, @types/react-dom@19.2.3, @types/unist@2.0.11, @types/unist@3.0.3</summary>
+<details><summary>@types/bun@1.3.14, @types/d3-color@3.1.3, @types/d3-drag@3.0.7, @types/d3-interpolate@3.0.4, @types/d3-selection@3.0.11, @types/d3-transition@3.0.9, @types/d3-zoom@3.0.8, @types/debug@4.1.13, @types/ejs@3.1.5, @types/estree@1.0.9, @types/estree-jsx@1.0.5, @types/hast@3.0.5, @types/mdast@4.0.4, @types/ms@2.1.0, @types/node@26.1.1, @types/node@26.1.2, @types/react@19.2.18, @types/react-dom@19.2.4, @types/unist@2.0.11, @types/unist@3.0.3</summary>
 
 ```
 MIT License
@@ -3957,7 +3998,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>baseline-browser-mapping@2.11.7, ejs@5.0.2, swagger-ui-dist@5.32.11, web-worker@1.5.0</summary>
+<details><summary>baseline-browser-mapping@2.11.7, ejs@5.0.2, swagger-ui-dist@5.32.12, web-worker@1.5.0</summary>
 
 ```
 Apache License
@@ -5076,7 +5117,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 </details>
 
-<details><summary>cron-parser@5.6.2</summary>
+<details><summary>cron-parser@5.7.0</summary>
 
 ```
 The MIT License (MIT)
@@ -5858,7 +5899,7 @@ THE SOFTWARE.
 ```
 </details>
 
-<details><summary>elkjs@0.11.1</summary>
+<details><summary>elkjs@0.12.0</summary>
 
 ```
 # Eclipse Public License - v 2.0
@@ -6113,8 +6154,7 @@ No third-party beneficiary rights are created under this Agreement.
 
 “This Source Code may also be made available under the following
 Secondary Licenses when the conditions for such availability set forth
-in the Eclipse Public License, v. 2.0 are satisfied: {name license(s),
-version(s), and exceptions or additional permissions here}.”
+in the Eclipse Public License, v. 2.0 are satisfied: GNU General Public License v3.0 or later”
 
 > Simply including a copy of this Agreement, including this Exhibit A is
 > not sufficient to license the Source Code under Secondary Licenses.
@@ -6558,7 +6598,7 @@ The complete list of contributors can be found at:
 ```
 </details>
 
-<details><summary>fastify@5.10.0</summary>
+<details><summary>fastify@5.11.2</summary>
 
 ```
 MIT License
@@ -7330,7 +7370,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>jose@6.2.4</summary>
+<details><summary>jose@6.2.4, jose@6.2.8</summary>
 
 ```
 The MIT License (MIT)
@@ -7566,7 +7606,7 @@ The complete list of contributors can be found at:
 ```
 </details>
 
-<details><summary>lightningcss@1.32.0, lightningcss-linux-x64-gnu@1.32.0, lightningcss-linux-x64-musl@1.32.0</summary>
+<details><summary>lightningcss@1.32.0, lightningcss-linux-arm64-gnu@1.32.0, lightningcss-linux-arm64-musl@1.32.0, lightningcss-linux-x64-gnu@1.32.0, lightningcss-linux-x64-musl@1.32.0</summary>
 
 ```
 Mozilla Public License Version 2.0
@@ -8055,7 +8095,7 @@ software or this license, under any kind of legal claim.***
 ```
 </details>
 
-<details><summary>lucide-react@1.28.0</summary>
+<details><summary>lucide-react@1.29.0</summary>
 
 ```
 ISC License
@@ -8349,7 +8389,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 </details>
 
-<details><summary>next@16.2.11</summary>
+<details><summary>next@16.3.0</summary>
 
 ```
 The MIT License (MIT)
@@ -8911,7 +8951,7 @@ THE SOFTWARE.
 ```
 </details>
 
-<details><summary>react@19.2.7, react-dom@19.2.7, react-is@19.3.0-canary-3f0b9e61-20260317, scheduler@0.27.0, use-sync-external-store@1.6.0</summary>
+<details><summary>react@19.2.8, react-dom@19.2.8, react-is@19.3.0-canary-cbb046ab-20260731, scheduler@0.27.0, use-sync-external-store@1.6.0</summary>
 
 ```
 MIT License

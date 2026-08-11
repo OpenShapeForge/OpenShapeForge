@@ -151,7 +151,7 @@ jobs:
         run: bun run check:authoring-schemas
 
       - name: Check THIRD-PARTY-NOTICES is up to date
-        run: bun run check:notices
+        run: bun run check:notices:linux
 
       # A required status check is matched by job NAME. Renaming a job here
       # would silently drop the gate the branch-protection ruleset claims to

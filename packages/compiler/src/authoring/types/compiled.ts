@@ -107,6 +107,7 @@ export interface CompiledRelationship {
   kind: "belongsTo" | "hasMany" | "manyToMany";
   target: string;
   foreignKey?: string;
+  onDelete?: "CASCADE" | "RESTRICT" | "SET NULL";
   via?: string;
   label?: LocalizedText;
 }

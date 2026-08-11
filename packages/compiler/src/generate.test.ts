@@ -1249,6 +1249,7 @@ tables:
       erasure:
         subjectScoped: true
         subjectColumns: [id]
+        anonymizeColumns: [closed_at]
         cascades:
           - { schema: erp, table: contact_details, via: relation_id }
   - schema: erp
@@ -1274,8 +1275,40 @@ tables:
       expect(relations?.retention?.erasure).toEqual({
         subjectScoped: true,
         subjectColumns: ["id"],
+        anonymizeColumns: ["closed_at"],
         cascades: [{ schema: "erp", table: "contact_details", via: "relation_id" }],
       });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects malformed erasure anonymizeColumns before it reaches generated output", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openshapeforge-service-compiler-"));
+    const path = join(dir, "schema.yaml");
+    await writeFile(
+      path,
+      `
+version: 1
+tables:
+  - schema: erp
+    name: relations
+    tenantScoped: true
+    columns:
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: closed_at, type: timestamptz }
+    retention:
+      clock: { column: closed_at }
+      rules:
+        - { id: retain_closed_case, after: { years: 7 }, action: retain }
+      erasure:
+        anonymizeColumns: [subject_name, subject_name]
+`,
+      "utf8",
+    );
+    try {
+      await expect(loadManifest(path)).rejects.toThrow(/anonymizeColumns must not contain duplicates/);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

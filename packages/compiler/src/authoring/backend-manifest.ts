@@ -563,6 +563,50 @@ function compileRetention(
     return undefined;
   }
   const entityName = candidate.contract.entity.name;
+  const authoredErasure = entityRetention.erasure;
+
+  const compileErasure = (): RetentionDefinition["erasure"] => {
+    if (!authoredErasure) return undefined;
+    const knownColumns = columnsByName;
+    const subjectColumns = authoredErasure.subjectColumns ?? [];
+    if (authoredErasure.subjectScoped === true && subjectColumns.length === 0) {
+      throw new Error(`[${entityName}] retention.erasure.subjectScoped requires subjectColumns.`);
+    }
+    for (const columnName of subjectColumns) {
+      const column = knownColumns.get(columnName);
+      if (!column) {
+        throw new Error(`[${entityName}] retention.erasure.subjectColumns references unknown column "${columnName}".`);
+      }
+      if (column.type !== "uuid") {
+        throw new Error(`[${entityName}] retention.erasure.subjectColumns column "${columnName}" must be uuid.`);
+      }
+    }
+    const anonymizeColumns = authoredErasure.anonymizeColumns ?? [];
+    if (anonymizeColumns.length > 0 && policy?.legalBasis?.type !== "statutory_obligation") {
+      throw new Error(`[${entityName}] retention.erasure.anonymizeColumns requires a statutory_obligation retention policy.`);
+    }
+    for (const columnName of anonymizeColumns) {
+      const column = knownColumns.get(columnName);
+      if (!column || column.type !== "text") {
+        throw new Error(`[${entityName}] retention.erasure.anonymizeColumns column "${columnName}" must be an emitted text column.`);
+      }
+      const sourceField = [...candidate.fieldsByKey.values()].find(
+        (field) => field.persisted?.column === columnName,
+      );
+      if (sourceField?.retention?.disposition?.action !== "anonymize") {
+        throw new Error(`[${entityName}] retention.erasure.anonymizeColumns column "${columnName}" requires field retention disposition anonymize.`);
+      }
+    }
+    return {
+      ...(authoredErasure.subjectScoped === true ? { subjectScoped: true } : {}),
+      ...(subjectColumns.length > 0 ? { subjectColumns } : {}),
+      ...(authoredErasure.cascades && authoredErasure.cascades.length > 0
+        ? { cascades: authoredErasure.cascades.map((cascade) => ({ ...cascade })) }
+        : {}),
+      ...(anonymizeColumns.length > 0 ? { anonymizeColumns } : {}),
+    };
+  };
+
   let policy: RetentionPolicy | undefined;
   if (entityRetention.mode === "policyRef" && entityRetention.policy) {
     policy = candidate.contract.retention?.policies?.[entityRetention.policy];
@@ -576,6 +620,27 @@ function compileRetention(
     }
   } else {
     policy = entityRetention;
+  }
+
+  const erasure = compileErasure();
+  const hasScheduledRetention =
+    entityRetention.mode !== undefined ||
+    entityRetention.policy !== undefined ||
+    entityRetention.duration !== undefined ||
+    entityRetention.startsFrom !== undefined;
+  if (!hasScheduledRetention) {
+    const createdAt = columnsByName.get("created_at");
+    if (!erasure || !createdAt || createdAt.type !== "timestamptz") {
+      return undefined;
+    }
+    // Erasure metadata needs no scheduled disposition, but the manifest keeps
+    // its stable RetentionDefinition shape for downstream readers.
+    return {
+      clock: { column: "created_at", type: "timestamptz" },
+      rules: [],
+      erasure,
+      source: "authoring-entity-erasure",
+    };
   }
 
   const rawDuration =
@@ -691,6 +756,7 @@ function compileRetention(
     // #100: a legal hold must suspend all destructive dispositions; carry it so
     // an executor never deletes a record under litigation hold.
     ...(legalHold ? { legalHold: { suspendDestruction: true } } : {}),
+    ...(erasure === undefined ? {} : { erasure }),
     source: entityRetention.policy ?? "authoring-entity-retention",
   };
 }
@@ -1021,6 +1087,7 @@ export function compileAuthoringBackendManifest(
         schema: targetSchema,
         table: target.contract.storage.table,
         column: "id",
+        ...(relationship.onDelete === undefined ? {} : { onDelete: relationship.onDelete }),
       };
       const sameModule = target.contract.entity.module === candidate.contract.entity.module;
       const registered = isRelationshipRegistered(

@@ -28,6 +28,10 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+retention:
+  erasure:
+    subjectScoped: true
+    subjectColumns: [relation_id]
 fields:
   - key: relationId
     valueType: string
@@ -232,6 +236,8 @@ relationships:
     kind: belongsTo
     target: Relation
     foreignKey: relation_id
+    # The erasure primitive deletes this dependent record explicitly first.
+    onDelete: RESTRICT
     label:
       en: Relation
       nl: Relatie

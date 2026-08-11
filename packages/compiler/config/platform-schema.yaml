@@ -150,6 +150,26 @@ tables:
       - name: entity_events_tenant_aggregate_sequence_idx
         columns: [tenant_id, aggregate_type, aggregate_id, sequence]
 
+  # Privacy erasure proof, intentionally unlinked from the erased subject and
+  # actor. The operational trail proves that an erasure completed without
+  # recreating personal data in an audit table.
+  - schema: platform
+    name: data_subject_erasure_audit
+    tenantScoped: true
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: occurred_at, type: timestamptz, required: true, default: now() }
+      - { name: outcome, type: text, required: true, default: "'completed'" }
+      - { name: contact_details_deleted, type: integer, required: true }
+      - { name: payment_details_anonymized, type: integer, required: true }
+      - { name: relations_deleted, type: integer, required: true }
+    indexes:
+      - name: data_subject_erasure_audit_tenant_occurred_idx
+        columns: [tenant_id, occurred_at]
+
   # Org-unit hierarchy for group-predicated RLS (authorization.rowAccess.group).
   # Both tables are tenantScoped (get {table}_tenant_isolation automatically) and
   # carry NO rowScope — they are the resolution substrate a user must be able to

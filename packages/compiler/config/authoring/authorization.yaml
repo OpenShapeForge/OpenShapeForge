@@ -167,6 +167,7 @@ realmRoles:
         - Cases.All.ReadWrite
         - Relations.Bsn.Read
         - Platform.ApiKeys.Manage
+        - Privacy.DataErasure
       openshapeforge-support:
         - Support.Issues.All
       openshapeforge-audit:
@@ -192,6 +193,12 @@ realmRoles:
         - Messaging.Conversation.ViewQueue
         - Messaging.Conversation.Assign
         - Messaging.Conversation.Reassign
+
+  privacy-officer:
+    description: "Privacy officer: execute approved data-subject erasure requests"
+    composites:
+      erp-provider:
+        - Privacy.DataErasure
 
   vastgoedbeheerder:
     description: "Vastgoedbeheer: full access to the real estate module"
@@ -496,6 +503,9 @@ clientRoles:
     # Platform.* role, so it is never emitted by an entity's authorization
     # block and cannot be acquired through ordinary business access.
     - Platform.ApiKeys.Manage
+    # Destructive privacy primitive; deliberately unrelated to ordinary entity
+    # write/delete grants.
+    - Privacy.DataErasure
     - CaseFile.All.Read
     - Energy.All.Read
     - Maintenance.All.Read

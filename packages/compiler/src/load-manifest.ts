@@ -228,6 +228,20 @@ function loadRetentionErasure(
       return { schema: cascade.schema, table: cascade.table, via: cascade.via };
     });
   }
+  if (value.anonymizeColumns !== undefined) {
+    if (!Array.isArray(value.anonymizeColumns)) {
+      throw new Error(`${label}.anonymizeColumns must be an array.`);
+    }
+    const columns = new Set<string>();
+    value.anonymizeColumns.forEach((column, index) => {
+      assertIdentifier(column, `${label}.anonymizeColumns[${index}]`);
+      if (columns.has(column)) {
+        throw new Error(`${label}.anonymizeColumns must not contain duplicates.`);
+      }
+      columns.add(column);
+    });
+    erasure.anonymizeColumns = [...columns];
+  }
   return erasure;
 }
 

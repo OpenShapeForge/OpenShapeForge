@@ -40,6 +40,7 @@ import { readApiKeyProvisioningConfig } from "../auth/api-key/runtime-config.js"
 import type { GraphqlContext } from "./context.js";
 import type { ModuleRuntimeContext, RuntimeModule } from "../modules/contract.js";
 import { composeModuleGraphql, declaredFieldNames } from "../modules/graphql-composition.js";
+import { eraseRelationDataSubject } from "../privacy/data-subject-erasure.js";
 
 // The connector catalog types are static — identical across deployments — so a
 // connector this deployment is not licensed for is a row with
@@ -106,6 +107,12 @@ export function buildGraphqlSchema(
       editFormConfigBases: JSON
     }
 
+    type DataSubjectErasureResult {
+      contactDetailsDeleted: Int!
+      paymentDetailsAnonymized: Int!
+      relationsDeleted: Int!
+    }
+
     type Query {
       health: Health!
       entityPageConfigs(entitySlug: String!): EntityPageConfigs
@@ -118,6 +125,7 @@ ${moduleGraphql.queryFields}
     }
 
     type Mutation {
+      eraseRelationDataSubject(relationId: ID!): DataSubjectErasureResult!
 ${generatedEntityMutationFields}
 ${connectorMutationFields}
 ${connectorNamespaceMutationFields}
@@ -147,6 +155,14 @@ ${moduleGraphql.mutationFields}
       currentTenant: resolveCurrentTenant,
     },
     Mutation: {
+      eraseRelationDataSubject: (_parent, args: { relationId: string }, graphqlContext) => {
+        if (!graphqlContext.db) {
+          throw new GraphQLError("Database is not configured for data-subject erasure.", {
+            extensions: { code: "DATABASE_NOT_CONFIGURED", status: 503 },
+          });
+        }
+        return eraseRelationDataSubject(graphqlContext.db, graphqlContext.session, args.relationId);
+      },
       ...generatedEntityResolvers.Mutation,
       ...connectorResolvers.Mutation,
       ...apiKeyResolvers.Mutation,
@@ -173,6 +189,7 @@ const coreQueryFieldNames = [
   ...declaredFieldNames(apiKeyQueryFields),
 ];
 const coreMutationFieldNames = [
+  "eraseRelationDataSubject",
   ...declaredFieldNames(generatedEntityMutationFields),
   ...declaredFieldNames(connectorMutationFields),
   ...declaredFieldNames(connectorNamespaceMutationFields),

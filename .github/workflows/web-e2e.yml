@@ -38,7 +38,7 @@ permissions:
 jobs:
   browser-e2e:
     name: Browser e2e (apps/web)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'osf-pr' || 'ubuntu-latest' }}
     services:
       # Same image and credentials as the db-tests job in ci.yml. These are the
       # documented local-dev-only values from AGENTS.md; they exist in

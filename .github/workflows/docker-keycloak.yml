@@ -25,7 +25,7 @@ on:
   # Every pull request, whatever its base branch, for the reason in ci.yml:
   # a stacked PR used to match no trigger and so reported no checks at all
   # (#269). Building and smoke-testing an intermediate branch is the point;
-  # PUBLISH below is what keeps it out of the registry.
+  # the separate hosted publish job keeps it out of the registry.
   pull_request:
   push:
     branches: [main]
@@ -43,30 +43,16 @@ env:
   # Lowercase literal: GHCR rejects the mixed-case ${{ github.repository_owner }}.
   IMAGE: ghcr.io/openshapeforge/openshapeforge-keycloak
 
-  # WHETHER THIS RUN MAY PUBLISH — identical rule to docker-api.yml, and
-  # deliberately so: the two images are deployed as a pair against one tag, so a
-  # ref that publishes one must publish the other. Every step that authenticates
-  # to GHCR, derives tags, or pushes is gated on this and on nothing else.
-  #
-  # It names the two refs allowed to publish rather than the events that must
-  # not, because "not a pull request" stopped being a statement about which code
-  # this is the moment the trigger above widened to every base branch (#269).
-  # A pull request runs with github.ref = refs/pull/<n>/merge, which matches
-  # neither arm, so it cannot publish however it is based — and the event check
-  # says so a second time, independently. It also stops a workflow_dispatch on a
-  # feature branch from pushing :<branch> and :sha-<commit> out of unreviewed
-  # code; dispatch on main or a release tag still publishes.
-  PUBLISH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
-
 jobs:
   build:
     # Named distinctly from the API image job: a required status check is
     # matched by name, and two jobs sharing one name cannot both be required.
+    # Keep the established name even though publication now lives in a separate
+    # hosted job below.
     name: Build, smoke test, push the Keycloak image
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'osf-pr' || 'ubuntu-latest' }}
     permissions:
       contents: read
-      packages: write # required to push to GHCR
     services:
       # Keycloak's image is built with `kc.sh build --db=postgres`, so it needs a
       # real Postgres to reach a ready state. This throwaway instance exists only
@@ -178,8 +164,24 @@ jobs:
           docker rm -f kc-rofs >/dev/null
           exit 1
 
+  # Publication is physically separated from pull-request validation so the
+  # self-hosted runner never receives packages:write, registry credentials, or
+  # a push step. This job is always GitHub-hosted and is fail-closed to main and
+  # v* release refs; workflow_dispatch on a feature branch only validates.
+  publish:
+    name: Publish the Keycloak image
+    needs: build
+    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
       - name: Log in to GHCR
-        if: env.PUBLISH == 'true'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
@@ -187,7 +189,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Derive tags and labels
-        if: env.PUBLISH == 'true'
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
@@ -203,11 +204,10 @@ jobs:
             org.opencontainers.image.description=Keycloak with the OpenShapeForge SPI provider
             org.opencontainers.image.licenses=BUSL-1.1
 
-      # Fully cache-hit from the build above; this step exports and pushes.
-      # Separate from the load build because the local docker exporter cannot
-      # carry provenance/SBOM attestations.
+      # The hosted validation job above populated the same GHA cache. This step
+      # exports and pushes with provenance/SBOM; the self-hosted PR path can
+      # never reach it.
       - name: Push to GHCR
-        if: env.PUBLISH == 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: packages/keycloak-spi

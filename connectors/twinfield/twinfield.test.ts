@@ -87,12 +87,22 @@ async function invoke(
     secrets: SECRETS,
     input,
     fetchImpl: stub.fetch,
+    resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
     ...(wrapFetch ? { wrapFetch } : {}),
   });
 }
 
 function bodyOf(call: { init?: RequestInit } | undefined): string {
-  return String(call?.init?.body ?? "");
+  const body = call?.init?.body;
+  if (body === undefined || body === null) return "";
+  if (typeof body === "string") return body;
+  if (body instanceof ArrayBuffer) return new TextDecoder().decode(body);
+  if (ArrayBuffer.isView(body)) {
+    return new TextDecoder().decode(
+      new Uint8Array(body.buffer, body.byteOffset, body.byteLength),
+    );
+  }
+  return String(body);
 }
 
 function headersOf(call: { init?: RequestInit } | undefined): Headers {

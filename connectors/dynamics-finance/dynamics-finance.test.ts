@@ -75,6 +75,7 @@ async function invoke(
     secrets: SECRETS,
     input,
     fetchImpl: stub.fetch,
+    resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
   });
 }
 
@@ -185,7 +186,9 @@ describe("creating a record", () => {
       stub,
     );
     expect(stub.calls[0]?.init?.method).toBe("POST");
-    expect(stub.calls[0]?.init?.body).toBe(JSON.stringify({ Name: "Acme" }));
+    expect(new TextDecoder().decode(stub.calls[0]?.init?.body as Uint8Array)).toBe(
+      JSON.stringify({ Name: "Acme" }),
+    );
     expect(result).toEqual({ record: { CustomerAccount: "C2" } });
   });
 

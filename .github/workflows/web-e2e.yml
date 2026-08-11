@@ -123,9 +123,18 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
 
-      - name: Install Chromium
+      - name: Install Chromium and system dependencies (GitHub-hosted)
+        if: runner.environment == 'github-hosted'
         working-directory: apps/web
         run: bunx playwright install --with-deps chromium
+
+      # The ephemeral self-hosted image installs the pinned Playwright system
+      # dependencies before dropping sudo. PR code may download its matching
+      # browser build, but cannot elevate privileges or alter the base image.
+      - name: Install Chromium (self-hosted)
+        if: runner.environment == 'self-hosted'
+        working-directory: apps/web
+        run: bunx playwright install chromium
 
       - name: Apply migrations
         env:

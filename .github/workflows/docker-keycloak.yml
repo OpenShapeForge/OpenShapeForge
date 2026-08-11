@@ -53,23 +53,6 @@ jobs:
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'osf-pr' || 'ubuntu-latest' }}
     permissions:
       contents: read
-    services:
-      # Keycloak's image is built with `kc.sh build --db=postgres`, so it needs a
-      # real Postgres to reach a ready state. This throwaway instance exists only
-      # for the smoke test; the credentials are local to the runner.
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_DB: keycloak
-          POSTGRES_USER: keycloak
-          POSTGRES_PASSWORD: keycloak
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U keycloak -d keycloak"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -97,15 +80,38 @@ jobs:
           docker run --rm --entrypoint ls openshapeforge-keycloak:ci \
             /opt/keycloak/providers/openshapeforge-keycloak-spi.jar
 
-      # Prove the image actually reaches a ready state against Postgres. Host
-      # networking lets the container reach the service container on localhost.
+      # Use one explicit bridge network for the smoke-test database and image.
+      # This behaves identically with rootful and rootless Docker and avoids
+      # depending on rootless Docker's intentionally isolated host network.
+      - name: Start smoke-test Postgres
+        run: |
+          docker network create kc-smoke-network
+          docker run -d --name kc-postgres --network kc-smoke-network \
+            -e POSTGRES_DB=keycloak \
+            -e POSTGRES_USER=keycloak \
+            -e POSTGRES_PASSWORD=keycloak \
+            --health-cmd "pg_isready -U keycloak -d keycloak" \
+            --health-interval 2s --health-timeout 3s --health-retries 20 \
+            postgres:18-alpine
+          for i in $(seq 1 40); do
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' kc-postgres)" = healthy ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs kc-postgres
+          exit 1
+
+      # Prove the image actually reaches a ready state against Postgres. Publish
+      # only its management port to loopback for the host-side readiness probe.
       - name: Smoke test the image
         run: |
-          docker run -d --name kc-smoke --network host \
+          docker run -d --name kc-smoke --network kc-smoke-network \
+            -p 127.0.0.1:9000:9000 \
             -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
             -e KC_DB=postgres \
-            -e KC_DB_URL=jdbc:postgresql://localhost:5432/keycloak \
+            -e KC_DB_URL=jdbc:postgresql://kc-postgres:5432/keycloak \
             -e KC_DB_USERNAME=keycloak \
             -e KC_DB_PASSWORD=keycloak \
             -e KC_HEALTH_ENABLED=true \
@@ -139,12 +145,13 @@ jobs:
       # fails — which is exactly the regression worth catching.
       - name: Smoke test the image with a read-only root filesystem
         run: |
-          docker run -d --name kc-rofs --network host \
+          docker run -d --name kc-rofs --network kc-smoke-network \
+            -p 127.0.0.1:9000:9000 \
             --read-only --tmpfs /tmp --tmpfs /opt/keycloak/data \
             -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
             -e KC_DB=postgres \
-            -e KC_DB_URL=jdbc:postgresql://localhost:5432/keycloak \
+            -e KC_DB_URL=jdbc:postgresql://kc-postgres:5432/keycloak \
             -e KC_DB_USERNAME=keycloak \
             -e KC_DB_PASSWORD=keycloak \
             -e KC_HEALTH_ENABLED=true \
@@ -163,6 +170,12 @@ jobs:
           docker logs kc-rofs
           docker rm -f kc-rofs >/dev/null
           exit 1
+
+      - name: Clean up smoke-test containers
+        if: always()
+        run: |
+          docker rm -f kc-smoke kc-rofs kc-postgres >/dev/null 2>&1 || true
+          docker network rm kc-smoke-network >/dev/null 2>&1 || true
 
   # Publication is physically separated from pull-request validation so the
   # self-hosted runner never receives packages:write, registry credentials, or

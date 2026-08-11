@@ -102,7 +102,8 @@ jobs:
         run: |
           image=$(grep -m1 '^FROM quay.io/keycloak/keycloak' packages/keycloak-spi/Dockerfile | awk '{print $2}')
           echo "keycloak image: $image"
-          docker run -d --name keycloak --network host \
+          docker run -d --name keycloak \
+            -p 127.0.0.1:8181:8181 -p 127.0.0.1:9000:9000 \
             -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
             -e KC_HTTP_ENABLED=true \

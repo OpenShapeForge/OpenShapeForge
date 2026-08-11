@@ -67,6 +67,7 @@ jobs:
         with:
           context: packages/keycloak-spi
           file: packages/keycloak-spi/Dockerfile
+          platforms: linux/amd64
           load: true
           tags: openshapeforge-keycloak:ci
           cache-from: type=gha,scope=keycloak

@@ -5,10 +5,13 @@
 // code on infrastructure we own. That is acceptable only for branches in this
 // repository. Fork pull requests, release/publication jobs, deployments, and
 // jobs with repository secrets must stay on GitHub-hosted runners.
+// The root-owned pre-job policy enforces that source boundary before workflow
+// steps run; this check inventories the repository-controlled half as defense
+// in depth and prevents workflow drift.
 //
-// Keep this check dependency-free. It runs inside the existing required gates
-// job so it adds no GitHub-hosted PR check that could remain red during a
-// hosted-Actions billing outage.
+// Bun's built-in YAML parser keeps this check dependency-free. It runs inside
+// the existing required gates job so it adds no GitHub-hosted PR check that
+// could remain red during a hosted-Actions billing outage.
 
 import { readFile, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -65,151 +68,153 @@ const JOB_POLICY = {
   },
 };
 
-function hasPullRequestTrigger(source) {
-  let inOn = false;
-  for (const line of source.split("\n")) {
-    if (/^on:\s*$/.test(line)) {
-      inOn = true;
-      continue;
-    }
-    if (!inOn || /^\s*#/.test(line) || line.trim() === "") continue;
-    if (/^\S/.test(line)) return false;
-    if (/^ {2}pull_request:\s*(?:#.*)?$/.test(line)) return true;
-  }
-  return false;
+function isMapping(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function parseJobs(source) {
-  const lines = source.split("\n");
-  const jobs = [];
-  const jobsLine = lines.findIndex((line) => /^jobs:\s*$/.test(line));
-  if (jobsLine === -1) return jobs;
-
-  for (let index = jobsLine + 1; index < lines.length; index += 1) {
-    const match = lines[index].match(/^ {2}([A-Za-z0-9_-]+):\s*(?:#.*)?$/);
-    if (!match) continue;
-
-    let end = index + 1;
-    while (
-      end < lines.length &&
-      !/^ {2}[A-Za-z0-9_-]+:\s*(?:#.*)?$/.test(lines[end]) &&
-      !/^\S/.test(lines[end])
-    ) {
-      end += 1;
+function parseWorkflow(path, source, problems) {
+  try {
+    // Bun currently applies YAML 1.1 booleans, where the GitHub-specific `on`
+    // key becomes `true`. Quote only that top-level key before semantic parse.
+    const workflow = Bun.YAML.parse(source.replace(/^on:/m, '"on":'));
+    if (!isMapping(workflow)) {
+      problems.push(`${path} must contain a YAML mapping`);
+      return null;
     }
-
-    const block = lines.slice(index, end).join("\n");
-    const property = (name) =>
-      block.match(new RegExp(`^ {4}${name}:\\s*(.+?)\\s*$`, "m"))?.[1] ??
-      null;
-    jobs.push({
-      id: match[1],
-      block,
-      name: property("name"),
-      runsOn: property("runs-on"),
-      condition: property("if"),
-    });
-    index = end - 1;
-  }
-  return jobs;
-}
-
-function permissionSpec(source, indent) {
-  const lines = source.split("\n");
-  const prefix = " ".repeat(indent);
-  const entryPrefix = " ".repeat(indent + 2);
-  const linePattern = new RegExp(
-    `^${prefix}permissions:\\s*([^#\\s]+)?\\s*(?:#.*)?$`,
-  );
-  const start = lines.findIndex((line) => linePattern.test(line));
-  if (start === -1) return null;
-  const scalar = lines[start].match(linePattern)?.[1] ?? null;
-  if (scalar) return { scalar, entries: [] };
-
-  const entries = [];
-  for (let index = start + 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (line.trim() === "" || /^\s*#/.test(line)) continue;
-    if (!line.startsWith(entryPrefix)) break;
-    const match = line.match(
-      new RegExp(`^${entryPrefix}([A-Za-z-]+):\\s*([^#\\s]+)`),
+    if (workflow.jobs !== undefined && !isMapping(workflow.jobs)) {
+      problems.push(`${path}#jobs must contain a YAML mapping`);
+      return null;
+    }
+    const jobs = Object.entries(workflow.jobs ?? {}).map(([id, config]) => ({
+      id,
+      config,
+    }));
+    if (jobs.some((job) => !isMapping(job.config))) {
+      problems.push(`${path} contains a job that is not a YAML mapping`);
+      return null;
+    }
+    return { workflow, jobs };
+  } catch (error) {
+    problems.push(
+      `${path} is not valid YAML: ${error instanceof Error ? error.message : String(error)}`,
     );
-    if (match) entries.push([match[1], match[2]]);
+    return null;
   }
-  return { scalar: null, entries };
+}
+
+function hasPullRequestTrigger(workflow) {
+  const trigger = workflow.on;
+  if (trigger === "pull_request") return true;
+  if (Array.isArray(trigger)) return trigger.includes("pull_request");
+  return isMapping(trigger) && Object.hasOwn(trigger, "pull_request");
 }
 
 function hasOnlyReadContents(spec) {
   return (
-    spec?.scalar === null &&
-    spec.entries.length === 1 &&
-    spec.entries[0][0] === "contents" &&
-    spec.entries[0][1] === "read"
+    isMapping(spec) &&
+    Object.keys(spec).length === 1 &&
+    spec.contents === "read"
   );
 }
 
-function routedJobHasOnlyReadContents(source, job) {
-  const jobPermissions = permissionSpec(job.block, 4);
-  if (jobPermissions) return hasOnlyReadContents(jobPermissions);
-  const beforeJobs = source.split(/^jobs:\s*$/m)[0];
-  return hasOnlyReadContents(permissionSpec(beforeJobs, 0));
+function routedJobHasOnlyReadContents(workflow, job) {
+  return hasOnlyReadContents(job.config.permissions ?? workflow.permissions);
 }
 
-function executableYaml(source) {
-  return source
-    .split("\n")
-    .filter((line) => !/^\s*#/.test(line))
-    .join("\n");
+function containsSecretReference(value) {
+  return SECRET_REFERENCE.test(JSON.stringify(value));
 }
 
-function routedJobProblems(path, source, job) {
+function stepsFor(job) {
+  return Array.isArray(job.config.steps) ? job.config.steps : [];
+}
+
+function usesAction(job, action) {
+  return stepsFor(job).some(
+    (step) => isMapping(step) && String(step.uses ?? "").includes(action),
+  );
+}
+
+function pushesImage(job) {
+  return stepsFor(job).some(
+    (step) =>
+      isMapping(step) &&
+      isMapping(step.with) &&
+      (step.with.push === true || step.with.push === "true"),
+  );
+}
+
+function buildsCanonicalImagePlatform(job) {
+  return stepsFor(job).some(
+    (step) =>
+      isMapping(step) &&
+      String(step.uses ?? "").includes("docker/build-push-action@") &&
+      isMapping(step.with) &&
+      step.with.platforms === "linux/amd64" &&
+      (step.with.load === true || step.with.load === "true"),
+  );
+}
+
+function routedJobProblems(path, workflow, job) {
   const problems = [];
-  if (!hasPullRequestTrigger(source)) {
+  if (!hasPullRequestTrigger(workflow)) {
     problems.push(`${path}#${job.id} is routed but its workflow has no pull_request trigger`);
   }
-  if (job.runsOn !== TRUSTED_SOURCE_RUNS_ON) {
+  if (job.config["runs-on"] !== TRUSTED_SOURCE_RUNS_ON) {
     problems.push(
       `${path}#${job.id} must use the canonical trusted-source runs-on expression`,
     );
   }
-  if (!routedJobHasOnlyReadContents(source, job)) {
+  if (!routedJobHasOnlyReadContents(workflow, job)) {
     problems.push(
       `${path}#${job.id} must have exactly contents: read permissions`,
     );
   }
-
-  const forbidden = [
-    [/^ {4}environment:/m, "an environment"],
-    [SECRET_REFERENCE, "repository/environment secrets"],
-    [/^ {6}packages:\s*write/m, "packages: write"],
-    [/docker\/login-action@/, "a registry login action"],
-    [/^\s+push:\s*true\s*$/m, "an image push"],
-  ];
-  for (const [pattern, description] of forbidden) {
-    if (pattern.test(executableYaml(job.block))) {
-      problems.push(`${path}#${job.id} contains ${description}`);
-    }
+  if (Object.hasOwn(job.config, "environment")) {
+    problems.push(`${path}#${job.id} contains an environment`);
+  }
+  if (containsSecretReference(job.config)) {
+    problems.push(`${path}#${job.id} contains repository/environment secrets`);
+  }
+  if (isMapping(job.config.permissions) && job.config.permissions.packages === "write") {
+    problems.push(`${path}#${job.id} contains packages: write`);
+  }
+  if (usesAction(job, "docker/login-action@")) {
+    problems.push(`${path}#${job.id} contains a registry login action`);
+  }
+  if (pushesImage(job)) {
+    problems.push(`${path}#${job.id} contains an image push`);
+  }
+  if (
+    job.id === "build" &&
+    (path === ".github/workflows/docker-api.yml" ||
+      path === ".github/workflows/docker-keycloak.yml") &&
+    !buildsCanonicalImagePlatform(job)
+  ) {
+    problems.push(
+      `${path}#${job.id} must load and smoke-test the published linux/amd64 platform`,
+    );
   }
   return problems;
 }
 
 function hostedJobProblems(path, job, mode) {
   const problems = [];
-  if (job.runsOn !== "ubuntu-latest") {
+  if (job.config["runs-on"] !== "ubuntu-latest") {
     problems.push(`${path}#${job.id} must remain on ubuntu-latest`);
   }
-  if (job.block.includes("osf-pr")) {
+  if (JSON.stringify(job.config).includes("osf-pr")) {
     problems.push(`${path}#${job.id} must never reference osf-pr`);
   }
 
   if (mode === "publish") {
-    if (job.condition !== PUBLISH_IF) {
+    if (job.config.if !== PUBLISH_IF) {
       problems.push(`${path}#${job.id} must use the canonical main/v* publish condition`);
     }
-    if (!/^ {6}packages:\s*write\s*(?:#.*)?$/m.test(job.block)) {
+    if (!isMapping(job.config.permissions) || job.config.permissions.packages !== "write") {
       problems.push(`${path}#${job.id} must own the isolated packages: write permission`);
     }
-    if (!/docker\/login-action@/.test(job.block) || !/^\s+push:\s*true\s*$/m.test(job.block)) {
+    if (!usesAction(job, "docker/login-action@") || !pushesImage(job)) {
       problems.push(`${path}#${job.id} must contain the isolated registry login and push steps`);
     }
   }
@@ -225,18 +230,25 @@ export function auditWorkflowSources(workflows) {
 
   for (const path of workflowPaths) {
     const source = workflows[path];
-    const jobs = parseJobs(source);
-    const policy = JOB_POLICY[path] ?? {};
+    const policy = JOB_POLICY[path];
+    if (!policy) {
+      problems.push(`${path} has no workflow runner security policy`);
+      continue;
+    }
+    const parsed = parseWorkflow(path, source, problems);
+    if (!parsed) continue;
+    const { workflow, jobs } = parsed;
     const routedJobs = jobs.filter((job) => policy[job.id] === "routed");
 
     if (routedJobs.length > 0) {
-      const workflowScope = source.split(/^jobs:\s*$/m)[0];
-      if (!hasOnlyReadContents(permissionSpec(workflowScope, 0))) {
+      if (!hasOnlyReadContents(workflow.permissions)) {
         problems.push(
           `${path} has routed jobs but workflow permissions are not exactly contents: read`,
         );
       }
-      if (SECRET_REFERENCE.test(executableYaml(workflowScope))) {
+      const workflowScope = { ...workflow };
+      delete workflowScope.jobs;
+      if (containsSecretReference(workflowScope)) {
         problems.push(
           `${path} exposes a workflow-level secret reference to routed jobs`,
         );
@@ -251,7 +263,7 @@ export function auditWorkflowSources(workflows) {
       }
       if (mode === "routed") {
         routed += 1;
-        problems.push(...routedJobProblems(path, source, job));
+        problems.push(...routedJobProblems(path, workflow, job));
       } else {
         hosted += 1;
         problems.push(...hostedJobProblems(path, job, mode));
@@ -269,7 +281,11 @@ export function auditWorkflowSources(workflows) {
       !jobs.some(
         (job) =>
           job.id === "gates" &&
-          /run:\s*bun run check:self-hosted-routing\s*$/m.test(job.block),
+          stepsFor(job).some(
+            (step) =>
+              isMapping(step) &&
+              step.run === "bun run check:self-hosted-routing",
+          ),
       )
     ) {
       problems.push(

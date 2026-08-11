@@ -40,12 +40,42 @@ function injectIntoGates(line: string): string[] {
 }
 
 describe("self-hosted routing negative fixtures", () => {
+  test("rejects an unlisted workflow regardless of YAML indentation", () => {
+    const workflows = {
+      ...baseline,
+      ".github/workflows/unlisted.yml": `name: Unlisted
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+    bypass:
+        runs-on: osf-pr
+        steps:
+          - run: true
+`,
+    };
+    expect(auditWorkflowSources(workflows).problems).toContain(
+      ".github/workflows/unlisted.yml has no workflow runner security policy",
+    );
+  });
+
   test("rejects workflow-level permissions: write-all", () => {
     const problems = auditMutation(".github/workflows/ci.yml", (source) =>
       source.replace("permissions:\n  contents: read", "permissions: write-all"),
     );
     expect(problems).toContain(
       ".github/workflows/ci.yml has routed jobs but workflow permissions are not exactly contents: read",
+    );
+  });
+
+  test("rejects a native-only PR image build", () => {
+    const problems = auditMutation(
+      ".github/workflows/docker-api.yml",
+      (source) => source.replace("          platforms: linux/amd64\n", ""),
+    );
+    expect(problems).toContain(
+      ".github/workflows/docker-api.yml#build must load and smoke-test the published linux/amd64 platform",
     );
   });
 

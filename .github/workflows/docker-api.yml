@@ -6,7 +6,8 @@ name: API image
 #   pull request (any base) -> build + smoke test only, never push
 #   push to main            -> push :main and :sha-<commit>
 #   tag v*                  -> push :<version>, :<major>.<minor> and :latest
-#   manual run on any other ref -> build + smoke test only, never push
+#   repository dispatch     -> build default-branch SHA and publish :main and
+#                              :sha-<commit>
 #
 # The image path matches what the Helm chart defaults to
 # (deploy/helm/openshapeforge-api/values.yaml) and what deploy/README.md
@@ -24,7 +25,10 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-  workflow_dispatch:
+  # This event cannot select a branch or tag: GitHub binds it to the default
+  # branch's current SHA.
+  repository_dispatch:
+    types: [publish-images]
 
 concurrency:
   group: docker-api-${{ github.ref }}
@@ -103,12 +107,13 @@ jobs:
 
   # Publication is physically separated from pull-request validation so the
   # self-hosted runner never receives packages:write, registry credentials, or
-  # a push step. This job is always GitHub-hosted and is fail-closed to main and
-  # v* release refs; workflow_dispatch on a feature branch only validates.
+  # a push step. This job is always GitHub-hosted. Repository dispatch can only
+  # publish the default branch; release publication remains a reviewed v* tag
+  # push and cannot select an arbitrary workflow definition.
   publish:
     name: Publish the API image
     needs: build
-    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    if: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'repository_dispatch' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -117,6 +122,21 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Preflight — publication request is empty
+        # Stable security-policy anchor used by check:deploy-workflows.
+        id: request
+        if: github.event_name == 'repository_dispatch'
+        env:
+          DISPATCH_PAYLOAD_JSON: ${{ toJSON(github.event.client_payload) }}
+        run: |
+          set -euo pipefail
+          payload_json="$DISPATCH_PAYLOAD_JSON"
+          [ "$payload_json" != "null" ] || payload_json="{}"
+          if ! jq -e 'type == "object" and length == 0' <<<"$payload_json" >/dev/null; then
+            echo "::error::publish-images does not accept client_payload fields"
+            exit 1
+          fi
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
@@ -155,9 +175,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64
-          # Emulated arm64 would run `bun install` + `bun run generate` under
-          # QEMU; add linux/arm64 above only if you need it and can absorb the
-          # build time.
           provenance: mode=max
           sbom: true
           cache-from: type=gha

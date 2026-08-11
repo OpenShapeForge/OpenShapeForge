@@ -11,12 +11,13 @@ name: Web browser e2e
 # processes. `docker-keycloak.yml` is the precedent for standing a stack up on a
 # pull request. Unlike that one this workflow builds and pushes NO image.
 #
-# Trigger matches ci.yml exactly. Issue #269 is the reason it is spelled out:
-# a workflow that does not run on a pull request is not a gate, and one that
+# The automatic triggers match ci.yml. Issue #269 is the reason they are spelled
+# out: a workflow that does not run on a pull request is not a gate, and one that
 # runs only on pull requests to main is not a gate on the stacked PRs #240
 # produces. This is a required status check, so leaving it base-filtered while
-# the others widened would put a stacked PR back in the state #269 describes —
-# a check that reads as pending and never runs.
+# the others widened would put a stacked PR back in the state #269 describes — a
+# check that reads as pending and never runs. The repository_dispatch escape
+# hatch is default-branch-only and is documented in deploy/README.md.
 #
 # `bun run generate` is not optional here and is not just for types. Both the
 # realm JSON Keycloak imports and the `/workflow` route files themselves are
@@ -26,7 +27,8 @@ on:
   pull_request:
   push:
     branches: [main]
-  workflow_dispatch:
+  repository_dispatch:
+    types: [web-e2e]
 
 concurrency:
   group: web-e2e-${{ github.ref }}
@@ -71,6 +73,20 @@ jobs:
           --health-retries 10
 
     steps:
+      - name: Preflight — manual browser request is empty
+        id: request
+        if: github.event_name == 'repository_dispatch'
+        env:
+          DISPATCH_PAYLOAD_JSON: ${{ toJSON(github.event.client_payload) }}
+        run: |
+          set -euo pipefail
+          payload_json="$DISPATCH_PAYLOAD_JSON"
+          [ "$payload_json" != "null" ] || payload_json="{}"
+          if ! jq -e 'type == "object" and length == 0' <<<"$payload_json" >/dev/null; then
+            echo "::error::web-e2e does not accept client_payload fields"
+            exit 1
+          fi
+
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0

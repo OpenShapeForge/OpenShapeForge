@@ -64,7 +64,7 @@ function parseWorkflow(source) {
       runsOnPullRequest = true;
       inPullRequest = true;
     } else if (/^ {2}\S/.test(line)) {
-      inPullRequest = false; // a sibling event: push, workflow_dispatch, ...
+      inPullRequest = false; // a sibling event: push, repository_dispatch, ...
     } else if (inPullRequest) {
       const filter = line.match(/^ {4}(branches(?:-ignore)?):/);
       if (filter) pullRequestBaseFilter = filter[1];

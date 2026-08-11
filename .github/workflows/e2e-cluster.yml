@@ -21,13 +21,10 @@ name: E2E against cluster
 # REQUIRED REPOSITORY SECRETS: the same Scaleway set the deploy workflow uses.
 
 on:
-  workflow_dispatch:
-    inputs:
-      api_url:
-        description: "URL the suite drives. Default exercises the public ingress and its certificate."
-        required: false
-        type: string
-        default: "https://api.openshapeforge.eu"
+  # repository_dispatch has no caller-selected ref: GitHub always runs this
+  # workflow from the default branch. See deploy/README.md for the command.
+  repository_dispatch:
+    types: [e2e-cluster]
 
 concurrency:
   group: e2e-cluster
@@ -40,16 +37,48 @@ env:
   NAMESPACE: openshapeforge
   RELEASE: openshapeforge
   REGION: nl-ams
+  SCW_CLI_URL: https://github.com/scaleway/scaleway-cli/releases/download/v2.51.0/scaleway-cli_2.51.0_linux_amd64
+  SCW_CLI_SHA256: 091060ecaa6f74ef1381f4d024584aa8f5dc6226d66669e00ada005b51bc26b0
   # Local port the database tunnel listens on.
   DB_LOCAL_PORT: "15432"
 
 jobs:
   e2e:
     name: e2e against the deployed cluster
+    # repository_dispatch already binds this to the default branch. Keep the
+    # condition as an independent fail-closed assertion.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: dev
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Preflight — cluster test request is valid
+        id: request
+        env:
+          DISPATCH_PAYLOAD_JSON: ${{ toJSON(github.event.client_payload) }}
+        run: |
+          set -euo pipefail
+          payload_json="$DISPATCH_PAYLOAD_JSON"
+          [ "$payload_json" != "null" ] || payload_json="{}"
+
+          if ! jq -e '
+            type == "object"
+            and ((keys - ["api_url"]) | length == 0)
+            and ((has("api_url") | not) or (.api_url | type == "string"))
+          ' <<<"$payload_json" >/dev/null; then
+            echo "::error::e2e-cluster client_payload accepts only an optional string api_url"
+            exit 1
+          fi
+
+          api_url="$(jq -r 'if has("api_url") then .api_url else "https://api.openshapeforge.eu" end' <<<"$payload_json")"
+          if [ "${#api_url}" -gt 253 ] ||
+             [[ ! "$api_url" =~ ^https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+openshapeforge\.eu$ ]]; then
+            echo "::error::api_url must be an HTTPS origin on openshapeforge.eu with no port, path, query, or fragment."
+            exit 1
+          fi
+          echo "E2E_API_URL=$api_url" >> "$GITHUB_ENV"
+          echo "API URL is trusted"
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -64,9 +93,13 @@ jobs:
 
       - name: Install Scaleway CLI
         run: |
-          curl -fsSL https://github.com/scaleway/scaleway-cli/releases/download/v2.51.0/scaleway-cli_2.51.0_linux_amd64 \
-            -o /usr/local/bin/scw
-          chmod +x /usr/local/bin/scw
+          set -euo pipefail
+          download="$(mktemp)"
+          trap 'rm -f "$download"' EXIT
+          curl --proto '=https' --tlsv1.2 --retry 3 --retry-all-errors -fsSL \
+            "$SCW_CLI_URL" -o "$download"
+          printf '%s  %s\n' "$SCW_CLI_SHA256" "$download" | sha256sum -c -
+          sudo install -m 0755 "$download" /usr/local/bin/scw
 
       - name: Fetch kubeconfig
         env:
@@ -74,9 +107,11 @@ jobs:
           SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
           SCW_DEFAULT_PROJECT_ID: ${{ secrets.SCW_DEFAULT_PROJECT_ID }}
           SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+          SCW_CLUSTER_ID: ${{ secrets.SCW_CLUSTER_ID }}
         run: |
-          scw k8s kubeconfig install "${{ secrets.SCW_CLUSTER_ID }}" \
-            region=${{ env.REGION }} auth-method=copy-cli-token
+          set -euo pipefail
+          scw k8s kubeconfig install "$SCW_CLUSTER_ID" \
+            region="$REGION" auth-method=copy-cli-token
           kubectl get nodes
 
       # Read the issuer off the deployment and pass it through unchanged, so the
@@ -205,7 +240,6 @@ jobs:
         working-directory: apps/api
         env:
           NODE_ENV: test
-          E2E_API_URL: ${{ inputs.api_url }}
           OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER: ${{ steps.cfg.outputs.issuer }}
         run: bun test --timeout 30000 src/graphql/__tests__ src/rest/__tests__ src/mcp/__tests__
 

@@ -30,48 +30,11 @@ name: Deploy
 # that carries.
 
 on:
-  workflow_dispatch:
-    inputs:
-      image_tag:
-        description: "Image tag to deploy. Empty = sha-<short commit> of this ref."
-        required: false
-        type: string
-      deploy_keycloak:
-        description: "Also deploy Keycloak from the subchart."
-        required: false
-        type: boolean
-        default: true
-      bearer_audience:
-        description: "aud the API requires in bearer tokens. Must appear in the token's aud array."
-        required: false
-        type: string
-        default: "erp-provider"
-      api_host:
-        description: "Public hostname to serve the API on. Empty = no Ingress (ClusterIP only)."
-        required: false
-        type: string
-        default: "api.openshapeforge.eu"
-      auth_host:
-        description: "Public hostname for Keycloak. CHANGES THE TOKEN ISSUER — existing tokens stop validating. Empty = Keycloak stays cluster-internal."
-        required: false
-        type: string
-        default: "auth.openshapeforge.eu"
-      realm_mode:
-        description: "Keycloak realm to compile. development permits the committed dev secrets and must never reach a public hostname."
-        required: false
-        type: choice
-        default: production
-        options:
-          - development
-          - production
-      tls_issuer:
-        description: "cert-manager ClusterIssuer. Switch to staging while iterating on a NON-production hostname — prod allows only 5 failed validations per hostname per hour."
-        required: false
-        type: choice
-        default: letsencrypt-prod
-        options:
-          - letsencrypt-staging
-          - letsencrypt-prod
+  # repository_dispatch always runs the workflow from the default branch and
+  # exposes no caller-selected ref. The public-safe invocation and payload
+  # fields are documented in deploy/README.md.
+  repository_dispatch:
+    types: [deploy]
 
 # Never let two deploys race for the same release.
 concurrency:
@@ -87,6 +50,8 @@ env:
   RELEASE: openshapeforge
   REGION: nl-ams
   SECRET_PREFIX: openshapeforge
+  SCW_CLI_URL: https://github.com/scaleway/scaleway-cli/releases/download/v2.51.0/scaleway-cli_2.51.0_linux_amd64
+  SCW_CLI_SHA256: 091060ecaa6f74ef1381f4d024584aa8f5dc6226d66669e00ada005b51bc26b0
   # The realm this deployment IS. `bun run generate` emits one
   # keycloak/<realm>-realm.json per authored realm, and since #288 there are
   # two of them — the tenant realm below and openshapeforge-control, which is
@@ -100,12 +65,120 @@ env:
 jobs:
   deploy:
     name: Helm upgrade --install
+    # repository_dispatch binds both github.ref and github.sha to the default
+    # branch. Keep this independent check: a trigger edit must fail closed too.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # Attach required reviewers to this environment in repo settings to gate
     # deploys behind an approval.
     environment: dev
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Preflight — deployment request is valid
+        id: request
+        env:
+          # Untrusted client_payload crosses into the shell only as environment
+          # data. This step is its sole ingress; later steps receive only the
+          # normalized, format-checked values written to GITHUB_ENV.
+          DISPATCH_PAYLOAD_JSON: ${{ toJSON(github.event.client_payload) }}
+        run: |
+          set -euo pipefail
+          payload_json="$DISPATCH_PAYLOAD_JSON"
+          [ "$payload_json" != "null" ] || payload_json="{}"
+
+          if ! jq -e '
+            def absent_or_type($key; $kind):
+              (has($key) | not) or (getpath([$key]) | type == $kind);
+            type == "object"
+            and ((keys - [
+              "image_tag", "deploy_keycloak", "bearer_audience", "api_host",
+              "auth_host", "realm_mode", "tls_issuer"
+            ]) | length == 0)
+            and absent_or_type("image_tag"; "string")
+            and absent_or_type("deploy_keycloak"; "boolean")
+            and absent_or_type("bearer_audience"; "string")
+            and absent_or_type("api_host"; "string")
+            and absent_or_type("auth_host"; "string")
+            and absent_or_type("realm_mode"; "string")
+            and absent_or_type("tls_issuer"; "string")
+          ' <<<"$payload_json" >/dev/null; then
+            echo "::error::deploy client_payload has unknown fields or invalid JSON value types"
+            exit 1
+          fi
+
+          image_tag="$(jq -r '.image_tag // ""' <<<"$payload_json")"
+          deploy_keycloak="$(jq -r 'if has("deploy_keycloak") then .deploy_keycloak else true end' <<<"$payload_json")"
+          bearer_audience="$(jq -r 'if has("bearer_audience") then .bearer_audience else "erp-provider" end' <<<"$payload_json")"
+          api_host="$(jq -r 'if has("api_host") then .api_host else "api.openshapeforge.eu" end' <<<"$payload_json")"
+          auth_host="$(jq -r 'if has("auth_host") then .auth_host else "auth.openshapeforge.eu" end' <<<"$payload_json")"
+          realm_mode="$(jq -r 'if has("realm_mode") then .realm_mode else "production" end' <<<"$payload_json")"
+          tls_issuer="$(jq -r 'if has("tls_issuer") then .tls_issuer else "letsencrypt-prod" end' <<<"$payload_json")"
+
+          valid_hostname() {
+            local host="$1"
+            if [ -z "$host" ]; then
+              return 0
+            fi
+            [ "${#host}" -le 253 ] || return 1
+            [[ "$host" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || return 1
+            return 0
+          }
+
+          for host in "$api_host" "$auth_host"; do
+            if ! valid_hostname "$host"; then
+              echo "::error::api_host and auth_host must be empty or lowercase fully-qualified DNS hostnames"
+              exit 1
+            fi
+          done
+
+          if [ -n "$image_tag" ] &&
+             { [ "${#image_tag}" -gt 128 ] ||
+               [[ ! "$image_tag" =~ ^[a-z0-9_][a-z0-9._-]*$ ]]; }; then
+            echo "::error::image_tag must be empty or a lowercase OCI tag of at most 128 characters"
+            exit 1
+          fi
+
+          if [ -z "$bearer_audience" ] ||
+             [ "${#bearer_audience}" -gt 128 ] ||
+             [[ ! "$bearer_audience" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+            echo "::error::bearer_audience must be a lowercase client identifier of 1-128 characters"
+            exit 1
+          fi
+
+          case "$deploy_keycloak" in
+            true|false) ;;
+            *) echo "::error::deploy_keycloak must be a JSON boolean"; exit 1 ;;
+          esac
+          case "$realm_mode" in
+            development|production) ;;
+            *) echo "::error::realm_mode must be development or production"; exit 1 ;;
+          esac
+          case "$tls_issuer" in
+            letsencrypt-staging|letsencrypt-prod) ;;
+            *) echo "::error::tls_issuer is not an allowed issuer"; exit 1 ;;
+          esac
+
+          if [ "$realm_mode" = "development" ] &&
+             { [ -n "$api_host" ] || [ -n "$auth_host" ]; }; then
+            echo "::error::realm_mode=development requires empty api_host and auth_host; local-only realm credentials must never be exposed through public ingress"
+            exit 1
+          fi
+
+          {
+            echo "DISPATCH_IMAGE_TAG=$image_tag"
+            echo "DISPATCH_DEPLOY_KEYCLOAK=$deploy_keycloak"
+            echo "DISPATCH_BEARER_AUDIENCE=$bearer_audience"
+            echo "DISPATCH_API_HOST=$api_host"
+            echo "DISPATCH_AUTH_HOST=$auth_host"
+            echo "DISPATCH_REALM_MODE=$realm_mode"
+            echo "DISPATCH_TLS_ISSUER=$tls_issuer"
+          } >> "$GITHUB_ENV"
+          {
+            echo "deploy_keycloak=$deploy_keycloak"
+            echo "realm_mode=$realm_mode"
+          } >> "$GITHUB_OUTPUT"
+          echo "deployment request is valid"
 
       # Fail early and legibly rather than part-way through a helm upgrade.
       - name: Preflight — required secrets are present
@@ -127,32 +200,30 @@ jobs:
           fi
           echo "all required secrets present"
 
-      # The inputs are individually plausible but can combine into a deploy
-      # that is both broken and unsafe: a development realm carries the
-      # committed dev client secrets (authorization.yaml devSecret literals)
-      # and sslRequired: none, and staging certificates are issued from an
-      # untrusted root. Neither belongs on a hostname real clients resolve.
-      #
-      # Iteration is unaffected — any OTHER hostname may still use a
-      # development realm and staging certificates, which is what they are for.
-      # Only the live names are constrained.
+      # The request preflight already keeps every development realm private: it
+      # carries committed local-only credentials and may have no ingress host.
+      # This independent check protects the live production names from a
+      # staging certificate even when the production realm itself is selected.
       - name: Preflight — live hostnames require production settings
         env:
+          # Hostnames are lowercase here because valid_hostname rejects every
+          # uppercase input before this exact-match allow-list is consulted.
           PROTECTED_HOSTS: "api.openshapeforge.eu auth.openshapeforge.eu"
         run: |
+          set -euo pipefail
           fail=0
-          for host in "${{ inputs.api_host }}" "${{ inputs.auth_host }}"; do
+          for host in "$DISPATCH_API_HOST" "$DISPATCH_AUTH_HOST"; do
             [ -n "$host" ] || continue
             case " $PROTECTED_HOSTS " in
               *" $host "*) ;;
               *) continue ;;
             esac
-            if [ "${{ inputs.tls_issuer }}" != "letsencrypt-prod" ]; then
-              echo "::error::$host is a live hostname, but tls_issuer is '${{ inputs.tls_issuer }}'. Staging certificates are issued from an untrusted root and every client would see a TLS error."
+            if [ "$DISPATCH_TLS_ISSUER" != "letsencrypt-prod" ]; then
+              echo "::error::$host is a live hostname, but the selected TLS issuer is not production. Staging certificates are issued from an untrusted root and every client would see a TLS error."
               fail=1
             fi
-            if [ "${{ inputs.realm_mode }}" != "production" ]; then
-              echo "::error::$host is a live hostname, but realm_mode is '${{ inputs.realm_mode }}'. A development realm carries this repository's committed client secrets and must never be reachable publicly."
+            if [ "$DISPATCH_REALM_MODE" != "production" ]; then
+              echo "::error::$host is a live hostname, but the selected realm mode is not production. A development realm carries this repository's committed client secrets and must never be reachable publicly."
               fail=1
             fi
           done
@@ -173,9 +244,13 @@ jobs:
       # therefore must be regenerated here rather than read from the checkout.
       - name: Install Scaleway CLI
         run: |
-          curl -fsSL https://github.com/scaleway/scaleway-cli/releases/download/v2.51.0/scaleway-cli_2.51.0_linux_amd64 \
-            -o /usr/local/bin/scw
-          chmod +x /usr/local/bin/scw
+          set -euo pipefail
+          download="$(mktemp)"
+          trap 'rm -f "$download"' EXIT
+          curl --proto '=https' --tlsv1.2 --retry 3 --retry-all-errors -fsSL \
+            "$SCW_CLI_URL" -o "$download"
+          printf '%s  %s\n' "$SCW_CLI_SHA256" "$download" | sha256sum -c -
+          sudo install -m 0755 "$download" /usr/local/bin/scw
 
       # The compiler REFUSES to emit a production realm carrying committed
       # client secrets or user passwords; it reads them from the environment
@@ -187,7 +262,7 @@ jobs:
       # identities the e2e suite authenticates as to prove roles and tenant
       # isolation. Production changes their passwords, not their existence.
       - name: Read realm credentials from Secret Manager
-        if: ${{ inputs.realm_mode == 'production' }}
+        if: steps.request.outputs.realm_mode == 'production'
         env:
           SCW_ACCESS_KEY: ${{ secrets.SCW_ACCESS_KEY }}
           SCW_SECRET_KEY: ${{ secrets.SCW_SECRET_KEY }}
@@ -209,28 +284,37 @@ jobs:
           # Secret Manager — fails `bun run generate` in this workflow, which is
           # the first deploy after it merges rather than the PR that added it
           # (#324). Nothing enforces that yet.
-          while IFS='|' read -r name var; do
-            [ -z "$name" ] && continue
+          while IFS='|' read -r suffix var; do
+            [ -z "$suffix" ] && continue
+            name="${SECRET_PREFIX}-${suffix}"
             value="$(fetch "$name")"
             if [ -z "$value" ]; then
               echo "::error::Secret Manager entry missing or empty: $name (needed for $var)"
               exit 1
             fi
-            echo "::add-mask::$value"
-            echo "$var=$value" >> "$GITHUB_ENV"
+            mask="${value//'%'/'%25'}"
+            mask="${mask//$'\r'/'%0D'}"
+            mask="${mask//$'\n'/'%0A'}"
+            printf '::add-mask::%s\n' "$mask"
+            delimiter="OSF_SECRET_$(openssl rand -hex 16)"
+            {
+              printf '%s<<%s\n' "$var" "$delimiter"
+              printf '%s\n' "$value"
+              printf '%s\n' "$delimiter"
+            } >> "$GITHUB_ENV"
           done <<'PAIRS'
-          ${{ env.SECRET_PREFIX }}-realm-client-openshapeforge-gateway|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_GATEWAY
-          ${{ env.SECRET_PREFIX }}-realm-client-erp-provider|KEYCLOAK_CLIENT_SECRET_ERP_PROVIDER
-          ${{ env.SECRET_PREFIX }}-realm-client-openshapeforge-timeline|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_TIMELINE
-          ${{ env.SECRET_PREFIX }}-realm-client-seed-service|KEYCLOAK_CLIENT_SECRET_SEED_SERVICE
-          ${{ env.SECRET_PREFIX }}-realm-client-openshapeforge-auth-api|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API
-          ${{ env.SECRET_PREFIX }}-realm-client-openshapeforge-apikey-provisioner|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_APIKEY_PROVISIONER
-          ${{ env.SECRET_PREFIX }}-realm-user-acme-directie|E2E_USER_PASSWORD_ACME_DIRECTIE
-          ${{ env.SECRET_PREFIX }}-realm-user-acme-vastgoedbeheerder|E2E_USER_PASSWORD_ACME_VASTGOEDBEHEERDER
-          ${{ env.SECRET_PREFIX }}-realm-user-acme-wijkbeheerder|E2E_USER_PASSWORD_ACME_WIJKBEHEERDER
-          ${{ env.SECRET_PREFIX }}-realm-user-acme-verhuurconsulent|E2E_USER_PASSWORD_ACME_VERHUURCONSULENT
-          ${{ env.SECRET_PREFIX }}-realm-user-acme-noaccess|E2E_USER_PASSWORD_ACME_NOACCESS
-          ${{ env.SECRET_PREFIX }}-realm-user-beta-verhuurconsulent|E2E_USER_PASSWORD_BETA_VERHUURCONSULENT
+          realm-client-openshapeforge-gateway|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_GATEWAY
+          realm-client-erp-provider|KEYCLOAK_CLIENT_SECRET_ERP_PROVIDER
+          realm-client-openshapeforge-timeline|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_TIMELINE
+          realm-client-seed-service|KEYCLOAK_CLIENT_SECRET_SEED_SERVICE
+          realm-client-openshapeforge-auth-api|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API
+          realm-client-openshapeforge-apikey-provisioner|KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_APIKEY_PROVISIONER
+          realm-user-acme-directie|E2E_USER_PASSWORD_ACME_DIRECTIE
+          realm-user-acme-vastgoedbeheerder|E2E_USER_PASSWORD_ACME_VASTGOEDBEHEERDER
+          realm-user-acme-wijkbeheerder|E2E_USER_PASSWORD_ACME_WIJKBEHEERDER
+          realm-user-acme-verhuurconsulent|E2E_USER_PASSWORD_ACME_VERHUURCONSULENT
+          realm-user-acme-noaccess|E2E_USER_PASSWORD_ACME_NOACCESS
+          realm-user-beta-verhuurconsulent|E2E_USER_PASSWORD_BETA_VERHUURCONSULENT
           PAIRS
           echo "realm credentials loaded (values masked)"
 
@@ -248,7 +332,7 @@ jobs:
       # deployment would otherwise stand up an issuer nobody holds credentials
       # for.
       - name: Placeholder credentials for the undeployed control realm
-        if: ${{ inputs.realm_mode == 'production' }}
+        if: steps.request.outputs.realm_mode == 'production'
         run: |
           set -euo pipefail
           for var in KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_ADMIN_GATEWAY \
@@ -262,7 +346,7 @@ jobs:
 
       - name: Generate artifacts
         env:
-          OPENSHAPEFORGE_REALM_MODE: ${{ inputs.realm_mode }}
+          OPENSHAPEFORGE_REALM_MODE: ${{ steps.request.outputs.realm_mode }}
         run: bun run generate
 
       - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
@@ -276,9 +360,11 @@ jobs:
           # a cluster lookup by ID needs no organization, but it would have
           # failed the moment any call did.
           SCW_DEFAULT_ORGANIZATION_ID: ${{ secrets.SCW_DEFAULT_ORGANIZATION_ID }}
+          SCW_CLUSTER_ID: ${{ secrets.SCW_CLUSTER_ID }}
         run: |
-          scw k8s kubeconfig install "${{ secrets.SCW_CLUSTER_ID }}" \
-            region=${{ env.REGION }} auth-method=copy-cli-token
+          set -euo pipefail
+          scw k8s kubeconfig install "$SCW_CLUSTER_ID" \
+            region="$REGION" auth-method=copy-cli-token
           kubectl config current-context
           kubectl get nodes
 
@@ -298,26 +384,30 @@ jobs:
       # (a PAT with read:packages) — it is used in preference when present.
       - name: Create GHCR pull secret
         env:
+          GHCR_ACTOR: ${{ github.actor }}
+          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
           PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          if [ -n "${{ secrets.GHCR_PULL_TOKEN }}" ]; then
+          set -euo pipefail
+          if [ -n "$GHCR_PULL_TOKEN" ]; then
             echo "using GHCR_PULL_TOKEN (durable)"
           else
             echo "::warning::using GITHUB_TOKEN for the pull secret; it expires with this job. Pods scheduled onto a new node later will fail to pull. Set GHCR_PULL_TOKEN or make the packages public to fix."
           fi
           kubectl -n "$NAMESPACE" create secret docker-registry ghcr-pull \
             --docker-server=ghcr.io \
-            --docker-username="${{ github.actor }}" \
+            --docker-username="$GHCR_ACTOR" \
             --docker-password="$PULL_TOKEN" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Resolve image tag
         id: tag
         run: |
-          tag="${{ inputs.image_tag }}"
+          set -euo pipefail
+          tag="$DISPATCH_IMAGE_TAG"
           if [ -z "$tag" ]; then
             # Matches docker/metadata-action's type=sha (7-char short sha).
-            tag="sha-$(echo "${GITHUB_SHA}" | cut -c1-7)"
+            tag="sha-${GITHUB_SHA:0:7}"
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "deploying tag: $tag"
@@ -327,11 +417,14 @@ jobs:
       # a failed rollout.
       - name: Verify images exist in GHCR
         env:
+          GHCR_ACTOR: ${{ github.actor }}
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
           PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
-          echo "$PULL_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          set -euo pipefail
+          echo "$PULL_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
           for img in openshapeforge-api openshapeforge-keycloak; do
-            ref="ghcr.io/openshapeforge/$img:${{ steps.tag.outputs.tag }}"
+            ref="ghcr.io/openshapeforge/$img:$IMAGE_TAG"
             if ! docker manifest inspect "$ref" >/dev/null 2>&1; then
               echo "::error::image not found: $ref"
               exit 1
@@ -414,9 +507,10 @@ jobs:
       # generated file is cross-checked against it rather than searched for, so
       # a renamed realm fails here instead of deploying the wrong issuer.
       - name: Derive issuer
-        if: ${{ inputs.deploy_keycloak }}
+        if: steps.request.outputs.deploy_keycloak == 'true'
         id: issuer
         run: |
+          set -euo pipefail
           realm="${TENANT_REALM}"
           realm_file="keycloak/${realm}-realm.json"
           if [ ! -f "$realm_file" ]; then
@@ -429,10 +523,10 @@ jobs:
           fi
           internal="http://${RELEASE}-keycloak:8080/realms/${realm}"
 
-          if [ -n "${{ inputs.auth_host }}" ]; then
+          if [ -n "$DISPATCH_AUTH_HOST" ]; then
             # Keycloak is public: it stamps `iss` with its external URL, so the
             # API must verify against THAT, not the Service name.
-            issuer="https://${{ inputs.auth_host }}/realms/${realm}"
+            issuer="https://${DISPATCH_AUTH_HOST}/realms/${realm}"
           else
             issuer="$internal"
           fi
@@ -449,13 +543,19 @@ jobs:
           echo "  jwks   (back-channel, internal):   $internal/protocol/openid-connect/certs"
 
       - name: Helm upgrade --install
+        env:
+          BEARER_ISSUER: ${{ steps.issuer.outputs.issuer }}
+          BEARER_JWKS: ${{ steps.issuer.outputs.jwks }}
+          DEPLOY_REALM: ${{ steps.issuer.outputs.realm }}
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
         run: |
+          set -euo pipefail
           bearer_args=()
-          if [ "${{ inputs.deploy_keycloak }}" = "true" ]; then
+          if [ "$DISPATCH_DEPLOY_KEYCLOAK" = "true" ]; then
             bearer_args=(
-              --set auth.bearer.issuer="${{ steps.issuer.outputs.issuer }}"
-              --set auth.bearer.jwksUri="${{ steps.issuer.outputs.jwks }}"
-              --set auth.bearer.audience="${{ inputs.bearer_audience }}"
+              --set-string auth.bearer.issuer="$BEARER_ISSUER"
+              --set-string auth.bearer.jwksUri="$BEARER_JWKS"
+              --set-string auth.bearer.audience="$DISPATCH_BEARER_AUDIENCE"
             )
           fi
 
@@ -464,19 +564,19 @@ jobs:
           # chart only declares the Ingress and names the issuer that should
           # fulfil it. An empty api_host leaves the release ClusterIP-only.
           ingress_args=()
-          host="${{ inputs.api_host }}"
+          host="$DISPATCH_API_HOST"
           if [ -n "$host" ]; then
             ingress_args=(
               --set ingress.enabled=true
               --set ingress.className=nginx
-              --set "ingress.annotations.cert-manager\.io/cluster-issuer=${{ inputs.tls_issuer }}"
-              --set "ingress.hosts[0].host=$host"
+              --set-string "ingress.annotations.cert-manager\.io/cluster-issuer=$DISPATCH_TLS_ISSUER"
+              --set-string "ingress.hosts[0].host=$host"
               --set "ingress.hosts[0].paths[0].path=/"
               --set "ingress.hosts[0].paths[0].pathType=Prefix"
-              --set "ingress.tls[0].secretName=openshapeforge-api-tls"
-              --set "ingress.tls[0].hosts[0]=$host"
+              --set-string "ingress.tls[0].secretName=openshapeforge-api-tls"
+              --set-string "ingress.tls[0].hosts[0]=$host"
             )
-            echo "serving on https://$host (issuer: ${{ inputs.tls_issuer }})"
+            echo "serving on https://$host (issuer: $DISPATCH_TLS_ISSUER)"
           else
             echo "no api_host given — ClusterIP only, no Ingress"
           fi
@@ -488,15 +588,15 @@ jobs:
           # without it Keycloak builds redirect and issuer URLs from the
           # in-cluster request and advertises http:// on the wrong host.
           auth_args=()
-          ahost="${{ inputs.auth_host }}"
-          if [ "${{ inputs.deploy_keycloak }}" = "true" ] && [ -n "$ahost" ]; then
+          ahost="$DISPATCH_AUTH_HOST"
+          if [ "$DISPATCH_DEPLOY_KEYCLOAK" = "true" ] && [ -n "$ahost" ]; then
             auth_args=(
-              --set keycloak.hostname="https://$ahost"
+              --set-string keycloak.hostname="https://$ahost"
               --set keycloak.proxyHeaders=xforwarded
               --set keycloak.ingress.enabled=true
               --set keycloak.ingress.className=nginx
-              --set "keycloak.ingress.annotations.cert-manager\.io/cluster-issuer=${{ inputs.tls_issuer }}"
-              --set "keycloak.ingress.hosts[0].host=$ahost"
+              --set-string "keycloak.ingress.annotations.cert-manager\.io/cluster-issuer=$DISPATCH_TLS_ISSUER"
+              --set-string "keycloak.ingress.hosts[0].host=$ahost"
               # WHICH prefixes are public is the chart's decision, not this
               # workflow's: naming the realm makes it route that realm's OIDC
               # surface (discovery, protocol, login-actions) plus /resources for
@@ -505,19 +605,19 @@ jobs:
               # /realms/<realm>/openshapeforge match no rule and never reach
               # Keycloak. This used to pass /realms/<realm> as a single prefix,
               # which routed the SPI to the internet — the finding S8 closes.
-              --set "keycloak.ingress.publicRealm=${{ steps.issuer.outputs.realm }}"
-              --set "keycloak.ingress.tls[0].secretName=openshapeforge-keycloak-tls"
-              --set "keycloak.ingress.tls[0].hosts[0]=$ahost"
+              --set-string "keycloak.ingress.publicRealm=$DEPLOY_REALM"
+              --set-string "keycloak.ingress.tls[0].secretName=openshapeforge-keycloak-tls"
+              --set-string "keycloak.ingress.tls[0].hosts[0]=$ahost"
             )
-            echo "keycloak public at https://$ahost (OIDC surface of ${{ steps.issuer.outputs.realm }} + /resources only; admin console and configuration SPI unrouted)"
+            echo "keycloak public at https://$ahost (OIDC surface of $DEPLOY_REALM + /resources only; admin console and configuration SPI unrouted)"
           fi
           helm upgrade --install "$RELEASE" ./deploy/helm/openshapeforge-api \
             --namespace "$NAMESPACE" \
             --values secrets.values.yaml \
-            --set image.tag="${{ steps.tag.outputs.tag }}" \
+            --set-string image.tag="$IMAGE_TAG" \
             --set 'global.imagePullSecrets[0].name=ghcr-pull' \
-            --set keycloak.enabled=${{ inputs.deploy_keycloak }} \
-            --set keycloak.image.tag="${{ steps.tag.outputs.tag }}" \
+            --set keycloak.enabled="$DISPATCH_DEPLOY_KEYCLOAK" \
+            --set-string keycloak.image.tag="$IMAGE_TAG" \
             --set-file keycloak.realm.json="keycloak/${TENANT_REALM}-realm.json" \
             "${bearer_args[@]}" \
             "${ingress_args[@]}" \

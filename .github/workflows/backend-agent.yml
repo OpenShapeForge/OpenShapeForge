@@ -4,6 +4,9 @@ on:
   issues:
     types: [labeled]
 
+permissions:
+  contents: read
+
 jobs:
   backend-agent:
     if: github.event.label.name == 'backend-agent-work'

@@ -8,22 +8,23 @@ The API is a Bun service. It expects an **external Postgres** and an
 Images are published to GHCR automatically by
 [`.github/workflows/docker-api.yml`](../.github/workflows/docker-api.yml):
 
-| Trigger                            | Tags pushed                    |
-| ---------------------------------- | ------------------------------ |
-| pull request (whatever its base)   | none — build + smoke test only |
-| push to `main`                     | `main`, `sha-<commit>`         |
-| tag `v0.1.0`                       | `0.1.0`, `0.1`, `latest`       |
-| manual run on any other ref        | none — build + smoke test only |
+| Trigger | Tags pushed |
+| --- | --- |
+| pull request (whatever its base) | none — build + smoke test only |
+| push to `main` | `main`, `sha-<commit>` |
+| tag `v0.1.0` | `0.1.0`, `0.1`, `sha-<commit>`, `latest` |
+| `publish-images` repository event | `main`, `sha-<commit>` from the default branch |
 
-Publishing is gated on the **ref**, not on the event: only `refs/heads/main` and
-`refs/tags/v*` authenticate to GHCR at all. A feature branch builds and
-smoke-tests the image — that is the gate — but nothing it produces reaches the
-registry, however the workflow was triggered. `.github/workflows/ci.yml` and the
-image workflows run on pull requests to *any* base branch so that a stacked PR
-is gated too (issue #269), which is what makes that distinction load-bearing.
-
-`latest` follows the newest release tag, not the newest `main` commit. Pin an
-explicit version in the chart (`image.tag`) for anything but scratch testing.
+The PR build job has read-only repository access and no registry permission. A
+separate publish job runs only for a `main` push, a pushed `v*` release tag, or
+the typed repository event. That event has no ref parameter, so GitHub executes
+the workflow and checks out the current default-branch SHA; release tags remain
+an explicit Git push and cannot be selected through a manual workflow ref. The
+API and Keycloak workflows listen to the same event, but run independently: the
+event is not an atomic publish. Check both workflow results before deploying;
+the deploy workflow also verifies that both requested image tags exist before
+touching the cluster. `latest` follows the newest release tag, not `main`. Pin a
+`sha-<commit>` or version tag in the chart for anything but scratch testing.
 
 To build the same image locally, run this from the repository root (the build
 runs `bun run generate`, so the generated DB schema/types/manifest are baked
@@ -81,9 +82,12 @@ the pre-job hook because pull-request code can edit both.
 
 [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) runs
 `helm upgrade --install` against the Scaleway Kapsule cluster. It is
-`workflow_dispatch` only — deploys are deliberately a decision, not a
-side effect of merging — and runs against the `dev` GitHub Environment, so
-required reviewers can gate it.
+triggered only by the typed `deploy` repository event — deploys are deliberately
+a decision, not a side effect of merging — and runs against the `dev` GitHub
+Environment, so required reviewers can gate it. Repository events execute the
+workflow at the default branch's current SHA and cannot select an older or
+feature ref; the privileged job independently asserts `refs/heads/main` before
+GitHub sends it to a runner.
 
 It builds nothing: it installs images already published by the `API image` and
 `Keycloak image` workflows, and verifies both tags exist in GHCR **before**
@@ -99,12 +103,65 @@ read them with `terraform output -raw <name>`.
 > docker-registry Secret from `GHCR_PULL_TOKEN` (a PAT with `read:packages`) on
 > every deploy. Drop that secret only if the packages are made public.
 
-### Inputs
+### Manual workflow commands
+
+The commands below use only repository coordinates and non-secret example data.
+Authentication comes from the caller's existing `gh` session. Omitting
+`client_payload` selects every documented default. The `publish-images` and
+`web-e2e` events reject every payload field.
+
+```sh
+# Request independent API and Keycloak publishes for the current default SHA.
+gh api --method POST repos/OpenShapeForge/OpenShapeForge/dispatches \
+  -f event_type=publish-images
+
+# Deploy with production defaults.
+gh api --method POST repos/OpenShapeForge/OpenShapeForge/dispatches \
+  -f event_type=deploy
+
+# Example private development deploy. Both host fields must be explicitly empty;
+# the local-only realm is ClusterIP-only. -F preserves the JSON boolean type.
+gh api --method POST repos/OpenShapeForge/OpenShapeForge/dispatches \
+  -f event_type=deploy \
+  -f 'client_payload[image_tag]=sha-0123abc' \
+  -F 'client_payload[deploy_keycloak]=true' \
+  -f 'client_payload[api_host]=' \
+  -f 'client_payload[auth_host]=' \
+  -f 'client_payload[realm_mode]=development' \
+  -f 'client_payload[tls_issuer]=letsencrypt-staging'
+
+# Run cluster e2e against the default public API origin.
+gh api --method POST repos/OpenShapeForge/OpenShapeForge/dispatches \
+  -f event_type=e2e-cluster
+
+# Re-run the local-stack browser workflow from the default branch.
+gh api --method POST repos/OpenShapeForge/OpenShapeForge/dispatches \
+  -f event_type=web-e2e
+```
+
+### Deploy payload
 
 The defaults describe a **production deploy of the current `main`**: leave every
 input untouched and you get `sha-<short commit>` on `api.openshapeforge.eu` and
 `auth.openshapeforge.eu`, with a production realm and Let's Encrypt production
 certificates.
+
+The untrusted `client_payload` object enters one preflight step as environment
+data. Unknown keys and wrong JSON types are rejected before its values are
+normalized for later steps. Free-form strings must also have a narrow shape:
+
+- `image_tag` is empty or a lowercase OCI tag of at most 128 characters;
+- `bearer_audience` is a lowercase client identifier of 1-128 characters;
+- `api_host` and `auth_host` are empty or lowercase fully-qualified DNS names.
+
+`deploy_keycloak` must be a JSON boolean. `realm_mode` accepts `development` or
+`production`; `tls_issuer` accepts `letsencrypt-staging` or
+`letsencrypt-prod`. A development realm is valid only when both host fields are
+explicitly empty, so it stays ClusterIP-only. Any omitted field receives the
+production default described above.
+
+The pinned Scaleway CLI binary is checked against the SHA-256 digest published
+with its release before it is installed.
 
 Two inputs change what the deployment *is*, rather than merely where it runs:
 
@@ -113,10 +170,10 @@ Two inputs change what the deployment *is*, rather than merely where it runs:
 | `realm_mode` | `production` — client secrets come from Secret Manager | `development` — permits the committed `devSecret` literals and `sslRequired: none` |
 | `tls_issuer` | `letsencrypt-prod` | `letsencrypt-staging` — untrusted root, but no rate limit to burn (prod allows only 5 failed validations per hostname per hour) |
 
-A development realm on a public hostname would publish a Keycloak whose client
-secrets are readable in this repository, so the workflow **refuses** to combine
-either non-production setting with a live hostname. Iterate against a different
-hostname, or with the hosts left empty for a ClusterIP-only release.
+A development realm carries known local-only credentials, so the workflow
+**refuses every ingress hostname** in that mode. Keep both hosts empty for a
+ClusterIP-only development release. A non-production hostname may use the
+production realm with a staging certificate when ingress iteration is needed.
 
 ## Helm chart
 

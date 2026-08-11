@@ -2,7 +2,7 @@
 # in particular floats across Maven patch and base-OS releases, so the tag alone
 # does not describe the bytes a rebuild pulls. Dependabot's docker ecosystem
 # (.github/dependabot.yml) bumps the tag and the digest together.
-FROM maven:3.9-eclipse-temurin-17@sha256:1ed5d1f54416b706707b4f3238f63a20bb06aab27c6d240090a2bb9ad895ed45 AS builder
+FROM maven:3-eclipse-temurin-26@sha256:d5617b9a6307e1b51dc7c55edf09bacb66f1c91fb861949c34a3a0d4e16bd241 AS builder
 WORKDIR /build
 COPY pom.xml .
 RUN mvn dependency:go-offline -B

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { NextConfig } from "next";
+import { validateProductionEnv } from "./src/lib/auth/validate-env";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -17,4 +18,14 @@ const nextConfig: NextConfig = {
   // `typecheck:admin`. Do not copy apps/web's flag over without a reason.
 };
 
-export default nextConfig;
+export function createNextConfig(
+  phase: string,
+  env: Record<string, string | undefined> = process.env,
+): NextConfig {
+  validateProductionEnv({ ...env, NEXT_PHASE: phase });
+  return nextConfig;
+}
+
+export default function configureNext(phase: string): NextConfig {
+  return createNextConfig(phase);
+}

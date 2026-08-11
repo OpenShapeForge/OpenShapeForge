@@ -44,9 +44,10 @@ const REQUIRED_ENV_VARS = [
   "AUTH_KEYCLOAK_SECRET",
   "AUTH_KEYCLOAK_ISSUER",
   "AUTH_COOKIE_SECURE",
-  "AUTH_COOKIE_DOMAIN",
   "REDIS_URL",
 ] as const;
+
+type AuthEnvironment = Record<string, string | undefined>;
 
 function assertConfigured(envVar: string, value: string | undefined): string {
   if (!value?.trim()) {
@@ -56,15 +57,9 @@ function assertConfigured(envVar: string, value: string | undefined): string {
   return value.trim();
 }
 
-function assertBooleanString(envVar: string, value: string): void {
-  if (value !== "true" && value !== "false") {
-    throw new Error(`FATAL: ${envVar} must be set to "true" or "false" in production.`);
-  }
-}
-
-function assertValidUrl(envVar: string, value: string): void {
+function parseUrl(envVar: string, value: string): URL {
   try {
-    new URL(value);
+    return new URL(value);
   } catch {
     throw new Error(`FATAL: ${envVar} must be a valid URL in production.`);
   }
@@ -83,52 +78,106 @@ function tryParseUrl(value: string | undefined): URL | undefined {
 }
 
 function isLoopbackHostname(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (normalized === "localhost" || normalized === "::1") {
+    return true;
+  }
+  const ipv4Octets = normalized.split(".");
+  if (
+    ipv4Octets.length === 4
+    && ipv4Octets.every(
+      (octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255,
+    )
+  ) {
+    return Number(ipv4Octets[0]) === 127;
+  }
+  const dottedIpv4Mapping = normalized.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (dottedIpv4Mapping) {
+    return isLoopbackHostname(dottedIpv4Mapping[1]!);
+  }
+  // URL canonicalizes an IPv4-mapped 127/8 address to this exact IPv6 shape.
+  return /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(normalized);
 }
 
-function isLocalProductionPreview(): boolean {
-  const issuerUrl = tryParseUrl(
-    process.env.AUTH_KEYCLOAK_ISSUER ?? "http://localhost:8181/realms/openshapeforge-control",
-  );
+function isLocalProductionPreview(env: AuthEnvironment): boolean {
+  if (env.OPENSHAPEFORGE_LOCAL_PRODUCTION_PREVIEW !== "true") {
+    return false;
+  }
+
+  const listenerHostname = env.HOSTNAME?.trim();
+  if (!listenerHostname || !isLoopbackHostname(listenerHostname)) {
+    return false;
+  }
+
+  const issuerUrl = tryParseUrl(env.AUTH_KEYCLOAK_ISSUER);
   if (!issuerUrl || !isLoopbackHostname(issuerUrl.hostname)) {
     return false;
   }
 
-  const authUrl = tryParseUrl(process.env.AUTH_URL ?? process.env.NEXTAUTH_URL);
-  if (authUrl && !isLoopbackHostname(authUrl.hostname)) {
+  const internalIssuerValue = env.AUTH_KEYCLOAK_ISSUER_INTERNAL?.trim();
+  const internalIssuerUrl = tryParseUrl(internalIssuerValue);
+  if (
+    internalIssuerValue
+    && (!internalIssuerUrl || !isLoopbackHostname(internalIssuerUrl.hostname))
+  ) {
     return false;
   }
 
-  const redisUrl = tryParseUrl(process.env.REDIS_URL ?? DEV_REDIS_URL);
-  if (redisUrl && !isLoopbackHostname(redisUrl.hostname)) {
+  const authUrlValue = (env.AUTH_URL ?? env.NEXTAUTH_URL)?.trim();
+  const authUrl = tryParseUrl(authUrlValue);
+  if (!authUrlValue || !authUrl || !isLoopbackHostname(authUrl.hostname)) {
     return false;
   }
 
-  return !process.env.AUTH_COOKIE_DOMAIN && process.env.AUTH_COOKIE_SECURE !== "true";
+  const redisUrl = tryParseUrl(env.REDIS_URL);
+  if (!redisUrl || !isLoopbackHostname(redisUrl.hostname)) {
+    return false;
+  }
+
+  return !env.AUTH_COOKIE_DOMAIN && env.AUTH_COOKIE_SECURE === "false";
 }
 
-export function validateProductionEnv(): void {
-  if (process.env.NODE_ENV !== "production") {
+function assertSecureUrl(envVar: string, value: string, protocol: "https:" | "rediss:"): void {
+  const url = parseUrl(envVar, value);
+  if (url.protocol !== protocol) {
+    throw new Error(`FATAL: ${envVar} must use ${protocol} in production.`);
+  }
+}
+
+function assertSecureHostOnlyCookie(env: AuthEnvironment): void {
+  const secure = assertConfigured("AUTH_COOKIE_SECURE", env.AUTH_COOKIE_SECURE);
+  if (secure !== "true") {
+    throw new Error('FATAL: AUTH_COOKIE_SECURE must be set to "true" in production.');
+  }
+  if (env.AUTH_COOKIE_DOMAIN) {
+    throw new Error(
+      "FATAL: AUTH_COOKIE_DOMAIN must be unset in production so session cookies remain host-only.",
+    );
+  }
+}
+
+export function validateProductionEnv(env: AuthEnvironment = process.env): void {
+  if (env.NODE_ENV !== "production") {
     return;
   }
 
   // Skip during Next.js build phase — secrets are not needed at build time,
   // only at runtime. NEXT_PHASE is set by Next.js during `next build`.
-  if (process.env.NEXT_PHASE === "phase-production-build") {
+  if (env.NEXT_PHASE === "phase-production-build") {
     return;
   }
 
-  if (isLocalProductionPreview()) {
+  if (isLocalProductionPreview(env)) {
     return;
   }
 
-  const authSecret = process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET;
+  const authSecret = env.AUTH_SECRET ?? env.NEXTAUTH_SECRET;
   if (!authSecret?.trim()) {
     throw new Error("FATAL: AUTH_SECRET or NEXTAUTH_SECRET must be configured for production.");
   }
 
   for (const [envVar, devValues] of Object.entries(DEV_DEFAULTS)) {
-    const value = process.env[envVar];
+    const value = env[envVar];
 
     if (value && devValues.includes(value)) {
       throw new Error(
@@ -138,14 +187,24 @@ export function validateProductionEnv(): void {
   }
 
   for (const envVar of REQUIRED_ENV_VARS) {
-    const value = assertConfigured(envVar, process.env[envVar]);
-
-    if (envVar === "AUTH_KEYCLOAK_ISSUER" || envVar === "REDIS_URL") {
-      assertValidUrl(envVar, value);
-    }
-
-    if (envVar === "AUTH_COOKIE_SECURE") {
-      assertBooleanString(envVar, value);
-    }
+    assertConfigured(envVar, env[envVar]);
   }
+
+  assertSecureUrl("AUTH_KEYCLOAK_ISSUER", env.AUTH_KEYCLOAK_ISSUER!, "https:");
+  if (env.AUTH_KEYCLOAK_ISSUER_INTERNAL?.trim()) {
+    assertSecureUrl(
+      "AUTH_KEYCLOAK_ISSUER_INTERNAL",
+      env.AUTH_KEYCLOAK_ISSUER_INTERNAL,
+      "https:",
+    );
+  }
+
+  const authUrl = env.AUTH_URL ?? env.NEXTAUTH_URL;
+  assertSecureUrl(
+    env.AUTH_URL !== undefined ? "AUTH_URL" : "NEXTAUTH_URL",
+    assertConfigured("AUTH_URL or NEXTAUTH_URL", authUrl),
+    "https:",
+  );
+  assertSecureUrl("REDIS_URL", env.REDIS_URL!, "rediss:");
+  assertSecureHostOnlyCookie(env);
 }

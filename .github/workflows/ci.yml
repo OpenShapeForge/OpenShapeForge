@@ -137,6 +137,9 @@ jobs:
           src/graphql/__tests__/classified-nullability.unit.test.ts
           src/graphql/__tests__/query-hardening.unit.test.ts
 
+      - name: Production auth environment tests
+        run: bun run test:auth-production-env
+
       # Determinism + freshness gate: regenerates twice and fails on drift, so
       # it must run after (or independently of) the generate step above.
       - name: Check generated artifacts are fresh and deterministic

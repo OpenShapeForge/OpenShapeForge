@@ -39,6 +39,6 @@
     "@openshapeforge/connector-example-object-store": "workspace:*",
     "@openshapeforge/connector-twinfield": "workspace:*",
     "@types/bun": "^1.3.5",
-    "typescript": "^5.9.0"
+    "typescript": "^7.0.2"
   }
 }

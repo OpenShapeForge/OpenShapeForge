@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
@@ -10,11 +10,25 @@ import { mergePluginPlatformTables } from "./plugins.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 
 const repoRoot = resolve(import.meta.dir, "../../..");
+type ArtifactCollection = Awaited<ReturnType<typeof collectAllArtifacts>>;
+
+// Two full-corpus runs are required for the byte-for-byte comparison. The
+// shared setup avoids repeating them per assertion and gives larger supported
+// authoring corpora a deliberate budget instead of Bun's implicit five seconds.
+const FULL_CORPUS_DETERMINISM_TIMEOUT_MS = 15_000;
 
 describe("compiler plugins", () => {
-  test("collectAllArtifacts runs configured plugins deterministically", async () => {
-    const first = await collectAllArtifacts(repoRoot);
-    const second = await collectAllArtifacts(repoRoot);
+  let deterministicRuns: [ArtifactCollection, ArtifactCollection];
+
+  beforeAll(async () => {
+    deterministicRuns = [
+      await collectAllArtifacts(repoRoot),
+      await collectAllArtifacts(repoRoot),
+    ];
+  }, FULL_CORPUS_DETERMINISM_TIMEOUT_MS);
+
+  test("collectAllArtifacts runs configured plugins deterministically", () => {
+    const [first, second] = deterministicRuns;
 
     const docs = first.groups.plugins.find((entry) => entry.name === "entity-docs");
     expect(docs).toBeTruthy();
@@ -45,9 +59,8 @@ describe("compiler plugins", () => {
     expect(headings.length).toBe(crudTables.length);
   });
 
-  test("workflow plugin emits api workflow artifacts deterministically", async () => {
-    const first = await collectAllArtifacts(repoRoot);
-    const second = await collectAllArtifacts(repoRoot);
+  test("workflow plugin emits api workflow artifacts deterministically", () => {
+    const [first, second] = deterministicRuns;
 
     const workflow = first.groups.plugins.find((entry) => entry.name === "workflow");
     expect(workflow).toBeTruthy();

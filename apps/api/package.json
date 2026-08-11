@@ -19,7 +19,7 @@
     "@escape.tech/graphql-armor-max-depth": "^2.4.2",
     "@escape.tech/graphql-armor-max-directives": "^2.3.1",
     "@escape.tech/graphql-armor-max-tokens": "^2.5.1",
-    "@fastify/rate-limit": "^10",
+    "@fastify/rate-limit": "^11",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@openshapeforge/auth": "workspace:*",
     "ajv": "^8.20.0",

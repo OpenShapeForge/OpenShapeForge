@@ -36,7 +36,7 @@ import { join } from "node:path";
 const repoRoot = new URL("..", import.meta.url).pathname;
 const storeRoot = join(repoRoot, "node_modules/.bun");
 
-type Pkg = {
+export type Pkg = {
   name: string;
   version: string;
   license: string;
@@ -103,7 +103,7 @@ function walkPackageJson(dir: string, depth = 0, acc: string[] = []): string[] {
   } catch {
     return acc;
   }
-  for (const entry of entries) {
+  for (const entry of entries.sort()) {
     const full = join(dir, entry);
     let s;
     try {
@@ -120,47 +120,53 @@ function walkPackageJson(dir: string, depth = 0, acc: string[] = []): string[] {
   return acc;
 }
 
-const byKey = new Map<string, Pkg>();
-// Nested test/benchmark fixtures reuse generic names; skip them.
-const FIXTURE_NAMES = new Set(["benchmarks", "transport"]);
+export function collectPackages(store: string): Pkg[] {
+  const byKey = new Map<string, Pkg>();
+  // Nested test/benchmark fixtures reuse generic names; skip them.
+  const FIXTURE_NAMES = new Set(["benchmarks", "transport"]);
 
-for (const keyDir of readdirSync(storeRoot)) {
-  const base = join(storeRoot, keyDir, "node_modules");
-  for (const pjPath of walkPackageJson(base)) {
-    let pkg: Record<string, any>;
-    try {
-      pkg = JSON.parse(readFileSync(pjPath, "utf8"));
-    } catch {
-      continue;
+  for (const keyDir of readdirSync(store).sort()) {
+    const base = join(store, keyDir, "node_modules");
+    for (const pjPath of walkPackageJson(base)) {
+      let pkg: Record<string, any>;
+      try {
+        pkg = JSON.parse(readFileSync(pjPath, "utf8"));
+      } catch {
+        continue;
+      }
+      const { name, version } = pkg;
+      if (!name || !version || String(name).startsWith("@openshapeforge/")) continue;
+      if (FIXTURE_NAMES.has(name)) continue;
+      const key = `${name}@${version}`;
+      const depth = (pjPath.match(/node_modules/g) ?? []).length;
+      const existing = byKey.get(key);
+      if (existing && existing.depth <= depth) continue;
+      const repo = pkg.repository;
+      byKey.set(key, {
+        name,
+        version,
+        license: normalizeLicense(pkg),
+        homepage:
+          pkg.homepage ||
+          (repo && typeof repo === "object" ? repo.url : typeof repo === "string" ? repo : "") ||
+          "",
+        author:
+          (pkg.author && typeof pkg.author === "object" ? pkg.author.name : pkg.author) || "",
+        licenseText: findLicenseText(pjPath.slice(0, -"package.json".length)),
+        depth,
+      });
     }
-    const { name, version } = pkg;
-    if (!name || !version || String(name).startsWith("@openshapeforge/")) continue;
-    if (FIXTURE_NAMES.has(name)) continue;
-    const key = `${name}@${version}`;
-    const depth = (pjPath.match(/node_modules/g) ?? []).length;
-    const existing = byKey.get(key);
-    if (existing && existing.depth <= depth) continue;
-    const repo = pkg.repository;
-    byKey.set(key, {
-      name,
-      version,
-      license: normalizeLicense(pkg),
-      homepage:
-        pkg.homepage ||
-        (repo && typeof repo === "object" ? repo.url : typeof repo === "string" ? repo : "") ||
-        "",
-      author:
-        (pkg.author && typeof pkg.author === "object" ? pkg.author.name : pkg.author) || "",
-      licenseText: findLicenseText(pjPath.slice(0, -"package.json".length)),
-      depth,
-    });
   }
+
+  return [...byKey.values()].sort(
+    (a, b) =>
+      `${a.name}`.toLowerCase().localeCompare(`${b.name}`.toLowerCase()) ||
+      a.version.localeCompare(b.version),
+  );
 }
 
-const pkgs = [...byKey.values()].sort((a, b) =>
-  `${a.name}`.toLowerCase().localeCompare(`${b.name}`.toLowerCase()) ||
-  a.version.localeCompare(b.version),
-);
+if (import.meta.main) {
+const pkgs = collectPackages(storeRoot);
 
 const byLicense = new Map<string, number>();
 for (const p of pkgs) byLicense.set(p.license, (byLicense.get(p.license) ?? 0) + 1);
@@ -235,4 +241,5 @@ if (process.argv.includes("--check")) {
   console.log(
     `THIRD-PARTY-NOTICES.md: ${pkgs.length} packages, ${textToOwners.size} distinct license texts`,
   );
+}
 }

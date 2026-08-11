@@ -79,6 +79,48 @@ jobs:
     );
   });
 
+  test("rejects an unused amd64 build followed by a native smoke-test build", () => {
+    const problems = auditMutation(
+      ".github/workflows/docker-api.yml",
+      (source) =>
+        source.replace(
+          "      # Prove the image actually boots",
+          `      - name: Replace the smoke-test image natively
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          load: true
+          tags: openshapeforge-api:ci
+
+      # Prove the image actually boots`,
+        ),
+    );
+    expect(problems).toContain(
+      ".github/workflows/docker-api.yml#build must load and smoke-test the published linux/amd64 platform",
+    );
+  });
+
+  test("rejects a prototype-named job not owned by the policy", () => {
+    const problems = auditMutation(".github/workflows/ci.yml", (source) =>
+      source.replace(
+        "jobs:\n",
+        `jobs:
+  __proto__:
+    runs-on: ubuntu-latest
+    permissions: write-all
+    environment: production
+    steps:
+      - uses: docker/login-action@example
+      - run: docker push example.invalid/image
+`,
+      ),
+    );
+    expect(problems).toContain(
+      ".github/workflows/ci.yml#__proto__ has no explicit runner security policy",
+    );
+  });
+
   test("rejects job-level permissions: write-all", () => {
     const problems = auditMutation(
       ".github/workflows/docker-api.yml",
@@ -96,6 +138,15 @@ jobs:
   test("rejects a job secret reference using dot notation", () => {
     const problems = injectIntoGates(
       "    env:\n      LEAK: ${{ secrets.TEST_TOKEN }}",
+    );
+    expect(problems).toContain(
+      ".github/workflows/ci.yml#gates contains repository/environment secrets",
+    );
+  });
+
+  test("rejects a mixed-case secret context reference", () => {
+    const problems = injectIntoGates(
+      "    env:\n      LEAK: ${{ SeCrEtS.TEST_TOKEN }}",
     );
     expect(problems).toContain(
       ".github/workflows/ci.yml#gates contains repository/environment secrets",

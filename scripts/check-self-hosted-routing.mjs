@@ -28,7 +28,7 @@ const PUBLISH_IF =
 // also allow dynamic indexes and object serialization (`secrets[env.NAME]`,
 // `toJSON(secrets)`), so enumerating dot/bracket forms would fail open.
 const SECRET_REFERENCE =
-  /\$\{\{(?:(?!\}\})[\s\S])*\bsecrets\b(?:(?!\}\})[\s\S])*\}\}/;
+  /\$\{\{(?:(?!\}\})[\s\S])*\bsecrets\b(?:(?!\}\})[\s\S])*\}\}/i;
 
 /**
  * Every workflow job is inventoried deliberately. Adding a job without making
@@ -144,14 +144,44 @@ function pushesImage(job) {
   );
 }
 
-function buildsCanonicalImagePlatform(job) {
+function buildsCanonicalImagePlatform(path, job) {
+  const canonicalTag =
+    path === ".github/workflows/docker-api.yml"
+      ? "openshapeforge-api:ci"
+      : "openshapeforge-keycloak:ci";
+  const buildSteps = stepsFor(job).filter(
+    (step) =>
+      isMapping(step) &&
+      String(step.uses ?? "").includes("docker/build-push-action@"),
+  );
+  if (buildSteps.length !== 1) return false;
+  const build = buildSteps[0];
+  if (
+    !isMapping(build.with) ||
+    build.with.platforms !== "linux/amd64" ||
+    (build.with.load !== true && build.with.load !== "true") ||
+    !String(build.with.tags ?? "")
+      .split(/\s+/)
+      .includes(canonicalTag)
+  ) {
+    return false;
+  }
+  if (
+    stepsFor(job).some(
+      (step) =>
+        isMapping(step) &&
+        typeof step.run === "string" &&
+        /(^|\n)\s*docker\s+(?:build|buildx\s+build)\b/.test(step.run),
+    )
+  ) {
+    return false;
+  }
   return stepsFor(job).some(
     (step) =>
       isMapping(step) &&
-      String(step.uses ?? "").includes("docker/build-push-action@") &&
-      isMapping(step.with) &&
-      step.with.platforms === "linux/amd64" &&
-      (step.with.load === true || step.with.load === "true"),
+      step.name === "Smoke test the image" &&
+      typeof step.run === "string" &&
+      step.run.includes(canonicalTag),
   );
 }
 
@@ -189,7 +219,7 @@ function routedJobProblems(path, workflow, job) {
     job.id === "build" &&
     (path === ".github/workflows/docker-api.yml" ||
       path === ".github/workflows/docker-keycloak.yml") &&
-    !buildsCanonicalImagePlatform(job)
+    !buildsCanonicalImagePlatform(path, job)
   ) {
     problems.push(
       `${path}#${job.id} must load and smoke-test the published linux/amd64 platform`,
@@ -238,7 +268,9 @@ export function auditWorkflowSources(workflows) {
     const parsed = parseWorkflow(path, source, problems);
     if (!parsed) continue;
     const { workflow, jobs } = parsed;
-    const routedJobs = jobs.filter((job) => policy[job.id] === "routed");
+    const routedJobs = jobs.filter(
+      (job) => Object.hasOwn(policy, job.id) && policy[job.id] === "routed",
+    );
 
     if (routedJobs.length > 0) {
       if (!hasOnlyReadContents(workflow.permissions)) {
@@ -256,11 +288,11 @@ export function auditWorkflowSources(workflows) {
     }
 
     for (const job of jobs) {
-      const mode = policy[job.id];
-      if (!mode) {
+      if (!Object.hasOwn(policy, job.id)) {
         problems.push(`${path}#${job.id} has no explicit runner security policy`);
         continue;
       }
+      const mode = policy[job.id];
       if (mode === "routed") {
         routed += 1;
         problems.push(...routedJobProblems(path, workflow, job));

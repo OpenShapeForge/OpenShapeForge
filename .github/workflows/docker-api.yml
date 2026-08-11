@@ -84,7 +84,7 @@ jobs:
       # here rather than in a cluster after a rollout.
       - name: Smoke test the image
         run: |
-          docker run -d --name api-smoke -p 3001:3001 \
+          docker run -d --platform linux/amd64 --name api-smoke -p 3001:3001 \
             --read-only --tmpfs /tmp \
             -e NODE_ENV=development \
             openshapeforge-api:ci

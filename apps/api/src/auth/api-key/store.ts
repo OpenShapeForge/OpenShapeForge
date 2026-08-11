@@ -22,6 +22,7 @@ import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { withCredentialResolutionSession } from "../../db/session.js";
 import type { StoredSecret } from "../../platform/secrets.js";
 import { secretMatches } from "./format.js";
+import { parseStoredRoleSubset } from "./role-subset.js";
 
 export type ResolvedApiKey = {
   keyId: string;
@@ -51,6 +52,7 @@ type KeyRow = {
   integration_id: string;
   secret_hash: string;
   role_subset: unknown;
+  role_subset_is_null: boolean;
   expires_at: Date | string | null;
   revoked_at: Date | string | null;
 };
@@ -68,30 +70,6 @@ function asDate(value: Date | string | null): Date | null {
   return value instanceof Date ? value : new Date(value);
 }
 
-/**
- * A stored `role_subset` must be an array of non-empty strings or nothing. A
- * malformed value is treated as "no subset recorded" rather than as an empty
- * subset: an empty array would silently authorize nothing and read as a
- * mysterious 403, while the honest reading of corrupt data is that no narrowing
- * was expressed.
- */
-function parseRoleSubset(value: unknown): string[] | null {
-  const raw = typeof value === "string" ? safeJsonParse(value) : value;
-  if (!Array.isArray(raw)) return null;
-  const roles = raw.filter(
-    (role): role is string => typeof role === "string" && role.trim().length > 0,
-  );
-  return roles.length > 0 ? roles : null;
-}
-
-function safeJsonParse(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return undefined;
-  }
-}
-
 export async function resolveApiKey(
   db: OpenShapeForgeDatabase,
   lookupId: string,
@@ -99,7 +77,9 @@ export async function resolveApiKey(
   now: Date = new Date(),
 ): Promise<ApiKeyLookupResult> {
   const keyResult = await sql<KeyRow>`
-    select id, tenant_id, integration_id, secret_hash, role_subset, expires_at, revoked_at
+    select id, tenant_id, integration_id, secret_hash, role_subset,
+           role_subset is null as role_subset_is_null,
+           expires_at, revoked_at
       from platform.api_keys
      where lookup_id = ${lookupId}
      limit 1
@@ -157,7 +137,7 @@ export async function resolveApiKey(
       keyId: row.id,
       tenantId: row.tenant_id,
       integrationId: row.integration_id,
-      roleSubset: parseRoleSubset(row.role_subset),
+      roleSubset: parseStoredRoleSubset(row.role_subset, row.role_subset_is_null),
       keycloakClientId: integration.keycloak_client_id,
       clientSecret: {
         ciphertext: integration.client_secret_ciphertext,

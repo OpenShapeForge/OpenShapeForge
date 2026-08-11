@@ -25,6 +25,7 @@ import {
   type ApiKeyServiceDeps,
   type ProvisioningSession,
 } from "./service.js";
+import { normalizeRequestedRoleSubset } from "./role-subset.js";
 
 export const API_KEY_MOUNT = "/api/api-keys";
 
@@ -136,7 +137,9 @@ export function registerApiKeyRestRoutes(
           displayName: typeof body.displayName === "string" ? body.displayName : "",
           roles: asStringArray(body.roles),
           ...(expiresInDays === undefined ? {} : { expiresInDays }),
-          ...(body.roleSubset === undefined ? {} : { roleSubset: asStringArray(body.roleSubset) }),
+          ...(body.roleSubset === undefined
+            ? {}
+            : { roleSubset: normalizeRequestedRoleSubset(body.roleSubset) }),
         });
         // 201 with the token in the body, once. Never logged, never in a URL.
         return reply.status(201).send(created);
@@ -154,7 +157,9 @@ export function registerApiKeyRestRoutes(
           integrationId,
           displayName: typeof body.displayName === "string" ? body.displayName : "rotated",
           ...(expiresInDays === undefined ? {} : { expiresInDays }),
-          ...(body.roleSubset === undefined ? {} : { roleSubset: asStringArray(body.roleSubset) }),
+          ...(body.roleSubset === undefined
+            ? {}
+            : { roleSubset: normalizeRequestedRoleSubset(body.roleSubset) }),
         });
         return reply.status(201).send(created);
       } catch (error) {

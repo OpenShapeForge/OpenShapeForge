@@ -62,6 +62,11 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # The Linux notices command must install into a container-only volume;
+      # deleting or restoring the caller's node_modules breaks later gates.
+      - name: Third-party notices script tests
+        run: bun run test:notices-workspace
+
       # generate is REQUIRED before the api typecheck/tests (produces
       # apps/api/src/generated/**).
       - name: Generate artifacts

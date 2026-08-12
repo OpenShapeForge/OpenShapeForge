@@ -1026,6 +1026,17 @@ describe("isolation invariants", () => {
 
   test("keeps native ARM64 runners and proves amd64 execution before registration", async () => {
     const source = await readFile(RUNNERS, "utf8");
+    const configuredStartBegin = source.indexOf(
+      "run_configured_colima_start() {",
+    );
+    const configuredStartEnd = source.indexOf(
+      "\nstart_colima_profile() {",
+      configuredStartBegin,
+    );
+    const configuredStart = source.slice(
+      configuredStartBegin,
+      configuredStartEnd,
+    );
     const start = source.indexOf("provision_slot_locked() {");
     const end = source.indexOf("\nprovision_slot() (", start);
     const provisioning = source.slice(start, end);
@@ -1039,14 +1050,137 @@ describe("isolation invariants", () => {
 
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
-    expect(provisioning).toContain("--arch aarch64 --runtime docker");
-    expect(provisioning).toContain(
+    expect(configuredStartBegin).toBeGreaterThanOrEqual(0);
+    expect(configuredStartEnd).toBeGreaterThan(configuredStartBegin);
+    expect(configuredStart).toContain("--arch aarch64 --runtime docker");
+    expect(configuredStart).toContain(
       "--vm-type vz --vz-rosetta --binfmt --mount none",
     );
-    expect(provisioning).not.toContain("--arch x86_64");
+    expect(configuredStart).not.toContain("--arch x86_64");
+    expect(provisioning).toContain(
+      'start_colima_profile "$profile" || return 1',
+    );
     expect(freshVm).toBeGreaterThanOrEqual(0);
     expect(crossArchitecture).toBeGreaterThan(freshVm);
     expect(registrationToken).toBeGreaterThan(crossArchitecture);
+  });
+
+  test("completes a late initial Colima start with the identical full configuration", async () => {
+    const result = await runHarness(`
+export COLIMA_HOME="$HOME/.colima"
+colima() {
+  if [[ "$1" == start ]]; then
+    printf '%s\n' "$*" >>"$HOME/colima-starts"
+    [[ "$(grep -c '^start ' "$HOME/colima-starts")" != 1 ]]
+    return
+  fi
+  [[ "$*" == "list --json" ]]
+  printf 'check\n' >>"$HOME/profile-checks"
+  if [[ "$(grep -c '^check$' "$HOME/profile-checks")" == 1 ]]; then
+    printf '%s\n' '{"name":"profile","status":"Broken"}'
+  else
+    printf '%s\n' '{"name":"profile","status":"Running"}'
+  fi
+}
+limactl() {
+  [[ "$LIMA_HOME" == "$COLIMA_HOME/_lima" ]]
+  case "$*" in
+    "shell colima-profile true"|"stop colima-profile")
+      printf '%s\n' "$*" >>"$HOME/limactl-calls"
+      ;;
+    *) return 1 ;;
+  esac
+}
+sleep() {
+  printf '%s\n' "$1" >>"$HOME/sleeps"
+}
+start_colima_profile profile
+[[ "$(grep -c '^start ' "$HOME/colima-starts")" == 2 ]]
+[[ "$(sed -n '1p' "$HOME/colima-starts")" == "$(sed -n '2p' "$HOME/colima-starts")" ]]
+grep -Fq -- '--cpus 6 --memory 14 --root-disk 120 --arch aarch64 --runtime docker' "$HOME/colima-starts"
+grep -Fq -- '--vm-type vz --vz-rosetta --binfmt --mount none --ssh-agent=false --ssh-config=false' "$HOME/colima-starts"
+grep -Fq -- '--activate=false --port-forwarder none --dns 1.1.1.1 --dns 1.0.0.1' "$HOME/colima-starts"
+[[ "$(grep -c '^check$' "$HOME/profile-checks")" == 2 ]]
+[[ "$(grep -c '^3$' "$HOME/sleeps")" == 1 ]]
+[[ "$(grep -c '^shell colima-profile true$' "$HOME/limactl-calls")" == 1 ]]
+[[ "$(grep -c '^stop colima-profile$' "$HOME/limactl-calls")" == 1 ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Completed Colima provisioning after late Lima start for profile",
+    );
+  });
+
+  test("rejects a late initial start when Colima completion still fails", async () => {
+    const result = await runHarness(`
+export COLIMA_HOME="$HOME/.colima"
+colima() {
+  if [[ "$1" == start ]]; then
+    printf '%s\n' "$*" >>"$HOME/colima-starts"
+    return 1
+  fi
+  [[ "$*" == "list --json" ]]
+  printf '%s\n' '{"name":"profile","status":"Running"}'
+}
+limactl() {
+  [[ "$LIMA_HOME" == "$COLIMA_HOME/_lima" ]]
+  case "$*" in
+    "shell colima-profile true"|"stop colima-profile")
+      printf '%s\n' "$*" >>"$HOME/limactl-calls"
+      ;;
+    *) return 1 ;;
+  esac
+}
+set +e
+start_colima_profile profile
+start_result=$?
+set -e
+(( start_result != 0 ))
+[[ "$(grep -c '^start ' "$HOME/colima-starts")" == 2 ]]
+[[ "$(sed -n '1p' "$HOME/colima-starts")" == "$(sed -n '2p' "$HOME/colima-starts")" ]]
+[[ "$(grep -c '^shell colima-profile true$' "$HOME/limactl-calls")" == 1 ]]
+[[ "$(grep -c '^stop colima-profile$' "$HOME/limactl-calls")" == 1 ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Colima runtime provisioning did not complete after late Lima start: profile",
+    );
+  });
+
+  test("bounds a hard-failed initial Colima start without attempting completion", async () => {
+    const result = await runHarness(`
+colima() {
+  if [[ "$1" == start ]]; then
+    printf '%s\n' "$*" >>"$HOME/colima-starts"
+    return 1
+  fi
+  [[ "$*" == "list --json" ]]
+  printf 'check\n' >>"$HOME/profile-checks"
+  printf '%s\n' '{"name":"profile","status":"Broken"}'
+}
+limactl() {
+  touch "$HOME/limactl-called"
+}
+sleep() {
+  printf '%s\n' "$1" >>"$HOME/sleeps"
+}
+set +e
+start_colima_profile profile
+start_result=$?
+set -e
+(( start_result != 0 ))
+[[ "$(grep -c '^start ' "$HOME/colima-starts")" == 1 ]]
+[[ "$(grep -c '^check$' "$HOME/profile-checks")" == 80 ]]
+[[ "$(grep -c '^3$' "$HOME/sleeps")" == 79 ]]
+[[ ! -e "$HOME/limactl-called" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Colima profile profile stayed Broken after the failed Lima start",
+    );
   });
 
   test("accepts a rootless linux/amd64 container that executes as x86_64", async () => {
@@ -1262,7 +1396,9 @@ fi
     const provisionStart = source.indexOf("provision_slot_locked() {");
     const provisionEnd = source.indexOf("\nprovision_slot() (", provisionStart);
     const provision = source.slice(provisionStart, provisionEnd);
-    const forwardingFlag = provision.indexOf("--port-forwarder none");
+    const initialCompletion = provision.indexOf(
+      'start_colima_profile "$profile" || return 1',
+    );
     const loopbackHardening = provision.indexOf(
       'harden_colima_loopback_forwarding "$profile"',
     );
@@ -1291,8 +1427,8 @@ fi
 
     expect(provisionStart).toBeGreaterThanOrEqual(0);
     expect(provisionEnd).toBeGreaterThan(provisionStart);
-    expect(forwardingFlag).toBeGreaterThanOrEqual(0);
-    expect(loopbackHardening).toBeGreaterThan(forwardingFlag);
+    expect(initialCompletion).toBeGreaterThanOrEqual(0);
+    expect(loopbackHardening).toBeGreaterThan(initialCompletion);
     expect(liveProof).toBeGreaterThan(loopbackHardening);
     expect(tokenRequest).toBeGreaterThan(liveProof);
     expect(isolationProof).toBeGreaterThan(tokenRequest);
@@ -1396,7 +1532,7 @@ harden_colima_loopback_forwarding profile
     );
   });
 
-  test("bounds a hard-failed Lima start while Broken remains unaccepted", async () => {
+  test("bounds a hard-failed Lima restart while Broken remains unaccepted", async () => {
     const result = await runHarness(`
 colima_profile_status() {
   printf 'check\n' >>"$HOME/profile-checks"
@@ -1410,13 +1546,43 @@ wait_for_late_lima_start profile
 wait_result=$?
 set -e
 (( wait_result != 0 ))
-[[ "$(grep -c '^check$' "$HOME/profile-checks")" == 20 ]]
-[[ "$(grep -c '^3$' "$HOME/sleeps")" == 19 ]]
+[[ "$(grep -c '^check$' "$HOME/profile-checks")" == 80 ]]
+[[ "$(grep -c '^3$' "$HOME/sleeps")" == 79 ]]
 `);
 
     expect(result.exitCode, output(result)).toBe(0);
     expect(result.stderr.toString()).toContain(
       "Colima profile profile stayed Broken after the failed Lima start",
+    );
+  });
+
+  test("bounds and rejects Running without a working exact-instance guest connection", async () => {
+    const result = await runHarness(`
+export COLIMA_HOME="$HOME/.colima"
+colima_profile_status() {
+  printf 'Running\n'
+}
+limactl() {
+  [[ "$LIMA_HOME" == "$COLIMA_HOME/_lima" ]]
+  [[ "$*" == "shell colima-profile true" ]]
+  printf 'shell\n' >>"$HOME/guest-checks"
+  return 1
+}
+sleep() {
+  printf '%s\n' "$1" >>"$HOME/sleeps"
+}
+set +e
+wait_for_late_lima_start profile
+wait_result=$?
+set -e
+(( wait_result != 0 ))
+[[ "$(grep -c '^shell$' "$HOME/guest-checks")" == 80 ]]
+[[ "$(grep -c '^3$' "$HOME/sleeps")" == 79 ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Late Lima instance did not become guest-ready: colima-profile",
     );
   });
 

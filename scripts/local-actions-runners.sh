@@ -30,6 +30,8 @@ readonly RUNNER_USER="$(id -un)"
 readonly RUNNER_UID="$(id -u)"
 readonly RUNNER_NAME_PREFIX="${OPENSHAPEFORGE_RUNNER_NAME_PREFIX:-openshapeforge-pr}"
 readonly DISABLED_DEPLOY_RUNNER_PREFIX="${OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX:-openshapeforge-deploy}"
+readonly LATE_LIMA_START_ATTEMPTS=80
+readonly LATE_LIMA_START_INTERVAL_SECONDS=3
 
 approved_workflow_sha256() {
   case "$1" in
@@ -500,18 +502,31 @@ colima_profile_status() {
 }
 
 # Lima 2.2 has no Starting state: a running driver without its late hostagent
-# is Broken until the hostagent becomes reachable. Only that state gets a
-# bounded grace period, and only the exact profile reaching Running succeeds.
+# is Broken until the hostagent becomes reachable. Bound that transient state
+# and guest startup; only exact-profile Running plus exact-instance shell works.
 wait_for_late_lima_start() {
   local profile="$1"
+  local colima_home="${COLIMA_HOME:-${HOME}/.colima}"
+  local lima_home="${colima_home}/_lima"
+  local instance="colima-${profile}"
   local attempt status
-  for attempt in {1..20}; do
+  for ((attempt = 1; attempt <= LATE_LIMA_START_ATTEMPTS; attempt += 1)); do
     status="$(colima_profile_status "$profile")" || return 1
     case "$status" in
-      Running) return 0 ;;
+      Running)
+        if LIMA_HOME="$lima_home" limactl shell "$instance" true >/dev/null 2>&1; then
+          return 0
+        fi
+        if (( attempt < LATE_LIMA_START_ATTEMPTS )); then
+          sleep "$LATE_LIMA_START_INTERVAL_SECONDS"
+          continue
+        fi
+        echo "Late Lima instance did not become guest-ready: ${instance}" >&2
+        return 1
+        ;;
       Broken)
-        if (( attempt < 20 )); then
-          sleep 3
+        if (( attempt < LATE_LIMA_START_ATTEMPTS )); then
+          sleep "$LATE_LIMA_START_INTERVAL_SECONDS"
           continue
         fi
         ;;
@@ -531,6 +546,40 @@ wait_for_late_lima_start() {
   done
   echo "Colima profile ${profile} stayed Broken after the failed Lima start" >&2
   return 1
+}
+
+run_configured_colima_start() {
+  local profile="$1"
+  colima start "$profile" \
+    --cpus 6 --memory 14 --root-disk 120 --arch aarch64 --runtime docker \
+    --vm-type vz --vz-rosetta --binfmt --mount none --ssh-agent=false --ssh-config=false \
+    --activate=false --port-forwarder none \
+    --dns 1.1.1.1 --dns 1.0.0.1 >/dev/null
+}
+
+start_colima_profile() {
+  local profile="$1"
+  local colima_home="${COLIMA_HOME:-${HOME}/.colima}"
+  local lima_home="${colima_home}/_lima"
+  local instance="colima-${profile}"
+
+  if run_configured_colima_start "$profile"; then
+    return 0
+  fi
+  wait_for_late_lima_start "$profile" || return 1
+
+  # Colima 0.10.x ignores start while Lima is already running. Stop only the
+  # exact late instance so the identical retry must finish Colima's runtime
+  # provisioning instead of treating Lima's Running state as completion.
+  if ! LIMA_HOME="$lima_home" limactl stop "$instance" >/dev/null; then
+    echo "Could not stop late Lima instance for Colima completion: ${instance}" >&2
+    return 1
+  fi
+  if ! run_configured_colima_start "$profile"; then
+    echo "Colima runtime provisioning did not complete after late Lima start: ${profile}" >&2
+    return 1
+  fi
+  echo "Completed Colima provisioning after late Lima start for ${profile}" >&2
 }
 
 path_owner_uid() {
@@ -1662,11 +1711,7 @@ provision_slot_locked() {
   cleanup_slot "$slot" || return 1
   # Keep the guest and runner toolchain native ARM64. Rosetta provides the fast
   # amd64 path; binfmt retains Colima's supported fallback when needed.
-  colima start "$profile" \
-    --cpus 6 --memory 14 --root-disk 120 --arch aarch64 --runtime docker \
-    --vm-type vz --vz-rosetta --binfmt --mount none --ssh-agent=false --ssh-config=false \
-    --activate=false --port-forwarder none \
-    --dns 1.1.1.1 --dns 1.0.0.1 >/dev/null
+  start_colima_profile "$profile" || return 1
   harden_colima_loopback_forwarding "$profile"
 
   verify_host_network_boundary "$profile"

@@ -80,10 +80,10 @@ The workflow expression and `bun run check:self-hosted-routing` cannot replace
 the pre-job hook because pull-request code can edit both.
 
 The macOS supervisor derives its runner user and isolation-group id from the
-host. Its runner-name prefixes and isolation group can be overridden with the
-`OPENSHAPEFORGE_RUNNER_*` variables declared at the top of the script. Changing
-those values is an operator migration: stop only after the busy-runner preflight
-passes, then start the new copied installation.
+host. Its runner-name prefixes and isolation-group name can be overridden with
+the `OPENSHAPEFORGE_RUNNER_*` variables declared at the top of the script.
+Changing those values is an operator migration: stop only after the busy-runner
+preflight passes, then start the new copied installation.
 
 ## Deploy pipeline
 

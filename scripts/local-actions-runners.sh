@@ -25,7 +25,7 @@ readonly HOST_LAUNCHER="/usr/local/libexec/openshapeforge-actions-launcher"
 readonly HOST_FIREWALL_PLIST="/Library/LaunchDaemons/com.openshapeforge.actions.firewall.plist"
 readonly HOST_FIREWALL_RULES="/Library/Application Support/OpenShapeForge Actions/pf-anchor.conf"
 readonly ISOLATION_GROUP="${OPENSHAPEFORGE_RUNNER_ISOLATION_GROUP:-_osfci}"
-readonly RUNNER_USER="${OPENSHAPEFORGE_RUNNER_USER:-$(id -un)}"
+readonly RUNNER_USER="$(id -un)"
 readonly RUNNER_NAME_PREFIX="${OPENSHAPEFORGE_RUNNER_NAME_PREFIX:-openshapeforge-pr}"
 readonly DISABLED_DEPLOY_RUNNER_PREFIX="${OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX:-openshapeforge-deploy}"
 

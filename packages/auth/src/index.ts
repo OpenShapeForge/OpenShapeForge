@@ -38,3 +38,20 @@ export type {
   BearerVerifier,
   BearerVerifierOptions,
 } from "./bearer.js";
+
+export {
+  handleLogoutRequest,
+  resolveCanonicalAppOrigin,
+  revokeKeycloakRefreshSession,
+} from "./logout.js";
+export type {
+  LogoutDependencies,
+  LogoutReason,
+  RefreshSessionRevocation,
+} from "./logout.js";
+
+export { requestLogout } from "./logout-client.js";
+export type {
+  LogoutClientDependencies,
+  LogoutRequestOptions,
+} from "./logout-client.js";

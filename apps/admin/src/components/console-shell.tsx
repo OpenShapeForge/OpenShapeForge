@@ -42,6 +42,7 @@ import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Building2, LayoutDashboard, RefreshCcwDot } from "lucide-react";
+import { requestLogout } from "@openshapeforge/auth";
 import { Sidebar, Surface } from "@openshapeforge/ui";
 
 interface ConsoleShellProps {
@@ -60,6 +61,8 @@ export function ConsoleShell({
   // not persisted: a remembered rail width is a preference worth storing once
   // there are preferences to store.
   const [expanded, setExpanded] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutFailed, setLogoutFailed] = useState(false);
   const pathname = usePathname();
   // Prefix match, so `/tenants/acme` and `/tenants/new` keep the Tenants entry
   // lit. `/` needs an exact match or it would be current on every page.
@@ -124,11 +127,31 @@ export function ConsoleShell({
             </p>
             <h1 className="text-lg font-semibold tracking-tight">Control plane</h1>
           </div>
-          <div className="text-right text-sm" data-testid="operator-identity">
-            <p className="font-medium">{operatorName ?? "Operator"}</p>
-            {operatorEmail ? (
-              <p className="text-[var(--color-foreground-muted)]">{operatorEmail}</p>
-            ) : null}
+          <div className="flex items-center gap-4">
+            <div className="text-right text-sm" data-testid="operator-identity">
+              <p className="font-medium">{operatorName ?? "Operator"}</p>
+              {operatorEmail ? (
+                <p className="text-[var(--color-foreground-muted)]">{operatorEmail}</p>
+              ) : null}
+              {logoutFailed ? (
+                <p className="text-xs text-red-700" role="alert">Logout failed. Please try again.</p>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              disabled={loggingOut}
+              className="rounded-md border border-[var(--color-border-subtle)] px-3 py-2 text-sm font-medium disabled:cursor-wait disabled:opacity-60"
+              onClick={async () => {
+                setLoggingOut(true);
+                setLogoutFailed(false);
+                if (!await requestLogout()) {
+                  setLoggingOut(false);
+                  setLogoutFailed(true);
+                }
+              }}
+            >
+              {loggingOut ? "Logging out..." : "Log out"}
+            </button>
           </div>
         </header>
 

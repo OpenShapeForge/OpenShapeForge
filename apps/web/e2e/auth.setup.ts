@@ -14,37 +14,12 @@
  * What it costs is one browser round trip per run, which is why the result is
  * saved as `storageState` and every spec starts from it.
  */
-import { expect, test as setup } from "@playwright/test";
-import { AUTH_STATE_PATH, E2E_PASSWORD, E2E_USERNAME } from "./support/environment";
+import { test as setup } from "@playwright/test";
+import { AUTH_STATE_PATH } from "./support/environment";
+import { signInThroughKeycloak } from "./support/sign-in";
 
 setup("sign in through Keycloak", async ({ page }) => {
-  // `callbackUrl` is a hidden field on the login form, so asking for the
-  // workflow list here is what the flow lands on when it completes — and
-  // landing there is itself the proof that the session was accepted.
-  await page.goto("/login?callbackUrl=%2Fworkflow");
-
-  // The login page probes Keycloak server-side and replaces the button with an
-  // "unavailable" panel when it cannot reach it. Naming that here turns "the
-  // realm is down" into a sentence rather than a selector timeout.
-  await expect(
-    page.getByRole("button", { name: "Sign in with Keycloak" }),
-    "the app could not reach Keycloak, so it never offered the sign-in button",
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Sign in with Keycloak" }).click();
-
-  // Keycloak's own login form. The ids are the ones the stock theme has used
-  // for a decade; the name attributes are the fallback if a theme renames them.
-  const username = page.locator("#username, input[name='username']").first();
-  await expect(username).toBeVisible();
-  await username.fill(E2E_USERNAME);
-  await page.locator("#password, input[name='password']").first().fill(E2E_PASSWORD);
-  await page.locator("#kc-login, button[type='submit'], input[type='submit']").first().click();
-
-  // Back in the app, signed in. The heading is the list page's own, so this
-  // asserts the session survived the callback rather than that a redirect
-  // happened: a refused sign-in lands back on /login instead.
-  await page.waitForURL("**/workflow");
-  await expect(page.getByRole("heading", { name: "Workflows", level: 1 })).toBeVisible();
+  await signInThroughKeycloak(page);
 
   await page.context().storageState({ path: AUTH_STATE_PATH });
 });

@@ -55,6 +55,7 @@ Requests need a Keycloak bearer token or signed trusted-context headers — see
 | [docs/plugins.md](docs/plugins.md) | Compiler plugin contract + shipped examples |
 | [docs/connectors.md](docs/connectors.md) | Connector contracts: one YAML interface, many surfaces, license-gated |
 | [docs/api.md](docs/api.md) | CRUD engine, RLS, auth, event journal, local stack |
+| [docs/session-logout.md](docs/session-logout.md) | Web/admin logout, local fencing, automatic retry, and Keycloak revocation semantics |
 | [docs/mcp.md](docs/mcp.md) | Generated MCP server: tools from field definitions, authorization |
 | [docs/testing.md](docs/testing.md) | Proof gates, e2e suite, reports, k6 |
 | [docs/migrations.md](docs/migrations.md) | Roll-forward + versioned migrations, drift signals |

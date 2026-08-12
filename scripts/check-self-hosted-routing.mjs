@@ -5,9 +5,10 @@
 // code on infrastructure we own. That is acceptable only for branches in this
 // repository. Fork pull requests, release/publication jobs, deployments, and
 // jobs with repository secrets must stay on GitHub-hosted runners.
-// The root-owned pre-job policy enforces that source boundary before workflow
-// steps run; this check inventories the repository-controlled half as defense
-// in depth and prevents workflow drift.
+// The immutable, root-owned pre-job policy enforces that source boundary before
+// workflow steps run. This load-bearing drift gate inventories the
+// repository-controlled half as defense in depth, but is not itself the
+// security boundary: pull-request code can modify every file in its checkout.
 //
 // Bun's built-in YAML parser keeps this check dependency-free. It runs inside
 // the existing required gates job so it adds no GitHub-hosted PR check that

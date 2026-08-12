@@ -66,6 +66,8 @@ workflow and scripts in its own checkout.
 The actual admission boundary is the runner's pre-job hook. Operators must:
 
 - provision an isolated, ephemeral runner for each job;
+- run the versioned `scripts/local-actions-runners.sh` supervisor from its
+  copied, host-owned installation rather than directly from a checkout;
 - install `scripts/self-hosted-pre-job-policy.sh` as an immutable, root-owned
   file outside the Actions workspace;
 - set `ACTIONS_RUNNER_HOOK_JOB_STARTED` in the runner service configuration to
@@ -76,6 +78,12 @@ The actual admission boundary is the runner's pre-job hook. Operators must:
 If that host-side contract cannot be proved, do not attach the `osf-pr` label.
 The workflow expression and `bun run check:self-hosted-routing` cannot replace
 the pre-job hook because pull-request code can edit both.
+
+The macOS supervisor derives its runner user and isolation-group id from the
+host. Its runner-name prefixes and isolation-group name can be overridden with
+the `OPENSHAPEFORGE_RUNNER_*` variables declared at the top of the script.
+Changing those values is an operator migration: stop only after the busy-runner
+preflight passes, then start the new copied installation.
 
 ## Deploy pipeline
 

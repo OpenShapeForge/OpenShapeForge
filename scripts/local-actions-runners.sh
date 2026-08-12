@@ -205,7 +205,7 @@ verify_fresh_vm() {
     set -euo pipefail
     test ! -e "$HOST_HOME"
     test "$(uname -m)" = aarch64
-    command -v curl git mvn node npx wget unzip zstd jq iptables ip6tables dockerd-rootless-setuptool.sh >/dev/null
+    command -v curl git mvn node npx wget unzip zstd jq pgrep visudo iptables ip6tables dockerd-rootless-setuptool.sh >/dev/null
     ! dmesg --level=err 2>/dev/null | grep -Eq "I/O error|EXT4-fs error|Aborting journal"
     export XDG_RUNTIME_DIR="/run/user/$(id -u)"
     export DOCKER_HOST="unix://${XDG_RUNTIME_DIR}/docker.sock"
@@ -391,14 +391,15 @@ install_runner_service() {
       "[Service]" \
       "Environment=XDG_RUNTIME_DIR=/run/user/${runner_uid}" \
       "Environment=DOCKER_HOST=unix:///run/user/${runner_uid}/docker.sock" \
-      "Environment=ACTIONS_RUNNER_HOOK_JOB_STARTED=/opt/openshapeforge-runner/pre-job-policy.sh" |
+      "Environment=ACTIONS_RUNNER_HOOK_JOB_STARTED=/opt/openshapeforge-runner/pre-job-policy.sh" \
+      "ExecStartPre=+/usr/bin/rm -f /etc/sudoers.d/openshapeforge-runner-start" |
       sudo tee "/etc/systemd/system/${RUNNER_SERVICE}.d/rootless-docker.conf" >/dev/null
     sudo systemctl daemon-reload
     sudo systemctl disable "$RUNNER_SERVICE" >/dev/null
   '
 }
 
-harden_and_start_runner() {
+harden_runner_before_start() {
   local profile="$1"
   local service="$2"
   colima -p "$profile" ssh -- env RUNNER_SERVICE="$service" RUNNER_USER="$RUNNER_USER" bash -lc '
@@ -411,8 +412,28 @@ harden_and_start_runner() {
       gpasswd -d "$RUNNER_USER" docker >/dev/null 2>&1 || true
       rm -f /var/run/docker.sock
       rm -f /etc/sudoers.d/90-cloud-init-users
-      systemctl start "$RUNNER_SERVICE"
+      printf "%s ALL=(root) NOPASSWD: /usr/bin/systemctl start %s\n" \
+        "$RUNNER_USER" "$RUNNER_SERVICE" >/etc/sudoers.d/openshapeforge-runner-start
+      chmod 0440 /etc/sudoers.d/openshapeforge-runner-start
+      visudo -cf /etc/sudoers.d/openshapeforge-runner-start >/dev/null
     '\''
+  '
+}
+
+start_runner_service() {
+  local profile="$1"
+  local service="$2"
+  colima -p "$profile" ssh -- env RUNNER_SERVICE="$service" bash -lc '
+    set -euo pipefail
+    sudo -n /usr/bin/systemctl start "$RUNNER_SERVICE"
+    [[ "$(systemctl is-active "$RUNNER_SERVICE" 2>/dev/null || true)" == "active" ]] || {
+      echo "Runner service did not become active" >&2
+      exit 1
+    }
+    test ! -e /etc/sudoers.d/openshapeforge-runner-start || {
+      echo "Runner start authorization was not consumed" >&2
+      exit 1
+    }
   '
 }
 
@@ -458,6 +479,14 @@ verify_unprivileged_runner() {
     set -euo pipefail
     if [[ "$(systemctl is-enabled "$RUNNER_SERVICE" 2>/dev/null || true)" != "disabled" ]]; then
       echo "Runner service would restart without the runtime firewall" >&2
+      exit 1
+    fi
+    if [[ "$(systemctl is-active "$RUNNER_SERVICE" 2>/dev/null || true)" != "inactive" ]]; then
+      echo "Runner service started before admission" >&2
+      exit 1
+    fi
+    if pgrep -f "^/opt/actions-runner/bin/Runner.Listener( |$)" >/dev/null; then
+      echo "Runner listener exists before admission" >&2
       exit 1
     fi
     if sudo -n true >/dev/null 2>&1; then
@@ -885,6 +914,26 @@ wait_for_repository_runner_id() {
   return 1
 }
 
+add_repository_runner_routing_label() {
+  local runner_id="$1"
+  if ! gh api --method POST "repos/${REPOSITORY}/actions/runners/${runner_id}/labels" \
+    --field "labels[]=osf-pr" --silent; then
+    echo "Could not add routing label to repository runner ${runner_id}" >&2
+    return 1
+  fi
+  return 0
+}
+
+clear_repository_runner_labels() {
+  local runner_id="$1"
+  if ! gh api --method DELETE "repos/${REPOSITORY}/actions/runners/${runner_id}/labels" \
+    --silent; then
+    echo "Could not clear labels from repository runner ${runner_id}" >&2
+    return 1
+  fi
+  return 0
+}
+
 repository_runner_state() {
   local runner_id="$1"
   local error_file="${SUPPORT_DIR}/runner-state-error.$$" state
@@ -978,9 +1027,14 @@ release_provision_lock() {
 
 provision_slot_locked() {
   local slot="$1"
-  local profile runner_name runner_id machine_id service lifecycle_state
+  local profile runner_name bootstrap_label runner_id machine_id service lifecycle_state
   profile="$(profile_for "$slot")"
   runner_name="$(runner_prefix_for "$slot")-$(uuidgen | tr '[:upper:]' '[:lower:]' | cut -c 1-8)"
+  bootstrap_label="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+  [[ "$bootstrap_label" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || {
+    echo "Could not generate a full UUID bootstrap label" >&2
+    return 1
+  }
 
   require_host_isolation
   cleanup_slot "$slot" || return 1
@@ -1039,25 +1093,31 @@ provision_slot_locked() {
   require_host_isolation
   verify_host_network_boundary "$profile"
   gh api --method POST "repos/${REPOSITORY}/actions/runners/registration-token" --jq .token |
-    colima -p "$profile" ssh -- env RUNNER_NAME="$runner_name" bash -lc '
+    colima -p "$profile" ssh -- env RUNNER_NAME="$runner_name" \
+      RUNNER_BOOTSTRAP_LABEL="$bootstrap_label" bash -lc '
       set -euo pipefail
       read -r runner_token
       cd /opt/actions-runner
+      # The pinned runner requires one custom label when default labels are disabled.
+      # The controller clears it before the service is installed or started.
       ./config.sh --unattended --ephemeral --disableupdate \
         --url https://github.com/OpenShapeForge/OpenShapeForge \
         --token "$runner_token" --name "$RUNNER_NAME" \
-        --labels osf-pr --work _work
-      unset runner_token
+        --labels "$RUNNER_BOOTSTRAP_LABEL" --no-default-labels --work _work
+      unset runner_token RUNNER_BOOTSTRAP_LABEL
     '
   runner_id="$(wait_for_repository_runner_id "$runner_name")"
+  clear_repository_runner_labels "$runner_id"
 
   service="$(runner_service_for "$runner_name")"
   install_runner_service "$profile" "$service"
   verify_pre_job_policy "$profile" "$service"
-  harden_and_start_runner "$profile" "$service"
+  harden_runner_before_start "$profile" "$service"
   verify_unprivileged_runner "$profile" "$service"
 
   machine_id="$(colima -p "$profile" ssh -- cat /etc/machine-id)"
+  add_repository_runner_routing_label "$runner_id"
+  start_runner_service "$profile" "$service"
   lifecycle_state="$(wait_for_runner_online_or_consumed \
     "$profile" "$service" "$runner_id" "$runner_name")"
   if [[ "$lifecycle_state" == online ]]; then

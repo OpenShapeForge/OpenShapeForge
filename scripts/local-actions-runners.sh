@@ -1104,19 +1104,87 @@ cleanup_slot_on_exit() {
   cleanup_slot_serialized "$slot"
 }
 
+SUPERVISOR_PROVISION_PID=""
+
+terminate_active_provision() {
+  local provision_pid="${SUPERVISOR_PROVISION_PID:-}"
+  local attempt
+  [[ "$provision_pid" =~ ^[0-9]+$ ]] || return 0
+
+  kill -TERM -- "-${provision_pid}" >/dev/null 2>&1 || true
+  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    kill -0 -- "-${provision_pid}" >/dev/null 2>&1 || break
+    sleep 0.05
+  done
+  if kill -0 -- "-${provision_pid}" >/dev/null 2>&1; then
+    echo \
+      "Provisioning processes for pid ${provision_pid} did not stop after TERM; forcing termination" \
+      >&2
+    kill -KILL -- "-${provision_pid}" >/dev/null 2>&1 || true
+  fi
+  wait "$provision_pid" 2>/dev/null || true
+  SUPERVISOR_PROVISION_PID=""
+}
+
+supervisor_signal_exit() {
+  local exit_status="$1"
+  trap '' INT TERM
+  terminate_active_provision
+  exit "$exit_status"
+}
+
+supervisor_exit_cleanup() {
+  local exit_status="$1"
+  local slot="$2"
+  local cleanup_result=0
+  trap - EXIT
+  if cleanup_slot_on_exit "$slot"; then
+    cleanup_result=0
+  else
+    cleanup_result=$?
+    echo "Supervisor cleanup for slot ${slot} failed with status ${cleanup_result}" >&2
+  fi
+  if (( exit_status != 0 )); then
+    exit "$exit_status"
+  fi
+  exit "$cleanup_result"
+}
+
+install_supervisor_exit_traps() {
+  local slot="${1:-}"
+  local configured_slot exit_trap
+  for configured_slot in "${SLOTS[@]}"; do
+    [[ "$slot" == "$configured_slot" ]] || continue
+    # Bash 3.2 may run EXIT after this function's locals leave scope.
+    printf -v exit_trap 'supervisor_exit_cleanup "$?" %q' "$slot"
+    trap "$exit_trap" EXIT
+    trap 'supervisor_signal_exit 130' INT
+    trap 'supervisor_signal_exit 143' TERM
+    return 0
+  done
+  echo "Refusing to supervise unconfigured slot: ${slot:-<missing>}" >&2
+  return 2
+}
+
 supervise_slot() {
   local slot="$1"
   local provision_result cleanup_result
-  trap 'cleanup_slot_on_exit "$slot"' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
+  install_supervisor_exit_traps "$slot"
   require_host_tools
   require_host_isolation
   ensure_runner_archive
   while true; do
+    # Job control gives the asynchronous provisioning attempt a distinct process
+    # group. Disable it inside the group leader so every descendant stays in
+    # that group and a supervisor signal stops the complete process tree.
+    set -m
+    (set +m; provision_slot "$slot") &
+    SUPERVISOR_PROVISION_PID=$!
+    set +m
     set +e
-    provision_slot "$slot"
+    wait "$SUPERVISOR_PROVISION_PID"
     provision_result=$?
+    SUPERVISOR_PROVISION_PID=""
     set -e
     if (( provision_result != 0 )); then
       echo "Slot ${slot} provisioning failed; retrying in 10 seconds" >&2

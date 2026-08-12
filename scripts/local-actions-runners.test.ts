@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -33,6 +33,123 @@ ${body}
 
 function output(result: ReturnType<typeof Bun.spawnSync>) {
   return `${result.stdout.toString()}${result.stderr.toString()}`;
+}
+
+async function waitForFile(path: string) {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    try {
+      await access(path);
+      return;
+    } catch {
+      await Bun.sleep(20);
+    }
+  }
+  throw new Error(`Timed out waiting for ${path}`);
+}
+
+function processExists(pid: string) {
+  return Bun.spawnSync(["/bin/kill", "-0", pid]).exitCode === 0;
+}
+
+async function runSupervisorSignal(
+  signal: "SIGINT" | "SIGTERM",
+  cleanupResult = 0,
+  ignoreTerm = false,
+) {
+  const home = await mkdtemp(join(tmpdir(), "osf-runner-supervisor-signal-"));
+  const harness = join(home, "harness.sh");
+  const provisionReady = join(home, "provision-ready");
+  await writeFile(
+    harness,
+    `#!/bin/bash
+set -euo pipefail
+source ${JSON.stringify(RUNNERS)}
+mkdir -p "$SUPPORT_DIR"
+readonly CLEANUP_RESULT=${cleanupResult}
+require_host_tools() { :; }
+require_host_isolation() { :; }
+ensure_runner_archive() { :; }
+acquire_provision_lock() {
+  printf 'acquire\\n' >>"$HOME/cleanup-lifecycle"
+}
+release_provision_lock() {
+  printf 'release\\n' >>"$HOME/cleanup-lifecycle"
+}
+cleanup_slot() {
+  printf 'cleanup:%s\\n' "$1" >>"$HOME/cleanup-lifecycle"
+  return "$CLEANUP_RESULT"
+}
+provision_slot() {
+  if (( ${ignoreTerm ? 1 : 0} )); then
+    trap '' TERM
+  fi
+  /bin/bash -c '
+set -euo pipefail
+on_term() {
+  exit 143
+}
+if (( ${ignoreTerm ? 1 : 0} )); then
+  trap '' TERM
+else
+  trap on_term TERM
+fi
+printf "%s\\n" "$$" >"$HOME/provision-child.pid"
+printf "%s\\n" "$PPID" >"$HOME/provision-pid"
+touch "$HOME/provision-ready"
+while true; do
+  /bin/sleep 30 || :
+done
+' &
+  wait "$!"
+}
+supervise_slot 1
+`,
+  );
+
+  const subprocess = Bun.spawn(["/bin/bash", harness], {
+    env: { ...process.env, HOME: home },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  try {
+    await waitForFile(provisionReady);
+    subprocess.kill(signal);
+    const exitCode = await Promise.race([
+      subprocess.exited,
+      Bun.sleep(3_000).then(() => null),
+    ]);
+    if (exitCode === null) {
+      subprocess.kill("SIGKILL");
+      await subprocess.exited;
+      throw new Error(`Supervisor did not exit after ${signal}`);
+    }
+    const [stdout, stderr, cleanupLifecycle, provisionChildPid, provisionPid] =
+      await Promise.all([
+        new Response(subprocess.stdout).text(),
+        new Response(subprocess.stderr).text(),
+        readFile(join(home, "cleanup-lifecycle"), "utf8"),
+        readFile(join(home, "provision-child.pid"), "utf8"),
+        readFile(join(home, "provision-pid"), "utf8"),
+      ]);
+    return {
+      cleanupLifecycle,
+      exitCode,
+      provisionChildPid: provisionChildPid.trim(),
+      provisionChildAlive: processExists(provisionChildPid.trim()),
+      provisionPid: provisionPid.trim(),
+      provisionPidAlive: processExists(provisionPid.trim()),
+      stderr,
+      stdout,
+    };
+  } finally {
+    if (subprocess.exitCode === null) {
+      subprocess.kill("SIGKILL");
+      await subprocess.exited;
+    }
+    await rm(home, { recursive: true, force: true });
+  }
 }
 
 describe("ephemeral runner lifecycle", () => {
@@ -446,6 +563,118 @@ cleanup_slot_on_exit 1
 `);
 
     expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("captures the validated slot for normal Bash 3.2 EXIT cleanup", async () => {
+    const home = await mkdtemp(join(tmpdir(), "osf-runner-supervisor-exit-"));
+    const harness = join(home, "harness.sh");
+    await writeFile(
+      harness,
+      `#!/bin/bash
+set -euo pipefail
+source ${JSON.stringify(RUNNERS)}
+mkdir -p "$SUPPORT_DIR"
+cleanup_slot_serialized() { printf '%s\\n' "$1" >>"$HOME/cleanup-calls"; }
+install_supervisor_exit_traps 1
+`,
+    );
+
+    try {
+      const result = Bun.spawnSync(["/bin/bash", harness], {
+        env: { ...process.env, HOME: home },
+      });
+      expect(result.exitCode, output(result)).toBe(0);
+      expect(await readFile(join(home, "cleanup-calls"), "utf8")).toBe("1\n");
+      expect(result.stderr.toString()).not.toContain("unbound variable");
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("provisioning failure and normal exit both invoke serialized cleanup", async () => {
+    const result = await runHarness(`
+require_host_tools() { :; }
+require_host_isolation() { :; }
+ensure_runner_archive() { :; }
+provision_slot() { return 1; }
+cleanup_slot_serialized() {
+  printf 'cleanup:%s\\n' "$1"
+}
+sleep() {
+  [[ "$1" == 10 ]]
+  exit 0
+}
+supervise_slot 1
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stdout.toString()).toBe("cleanup:1\ncleanup:1\n");
+    expect(result.stderr.toString()).toContain("Slot 1 provisioning failed");
+    expect(result.stderr.toString()).not.toContain("unbound variable");
+  });
+
+  for (const [signal, exitCode] of [
+    ["SIGINT", 130],
+    ["SIGTERM", 143],
+  ] as const) {
+    test(`${signal} terminates active provisioning before serialized cleanup`, async () => {
+      const result = await runSupervisorSignal(signal);
+      expect(result.exitCode, `${result.stdout}${result.stderr}`).toBe(exitCode);
+      expect(result.provisionChildPid).not.toBe(result.provisionPid);
+      expect(result.provisionPidAlive).toBe(false);
+      expect(result.provisionChildAlive).toBe(false);
+      expect(result.cleanupLifecycle).toBe(
+        "release\nacquire\ncleanup:1\nrelease\n",
+      );
+      expect(result.stderr).not.toContain("unbound variable");
+    });
+
+    test(`${signal} force kills TERM-ignoring provisioning before cleanup`, async () => {
+      const startedAt = Date.now();
+      const result = await runSupervisorSignal(signal, 0, true);
+      expect(result.exitCode, `${result.stdout}${result.stderr}`).toBe(exitCode);
+      expect(Date.now() - startedAt).toBeLessThan(2_000);
+      expect(result.provisionChildPid).not.toBe(result.provisionPid);
+      expect(result.provisionPidAlive).toBe(false);
+      expect(result.provisionChildAlive).toBe(false);
+      expect(result.cleanupLifecycle).toBe(
+        "release\nacquire\ncleanup:1\nrelease\n",
+      );
+      expect(result.stderr).toContain(
+        "did not stop after TERM; forcing termination",
+      );
+      expect(result.stderr).not.toContain("unbound variable");
+    });
+
+    test(`${signal} preserves its exit status when cleanup fails`, async () => {
+      const result = await runSupervisorSignal(signal, 9);
+      expect(result.exitCode, `${result.stdout}${result.stderr}`).toBe(exitCode);
+      expect(result.provisionPidAlive).toBe(false);
+      expect(result.provisionChildAlive).toBe(false);
+      expect(result.cleanupLifecycle).toBe(
+        "release\nacquire\ncleanup:1\nrelease\n",
+      );
+      expect(result.stderr).toContain(
+        "Supervisor cleanup for slot 1 failed with status 9",
+      );
+      expect(result.stderr).not.toContain("unbound variable");
+    });
+  }
+
+  test("rejects an unconfigured slot before installing traps", async () => {
+    const result = await runHarness(`
+set +e
+install_supervisor_exit_traps 2
+trap_result=$?
+set -e
+(( trap_result == 2 ))
+[[ -z "$(trap -p EXIT)" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Refusing to supervise unconfigured slot: 2",
+    );
   });
 
   test("persists validated runner identity overrides in the launch agent", async () => {

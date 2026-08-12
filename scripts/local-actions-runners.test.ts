@@ -228,6 +228,9 @@ fi
     const provisionEnd = source.indexOf("\nprovision_slot() (", provisionStart);
     const provision = source.slice(provisionStart, provisionEnd);
     const forwardingFlag = provision.indexOf("--port-forwarder none");
+    const loopbackHardening = provision.indexOf(
+      'harden_colima_loopback_forwarding "$profile"',
+    );
     const liveProof = provision.indexOf(
       'verify_guest_port_forwarding_disabled "$profile"',
     );
@@ -236,7 +239,8 @@ fi
     expect(provisionStart).toBeGreaterThanOrEqual(0);
     expect(provisionEnd).toBeGreaterThan(provisionStart);
     expect(forwardingFlag).toBeGreaterThanOrEqual(0);
-    expect(liveProof).toBeGreaterThan(forwardingFlag);
+    expect(loopbackHardening).toBeGreaterThan(forwardingFlag);
+    expect(liveProof).toBeGreaterThan(loopbackHardening);
     expect(tokenRequest).toBeGreaterThan(liveProof);
   });
 
@@ -249,12 +253,72 @@ fi
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     expect(verification).toContain("nohup /usr/local/bin/node");
-    expect(verification).toContain('if [[ "$response" == ready ]]; then');
+    expect(verification).toContain(
+      '[Number(process.env.WILDCARD_PROBE_PORT), "0.0.0.0"]',
+    );
+    expect(verification).toContain(
+      '[Number(process.env.IPV4_LOOPBACK_PROBE_PORT), "127.0.0.1"]',
+    );
+    expect(verification).toContain(
+      '[Number(process.env.IPV6_LOOPBACK_PROBE_PORT), "::1"]',
+    );
+    expect(verification).toContain(
+      'if [[ "$wildcard_response" == ready && "$ipv4_response" == ready &&',
+    );
     expect(verification).toContain("probe_ready=1");
     expect(verification).toContain(
       "Guest port-forwarding probe setup failed; guest diagnostics follow",
     );
     expect(verification).toContain('sed -n "1,80p" "$log_file"');
+  });
+
+  test("adds explicit IPv4 and IPv6 loopback denies before restarting Lima", async () => {
+    const result = await runHarness(`
+export COLIMA_HOME="$HOME/.colima"
+config="$COLIMA_HOME/_lima/colima-profile/lima.yaml"
+mkdir -p "$(dirname "$config")"
+cat >"$config" <<'YAML'
+vmType: vz
+portForwards:
+    - guestIP: 0.0.0.0
+      proto: any
+      ignore: true
+YAML
+limactl() {
+  printf '%s\n' "$*" >>"$HOME/limactl-calls"
+}
+harden_colima_loopback_forwarding profile
+grep -Fq 'guestIP: 127.0.0.1' "$config"
+grep -Fq 'guestIP: ::1' "$config"
+grep -Fq 'stop colima-profile' "$HOME/limactl-calls"
+grep -Fq 'start --tty=false colima-profile' "$HOME/limactl-calls"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("leaves the VM stopped when the generated forwarding config is unexpected", async () => {
+    const result = await runHarness(`
+export COLIMA_HOME="$HOME/.colima"
+config="$COLIMA_HOME/_lima/colima-profile/lima.yaml"
+mkdir -p "$(dirname "$config")"
+printf 'vmType: vz\n' >"$config"
+limactl() {
+  printf '%s\n' "$*" >>"$HOME/limactl-calls"
+}
+set +e
+harden_colima_loopback_forwarding profile
+harden_result=$?
+set -e
+(( harden_result != 0 ))
+grep -Fq 'stop colima-profile' "$HOME/limactl-calls"
+! grep -Fq 'start --tty=false colima-profile' "$HOME/limactl-calls"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Generated Lima forwarding config is not in the expected shape",
+    );
   });
 
   test("fails the live proof closed when a wildcard host listener appears", async () => {
@@ -263,7 +327,7 @@ lsof() {
   calls="$(cat "$HOME/lsof-calls" 2>/dev/null || printf 0)"
   calls="$((calls + 1))"
   printf '%s\n' "$calls" >"$HOME/lsof-calls"
-  if (( calls <= 2 )); then
+  if (( calls <= 6 )); then
     return 1
   fi
   printf 'hostagent 42 user 10u IPv4 TCP *:49152 (LISTEN)\\n'
@@ -309,6 +373,10 @@ colima() {
 verify_guest_port_forwarding_disabled profile
 grep -Fq -- '-z 127.0.0.1 49153' "$HOME/nc-calls"
 grep -Fq -- '-z ::1 49153' "$HOME/nc-calls"
+grep -Fq -- '-z 127.0.0.1 49154' "$HOME/nc-calls"
+grep -Fq -- '-z ::1 49154' "$HOME/nc-calls"
+grep -Fq -- '-z 127.0.0.1 49155' "$HOME/nc-calls"
+grep -Fq -- '-z ::1 49155' "$HOME/nc-calls"
 grep -Fq 'kill "$pid"' "$HOME/colima-calls"
 `);
 

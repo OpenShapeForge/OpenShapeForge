@@ -7,6 +7,7 @@
  * pointing at nothing.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import type { InjectOptions, LightMyRequestResponse } from "fastify";
 import { createApiApp } from "../../roles/api.js";
 import { MCP_MOUNT_PATH } from "../generated-mcp-server.js";
 import {
@@ -15,6 +16,16 @@ import {
 } from "../protected-resource-metadata.js";
 
 let app: ReturnType<typeof createApiApp>;
+
+function injectOnce(options: InjectOptions): Promise<LightMyRequestResponse> {
+  return new Promise((resolve, reject) => {
+    app.inject(options, (error, response) => {
+      if (error) return reject(error);
+      if (!response) return reject(new Error("Fastify injection completed without a response"));
+      resolve(response);
+    });
+  });
+}
 
 beforeAll(async () => {
   app = createApiApp();
@@ -27,7 +38,9 @@ afterAll(async () => {
 
 describe("protected resource metadata", () => {
   test("is served unauthenticated — a client cannot authenticate to read it", async () => {
-    const response = await app.inject({
+    // The callback overload dispatches exactly once and avoids Bun re-entering
+    // light-my-request's auto-starting thenable while dispatch is pending.
+    const response = await injectOnce({
       method: "GET",
       url: PROTECTED_RESOURCE_METADATA_PATH,
     });
@@ -39,7 +52,7 @@ describe("protected resource metadata", () => {
   });
 
   test("is also served at the path-suffixed spelling", async () => {
-    const response = await app.inject({
+    const response = await injectOnce({
       method: "GET",
       url: `${PROTECTED_RESOURCE_METADATA_PATH}${MCP_MOUNT_PATH}`,
     });
@@ -89,7 +102,7 @@ describe("protected resource metadata", () => {
 
 describe("the 401 challenge", () => {
   test("points an unauthenticated MCP request at the metadata document", async () => {
-    const response = await app.inject({
+    const response = await injectOnce({
       method: "POST",
       url: MCP_MOUNT_PATH,
       headers: {
@@ -109,7 +122,7 @@ describe("the 401 challenge", () => {
   test("the advertised document is actually fetchable at the advertised path", async () => {
     // The pair is the point: a header pointing at a 404 is worse than no
     // header, because a client will follow it and fail with a confusing error.
-    const unauthorized = await app.inject({
+    const unauthorized = await injectOnce({
       method: "POST",
       url: MCP_MOUNT_PATH,
       headers: {
@@ -122,7 +135,10 @@ describe("the 401 challenge", () => {
     const advertised = /resource_metadata="([^"]+)"/.exec(challenge)?.[1];
     expect(advertised).toBeDefined();
 
-    const followed = await app.inject({ method: "GET", url: new URL(advertised!).pathname });
+    const followed = await injectOnce({
+      method: "GET",
+      url: new URL(advertised!).pathname,
+    });
     expect(followed.statusCode).toBe(200);
   });
 });

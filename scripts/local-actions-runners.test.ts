@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const RUNNERS = join(import.meta.dir, "local-actions-runners.sh");
+const PRE_JOB_POLICY = join(import.meta.dir, "self-hosted-pre-job-policy.sh");
 
 async function runHarness(body: string) {
   const home = await mkdtemp(join(tmpdir(), "osf-runner-lifecycle-"));
@@ -102,6 +103,23 @@ fi
 });
 
 describe("isolation invariants", () => {
+  test("embeds the exact reviewed pre-job policy", async () => {
+    const [source, policy] = await Promise.all([
+      readFile(RUNNERS, "utf8"),
+      readFile(PRE_JOB_POLICY, "utf8"),
+    ]);
+    const marker = `<<'"'"'POLICY'"'"'\n`;
+    const start = source.indexOf(marker);
+    const end = source.indexOf("\nPOLICY\n", start + marker.length);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const embedded = source
+      .slice(start + marker.length, end)
+      .replaceAll(`'"'"'`, "'");
+    expect(`${embedded}\n`).toBe(policy);
+  });
+
   test("keeps one slot, ephemeral registration and serialized cleanup", async () => {
     const source = await readFile(RUNNERS, "utf8");
     expect(source).toContain("readonly SLOTS=(1)");

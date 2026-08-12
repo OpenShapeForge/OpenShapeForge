@@ -154,9 +154,10 @@ export type RetentionLegalHold = {
 
 /**
  * Advisory metadata describing how a data-subject erasure request should
- * cascade from this table to dependent PII. This is metadata only: no runtime
- * enforcement exists yet (tracked as a follow-up). Downstream tooling and
- * operators consume it to drive/verify ordered erasure.
+ * cascade from this table to dependent PII. The API's fixed Relation procedure
+ * uses it for validation and coverage; it does not generate a generic runtime
+ * traversal. Other runtimes and operators may consume it to drive or verify
+ * ordered erasure.
  */
 export type RetentionErasure = {
   /** This table participates in subject-scoped erasure. */

@@ -65,27 +65,31 @@ Any executor built against this metadata MUST:
 
 Building that job is tracked as a follow-up issue.
 
-## Data-subject erasure: metadata only (follow-up)
+## Data-subject erasure: fixed Relation procedure
 
-There is likewise **no cross-entity erasure primitive**. The generated CRUD
-delete (`generated-crud.ts`) operates one table at a time and there is no
-soft-delete / `deletedAt` mechanism. Honoring a GDPR Art. 17 erasure request
-today requires ordered, manual, multi-table deletion by an operator, and some
-PII foreign keys (e.g. `contact_details.relation_id`) omit an `ON DELETE`
-clause, so a naive parent delete fails with an opaque FK violation.
+The API contains one cross-entity erasure procedure for the authored Relation
+aggregate. It requires the dedicated privacy role, uses RLS plus explicit
+`tenant_id` predicates, deletes contact details, clears the configured payment
+columns and relation link, deletes the Relation root, and records anonymous
+result counts in the same transaction.
 
-The `erasure` cascade metadata above is emitted so downstream tooling and a
-future erasure runtime can drive or verify an ordered, subject-scoped cascade.
-It is **not** enforced yet. Building the erasure primitive (and deciding
-`ON DELETE` semantics deliberately per PII relationship) is tracked as a
-follow-up issue.
+This is deliberately **not a generic manifest-driven traversal**. The table and
+operation sequence are fixed in `apps/api/src/privacy/data-subject-erasure.ts`;
+the compiled manifest validates the identifiers, subject columns, cascades and
+configured anonymisation columns. `check:generated` also fails when a generated
+table carrying `pii`, `bsn` or `confidential` columns is not covered by the
+fixed Relation root or one of its valid cascades. Adding another root in
+metadata alone does not create a new runtime procedure or satisfy the gate.
 
-## No shipped entity declares retention
+The generated CRUD delete (`generated-crud.ts`) remains a single-table
+operation, and there is still no soft-delete / `deletedAt` mechanism. The
+retained payment row's fiscal usefulness after its configured PII and Relation
+link are cleared is not established by the manifest and remains a product
+decision.
 
-At present **no entity YAML** under `packages/compiler/config/authoring/entities`
-declares a `retention:` block, so the shipped `manifest.json` contains no
-`retention` metadata. `retention-policies.yaml` is authored but not yet
-referenced by any table. Wiring policies onto the PII-bearing entities
-(relations, contact details) is the authoring step that makes the metadata
-above actually appear in the manifest — do it alongside, or ahead of, the
-runtime-enforcement follow-up.
+## Shipped erasure declarations
+
+The shipped Relation entity is the explicit erasure root. Its plan reaches
+contact details and payment details; both dependent tables declare the matching
+`relation_id` subject column. Payment details also reference the existing
+retention policy and enumerate the text columns the fixed procedure may clear.

@@ -22,4 +22,10 @@ describe("data-subject erasure manifest boundary", () => {
       anonymizeColumns: ["iban", "bic", "account_holder"],
     });
   });
+
+  test("keeps an explicit tenant predicate on every irreversible statement", async () => {
+    const source = await Bun.file(new URL("./data-subject-erasure.ts", import.meta.url)).text();
+    const predicate = 'and ${sql.ref("tenant_id")} = ${session.tenantId}::uuid';
+    expect(source.split(predicate)).toHaveLength(4);
+  });
 });

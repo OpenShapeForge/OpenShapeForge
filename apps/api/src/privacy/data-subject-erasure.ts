@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Tenant-scoped data-subject erasure for the currently authored Relation
- * aggregate. The compiled manifest is the allow-list: callers supply only an
- * id, never schema, table or column names.
+ * aggregate. This is a fixed procedure whose identifiers and coverage are
+ * validated against the compiled manifest; the manifest does not drive a
+ * generic traversal. Callers supply only an id, never schema, table or column
+ * names.
  */
 import { GraphQLError } from "graphql";
 import manifest from "../generated/db/manifest.json" with { type: "json" };
@@ -69,7 +71,7 @@ function tableByName(tables: ManifestTable[], schema: string, table: string): Ma
   return result;
 }
 
-/** Resolve only the authored relation plan; no caller-controlled SQL surface. */
+/** Validate the fixed Relation procedure against authored manifest metadata. */
 function resolveErasurePlan(): ErasurePlan {
   const tables = manifest.tables as ManifestTable[];
   const root = tableByName(tables, "erp", "relations");
@@ -137,6 +139,7 @@ export async function eraseRelationDataSubject(
     const contactResult = await sql<{ id: string }>`
       delete from ${sql.table(qualifiedName(plan.contactDetails.table))}
       where ${sql.ref(plan.contactDetails.via)} = ${relationId}::uuid
+        and ${sql.ref("tenant_id")} = ${session.tenantId}::uuid
       returning id
     `.execute(trx);
 
@@ -151,12 +154,14 @@ export async function eraseRelationDataSubject(
       update ${sql.table(qualifiedName(plan.paymentDetails.table))}
       set ${assignments}
       where ${sql.ref(plan.paymentDetails.via)} = ${relationId}::uuid
+        and ${sql.ref("tenant_id")} = ${session.tenantId}::uuid
       returning id
     `.execute(trx);
 
     const rootResult = await sql<{ id: string }>`
       delete from ${sql.table(qualifiedName(plan.root))}
       where id = ${relationId}::uuid
+        and ${sql.ref("tenant_id")} = ${session.tenantId}::uuid
       returning id
     `.execute(trx);
     if (rootResult.rows.length !== 1) {

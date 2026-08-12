@@ -12,6 +12,7 @@ import {
   compilerOwnedGeneratedFiles,
   compilerOwnedGeneratedRoots,
 } from "./compiler-generated-artifact-paths.mjs";
+import { dataErasureCoverageFailures } from "./data-erasure-coverage.mjs";
 
 const repoRoot = process.cwd();
 const webPresent = existsSync(join(repoRoot, "apps/web"));
@@ -71,6 +72,29 @@ for (const [label, firstGroup, secondGroup] of groupPairs) {
     console.error(`Generated ${label} artifacts are nondeterministic.`);
     process.exit(1);
   }
+}
+
+// --- Classified entity erasure coverage -----------------------------------
+//
+// A generated table carrying PII/BSN/confidential data must not silently
+// appear outside the fixed Relation procedure or one of its valid cascades.
+// Check the freshly generated in-memory manifest so stale disk output cannot
+// mask a coverage gap; authoring another root does not create runtime support.
+
+const dbManifestArtifact = first.groups.db.find(
+  (artifact) => artifact.path === "apps/api/src/generated/db/manifest.json",
+);
+if (!dbManifestArtifact) {
+  console.error("Generated database manifest is missing; cannot verify data-erasure coverage.");
+  process.exit(1);
+}
+const erasureCoverageFailures = dataErasureCoverageFailures(
+  JSON.parse(dbManifestArtifact.contents),
+);
+if (erasureCoverageFailures.length > 0) {
+  console.error("Generated data-erasure coverage check failed:");
+  for (const failure of erasureCoverageFailures) console.error(`- ${failure}`);
+  process.exit(1);
 }
 
 // --- Keycloak: one file per authored realm, named after that realm ----------

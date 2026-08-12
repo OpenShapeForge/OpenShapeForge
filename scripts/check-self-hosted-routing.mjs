@@ -69,6 +69,16 @@ const JOB_POLICY = {
   },
 };
 
+export const APPROVED_SELF_HOSTED_ROUTES = Object.freeze(
+  Object.entries(JOB_POLICY)
+    .flatMap(([path, jobs]) =>
+      Object.entries(jobs)
+        .filter(([, mode]) => mode === "routed")
+        .map(([job]) => `${path}#${job}`),
+    )
+    .sort(),
+);
+
 function isMapping(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }

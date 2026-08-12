@@ -3,7 +3,10 @@
 import { beforeAll, describe, expect, test } from "bun:test";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { auditWorkflowSources } from "./check-self-hosted-routing.mjs";
+import {
+  APPROVED_SELF_HOSTED_ROUTES,
+  auditWorkflowSources,
+} from "./check-self-hosted-routing.mjs";
 
 const WORKFLOW_DIR = ".github/workflows";
 let baseline: Record<string, string>;
@@ -40,6 +43,65 @@ function injectIntoGates(line: string): string[] {
 }
 
 describe("self-hosted routing negative fixtures", () => {
+  test("exports the approved runtime routes in deterministic order", () => {
+    expect(APPROVED_SELF_HOSTED_ROUTES).toEqual([
+      ".github/workflows/ci.yml#db-tests",
+      ".github/workflows/ci.yml#gates",
+      ".github/workflows/ci.yml#helm",
+      ".github/workflows/ci.yml#keycloak-spi",
+      ".github/workflows/ci.yml#scan",
+      ".github/workflows/docker-api.yml#build",
+      ".github/workflows/docker-keycloak.yml#build",
+      ".github/workflows/web-e2e.yml#browser-e2e",
+    ]);
+  });
+
+  test("rejects a group-only job outside the approved routes", () => {
+    const problems = auditMutation(".github/workflows/ci.yml", (source) =>
+      source.replace(
+        "jobs:\n",
+        `jobs:
+  group-only:
+    runs-on: { group: Default }
+    steps:
+      - run: true
+`,
+      ),
+    );
+    expect(problems).toContain(
+      ".github/workflows/ci.yml#group-only has no explicit runner security policy",
+    );
+  });
+
+  test("rejects a mixed group and label job outside the approved routes", () => {
+    const problems = auditMutation(".github/workflows/ci.yml", (source) =>
+      source.replace(
+        "jobs:\n",
+        `jobs:
+  mixed-route:
+    runs-on: { group: Default, labels: osf-pr }
+    steps:
+      - run: true
+`,
+      ),
+    );
+    expect(problems).toContain(
+      ".github/workflows/ci.yml#mixed-route has no explicit runner security policy",
+    );
+  });
+
+  test("rejects a renamed approved job", () => {
+    const problems = auditMutation(".github/workflows/ci.yml", (source) =>
+      source.replace("  gates:\n", "  renamed-gates:\n"),
+    );
+    expect(problems).toContain(
+      ".github/workflows/ci.yml#renamed-gates has no explicit runner security policy",
+    );
+    expect(problems).toContain(
+      ".github/workflows/ci.yml is missing policy-listed job gates",
+    );
+  });
+
   test("rejects an unlisted workflow regardless of YAML indentation", () => {
     const workflows = {
       ...baseline,

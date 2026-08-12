@@ -29,6 +29,336 @@ readonly RUNNER_USER="$(id -un)"
 readonly RUNNER_NAME_PREFIX="${OPENSHAPEFORGE_RUNNER_NAME_PREFIX:-openshapeforge-pr}"
 readonly DISABLED_DEPLOY_RUNNER_PREFIX="${OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX:-openshapeforge-deploy}"
 
+approved_workflow_sha256() {
+  case "$1" in
+    ".github/workflows/ci.yml")
+      printf '%s\n' "4d3c9d983a7c9c8854bff17a7494b381660368ba83e2ec60779236cb84092fb2"
+      ;;
+    ".github/workflows/docker-api.yml")
+      printf '%s\n' "873ddbae45b0e3bd8823243a788b58ebca869a019b2128e141ec063c64c15aba"
+      ;;
+    ".github/workflows/docker-keycloak.yml")
+      printf '%s\n' "456a88525a9500c705f070a9078d198421159e8d537002d39e00107da35bb2fd"
+      ;;
+    ".github/workflows/web-e2e.yml")
+      printf '%s\n' "b0182d193f448b2751e3c39be6600de3b517625bf1ba6d64dc30ca07addeb47c"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+print_approved_workflow_sha256() {
+  local workflow_path
+  while IFS= read -r workflow_path; do
+    printf '%s %s\n' "$workflow_path" "$(approved_workflow_sha256 "$workflow_path")"
+  done <<'EOF'
+.github/workflows/ci.yml
+.github/workflows/docker-api.yml
+.github/workflows/docker-keycloak.yml
+.github/workflows/web-e2e.yml
+EOF
+}
+
+# A pull-request run's REST head_sha names the PR head, while
+# GITHUB_WORKFLOW_SHA may name the fixed head, base, or synthesized merge
+# revision that supplied the direct workflow. Resolve and authenticate all three
+# possible revisions before registration instead of treating head_sha as the
+# workflow revision.
+active_same_repository_workflow_runs() {
+  local pages active_runs
+  if ! pages="$(
+    gh api --hostname github.com --paginate --slurp \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "repos/${REPOSITORY}/actions/runs?event=pull_request&per_page=100"
+  )"; then
+    echo "Could not enumerate all pull-request workflow runs" >&2
+    return 1
+  fi
+  if ! active_runs="$(
+    printf '%s\n' "$pages" | jq -r \
+      --arg repository "$REPOSITORY" '
+      def sha: type == "string" and test("^[0-9a-f]{40}$");
+      def direct_workflow_path:
+        type == "string" and
+        test("^\\.github/workflows/[A-Za-z0-9._-]+\\.ya?ml$");
+      def active_status:
+        . == "queued" or . == "in_progress" or . == "requested" or
+        . == "waiting" or . == "pending";
+      def known_status:
+        active_status or . == "completed" or . == "action_required" or
+        . == "cancelled" or . == "failure" or . == "neutral" or
+        . == "skipped" or . == "stale" or . == "success" or
+        . == "timed_out";
+      if type != "array" or length == 0 or
+        any(.[];
+          type != "object" or
+          (.workflow_runs | type) != "array" or
+          (.total_count | type) != "number" or
+          .total_count < 0 or .total_count != (.total_count | floor))
+      then error("invalid workflow-run page")
+      else
+        . as $pages |
+        ($pages[0].total_count) as $total_count |
+        [$pages[].workflow_runs[]] as $runs |
+        if any($pages[]; .total_count != $total_count) or
+          ($runs | length) != $total_count or
+          any($runs[];
+            type != "object" or
+            (.id | type) != "number" or .id <= 0 or
+            .id != (.id | floor) or
+            .event != "pull_request" or
+            .repository.full_name != $repository or
+            (.status | type) != "string" or (.status | known_status | not)) or
+          ($runs | group_by(.id) | any(.[]; length != 1))
+        then error("incomplete workflow-run pagination")
+        else
+          [$runs[] |
+            select(.status | active_status) |
+            if (.head_repository.full_name | type) != "string"
+            then error("invalid head repository")
+            elif .head_repository.full_name != $repository
+            then empty
+            elif
+              (.run_attempt | type) != "number" or .run_attempt <= 0 or
+              .run_attempt != (.run_attempt | floor) or
+              (.path | direct_workflow_path | not) or
+              (.head_sha | sha | not) or
+              (.pull_requests | type) != "array" or
+              (.pull_requests | length) != 1 or
+              (.pull_requests[0].number | type) != "number" or
+              .pull_requests[0].number <= 0 or
+              .pull_requests[0].number != (.pull_requests[0].number | floor) or
+              (.pull_requests[0].head.sha | sha | not) or
+              (.pull_requests[0].base.sha | sha | not) or
+              .head_sha != .pull_requests[0].head.sha
+            then error("invalid direct pull-request run")
+            else {
+              id,
+              run_attempt,
+              path,
+              head_sha,
+              pull_request_number: .pull_requests[0].number,
+              pull_request_head_sha: .pull_requests[0].head.sha,
+              pull_request_base_sha: .pull_requests[0].base.sha
+            }
+            end
+          ] |
+          .[] |
+          [
+            .id,
+            .run_attempt,
+            .path,
+            .head_sha,
+            .pull_request_number,
+            .pull_request_head_sha,
+            .pull_request_base_sha
+          ] | @tsv
+        end
+      end
+    '
+  )"; then
+    echo "Pull-request workflow-run response was incomplete or malformed" >&2
+    return 1
+  fi
+  if [[ -z "$active_runs" ]]; then
+    echo "No active same-repository pull-request workflow run is available" >&2
+    return 1
+  fi
+  printf '%s\n' "$active_runs"
+}
+
+validate_direct_workflow_run() {
+  local run_id="$1"
+  local run_attempt="$2"
+  local workflow_path="$3"
+  local run_head_sha="$4"
+  local pull_request_number="$5"
+  local pull_request_head_sha="$6"
+  local pull_request_base_sha="$7"
+  local run
+  [[ "$run_id" =~ ^[1-9][0-9]*$ && "$run_attempt" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ "$workflow_path" =~ ^\.github/workflows/[A-Za-z0-9._-]+\.ya?ml$ ]] || return 1
+  [[ "$run_head_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  [[ "$pull_request_number" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ "$pull_request_head_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  [[ "$pull_request_base_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  if ! run="$(
+    gh api --hostname github.com \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "repos/${REPOSITORY}/actions/runs/${run_id}/attempts/${run_attempt}"
+  )"; then
+    echo "Could not verify active workflow run ${run_id} attempt ${run_attempt}" >&2
+    return 1
+  fi
+  if ! printf '%s\n' "$run" | jq -e \
+    --arg repository "$REPOSITORY" \
+    --arg workflow_path "$workflow_path" \
+    --arg run_head_sha "$run_head_sha" \
+    --arg pull_request_head_sha "$pull_request_head_sha" \
+    --arg pull_request_base_sha "$pull_request_base_sha" \
+    --argjson run_id "$run_id" \
+    --argjson run_attempt "$run_attempt" \
+    --argjson pull_request_number "$pull_request_number" '
+      type == "object" and
+      .id == $run_id and
+      .run_attempt == $run_attempt and
+      .event == "pull_request" and
+      (
+        .status == "queued" or .status == "in_progress" or
+        .status == "requested" or .status == "waiting" or
+        .status == "pending"
+      ) and
+      .path == $workflow_path and
+      .head_sha == $run_head_sha and
+      .repository.full_name == $repository and
+      .head_repository.full_name == $repository and
+      (.referenced_workflows | type) == "array" and
+      (.referenced_workflows | length) == 0 and
+      (.pull_requests | type) == "array" and
+      (.pull_requests | length) == 1 and
+      .pull_requests[0].number == $pull_request_number and
+      .pull_requests[0].head.sha == $pull_request_head_sha and
+      .pull_requests[0].base.sha == $pull_request_base_sha and
+      .head_sha == .pull_requests[0].head.sha
+    ' >/dev/null; then
+    echo "Active workflow run ${run_id} metadata was malformed, stale, or reusable" >&2
+    return 1
+  fi
+}
+
+current_pull_request_workflow_shas() {
+  local pull_request_number="$1"
+  local expected_head_sha="$2"
+  local expected_base_sha="$3"
+  local pull_request candidate_shas
+  [[ "$pull_request_number" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ "$expected_head_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  [[ "$expected_base_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  if ! pull_request="$(
+    gh api --hostname github.com \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "repos/${REPOSITORY}/pulls/${pull_request_number}"
+  )"; then
+    echo "Could not verify pull request ${pull_request_number}" >&2
+    return 1
+  fi
+  if ! candidate_shas="$(
+    printf '%s\n' "$pull_request" | jq -er \
+      --arg repository "$REPOSITORY" \
+      --arg expected_head_sha "$expected_head_sha" \
+      --arg expected_base_sha "$expected_base_sha" \
+      --argjson pull_request_number "$pull_request_number" '
+      def sha: type == "string" and test("^[0-9a-f]{40}$");
+      if
+        type != "object" or
+        .number != $pull_request_number or
+        .state != "open" or
+        .head.repo.full_name != $repository or
+        .base.repo.full_name != $repository or
+        .head.sha != $expected_head_sha or
+        .base.sha != $expected_base_sha or
+        (.merge_commit_sha | sha | not)
+      then error("stale or malformed pull request")
+      else [$expected_head_sha, $expected_base_sha, .merge_commit_sha] |
+        unique | join("\n")
+      end
+    '
+  )"; then
+    echo "Pull request ${pull_request_number} no longer matches its workflow run" >&2
+    return 1
+  fi
+  printf '%s\n' "$candidate_shas"
+}
+
+workflow_file_sha256_at() {
+  local workflow_path="$1"
+  local workflow_sha="$2"
+  local digest_output digest
+  [[ "$workflow_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  if ! digest_output="$(
+    gh api --hostname github.com \
+      -H "Accept: application/vnd.github.raw+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "repos/${REPOSITORY}/contents/${workflow_path}?ref=${workflow_sha}" |
+      shasum -a 256
+  )"; then
+    echo "Could not fetch approved workflow ${workflow_path} at ${workflow_sha}" >&2
+    return 1
+  fi
+  digest="${digest_output%% *}"
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "Could not hash approved workflow ${workflow_path} at ${workflow_sha}" >&2
+    return 1
+  }
+  printf '%s\n' "$digest"
+}
+
+authorize_active_workflow_shas() {
+  local active_runs run_id run_attempt workflow_path run_head_sha
+  local pull_request_number pull_request_head_sha pull_request_base_sha run_candidate_shas
+  local candidate_shas='' workflow_sha expected_sha256 actual_sha256
+  local approved_workflow_shas='' workflow_revision_approved
+  active_runs="$(active_same_repository_workflow_runs)" || return 1
+  while IFS=$'\t' read -r run_id run_attempt workflow_path run_head_sha \
+    pull_request_number pull_request_head_sha pull_request_base_sha; do
+    validate_direct_workflow_run \
+      "$run_id" "$run_attempt" "$workflow_path" "$run_head_sha" \
+      "$pull_request_number" "$pull_request_head_sha" "$pull_request_base_sha" || return 1
+    run_candidate_shas="$(
+      current_pull_request_workflow_shas \
+        "$pull_request_number" "$pull_request_head_sha" "$pull_request_base_sha"
+    )" || return 1
+    if [[ -n "$candidate_shas" ]]; then
+      candidate_shas="${candidate_shas}"$'\n'"${run_candidate_shas}"
+    else
+      candidate_shas="$run_candidate_shas"
+    fi
+  done <<<"$active_runs"
+  candidate_shas="$(
+    printf '%s\n' "$candidate_shas" | jq -Rser \
+      'split("\n") | map(select(length > 0)) | unique | join("\n")'
+  )" || return 1
+  [[ -n "$candidate_shas" ]] || return 1
+  while IFS= read -r workflow_sha; do
+    [[ "$workflow_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+    workflow_revision_approved=true
+    while IFS=' ' read -r workflow_path expected_sha256; do
+      actual_sha256="$(workflow_file_sha256_at "$workflow_path" "$workflow_sha")" || return 1
+      if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+        workflow_revision_approved=false
+      fi
+    done < <(print_approved_workflow_sha256)
+    if [[ "$workflow_revision_approved" == true ]]; then
+      if [[ -n "$approved_workflow_shas" ]]; then
+        approved_workflow_shas="${approved_workflow_shas}"$'\n'"${workflow_sha}"
+      else
+        approved_workflow_shas="$workflow_sha"
+      fi
+    else
+      echo "Workflow revision ${workflow_sha} differs from reviewed routed workflow content" >&2
+    fi
+  done <<<"$candidate_shas"
+  if [[ -z "$approved_workflow_shas" ]]; then
+    echo "No active workflow revision matches the reviewed routed workflow content" >&2
+    return 1
+  fi
+  printf '%s\n' "$approved_workflow_shas"
+}
+
+validate_workflow_sha_allow_list() {
+  local approved_workflow_shas="$1"
+  local workflow_sha count=0
+  [[ -n "$approved_workflow_shas" ]] || return 1
+  while IFS= read -r workflow_sha; do
+    [[ "$workflow_sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+    count=$((count + 1))
+  done <<<"$approved_workflow_shas"
+  ((count > 0))
+}
+
 require_host_tools() {
   local tool
   for tool in colima curl dscl gh ifconfig ipconfig jq launchctl limactl lsof nc ps route shasum shlock stat unlink uuidgen; do
@@ -337,7 +667,12 @@ setup_rootless_docker() {
 
 install_pre_job_policy() {
   local profile="$1"
-  colima -p "$profile" ssh -- bash -lc '
+  local approved_workflow_shas="$2"
+  validate_workflow_sha_allow_list "$approved_workflow_shas" || {
+    echo "Refusing to install an invalid workflow SHA allow-list" >&2
+    return 1
+  }
+  printf '%s\n' "$approved_workflow_shas" | colima -p "$profile" ssh -- bash -lc '
     set -euo pipefail
     sudo install -d -o root -g root -m 0755 /opt/openshapeforge-runner
     sudo tee /opt/openshapeforge-runner/pre-job-policy.sh >/dev/null <<'"'"'POLICY'"'"'
@@ -354,27 +689,91 @@ install_pre_job_policy() {
 set -euo pipefail
 
 readonly EXPECTED_REPOSITORY="OpenShapeForge/OpenShapeForge"
+readonly APPROVED_WORKFLOW_SHAS_FILE="/opt/openshapeforge-runner/approved-workflow-shas"
+readonly -a APPROVED_ROUTES=(
+  ".github/workflows/ci.yml#db-tests"
+  ".github/workflows/ci.yml#gates"
+  ".github/workflows/ci.yml#helm"
+  ".github/workflows/ci.yml#keycloak-spi"
+  ".github/workflows/ci.yml#scan"
+  ".github/workflows/docker-api.yml#build"
+  ".github/workflows/docker-keycloak.yml#build"
+  ".github/workflows/web-e2e.yml#browser-e2e"
+)
 
 deny() {
   echo "Self-hosted runner policy denied this job before workflow steps ran." >&2
   exit 1
 }
 
+main() {
+local workflow_ref workflow_path workflow_revision route approved_route approved_sha
+local route_approved workflow_sha_approved
+
+if [[ "$#" -eq 1 && "$1" == "--print-approved-routes" ]]; then
+  printf '%s\n' "${APPROVED_ROUTES[@]}"
+  return 0
+fi
+[[ "$#" -eq 0 ]] || deny
+
 [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" ]] || deny
 [[ "${GITHUB_REPOSITORY:-}" == "$EXPECTED_REPOSITORY" ]] || deny
 [[ -n "${GITHUB_EVENT_PATH:-}" && -r "$GITHUB_EVENT_PATH" ]] || deny
+[[ -n "${GITHUB_WORKFLOW_REF:-}" && -n "${GITHUB_WORKFLOW_SHA:-}" ]] || deny
+[[ -n "${GITHUB_JOB:-}" ]] || deny
+[[ "$GITHUB_WORKFLOW_SHA" =~ ^[0-9a-f]{40}$ ]] || deny
+[[ -f "$APPROVED_WORKFLOW_SHAS_FILE" && ! -L "$APPROVED_WORKFLOW_SHAS_FILE" ]] || deny
 
-jq -e --arg repository "$EXPECTED_REPOSITORY" '"'"'
+# GitHub documents the github context as caller-associated for reusable
+# workflows. Bind its fixed repository/path to a host-authorized workflow SHA;
+# GITHUB_JOB alone may identify a job in the reusable callee. The host snapshots
+# every active same-repository PR run and verifies every routed workflow file at
+# each possible SHA immediately before it installs this allow-list and admits
+# routing.
+workflow_ref="${GITHUB_WORKFLOW_REF#"$EXPECTED_REPOSITORY/"}"
+[[ "$workflow_ref" != "$GITHUB_WORKFLOW_REF" && "$workflow_ref" == *@* ]] || deny
+workflow_path="${workflow_ref%@*}"
+workflow_revision="${workflow_ref##*@}"
+[[ -n "$workflow_path" && -n "$workflow_revision" ]] || deny
+
+route="$workflow_path#$GITHUB_JOB"
+route_approved=false
+for approved_route in "${APPROVED_ROUTES[@]}"; do
+  if [[ "$route" == "$approved_route" ]]; then
+    route_approved=true
+    break
+  fi
+done
+[[ "$route_approved" == true ]] || deny
+
+workflow_sha_approved=false
+while IFS= read -r approved_sha || [[ -n "$approved_sha" ]]; do
+  [[ "$approved_sha" =~ ^[0-9a-f]{40}$ ]] || deny
+  if [[ "$GITHUB_WORKFLOW_SHA" == "$approved_sha" ]]; then
+    workflow_sha_approved=true
+  fi
+done <"$APPROVED_WORKFLOW_SHAS_FILE"
+[[ "$workflow_sha_approved" == true ]] || deny
+
+/usr/bin/env -i /usr/bin/jq -e --arg repository "$EXPECTED_REPOSITORY" '"'"'
   .repository.full_name == $repository and
   .pull_request.base.repo.full_name == $repository and
   .pull_request.head.repo.full_name == $repository and
   .pull_request.head.repo.fork == false
 '"'"' "$GITHUB_EVENT_PATH" >/dev/null || deny
 
-echo "Self-hosted runner policy accepted a same-repository pull request."
+echo "Self-hosted runner policy accepted an approved same-repository pull request route."
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
 POLICY
     sudo chown root:root /opt/openshapeforge-runner/pre-job-policy.sh
     sudo chmod 0755 /opt/openshapeforge-runner/pre-job-policy.sh
+    sudo tee /opt/openshapeforge-runner/approved-workflow-shas >/dev/null
+    sudo chown root:root /opt/openshapeforge-runner/approved-workflow-shas
+    sudo chmod 0444 /opt/openshapeforge-runner/approved-workflow-shas
   '
 }
 
@@ -443,8 +842,22 @@ verify_pre_job_policy() {
   colima -p "$profile" ssh -- env RUNNER_SERVICE="$service" bash -lc '
     set -euo pipefail
     hook=/opt/openshapeforge-runner/pre-job-policy.sh
+    allow_list=/opt/openshapeforge-runner/approved-workflow-shas
     [[ "$(stat -c "%u:%g:%a" "$hook")" == "0:0:755" ]] || {
       echo "Pre-job policy is not root-owned and executable" >&2
+      exit 1
+    }
+    [[ -f "$allow_list" && ! -L "$allow_list" ]] || {
+      echo "Workflow SHA allow-list is not a regular root-controlled file" >&2
+      exit 1
+    }
+    [[ "$(stat -c "%u:%g:%a" "$allow_list")" == "0:0:444" ]] || {
+      echo "Workflow SHA allow-list is not root-owned and world-readable" >&2
+      exit 1
+    }
+    approved_workflow_sha="$(sed -n "1p" "$allow_list")"
+    [[ "$approved_workflow_sha" =~ ^[0-9a-f]{40}$ ]] || {
+      echo "Workflow SHA allow-list is empty or malformed" >&2
       exit 1
     }
     systemctl show "$RUNNER_SERVICE" -p Environment --value |
@@ -457,14 +870,40 @@ verify_pre_job_policy() {
     printf "%s\n" '"'"'{"repository":{"full_name":"OpenShapeForge/OpenShapeForge"},"pull_request":{"base":{"repo":{"full_name":"OpenShapeForge/OpenShapeForge"}},"head":{"repo":{"full_name":"OpenShapeForge/OpenShapeForge","fork":false}}}}'"'"' >"$policy_fixtures/same-repo.json"
     printf "%s\n" '"'"'{"repository":{"full_name":"OpenShapeForge/OpenShapeForge"},"pull_request":{"base":{"repo":{"full_name":"OpenShapeForge/OpenShapeForge"}},"head":{"repo":{"full_name":"contributor/OpenShapeForge","fork":true}}}}'"'"' >"$policy_fixtures/fork.json"
     env GITHUB_EVENT_NAME=pull_request \
+      GITHUB_JOB=gates \
       GITHUB_REPOSITORY=OpenShapeForge/OpenShapeForge \
       GITHUB_EVENT_PATH="$policy_fixtures/same-repo.json" \
+      GITHUB_WORKFLOW_REF=OpenShapeForge/OpenShapeForge/.github/workflows/ci.yml@refs/pull/1/merge \
+      GITHUB_WORKFLOW_SHA="$approved_workflow_sha" \
       "$hook" >/dev/null
     if env GITHUB_EVENT_NAME=pull_request \
+      GITHUB_JOB=gates \
       GITHUB_REPOSITORY=OpenShapeForge/OpenShapeForge \
       GITHUB_EVENT_PATH="$policy_fixtures/fork.json" \
+      GITHUB_WORKFLOW_REF=OpenShapeForge/OpenShapeForge/.github/workflows/ci.yml@refs/pull/1/merge \
+      GITHUB_WORKFLOW_SHA="$approved_workflow_sha" \
       "$hook" >/dev/null 2>&1; then
       echo "Pre-job policy accepted a fork pull request" >&2
+      exit 1
+    fi
+    if env GITHUB_EVENT_NAME=pull_request \
+      GITHUB_JOB=group-only \
+      GITHUB_REPOSITORY=OpenShapeForge/OpenShapeForge \
+      GITHUB_EVENT_PATH="$policy_fixtures/same-repo.json" \
+      GITHUB_WORKFLOW_REF=OpenShapeForge/OpenShapeForge/.github/workflows/ci.yml@refs/pull/1/merge \
+      GITHUB_WORKFLOW_SHA="$approved_workflow_sha" \
+      "$hook" >/dev/null 2>&1; then
+      echo "Pre-job policy accepted an unapproved workflow route" >&2
+      exit 1
+    fi
+    if env GITHUB_EVENT_NAME=pull_request \
+      GITHUB_JOB=gates \
+      GITHUB_REPOSITORY=OpenShapeForge/OpenShapeForge \
+      GITHUB_EVENT_PATH="$policy_fixtures/same-repo.json" \
+      GITHUB_WORKFLOW_REF=OpenShapeForge/OpenShapeForge/.github/workflows/ci.yml@refs/pull/1/merge \
+      GITHUB_WORKFLOW_SHA=0000000000000000000000000000000000000000 \
+      "$hook" >/dev/null 2>&1; then
+      echo "Pre-job policy accepted a workflow SHA outside its host snapshot" >&2
       exit 1
     fi
     rm -rf "$policy_fixtures"
@@ -1028,6 +1467,7 @@ release_provision_lock() {
 provision_slot_locked() {
   local slot="$1"
   local profile runner_name bootstrap_label runner_id machine_id service lifecycle_state
+  local approved_workflow_shas
   profile="$(profile_for "$slot")"
   runner_name="$(runner_prefix_for "$slot")-$(uuidgen | tr '[:upper:]' '[:lower:]' | cut -c 1-8)"
   bootstrap_label="$(uuidgen | tr '[:upper:]' '[:lower:]')"
@@ -1087,7 +1527,6 @@ provision_slot_locked() {
   verify_fresh_vm "$profile"
   verify_rootless_docker_firewall_behavior "$profile"
   verify_cross_architecture_container_execution "$profile"
-  install_pre_job_policy "$profile"
   verify_guest_port_forwarding_disabled "$profile"
 
   require_host_isolation
@@ -1111,11 +1550,15 @@ provision_slot_locked() {
 
   service="$(runner_service_for "$runner_name")"
   install_runner_service "$profile" "$service"
-  verify_pre_job_policy "$profile" "$service"
   harden_runner_before_start "$profile" "$service"
   verify_unprivileged_runner "$profile" "$service"
 
   machine_id="$(colima -p "$profile" ssh -- cat /etc/machine-id)"
+  # The listener is still absent and the runner has no routing labels. Take the
+  # immutable workflow snapshot as late as possible before admission.
+  approved_workflow_shas="$(authorize_active_workflow_shas)" || return 1
+  install_pre_job_policy "$profile" "$approved_workflow_shas"
+  verify_pre_job_policy "$profile" "$service"
   add_repository_runner_routing_label "$runner_id"
   start_runner_service "$profile" "$service"
   lifecycle_state="$(wait_for_runner_online_or_consumed \

@@ -650,6 +650,20 @@ describe("repository event payload preflights", () => {
     expect(rejected.environment).toBe("");
   });
 
+  test("cluster e2e writes Secret Manager values with randomized environment delimiters", async () => {
+    const source = await readFile(
+      join(repoRoot, ".github/workflows/e2e-cluster.yml"),
+      "utf8",
+    );
+    expect(source).not.toContain('echo "$var=$value" >> "$GITHUB_ENV"');
+    expect(source).not.toContain('echo "DATABASE_URL=$local_url" >> "$GITHUB_ENV"');
+    expect(source).not.toContain(
+      'echo "OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET=$secret" >> "$GITHUB_ENV"',
+    );
+    expect(source.match(/delimiter="OSF_SECRET_\$\(openssl rand -hex 16\)"/g)).toHaveLength(3);
+    expect(source.match(/mask="\$\{mask\/\/\$'\\n'\/'%0A'\}"/g)).toHaveLength(4);
+  });
+
   test("both image publishers accept only an empty client payload", async () => {
     for (const workflowName of ["docker-api.yml", "docker-keycloak.yml"]) {
       const accepted = await runWorkflowStep(

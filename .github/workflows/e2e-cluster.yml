@@ -149,7 +149,10 @@ jobs:
           url=$(scw secret version access-by-path secret-path=/ \
             secret-name=openshapeforge-migrate-database-url revision=latest \
             region="$REGION" project-id="$SCW_DEFAULT_PROJECT_ID" -o json | jq -r '.data' | base64 -d)
-          echo "::add-mask::$url"
+          mask="${url//'%'/'%25'}"
+          mask="${mask//$'\r'/'%0D'}"
+          mask="${mask//$'\n'/'%0A'}"
+          printf '::add-mask::%s\n' "$mask"
           hostport=$(sed -E 's#.*@([^/]+)/.*#\1#' <<<"$url")
 
           kubectl -n "$NAMESPACE" delete pod db-tunnel --ignore-not-found --wait=true
@@ -175,8 +178,16 @@ jobs:
 
           # Same credentials, rerouted through the tunnel.
           local_url=$(sed -E "s#@[^/]+/#@127.0.0.1:${DB_LOCAL_PORT}/#" <<<"$url")
-          echo "::add-mask::$local_url"
-          echo "DATABASE_URL=$local_url" >> "$GITHUB_ENV"
+          mask="${local_url//'%'/'%25'}"
+          mask="${mask//$'\r'/'%0D'}"
+          mask="${mask//$'\n'/'%0A'}"
+          printf '::add-mask::%s\n' "$mask"
+          delimiter="OSF_SECRET_$(openssl rand -hex 16)"
+          {
+            printf 'DATABASE_URL<<%s\n' "$delimiter"
+            printf '%s\n' "$local_url"
+            printf '%s\n' "$delimiter"
+          } >> "$GITHUB_ENV"
 
       # The suite authenticates as real realm users. Against a production-mode
       # realm their passwords are generated, not the committed "test", so they
@@ -203,8 +214,16 @@ jobs:
               project-id="$SCW_DEFAULT_PROJECT_ID" -o json 2>/dev/null \
               | jq -r '.data // empty' | base64 -d 2>/dev/null || true)
             if [ -n "$value" ]; then
-              echo "::add-mask::$value"
-              echo "$var=$value" >> "$GITHUB_ENV"
+              mask="${value//'%'/'%25'}"
+              mask="${mask//$'\r'/'%0D'}"
+              mask="${mask//$'\n'/'%0A'}"
+              printf '::add-mask::%s\n' "$mask"
+              delimiter="OSF_SECRET_$(openssl rand -hex 16)"
+              {
+                printf '%s<<%s\n' "$var" "$delimiter"
+                printf '%s\n' "$value"
+                printf '%s\n' "$delimiter"
+              } >> "$GITHUB_ENV"
               found=$((found + 1))
             fi
           done <<'PAIRS'
@@ -227,8 +246,16 @@ jobs:
           secret=$(scw secret version access-by-path secret-path=/ \
             secret-name=openshapeforge-internal-context-secret revision=latest \
             region="$REGION" project-id="$SCW_DEFAULT_PROJECT_ID" -o json | jq -r '.data' | base64 -d)
-          echo "::add-mask::$secret"
-          echo "OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET=$secret" >> "$GITHUB_ENV"
+          mask="${secret//'%'/'%25'}"
+          mask="${mask//$'\r'/'%0D'}"
+          mask="${mask//$'\n'/'%0A'}"
+          printf '::add-mask::%s\n' "$mask"
+          delimiter="OSF_SECRET_$(openssl rand -hex 16)"
+          {
+            printf 'OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET<<%s\n' "$delimiter"
+            printf '%s\n' "$secret"
+            printf '%s\n' "$delimiter"
+          } >> "$GITHUB_ENV"
 
       # --timeout: bun's 5s default assumes a local database. Here every journal
       # read crosses runner -> cluster API -> port-forward -> proxy -> database,

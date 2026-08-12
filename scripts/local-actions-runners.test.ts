@@ -160,6 +160,23 @@ describe("isolation invariants", () => {
     expect(tokenRequest).toBeGreaterThan(liveProof);
   });
 
+  test("uses a deterministic guest probe and preserves failure diagnostics", async () => {
+    const source = await readFile(RUNNERS, "utf8");
+    const start = source.indexOf("verify_guest_port_forwarding_disabled() {");
+    const end = source.indexOf("\n# macOS skips PF", start);
+    const verification = source.slice(start, end);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(verification).toContain("nohup /usr/local/bin/node");
+    expect(verification).toContain('if [[ "$response" == ready ]]; then');
+    expect(verification).toContain("probe_ready=1");
+    expect(verification).toContain(
+      "Guest port-forwarding probe setup failed; guest diagnostics follow",
+    );
+    expect(verification).toContain('sed -n "1,80p" "$log_file"');
+  });
+
   test("fails the live proof closed when a wildcard host listener appears", async () => {
     const result = await runHarness(`
 lsof() {

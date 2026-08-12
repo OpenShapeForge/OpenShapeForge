@@ -547,8 +547,10 @@ verify_guest_port_forwarding_disabled() {
     readonly pid_file=/tmp/openshapeforge-forwarding-probe.pid
     readonly ready_file=/tmp/openshapeforge-forwarding-probe.ready
     readonly log_file=/tmp/openshapeforge-forwarding-probe.log
+    probe_ready=0
     rm -f "$pid_file" "$ready_file" "$log_file"
-    nohup node -e '"'"'
+    [[ -x /usr/local/bin/node ]]
+    nohup /usr/local/bin/node -e '"'"'
       const fs = require("node:fs");
       const net = require("node:net");
       const port = Number(process.env.FORWARDING_PROBE_PORT);
@@ -561,21 +563,45 @@ verify_guest_port_forwarding_disabled() {
     '"'"' >"$log_file" 2>&1 </dev/null &
     printf "%s\n" "$!" >"$pid_file"
     for attempt in {1..20}; do
-      if [[ -f "$ready_file" ]] &&
-        curl -fsS --max-time 1 "http://127.0.0.1:${FORWARDING_PROBE_PORT}" | grep -qx ready; then
-        exit 0
+      if [[ -f "$ready_file" ]]; then
+        response="$(curl -fsS --max-time 1 \
+          "http://127.0.0.1:${FORWARDING_PROBE_PORT}" 2>>"$log_file" || true)"
+        if [[ "$response" == ready ]]; then
+          probe_ready=1
+          break
+        fi
       fi
       sleep 0.25
     done
-    echo "Could not establish the guest port-forwarding probe" >&2
-    exit 1
+    if (( probe_ready == 0 )); then
+      echo "Could not establish the guest port-forwarding probe" >&2
+      exit 1
+    fi
   '; then
+    echo "Guest port-forwarding probe setup failed; guest diagnostics follow" >&2
     colima -p "$profile" ssh -- bash -lc '
       pid_file=/tmp/openshapeforge-forwarding-probe.pid
+      ready_file=/tmp/openshapeforge-forwarding-probe.ready
+      log_file=/tmp/openshapeforge-forwarding-probe.log
+      printf "node=%s ready_file=%s\n" \
+        "$(command -v node 2>/dev/null || printf missing)" \
+        "$([[ -f "$ready_file" ]] && printf present || printf missing)"
+      if [[ -f "$pid_file" ]]; then
+        pid="$(cat "$pid_file")"
+        printf "pid=%s process=%s\n" "$pid" \
+          "$(kill -0 "$pid" 2>/dev/null && printf alive || printf stopped)"
+      else
+        printf "pid=missing process=unknown\n"
+      fi
+      if [[ -s "$log_file" ]]; then
+        printf "%s\n" "--- probe log ---"
+        sed -n "1,80p" "$log_file"
+      fi
+      printf "%s\n" "--- guest TCP listeners ---"
+      ss -ltnp 2>&1 | sed -n "1,80p" || true
       [[ -f "$pid_file" ]] && kill "$(cat "$pid_file")" >/dev/null 2>&1 || true
-      rm -f "$pid_file" /tmp/openshapeforge-forwarding-probe.ready \
-        /tmp/openshapeforge-forwarding-probe.log
-    ' >/dev/null 2>&1 || true
+      rm -f "$pid_file" "$ready_file" "$log_file"
+    ' >&2 || true
     return 1
   fi
 

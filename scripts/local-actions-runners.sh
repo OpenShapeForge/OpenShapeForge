@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: BUSL-1.1
 
-# Versioned source for the macOS one-slot runner supervisor. `start` installs a
-# private host copy so pull-request checkouts never control the running process.
+# Versioned source for the macOS runner supervisor. `start` installs a private
+# host copy so pull-request checkouts never control the running process.
 
 set -euo pipefail
 
 readonly REPOSITORY="OpenShapeForge/OpenShapeForge"
-readonly SLOTS=(1)
 readonly COMMAND="${1:-status}"
+readonly SLOT_CPUS=6
+readonly SLOT_MEMORY_GIB=14
 readonly RUNNER_VERSION="2.336.0"
 readonly RUNNER_SHA256="58b758e420b87093fbd4bfddd368074960053e2f1388f01848c82624b90f27d1"
 readonly PLAYWRIGHT_VERSION="1.62.1"
@@ -18,6 +19,7 @@ readonly MAVEN_VERSION="3.9.16"
 readonly MAVEN_SHA512="831a8591fe20c8243b1dbe7d71e3244f31d1665b0804b2e825e38cbbe5ce0cafb8338851f90780735568773e0a6cd07bbec107cda0b896b008b861075358b6f6"
 readonly SUPPORT_DIR="${HOME}/Library/Application Support/OpenShapeForge Actions"
 readonly LOG_DIR="${HOME}/Library/Logs/OpenShapeForgeActions"
+readonly CAPACITY_CONFIG="${SUPPORT_DIR}/runner-capacity"
 readonly INSTALLED_SCRIPT="${SUPPORT_DIR}/local-actions-runners.sh"
 readonly RUNNER_ARCHIVE="${SUPPORT_DIR}/actions-runner-linux-arm64-${RUNNER_VERSION}.tar.gz"
 readonly PROVISION_LOCK="${SUPPORT_DIR}/provision.lock"
@@ -28,6 +30,13 @@ readonly ISOLATION_GROUP="${OPENSHAPEFORGE_RUNNER_ISOLATION_GROUP:-_osfci}"
 readonly RUNNER_USER="$(id -un)"
 readonly RUNNER_NAME_PREFIX="${OPENSHAPEFORGE_RUNNER_NAME_PREFIX:-openshapeforge-pr}"
 readonly DISABLED_DEPLOY_RUNNER_PREFIX="${OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX:-openshapeforge-deploy}"
+SLOT_COUNT="${OPENSHAPEFORGE_RUNNER_SLOT_COUNT:-}"
+HOST_CPU_LIMIT="${OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT:-}"
+HOST_MEMORY_GIB_LIMIT="${OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT:-}"
+PERSISTED_SLOT_COUNT=""
+PERSISTED_HOST_CPU_LIMIT=""
+PERSISTED_HOST_MEMORY_GIB_LIMIT=""
+SLOTS=()
 
 require_host_tools() {
   local tool
@@ -89,12 +98,129 @@ require_host_isolation() {
   }
 }
 
+require_positive_integer() {
+  local name="$1"
+  local value="$2"
+  if [[ ! "$value" =~ ^[1-9][0-9]*$ || ${#value} -gt 9 ]]; then
+    echo "${name} must be a positive integer" >&2
+    return 1
+  fi
+}
+
+read_persisted_capacity_configuration() {
+  local persisted_slot_count persisted_cpu_limit persisted_memory_limit extra read_status=0
+  if [[ ! -e "$CAPACITY_CONFIG" ]]; then
+    return 0
+  fi
+  if [[ ! -r "$CAPACITY_CONFIG" ]]; then
+    echo "Runner capacity configuration is not readable" >&2
+    return 1
+  fi
+  {
+    IFS= read -r persisted_slot_count || read_status=1
+    IFS= read -r persisted_cpu_limit || read_status=1
+    IFS= read -r persisted_memory_limit || read_status=1
+    if IFS= read -r extra; then
+      read_status=2
+    fi
+  } <"$CAPACITY_CONFIG"
+  if (( read_status == 1 )); then
+    echo "Runner capacity configuration is incomplete" >&2
+    return 1
+  fi
+  if (( read_status == 2 )); then
+    echo "Runner capacity configuration has unexpected data" >&2
+    return 1
+  fi
+  PERSISTED_SLOT_COUNT="$persisted_slot_count"
+  PERSISTED_HOST_CPU_LIMIT="$persisted_cpu_limit"
+  PERSISTED_HOST_MEMORY_GIB_LIMIT="$persisted_memory_limit"
+  require_positive_integer "persisted runner slot count" "$PERSISTED_SLOT_COUNT"
+  require_positive_integer "persisted runner CPU limit" "$PERSISTED_HOST_CPU_LIMIT"
+  require_positive_integer "persisted runner memory limit" "$PERSISTED_HOST_MEMORY_GIB_LIMIT"
+}
+
+load_capacity_configuration() {
+  local explicit_value_count=0
+  [[ -n "$SLOT_COUNT" ]] && ((explicit_value_count += 1))
+  [[ -n "$HOST_CPU_LIMIT" ]] && ((explicit_value_count += 1))
+  [[ -n "$HOST_MEMORY_GIB_LIMIT" ]] && ((explicit_value_count += 1))
+  if (( explicit_value_count != 0 && explicit_value_count != 3 )); then
+    echo "Runner capacity overrides must set slot count, CPU limit and memory limit together" >&2
+    return 1
+  fi
+
+  read_persisted_capacity_configuration
+  if (( explicit_value_count == 0 )) && [[ -n "$PERSISTED_SLOT_COUNT" ]]; then
+    SLOT_COUNT="$PERSISTED_SLOT_COUNT"
+    HOST_CPU_LIMIT="$PERSISTED_HOST_CPU_LIMIT"
+    HOST_MEMORY_GIB_LIMIT="$PERSISTED_HOST_MEMORY_GIB_LIMIT"
+  fi
+}
+
+require_supervisor_capacity_matches_persisted() {
+  if [[ "$COMMAND" != supervise-slot || -z "$PERSISTED_SLOT_COUNT" ]]; then
+    return 0
+  fi
+  if [[ "$SLOT_COUNT" != "$PERSISTED_SLOT_COUNT" ||
+        "$HOST_CPU_LIMIT" != "$PERSISTED_HOST_CPU_LIMIT" ||
+        "$HOST_MEMORY_GIB_LIMIT" != "$PERSISTED_HOST_MEMORY_GIB_LIMIT" ]]; then
+    echo "Runner supervisor capacity differs from the active persisted configuration" >&2
+    return 1
+  fi
+}
+
+persist_capacity_configuration() {
+  local temporary_config="${CAPACITY_CONFIG}.tmp.$$"
+  {
+    printf '%s\n' "$SLOT_COUNT"
+    printf '%s\n' "$HOST_CPU_LIMIT"
+    printf '%s\n' "$HOST_MEMORY_GIB_LIMIT"
+  } >"$temporary_config"
+  chmod 0600 "$temporary_config"
+  mv -f "$temporary_config" "$CAPACITY_CONFIG"
+}
+
+configure_slots() {
+  local required_cpus required_memory_gib slot
+  load_capacity_configuration
+  SLOT_COUNT="${SLOT_COUNT:-1}"
+  HOST_CPU_LIMIT="${HOST_CPU_LIMIT:-$SLOT_CPUS}"
+  HOST_MEMORY_GIB_LIMIT="${HOST_MEMORY_GIB_LIMIT:-$SLOT_MEMORY_GIB}"
+  require_positive_integer "OPENSHAPEFORGE_RUNNER_SLOT_COUNT" "$SLOT_COUNT"
+  require_positive_integer "OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT" "$HOST_CPU_LIMIT"
+  require_positive_integer "OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT" "$HOST_MEMORY_GIB_LIMIT"
+  require_supervisor_capacity_matches_persisted
+
+  required_cpus=$((SLOT_COUNT * SLOT_CPUS))
+  required_memory_gib=$((SLOT_COUNT * SLOT_MEMORY_GIB))
+  if (( required_cpus > HOST_CPU_LIMIT )); then
+    echo "Configured slots require ${required_cpus} CPUs but the declared host limit is ${HOST_CPU_LIMIT}" >&2
+    return 1
+  fi
+  if (( required_memory_gib > HOST_MEMORY_GIB_LIMIT )); then
+    echo "Configured slots require ${required_memory_gib} GiB but the declared host limit is ${HOST_MEMORY_GIB_LIMIT} GiB" >&2
+    return 1
+  fi
+
+  SLOTS=()
+  for ((slot = 1; slot <= SLOT_COUNT; slot++)); do
+    SLOTS+=("$slot")
+  done
+}
+
+slot_is_configured() {
+  local requested="$1"
+  [[ "$requested" =~ ^[1-9][0-9]*$ && ${#requested} -le 9 ]] &&
+    (( requested <= SLOT_COUNT ))
+}
+
 profile_for() {
   printf 'osf-pr-%s' "$1"
 }
 
 runner_prefix_for() {
-  printf '%s-%s' "$RUNNER_NAME_PREFIX" "$1"
+  printf '%s-%s-' "$RUNNER_NAME_PREFIX" "$1"
 }
 
 agent_label_for() {
@@ -107,6 +233,62 @@ plist_for() {
 
 runner_service_for() {
   printf 'actions.runner.OpenShapeForge-OpenShapeForge.%s.service' "$1"
+}
+
+runner_file_for() {
+  printf '%s/slot-%s.runner' "$SUPPORT_DIR" "$1"
+}
+
+machine_id_file_for() {
+  printf '%s/slot-%s.machine-id' "$SUPPORT_DIR" "$1"
+}
+
+state_file_for() {
+  printf '%s/slot-%s.state' "$SUPPORT_DIR" "$1"
+}
+
+pid_file_for() {
+  printf '%s/slot-%s.pid' "$SUPPORT_DIR" "$1"
+}
+
+write_slot_state() {
+  local slot="$1"
+  local state="$2"
+  mkdir -p "$SUPPORT_DIR"
+  printf '%s\n' "$state" >"$(state_file_for "$slot")"
+}
+
+record_slot_identity() {
+  local slot="$1"
+  local runner_name="$2"
+  local machine_id="$3"
+  printf '%s\n' "$runner_name" >"$(runner_file_for "$slot")"
+  printf '%s\n' "$machine_id" >"$(machine_id_file_for "$slot")"
+}
+
+clear_slot_identity() {
+  local slot="$1"
+  rm -f "$(runner_file_for "$slot")" "$(machine_id_file_for "$slot")"
+}
+
+verify_unique_machine_id() {
+  local slot="$1"
+  local machine_id="$2"
+  local other_slot other_machine_id_file other_machine_id
+  [[ "$machine_id" =~ ^[0-9a-f]{32}$ ]] || {
+    echo "Runner slot ${slot} returned an invalid machine id" >&2
+    return 1
+  }
+  for other_slot in "${SLOTS[@]}"; do
+    [[ "$other_slot" == "$slot" ]] && continue
+    other_machine_id_file="$(machine_id_file_for "$other_slot")"
+    [[ -r "$other_machine_id_file" ]] || continue
+    other_machine_id="$(cat "$other_machine_id_file")"
+    if [[ "$other_machine_id" == "$machine_id" ]]; then
+      echo "Runner slots ${slot} and ${other_slot} have the same machine id" >&2
+      return 1
+    fi
+  done
 }
 
 delete_repository_runner() {
@@ -160,25 +342,36 @@ delete_profile() {
 cleanup_slot() {
   local slot="$1"
   local prefix busy
+  write_slot_state "$slot" cleaning
   prefix="$(runner_prefix_for "$slot")"
   if ! busy="$(
     gh api --paginate "repos/${REPOSITORY}/actions/runners?per_page=100" \
       --jq ".runners[] | select(.name | startswith(\"${prefix}\")) | select(.busy == true) | .name"
   )"; then
+    write_slot_state "$slot" cleanup-failed
     echo "Could not verify runner state for slot ${slot}; refusing cleanup" >&2
     return 1
   fi
   if [[ -n "$busy" ]]; then
+    write_slot_state "$slot" cleanup-failed
     echo "Refusing to delete busy runner slot ${slot}: ${busy}" >&2
     return 1
   fi
-  delete_matching_runners "$prefix" || return 1
-  delete_profile "$(profile_for "$slot")" || return 1
+  delete_matching_runners "$prefix" || {
+    write_slot_state "$slot" cleanup-failed
+    return 1
+  }
+  delete_profile "$(profile_for "$slot")" || {
+    write_slot_state "$slot" cleanup-failed
+    return 1
+  }
+  clear_slot_identity "$slot"
+  write_slot_state "$slot" idle
   return 0
 }
 
 disable_local_deploy_runner() {
-  delete_matching_runners "$DISABLED_DEPLOY_RUNNER_PREFIX"
+  delete_matching_runners "$DISABLED_DEPLOY_RUNNER_PREFIX" || return 1
   delete_profile "osf-deploy"
 }
 
@@ -943,12 +1136,13 @@ provision_slot_locked() {
   local slot="$1"
   local profile runner_name runner_id machine_id service lifecycle_state
   profile="$(profile_for "$slot")"
-  runner_name="$(runner_prefix_for "$slot")-$(uuidgen | tr '[:upper:]' '[:lower:]' | cut -c 1-8)"
+  runner_name="$(runner_prefix_for "$slot")$(uuidgen | tr '[:upper:]' '[:lower:]' | cut -c 1-8)"
 
   require_host_isolation
   cleanup_slot "$slot" || return 1
+  write_slot_state "$slot" provisioning
   colima start "$profile" \
-    --cpus 6 --memory 14 --root-disk 120 --arch aarch64 --runtime docker \
+    --cpus "$SLOT_CPUS" --memory "$SLOT_MEMORY_GIB" --root-disk 120 --arch aarch64 --runtime docker \
     --vm-type vz --mount none --ssh-agent=false --ssh-config=false \
     --activate=false --port-forwarder none \
     --dns 1.1.1.1 --dns 1.0.0.1 >/dev/null
@@ -998,6 +1192,9 @@ provision_slot_locked() {
 
   require_host_isolation
   verify_host_network_boundary "$profile"
+  machine_id="$(colima -p "$profile" ssh -- cat /etc/machine-id)"
+  verify_unique_machine_id "$slot" "$machine_id"
+  record_slot_identity "$slot" "$runner_name" "$machine_id"
   gh api --method POST "repos/${REPOSITORY}/actions/runners/registration-token" --jq .token |
     colima -p "$profile" ssh -- env RUNNER_NAME="$runner_name" bash -lc '
       set -euo pipefail
@@ -1017,18 +1214,20 @@ provision_slot_locked() {
   harden_and_start_runner "$profile" "$service"
   verify_unprivileged_runner "$profile" "$service"
 
-  machine_id="$(colima -p "$profile" ssh -- cat /etc/machine-id)"
   lifecycle_state="$(wait_for_runner_online_or_consumed \
     "$profile" "$service" "$runner_id" "$runner_name")"
   if [[ "$lifecycle_state" == online ]]; then
+    write_slot_state "$slot" active
     echo "READY slot=${slot} runner=${runner_name} machine_id=${machine_id}"
-    printf '%s\n' "$runner_name" >"${SUPPORT_DIR}/slot-${slot}.runner"
-    printf '%s\n' "$machine_id" >"${SUPPORT_DIR}/slot-${slot}.machine-id"
     release_provision_lock
-    wait_for_ephemeral_runner_completion "$runner_id" "$runner_name" || return 1
+    if ! wait_for_ephemeral_runner_completion "$runner_id" "$runner_name"; then
+      write_slot_state "$slot" lifecycle-failed
+      return 1
+    fi
   else
     release_provision_lock
   fi
+  write_slot_state "$slot" completed
   echo "COMPLETE slot=${slot} runner=${runner_name} machine_id=${machine_id}"
 }
 
@@ -1060,13 +1259,16 @@ cleanup_slot_serialized() (
 
 cleanup_slot_on_exit() {
   local slot="$1"
-  release_provision_lock
-  cleanup_slot_serialized "$slot"
+  release_provision_lock || true
+  cleanup_slot_serialized "$slot" || true
+  rm -f "$(pid_file_for "$slot")"
 }
 
 supervise_slot() {
   local slot="$1"
   local provision_result cleanup_result
+  write_slot_state "$slot" starting
+  printf '%s\n' "$$" >"$(pid_file_for "$slot")"
   trap 'cleanup_slot_on_exit "$slot"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
@@ -1126,15 +1328,100 @@ write_launch_agent() {
     <key>OPENSHAPEFORGE_RUNNER_ISOLATION_GROUP</key><string>${escaped_isolation_group}</string>
     <key>OPENSHAPEFORGE_RUNNER_NAME_PREFIX</key><string>${escaped_runner_prefix}</string>
     <key>OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX</key><string>${escaped_deploy_prefix}</string>
+    <key>OPENSHAPEFORGE_RUNNER_SLOT</key><string>${slot}</string>
+    <key>OPENSHAPEFORGE_RUNNER_SLOT_COUNT</key><string>${SLOT_COUNT}</string>
+    <key>OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT</key><string>${HOST_CPU_LIMIT}</string>
+    <key>OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT</key><string>${HOST_MEMORY_GIB_LIMIT}</string>
   </dict>
 </dict></plist>
 EOF
   plutil -lint "$plist" >/dev/null
 }
 
+verify_capacity_migration() {
+  local slot prefix runners profiles supervisor_pid plist backup launch_agent_status
+  local launch_agent_label launchctl_output launchctl_status expected_not_found
+  local retired_plists=()
+  local retired_backups=()
+  if [[ -z "$PERSISTED_SLOT_COUNT" ]] || (( SLOT_COUNT >= PERSISTED_SLOT_COUNT )); then
+    return 0
+  fi
+
+  if ! profiles="$(colima list --json 2>/dev/null)"; then
+    echo "Could not inspect Colima profiles before reducing runner capacity" >&2
+    return 1
+  fi
+  for ((slot = SLOT_COUNT + 1; slot <= PERSISTED_SLOT_COUNT; slot++)); do
+    launch_agent_label="$(agent_label_for "$slot")"
+    if launchctl_output="$(launchctl print "gui/${UID}/${launch_agent_label}" 2>&1)"; then
+      launch_agent_status=0
+    else
+      launchctl_status=$?
+      expected_not_found="Bad request."$'\n'"Could not find service \"${launch_agent_label}\" in domain for user gui: ${UID}"
+      if (( launchctl_status == 113 )) && [[ "$launchctl_output" == "$expected_not_found" ]]; then
+        launch_agent_status=1
+      else
+        echo "Could not inspect runner supervisor slot ${slot} with launchctl" \
+          "(exit ${launchctl_status}): ${launchctl_output}" >&2
+        return 1
+      fi
+    fi
+    if (( launch_agent_status == 0 )); then
+      echo "Refusing to retire active runner supervisor slot ${slot}; stop the old capacity first" >&2
+      return 1
+    fi
+    supervisor_pid="$(cat "$(pid_file_for "$slot")" 2>/dev/null || true)"
+    if [[ "$supervisor_pid" =~ ^[0-9]+$ ]] && kill -0 "$supervisor_pid" 2>/dev/null; then
+      echo "Refusing to retire running runner process slot ${slot}; stop the old capacity first" >&2
+      return 1
+    fi
+    prefix="$(runner_prefix_for "$slot")"
+    if ! runners="$(gh api --paginate "repos/${REPOSITORY}/actions/runners?per_page=100" \
+      --jq ".runners[] | select(.name | startswith(\"${prefix}\")) | .name")"; then
+      echo "Could not verify repository runners before reducing runner capacity" >&2
+      return 1
+    fi
+    if [[ -n "$runners" ]]; then
+      echo "Refusing to retire registered runner slot ${slot}: ${runners}" >&2
+      return 1
+    fi
+    if printf '%s\n' "$profiles" | jq -e --arg profile "$(profile_for "$slot")" \
+      'select(.name == $profile)' >/dev/null; then
+      echo "Refusing to retire existing Colima profile slot ${slot}; stop the old capacity first" >&2
+      return 1
+    fi
+  done
+
+  for ((slot = SLOT_COUNT + 1; slot <= PERSISTED_SLOT_COUNT; slot++)); do
+    plist="$(plist_for "$slot")"
+    [[ -e "$plist" ]] || continue
+    backup="${plist}.retired.$$"
+    if ! mv -f "$plist" "$backup"; then
+      echo "Could not retire launch agent for slot ${slot}" >&2
+      local restore_index
+      for ((restore_index = 0; restore_index < ${#retired_plists[@]}; restore_index++)); do
+        mv -f "${retired_backups[$restore_index]}" "${retired_plists[$restore_index]}" || true
+      done
+      return 1
+    fi
+    retired_plists+=("$plist")
+    retired_backups+=("$backup")
+  done
+  if (( ${#retired_backups[@]} > 0 )); then
+    for backup in "${retired_backups[@]}"; do
+      unlink "$backup" || {
+        echo "Could not remove retired launch agent backup: ${backup}" >&2
+        return 1
+      }
+    done
+  fi
+}
+
 start_supervisors() {
   require_host_isolation
   mkdir -p "$SUPPORT_DIR" "$LOG_DIR"
+  verify_capacity_migration
+  persist_capacity_configuration
   install -m 0700 "$0" "$INSTALLED_SCRIPT"
   ensure_runner_archive
   disable_local_deploy_runner
@@ -1151,9 +1438,11 @@ start_supervisors() {
 
 wait_for_supervisor_exit() {
   local slot="$1"
-  local attempt
+  local attempt supervisor_pid
+  supervisor_pid="$(cat "$(pid_file_for "$slot")" 2>/dev/null || true)"
+  [[ "$supervisor_pid" =~ ^[0-9]+$ ]] || return 0
   for attempt in {1..50}; do
-    if ! pgrep -f "${INSTALLED_SCRIPT} supervise-slot ${slot}" >/dev/null; then
+    if ! kill -0 "$supervisor_pid" 2>/dev/null; then
       return
     fi
     sleep 0.2
@@ -1163,7 +1452,7 @@ wait_for_supervisor_exit() {
 }
 
 preflight_stop() {
-  local slot prefix busy
+  local slot prefix busy result=0
   for slot in "${SLOTS[@]}"; do
     prefix="$(runner_prefix_for "$slot")"
     if ! busy="$(
@@ -1171,27 +1460,48 @@ preflight_stop() {
         --jq ".runners[] | select(.name | startswith(\"${prefix}\")) | select(.busy == true) | .name"
     )"; then
       echo "Could not verify runner state for slot ${slot}; supervisors remain active" >&2
-      return 1
+      result=1
+      continue
     fi
     if [[ -n "$busy" ]]; then
       echo "Refusing to stop busy runner slot ${slot}: ${busy}" >&2
-      return 1
+      result=1
     fi
   done
+  return "$result"
 }
 
 restore_supervisors() {
-  local slot plist
+  local slot plist result=0
   for slot in "${SLOTS[@]}"; do
     plist="$(plist_for "$slot")"
     if ! launchctl print "gui/${UID}/$(agent_label_for "$slot")" >/dev/null 2>&1; then
-      launchctl bootstrap "gui/${UID}" "$plist"
+      if ! launchctl bootstrap "gui/${UID}" "$plist"; then
+        echo "Could not restore supervisor for slot ${slot}" >&2
+        result=1
+      fi
     fi
   done
+  return "$result"
+}
+
+cleanup_configured_slots() {
+  local slot result=0
+  for slot in "${SLOTS[@]}"; do
+    if cleanup_slot "$slot"; then
+      echo "slot ${slot}: stopped and deleted"
+    else
+      result=1
+    fi
+  done
+  if ! disable_local_deploy_runner; then
+    result=1
+  fi
+  return "$result"
 }
 
 stop_supervisors() {
-  local slot plist result wait_result=0
+  local slot plist result=0 wait_result=0
   preflight_stop
   for slot in "${SLOTS[@]}"; do
     plist="$(plist_for "$slot")"
@@ -1210,14 +1520,7 @@ stop_supervisors() {
 
   acquire_provision_lock
   set +e
-  (
-    set -e
-    for slot in "${SLOTS[@]}"; do
-      cleanup_slot "$slot"
-      echo "slot ${slot}: stopped and deleted"
-    done
-    disable_local_deploy_runner
-  )
+  cleanup_configured_slots
   result=$?
   set -e
   release_provision_lock
@@ -1244,10 +1547,10 @@ show_status() {
 }
 
 verify_slots() {
-  local slot profile runner_name service repository_runner_names
+  local slot profile runner_name service machine_id stored_machine_id repository_runner_names
   for slot in "${SLOTS[@]}"; do
     profile="$(profile_for "$slot")"
-    runner_name="$(cat "${SUPPORT_DIR}/slot-${slot}.runner")"
+    runner_name="$(cat "$(runner_file_for "$slot")")"
     service="$(runner_service_for "$runner_name")"
     require_host_isolation
     verify_host_network_boundary "$profile"
@@ -1256,7 +1559,14 @@ verify_slots() {
     verify_rootless_docker_firewall_behavior "$profile"
     verify_pre_job_policy "$profile" "$service"
     verify_unprivileged_runner "$profile" "$service"
-    colima -p "$profile" ssh -- bash -lc 'printf "machine_id=%s\\n" "$(cat /etc/machine-id)"'
+    stored_machine_id="$(cat "$(machine_id_file_for "$slot")")"
+    machine_id="$(colima -p "$profile" ssh -- cat /etc/machine-id)"
+    [[ "$machine_id" == "$stored_machine_id" ]] || {
+      echo "Runner slot ${slot} machine id changed" >&2
+      return 1
+    }
+    verify_unique_machine_id "$slot" "$machine_id"
+    printf 'slot=%s machine_id=%s\n' "$slot" "$machine_id"
   done
   if ! repository_runner_names="$(
     gh api --paginate "repos/${REPOSITORY}/actions/runners?per_page=100" \
@@ -1272,6 +1582,7 @@ verify_slots() {
 }
 
 main() {
+  configure_slots
   require_host_tools
   require_runner_identity_values
 
@@ -1281,11 +1592,12 @@ main() {
     status) show_status ;;
     verify) verify_slots ;;
     supervise-slot)
-      [[ "${2:-}" == "1" ]] || {
-        echo "supervise-slot requires slot 1" >&2
+      local requested_slot="${OPENSHAPEFORGE_RUNNER_SLOT:-${2:-}}"
+      slot_is_configured "$requested_slot" || {
+        echo "supervise-slot requires a configured slot" >&2
         exit 2
       }
-      supervise_slot "$2"
+      supervise_slot "$requested_slot"
       ;;
     *)
       echo "Usage: $0 {start|stop|status|verify}" >&2

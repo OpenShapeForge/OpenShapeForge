@@ -84,10 +84,49 @@ The workflow expression and `bun run check:self-hosted-routing` cannot replace
 the pre-job hook because pull-request code can edit both.
 
 The macOS supervisor derives its runner user and isolation-group id from the
-host. Its runner-name prefixes and isolation-group name can be overridden with
+host. It defaults to one 6-CPU / 14-GiB slot. Additional slots are opt-in and
+must fit within CPU and memory limits declared by the operator; leaving the
+limits unset therefore permits only the safe one-slot default. For example,
+the complete capacity declaration for two slots is:
+
+```sh
+export OPENSHAPEFORGE_RUNNER_SLOT_COUNT=2
+export OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT=12
+export OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT=28
+./scripts/local-actions-runners.sh start
+```
+
+`start` stores the validated capacity in the private host support directory.
+Later `status`, `verify` and `stop` calls reuse that configuration when no
+capacity variables are supplied, so a two-slot installation cannot silently be
+managed as one slot. An explicit environment remains authoritative only when
+all three capacity variables are supplied together. The limits are the
+capacity reserved for these runners,
+not a claim derived from the physical host, so they must not exceed what the
+operator has actually made available. The supervisor refuses incomplete,
+invalid or overcommitted capacity before it changes runner state.
+
+Every slot has its own `osf-pr-<slot>` Colima profile, launch agent, log,
+runner-name file, machine-id file, PID file and lifecycle-state file. Each VM
+still registers with `--ephemeral`, accepts at most one job and is deleted
+before that slot registers a replacement. The shared host lock serializes VM
+provisioning and cleanup, but it is released while an online slot runs its job,
+so another slot can provision concurrently with that active job. Firewall,
+machine-identity and pre-job admission checks run separately before each slot
+becomes available.
+
+Runner-name prefixes and the isolation-group name can also be overridden with
 the `OPENSHAPEFORGE_RUNNER_*` variables declared at the top of the script.
-Changing those values is an operator migration: stop only after the busy-runner
-preflight passes, then start the new copied installation.
+Changing the slot count or any of those values is an operator migration: use
+the old configuration to stop only after every configured slot passes the
+busy-runner preflight, then start the new copied installation with all three
+capacity values. A lower slot count is rejected while any retired supervisor,
+runner process, repository registration or VM profile still exists. Once that
+preflight passes, retired LaunchAgent files are removed; a stale agent also
+fails closed when its embedded capacity differs from the persisted capacity.
+Cleanup is
+serialized but failure-isolated: all configured slots are attempted, and a
+failure restores the supervisors so remaining state stays managed.
 
 ## Deploy pipeline
 

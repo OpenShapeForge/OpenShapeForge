@@ -31,7 +31,7 @@ readonly DISABLED_DEPLOY_RUNNER_PREFIX="${OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX:-o
 
 require_host_tools() {
   local tool
-  for tool in colima curl dscl gh ifconfig ipconfig jq launchctl lsof nc ps route shasum shlock stat unlink uuidgen; do
+  for tool in colima curl dscl gh ifconfig ipconfig jq launchctl limactl lsof nc ps route shasum shlock stat unlink uuidgen; do
     command -v "$tool" >/dev/null 2>&1 || {
       echo "Required host tool is missing: $tool" >&2
       exit 1
@@ -512,8 +512,9 @@ assert_host_tcp_port_unbound() {
 }
 
 select_forwarding_probe_port() {
+  local first_port="${1:-49152}"
   local port state
-  for ((port = 49152; port <= 49279; port += 1)); do
+  for ((port = first_port; port <= 49279; port += 1)); do
     state="$(host_tcp_port_state "$port")"
     case "$state" in
       unbound)
@@ -531,18 +532,85 @@ select_forwarding_probe_port() {
   return 1
 }
 
+# Colima 0.10.x's `none` rule covers wildcard listeners but Lima's implicit
+# loopback rule has higher specificity. Stop the still-trusted VM, add explicit
+# deny rules to its generated Lima config, validate it, and only then restart.
+harden_colima_loopback_forwarding() {
+  local profile="$1"
+  local colima_home="${COLIMA_HOME:-${HOME}/.colima}"
+  local lima_home="${colima_home}/_lima"
+  local instance="colima-${profile}"
+  local config="${lima_home}/${instance}/lima.yaml"
+  local temp_config
+
+  LIMA_HOME="$lima_home" limactl stop "$instance" >/dev/null
+  [[ -f "$config" ]] || {
+    echo "Generated Lima config is missing for ${profile}" >&2
+    return 1
+  }
+  [[ "$(grep -c '^portForwards:$' "$config")" == 1 ]] || {
+    echo "Generated Lima forwarding config is not in the expected shape" >&2
+    return 1
+  }
+
+  temp_config="$(mktemp "${config}.tmp.XXXXXX")"
+  if ! awk '
+    /^portForwards:$/ {
+      print
+      print "    - guestIP: 127.0.0.1"
+      print "      guestPortRange:"
+      print "        - 1"
+      print "        - 65535"
+      print "      hostPortRange:"
+      print "        - 1"
+      print "        - 65535"
+      print "      proto: any"
+      print "      ignore: true"
+      print "    - guestIP: ::1"
+      print "      guestPortRange:"
+      print "        - 1"
+      print "        - 65535"
+      print "      hostPortRange:"
+      print "        - 1"
+      print "        - 65535"
+      print "      proto: any"
+      print "      ignore: true"
+      next
+    }
+    { print }
+  ' "$config" >"$temp_config"; then
+    rm -f "$temp_config"
+    return 1
+  fi
+  chmod 0600 "$temp_config"
+  if ! LIMA_HOME="$lima_home" limactl validate "$temp_config" >/dev/null; then
+    rm -f "$temp_config"
+    echo "Hardened Lima forwarding config is invalid" >&2
+    return 1
+  fi
+  mv "$temp_config" "$config"
+  LIMA_HOME="$lima_home" limactl start --tty=false "$instance" >/dev/null
+}
+
 # Colima is configured with no port forwarder, but admission also proves that
-# behavior live. Keep a wildcard guest listener alive while the Mac checks both
-# loopback families and its complete listener table, then tear it down before a
-# registration token is requested.
+# behavior live. Keep wildcard, IPv4-loopback and IPv6-loopback guest listeners
+# alive while the Mac checks both loopback families and its complete listener
+# table, then tear them down before a registration token is requested.
 verify_guest_port_forwarding_disabled() {
   local profile="$1"
-  local attempt result=0
-  local forwarding_probe_port
+  local attempt port result=0
+  local wildcard_probe_port ipv4_loopback_probe_port ipv6_loopback_probe_port
 
-  forwarding_probe_port="$(select_forwarding_probe_port)" || return 1
-  assert_host_tcp_port_unbound "$forwarding_probe_port" || return 1
-  if ! colima -p "$profile" ssh -- env FORWARDING_PROBE_PORT="$forwarding_probe_port" bash -lc '
+  wildcard_probe_port="$(select_forwarding_probe_port)" || return 1
+  ipv4_loopback_probe_port="$(select_forwarding_probe_port "$((wildcard_probe_port + 1))")" || return 1
+  ipv6_loopback_probe_port="$(select_forwarding_probe_port "$((ipv4_loopback_probe_port + 1))")" || return 1
+  assert_host_tcp_port_unbound "$wildcard_probe_port" || return 1
+  assert_host_tcp_port_unbound "$ipv4_loopback_probe_port" || return 1
+  assert_host_tcp_port_unbound "$ipv6_loopback_probe_port" || return 1
+  if ! colima -p "$profile" ssh -- env \
+    WILDCARD_PROBE_PORT="$wildcard_probe_port" \
+    IPV4_LOOPBACK_PROBE_PORT="$ipv4_loopback_probe_port" \
+    IPV6_LOOPBACK_PROBE_PORT="$ipv6_loopback_probe_port" bash -lc '
     set -euo pipefail
     readonly pid_file=/tmp/openshapeforge-forwarding-probe.pid
     readonly ready_file=/tmp/openshapeforge-forwarding-probe.ready
@@ -553,20 +621,35 @@ verify_guest_port_forwarding_disabled() {
     nohup /usr/local/bin/node -e '"'"'
       const fs = require("node:fs");
       const net = require("node:net");
-      const port = Number(process.env.FORWARDING_PROBE_PORT);
-      const server = net.createServer((socket) => {
-        socket.end("HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nready\n");
-      });
-      server.listen(port, "0.0.0.0", () => {
-        fs.writeFileSync("/tmp/openshapeforge-forwarding-probe.ready", "ready\n", { mode: 0o600 });
-      });
+      const probes = [
+        [Number(process.env.WILDCARD_PROBE_PORT), "0.0.0.0"],
+        [Number(process.env.IPV4_LOOPBACK_PROBE_PORT), "127.0.0.1"],
+        [Number(process.env.IPV6_LOOPBACK_PROBE_PORT), "::1"],
+      ];
+      let ready = 0;
+      for (const [port, host] of probes) {
+        const server = net.createServer((socket) => {
+          socket.end("HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nready\n");
+        });
+        server.listen(port, host, () => {
+          ready += 1;
+          if (ready === probes.length) {
+            fs.writeFileSync("/tmp/openshapeforge-forwarding-probe.ready", "ready\n", { mode: 0o600 });
+          }
+        });
+      }
     '"'"' >"$log_file" 2>&1 </dev/null &
     printf "%s\n" "$!" >"$pid_file"
     for attempt in {1..20}; do
       if [[ -f "$ready_file" ]]; then
-        response="$(curl -fsS --max-time 1 \
-          "http://127.0.0.1:${FORWARDING_PROBE_PORT}" 2>>"$log_file" || true)"
-        if [[ "$response" == ready ]]; then
+        wildcard_response="$(curl -fsS --max-time 1 \
+          "http://127.0.0.1:${WILDCARD_PROBE_PORT}" 2>>"$log_file" || true)"
+        ipv4_response="$(curl -fsS --max-time 1 \
+          "http://127.0.0.1:${IPV4_LOOPBACK_PROBE_PORT}" 2>>"$log_file" || true)"
+        ipv6_response="$(curl --noproxy "*" -gfsS --max-time 1 \
+          "http://[::1]:${IPV6_LOOPBACK_PROBE_PORT}" 2>>"$log_file" || true)"
+        if [[ "$wildcard_response" == ready && "$ipv4_response" == ready && \
+          "$ipv6_response" == ready ]]; then
           probe_ready=1
           break
         fi
@@ -606,22 +689,30 @@ verify_guest_port_forwarding_disabled() {
   fi
 
   for attempt in {1..20}; do
-    if ! assert_host_tcp_port_unbound "$forwarding_probe_port"; then
-      result=1
-      break
-    fi
-    if nc -w 1 -z 127.0.0.1 "$forwarding_probe_port" >/dev/null 2>&1 ||
-      nc -6 -w 1 -z ::1 "$forwarding_probe_port" >/dev/null 2>&1; then
-      echo "Guest TCP port ${forwarding_probe_port} is reachable on the Mac" >&2
-      result=1
-      break
-    fi
+    for port in "$wildcard_probe_port" "$ipv4_loopback_probe_port" "$ipv6_loopback_probe_port"; do
+      if ! assert_host_tcp_port_unbound "$port"; then
+        result=1
+        break 2
+      fi
+      if nc -w 1 -z 127.0.0.1 "$port" >/dev/null 2>&1 ||
+        nc -6 -w 1 -z ::1 "$port" >/dev/null 2>&1; then
+        echo "Guest TCP port ${port} is reachable on the Mac" >&2
+        result=1
+        break 2
+      fi
+    done
     sleep 0.25
   done
 
-  if ! colima -p "$profile" ssh -- env FORWARDING_PROBE_PORT="$forwarding_probe_port" bash -lc '
+  if ! colima -p "$profile" ssh -- env \
+    WILDCARD_PROBE_PORT="$wildcard_probe_port" \
+    IPV4_LOOPBACK_PROBE_PORT="$ipv4_loopback_probe_port" \
+    IPV6_LOOPBACK_PROBE_PORT="$ipv6_loopback_probe_port" bash -lc '
     set -euo pipefail
-    curl -fsS --max-time 1 "http://127.0.0.1:${FORWARDING_PROBE_PORT}" | grep -qx ready
+    [[ "$(curl -fsS --max-time 1 "http://127.0.0.1:${WILDCARD_PROBE_PORT}")" == ready ]]
+    [[ "$(curl -fsS --max-time 1 "http://127.0.0.1:${IPV4_LOOPBACK_PROBE_PORT}")" == ready ]]
+    [[ "$(curl --noproxy "*" -gfsS --max-time 1 \
+      "http://[::1]:${IPV6_LOOPBACK_PROBE_PORT}")" == ready ]]
   '; then
     echo "Guest port-forwarding probe stopped before host verification completed" >&2
     result=1
@@ -856,6 +947,7 @@ provision_slot_locked() {
     --vm-type vz --mount none --ssh-agent=false --ssh-config=false \
     --activate=false --port-forwarder none \
     --dns 1.1.1.1 --dns 1.0.0.1 >/dev/null
+  harden_colima_loopback_forwarding "$profile"
 
   verify_host_network_boundary "$profile"
 

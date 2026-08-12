@@ -8,11 +8,8 @@ set -euo pipefail
 
 readonly REPOSITORY="OpenShapeForge/OpenShapeForge"
 readonly COMMAND="${1:-status}"
-readonly SLOT_COUNT="${OPENSHAPEFORGE_RUNNER_SLOT_COUNT:-1}"
 readonly SLOT_CPUS=6
 readonly SLOT_MEMORY_GIB=14
-readonly HOST_CPU_LIMIT="${OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT:-$SLOT_CPUS}"
-readonly HOST_MEMORY_GIB_LIMIT="${OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT:-$SLOT_MEMORY_GIB}"
 readonly RUNNER_VERSION="2.336.0"
 readonly RUNNER_SHA256="58b758e420b87093fbd4bfddd368074960053e2f1388f01848c82624b90f27d1"
 readonly PLAYWRIGHT_VERSION="1.62.1"
@@ -22,6 +19,7 @@ readonly MAVEN_VERSION="3.9.16"
 readonly MAVEN_SHA512="831a8591fe20c8243b1dbe7d71e3244f31d1665b0804b2e825e38cbbe5ce0cafb8338851f90780735568773e0a6cd07bbec107cda0b896b008b861075358b6f6"
 readonly SUPPORT_DIR="${HOME}/Library/Application Support/OpenShapeForge Actions"
 readonly LOG_DIR="${HOME}/Library/Logs/OpenShapeForgeActions"
+readonly CAPACITY_CONFIG="${SUPPORT_DIR}/runner-capacity"
 readonly INSTALLED_SCRIPT="${SUPPORT_DIR}/local-actions-runners.sh"
 readonly RUNNER_ARCHIVE="${SUPPORT_DIR}/actions-runner-linux-arm64-${RUNNER_VERSION}.tar.gz"
 readonly PROVISION_LOCK="${SUPPORT_DIR}/provision.lock"
@@ -32,6 +30,9 @@ readonly ISOLATION_GROUP="${OPENSHAPEFORGE_RUNNER_ISOLATION_GROUP:-_osfci}"
 readonly RUNNER_USER="$(id -un)"
 readonly RUNNER_NAME_PREFIX="${OPENSHAPEFORGE_RUNNER_NAME_PREFIX:-openshapeforge-pr}"
 readonly DISABLED_DEPLOY_RUNNER_PREFIX="${OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX:-openshapeforge-deploy}"
+SLOT_COUNT="${OPENSHAPEFORGE_RUNNER_SLOT_COUNT:-}"
+HOST_CPU_LIMIT="${OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT:-}"
+HOST_MEMORY_GIB_LIMIT="${OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT:-}"
 SLOTS=()
 
 require_host_tools() {
@@ -103,8 +104,56 @@ require_positive_integer() {
   fi
 }
 
+load_capacity_configuration() {
+  local persisted_slot_count persisted_cpu_limit persisted_memory_limit extra read_status=0
+  if [[ -n "$SLOT_COUNT" || -n "$HOST_CPU_LIMIT" || -n "$HOST_MEMORY_GIB_LIMIT" ]]; then
+    return 0
+  fi
+  if [[ ! -e "$CAPACITY_CONFIG" ]]; then
+    return 0
+  fi
+  if [[ ! -r "$CAPACITY_CONFIG" ]]; then
+    echo "Runner capacity configuration is not readable" >&2
+    return 1
+  fi
+  {
+    IFS= read -r persisted_slot_count || read_status=1
+    IFS= read -r persisted_cpu_limit || read_status=1
+    IFS= read -r persisted_memory_limit || read_status=1
+    if IFS= read -r extra; then
+      read_status=2
+    fi
+  } <"$CAPACITY_CONFIG"
+  if (( read_status == 1 )); then
+    echo "Runner capacity configuration is incomplete" >&2
+    return 1
+  fi
+  if (( read_status == 2 )); then
+    echo "Runner capacity configuration has unexpected data" >&2
+    return 1
+  fi
+  SLOT_COUNT="$persisted_slot_count"
+  HOST_CPU_LIMIT="$persisted_cpu_limit"
+  HOST_MEMORY_GIB_LIMIT="$persisted_memory_limit"
+}
+
+persist_capacity_configuration() {
+  local temporary_config="${CAPACITY_CONFIG}.tmp.$$"
+  {
+    printf '%s\n' "$SLOT_COUNT"
+    printf '%s\n' "$HOST_CPU_LIMIT"
+    printf '%s\n' "$HOST_MEMORY_GIB_LIMIT"
+  } >"$temporary_config"
+  chmod 0600 "$temporary_config"
+  mv -f "$temporary_config" "$CAPACITY_CONFIG"
+}
+
 configure_slots() {
   local required_cpus required_memory_gib slot
+  load_capacity_configuration
+  SLOT_COUNT="${SLOT_COUNT:-1}"
+  HOST_CPU_LIMIT="${HOST_CPU_LIMIT:-$SLOT_CPUS}"
+  HOST_MEMORY_GIB_LIMIT="${HOST_MEMORY_GIB_LIMIT:-$SLOT_MEMORY_GIB}"
   require_positive_integer "OPENSHAPEFORGE_RUNNER_SLOT_COUNT" "$SLOT_COUNT"
   require_positive_integer "OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT" "$HOST_CPU_LIMIT"
   require_positive_integer "OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT" "$HOST_MEMORY_GIB_LIMIT"
@@ -1258,6 +1307,7 @@ EOF
 start_supervisors() {
   require_host_isolation
   mkdir -p "$SUPPORT_DIR" "$LOG_DIR"
+  persist_capacity_configuration
   install -m 0700 "$0" "$INSTALLED_SCRIPT"
   ensure_runner_archive
   disable_local_deploy_runner

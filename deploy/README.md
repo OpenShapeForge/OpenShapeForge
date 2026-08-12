@@ -96,12 +96,14 @@ export OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT=28
 ./scripts/local-actions-runners.sh start
 ```
 
-Use the same exported configuration for `status`, `verify` and `stop`. The
-limits are the capacity reserved for these runners, not a claim derived from
-the physical host, so they must not exceed what the operator has actually made
-available. The supervisor refuses invalid values and any slot count whose
-fixed per-slot allocation would exceed either declared limit before it changes
-runner state.
+`start` stores the validated capacity in the private host support directory.
+Later `status`, `verify` and `stop` calls reuse that configuration when no
+capacity variables are supplied, so a two-slot installation cannot silently be
+managed as one slot. An explicit environment remains authoritative for a
+deliberate migration. The limits are the capacity reserved for these runners,
+not a claim derived from the physical host, so they must not exceed what the
+operator has actually made available. The supervisor refuses incomplete,
+invalid or overcommitted capacity before it changes runner state.
 
 Every slot has its own `osf-pr-<slot>` Colima profile, launch agent, log,
 runner-name file, machine-id file, PID file and lifecycle-state file. Each VM

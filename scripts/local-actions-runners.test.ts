@@ -134,9 +134,8 @@ describe("isolation invariants", () => {
 
   test("defaults to one slot, ephemeral registration and serialized cleanup", async () => {
     const source = await readFile(RUNNERS, "utf8");
-    expect(source).toContain(
-      'readonly SLOT_COUNT="${OPENSHAPEFORGE_RUNNER_SLOT_COUNT:-1}"',
-    );
+    expect(source).toContain('SLOT_COUNT="${OPENSHAPEFORGE_RUNNER_SLOT_COUNT:-}"');
+    expect(source).toContain('SLOT_COUNT="${SLOT_COUNT:-1}"');
     expect(source).toContain("./config.sh --unattended --ephemeral --disableupdate");
     expect(source).toContain(`cleanup_slot_serialized() (
   local slot="$1"
@@ -527,6 +526,41 @@ configure_slots
     expect(result.stderr.toString()).toContain(
       "Configured slots require 12 CPUs but the declared host limit is 6",
     );
+  });
+
+  test("reuses persisted capacity so stop cannot forget a configured slot", async () => {
+    const result = await runHarness(
+      `
+configure_slots
+persist_capacity_configuration
+SLOT_COUNT=""
+HOST_CPU_LIMIT=""
+HOST_MEMORY_GIB_LIMIT=""
+SLOTS=()
+configure_slots
+[[ "\${SLOTS[*]}" == "1 2" ]]
+[[ "$SLOT_COUNT" == 2 ]]
+[[ "$HOST_CPU_LIMIT" == 12 ]]
+[[ "$HOST_MEMORY_GIB_LIMIT" == 28 ]]
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "12",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "28",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("fails closed on incomplete persisted capacity", async () => {
+    const result = await runHarness(`
+printf '2\\n12\\n' >"$CAPACITY_CONFIG"
+configure_slots
+`);
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain("Runner capacity configuration is incomplete");
   });
 
   test("refuses memory overcommit", async () => {

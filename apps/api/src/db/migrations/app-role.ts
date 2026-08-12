@@ -23,8 +23,8 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
  * fully idempotent:
  *   - the role is created only if pg_roles has no such row, and its password
  *     is set only at that point (never force-reset on later runs);
- *   - ALTER ROLE ... NOSUPERUSER / NOBYPASSRLS re-asserts the load-bearing RLS
- *     attributes every run (defensive against manual tampering);
+ *   - ALTER ROLE ... NOSUPERUSER / NOBYPASSRLS repairs the load-bearing RLS
+ *     attributes only when pg_roles reports drift;
  *   - GRANT and ALTER DEFAULT PRIVILEGES are naturally idempotent.
  *
  * PASSWORD OWNERSHIP
@@ -171,6 +171,30 @@ async function applyAppSchemaGrants(db: OpenShapeForgeDatabase) {
 }
 
 /**
+ * Repair the role attributes that make PostgreSQL enforce RLS. The role name is
+ * explicit so the regression test can exercise this path with an isolated,
+ * transaction-scoped role instead of mutating the shared runtime role.
+ */
+export async function repairAppRoleAttributes(
+  db: OpenShapeForgeDatabase,
+  roleName: string,
+) {
+  await sql`
+    do $$
+    begin
+      if exists (
+        select 1 from pg_roles
+        where rolname = ${sql.lit(roleName)}
+          and (not rolcanlogin or rolsuper or rolbypassrls)
+      ) then
+        execute format('alter role %I login nosuperuser nobypassrls', ${sql.lit(roleName)});
+      end if;
+    end
+    $$;
+  `.execute(db);
+}
+
+/**
  * Create/repair the role and grant database connect, schema usage, function
  * execute, and default privileges. Safe to run at any point in the chain —
  * every grant is guarded on its schema existing — and it runs FIRST, so on a
@@ -198,23 +222,11 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
     $$;
   `.execute(db);
 
-  // Repair the load-bearing RLS attributes after tampering or a legacy manual
-  // role creation, but do not rewrite the cluster-wide pg_authid row on every
-  // routine migrate. Concurrent scratch-database migrations share that row,
-  // and unconditional ALTER ROLE statements contend there (#309).
-  await sql`
-    do $$
-    begin
-      if exists (
-        select 1 from pg_roles
-        where rolname = ${sql.lit(APP_ROLE)}
-          and (not rolcanlogin or rolsuper or rolbypassrls)
-      ) then
-        execute format('alter role %I login nosuperuser nobypassrls', ${sql.lit(APP_ROLE)});
-      end if;
-    end
-    $$;
-  `.execute(db);
+  // Repair after tampering or legacy manual creation without rewriting the
+  // cluster-wide pg_authid row on every routine migrate (#309). Two migrations
+  // that observe real drift simultaneously may both attempt this repair and
+  // briefly contend; the normal no-drift path remains read-only.
+  await repairAppRoleAttributes(db, APP_ROLE);
 
   // Rotate the password ONLY when explicitly requested for this run. This is
   // the sole path that overwrites an existing role's password; the default

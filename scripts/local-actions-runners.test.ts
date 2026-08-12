@@ -4,9 +4,121 @@ import { describe, expect, test } from "bun:test";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { APPROVED_SELF_HOSTED_ROUTES } from "./check-self-hosted-routing.mjs";
 
 const RUNNERS = join(import.meta.dir, "local-actions-runners.sh");
 const PRE_JOB_POLICY = join(import.meta.dir, "self-hosted-pre-job-policy.sh");
+const REPO_ROOT = join(import.meta.dir, "..");
+const WORKFLOW_SHA = "0123456789abcdef0123456789abcdef01234567";
+const BASE_WORKFLOW_SHA = "1111111111111111111111111111111111111111";
+const MERGE_WORKFLOW_SHA = "2222222222222222222222222222222222222222";
+const STALE_WORKFLOW_SHA = "3333333333333333333333333333333333333333";
+const WORKFLOW_RUN_ID = 38301;
+const PULL_REQUEST_NUMBER = 383;
+const DIRECT_WORKFLOW_PATH = ".github/workflows/ci.yml";
+
+function workflowRun(status = "queued") {
+  return {
+    id: WORKFLOW_RUN_ID,
+    run_attempt: 1,
+    event: "pull_request",
+    status,
+    path: DIRECT_WORKFLOW_PATH,
+    head_sha: WORKFLOW_SHA,
+    repository: { full_name: "OpenShapeForge/OpenShapeForge" },
+    head_repository: { full_name: "OpenShapeForge/OpenShapeForge" },
+    pull_requests: [
+      {
+        number: PULL_REQUEST_NUMBER,
+        head: { sha: WORKFLOW_SHA },
+        base: { sha: BASE_WORKFLOW_SHA },
+      },
+    ],
+  };
+}
+
+function verifiedWorkflowRun(status = "queued") {
+  return { ...workflowRun(status), referenced_workflows: [] };
+}
+
+function currentPullRequest(mergeCommitSha: string | null = MERGE_WORKFLOW_SHA) {
+  return {
+    number: PULL_REQUEST_NUMBER,
+    state: "open",
+    head: {
+      sha: WORKFLOW_SHA,
+      repo: { full_name: "OpenShapeForge/OpenShapeForge" },
+    },
+    base: {
+      sha: BASE_WORKFLOW_SHA,
+      repo: { full_name: "OpenShapeForge/OpenShapeForge" },
+    },
+    merge_commit_sha: mergeCommitSha,
+  };
+}
+
+function hostAuthorizationApi(options: {
+  activeStatus?: string;
+  pages?: unknown;
+  verifiedRun?: unknown;
+  pullRequest?: unknown;
+  failAt?: "enumeration" | "run" | "pull" | "content";
+  modifiedWorkflowRefs?: string[];
+} = {}) {
+  const activeStatus = options.activeStatus ?? "queued";
+  const pages =
+    options.pages ?? [
+      {
+        total_count: 2,
+        workflow_runs: [
+          {
+            id: WORKFLOW_RUN_ID - 1,
+            event: "pull_request",
+            status: "completed",
+            repository: { full_name: "OpenShapeForge/OpenShapeForge" },
+          },
+          workflowRun(activeStatus),
+        ],
+      },
+    ];
+  const verifiedRun =
+    options.verifiedRun ?? verifiedWorkflowRun(activeStatus);
+  const pullRequest = options.pullRequest ?? currentPullRequest();
+  const modifiedChecks = (options.modifiedWorkflowRefs ?? [])
+    .map(
+      (workflowSha) => `
+  if [[ "$*" == *"contents/.github/workflows/ci.yml"* && "$*" == *"ref=${workflowSha}"* ]]; then
+    printf 'modified workflow at ${workflowSha}\\n'
+    return
+  fi`,
+    )
+    .join("");
+
+  return `
+gh() {
+  printf '%s\\n' "$*" >>"$HOME/gh-calls"
+  if [[ "$*" == *"actions/runs?event=pull_request"* ]]; then
+    ${options.failAt === "enumeration" ? "return 1" : `printf '%s\\n' ${JSON.stringify(JSON.stringify(pages))}; return`}
+  fi
+  if [[ "$*" == *"actions/runs/${WORKFLOW_RUN_ID}/attempts/1"* ]]; then
+    ${options.failAt === "run" ? "return 1" : `printf '%s\\n' ${JSON.stringify(JSON.stringify(verifiedRun))}; return`}
+  fi
+  if [[ "$*" == *"pulls/${PULL_REQUEST_NUMBER}"* ]]; then
+    ${options.failAt === "pull" ? "return 1" : `printf '%s\\n' ${JSON.stringify(JSON.stringify(pullRequest))}; return`}
+  fi
+  if [[ "$*" == *"contents/"* ]]; then
+    ${options.failAt === "content" ? "return 1" : ":"}
+  fi${modifiedChecks}
+  case "$*" in
+    *contents/.github/workflows/ci.yml*) cat ${JSON.stringify(join(REPO_ROOT, ".github/workflows/ci.yml"))} ;;
+    *contents/.github/workflows/docker-api.yml*) cat ${JSON.stringify(join(REPO_ROOT, ".github/workflows/docker-api.yml"))} ;;
+    *contents/.github/workflows/docker-keycloak.yml*) cat ${JSON.stringify(join(REPO_ROOT, ".github/workflows/docker-keycloak.yml"))} ;;
+    *contents/.github/workflows/web-e2e.yml*) cat ${JSON.stringify(join(REPO_ROOT, ".github/workflows/web-e2e.yml"))} ;;
+    *) return 1 ;;
+  esac
+}
+`;
+}
 
 async function runHarness(body: string, environment: Record<string, string> = {}) {
   const home = await mkdtemp(join(tmpdir(), "osf-runner-lifecycle-"));
@@ -513,6 +625,361 @@ fi
   });
 });
 
+describe("host workflow authorization", () => {
+  test("authorizes independently verified head, base, and merge workflow revisions", async () => {
+    const result = await runHarness(`
+${hostAuthorizationApi()}
+expected="${WORKFLOW_SHA}"$'\\n'"${BASE_WORKFLOW_SHA}"$'\\n'"${MERGE_WORKFLOW_SHA}"
+[[ "$(authorize_active_workflow_shas)" == "$expected" ]]
+grep -Fq -- '--hostname github.com --paginate --slurp' "$HOME/gh-calls"
+grep -Fq -- 'Accept: application/vnd.github+json' "$HOME/gh-calls"
+grep -Fq -- 'Accept: application/vnd.github.raw+json' "$HOME/gh-calls"
+grep -Fq -- 'X-GitHub-Api-Version: 2022-11-28' "$HOME/gh-calls"
+[[ "$(grep -c 'actions/runs?event=pull_request' "$HOME/gh-calls")" == 1 ]]
+! grep -Fq 'status=' "$HOME/gh-calls"
+[[ "$(grep -c 'actions/runs/${WORKFLOW_RUN_ID}/attempts/1' "$HOME/gh-calls")" == 1 ]]
+[[ "$(grep -c 'pulls/${PULL_REQUEST_NUMBER}' "$HOME/gh-calls")" == 1 ]]
+[[ "$(grep -c 'contents/.github/workflows/' "$HOME/gh-calls")" == 12 ]]
+[[ "$(grep -c 'ref=${WORKFLOW_SHA}' "$HOME/gh-calls")" == 4 ]]
+[[ "$(grep -c 'ref=${BASE_WORKFLOW_SHA}' "$HOME/gh-calls")" == 4 ]]
+[[ "$(grep -c 'ref=${MERGE_WORKFLOW_SHA}' "$HOME/gh-calls")" == 4 ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("keeps candidate SHAs while sibling jobs remain in an active workflow run", async () => {
+    const result = await runHarness(`
+${hostAuthorizationApi({ activeStatus: "in_progress" })}
+expected="${WORKFLOW_SHA}"$'\\n'"${BASE_WORKFLOW_SHA}"$'\\n'"${MERGE_WORKFLOW_SHA}"
+[[ "$(authorize_active_workflow_shas)" == "$expected" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("fails closed when the active snapshot has no same-repository candidate", async () => {
+    const forkRun = {
+      ...workflowRun(),
+      head_repository: { full_name: "contributor/OpenShapeForge" },
+    };
+    const result = await runHarness(`
+${hostAuthorizationApi({ pages: [{ total_count: 1, workflow_runs: [forkRun] }] })}
+set +e
+authorize_active_workflow_shas
+authorize_result=$?
+set -e
+(( authorize_result != 0 ))
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "No active same-repository pull-request workflow run is available",
+    );
+  });
+
+  for (const [label, malformedRun] of [
+    ["malformed", { ...workflowRun(), pull_requests: "invalid" }],
+    [
+      "multiple",
+      {
+        ...workflowRun(),
+        pull_requests: [
+          ...workflowRun().pull_requests,
+          {
+            number: PULL_REQUEST_NUMBER + 1,
+            head: { sha: WORKFLOW_SHA },
+            base: { sha: BASE_WORKFLOW_SHA },
+          },
+        ],
+      },
+    ],
+    ["mismatched", { ...workflowRun(), head_sha: STALE_WORKFLOW_SHA }],
+  ] as const) {
+    test(`fails closed on ${label} pull-request run metadata`, async () => {
+      const result = await runHarness(`
+${hostAuthorizationApi({ pages: [{ total_count: 1, workflow_runs: [malformedRun] }] })}
+set +e
+authorize_active_workflow_shas
+authorize_result=$?
+set -e
+(( authorize_result != 0 ))
+`);
+
+      expect(result.exitCode, output(result)).toBe(0);
+      expect(result.stderr.toString()).toContain(
+        "Pull-request workflow-run response was incomplete or malformed",
+      );
+    });
+  }
+
+  test("fails the complete snapshot when any active same-repository run is malformed", async () => {
+    const malformedSibling = {
+      ...workflowRun(),
+      id: WORKFLOW_RUN_ID + 1,
+      pull_requests: [],
+    };
+    const result = await runHarness(`
+${hostAuthorizationApi({
+  pages: [
+    {
+      total_count: 2,
+      workflow_runs: [workflowRun(), malformedSibling],
+    },
+  ],
+})}
+set +e
+authorize_active_workflow_shas
+authorize_result=$?
+set -e
+(( authorize_result != 0 ))
+[[ "$(grep -c '/attempts/' "$HOME/gh-calls" || true)" == 0 ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Pull-request workflow-run response was incomplete or malformed",
+    );
+  });
+
+  test("rejects runs that reference reusable workflows", async () => {
+    const reusableRun = {
+      ...verifiedWorkflowRun(),
+      referenced_workflows: [
+        {
+          path: "OpenShapeForge/OpenShapeForge/.github/workflows/reuse.yml@main",
+          sha: WORKFLOW_SHA,
+          ref: "refs/heads/main",
+        },
+      ],
+    };
+    const result = await runHarness(`
+${hostAuthorizationApi({ verifiedRun: reusableRun })}
+set +e
+authorize_active_workflow_shas
+authorize_result=$?
+set -e
+(( authorize_result != 0 ))
+[[ "$(grep -c 'pulls/${PULL_REQUEST_NUMBER}' "$HOME/gh-calls" || true)" == 0 ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "metadata was malformed, stale, or reusable",
+    );
+  });
+
+  test("rejects a pull request that changed after the fixed run snapshot", async () => {
+    const stalePullRequest = {
+      ...currentPullRequest(),
+      head: {
+        ...currentPullRequest().head,
+        sha: STALE_WORKFLOW_SHA,
+      },
+    };
+    const result = await runHarness(`
+${hostAuthorizationApi({ pullRequest: stalePullRequest })}
+set +e
+authorize_active_workflow_shas
+authorize_result=$?
+set -e
+(( authorize_result != 0 ))
+[[ "$(grep -c 'contents/' "$HOME/gh-calls" || true)" == 0 ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "no longer matches its workflow run",
+    );
+  });
+
+  for (const [label, mergeCommitSha] of [
+    ["missing", null],
+    ["malformed", "not-a-sha"],
+  ] as const) {
+    test(`rejects a ${label} current merge commit SHA`, async () => {
+      const result = await runHarness(`
+${hostAuthorizationApi({ pullRequest: currentPullRequest(mergeCommitSha) })}
+set +e
+authorize_active_workflow_shas
+authorize_result=$?
+set -e
+(( authorize_result != 0 ))
+`);
+
+      expect(result.exitCode, output(result)).toBe(0);
+      expect(result.stderr.toString()).toContain(
+        "no longer matches its workflow run",
+      );
+    });
+  }
+
+  test("fails closed when paginated active-run enumeration fails", async () => {
+    const result = await runHarness(`
+${hostAuthorizationApi({ failAt: "enumeration" })}
+set +e
+authorize_active_workflow_shas
+authorize_result=$?
+set -e
+(( authorize_result != 0 ))
+[[ "$(grep -c 'contents/' "$HOME/gh-calls" || true)" == 0 ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not enumerate all pull-request workflow runs",
+    );
+  });
+
+  test("fails closed when pagination is incomplete", async () => {
+    const result = await runHarness(`
+${hostAuthorizationApi({
+  pages: [{ total_count: 2, workflow_runs: [workflowRun()] }],
+})}
+set +e
+authorize_active_workflow_shas
+authorize_result=$?
+set -e
+(( authorize_result != 0 ))
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Pull-request workflow-run response was incomplete or malformed",
+    );
+  });
+
+  for (const [stage, message] of [
+    ["run", "Could not verify active workflow run"],
+    ["pull", "Could not verify pull request"],
+  ] as const) {
+    test(`fails closed when the ${stage} API fails`, async () => {
+      const result = await runHarness(`
+${hostAuthorizationApi({ failAt: stage })}
+set +e
+authorize_active_workflow_shas
+authorize_result=$?
+set -e
+(( authorize_result != 0 ))
+`);
+
+      expect(result.exitCode, output(result)).toBe(0);
+      expect(result.stderr.toString()).toContain(message);
+    });
+  }
+
+  test("fails closed when authenticated workflow content cannot be fetched", async () => {
+    const result = await runHarness(`
+${hostAuthorizationApi({ failAt: "content" })}
+set +e
+authorize_active_workflow_shas
+authorize_result=$?
+set -e
+(( authorize_result != 0 ))
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not fetch approved workflow .github/workflows/ci.yml",
+    );
+  });
+
+  test("fails closed when the workflow hash result is malformed", async () => {
+    const result = await runHarness(`
+${hostAuthorizationApi()}
+shasum() {
+  command cat >/dev/null
+  printf 'not-a-digest  -\\n'
+}
+set +e
+authorize_active_workflow_shas
+authorize_result=$?
+set -e
+(( authorize_result != 0 ))
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not hash approved workflow .github/workflows/ci.yml",
+    );
+  });
+
+  test("fails closed when every candidate has different routed workflow bytes", async () => {
+    const result = await runHarness(`
+${hostAuthorizationApi({
+  modifiedWorkflowRefs: [
+    WORKFLOW_SHA,
+    BASE_WORKFLOW_SHA,
+    MERGE_WORKFLOW_SHA,
+  ],
+})}
+set +e
+authorize_active_workflow_shas
+authorize_result=$?
+set -e
+(( authorize_result != 0 ))
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "No active workflow revision matches the reviewed routed workflow content",
+    );
+  });
+
+  test("includes only candidate revisions with exact reviewed workflow digests", async () => {
+    const result = await runHarness(`
+${hostAuthorizationApi({ modifiedWorkflowRefs: [BASE_WORKFLOW_SHA] })}
+expected="${WORKFLOW_SHA}"$'\\n'"${MERGE_WORKFLOW_SHA}"
+[[ "$(authorize_active_workflow_shas)" == "$expected" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      `Workflow revision ${BASE_WORKFLOW_SHA} differs from reviewed routed workflow content`,
+    );
+  });
+
+  test("pins controller digests to every current routed workflow file", async () => {
+    const result = await runHarness("print_approved_workflow_sha256");
+    expect(result.exitCode, output(result)).toBe(0);
+    const approved = result.stdout.toString().trim().split("\n");
+    expect(approved).toHaveLength(4);
+    expect(approved.map((record) => record.split(" ")[0])).toEqual([
+      ...new Set(
+        APPROVED_SELF_HOSTED_ROUTES.map((route) => route.split("#")[0]),
+      ),
+    ]);
+    for (const record of approved) {
+      const [workflowPath, expectedSha256] = record.split(" ");
+      const source = await readFile(join(REPO_ROOT, workflowPath));
+      const actualSha256 = new Bun.CryptoHasher("sha256")
+        .update(source)
+        .digest("hex");
+      expect(expectedSha256, workflowPath).toBe(actualSha256);
+    }
+  });
+
+  test("installs only validated SHAs as a root-owned world-readable guest allow-list", async () => {
+    const result = await runHarness(`
+colima() {
+  printf '%s\n' "$*" >"$HOME/colima-command"
+  cat >"$HOME/guest-input"
+}
+install_pre_job_policy profile "${WORKFLOW_SHA}"
+[[ "$(cat "$HOME/guest-input")" == "${WORKFLOW_SHA}" ]]
+grep -Fq 'sudo chown root:root /opt/openshapeforge-runner/approved-workflow-shas' "$HOME/colima-command"
+grep -Fq 'sudo chmod 0444 /opt/openshapeforge-runner/approved-workflow-shas' "$HOME/colima-command"
+set +e
+install_pre_job_policy profile 'not-a-sha'
+invalid_result=$?
+set -e
+(( invalid_result != 0 ))
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+});
+
 describe("isolation invariants", () => {
   test("embeds the exact reviewed pre-job policy", async () => {
     const [source, policy] = await Promise.all([
@@ -688,10 +1155,10 @@ fi
     expect(registration).not.toContain("osf-pr");
     expect(labelClearing).toBeGreaterThan(registrationEnd);
     expect(serviceInstall).toBeGreaterThan(labelClearing);
-    expect(preJobVerification).toBeGreaterThan(serviceInstall);
-    expect(preStartHardening).toBeGreaterThan(preJobVerification);
+    expect(preStartHardening).toBeGreaterThan(serviceInstall);
     expect(isolationVerification).toBeGreaterThan(preStartHardening);
-    expect(labelAdmission).toBeGreaterThan(isolationVerification);
+    expect(preJobVerification).toBeGreaterThan(isolationVerification);
+    expect(labelAdmission).toBeGreaterThan(preJobVerification);
     expect(serviceStart).toBeGreaterThan(labelAdmission);
     expect(lifecyclePoll).toBeGreaterThan(serviceStart);
     expect(provision).not.toContain("harden_and_start_runner");
@@ -774,7 +1241,7 @@ fi
     expect(cleanup).toBeGreaterThan(provisioning);
   });
 
-  test("disables forwarding and proves the live boundary before registration", async () => {
+  test("snapshots workflows after isolation and immediately before routing admission", async () => {
     const source = await readFile(RUNNERS, "utf8");
     const provisionStart = source.indexOf("provision_slot_locked() {");
     const provisionEnd = source.indexOf("\nprovision_slot() (", provisionStart);
@@ -787,6 +1254,24 @@ fi
       'verify_guest_port_forwarding_disabled "$profile"',
     );
     const tokenRequest = provision.indexOf("actions/runners/registration-token");
+    const isolationProof = provision.indexOf(
+      'verify_unprivileged_runner "$profile" "$service"',
+    );
+    const workflowSnapshot = provision.indexOf(
+      'approved_workflow_shas="$(authorize_active_workflow_shas)"',
+    );
+    const policyInstall = provision.indexOf(
+      'install_pre_job_policy "$profile" "$approved_workflow_shas"',
+    );
+    const policyProof = provision.indexOf(
+      'verify_pre_job_policy "$profile" "$service"',
+    );
+    const routingAdmission = provision.indexOf(
+      'add_repository_runner_routing_label "$runner_id"',
+    );
+    const listenerStart = provision.indexOf(
+      'start_runner_service "$profile" "$service"',
+    );
 
     expect(provisionStart).toBeGreaterThanOrEqual(0);
     expect(provisionEnd).toBeGreaterThan(provisionStart);
@@ -794,6 +1279,12 @@ fi
     expect(loopbackHardening).toBeGreaterThan(forwardingFlag);
     expect(liveProof).toBeGreaterThan(loopbackHardening);
     expect(tokenRequest).toBeGreaterThan(liveProof);
+    expect(isolationProof).toBeGreaterThan(tokenRequest);
+    expect(workflowSnapshot).toBeGreaterThan(isolationProof);
+    expect(policyInstall).toBeGreaterThan(workflowSnapshot);
+    expect(policyProof).toBeGreaterThan(policyInstall);
+    expect(routingAdmission).toBeGreaterThan(policyProof);
+    expect(listenerStart).toBeGreaterThan(routingAdmission);
   });
 
   test("uses a deterministic guest probe and preserves failure diagnostics", async () => {

@@ -9,7 +9,7 @@ description: >-
 type: application
 version: 0.1.0
 # Tracks the base image in packages/keycloak-spi/Dockerfile.
-appVersion: "26.5.3"
+appVersion: "26.7.1"
 keywords:
   - keycloak
   - oidc

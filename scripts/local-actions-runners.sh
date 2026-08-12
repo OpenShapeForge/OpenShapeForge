@@ -1339,7 +1339,8 @@ EOF
 }
 
 verify_capacity_migration() {
-  local slot prefix runners profiles supervisor_pid plist backup
+  local slot prefix runners profiles supervisor_pid plist backup launch_agent_status
+  local launch_agent_label launchctl_output launchctl_status expected_not_found
   local retired_plists=()
   local retired_backups=()
   if [[ -z "$PERSISTED_SLOT_COUNT" ]] || (( SLOT_COUNT >= PERSISTED_SLOT_COUNT )); then
@@ -1351,7 +1352,21 @@ verify_capacity_migration() {
     return 1
   fi
   for ((slot = SLOT_COUNT + 1; slot <= PERSISTED_SLOT_COUNT; slot++)); do
-    if launchctl print "gui/${UID}/$(agent_label_for "$slot")" >/dev/null 2>&1; then
+    launch_agent_label="$(agent_label_for "$slot")"
+    if launchctl_output="$(launchctl print "gui/${UID}/${launch_agent_label}" 2>&1)"; then
+      launch_agent_status=0
+    else
+      launchctl_status=$?
+      expected_not_found="Bad request."$'\n'"Could not find service \"${launch_agent_label}\" in domain for user gui: ${UID}"
+      if (( launchctl_status == 113 )) && [[ "$launchctl_output" == "$expected_not_found" ]]; then
+        launch_agent_status=1
+      else
+        echo "Could not inspect runner supervisor slot ${slot} with launchctl" \
+          "(exit ${launchctl_status}): ${launchctl_output}" >&2
+        return 1
+      fi
+    fi
+    if (( launch_agent_status == 0 )); then
       echo "Refusing to retire active runner supervisor slot ${slot}; stop the old capacity first" >&2
       return 1
     fi
@@ -1392,12 +1407,14 @@ verify_capacity_migration() {
     retired_plists+=("$plist")
     retired_backups+=("$backup")
   done
-  for backup in "${retired_backups[@]}"; do
-    unlink "$backup" || {
-      echo "Could not remove retired launch agent backup: ${backup}" >&2
-      return 1
-    }
-  done
+  if (( ${#retired_backups[@]} > 0 )); then
+    for backup in "${retired_backups[@]}"; do
+      unlink "$backup" || {
+        echo "Could not remove retired launch agent backup: ${backup}" >&2
+        return 1
+      }
+    done
+  fi
 }
 
 start_supervisors() {

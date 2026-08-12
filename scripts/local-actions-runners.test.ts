@@ -568,11 +568,71 @@ configure_slots
 retired_plist="$(plist_for 2)"
 mkdir -p "$(dirname "$retired_plist")"
 printf 'stale slot two' >"$retired_plist"
-launchctl() { return 1; }
+launchctl() {
+  printf 'Bad request.\nCould not find service "%s" in domain for user gui: %s\n' \
+    "$(agent_label_for 2)" "$UID" >&2
+  return 113
+}
 colima() { [[ "$1" == list ]] && return 0; }
 gh() { :; }
 verify_capacity_migration
 [[ ! -e "$retired_plist" ]]
+persist_capacity_configuration
+[[ "$(cat "$CAPACITY_CONFIG")" == $'1\n6\n14' ]]
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "1",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "6",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "14",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("fails closed when launchctl cannot inspect a retired supervisor", async () => {
+    const result = await runHarness(
+      `
+printf '2\\n12\\n28\\n' >"$CAPACITY_CONFIG"
+configure_slots
+launchctl() {
+  printf 'launchd inspection unavailable\n' >&2
+  return 113
+}
+colima() { [[ "$1" == list ]] && return 0; }
+gh() { :; }
+if verify_capacity_migration; then
+  exit 1
+fi
+[[ "$(cat "$CAPACITY_CONFIG")" == $'2\n12\n28' ]]
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "1",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "6",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "14",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not inspect runner supervisor slot 2 with launchctl (exit 113)",
+    );
+  });
+
+  test("reduces capacity when no retired launch-agent plist exists", async () => {
+    const result = await runHarness(
+      `
+printf '2\\n12\\n28\\n' >"$CAPACITY_CONFIG"
+configure_slots
+launchctl() {
+  printf 'Bad request.\nCould not find service "%s" in domain for user gui: %s\n' \
+    "$(agent_label_for 2)" "$UID" >&2
+  return 113
+}
+colima() { [[ "$1" == list ]] && return 0; }
+gh() { :; }
+[[ ! -e "$(plist_for 2)" ]]
+verify_capacity_migration
 persist_capacity_configuration
 [[ "$(cat "$CAPACITY_CONFIG")" == $'1\n6\n14' ]]
 `,

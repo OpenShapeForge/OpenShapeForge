@@ -8,7 +8,7 @@ import { join } from "node:path";
 const RUNNERS = join(import.meta.dir, "local-actions-runners.sh");
 const PRE_JOB_POLICY = join(import.meta.dir, "self-hosted-pre-job-policy.sh");
 
-async function runHarness(body: string) {
+async function runHarness(body: string, environment: Record<string, string> = {}) {
   const home = await mkdtemp(join(tmpdir(), "osf-runner-lifecycle-"));
   const harness = join(home, "harness.sh");
   await writeFile(
@@ -24,7 +24,7 @@ ${body}
 
   try {
     return Bun.spawnSync(["bash", harness], {
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, ...environment, HOME: home },
     });
   } finally {
     await rm(home, { recursive: true, force: true });
@@ -128,6 +128,53 @@ describe("isolation invariants", () => {
   local slot="$1"
   local result
   acquire_provision_lock`);
+  });
+
+  test("runs exit cleanup when the process no longer owns a lock", async () => {
+    const result = await runHarness(`
+cleanup_slot_serialized() { touch "$HOME/cleanup-ran"; }
+cleanup_slot_on_exit 1
+[[ -e "$HOME/cleanup-ran" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("persists validated runner identity overrides in the launch agent", async () => {
+    const result = await runHarness(
+      `
+plutil() { :; }
+write_launch_agent 1
+plist="$(plist_for 1)"
+grep -Fq '<key>OPENSHAPEFORGE_RUNNER_ISOLATION_GROUP</key><string>_reviewers</string>' "$plist"
+grep -Fq '<key>OPENSHAPEFORGE_RUNNER_NAME_PREFIX</key><string>review-pr</string>' "$plist"
+grep -Fq '<key>OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX</key><string>review-deploy</string>' "$plist"
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_ISOLATION_GROUP: "_reviewers",
+        OPENSHAPEFORGE_RUNNER_NAME_PREFIX: "review-pr",
+        OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX: "review-deploy",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("rejects runner identity overrides that are unsafe in host paths or XML", async () => {
+    const result = await runHarness(
+      `
+plutil() { :; }
+if write_launch_agent 1; then
+  exit 1
+fi
+`,
+      { OPENSHAPEFORGE_RUNNER_NAME_PREFIX: "review<runner" },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "OPENSHAPEFORGE_RUNNER_NAME_PREFIX must contain only",
+    );
   });
 
   test("cleanup still refuses to delete a busy runner", async () => {

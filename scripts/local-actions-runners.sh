@@ -39,6 +39,29 @@ require_host_tools() {
   done
 }
 
+require_runner_identity_values() {
+  local variable_name value
+  while IFS='=' read -r variable_name value; do
+    if [[ -z "$value" || ! "$value" =~ ^[A-Za-z0-9._-]+$ ]]; then
+      echo "${variable_name} must contain only letters, digits, dots, underscores or hyphens" >&2
+      return 1
+    fi
+  done <<EOF
+OPENSHAPEFORGE_RUNNER_ISOLATION_GROUP=${ISOLATION_GROUP}
+OPENSHAPEFORGE_RUNNER_NAME_PREFIX=${RUNNER_NAME_PREFIX}
+OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX=${DISABLED_DEPLOY_RUNNER_PREFIX}
+EOF
+}
+
+xml_escape() {
+  printf '%s' "$1" | sed \
+    -e 's/&/\&amp;/g' \
+    -e 's/</\&lt;/g' \
+    -e 's/>/\&gt;/g' \
+    -e 's/"/\&quot;/g' \
+    -e "s/'/\&apos;/g"
+}
+
 require_host_isolation() {
   local launcher_state firewall_state group_id
   group_id="$(dscl . -read "/Groups/${ISOLATION_GROUP}" PrimaryGroupID 2>/dev/null | awk '{ print $2 }')"
@@ -636,7 +659,10 @@ acquire_provision_lock() {
 release_provision_lock() {
   local owner
   owner="$(cat "$PROVISION_LOCK" 2>/dev/null || true)"
-  [[ "$owner" == "$$" ]] && unlink "$PROVISION_LOCK"
+  if [[ "$owner" == "$$" ]]; then
+    unlink "$PROVISION_LOCK"
+  fi
+  return 0
 }
 
 provision_slot_locked() {
@@ -794,25 +820,36 @@ supervise_slot() {
 
 write_launch_agent() {
   local slot="$1"
-  local label plist
+  local label plist escaped_label escaped_launcher escaped_log_dir
+  local escaped_isolation_group escaped_runner_prefix escaped_deploy_prefix
+  require_runner_identity_values || return 1
   label="$(agent_label_for "$slot")"
   plist="$(plist_for "$slot")"
+  escaped_label="$(xml_escape "$label")"
+  escaped_launcher="$(xml_escape "$HOST_LAUNCHER")"
+  escaped_log_dir="$(xml_escape "$LOG_DIR")"
+  escaped_isolation_group="$(xml_escape "$ISOLATION_GROUP")"
+  escaped_runner_prefix="$(xml_escape "$RUNNER_NAME_PREFIX")"
+  escaped_deploy_prefix="$(xml_escape "$DISABLED_DEPLOY_RUNNER_PREFIX")"
   mkdir -p "$(dirname "$plist")" "$LOG_DIR"
   cat >"$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>${label}</string>
+  <key>Label</key><string>${escaped_label}</string>
   <key>ProgramArguments</key><array>
-    <string>${HOST_LAUNCHER}</string>
+    <string>${escaped_launcher}</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
-  <key>StandardOutPath</key><string>${LOG_DIR}/slot-${slot}.log</string>
-  <key>StandardErrorPath</key><string>${LOG_DIR}/slot-${slot}.error.log</string>
+  <key>StandardOutPath</key><string>${escaped_log_dir}/slot-${slot}.log</string>
+  <key>StandardErrorPath</key><string>${escaped_log_dir}/slot-${slot}.error.log</string>
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>OPENSHAPEFORGE_RUNNER_ISOLATION_GROUP</key><string>${escaped_isolation_group}</string>
+    <key>OPENSHAPEFORGE_RUNNER_NAME_PREFIX</key><string>${escaped_runner_prefix}</string>
+    <key>OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX</key><string>${escaped_deploy_prefix}</string>
   </dict>
 </dict></plist>
 EOF
@@ -947,6 +984,7 @@ verify_slots() {
 
 main() {
   require_host_tools
+  require_runner_identity_values
 
   case "$COMMAND" in
     start) start_supervisors ;;

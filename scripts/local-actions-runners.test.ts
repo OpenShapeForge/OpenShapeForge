@@ -132,9 +132,11 @@ describe("isolation invariants", () => {
     expect(`${embedded}\n`).toBe(policy);
   });
 
-  test("keeps one slot, ephemeral registration and serialized cleanup", async () => {
+  test("defaults to one slot, ephemeral registration and serialized cleanup", async () => {
     const source = await readFile(RUNNERS, "utf8");
-    expect(source).toContain("readonly SLOTS=(1)");
+    expect(source).toContain(
+      'readonly SLOT_COUNT="${OPENSHAPEFORGE_RUNNER_SLOT_COUNT:-1}"',
+    );
     expect(source).toContain("./config.sh --unattended --ephemeral --disableupdate");
     expect(source).toContain(`cleanup_slot_serialized() (
   local slot="$1"
@@ -426,9 +428,9 @@ set -e
     expect(result.exitCode, output(result)).toBe(0);
     expect(result.stderr.toString()).toContain("Refusing to delete busy runner slot 1");
   });
-
   test("restores the supervisor when it misses the stop deadline", async () => {
     const result = await runHarness(`
+configure_slots
 preflight_stop() { :; }
 wait_for_supervisor_exit() { return 1; }
 cleanup_slot() { touch "$HOME/cleanup-ran"; }
@@ -459,6 +461,7 @@ set -e
 
   test("fails verify closed when the complete runner inventory is unavailable", async () => {
     const result = await runHarness(`
+configure_slots
 require_host_isolation() { :; }
 verify_host_network_boundary() { :; }
 verify_guest_firewall_behavior() { :; }
@@ -480,5 +483,273 @@ set -e
     expect(result.stderr.toString()).toContain(
       "Could not verify the repository runner inventory",
     );
+  });
+  test("builds two isolated slots only with declared host capacity", async () => {
+    const result = await runHarness(
+      `
+configure_slots
+(( \${#SLOTS[@]} == 2 ))
+[[ "\${SLOTS[*]}" == "1 2" ]]
+[[ "$(profile_for 1)" == osf-pr-1 ]]
+[[ "$(profile_for 2)" == osf-pr-2 ]]
+[[ "$(runner_prefix_for 1)" == openshapeforge-pr-1- ]]
+[[ "$(runner_prefix_for 10)" == openshapeforge-pr-10- ]]
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "12",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "28",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("refuses CPU overcommit", async () => {
+    const result = await runHarness("configure_slots", {
+      OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+      OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "11",
+      OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "28",
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Configured slots require 12 CPUs but the declared host limit is 11",
+    );
+  });
+
+  test("fails closed when multiple slots omit host capacity", async () => {
+    const result = await runHarness("configure_slots", {
+      OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Configured slots require 12 CPUs but the declared host limit is 6",
+    );
+  });
+
+  test("refuses memory overcommit", async () => {
+    const result = await runHarness("configure_slots", {
+      OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+      OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "12",
+      OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "27",
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Configured slots require 28 GiB but the declared host limit is 27 GiB",
+    );
+  });
+
+  test("keeps runner, machine and lifecycle state separate per slot", async () => {
+    const result = await runHarness(
+      `
+configure_slots
+machine_one=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+machine_two=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+record_slot_identity 1 "$(runner_prefix_for 1)one" "$machine_one"
+write_slot_state 1 active
+verify_unique_machine_id 2 "$machine_two"
+if verify_unique_machine_id 2 "$machine_one"; then
+  exit 1
+fi
+record_slot_identity 2 "$(runner_prefix_for 2)two" "$machine_two"
+write_slot_state 2 active
+[[ "$(cat "$(runner_file_for 1)")" != "$(cat "$(runner_file_for 2)")" ]]
+[[ "$(cat "$(machine_id_file_for 1)")" != "$(cat "$(machine_id_file_for 2)")" ]]
+[[ "$(state_file_for 1)" != "$(state_file_for 2)" ]]
+[[ "$(cat "$(state_file_for 1)")" == active ]]
+[[ "$(cat "$(state_file_for 2)")" == active ]]
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "12",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "28",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Runner slots 2 and 1 have the same machine id",
+    );
+  });
+
+  test("allows two active slots while provisioning remains serialized", async () => {
+    const result = await runHarness(
+      `
+configure_slots
+acquire_provision_lock() {
+  until mkdir "$HOME/test-provision.lock" 2>/dev/null; do
+    command sleep 0.01
+  done
+}
+release_provision_lock() {
+  rmdir "$HOME/test-provision.lock" 2>/dev/null || true
+}
+provision_slot_locked() {
+  local slot="$1"
+  local other_slot=$((3 - slot))
+  [[ ! -e "$HOME/in-provisioning" ]]
+  printf '%s\n' "$slot" >"$HOME/in-provisioning"
+  if [[ -e "$HOME/slot-\${other_slot}.active" ]]; then
+    touch "$HOME/provisioned-alongside-active"
+  fi
+  rm "$HOME/in-provisioning"
+  write_slot_state "$slot" active
+  touch "$HOME/slot-\${slot}.active"
+  release_provision_lock
+  for attempt in {1..100}; do
+    [[ -e "$HOME/slot-1.active" && -e "$HOME/slot-2.active" ]] && return 0
+    command sleep 0.01
+  done
+  return 1
+}
+provision_slot 1 &
+slot_one_pid=$!
+provision_slot 2 &
+slot_two_pid=$!
+wait "$slot_one_pid"
+wait "$slot_two_pid"
+[[ -e "$HOME/provisioned-alongside-active" ]]
+[[ "$(cat "$(state_file_for 1)")" == active ]]
+[[ "$(cat "$(state_file_for 2)")" == active ]]
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "12",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "28",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("writes each launch agent with its own validated slot configuration", async () => {
+    const result = await runHarness(
+      `
+configure_slots
+plutil() { :; }
+write_launch_agent 1
+write_launch_agent 2
+slot_one_plist="$(plist_for 1)"
+slot_two_plist="$(plist_for 2)"
+grep -Fq '<key>OPENSHAPEFORGE_RUNNER_SLOT</key><string>1</string>' "$slot_one_plist"
+grep -Fq '<key>OPENSHAPEFORGE_RUNNER_SLOT</key><string>2</string>' "$slot_two_plist"
+grep -Fq '<key>OPENSHAPEFORGE_RUNNER_SLOT_COUNT</key><string>2</string>' "$slot_one_plist"
+grep -Fq '<key>OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT</key><string>12</string>' "$slot_two_plist"
+grep -Fq '<key>OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT</key><string>28</string>' "$slot_two_plist"
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "12",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "28",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("checks every slot before refusing a busy-runner stop", async () => {
+    const result = await runHarness(
+      `
+configure_slots
+gh() {
+  if [[ "$*" == *"openshapeforge-pr-2-"* ]]; then
+    printf 'slot-two-busy\n'
+  fi
+}
+set +e
+preflight_stop
+preflight_result=$?
+set -e
+(( preflight_result != 0 ))
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "12",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "28",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Refusing to stop busy runner slot 2: slot-two-busy",
+    );
+  });
+
+  test("isolates cleanup failure so every configured slot is attempted", async () => {
+    const result = await runHarness(
+      `
+configure_slots
+cleanup_slot() {
+  printf '%s\n' "$1" >>"$HOME/cleanup-attempts"
+  [[ "$1" != 1 ]]
+}
+disable_local_deploy_runner() { return 0; }
+set +e
+cleanup_configured_slots
+cleanup_result=$?
+set -e
+(( cleanup_result != 0 ))
+[[ "$(cat "$HOME/cleanup-attempts")" == $'1\n2' ]]
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "12",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "28",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stdout.toString()).toContain("slot 2: stopped and deleted");
+  });
+
+  test("cleans slot state on supervisor exit even when it owns no shared lock", async () => {
+    const result = await runHarness(`
+printf '%s\n' 123 >"$(pid_file_for 1)"
+cleanup_slot_serialized() { touch "$HOME/cleanup-attempted"; }
+cleanup_slot_on_exit 1
+[[ -e "$HOME/cleanup-attempted" ]]
+[[ ! -e "$(pid_file_for 1)" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("verifies firewall and admission boundaries independently per slot", async () => {
+    const result = await runHarness(
+      `
+configure_slots
+record_slot_identity 1 runner-one aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+record_slot_identity 2 runner-two bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+require_host_isolation() { printf 'host-isolation\n' >>"$HOME/checks"; }
+verify_host_network_boundary() { printf 'host:%s\n' "$1" >>"$HOME/checks"; }
+verify_guest_firewall_behavior() { printf 'guest:%s\n' "$1" >>"$HOME/checks"; }
+verify_fresh_vm() { printf 'fresh:%s\n' "$1" >>"$HOME/checks"; }
+verify_rootless_docker_firewall_behavior() { printf 'rootless:%s\n' "$1" >>"$HOME/checks"; }
+verify_pre_job_policy() { printf 'admission:%s\n' "$1" >>"$HOME/checks"; }
+verify_unprivileged_runner() { printf 'unprivileged:%s\n' "$1" >>"$HOME/checks"; }
+colima() {
+  if [[ "$*" == *"osf-pr-1"* ]]; then
+    printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n'
+  else
+    printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n'
+  fi
+}
+gh() { :; }
+verify_slots
+[[ "$(grep -c '^guest:' "$HOME/checks")" == 2 ]]
+[[ "$(grep -c '^rootless:' "$HOME/checks")" == 2 ]]
+[[ "$(grep -c '^admission:' "$HOME/checks")" == 2 ]]
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "12",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "28",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
   });
 });

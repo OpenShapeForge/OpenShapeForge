@@ -241,6 +241,26 @@ grep -Fq 'stop colima-profile' "$HOME/limactl-calls"
     );
   });
 
+  test("does not classify an lsof inspection error as an unbound host port", async () => {
+    const result = await runHarness(`
+lsof() {
+  printf 'listener inspection failed\n' >&2
+  return 1
+}
+[[ "$(host_tcp_port_state 49152)" == error ]]
+set +e
+assert_host_tcp_port_unbound 49152
+assert_result=$?
+set -e
+(( assert_result != 0 ))
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not prove that TCP port 49152 is unbound on the Mac",
+    );
+  });
+
   test("fails the live proof closed when a wildcard host listener appears", async () => {
     const result = await runHarness(`
 lsof() {

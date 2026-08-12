@@ -247,7 +247,6 @@ function describeTool(
  */
 export const __withholdClassifiedForTests = withholdClassified;
 export const __assertWritableValuesForTests = assertWritableValues;
-export const __assertEnumValuesForTests = assertEnumValues;
 export const __sessionMayInvokeForTests = sessionMayInvoke;
 export const __describeToolForTests = describeTool;
 
@@ -351,56 +350,6 @@ function assertWritableValues(
   }
 }
 
-/**
- * Enforce the closed vocabularies advertised by the generated write schema.
- * JSON Schema is presented to MCP callers as a contract, but the database
- * columns are intentionally plain text; validate here before the shared CRUD
- * writer persists the value.
- */
-function assertEnumValues(
-  values: Record<string, unknown>,
-  schema: Record<string, unknown>,
-  entity: CatalogEntity | undefined,
-): void {
-  const properties = schema.properties;
-  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return;
-
-  for (const [field, value] of Object.entries(values)) {
-    const fieldSchema = (properties as Record<string, unknown>)[field];
-    if (!fieldSchema || typeof fieldSchema !== "object" || Array.isArray(fieldSchema)) continue;
-    const definition = fieldSchema as Record<string, unknown>;
-    const enumeration = definition.enum;
-    if (Array.isArray(enumeration) && !enumeration.some((candidate) => Object.is(candidate, value))) {
-      throw new HttpError(
-        400,
-        "BAD_USER_INPUT",
-        `Invalid value for field "${field}" on ${entity?.entity ?? "entity"}. ` +
-          `Expected one of: ${enumeration.join(", ")}.`,
-      );
-    }
-
-    if (definition.type === "array" && Array.isArray(value)) {
-      const items = definition.items;
-      if (items && typeof items === "object" && !Array.isArray(items)) {
-        for (const item of value) {
-          assertEnumValues({ value: item }, { properties: { value: items } }, entity);
-        }
-      }
-    }
-  }
-}
-
-function writableSchema(tool: CatalogTool): Record<string, unknown> {
-  const schema = tool.inputSchema as Record<string, unknown>;
-  if (tool.operation !== "update") return schema;
-  const properties = schema.properties;
-  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return {};
-  const values = (properties as Record<string, unknown>).values;
-  return values && typeof values === "object" && !Array.isArray(values)
-    ? values as Record<string, unknown>
-    : {};
-}
-
 async function invokeTool(
   tool: CatalogTool,
   entity: CatalogEntity | undefined,
@@ -454,7 +403,6 @@ async function invokeTool(
       const values = requireArguments(args);
       assertDeclaredProperties(tool.inputSchema, values, "field");
       assertWritableValues(values, entity, table, session);
-      assertEnumValues(values, writableSchema(tool), entity);
       const row = await createGeneratedEntity(db, session, {
         table: table.name,
         values,
@@ -472,7 +420,6 @@ async function invokeTool(
         "field",
       );
       assertWritableValues(values, entity, table, session);
-      assertEnumValues(values, writableSchema(tool), entity);
       const row = await updateGeneratedEntity(db, session, {
         table: table.name,
         id,

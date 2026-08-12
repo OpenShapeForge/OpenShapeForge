@@ -88,6 +88,12 @@ export type GeneratedCrudAuthorization = {
   roles: Record<GeneratedCrudOperation, string[]>;
 };
 
+export type GeneratedEnumConstraint = {
+  values?: string[];
+  properties?: Record<string, GeneratedEnumConstraint>;
+  items?: GeneratedEnumConstraint;
+};
+
 export type GeneratedCrudColumn = {
   name: string;
   type: string;
@@ -107,6 +113,8 @@ export type GeneratedCrudColumn = {
    * does, so all three transports inherit it from one authored fact.
    */
   immutable?: boolean;
+  /** Authored closed vocabularies, including nested object/array paths. */
+  enumConstraint?: GeneratedEnumConstraint;
 };
 
 export type GeneratedCrudRelationship = {
@@ -663,6 +671,52 @@ function writableColumnMap(
   );
 }
 
+/**
+ * Enforce only authored enum membership here; transports retain responsibility
+ * for structural type validation. `null` deliberately passes through so an
+ * optional enum field can still be cleared on update.
+ */
+function assertEnumConstraintValue(
+  value: unknown,
+  constraint: GeneratedEnumConstraint | undefined,
+  path: string,
+  entity: string,
+): void {
+  if (!constraint || value === null || value === undefined) return;
+
+  if (
+    constraint.values &&
+    !constraint.values.some((candidate) => Object.is(candidate, value))
+  ) {
+    throw generatedCrudError(
+      `Invalid value for field "${path}" on ${entity}. Expected one of: ` +
+        `${constraint.values.map((candidate) => JSON.stringify(candidate)).join(", ")}.`,
+      "BAD_USER_INPUT",
+    );
+  }
+
+  if (constraint.items && Array.isArray(value)) {
+    value.forEach((item, index) =>
+      assertEnumConstraintValue(item, constraint.items, `${path}[${index}]`, entity),
+    );
+  }
+
+  if (
+    constraint.properties &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    const record = value as Record<string, unknown>;
+    for (const [property, nested] of Object.entries(constraint.properties)) {
+      if (Object.prototype.hasOwnProperty.call(record, property)) {
+        assertEnumConstraintValue(record[property], nested, `${path}.${property}`, entity);
+      }
+    }
+  }
+}
+
+export const __assertEnumConstraintValueForTests = assertEnumConstraintValue;
+
 function normalizeWritableValues(
   table: GeneratedCrudTable,
   input: Record<string, unknown>,
@@ -678,10 +732,13 @@ function normalizeWritableValues(
     if (!column || value === undefined) {
       continue;
     }
+    assertEnumConstraintValue(value, column.enumConstraint, field, entityLabel(table));
     values.set(column, value);
   }
   return values;
 }
+
+export const __normalizeWritableValuesForTests = normalizeWritableValues;
 
 export async function createGeneratedEntity(
   db: OpenShapeForgeDatabase,

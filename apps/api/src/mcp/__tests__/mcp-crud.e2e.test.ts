@@ -128,9 +128,6 @@ async function buildCreateArgs(
   identity: Identity,
 ): Promise<Record<string, unknown>> {
   const fkTargets = foreignKeyTargets(table);
-  const createTool = catalog.tools.find(
-    (tool) => tool.name === `${table.source!.mcp!.toolPrefix}_create`,
-  ) as { inputSchema?: { properties?: Record<string, { enum?: unknown[] }> } } | undefined;
   const args: Record<string, unknown> = {};
   for (const column of table.columns) {
     if (!column.required || column.primaryKey) continue;
@@ -140,9 +137,7 @@ async function buildCreateArgs(
       args[fieldName(column)] = await createRow(tablesByName.get(target)!, identity);
       continue;
     }
-    const field = fieldName(column);
-    const enumeration = createTool?.inputSchema?.properties?.[field]?.enum;
-    args[field] = enumeration?.[0] ?? sampleValue(column, seed);
+    args[fieldName(column)] = sampleValue(column, seed);
   }
   return args;
 }

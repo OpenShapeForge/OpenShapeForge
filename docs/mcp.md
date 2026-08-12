@@ -97,8 +97,9 @@ Every tool carries annotations derived mechanically from its operation:
 ## What the field definition contributes
 
 The catalog is generated from the compiled contracts (`model.fields`), not the
-runtime manifest — the manifest carries storage columns, which is everything
-SQL needs and almost nothing a model needs.
+runtime manifest. The manifest carries the enum-only constraint tree needed by
+the shared writer; labels, descriptions and other model-facing metadata stay in
+the separate MCP artifact.
 
 | Authored | Becomes |
 | --- | --- |
@@ -135,9 +136,14 @@ authored fact rather than two rules that can drift (#177).
 ### Enumerations
 
 `options.type: referentiedata` expands to concrete values at compile time from
-the referentiedata snapshot. This is the largest single gain: `Relation.relationType`
-is an unconstrained `text` column in every other transport, and a closed
-three-value enum here.
+the referentiedata snapshot. The same resolved values are stamped onto the
+storage manifest and enforced before the shared CRUD writer reaches SQL, so
+MCP, REST and GraphQL all reject values outside the vocabulary. Optional enum
+fields still accept `null` on update to preserve the existing clearing contract.
+
+Nested object properties, scalar arrays and arrays of objects use a recursive
+enum-only constraint tree. Structural type validation remains the transport's
+responsibility; the shared layer enforces only authored enum membership.
 
 The generator also reads `render.props.referentieGroep`, the shape the UI
 select components consume, because entities in this repo author the group

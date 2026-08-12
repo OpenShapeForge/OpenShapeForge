@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { NextRequest } from "next/server";
 import {
   handleLogoutRequest,
   resolveCanonicalAppOrigin,
   revokeKeycloakRefreshSession,
   type LogoutDependencies,
-} from "./logout";
+} from "./logout.js";
 
 const APP_ORIGIN = "https://app.example.test";
 
@@ -17,7 +16,7 @@ function logoutRequest(input?: {
   forwardedProto?: string;
   csrfToken?: string;
   reason?: string;
-}): NextRequest {
+}): Request {
   const body = new URLSearchParams({
     csrfToken: input?.csrfToken ?? "test-csrf-token",
   });
@@ -32,7 +31,7 @@ function logoutRequest(input?: {
   if (input?.forwardedHost) headers["X-Forwarded-Host"] = input.forwardedHost;
   if (input?.forwardedProto) headers["X-Forwarded-Proto"] = input.forwardedProto;
 
-  return new NextRequest(input?.requestUrl ?? `${APP_ORIGIN}/api/logout`, {
+  return new Request(input?.requestUrl ?? `${APP_ORIGIN}/api/logout`, {
     method: "POST",
     headers,
     body,
@@ -181,7 +180,10 @@ describe("logout request boundary", () => {
   });
 
   test("deletes the bound session, revokes its refresh session, and clears cookies", async () => {
-    const sessions = new Map([["session-under-test", { refreshToken: "test-refresh-token" }]]);
+    const sessions = new Map([[
+      "session-under-test",
+      { refreshToken: "test-refresh-token" },
+    ]]);
     let consumedId: string | undefined;
     let revokedToken: string | undefined;
 
@@ -213,7 +215,7 @@ describe("logout request boundary", () => {
     expect(setCookies).toContain("Secure");
   });
 
-  test("holds back cookie clearing when exact Redis deletion fails", async () => {
+  test("holds back cookie clearing when exact session deletion fails", async () => {
     let localFailureCalls = 0;
     const response = await handleLogoutRequest(
       logoutRequest(),
@@ -232,8 +234,11 @@ describe("logout request boundary", () => {
     expect(localFailureCalls).toBe(1);
   });
 
-  test("keeps local logout complete when upstream revocation is unavailable", async () => {
-    const sessions = new Map([["session-under-test", { refreshToken: "test-refresh-token" }]]);
+  test("reports failed upstream revocation but completes local logout", async () => {
+    const sessions = new Map([[
+      "session-under-test",
+      { refreshToken: "test-refresh-token" },
+    ]]);
     let revocationFailureCalls = 0;
     const response = await handleLogoutRequest(
       logoutRequest(),
@@ -246,6 +251,7 @@ describe("logout request boundary", () => {
         revokeRefreshSession: async () => false,
         onRevocationFailure: () => {
           revocationFailureCalls += 1;
+          throw new Error("test reporter unavailable");
         },
       }),
     );
@@ -256,7 +262,7 @@ describe("logout request boundary", () => {
     expect(revocationFailureCalls).toBe(1);
   });
 
-  test("clears a stale Auth.js cookie when no Redis-backed session remains", async () => {
+  test("clears a stale Auth.js cookie when no stored session remains", async () => {
     let consumeCalls = 0;
     const response = await handleLogoutRequest(
       logoutRequest({ reason: "session_expired" }),

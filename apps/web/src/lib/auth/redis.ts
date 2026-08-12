@@ -217,11 +217,12 @@ export async function deleteSession(sessionId: string): Promise<void> {
 /**
  * Remove and return the exact session being logged out.
  *
- * The refresh lock avoids needless refresh/revoke overlap. Correctness does
+ * The refresh lock reduces refresh/revoke overlap. Local session fencing does
  * not depend on its TTL: deletion is one single-key Redis operation, and every
  * later refresh/profile write is a compare-and-set against that same key. If a
  * refresh is in flight, logout fails without clearing the browser cookie so
- * the user is never shown a false success.
+ * the caller can retry. The lock TTL does not guarantee identity-provider
+ * revocation when an upstream refresh outlives the lock.
  */
 export async function consumeSessionForLogout(
   sessionId: string,

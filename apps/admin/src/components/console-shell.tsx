@@ -42,8 +42,8 @@ import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Building2, LayoutDashboard, RefreshCcwDot } from "lucide-react";
+import { requestLogout } from "@openshapeforge/auth";
 import { Sidebar, Surface } from "@openshapeforge/ui";
-import { requestLogout } from "@/lib/auth/logout-client";
 
 interface ConsoleShellProps {
   operatorName?: string;

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { NextRequest } from "next/server";
 
 export type LogoutReason = "session_expired";
 
@@ -11,7 +10,7 @@ type ConsumedSession = {
   refreshToken?: string;
 } | null;
 
-type AuthPostHandler = (request: NextRequest) => Promise<Response>;
+type AuthPostHandler = (request: Request) => Promise<Response> | Response;
 
 export interface LogoutDependencies {
   appOrigin: string | null;
@@ -22,6 +21,11 @@ export interface LogoutDependencies {
   transientCookieNames: readonly string[];
   secureCookies: boolean;
   onLocalFailure?: () => void;
+  /**
+   * Reports a best-effort identity-provider revocation failure. Local session
+   * deletion remains authoritative, so logout still succeeds and clears the
+   * browser cookies after this callback.
+   */
   onRevocationFailure?: () => void;
 }
 
@@ -72,7 +76,7 @@ export function resolveCanonicalAppOrigin(
   }
 }
 
-function hasSameOrigin(request: NextRequest, appOrigin: string): boolean {
+function hasSameOrigin(request: Request, appOrigin: string): boolean {
   const origin = request.headers.get("origin");
   if (!origin) {
     return false;
@@ -90,7 +94,7 @@ function hasSameOrigin(request: NextRequest, appOrigin: string): boolean {
   return !fetchSite || fetchSite === "same-origin" || fetchSite === "none";
 }
 
-function getReason(value: FormDataEntryValue | null): LogoutReason | undefined | null {
+function getReason(value: unknown): LogoutReason | undefined | null {
   if (value === null || value === "") {
     return undefined;
   }
@@ -184,13 +188,20 @@ export async function revokeKeycloakRefreshSession(
 }
 
 /**
- * Complete a logout only after Auth.js has accepted its CSRF token. The Auth.js
- * response is held back until the exact Redis session has been removed; on a
- * local-store failure its cookie-clearing headers are discarded so callers do
- * not receive a false success that leaves a captured cookie replayable.
+ * Complete a logout only after the application's Auth.js adapter has accepted
+ * its CSRF token. The adapter response is held back until the exact session
+ * has been removed; on a local-store failure its cookie-clearing headers are
+ * discarded so a captured cookie never receives false-success semantics.
+ *
+ * Identity-provider revocation happens after the local session is gone and is
+ * deliberately best effort. A revocation failure is reported through
+ * `onRevocationFailure`, but local logout still returns success and clears the
+ * browser cookies. The upstream SSO session may therefore remain usable until
+ * its own expiry; callers must monitor the callback rather than claim upstream
+ * revocation was guaranteed.
  */
 export async function handleLogoutRequest(
-  request: NextRequest,
+  request: Request,
   dependencies: LogoutDependencies,
 ): Promise<Response> {
   if (!dependencies.appOrigin) {
@@ -206,7 +217,7 @@ export async function handleLogoutRequest(
     return errorResponse(415);
   }
 
-  let form: FormData;
+  let form;
   try {
     form = await request.formData();
   } catch {
@@ -230,8 +241,8 @@ export async function handleLogoutRequest(
   headers.delete("content-length");
   headers.delete("x-forwarded-port");
 
-  const authRequest = new NextRequest(
-    new URL("/api/auth/signout", dependencies.appOrigin),
+  const authRequest = new Request(
+    new URL("/api/auth/signout", dependencies.appOrigin).href,
     {
       method: "POST",
       headers,
@@ -271,7 +282,13 @@ export async function handleLogoutRequest(
         revoked = false;
       }
       if (!revoked) {
-        dependencies.onRevocationFailure?.();
+        try {
+          dependencies.onRevocationFailure?.();
+        } catch {
+          // Reporting must not undo an already completed local logout.
+        }
+        // The local session has already been fenced and removed. Do not turn
+        // an upstream outage into a false local failure or restore credentials.
       }
     }
   }

@@ -3,13 +3,13 @@
 
 import * as React from "react";
 import { usePathname, useSearchParams } from "next/navigation";
+import { requestLogout } from "@openshapeforge/auth";
 import { Avatar, TabLanguageSelector } from "@openshapeforge/ui";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/overlay/popover";
-import { requestLogout } from "@/lib/auth/logout-client";
 
 type ShellLang = "en" | "nl";
 
@@ -23,6 +23,19 @@ const LANGUAGE_OPTIONS = [
   { value: "nl", label: "NL", fullName: "Nederlands" },
   { value: "en", label: "EN", fullName: "English" },
 ] as const;
+
+const COPY = {
+  en: {
+    logout: "Log out",
+    loggingOut: "Logging out...",
+    logoutFailed: "Logout failed.",
+  },
+  nl: {
+    logout: "Uitloggen",
+    loggingOut: "Bezig...",
+    logoutFailed: "Uitloggen is niet gelukt.",
+  },
+} as const;
 
 function userInitials(name: string): string {
   return name
@@ -44,9 +57,7 @@ export function UserProfileMenu({ name, role, activeLang }: UserProfileMenuProps
   const searchParams = useSearchParams();
   const [loggingOut, setLoggingOut] = React.useState(false);
   const [logoutFailed, setLogoutFailed] = React.useState(false);
-  const logoutCopy = activeLang === "nl"
-    ? { action: "Uitloggen", pending: "Bezig...", error: "Uitloggen is niet gelukt." }
-    : { action: "Log out", pending: "Logging out...", error: "Logout failed." };
+  const copy = activeLang === "nl" ? COPY.nl : COPY.en;
 
   const switchLanguage = React.useCallback(
     (nextLang: ShellLang) => {
@@ -103,11 +114,11 @@ export function UserProfileMenu({ name, role, activeLang }: UserProfileMenuProps
                 }
               }}
             >
-              {loggingOut ? logoutCopy.pending : logoutCopy.action}
+              {loggingOut ? copy.loggingOut : copy.logout}
             </button>
             {logoutFailed ? (
               <p className="mt-2 text-xs text-destructive" role="alert">
-                {logoutCopy.error}
+                {copy.logoutFailed}
               </p>
             ) : null}
           </div>

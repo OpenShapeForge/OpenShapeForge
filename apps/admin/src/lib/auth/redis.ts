@@ -219,7 +219,14 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await withRedis((redis) => redis.del(key));
 }
 
-/** See apps/web's equivalent for the refresh/logout race this lock closes. */
+/**
+ * Remove and return the exact session being logged out.
+ *
+ * The refresh lock reduces refresh/revoke overlap. Local session fencing does
+ * not depend on its TTL: the single-key deletion and compare-and-set writers
+ * prevent a deleted session from being recreated. The TTL does not guarantee
+ * identity-provider revocation when an upstream refresh outlives the lock.
+ */
 export async function consumeSessionForLogout(
   sessionId: string,
 ): Promise<StoredSession | null> {

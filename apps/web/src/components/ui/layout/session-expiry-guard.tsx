@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { requestLogout, type LogoutReason } from "@openshapeforge/auth";
 import { Button } from "@openshapeforge/ui/button";
 import {
   Dialog,
@@ -13,7 +14,6 @@ import {
   DialogTitle,
 } from "@/components/ui/overlay/dialog";
 import type { Session } from "@/lib/auth";
-import { requestLogout } from "@/lib/auth/logout-client";
 import { useAppSession, useSetAppSession } from "./session-provider";
 
 const WARNING_BEFORE_EXPIRY_S = 120;
@@ -72,7 +72,7 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
     }
   }, []);
 
-  const logout = useCallback(async (reason?: "session_expired") => {
+  const logout = useCallback(async (reason?: LogoutReason) => {
     if (redirectingRef.current) {
       return;
     }
@@ -80,7 +80,9 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
     redirectingRef.current = true;
     setLogoutFailed(false);
     clearTimers();
-    if (!await requestLogout(reason)) {
+    if (!await requestLogout(reason, {
+      retryOnceOnServiceUnavailable: reason === "session_expired",
+    })) {
       redirectingRef.current = false;
       setLogoutFailed(true);
       setShowDialog(true);

@@ -102,11 +102,12 @@ jobs:
       - name: Compiler unit tests
         run: bun test packages/compiler
 
-      # Server-side session logout and refresh fencing are framework-specific.
-      # Keep both app variants under the main unit-test gate.
+      # Logout orchestration is framework-neutral in packages/auth; Redis
+      # fencing and refresh/hydration adapters remain app-specific.
       - name: Session logout unit tests
         run: >-
-          bun test apps/web/src/lib/auth/auth/logout.test.ts
+          bun test packages/auth/src/logout.test.ts
+          packages/auth/src/logout-client.test.ts
           apps/web/src/lib/auth/auth/token-refresh-lock.test.ts
           apps/web/src/lib/auth/auth/session-hydration.test.ts
           apps/web/src/lib/auth/redis-fencing.test.ts

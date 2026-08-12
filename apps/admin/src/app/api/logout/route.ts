@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { NextRequest } from "next/server";
+import { NextRequest } from "next/server";
+import {
+  handleLogoutRequest,
+  resolveCanonicalAppOrigin,
+  revokeKeycloakRefreshSession,
+} from "@openshapeforge/auth";
 import { auth, handlers } from "@/lib/auth";
 import {
   authCookieNames,
@@ -7,11 +12,6 @@ import {
   keycloakClientSecret,
   keycloakServerLogoutUrl,
 } from "@/lib/auth/auth/keycloak";
-import {
-  handleLogoutRequest,
-  resolveCanonicalAppOrigin,
-  revokeKeycloakRefreshSession,
-} from "@/lib/auth/auth/logout";
 import { consumeSessionForLogout } from "@/lib/auth/redis";
 
 const transientCookieNames = [
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     appOrigin: resolveCanonicalAppOrigin(
       process.env.AUTH_URL ?? process.env.NEXTAUTH_URL,
     ),
-    authPost: handlers.POST,
+    authPost: (authRequest) => handlers.POST(new NextRequest(authRequest)),
     getAuthenticatedSession: auth,
     consumeSession: consumeSessionForLogout,
     revokeRefreshSession: (refreshToken) => revokeKeycloakRefreshSession({

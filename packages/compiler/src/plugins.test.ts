@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { beforeAll, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
@@ -18,17 +18,17 @@ type ArtifactCollection = Awaited<ReturnType<typeof collectAllArtifacts>>;
 const FULL_CORPUS_DETERMINISM_TIMEOUT_MS = 15_000;
 
 describe("compiler plugins", () => {
-  let deterministicRuns: [ArtifactCollection, ArtifactCollection];
-
-  beforeAll(async () => {
-    deterministicRuns = [
+  let deterministicRuns: Promise<[ArtifactCollection, ArtifactCollection]> | undefined;
+  const getDeterministicRuns = () => {
+    deterministicRuns ??= (async () => [
       await collectAllArtifacts(repoRoot),
       await collectAllArtifacts(repoRoot),
-    ];
-  }, FULL_CORPUS_DETERMINISM_TIMEOUT_MS);
+    ])();
+    return deterministicRuns;
+  };
 
-  test("collectAllArtifacts runs configured plugins deterministically", () => {
-    const [first, second] = deterministicRuns;
+  test("collectAllArtifacts runs configured plugins deterministically", async () => {
+    const [first, second] = await getDeterministicRuns();
 
     const docs = first.groups.plugins.find((entry) => entry.name === "entity-docs");
     expect(docs).toBeTruthy();
@@ -41,7 +41,7 @@ describe("compiler plugins", () => {
     expect(second.all.map((a) => [a.path, a.contents])).toEqual(
       first.all.map((a) => [a.path, a.contents]),
     );
-  });
+  }, FULL_CORPUS_DETERMINISM_TIMEOUT_MS);
 
   test("plugin context exposes compiled entity contracts", async () => {
     const { groups } = await collectAllArtifacts(repoRoot);
@@ -59,8 +59,8 @@ describe("compiler plugins", () => {
     expect(headings.length).toBe(crudTables.length);
   });
 
-  test("workflow plugin emits api workflow artifacts deterministically", () => {
-    const [first, second] = deterministicRuns;
+  test("workflow plugin emits api workflow artifacts deterministically", async () => {
+    const [first, second] = await getDeterministicRuns();
 
     const workflow = first.groups.plugins.find((entry) => entry.name === "workflow");
     expect(workflow).toBeTruthy();
@@ -103,7 +103,7 @@ describe("compiler plugins", () => {
 
     // Its generated root is gated by the shared stale/orphan checks.
     expect(first.ownedPaths.roots).toContain("apps/api/src/generated/workflow");
-  });
+  }, FULL_CORPUS_DETERMINISM_TIMEOUT_MS);
 
   test("workflow plugin contributes the platform workflow catalog tables", async () => {
     const manifest = await loadActivePlatformManifest(repoRoot);

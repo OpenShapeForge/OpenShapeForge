@@ -222,6 +222,209 @@ fi
     );
   });
 
+  test("disables forwarding and proves the live boundary before registration", async () => {
+    const source = await readFile(RUNNERS, "utf8");
+    const provisionStart = source.indexOf("provision_slot_locked() {");
+    const provisionEnd = source.indexOf("\nprovision_slot() (", provisionStart);
+    const provision = source.slice(provisionStart, provisionEnd);
+    const forwardingFlag = provision.indexOf("--port-forwarder none");
+    const loopbackHardening = provision.indexOf(
+      'harden_colima_loopback_forwarding "$profile"',
+    );
+    const liveProof = provision.indexOf(
+      'verify_guest_port_forwarding_disabled "$profile"',
+    );
+    const tokenRequest = provision.indexOf("actions/runners/registration-token");
+
+    expect(provisionStart).toBeGreaterThanOrEqual(0);
+    expect(provisionEnd).toBeGreaterThan(provisionStart);
+    expect(forwardingFlag).toBeGreaterThanOrEqual(0);
+    expect(loopbackHardening).toBeGreaterThan(forwardingFlag);
+    expect(liveProof).toBeGreaterThan(loopbackHardening);
+    expect(tokenRequest).toBeGreaterThan(liveProof);
+  });
+
+  test("uses a deterministic guest probe and preserves failure diagnostics", async () => {
+    const source = await readFile(RUNNERS, "utf8");
+    const start = source.indexOf("verify_guest_port_forwarding_disabled() {");
+    const end = source.indexOf("\n# macOS skips PF", start);
+    const verification = source.slice(start, end);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(verification).toContain("nohup /usr/local/bin/node");
+    expect(verification).toContain(
+      '[Number(process.env.WILDCARD_PROBE_PORT), "0.0.0.0"]',
+    );
+    expect(verification).toContain(
+      '[Number(process.env.IPV4_LOOPBACK_PROBE_PORT), "127.0.0.1"]',
+    );
+    expect(verification).toContain(
+      '[Number(process.env.IPV6_LOOPBACK_PROBE_PORT), "::1"]',
+    );
+    expect(verification).toContain(
+      'if [[ "$wildcard_response" == ready && "$ipv4_response" == ready &&',
+    );
+    expect(verification).toContain("probe_ready=1");
+    expect(verification).toContain(
+      "Guest port-forwarding probe setup failed; guest diagnostics follow",
+    );
+    expect(verification).toContain('sed -n "1,80p" "$log_file"');
+  });
+
+  test("adds explicit IPv4 and IPv6 loopback denies before restarting Lima", async () => {
+    const result = await runHarness(`
+export COLIMA_HOME="$HOME/.colima"
+config="$COLIMA_HOME/_lima/colima-profile/lima.yaml"
+mkdir -p "$(dirname "$config")"
+cat >"$config" <<'YAML'
+vmType: vz
+portForwards:
+    - guestIP: 0.0.0.0
+      proto: any
+      ignore: true
+YAML
+limactl() {
+  printf '%s\n' "$*" >>"$HOME/limactl-calls"
+}
+harden_colima_loopback_forwarding profile
+grep -Fq 'guestIP: 127.0.0.1' "$config"
+grep -Fq 'guestIP: ::1' "$config"
+grep -Fq 'stop colima-profile' "$HOME/limactl-calls"
+grep -Fq 'start --tty=false colima-profile' "$HOME/limactl-calls"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("leaves the VM stopped when the generated forwarding config is unexpected", async () => {
+    const result = await runHarness(`
+export COLIMA_HOME="$HOME/.colima"
+config="$COLIMA_HOME/_lima/colima-profile/lima.yaml"
+mkdir -p "$(dirname "$config")"
+printf 'vmType: vz\n' >"$config"
+limactl() {
+  printf '%s\n' "$*" >>"$HOME/limactl-calls"
+}
+set +e
+harden_colima_loopback_forwarding profile
+harden_result=$?
+set -e
+(( harden_result != 0 ))
+grep -Fq 'stop colima-profile' "$HOME/limactl-calls"
+! grep -Fq 'start --tty=false colima-profile' "$HOME/limactl-calls"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Generated Lima forwarding config is not in the expected shape",
+    );
+  });
+
+  test("does not classify an lsof inspection error as an unbound host port", async () => {
+    const result = await runHarness(`
+lsof() {
+  printf 'listener inspection failed\n' >&2
+  return 1
+}
+[[ "$(host_tcp_port_state 49152)" == error ]]
+set +e
+assert_host_tcp_port_unbound 49152
+assert_result=$?
+set -e
+(( assert_result != 0 ))
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not prove that TCP port 49152 is unbound on the Mac",
+    );
+  });
+
+  test("does not inspect or accept a host port when its error log cannot be created", async () => {
+    const result = await runHarness(`
+mktemp() { return 1; }
+lsof() {
+  touch "$HOME/lsof-called"
+  return 1
+}
+[[ "$(host_tcp_port_state 49152)" == error ]]
+[[ ! -e "$HOME/lsof-called" ]]
+set +e
+select_forwarding_probe_port 49152
+selection_result=$?
+set -e
+(( selection_result != 0 ))
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not inspect candidate forwarding probe ports on the Mac",
+    );
+  });
+
+  test("fails the live proof closed when a wildcard host listener appears", async () => {
+    const result = await runHarness(`
+lsof() {
+  calls="$(cat "$HOME/lsof-calls" 2>/dev/null || printf 0)"
+  calls="$((calls + 1))"
+  printf '%s\n' "$calls" >"$HOME/lsof-calls"
+  if (( calls <= 6 )); then
+    return 1
+  fi
+  printf 'hostagent 42 user 10u IPv4 TCP *:49152 (LISTEN)\\n'
+}
+nc() { return 1; }
+sleep() { :; }
+colima() {
+  printf '%s\\n' "$*" >>"$HOME/colima-calls"
+  return 0
+}
+set +e
+verify_guest_port_forwarding_disabled profile
+verify_result=$?
+set -e
+(( verify_result != 0 ))
+grep -Fq 'openshapeforge-forwarding-probe.pid' "$HOME/colima-calls"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "TCP port 49152 is bound on the Mac; forwarding proof cannot continue",
+    );
+  });
+
+  test("selects an unbound port, accepts the isolated listener and removes it", async () => {
+    const result = await runHarness(`
+lsof() {
+  if [[ "$*" == *'-iTCP:49152'* ]]; then
+    printf 'service 43 user 10u IPv4 TCP *:49152 (LISTEN)\\n'
+    return 0
+  fi
+  return 1
+}
+nc() {
+  printf '%s\\n' "$*" >>"$HOME/nc-calls"
+  return 1
+}
+sleep() { :; }
+colima() {
+  printf '%s\\n' "$*" >>"$HOME/colima-calls"
+  return 0
+}
+verify_guest_port_forwarding_disabled profile
+grep -Fq -- '-z 127.0.0.1 49153' "$HOME/nc-calls"
+grep -Fq -- '-z ::1 49153' "$HOME/nc-calls"
+grep -Fq -- '-z 127.0.0.1 49154' "$HOME/nc-calls"
+grep -Fq -- '-z ::1 49154' "$HOME/nc-calls"
+grep -Fq -- '-z 127.0.0.1 49155' "$HOME/nc-calls"
+grep -Fq -- '-z ::1 49155' "$HOME/nc-calls"
+grep -Fq 'kill "$pid"' "$HOME/colima-calls"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
   test("verifies durable service identity after a fast runner exit", async () => {
     const source = await readFile(RUNNERS, "utf8");
     const start = source.indexOf("verify_unprivileged_runner() {");

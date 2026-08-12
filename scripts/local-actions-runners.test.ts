@@ -456,6 +456,61 @@ gh() {
 
     expect(result.exitCode, output(result)).toBe(0);
   });
+
+  test("adds the routing label through the repository runner API", async () => {
+    const result = await runHarness(`
+gh() {
+  printf '%s\n' "$*" >"$HOME/gh-call"
+}
+add_repository_runner_routing_label 42
+grep -Fq -- '--method POST repos/OpenShapeForge/OpenShapeForge/actions/runners/42/labels' "$HOME/gh-call"
+grep -Fq -- '--field labels[]=osf-pr' "$HOME/gh-call"
+grep -Fq -- '--silent' "$HOME/gh-call"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("fails closed when the routing label update fails", async () => {
+    const result = await runHarness(`
+gh() { return 1; }
+if add_repository_runner_routing_label 42; then
+  exit 1
+fi
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not add routing label to repository runner 42",
+    );
+  });
+
+  test("clears bootstrap labels through the repository runner API", async () => {
+    const result = await runHarness(`
+gh() {
+  printf '%s\n' "$*" >"$HOME/gh-call"
+}
+clear_repository_runner_labels 42
+grep -Fq -- '--method DELETE repos/OpenShapeForge/OpenShapeForge/actions/runners/42/labels' "$HOME/gh-call"
+grep -Fq -- '--silent' "$HOME/gh-call"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("fails closed when clearing bootstrap labels fails", async () => {
+    const result = await runHarness(`
+gh() { return 1; }
+if clear_repository_runner_labels 42; then
+  exit 1
+fi
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not clear labels from repository runner 42",
+    );
+  });
 });
 
 describe("isolation invariants", () => {
@@ -564,6 +619,159 @@ fi
     expect(result.stderr.toString()).toContain(
       "Runner pre-admission cannot execute linux/amd64 containers",
     );
+  });
+
+  test("starts the listener only after isolation verification and label admission", async () => {
+    const source = await readFile(RUNNERS, "utf8");
+    const provisionStart = source.indexOf("provision_slot_locked() {");
+    const provisionEnd = source.indexOf("\nprovision_slot() (", provisionStart);
+    const provision = source.slice(provisionStart, provisionEnd);
+    const runnerNameGeneration = provision.indexOf(
+      'runner_name="$(runner_prefix_for "$slot")-$(uuidgen',
+    );
+    const bootstrapGeneration = provision.indexOf(
+      'bootstrap_label="$(uuidgen | tr',
+    );
+    const bootstrapGenerationEnd = provision.indexOf(
+      "\n",
+      bootstrapGeneration,
+    );
+    const bootstrapAssignment = provision.slice(
+      bootstrapGeneration,
+      bootstrapGenerationEnd,
+    );
+    const registrationStart = provision.indexOf("./config.sh --unattended");
+    const registrationEnd = provision.indexOf(
+      'runner_id="$(wait_for_repository_runner_id',
+      registrationStart,
+    );
+    const registration = provision.slice(registrationStart, registrationEnd);
+    const labelClearing = provision.indexOf(
+      'clear_repository_runner_labels "$runner_id"',
+    );
+    const serviceInstall = provision.indexOf(
+      'install_runner_service "$profile" "$service"',
+    );
+    const preJobVerification = provision.indexOf(
+      'verify_pre_job_policy "$profile" "$service"',
+    );
+    const preStartHardening = provision.indexOf(
+      'harden_runner_before_start "$profile" "$service"',
+    );
+    const isolationVerification = provision.indexOf(
+      'verify_unprivileged_runner "$profile" "$service"',
+    );
+    const labelAdmission = provision.indexOf(
+      'add_repository_runner_routing_label "$runner_id"',
+    );
+    const serviceStart = provision.indexOf(
+      'start_runner_service "$profile" "$service"',
+    );
+    const lifecyclePoll = provision.indexOf(
+      'wait_for_runner_online_or_consumed',
+    );
+
+    expect(provisionStart).toBeGreaterThanOrEqual(0);
+    expect(provisionEnd).toBeGreaterThan(provisionStart);
+    expect(runnerNameGeneration).toBeGreaterThanOrEqual(0);
+    expect(bootstrapGeneration).toBeGreaterThan(runnerNameGeneration);
+    expect(bootstrapAssignment).not.toContain("cut -c 1-8");
+    expect(provision).toContain(
+      '[[ "$bootstrap_label" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]',
+    );
+    expect(provision).toContain('RUNNER_BOOTSTRAP_LABEL="$bootstrap_label"');
+    expect(registrationStart).toBeGreaterThanOrEqual(0);
+    expect(registrationEnd).toBeGreaterThan(registrationStart);
+    expect(registration).toContain("--no-default-labels");
+    expect(registration).toContain('--labels "$RUNNER_BOOTSTRAP_LABEL"');
+    expect(provision).not.toContain("osf-bootstrap-quarantine");
+    expect(registration).not.toContain("osf-pr");
+    expect(labelClearing).toBeGreaterThan(registrationEnd);
+    expect(serviceInstall).toBeGreaterThan(labelClearing);
+    expect(preJobVerification).toBeGreaterThan(serviceInstall);
+    expect(preStartHardening).toBeGreaterThan(preJobVerification);
+    expect(isolationVerification).toBeGreaterThan(preStartHardening);
+    expect(labelAdmission).toBeGreaterThan(isolationVerification);
+    expect(serviceStart).toBeGreaterThan(labelAdmission);
+    expect(lifecyclePoll).toBeGreaterThan(serviceStart);
+    expect(provision).not.toContain("harden_and_start_runner");
+  });
+
+  test("keeps the listener absent throughout the bootstrap-label window", async () => {
+    const source = await readFile(RUNNERS, "utf8");
+    const installStart = source.indexOf("install_runner_service() {");
+    const installEnd = source.indexOf(
+      "\nharden_runner_before_start() {",
+      installStart,
+    );
+    const install = source.slice(installStart, installEnd);
+    const hardeningStart = source.indexOf("harden_runner_before_start() {");
+    const hardeningEnd = source.indexOf(
+      "\nstart_runner_service() {",
+      hardeningStart,
+    );
+    const hardening = source.slice(hardeningStart, hardeningEnd);
+    const verificationStart = source.indexOf("verify_unprivileged_runner() {");
+    const verificationEnd = source.indexOf(
+      "\nverify_host_network_boundary() {",
+      verificationStart,
+    );
+    const verification = source.slice(verificationStart, verificationEnd);
+    const startStart = source.indexOf("start_runner_service() {");
+    const startEnd = source.indexOf("\nverify_pre_job_policy() {", startStart);
+    const start = source.slice(startStart, startEnd);
+
+    expect(installStart).toBeGreaterThanOrEqual(0);
+    expect(installEnd).toBeGreaterThan(installStart);
+    expect(install).toContain('systemctl disable "$RUNNER_SERVICE"');
+    expect(install).not.toContain('systemctl start "$RUNNER_SERVICE"');
+    expect(install).toContain(
+      "ExecStartPre=+/usr/bin/rm -f /etc/sudoers.d/openshapeforge-runner-start",
+    );
+    expect(hardeningStart).toBeGreaterThanOrEqual(0);
+    expect(hardeningEnd).toBeGreaterThan(hardeningStart);
+    expect(hardening).not.toContain('systemctl start "$RUNNER_SERVICE"');
+    expect(hardening).not.toContain("Runner.Listener");
+    expect(hardening).toContain(
+      'NOPASSWD: /usr/bin/systemctl start %s\\n"',
+    );
+    expect(hardening).toContain(
+      "visudo -cf /etc/sudoers.d/openshapeforge-runner-start",
+    );
+    expect(verification).toContain('systemctl is-active "$RUNNER_SERVICE"');
+    expect(verification).toContain('!= "inactive"');
+    expect(verification).toContain(
+      'pgrep -f "^/opt/actions-runner/bin/Runner.Listener( |$)"',
+    );
+    expect(start).toContain(
+      'sudo -n /usr/bin/systemctl start "$RUNNER_SERVICE"',
+    );
+    expect(start).toContain(
+      "test ! -e /etc/sudoers.d/openshapeforge-runner-start",
+    );
+  });
+
+  test("supervisor serializes cleanup after every provisioning result", async () => {
+    const source = await readFile(RUNNERS, "utf8");
+    const provisionStart = source.indexOf("provision_slot() (");
+    const provisionEnd = source.indexOf(
+      "\ncleanup_slot_serialized() (",
+      provisionStart,
+    );
+    const provision = source.slice(provisionStart, provisionEnd);
+    const supervisorStart = source.indexOf("supervise_slot() {");
+    const supervisorEnd = source.indexOf(
+      "\nwrite_launch_agent() {",
+      supervisorStart,
+    );
+    const supervisor = source.slice(supervisorStart, supervisorEnd);
+    const provisioning = supervisor.indexOf('provision_slot "$slot"');
+    const cleanup = supervisor.indexOf('cleanup_slot_serialized "$slot"');
+
+    expect(provision).toContain('(set -e; provision_slot_locked "$slot")');
+    expect(supervisor).toContain('install_supervisor_exit_traps "$slot"');
+    expect(provisioning).toBeGreaterThanOrEqual(0);
+    expect(cleanup).toBeGreaterThan(provisioning);
   });
 
   test("disables forwarding and proves the live boundary before registration", async () => {
@@ -769,7 +977,7 @@ grep -Fq 'kill "$pid"' "$HOME/colima-calls"
     expect(result.exitCode, output(result)).toBe(0);
   });
 
-  test("verifies durable service identity after a fast runner exit", async () => {
+  test("verifies inactive service and durable identity before listener start", async () => {
     const source = await readFile(RUNNERS, "utf8");
     const start = source.indexOf("verify_unprivileged_runner() {");
     const end = source.indexOf("\nverify_host_network_boundary() {", start);
@@ -779,7 +987,7 @@ grep -Fq 'kill "$pid"' "$HOME/colima-calls"
     expect(end).toBeGreaterThan(start);
     expect(verification).toContain('-p User --value');
     expect(verification).toContain('-p SupplementaryGroups --value');
-    expect(verification).not.toContain("Runner.Listener");
+    expect(verification).toContain("Runner.Listener");
   });
 
   test("runs exit cleanup when the process no longer owns a lock", async () => {

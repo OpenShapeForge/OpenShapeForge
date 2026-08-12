@@ -1104,20 +1104,362 @@ cleanup_slot_on_exit() {
   cleanup_slot_serialized "$slot"
 }
 
+SUPERVISOR_PROVISION_PID=""
+SUPERVISOR_PROVISION_READY_FILE=""
+SUPERVISOR_PROVISION_RESULT_FILE=""
+SUPERVISOR_PROVISION_GENERATION=0
+SUPERVISOR_PROVISION_STATE="idle"
+SUPERVISOR_PENDING_SIGNAL_STATUS=""
+
+provision_pid_is_direct_child() {
+  local provision_pid="$1"
+  local parent_pid
+  [[ "$provision_pid" =~ ^[0-9]+$ ]] || return 1
+  parent_pid="$(ps -p "$provision_pid" -o ppid= 2>/dev/null)" || return 1
+  parent_pid="${parent_pid//[[:space:]]/}"
+  [[ "$parent_pid" == "$$" ]]
+}
+
+provision_anchor_is_direct_child() {
+  local provision_pid="$1"
+  local process_group_id
+  provision_pid_is_direct_child "$provision_pid" || return 1
+  process_group_id="$(ps -p "$provision_pid" -o pgid= 2>/dev/null)" || return 1
+  process_group_id="${process_group_id//[[:space:]]/}"
+  [[ "$process_group_id" == "$provision_pid" ]]
+}
+
+provision_anchor_is_active() {
+  local provision_pid="$1"
+  local state
+  provision_anchor_is_direct_child "$provision_pid" || return 1
+  state="$(ps -p "$provision_pid" -o stat= 2>/dev/null)" || return 1
+  state="${state//[[:space:]]/}"
+  [[ -n "$state" && "$state" != Z* ]]
+}
+
+provision_group_has_live_processes() {
+  local provision_pid="$1"
+  local processes scan_result
+  processes="$(ps -axo pgid=,stat= 2>/dev/null)" || return 2
+  printf '%s\n' "$processes" | awk -v group="$provision_pid" '
+    $1 == group && $2 !~ /^Z/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  '
+  scan_result=$?
+  return "$scan_result"
+}
+
+wait_for_provision_group_death() {
+  local provision_pid="$1"
+  local attempt group_state
+  for attempt in {1..20}; do
+    if provision_group_has_live_processes "$provision_pid"; then
+      group_state=0
+    else
+      group_state=$?
+    fi
+    (( group_state == 1 )) && return 0
+    (( group_state == 2 )) && return 1
+    /bin/sleep 0.05
+  done
+  return 1
+}
+
+reap_dead_provision_anchor() {
+  local provision_pid="$1"
+  local expected_status="$2"
+  local wait_status
+  wait_for_provision_group_death "$provision_pid" || return 1
+  if builtin wait "$provision_pid" 2>/dev/null; then
+    wait_status=0
+  else
+    wait_status=$?
+  fi
+  (( wait_status == expected_status ))
+}
+
+force_kill_and_reap_provision_anchor() {
+  local provision_pid="$1"
+  provision_anchor_is_direct_child "$provision_pid" || return 1
+  kill -KILL -- "-${provision_pid}" >/dev/null 2>&1 || return 1
+  reap_dead_provision_anchor "$provision_pid" 137
+}
+
+clear_active_provision_identity() {
+  if [[ -n "$SUPERVISOR_PROVISION_READY_FILE" ]]; then
+    unlink "$SUPERVISOR_PROVISION_READY_FILE" >/dev/null 2>&1 || true
+    SUPERVISOR_PROVISION_READY_FILE=""
+  fi
+  if [[ -n "$SUPERVISOR_PROVISION_RESULT_FILE" ]]; then
+    unlink "$SUPERVISOR_PROVISION_RESULT_FILE" >/dev/null 2>&1 || true
+    SUPERVISOR_PROVISION_RESULT_FILE=""
+  fi
+}
+
+clear_reaped_active_provision_identity() {
+  SUPERVISOR_PROVISION_PID=""
+  SUPERVISOR_PROVISION_STATE="idle"
+  clear_active_provision_identity
+}
+
+terminate_active_provision() {
+  local provision_pid="${SUPERVISOR_PROVISION_PID:-}"
+  local anchor_wait_status=0 termination_result=0
+  if [[ ! "$provision_pid" =~ ^[0-9]+$ ]]; then
+    return 0
+  fi
+  SUPERVISOR_PROVISION_STATE="terminating"
+
+  if ! provision_anchor_is_direct_child "$provision_pid"; then
+    echo "Could not validate active provisioning anchor pid ${provision_pid}" >&2
+    return 1
+  fi
+  if ! kill -TERM -- "-${provision_pid}" >/dev/null 2>&1; then
+    termination_result=1
+  fi
+  /bin/sleep 0.5
+  if ! provision_anchor_is_direct_child "$provision_pid"; then
+    echo "Provisioning anchor pid ${provision_pid} lost its stable identity before KILL" >&2
+    return 1
+  fi
+  if provision_anchor_is_active "$provision_pid" ||
+    provision_group_has_live_processes "$provision_pid"; then
+    echo \
+      "Provisioning processes for pid ${provision_pid} reached the TERM deadline; forcing termination" \
+      >&2
+    if ! kill -KILL -- "-${provision_pid}" >/dev/null 2>&1; then
+      echo "Could not force termination of provisioning group ${provision_pid}" >&2
+      return 1
+    fi
+    anchor_wait_status=137
+  fi
+  if ! reap_dead_provision_anchor "$provision_pid" "$anchor_wait_status"; then
+    echo "Could not confirm provisioning group ${provision_pid} died and was reaped" >&2
+    return 1
+  fi
+  clear_reaped_active_provision_identity
+  return "$termination_result"
+}
+
+run_active_provision_anchor() {
+  local slot="$1"
+  local ready_file="$2"
+  local result_file="$3"
+  local provision_result provision_worker_pid
+  trap - EXIT
+  trap '' INT TERM
+  trap 'exit 0' USR1
+  set +e
+  (
+    trap - INT TERM
+    provision_slot "$slot"
+  ) &
+  provision_worker_pid=$!
+  printf 'ready\n' >"$ready_file"
+  builtin wait "$provision_worker_pid"
+  provision_result=$?
+  printf '%s\n' "$provision_result" >"$result_file"
+  while true; do :; done
+}
+
+launch_active_provision() {
+  local slot="$1"
+  local ready_file result_file launch_attempt pending_signal_status provision_pid
+  SUPERVISOR_PROVISION_GENERATION=$((SUPERVISOR_PROVISION_GENERATION + 1))
+  ready_file="${SUPPORT_DIR}/.supervisor-provision-$$-${SUPERVISOR_PROVISION_GENERATION}.ready"
+  result_file="${ready_file}.result"
+  unlink "$ready_file" >/dev/null 2>&1 || true
+  unlink "$result_file" >/dev/null 2>&1 || true
+  SUPERVISOR_PROVISION_READY_FILE="$ready_file"
+  SUPERVISOR_PROVISION_RESULT_FILE="$result_file"
+  SUPERVISOR_PENDING_SIGNAL_STATUS=""
+  SUPERVISOR_PROVISION_PID=""
+  SUPERVISOR_PROVISION_STATE="launching"
+
+  set -m
+  (set +m; run_active_provision_anchor "$slot" "$ready_file" "$result_file") &
+  provision_pid=$!
+  set +m
+
+  for launch_attempt in {1..300}; do
+    [[ -s "$ready_file" ]] && break
+    kill -0 "$provision_pid" >/dev/null 2>&1 || break
+    /bin/sleep 0.01
+  done
+  if [[ ! -s "$ready_file" ]] || ! provision_anchor_is_active "$provision_pid"; then
+    pending_signal_status="$SUPERVISOR_PENDING_SIGNAL_STATUS"
+    # Retain the local anchor identity for EXIT retry until group death and
+    # reaping are confirmed, even though active publication failed.
+    SUPERVISOR_PROVISION_PID="$provision_pid"
+    SUPERVISOR_PROVISION_STATE="failed"
+    if force_kill_and_reap_provision_anchor "$provision_pid"; then
+      clear_reaped_active_provision_identity
+    else
+      echo "Could not discard unpublished provisioning anchor pid ${provision_pid}" >&2
+    fi
+    if [[ -n "$pending_signal_status" ]]; then
+      supervisor_signal_exit "$pending_signal_status"
+    fi
+    echo "Provisioning anchor failed before publishing a stable identity" >&2
+    return 1
+  fi
+  SUPERVISOR_PROVISION_PID="$provision_pid"
+  SUPERVISOR_PROVISION_STATE="active"
+  if [[ -n "$SUPERVISOR_PENDING_SIGNAL_STATUS" ]]; then
+    supervisor_signal_exit "$SUPERVISOR_PENDING_SIGNAL_STATUS"
+  fi
+}
+
+release_and_reap_provision_anchor() {
+  local provision_pid="$1"
+  local attempt
+  provision_anchor_is_active "$provision_pid" || return 1
+  kill -USR1 -- "$provision_pid" >/dev/null 2>&1 || return 1
+  for attempt in {1..20}; do
+    if ! provision_anchor_is_active "$provision_pid"; then
+      reap_dead_provision_anchor "$provision_pid" 0 && return 0
+      return 1
+    fi
+    /bin/sleep 0.05
+  done
+  return 1
+}
+
+wait_for_active_provision_result() {
+  local provision_pid="${SUPERVISOR_PROVISION_PID:-}"
+  local provision_result result_file="${SUPERVISOR_PROVISION_RESULT_FILE:-}"
+  local pending_signal_status
+  while [[ -n "$result_file" && ! -s "$result_file" ]]; do
+    if ! provision_anchor_is_active "$provision_pid"; then
+      echo "Provisioning anchor pid ${provision_pid} exited before reporting a result" >&2
+      if force_kill_and_reap_provision_anchor "$provision_pid"; then
+        clear_reaped_active_provision_identity
+      fi
+      return 1
+    fi
+    /bin/sleep 0.05
+  done
+  if [[ -z "$result_file" ]] || ! read -r provision_result <"$result_file" ||
+    [[ ! "$provision_result" =~ ^[0-9]+$ ]] || (( provision_result > 255 )); then
+    echo "Provisioning anchor pid ${provision_pid} reported an invalid result" >&2
+    if force_kill_and_reap_provision_anchor "$provision_pid"; then
+      clear_reaped_active_provision_identity
+    fi
+    return 1
+  fi
+  if ! provision_anchor_is_active "$provision_pid"; then
+    echo "Provisioning anchor pid ${provision_pid} exited before release" >&2
+    if force_kill_and_reap_provision_anchor "$provision_pid"; then
+      clear_reaped_active_provision_identity
+    fi
+    return 1
+  fi
+
+  SUPERVISOR_PROVISION_STATE="releasing"
+  if release_and_reap_provision_anchor "$provision_pid"; then
+    clear_reaped_active_provision_identity
+  else
+    echo "Provisioning anchor pid ${provision_pid} missed its release deadline; terminating group" >&2
+    provision_result=1
+    if ! terminate_active_provision; then
+      return 1
+    fi
+  fi
+  pending_signal_status="$SUPERVISOR_PENDING_SIGNAL_STATUS"
+  if [[ -n "$pending_signal_status" ]]; then
+    supervisor_signal_exit "$pending_signal_status"
+  fi
+  return "$provision_result"
+}
+
+supervisor_signal_received() {
+  local exit_status="$1"
+  if [[ "$SUPERVISOR_PROVISION_STATE" == "launching" ||
+    "$SUPERVISOR_PROVISION_STATE" == "releasing" ]]; then
+    if [[ -z "$SUPERVISOR_PENDING_SIGNAL_STATUS" ]]; then
+      SUPERVISOR_PENDING_SIGNAL_STATUS="$exit_status"
+    fi
+    return 0
+  fi
+  supervisor_signal_exit "$exit_status"
+}
+
+supervisor_signal_exit() {
+  local exit_status="$1"
+  local termination_result=0
+  trap '' INT TERM
+  if terminate_active_provision; then
+    termination_result=0
+  else
+    termination_result=$?
+    echo "Active provisioning termination failed with status ${termination_result}" >&2
+  fi
+  exit "$exit_status"
+}
+
+supervisor_exit_cleanup() {
+  local exit_status="$1"
+  local slot="$2"
+  local cleanup_result=0 termination_result=0
+  trap - EXIT
+  if [[ "${SUPERVISOR_PROVISION_PID:-}" =~ ^[0-9]+$ ]]; then
+    if terminate_active_provision; then
+      termination_result=0
+    else
+      termination_result=$?
+      echo "Supervisor exit could not terminate provisioning with status ${termination_result}" >&2
+    fi
+  fi
+  if (( termination_result == 0 )); then
+    if cleanup_slot_on_exit "$slot"; then
+      cleanup_result=0
+    else
+      cleanup_result=$?
+      echo "Supervisor cleanup for slot ${slot} failed with status ${cleanup_result}" >&2
+    fi
+  else
+    cleanup_result="$termination_result"
+  fi
+  if (( exit_status != 0 )); then
+    exit "$exit_status"
+  fi
+  exit "$cleanup_result"
+}
+
+install_supervisor_exit_traps() {
+  local slot="${1:-}"
+  local configured_slot exit_trap
+  for configured_slot in "${SLOTS[@]}"; do
+    [[ "$slot" == "$configured_slot" ]] || continue
+    # Bash 3.2 may run EXIT after this function's locals leave scope.
+    printf -v exit_trap 'supervisor_exit_cleanup "$?" %q' "$slot"
+    trap "$exit_trap" EXIT
+    trap 'supervisor_signal_received 130' INT
+    trap 'supervisor_signal_received 143' TERM
+    return 0
+  done
+  echo "Refusing to supervise unconfigured slot: ${slot:-<missing>}" >&2
+  return 2
+}
+
 supervise_slot() {
   local slot="$1"
   local provision_result cleanup_result
-  trap 'cleanup_slot_on_exit "$slot"' EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
+  install_supervisor_exit_traps "$slot"
   require_host_tools
   require_host_isolation
   ensure_runner_archive
   while true; do
+    launch_active_provision "$slot"
     set +e
-    provision_slot "$slot"
+    wait_for_active_provision_result
     provision_result=$?
     set -e
+    if [[ "${SUPERVISOR_PROVISION_PID:-}" =~ ^[0-9]+$ ]]; then
+      echo "Provisioning identity remains active after failed cleanup; exiting for final retry" >&2
+      return 1
+    fi
     if (( provision_result != 0 )); then
       echo "Slot ${slot} provisioning failed; retrying in 10 seconds" >&2
     fi

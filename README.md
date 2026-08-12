@@ -39,7 +39,10 @@ bun run dev:web       # http://localhost:3000 — the generated CRUD app
 
 bun run check:generated && bun run test:e2e    # proof gates
 bun run test:e2e:report                        # + HTML report in .e2e-report/
-bun run test:perf                              # k6 load suite (brew install k6)
+# Performance gate: restart dev:api with this checked, local-only profile,
+# then run k6 from another terminal (brew install k6).
+API_RATE_LIMIT_MAX_TRUSTED=1000000 bun run dev:api
+bun run test:perf
 ```
 
 Requests need a Keycloak bearer token or signed trusted-context headers — see

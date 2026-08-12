@@ -208,9 +208,26 @@ code**, so it can gate CI while always producing the report.
 ## k6 performance suite
 
 `bun run test:perf` (`scripts/run-perf.ts` → `apps/api/perf/
-generated-crud.perf.js`). Requirements: `brew install k6` and a running API
-(`bun run dev:api`); the runner health-checks `API_URL` (default
-`http://127.0.0.1:3001`) first.
+generated-crud.perf.js`). Requirements: `brew install k6` and a dedicated API
+process with the checked performance profile:
+
+```sh
+# API terminal. This one-process override does not change the production-safe
+# default trusted budget.
+API_RATE_LIMIT_MAX_TRUSTED=1000000 bun run dev:api
+
+# Test terminal.
+bun run test:perf
+```
+
+Before starting k6, the runner sends signed GraphQL requests for two fresh
+identities to `API_URL` (default `http://127.0.0.1:3001`). Each must report
+`x-ratelimit-limit: 1000000` and a fresh allowance, proving the effective
+trusted tier and configuration. The runner refuses to continue when the API is
+unreachable, the trusted-context secret does not match, or the API was started
+without the dedicated profile. The normal trusted budget remains 5× the
+anonymous budget (3000 requests per 60 seconds with defaults); only the
+explicit process above receives the performance budget.
 
 - **Scenarios derived from the manifest** — every `generatedCrud` entity gets
   its own constant-VUs lifecycle scenario: create (required FK dependencies
@@ -229,9 +246,10 @@ generated-crud.perf.js`). Requirements: `brew install k6` and a running API
 - Tuning env: `PERF_VUS` (default 5/entity), `PERF_DURATION` (15s),
   `PERF_P95_MS` (800), `API_URL`, `PERF_TENANT_ID`/`PERF_USER_ID`,
   `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET`.
-- Output: **`.perf-report/index.html`** (per entity/op avg/med/p95/p99/max +
-  threshold verdicts + raw k6 output) and `summary.json`. Exits with k6's
-  exit code, so threshold breaches fail CI while the report still renders.
+- Output: **`.perf-report/index.html`** (global threshold verdicts, per
+  entity/op avg/med/p95/p99/max + threshold verdicts, and raw k6 output) and
+  `summary.json`. The breach count covers both global and per-entity thresholds.
+  Exits non-zero when k6 or any threshold fails, while the report still renders.
 
 ## Migration tests
 

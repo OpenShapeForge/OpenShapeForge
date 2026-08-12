@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import {
+  PERF_API_RATE_LIMIT_MAX_ANONYMOUS,
   PERF_API_RATE_LIMIT_MAX_TRUSTED,
   assertPerfApiConfiguration,
   collectThresholdResults,
@@ -16,46 +17,76 @@ function preflightResponse(limit?: string, remaining?: string, status = 200) {
 }
 
 describe("performance API preflight", () => {
-  test("accepts only the dedicated trusted-caller budget", () => {
-    expect(() =>
-      assertPerfApiConfiguration(
-        preflightResponse(
-          String(PERF_API_RATE_LIMIT_MAX_TRUSTED),
-          String(PERF_API_RATE_LIMIT_MAX_TRUSTED - 1),
-        ),
+  const dedicatedProfile = (): {
+    anonymous: ReturnType<typeof preflightResponse>;
+    trusted: [ReturnType<typeof preflightResponse>, ReturnType<typeof preflightResponse>];
+  } => ({
+    anonymous: preflightResponse(
+      String(PERF_API_RATE_LIMIT_MAX_ANONYMOUS),
+      String(PERF_API_RATE_LIMIT_MAX_ANONYMOUS - 1),
+    ),
+    trusted: [
+      preflightResponse(
+        String(PERF_API_RATE_LIMIT_MAX_TRUSTED),
+        String(PERF_API_RATE_LIMIT_MAX_TRUSTED - 1),
       ),
+      preflightResponse(
+        String(PERF_API_RATE_LIMIT_MAX_TRUSTED),
+        String(PERF_API_RATE_LIMIT_MAX_TRUSTED - 1),
+      ),
+    ],
+  });
+
+  test("accepts only the dedicated anonymous and trusted budgets", () => {
+    expect(() =>
+      assertPerfApiConfiguration(dedicatedProfile()),
     ).not.toThrow();
   });
 
   test("fails closed when the effective rate-limit header is absent", () => {
-    expect(() => assertPerfApiConfiguration(preflightResponse())).toThrow(
+    const profile = dedicatedProfile();
+    profile.trusted[0] = preflightResponse();
+    expect(() => assertPerfApiConfiguration(profile)).toThrow(
       "omitted x-ratelimit-limit",
     );
   });
 
   test("fails closed when the running API uses another trusted budget", () => {
-    expect(() => assertPerfApiConfiguration(preflightResponse("3000", "2999"))).toThrow(
+    const profile = dedicatedProfile();
+    profile.trusted[0] = preflightResponse("3000", "2999");
+    expect(() => assertPerfApiConfiguration(profile)).toThrow(
       `expected ${PERF_API_RATE_LIMIT_MAX_TRUSTED}`,
     );
   });
 
+  test("fails closed when the anonymous budget was elevated too", () => {
+    const profile = dedicatedProfile();
+    profile.anonymous = preflightResponse(
+      String(PERF_API_RATE_LIMIT_MAX_TRUSTED),
+      String(PERF_API_RATE_LIMIT_MAX_TRUSTED - 1),
+    );
+    expect(() => assertPerfApiConfiguration(profile)).toThrow(
+      `expected ${PERF_API_RATE_LIMIT_MAX_ANONYMOUS}`,
+    );
+  });
+
   test("fails closed when the signed identity did not get a fresh allowance", () => {
-    expect(() =>
-      assertPerfApiConfiguration(
-        preflightResponse(
-          String(PERF_API_RATE_LIMIT_MAX_TRUSTED),
-          String(PERF_API_RATE_LIMIT_MAX_TRUSTED - 2),
-        ),
-      ),
-    ).toThrow("expected a fresh trusted allowance");
+    const profile = dedicatedProfile();
+    profile.trusted[0] = preflightResponse(
+      String(PERF_API_RATE_LIMIT_MAX_TRUSTED),
+      String(PERF_API_RATE_LIMIT_MAX_TRUSTED - 2),
+    );
+    expect(() => assertPerfApiConfiguration(profile)).toThrow("expected a fresh allowance");
   });
 
   test("fails closed when the signed GraphQL probe is not healthy", () => {
-    expect(() =>
-      assertPerfApiConfiguration(
-        preflightResponse(String(PERF_API_RATE_LIMIT_MAX_TRUSTED), undefined, 503),
-      ),
-    ).toThrow("status 503");
+    const profile = dedicatedProfile();
+    profile.trusted[0] = preflightResponse(
+      String(PERF_API_RATE_LIMIT_MAX_TRUSTED),
+      undefined,
+      503,
+    );
+    expect(() => assertPerfApiConfiguration(profile)).toThrow("status 503");
   });
 });
 

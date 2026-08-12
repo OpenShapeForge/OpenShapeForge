@@ -214,20 +214,21 @@ process with the checked performance profile:
 ```sh
 # API terminal. This one-process override does not change the production-safe
 # default trusted budget.
-API_RATE_LIMIT_MAX_TRUSTED=1000000 bun run dev:api
+HOST=127.0.0.1 API_RATE_LIMIT_MAX=600 API_RATE_LIMIT_MAX_TRUSTED=1000000 bun run dev:api
 
 # Test terminal.
 bun run test:perf
 ```
 
-Before starting k6, the runner sends signed GraphQL requests for two fresh
-identities to `API_URL` (default `http://127.0.0.1:3001`). Each must report
-`x-ratelimit-limit: 1000000` and a fresh allowance, proving the effective
-trusted tier and configuration. The runner refuses to continue when the API is
-unreachable, the trusted-context secret does not match, or the API was started
-without the dedicated profile. The normal trusted budget remains 5× the
-anonymous budget (3000 requests per 60 seconds with defaults); only the
-explicit process above receives the performance budget.
+Before starting k6, the runner sends one unsigned GraphQL request and signed
+requests for two fresh identities to `API_URL` (default
+`http://127.0.0.1:3001`). The unsigned probe must report the normal 600-request
+budget; each signed probe must report `x-ratelimit-limit: 1000000` and a fresh
+allowance. Together they prove only the trusted tier was elevated. The runner
+refuses to continue when the API is unreachable, the trusted-context secret
+does not match, or the API was started without this dedicated localhost-only
+profile. Production defaults remain 600 anonymous and 3000 trusted requests
+per 60 seconds.
 
 - **Scenarios derived from the manifest** — every `generatedCrud` entity gets
   its own constant-VUs lifecycle scenario: create (required FK dependencies

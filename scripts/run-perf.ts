@@ -4,8 +4,9 @@
  * Runs the manifest-driven k6 performance suite against a running API and
  * renders a self-contained HTML report.
  *
- *   API_RATE_LIMIT_MAX_TRUSTED=1000000 bun run dev:api  # dedicated API process
- *   bun run test:perf                                   # separate terminal
+ *   HOST=127.0.0.1 API_RATE_LIMIT_MAX=600 \
+ *     API_RATE_LIMIT_MAX_TRUSTED=1000000 bun run dev:api  # dedicated API process
+ *   bun run test:perf                                     # separate terminal
  *
  * Output: .perf-report/index.html (+ raw k6 summary.json). Exits non-zero when
  * k6 or a threshold fails, while still producing the report.
@@ -14,8 +15,10 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { applyTrustedContextHeaders } from "../packages/auth/src/index.ts";
+import { DEFAULT_RATE_LIMIT_MAX } from "../apps/api/src/config/limits.ts";
 
 export const PERF_API_RATE_LIMIT_MAX_TRUSTED = 1_000_000;
+export const PERF_API_RATE_LIMIT_MAX_ANONYMOUS = DEFAULT_RATE_LIMIT_MAX;
 
 const RATE_LIMIT_HEADER = "x-ratelimit-limit";
 const RATE_LIMIT_REMAINING_HEADER = "x-ratelimit-remaining";
@@ -64,47 +67,81 @@ export function collectThresholdResults(summary: Summary | null): ThresholdResul
   );
 }
 
-/**
- * The perf suite must see the dedicated trusted-caller budget and a fresh
- * allowance on the effective API response. The preflight calls this for two
- * distinct signed identities; both must get their own fresh allowance, proving
- * the running API classified them in the expected trusted tier.
- */
-export function assertPerfApiConfiguration(
+type PreflightResponse = Pick<Response, "headers" | "ok" | "status">;
+
+function assertRateLimitProbe(
+  label: string,
   response: Pick<Response, "headers" | "ok" | "status">,
-  expectedTrustedLimit = PERF_API_RATE_LIMIT_MAX_TRUSTED,
+  expectedLimit: number,
 ): void {
   if (!response.ok) {
-    throw new Error(`signed GraphQL preflight returned status ${response.status}`);
+    throw new Error(`${label} GraphQL preflight returned status ${response.status}`);
   }
 
   const rawLimit = response.headers.get(RATE_LIMIT_HEADER);
   if (rawLimit === null) {
-    throw new Error(`signed GraphQL preflight omitted ${RATE_LIMIT_HEADER}`);
+    throw new Error(`${label} GraphQL preflight omitted ${RATE_LIMIT_HEADER}`);
   }
   const rawRemaining = response.headers.get(RATE_LIMIT_REMAINING_HEADER);
   if (rawRemaining === null) {
-    throw new Error(`signed GraphQL preflight omitted ${RATE_LIMIT_REMAINING_HEADER}`);
+    throw new Error(`${label} GraphQL preflight omitted ${RATE_LIMIT_REMAINING_HEADER}`);
   }
 
   const actualLimit = Number(rawLimit);
-  if (!Number.isSafeInteger(actualLimit) || actualLimit !== expectedTrustedLimit) {
+  if (!Number.isSafeInteger(actualLimit) || actualLimit !== expectedLimit) {
     throw new Error(
-      `signed GraphQL preflight reported ${RATE_LIMIT_HEADER}=${rawLimit}; ` +
-        `expected ${expectedTrustedLimit}`,
+      `${label} GraphQL preflight reported ${RATE_LIMIT_HEADER}=${rawLimit}; ` +
+        `expected ${expectedLimit}`,
     );
   }
   const actualRemaining = Number(rawRemaining);
-  const expectedRemaining = expectedTrustedLimit - 1;
+  const expectedRemaining = expectedLimit - 1;
   if (!Number.isSafeInteger(actualRemaining) || actualRemaining !== expectedRemaining) {
     throw new Error(
-      `signed GraphQL preflight reported ${RATE_LIMIT_REMAINING_HEADER}=${rawRemaining}; ` +
-        `expected a fresh trusted allowance of ${expectedRemaining}`,
+      `${label} GraphQL preflight reported ${RATE_LIMIT_REMAINING_HEADER}=${rawRemaining}; ` +
+        `expected a fresh allowance of ${expectedRemaining}`,
     );
   }
 }
 
+/**
+ * The perf suite accepts only a dedicated local profile: the anonymous budget
+ * stays production-safe while two distinct signed identities each receive the
+ * elevated trusted budget with a fresh allowance.
+ */
+export function assertPerfApiConfiguration(
+  responses: {
+    anonymous: PreflightResponse;
+    trusted: readonly [PreflightResponse, PreflightResponse];
+  },
+  expectedAnonymousLimit = PERF_API_RATE_LIMIT_MAX_ANONYMOUS,
+  expectedTrustedLimit = PERF_API_RATE_LIMIT_MAX_TRUSTED,
+): void {
+  assertRateLimitProbe("unsigned", responses.anonymous, expectedAnonymousLimit);
+  for (const response of responses.trusted) {
+    assertRateLimitProbe("signed", response, expectedTrustedLimit);
+  }
+}
+
 async function preflightPerfApi(apiUrl: string, contextSecret: string): Promise<void> {
+  const request = async (headers: Headers, label: string): Promise<Response> => {
+    try {
+      return await fetch(`${apiUrl}/api/graphql`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ query: "query PerfPreflight { __typename }" }),
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch (error) {
+      throw new Error(`${label} API preflight could not reach ${apiUrl} (${String(error)})`);
+    }
+  };
+
+  const anonymous = await request(
+    new Headers({ "content-type": "application/json" }),
+    "unsigned",
+  );
+  const trusted: Response[] = [];
   for (let probe = 0; probe < 2; probe += 1) {
     const headers = new Headers({ "content-type": "application/json" });
     applyTrustedContextHeaders(
@@ -118,19 +155,9 @@ async function preflightPerfApi(apiUrl: string, contextSecret: string): Promise<
       { secret: contextSecret },
     );
 
-    let response: Response;
-    try {
-      response = await fetch(`${apiUrl}/api/graphql`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ query: "query PerfPreflight { __typename }" }),
-        signal: AbortSignal.timeout(3000),
-      });
-    } catch (error) {
-      throw new Error(`API is not reachable at ${apiUrl} (${String(error)})`);
-    }
-    assertPerfApiConfiguration(response);
+    trusted.push(await request(headers, `signed probe ${probe + 1}`));
   }
+  assertPerfApiConfiguration({ anonymous, trusted: [trusted[0]!, trusted[1]!] });
 }
 
 const escapeHtml = (value: string) =>
@@ -321,6 +348,7 @@ export async function runPerf(): Promise<number> {
   } catch (error) {
     console.error(`Performance API preflight failed: ${String(error)}`);
     const startCommand =
+      `HOST=127.0.0.1 API_RATE_LIMIT_MAX=${PERF_API_RATE_LIMIT_MAX_ANONYMOUS} ` +
       `API_RATE_LIMIT_MAX_TRUSTED=${PERF_API_RATE_LIMIT_MAX_TRUSTED} bun run dev:api`;
     console.error(
       `Restart the dedicated API with \`${startCommand}\`, then retry.`,

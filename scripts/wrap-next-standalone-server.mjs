@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 const app = process.argv[2];
@@ -13,6 +13,8 @@ const standaloneRoot = join(appRoot, ".next", "standalone", "apps", app);
 const serverPath = join(standaloneRoot, "server.js");
 const preflightPath = join(standaloneRoot, "auth-preflight.mjs");
 const preflightSource = join(appRoot, "src", "lib", "auth", "standalone-preflight.ts");
+const staticSource = join(appRoot, ".next", "static");
+const staticTarget = join(standaloneRoot, ".next", "static");
 const marker = "// OpenShapeForge standalone auth preflight\n";
 const preflightImport = 'import "./auth-preflight.mjs";\n';
 
@@ -32,6 +34,10 @@ const build = Bun.spawn([
 if (await build.exited !== 0) {
   throw new Error(`Failed to bundle the ${app} standalone auth preflight.`);
 }
+
+await mkdir(join(standaloneRoot, ".next"), { recursive: true });
+await rm(staticTarget, { recursive: true, force: true });
+await cp(staticSource, staticTarget, { recursive: true, force: true });
 
 const generatedServer = await readFile(serverPath, "utf8");
 if (!generatedServer.startsWith(marker)) {

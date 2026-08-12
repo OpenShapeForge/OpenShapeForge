@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
+import { stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateProductionEnv as validateAdminProductionEnv } from "../apps/admin/src/lib/auth/validate-env";
@@ -12,10 +13,21 @@ type Validator = (env: AuthEnvironment) => void;
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-const validators: Array<[name: string, validate: Validator]> = [
+const validators: Array<[name: "web" | "admin", validate: Validator]> = [
   ["web", validateWebProductionEnv],
   ["admin", validateAdminProductionEnv],
 ];
+
+const appDevDefaults = {
+  web: [
+    ["AUTH_SECRET", "dev-auth-secret-change-me"],
+    ["AUTH_KEYCLOAK_SECRET", "dev-secret"],
+  ],
+  admin: [
+    ["AUTH_SECRET", "openshapeforge-local-dev-admin-auth-secret"],
+    ["AUTH_KEYCLOAK_SECRET", "admin-dev-secret"],
+  ],
+} as const;
 
 const nextConfigs = [
   ["web", createWebNextConfig],
@@ -109,6 +121,9 @@ async function runPreviewProductionStart(
     stderr: "pipe",
   });
   let listening = false;
+  let staticAssetPath: string | undefined;
+  let staticStatus: number | undefined;
+  let staticBytes = 0;
   for (let attempt = 0; attempt < 100 && processHandle.exitCode === null; attempt += 1) {
     try {
       await fetch(`http://127.0.0.1:${port}`, { redirect: "manual" });
@@ -116,6 +131,33 @@ async function runPreviewProductionStart(
       break;
     } catch {
       await Bun.sleep(100);
+    }
+  }
+  if (listening) {
+    const staticRoot = join(
+      REPO_ROOT,
+      "apps",
+      app,
+      ".next",
+      "standalone",
+      "apps",
+      app,
+      ".next",
+      "static",
+    );
+    const staticGlob = new Bun.Glob("**/*");
+    for await (const candidate of staticGlob.scan({ cwd: staticRoot })) {
+      if ((await stat(join(staticRoot, candidate))).isFile()) {
+        staticAssetPath = candidate;
+        break;
+      }
+    }
+    if (staticAssetPath) {
+      const staticResponse = await fetch(
+        `http://127.0.0.1:${port}/_next/static/${staticAssetPath}`,
+      );
+      staticStatus = staticResponse.status;
+      staticBytes = (await staticResponse.arrayBuffer()).byteLength;
     }
   }
   if (processHandle.exitCode === null) {
@@ -128,7 +170,14 @@ async function runPreviewProductionStart(
     new Response(processHandle.stderr).text(),
   ]).finally(() => clearTimeout(timeout));
 
-  return { exitCode, listening, output: `${stdout}\n${stderr}` };
+  return {
+    exitCode,
+    listening,
+    output: `${stdout}\n${stderr}`,
+    staticAssetPath,
+    staticStatus,
+    staticBytes,
+  };
 }
 
 for (const [name, validate] of validators) {
@@ -180,6 +229,15 @@ for (const [name, validate] of validators) {
     test("accepts encrypted remote transport with a secure host-only cookie", () => {
       expect(() => validate(secureProductionEnv())).not.toThrow();
     });
+
+    test.each(appDevDefaults[name])(
+      "rejects the app-specific dev default for %s",
+      (envVar, value) => {
+        expect(() => validate(secureProductionEnv({ [envVar]: value }))).toThrow(
+          `${envVar} is using a dev-default value`,
+        );
+      },
+    );
 
     test("accepts NEXTAUTH_URL as the explicit secure application origin", () => {
       expect(() =>
@@ -257,6 +315,14 @@ for (const [name, validate] of validators) {
   });
 }
 
+test("web rejects development tenant overrides in remote production", () => {
+  expect(() =>
+    validateWebProductionEnv(secureProductionEnv({
+      OPENSHAPEFORGE_DEV_TENANT_ID: "00000000-0000-4000-8000-000000000001",
+    }))
+  ).toThrow("OPENSHAPEFORGE_DEV_TENANT_ID must not be configured in production");
+});
+
 for (const [name, createNextConfig] of nextConfigs) {
   describe(`${name} startup auth validation`, () => {
     test("rejects an insecure production environment while loading server config", () => {
@@ -296,9 +362,12 @@ for (const app of ["web", "admin"] as const) {
     expect(result.output).not.toContain("Network:");
   }, 15_000);
 
-  test(`${app} preview starts only on an explicit loopback listener`, async () => {
+  test(`${app} preview starts only on loopback and serves standalone static assets`, async () => {
     const result = await runPreviewProductionStart(app, "127.0.0.1");
     expect(result.listening).toBe(true);
+    expect(result.staticAssetPath).toBeDefined();
+    expect(result.staticStatus).toBe(200);
+    expect(result.staticBytes).toBeGreaterThan(0);
     expect(result.output).toContain("Ready");
     expect(result.output).toContain("127.0.0.1");
     expect(result.output).not.toContain("0.0.0.0");

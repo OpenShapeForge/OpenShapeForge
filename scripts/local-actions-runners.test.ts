@@ -1356,6 +1356,119 @@ grep -Fq 'start --tty=false colima-profile' "$HOME/limactl-calls"
     expect(result.exitCode, output(result)).toBe(0);
   });
 
+  test("accepts a failed Lima start only after the exact profile becomes Running", async () => {
+    const result = await runHarness(`
+export COLIMA_HOME="$HOME/.colima"
+config="$COLIMA_HOME/_lima/colima-profile/lima.yaml"
+mkdir -p "$(dirname "$config")"
+cat >"$config" <<'YAML'
+vmType: vz
+portForwards:
+    - guestIP: 0.0.0.0
+      proto: any
+      ignore: true
+YAML
+limactl() {
+  printf '%s\n' "$*" >>"$HOME/limactl-calls"
+  [[ "$1" != start ]]
+}
+colima() {
+  [[ "$*" == "list --json" ]]
+  call_count="$(wc -l <"$HOME/profile-checks" 2>/dev/null || printf '0')"
+  printf 'check\n' >>"$HOME/profile-checks"
+  if (( call_count < 2 )); then
+    printf '%s\n' '{"name":"profile","status":"Broken"}'
+  else
+    printf '%s\n' '{"name":"profile","status":"Running"}'
+  fi
+}
+sleep() {
+  printf '%s\n' "$1" >>"$HOME/sleeps"
+}
+harden_colima_loopback_forwarding profile
+[[ "$(grep -c '^check$' "$HOME/profile-checks")" == 3 ]]
+[[ "$(grep -c '^3$' "$HOME/sleeps")" == 2 ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Verified late Lima start for colima-profile",
+    );
+  });
+
+  test("bounds a hard-failed Lima start while Broken remains unaccepted", async () => {
+    const result = await runHarness(`
+colima_profile_status() {
+  printf 'check\n' >>"$HOME/profile-checks"
+  printf 'Broken\n'
+}
+sleep() {
+  printf '%s\n' "$1" >>"$HOME/sleeps"
+}
+set +e
+wait_for_late_lima_start profile
+wait_result=$?
+set -e
+(( wait_result != 0 ))
+[[ "$(grep -c '^check$' "$HOME/profile-checks")" == 20 ]]
+[[ "$(grep -c '^3$' "$HOME/sleeps")" == 19 ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Colima profile profile stayed Broken after the failed Lima start",
+    );
+  });
+
+  test("rejects Stopped, Absent and unexpected late-start states without waiting", async () => {
+    for (const status of ["Stopped", "Absent", "Installing"]) {
+      const result = await runHarness(`
+colima_profile_status() {
+  printf '%s\n' ${JSON.stringify(status)}
+}
+sleep() {
+  touch "$HOME/slept"
+}
+set +e
+wait_for_late_lima_start profile
+wait_result=$?
+set -e
+(( wait_result != 0 ))
+[[ ! -e "$HOME/slept" ]]
+`);
+
+      expect(result.exitCode, `${status}: ${output(result)}`).toBe(0);
+    }
+  });
+
+  test("rejects malformed and ambiguous profile inventories without waiting", async () => {
+    for (const inventory of [
+      '{"name":"profile"}',
+      '{"name":"profile","status":"Broken"}\\n{"name":"profile","status":"Running"}',
+    ]) {
+      const result = await runHarness(`
+colima() {
+  [[ "$*" == "list --json" ]]
+  printf '%b\n' ${JSON.stringify(inventory)}
+}
+sleep() {
+  touch "$HOME/slept"
+}
+set +e
+wait_for_late_lima_start profile
+wait_result=$?
+set -e
+(( wait_result != 0 ))
+[[ ! -e "$HOME/slept" ]]
+`);
+
+      expect(result.exitCode, output(result)).toBe(0);
+      expect(result.stderr.toString()).toContain(
+        "Could not verify Colima profile profile",
+      );
+    }
+  });
+
   test("leaves the VM stopped when the generated forwarding config is unexpected", async () => {
     const result = await runHarness(`
 export COLIMA_HOME="$HOME/.colima"

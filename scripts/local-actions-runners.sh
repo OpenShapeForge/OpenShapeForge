@@ -499,6 +499,40 @@ colima_profile_status() {
   printf '%s\n' "$status"
 }
 
+# Lima 2.2 has no Starting state: a running driver without its late hostagent
+# is Broken until the hostagent becomes reachable. Only that state gets a
+# bounded grace period, and only the exact profile reaching Running succeeds.
+wait_for_late_lima_start() {
+  local profile="$1"
+  local attempt status
+  for attempt in {1..20}; do
+    status="$(colima_profile_status "$profile")" || return 1
+    case "$status" in
+      Running) return 0 ;;
+      Broken)
+        if (( attempt < 20 )); then
+          sleep 3
+          continue
+        fi
+        ;;
+      Stopped|Absent)
+        echo \
+          "Colima profile ${profile} cannot complete the failed Lima start from state ${status}" \
+          >&2
+        return 1
+        ;;
+      *)
+        echo \
+          "Colima profile ${profile} reported unexpected state after failed Lima start: ${status}" \
+          >&2
+        return 1
+        ;;
+    esac
+  done
+  echo "Colima profile ${profile} stayed Broken after the failed Lima start" >&2
+  return 1
+}
+
 path_owner_uid() {
   if [[ "$(uname -s)" == "Darwin" ]]; then
     stat -f '%u' "$1"
@@ -1244,7 +1278,10 @@ harden_colima_loopback_forwarding() {
     return 1
   fi
   mv "$temp_config" "$config"
-  LIMA_HOME="$lima_home" limactl start --tty=false "$instance" >/dev/null
+  if ! LIMA_HOME="$lima_home" limactl start --tty=false "$instance" >/dev/null; then
+    wait_for_late_lima_start "$profile" || return 1
+    echo "Verified late Lima start for ${instance}" >&2
+  fi
 }
 
 # Colima is configured with no port forwarder, but admission also proves that

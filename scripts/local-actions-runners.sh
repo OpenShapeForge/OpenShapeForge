@@ -32,6 +32,21 @@ readonly RUNNER_NAME_PREFIX="${OPENSHAPEFORGE_RUNNER_NAME_PREFIX:-openshapeforge
 readonly DISABLED_DEPLOY_RUNNER_PREFIX="${OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX:-openshapeforge-deploy}"
 readonly LATE_LIMA_START_ATTEMPTS=80
 readonly LATE_LIMA_START_INTERVAL_SECONDS=3
+readonly LIMA_READINESS_PROBE_TIMEOUT_SECONDS=10
+readonly PROBE_STARTUP_TIMEOUT_SECONDS=5
+readonly PROVISION_TERMINATION_GRACE_ATTEMPTS=240
+
+late_lima_start_attempt_limit() {
+  printf '%s\n' "$LATE_LIMA_START_ATTEMPTS"
+}
+
+probe_startup_timeout_seconds() {
+  printf '%s\n' "$PROBE_STARTUP_TIMEOUT_SECONDS"
+}
+
+provision_termination_grace_attempt_limit() {
+  printf '%s\n' "$PROVISION_TERMINATION_GRACE_ATTEMPTS"
+}
 
 approved_workflow_sha256() {
   case "$1" in
@@ -470,12 +485,549 @@ delete_matching_runners() {
   return 0
 }
 
+probe_parent_before_pid_lookup() {
+  :
+}
+
+probe_process_active() {
+  local pid="$1"
+  local state
+  probe_parent_before_pid_lookup "$pid"
+  state="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')"
+  [[ -n "$state" && "$state" != Z* ]]
+}
+
+probe_process_owns_group() {
+  local pid="$1"
+  local pgid
+  probe_process_active "$pid" || return 1
+  pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
+  [[ "$pgid" == "$pid" ]]
+}
+
+probe_process_group_is_sentinel_only() {
+  local sentinel_pid="$1"
+  local processes
+  processes="$(ps -axo pid=,pgid=,stat= 2>/dev/null)" || return 1
+  printf '%s\n' "$processes" | awk -v sentinel="$sentinel_pid" '
+    NF == 0 { next }
+    NF != 3 || $1 !~ /^[0-9]+$/ || $2 !~ /^[0-9]+$/ {
+      invalid = 1
+      next
+    }
+    $2 == sentinel {
+      if ($1 == sentinel && $3 !~ /^Z/) seen_sentinel = 1
+      else seen_other = 1
+    }
+    END {
+      exit !(invalid == 0 && seen_sentinel == 1 && seen_other == 0)
+    }
+  '
+}
+
+probe_parent_before_probe_group_signal() {
+  :
+}
+
+terminate_owned_probe_process_group() {
+  local sentinel_pid="$1"
+  local ownership_file="$2"
+  [[ -f "$ownership_file" ]] || return 1
+  # The sentinel ignores TERM and cannot release until the parent completes
+  # the success handshake. The marker is published only after this unreaped
+  # direct child proves pid == pgid, so neither identity can be reused.
+  probe_parent_before_probe_group_signal TERM "$sentinel_pid"
+  kill -TERM -- "-${sentinel_pid}" >/dev/null 2>&1 || true
+  /bin/sleep 0.1
+  # The group leader is still our unreaped direct child and deliberately
+  # ignores TERM. Its PID therefore cannot be reused between the first proof
+  # above and this KILL, even if a later ps inspection would fail transiently.
+  probe_parent_before_probe_group_signal KILL "$sentinel_pid"
+  kill -KILL -- "-${sentinel_pid}" >/dev/null 2>&1 || true
+}
+
+terminate_unready_probe_sentinel() {
+  local sentinel_pid="$1"
+  [[ "$sentinel_pid" =~ ^[0-9]+$ ]] || return 1
+  # This is an unreaped direct child, so its positive PID cannot be reused.
+  # Before the start marker it is also the only process created for the probe.
+  kill -KILL "$sentinel_pid" >/dev/null 2>&1 || true
+}
+
+probe_sentinel_before_ready() {
+  :
+}
+
+probe_parent_after_sentinel_start() {
+  :
+}
+
+probe_parent_before_start_marker_publication() {
+  :
+}
+
+probe_parent_after_sentinel_wait() {
+  :
+}
+
+probe_sentinel_before_exit() {
+  :
+}
+
+probe_parent_before_sentinel_release() {
+  :
+}
+
+probe_child_before_command_start() {
+  :
+}
+
+run_trusted_readiness_probe_with_deadline() {
+  [[ "$#" -ge 2 ]] || return 125
+  local probe_kind="$1"
+  local timeout_seconds="$2"
+  local startup_timeout_seconds profile colima_home lima_home
+  startup_timeout_seconds="$(probe_startup_timeout_seconds)" || return 125
+  case "$probe_kind" in
+    colima-inventory)
+      [[ "$#" -eq 2 ]] || return 125
+      _run_readiness_probe_process_group \
+        "$startup_timeout_seconds" "$timeout_seconds" colima list --json
+      ;;
+    lima-guest)
+      [[ "$#" -eq 3 ]] || return 125
+      profile="$3"
+      [[ "$profile" =~ ^[a-z0-9][a-z0-9-]*$ ]] || return 125
+      colima_home="${COLIMA_HOME:-${HOME}/.colima}"
+      lima_home="${colima_home}/_lima"
+      LIMA_HOME="$lima_home" _run_readiness_probe_process_group \
+        "$startup_timeout_seconds" "$timeout_seconds" \
+        limactl shell "colima-${profile}" true
+      ;;
+    *) return 125 ;;
+  esac
+}
+
+# Private process-group primitive for the two readiness probes above. Both
+# commands are fixed, trusted and non-daemonizing. Never pass a command that can
+# fork, call setsid, or otherwise escape this sentinel-owned process group; a
+# broader timeout needs kernel-owned isolation, not PID discovery.
+_run_readiness_probe_process_group() (
+  set +e
+  local startup_timeout_seconds="$1"
+  local timeout_seconds="$2"
+  shift 2
+  local probe_dir=""
+  local output_file result_file result_temp_file
+  local ready_file ready_temp_file start_file start_temp_file
+  local command_started_file command_started_temp_file
+  local ownership_file ownership_temp_file
+  local settled_file settled_temp_file release_pipe
+  local sentinel_pid=""
+  local active_probe_state=false
+  local probe_group_created=false
+  local probe_reaped=false
+  local started=false
+  local released=false
+  local cancel_result=0
+  local startup_deadline_epoch deadline_epoch now_epoch
+  local result=0
+
+  write_probe_state() {
+    local temp_file="$1"
+    local marker_file="$2"
+    : >"$temp_file" && mv "$temp_file" "$marker_file"
+  }
+
+  refresh_external_probe_cancellation() {
+    if [[ -n "${SUPERVISOR_PROBE_CANCEL_FILE:-}" &&
+      -f "$SUPERVISOR_PROBE_CANCEL_FILE" ]]; then
+      cancel_result=143
+    fi
+  }
+
+  clear_active_probe_state() {
+    local attempt
+    [[ "$active_probe_state" == true ]] || return 0
+    for attempt in {1..20}; do
+      if rmdir "$SUPERVISOR_ACTIVE_PROBE_DIR" 2>/dev/null; then
+        active_probe_state=false
+        return 0
+      fi
+      /bin/sleep 0.05
+    done
+    return 1
+  }
+
+  publish_probe_reaped_proof() {
+    local reaped_file="${SUPERVISOR_PROBE_REAPED_FILE:-}"
+    [[ -n "$reaped_file" ]] || return 0
+    printf 'reaped\n' >"${reaped_file}.tmp" &&
+      mv "${reaped_file}.tmp" "$reaped_file"
+  }
+
+  reset_probe_reaped_proof() {
+    local reaped_file="${SUPERVISOR_PROBE_REAPED_FILE:-}"
+    [[ -n "$reaped_file" ]] || return 0
+    if [[ -e "$reaped_file" || -L "$reaped_file" ]]; then
+      unlink "$reaped_file" || return 1
+    fi
+    [[ ! -e "$reaped_file" && ! -L "$reaped_file" ]]
+  }
+
+  cancel_probe_deadline() {
+    cancel_result="$1"
+    [[ "${sentinel_pid:-}" =~ ^[0-9]+$ ]] || return 0
+    if [[ "$started" == true ]]; then
+      terminate_owned_probe_process_group \
+        "$sentinel_pid" "$ownership_file" || true
+    else
+      terminate_unready_probe_sentinel "$sentinel_pid" || true
+    fi
+    reap_probe_sentinel >/dev/null 2>&1 || true
+  }
+
+  reap_probe_sentinel() {
+    local reaping_pid wait_result running_pid still_running
+    [[ "${sentinel_pid:-}" =~ ^[0-9]+$ ]] || return 0
+    reaping_pid="$sentinel_pid"
+    # The direct-child identity is owned locally until wait definitively reaps
+    # it. Cancellation cannot observe or signal the numeric PID after that.
+    sentinel_pid=""
+    while true; do
+      wait "$reaping_pid"
+      wait_result=$?
+      still_running=false
+      if (( wait_result == 130 || wait_result == 143 )); then
+        for running_pid in $(jobs -p); do
+          if [[ "$running_pid" == "$reaping_pid" ]]; then
+            still_running=true
+            break
+          fi
+        done
+      fi
+      probe_parent_after_sentinel_wait \
+        "$wait_result" "$reaping_pid" "$still_running"
+      if [[ "$still_running" == true ]]; then
+        if (( cancel_result != 0 )); then
+          if [[ "$started" == true ]]; then
+            terminate_owned_probe_process_group \
+              "$reaping_pid" "$ownership_file" || true
+          else
+            terminate_unready_probe_sentinel "$reaping_pid" || true
+          fi
+        fi
+        continue
+      fi
+      probe_reaped=true
+      return "$wait_result"
+    done
+  }
+
+  cleanup_probe_deadline() {
+    local cleanup_exit_status=$?
+    trap - EXIT INT TERM
+    if [[ "${sentinel_pid:-}" =~ ^[0-9]+$ ]]; then
+      if [[ "$released" == false ]]; then
+        if [[ "$started" == true ]]; then
+          terminate_owned_probe_process_group \
+            "$sentinel_pid" "$ownership_file" || true
+        else
+          terminate_unready_probe_sentinel "$sentinel_pid" || true
+        fi
+      elif probe_process_active "$sentinel_pid"; then
+        printf 'release\n' >&4 || true
+      fi
+      reap_probe_sentinel >/dev/null 2>&1 || true
+    fi
+    if [[ "$probe_group_created" == false ]]; then
+      probe_reaped=true
+    fi
+    if [[ "$probe_reaped" != true ]] || ! publish_probe_reaped_proof; then
+      echo "Could not publish readiness probe reaped proof" >&2
+      cleanup_exit_status=125
+    fi
+    exec 4>&-
+    rm -f -- \
+      "$output_file" "$result_file" "$result_temp_file" \
+      "$ready_file" "$ready_temp_file" "$start_file" "$start_temp_file" \
+      "$command_started_file" "$command_started_temp_file" \
+      "$ownership_file" "$ownership_temp_file" \
+      "$settled_file" "$settled_temp_file" "$release_pipe"
+    rmdir "$probe_dir" 2>/dev/null || true
+    if ! clear_active_probe_state; then
+      echo "Could not remove active readiness probe marker" >&2
+      cleanup_exit_status=125
+    fi
+    exit "$cleanup_exit_status"
+  }
+
+  [[ "$startup_timeout_seconds" =~ ^[1-9][0-9]*$ ]] || return 125
+  [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ && "$#" -gt 0 ]] || return 125
+  probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/openshapeforge-probe.XXXXXX")" || return 125
+  output_file="${probe_dir}/stdout"
+  result_file="${probe_dir}/result"
+  result_temp_file="${probe_dir}/result.tmp"
+  ready_file="${probe_dir}/ready"
+  ready_temp_file="${probe_dir}/ready.tmp"
+  start_file="${probe_dir}/start"
+  start_temp_file="${probe_dir}/start.tmp"
+  command_started_file="${probe_dir}/command-started"
+  command_started_temp_file="${probe_dir}/command-started.tmp"
+  ownership_file="${probe_dir}/ownership-proven"
+  ownership_temp_file="${probe_dir}/ownership-proven.tmp"
+  settled_file="${probe_dir}/settled"
+  settled_temp_file="${probe_dir}/settled.tmp"
+  release_pipe="${probe_dir}/release.pipe"
+
+  trap 'cancel_probe_deadline 130' INT
+  trap 'cancel_probe_deadline 143' TERM
+  trap cleanup_probe_deadline EXIT
+  mkfifo "$release_pipe" || return 125
+  # Holding both ends in the parent makes the final write non-blocking even if
+  # cancellation has just reaped the sentinel FIFO reader.
+  exec 4<>"$release_pipe" || return 125
+  if [[ -n "${SUPERVISOR_ACTIVE_PROBE_DIR:-}" ]]; then
+    if ! reset_probe_reaped_proof; then
+      echo "Could not reset readiness probe reaped proof" >&2
+      return 125
+    fi
+    mkdir "$SUPERVISOR_ACTIVE_PROBE_DIR" || return 125
+    active_probe_state=true
+  fi
+  refresh_external_probe_cancellation
+  (( cancel_result == 0 )) || return "$cancel_result"
+
+  now_epoch="$(/bin/date +%s)" || return 125
+  # /bin/date has whole-second resolution. One extra tick guarantees the
+  # configured startup window is never shortened by a clock-boundary crossing.
+  startup_deadline_epoch="$((now_epoch + startup_timeout_seconds + 1))"
+  deadline_epoch=0
+  set -m
+  (
+    set +e
+    set +m
+    # Install the sentinel's signal policy before readiness. No probe child may
+    # exist until the parent has verified this process-group owner and starts it.
+    trap '' INT TERM
+    probe_sentinel_before_ready || exit 125
+    write_probe_state "$ready_temp_file" "$ready_file" || exit 125
+    while [[ ! -f "$start_file" ]]; do
+      /bin/sleep 0.001
+    done
+
+    (
+      exec 4>&-
+      trap - INT TERM
+      if ! probe_child_before_command_start; then
+        result=125
+      elif ! write_probe_state \
+        "$command_started_temp_file" "$command_started_file"; then
+        result=125
+      elif "$@" >"$output_file"; then
+        result=0
+      else
+        result=$?
+      fi
+      if printf '%s\n' "$result" >"$result_temp_file"; then
+        mv "$result_temp_file" "$result_file"
+      fi
+    ) &
+    local probe_child_pid=$!
+
+    wait "$probe_child_pid" 2>/dev/null || true
+    write_probe_state "$settled_temp_file" "$settled_file" || true
+    local release_signal
+    IFS= read -r release_signal <&4
+    probe_sentinel_before_exit || exit 125
+    [[ "$release_signal" == release ]]
+  ) &
+  sentinel_pid=$!
+  probe_group_created=true
+  set +m
+  probe_parent_after_sentinel_start "$sentinel_pid" || {
+    result=125
+    terminate_unready_probe_sentinel "$sentinel_pid" || true
+    reap_probe_sentinel >/dev/null 2>&1 || true
+    return "$result"
+  }
+
+  while [[ ! -f "$ready_file" ]]; do
+    refresh_external_probe_cancellation
+    if (( cancel_result != 0 )); then
+      result="$cancel_result"
+      break
+    fi
+    if ! probe_process_active "$sentinel_pid"; then
+      result=125
+      break
+    fi
+    now_epoch="$(/bin/date +%s)" || {
+      result=125
+      break
+    }
+    if (( now_epoch >= startup_deadline_epoch )); then
+      result=124
+      break
+    fi
+    /bin/sleep 0.001
+  done
+  if (( result == 0 )); then
+    if (( cancel_result != 0 )); then
+      result="$cancel_result"
+    elif ! probe_process_owns_group "$sentinel_pid"; then
+      result=125
+    elif ! write_probe_state "$ownership_temp_file" "$ownership_file"; then
+      result=125
+    else
+      # From this point cancellation must terminate the owned group: publishing
+      # start lets the sentinel fork the probe child at any instant.
+      started=true
+      if ! probe_parent_before_start_marker_publication; then
+        result=125
+      elif (( cancel_result != 0 )); then
+        result="$cancel_result"
+      elif ! write_probe_state "$start_temp_file" "$start_file"; then
+        if (( cancel_result != 0 )); then
+          result="$cancel_result"
+        else
+          result=125
+        fi
+      elif (( cancel_result != 0 )); then
+        result="$cancel_result"
+      fi
+    fi
+  fi
+
+  if [[ "$started" == false ]]; then
+    terminate_unready_probe_sentinel "$sentinel_pid" || result=125
+    reap_probe_sentinel >/dev/null 2>&1 || true
+    return "$result"
+  fi
+  if (( result != 0 )); then
+    if [[ "${sentinel_pid:-}" =~ ^[0-9]+$ ]]; then
+      terminate_owned_probe_process_group \
+        "$sentinel_pid" "$ownership_file" || result=125
+      reap_probe_sentinel >/dev/null 2>&1 || true
+    fi
+    return "$result"
+  fi
+
+  while [[ ! -f "$command_started_file" ]]; do
+    refresh_external_probe_cancellation
+    if (( cancel_result != 0 )); then
+      result="$cancel_result"
+      break
+    fi
+    if [[ -f "$result_file" && -f "$settled_file" ]]; then
+      result=125
+      break
+    fi
+    if ! probe_process_owns_group "$sentinel_pid"; then
+      result=125
+      break
+    fi
+    now_epoch="$(/bin/date +%s)" || {
+      result=125
+      break
+    }
+    if (( now_epoch >= startup_deadline_epoch )); then
+      result=124
+      break
+    fi
+    /bin/sleep 0.001
+  done
+
+  if (( result == 0 )); then
+    now_epoch="$(/bin/date +%s)" || result=125
+    if (( result == 0 )); then
+      # The command receives its complete configured runtime budget only after
+      # the child has finished the bounded startup handshake.
+      deadline_epoch="$((now_epoch + timeout_seconds + 1))"
+    fi
+  fi
+
+  while (( result == 0 )); do
+    refresh_external_probe_cancellation
+    if (( cancel_result != 0 )); then
+      result="$cancel_result"
+      break
+    fi
+    if [[ -f "$result_file" && -f "$settled_file" ]]; then
+      if ! IFS= read -r result <"$result_file" || \
+        [[ ! "$result" =~ ^[0-9]+$ ]] || (( result > 255 )); then
+        result=125
+      fi
+      if (( cancel_result != 0 )); then
+        result="$cancel_result"
+        break
+      fi
+      if ! probe_process_group_is_sentinel_only "$sentinel_pid"; then
+        result=125
+        break
+      fi
+      if (( cancel_result != 0 )); then
+        result="$cancel_result"
+        break
+      fi
+      probe_parent_before_sentinel_release
+      if ! printf 'release\n' >&4; then
+        result=125
+        break
+      fi
+      released=true
+      reap_probe_sentinel >/dev/null 2>&1 || true
+      if (( cancel_result != 0 )); then
+        result="$cancel_result"
+      fi
+      if ! cat "$output_file"; then
+        result=125
+      fi
+      return "$result"
+    fi
+    if ! probe_process_owns_group "$sentinel_pid"; then
+      result=125
+      break
+    fi
+    now_epoch="$(/bin/date +%s)" || {
+      result=125
+      break
+    }
+    if (( now_epoch >= deadline_epoch )); then
+      result=124
+      break
+    fi
+    /bin/sleep 0.001
+  done
+
+  terminate_owned_probe_process_group \
+    "$sentinel_pid" "$ownership_file" || result=125
+  reap_probe_sentinel >/dev/null 2>&1 || true
+  sentinel_pid=""
+  if [[ -f "$output_file" ]] && ! cat "$output_file"; then
+    result=125
+  fi
+  return "$result"
+)
+
 colima_profile_status() {
   local profile="$1"
-  local profiles status
-  if ! profiles="$(colima list --json 2>/dev/null)"; then
+  local timeout_seconds="${2:-$LIMA_READINESS_PROBE_TIMEOUT_SECONDS}"
+  local profiles probe_result status
+  if profiles="$(
+    run_trusted_readiness_probe_with_deadline \
+      colima-inventory "$timeout_seconds" 2>/dev/null
+  )"; then
+    probe_result=0
+  else
+    probe_result=$?
+  fi
+  if (( probe_result != 0 )); then
+    if (( probe_result == 124 )); then
+      echo "Colima profile inventory probe timed out: ${profile}" >&2
+    fi
     echo "Could not inspect Colima profile ${profile}" >&2
-    return 1
+    return "$probe_result"
   fi
   if ! status="$(
     printf '%s\n' "$profiles" | jq -ser --arg profile "$profile" '
@@ -501,23 +1053,46 @@ colima_profile_status() {
   printf '%s\n' "$status"
 }
 
+lima_guest_ready() {
+  local profile="$1"
+  local timeout_seconds="${2:-$LIMA_READINESS_PROBE_TIMEOUT_SECONDS}"
+  run_trusted_readiness_probe_with_deadline \
+    lima-guest "$timeout_seconds" "$profile" >/dev/null 2>&1
+}
+
 # Lima 2.2 has no Starting state: a running driver without its late hostagent
 # is Broken until the hostagent becomes reachable. Bound that transient state
 # and guest startup; only exact-profile Running plus exact-instance shell works.
 wait_for_late_lima_start() {
   local profile="$1"
-  local colima_home="${COLIMA_HOME:-${HOME}/.colima}"
-  local lima_home="${colima_home}/_lima"
+  local probe_timeout_seconds="${2:-$LIMA_READINESS_PROBE_TIMEOUT_SECONDS}"
   local instance="colima-${profile}"
-  local attempt status
-  for ((attempt = 1; attempt <= LATE_LIMA_START_ATTEMPTS; attempt += 1)); do
-    status="$(colima_profile_status "$profile")" || return 1
+  local attempt attempt_limit probe_result status
+  attempt_limit="$(late_lima_start_attempt_limit)" || return 125
+  [[ "$attempt_limit" =~ ^[1-9][0-9]*$ ]] || return 125
+  for ((attempt = 1; attempt <= attempt_limit; attempt += 1)); do
+    if status="$(colima_profile_status "$profile" "$probe_timeout_seconds")"; then
+      probe_result=0
+    else
+      probe_result=$?
+    fi
+    (( probe_result == 0 )) || return "$probe_result"
     case "$status" in
       Running)
-        if LIMA_HOME="$lima_home" limactl shell "$instance" true >/dev/null 2>&1; then
-          return 0
+        if lima_guest_ready "$profile" "$probe_timeout_seconds"; then
+          probe_result=0
+        else
+          probe_result=$?
         fi
-        if (( attempt < LATE_LIMA_START_ATTEMPTS )); then
+        (( probe_result == 0 )) && return 0
+        if (( probe_result == 124 )); then
+          echo "Late Lima guest probe timed out: ${instance}" >&2
+          return "$probe_result"
+        fi
+        if (( probe_result == 130 || probe_result == 143 )); then
+          return "$probe_result"
+        fi
+        if (( attempt < attempt_limit )); then
           sleep "$LATE_LIMA_START_INTERVAL_SECONDS"
           continue
         fi
@@ -525,7 +1100,7 @@ wait_for_late_lima_start() {
         return 1
         ;;
       Broken)
-        if (( attempt < LATE_LIMA_START_ATTEMPTS )); then
+        if (( attempt < attempt_limit )); then
           sleep "$LATE_LIMA_START_INTERVAL_SECONDS"
           continue
         fi
@@ -1835,9 +2410,12 @@ cleanup_slot_on_exit() {
 }
 
 SUPERVISOR_PROVISION_PID=""
+SUPERVISOR_PROVISION_PROTOCOL_DIR=""
 SUPERVISOR_PROVISION_READY_FILE=""
 SUPERVISOR_PROVISION_RESULT_FILE=""
-SUPERVISOR_PROVISION_GENERATION=0
+SUPERVISOR_ACTIVE_PROBE_DIR=""
+SUPERVISOR_PROBE_CANCEL_FILE=""
+SUPERVISOR_PROBE_REAPED_FILE=""
 SUPERVISOR_PROVISION_STATE="idle"
 SUPERVISOR_PENDING_SIGNAL_STATUS=""
 
@@ -1925,6 +2503,28 @@ clear_active_provision_identity() {
     unlink "$SUPERVISOR_PROVISION_RESULT_FILE" >/dev/null 2>&1 || true
     SUPERVISOR_PROVISION_RESULT_FILE=""
   fi
+  if [[ -n "$SUPERVISOR_PROBE_CANCEL_FILE" ]]; then
+    unlink "$SUPERVISOR_PROBE_CANCEL_FILE" >/dev/null 2>&1 || true
+    SUPERVISOR_PROBE_CANCEL_FILE=""
+  fi
+  if [[ -n "$SUPERVISOR_PROBE_REAPED_FILE" ]]; then
+    unlink "$SUPERVISOR_PROBE_REAPED_FILE" >/dev/null 2>&1 || true
+    SUPERVISOR_PROBE_REAPED_FILE=""
+  fi
+  if [[ -n "$SUPERVISOR_ACTIVE_PROBE_DIR" ]]; then
+    if [[ -d "$SUPERVISOR_ACTIVE_PROBE_DIR" ]] &&
+      ! rmdir "$SUPERVISOR_ACTIVE_PROBE_DIR" >/dev/null 2>&1; then
+      echo "Could not remove retained active readiness probe marker" >&2
+    fi
+    SUPERVISOR_ACTIVE_PROBE_DIR=""
+  fi
+  if [[ -n "$SUPERVISOR_PROVISION_PROTOCOL_DIR" ]]; then
+    if [[ -d "$SUPERVISOR_PROVISION_PROTOCOL_DIR" ]] &&
+      ! rmdir "$SUPERVISOR_PROVISION_PROTOCOL_DIR" >/dev/null 2>&1; then
+      echo "Could not remove retained supervisor protocol directory" >&2
+    fi
+    SUPERVISOR_PROVISION_PROTOCOL_DIR=""
+  fi
 }
 
 clear_reaped_active_provision_identity() {
@@ -1933,17 +2533,59 @@ clear_reaped_active_provision_identity() {
   clear_active_provision_identity
 }
 
+request_active_probe_cancellation() {
+  local cancel_file="${SUPERVISOR_PROBE_CANCEL_FILE:-}"
+  local cancel_temp_file
+  [[ -n "$cancel_file" ]] || return 0
+  cancel_temp_file="${cancel_file}.tmp"
+  printf 'cancel\n' >"$cancel_temp_file" && mv "$cancel_temp_file" "$cancel_file"
+}
+
 terminate_active_provision() {
   local provision_pid="${SUPERVISOR_PROVISION_PID:-}"
-  local anchor_wait_status=0 termination_result=0
+  local anchor_wait_status=0 attempt attempt_limit termination_result=0
   if [[ ! "$provision_pid" =~ ^[0-9]+$ ]]; then
     return 0
   fi
+  attempt_limit="$(provision_termination_grace_attempt_limit)" || return 1
+  [[ "$attempt_limit" =~ ^[1-9][0-9]*$ ]] || return 1
   SUPERVISOR_PROVISION_STATE="terminating"
 
   if ! provision_anchor_is_direct_child "$provision_pid"; then
     echo "Could not validate active provisioning anchor pid ${provision_pid}" >&2
     return 1
+  fi
+  if ! request_active_probe_cancellation; then
+    echo "Could not publish active readiness probe cancellation" >&2
+    return 1
+  fi
+  # The readiness wrapper creates this directory before it may spawn its own
+  # process group and removes it only after that group is reaped. Publishing the
+  # cancellation request first closes the launch race: a later wrapper observes
+  # the request before spawning, while an active wrapper clears the directory.
+  if [[ -n "${SUPERVISOR_ACTIVE_PROBE_DIR:-}" &&
+    -d "$SUPERVISOR_ACTIVE_PROBE_DIR" ]]; then
+    for ((attempt = 1; attempt <= attempt_limit; attempt += 1)); do
+      if [[ ! -d "$SUPERVISOR_ACTIVE_PROBE_DIR" ]] ||
+        [[ -n "${SUPERVISOR_PROBE_REAPED_FILE:-}" &&
+          -s "$SUPERVISOR_PROBE_REAPED_FILE" ]]; then
+        break
+      fi
+      if ! provision_anchor_is_direct_child "$provision_pid"; then
+        echo "Provisioning anchor pid ${provision_pid} lost its stable identity during probe cleanup" >&2
+        return 1
+      fi
+      /bin/sleep 0.05
+    done
+    if [[ -d "$SUPERVISOR_ACTIVE_PROBE_DIR" ]]; then
+      if [[ -n "${SUPERVISOR_PROBE_REAPED_FILE:-}" &&
+        -s "$SUPERVISOR_PROBE_REAPED_FILE" ]]; then
+        echo "Proceeding after probe reaped proof with a retained marker" >&2
+      else
+        echo "Active readiness probe missed its cancellation deadline" >&2
+        return 1
+      fi
+    fi
   fi
   if ! kill -TERM -- "-${provision_pid}" >/dev/null 2>&1; then
     termination_result=1
@@ -1995,14 +2637,25 @@ run_active_provision_anchor() {
 
 launch_active_provision() {
   local slot="$1"
-  local ready_file result_file launch_attempt pending_signal_status provision_pid
-  SUPERVISOR_PROVISION_GENERATION=$((SUPERVISOR_PROVISION_GENERATION + 1))
-  ready_file="${SUPPORT_DIR}/.supervisor-provision-$$-${SUPERVISOR_PROVISION_GENERATION}.ready"
-  result_file="${ready_file}.result"
-  unlink "$ready_file" >/dev/null 2>&1 || true
-  unlink "$result_file" >/dev/null 2>&1 || true
+  local active_probe_dir cancel_file protocol_dir ready_file reaped_file result_file
+  local launch_attempt pending_signal_status provision_pid
+  if ! protocol_dir="$(
+    mktemp -d "${SUPPORT_DIR}/.supervisor-provision.XXXXXX"
+  )"; then
+    echo "Could not allocate fresh supervisor protocol state" >&2
+    return 1
+  fi
+  ready_file="${protocol_dir}/ready"
+  result_file="${protocol_dir}/result"
+  active_probe_dir="${protocol_dir}/active-probe"
+  cancel_file="${protocol_dir}/cancel"
+  reaped_file="${protocol_dir}/probe-reaped"
+  SUPERVISOR_PROVISION_PROTOCOL_DIR="$protocol_dir"
   SUPERVISOR_PROVISION_READY_FILE="$ready_file"
   SUPERVISOR_PROVISION_RESULT_FILE="$result_file"
+  SUPERVISOR_ACTIVE_PROBE_DIR="$active_probe_dir"
+  SUPERVISOR_PROBE_CANCEL_FILE="$cancel_file"
+  SUPERVISOR_PROBE_REAPED_FILE="$reaped_file"
   SUPERVISOR_PENDING_SIGNAL_STATUS=""
   SUPERVISOR_PROVISION_PID=""
   SUPERVISOR_PROVISION_STATE="launching"

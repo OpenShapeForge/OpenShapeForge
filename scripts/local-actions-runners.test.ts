@@ -156,16 +156,256 @@ ${body}
       timeout: 5_000,
     });
   } finally {
+    await cleanupExactHarnessProcesses(harness);
     await rm(home, { recursive: true, force: true });
   }
 }
 
-function output(result: ReturnType<typeof Bun.spawnSync>) {
+function captureHarnessPipe(stream: ReadableStream<Uint8Array>) {
+  const reader = stream.getReader();
+  const chunks: Buffer[] = [];
+  let cancelled = false;
+  const done = (async () => {
+    try {
+      while (true) {
+        const { done: streamDone, value } = await reader.read();
+        if (streamDone) return Buffer.concat(chunks);
+        chunks.push(Buffer.from(value));
+      }
+    } catch (error) {
+      if (cancelled) return Buffer.concat(chunks);
+      throw error;
+    }
+  })();
+  return {
+    cancel() {
+      cancelled = true;
+      void reader.cancel().catch(() => {});
+    },
+    done,
+  };
+}
+
+async function drainHarnessPipes(
+  captures: ReturnType<typeof captureHarnessPipe>[],
+  timeoutMs: number,
+) {
+  const output = await Promise.race([
+    Promise.all(captures.map(({ done }) => done)),
+    Bun.sleep(timeoutMs).then(() => null),
+  ]);
+  if (output !== null) return output;
+  for (const capture of captures) capture.cancel();
+  throw new Error(`Test harness output did not close within ${timeoutMs}ms`);
+}
+
+async function terminateOwnedHarnessGroup(subprocess: Bun.Subprocess) {
+  const anchorOwnsGroup = () => {
+    const identity = Bun.spawnSync([
+      "/bin/ps",
+      "-o",
+      "pid=,pgid=,stat=",
+      "-p",
+      String(subprocess.pid),
+    ]).stdout.toString();
+    const match = identity.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s*$/);
+    return (
+      match?.[1] === String(subprocess.pid) &&
+      match[2] === String(subprocess.pid) &&
+      !match[3].startsWith("Z")
+    );
+  };
+  if (!anchorOwnsGroup()) {
+    throw new Error("Test harness anchor exited before group cleanup");
+  }
+  const group = `-${subprocess.pid}`;
+  let cleanupError = "";
+  const term = Bun.spawnSync(["/bin/kill", "-TERM", "--", group]);
+  if (term.exitCode !== 0) {
+    cleanupError = `Could not terminate owned test harness group ${group}`;
+  }
+  await Bun.sleep(100);
+  if (anchorOwnsGroup()) {
+    const killed = Bun.spawnSync(["/bin/kill", "-KILL", "--", group]);
+    if (killed.exitCode !== 0 && cleanupError.length === 0) {
+      cleanupError = `Could not kill owned test harness group ${group}`;
+    }
+  } else if (cleanupError.length === 0) {
+    cleanupError = "TERM unexpectedly removed the test harness group anchor";
+  }
+  const reaped = await Promise.race([
+    subprocess.exited,
+    Bun.sleep(1_000).then(() => null),
+  ]);
+  if (reaped === null) {
+    throw new Error(`Could not reap owned test harness group ${group}`);
+  }
+  if (cleanupError.length > 0) throw new Error(cleanupError);
+}
+
+async function terminateUnreadyHarnessAnchor(subprocess: Bun.Subprocess) {
+  subprocess.kill("SIGKILL");
+  const reaped = await Promise.race([
+    subprocess.exited,
+    Bun.sleep(1_000).then(() => null),
+  ]);
+  if (reaped === null) {
+    throw new Error("Could not reap unready test harness anchor");
+  }
+}
+
+async function runHarnessBounded(
+  body: string,
+  timeoutMs: number,
+  environment: Record<string, string> = {},
+) {
+  const home = await mkdtemp(join(tmpdir(), "osf-runner-lifecycle-"));
+  const harness = join(home, "harness.sh");
+  const anchor = join(home, "anchor.pl");
+  const anchorReady = join(home, "anchor-ready");
+  const resultFile = join(home, "result");
+  await writeFile(
+    harness,
+    `#!/usr/bin/env bash
+set -euo pipefail
+source ${JSON.stringify(RUNNERS)}
+mkdir -p "$SUPPORT_DIR"
+
+${body}
+`,
+  );
+  await writeFile(
+    anchor,
+    `use strict;
+use warnings;
+use POSIX qw(getpgrp setpgid WIFEXITED WEXITSTATUS WIFSIGNALED WTERMSIG);
+
+my ($harness, $result_file, $ready_file) = @ARGV;
+$SIG{INT} = 'IGNORE';
+$SIG{TERM} = 'IGNORE';
+$SIG{HUP} = 'IGNORE';
+if (getpgrp() != $$) {
+  defined setpgid(0, 0) or die "setpgid failed: $!";
+}
+getpgrp() == $$ or die "anchor does not own its process group";
+my $ready_temporary = "$ready_file.$$";
+open my $ready, '>', $ready_temporary or die "ready open failed: $!";
+print {$ready} "$$:" . getpgrp() . "\n" or die "ready write failed: $!";
+close $ready or die "ready close failed: $!";
+rename $ready_temporary, $ready_file or die "ready rename failed: $!";
+my $child = fork();
+defined $child or die "fork failed: $!";
+if ($child == 0) {
+  $SIG{INT} = 'DEFAULT';
+  $SIG{TERM} = 'DEFAULT';
+  $SIG{HUP} = 'DEFAULT';
+  exec '/bin/bash', $harness;
+  die "exec failed: $!";
+}
+waitpid($child, 0) == $child or die "waitpid failed: $!";
+my $status = WIFEXITED($?) ? WEXITSTATUS($?)
+  : WIFSIGNALED($?) ? 128 + WTERMSIG($?)
+  : 125;
+my $temporary = "$result_file.$$";
+open my $result, '>', $temporary or die "result open failed: $!";
+print {$result} "$status:$$:" . getpgrp() . "\n"
+  or die "result write failed: $!";
+close $result or die "result close failed: $!";
+rename $temporary, $result_file or die "result rename failed: $!";
+while (1) { select undef, undef, undef, 30; }
+`,
+  );
+
+  const subprocess = Bun.spawn(
+    ["/usr/bin/perl", anchor, harness, resultFile, anchorReady],
+    {
+      env: { ...process.env, ...environment, HOME: home },
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  );
+  const stdoutCapture = captureHarnessPipe(subprocess.stdout);
+  const stderrCapture = captureHarnessPipe(subprocess.stderr);
+  const captures = [stdoutCapture, stderrCapture];
+  let anchorCleanupStarted = false;
+  let anchorReadyObserved = false;
+
+  try {
+    await waitForFile(anchorReady, 1_000);
+    anchorReadyObserved = true;
+    const readyIdentity = (await readFile(anchorReady, "utf8")).trim();
+    if (readyIdentity !== `${subprocess.pid}:${subprocess.pid}`) {
+      throw new Error(`Test harness anchor identity mismatch: ${readyIdentity}`);
+    }
+    let completed = false;
+    try {
+      await waitForFile(resultFile, timeoutMs);
+      completed = true;
+    } catch {
+      completed = false;
+    }
+    const anchorExit = await Promise.race([
+      subprocess.exited,
+      Bun.sleep(20).then(() => null),
+    ]);
+    if (anchorExit !== null) {
+      const [stdout, stderr] = await drainHarnessPipes(captures, 1_000);
+      throw new Error(
+        `Test harness anchor exited ${anchorExit}: ${stdout}${stderr}`,
+      );
+    }
+    let parsedResult: RegExpMatchArray | null = null;
+    if (completed) {
+      const result = (await readFile(resultFile, "utf8")).trim();
+      parsedResult = result.match(/^([0-9]+):([1-9][0-9]*):([1-9][0-9]*)$/);
+      if (!parsedResult) {
+        throw new Error(`Invalid test harness result: ${result}`);
+      }
+      if (
+        parsedResult[2] !== String(subprocess.pid) ||
+        parsedResult[3] !== String(subprocess.pid)
+      ) {
+        throw new Error(`Test harness anchor identity mismatch: ${result}`);
+      }
+    }
+    anchorCleanupStarted = true;
+    await terminateOwnedHarnessGroup(subprocess);
+    if (!completed) {
+      await drainHarnessPipes(captures, 1_000);
+      throw new Error(`Test harness exceeded ${timeoutMs}ms: ${harness}`);
+    }
+    const [stdout, stderr] = await drainHarnessPipes(captures, 1_000);
+    return {
+      exitCode: Number(parsedResult![1]),
+      stdout,
+      stderr,
+    };
+  } finally {
+    for (const capture of captures) capture.cancel();
+    try {
+      if (!anchorCleanupStarted) {
+        anchorCleanupStarted = true;
+        if (anchorReadyObserved) {
+          await terminateOwnedHarnessGroup(subprocess);
+        } else {
+          await terminateUnreadyHarnessAnchor(subprocess);
+        }
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  }
+}
+
+function output(result: {
+  stdout: { toString(): string };
+  stderr: { toString(): string };
+}) {
   return `${result.stdout.toString()}${result.stderr.toString()}`;
 }
 
-async function waitForFile(path: string) {
-  const deadline = Date.now() + 3_000;
+async function waitForFile(path: string, timeoutMs = 3_000) {
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       await access(path);
@@ -281,6 +521,42 @@ type SupervisorScenario =
   | "all-ignore"
   | "leader-exits-child-ignores";
 type TerminationFailure = "none" | "validation" | "kill-signal";
+
+function exactHarnessProcesses(harness: string) {
+  return Bun.spawnSync([
+    "/bin/ps",
+    "-axo",
+    "pid=,ppid=,pgid=,args=",
+  ])
+    .stdout.toString()
+    .split("\n")
+    .flatMap((line) => {
+      const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*)$/);
+      if (!match || !match[4].includes(harness)) return [];
+      return [{ pid: match[1], pgid: match[3] }];
+    });
+}
+
+async function cleanupExactHarnessProcesses(harness: string) {
+  let processes = exactHarnessProcesses(harness);
+  for (const process of processes) {
+    const target =
+      process.pid === process.pgid ? `-${process.pgid}` : process.pid;
+    Bun.spawnSync(["/bin/kill", "-TERM", target]);
+  }
+  if (processes.length > 0) await Bun.sleep(100);
+
+  processes = exactHarnessProcesses(harness);
+  for (const process of processes) {
+    const target =
+      process.pid === process.pgid ? `-${process.pgid}` : process.pid;
+    Bun.spawnSync(["/bin/kill", "-KILL", target]);
+  }
+  if (processes.length > 0) await Bun.sleep(100);
+  if (exactHarnessProcesses(harness).length > 0) {
+    throw new Error(`Could not clean exact test harness ${harness}`);
+  }
+}
 
 async function runSupervisorSignal(
   signal: "SIGINT" | "SIGTERM",
@@ -503,6 +779,235 @@ supervise_slot 1
       ]);
       if (!killed) throw new Error("Supervisor survived final SIGKILL cleanup");
     }
+    await rm(home, { recursive: true, force: true });
+  }
+}
+
+async function runSupervisorReadinessProbe(
+  probe: "inventory" | "guest" | "sequential",
+  signal?: "SIGTERM",
+  delayProbeCleanup = false,
+  failActiveMarkerRemoval = false,
+) {
+  const home = await mkdtemp(join(tmpdir(), "osf-runner-probe-supervisor-"));
+  const harness = join(home, "harness.sh");
+  const probeReady = join(home, "probe-ready");
+  const hungProbe = join(home, "hung-probe.pid");
+  const probeCall =
+    probe === "inventory"
+      ? "colima_profile_status profile 1"
+      : probe === "guest"
+        ? `lima_guest_ready profile ${signal ? 30 : 1}`
+        : `run_trusted_readiness_probe_with_deadline colima-inventory 1 >/dev/null
+  [[ -s "$SUPERVISOR_PROBE_REAPED_FILE" ]]
+  lima_guest_ready profile ${signal ? 30 : 1}`;
+  await writeFile(
+    harness,
+    `#!/bin/bash
+set -euo pipefail
+source ${JSON.stringify(RUNNERS)}
+mkdir -p "$SUPPORT_DIR"
+require_host_tools() { :; }
+require_host_isolation() { :; }
+ensure_runner_archive() { :; }
+provision_termination_grace_attempt_limit() { printf '60\n'; }
+acquire_provision_lock() { printf 'acquire\n' >>"$HOME/cleanup-lifecycle"; }
+release_provision_lock() { printf 'release\n' >>"$HOME/cleanup-lifecycle"; }
+cleanup_slot() { printf 'cleanup:%s\n' "$1" >>"$HOME/cleanup-lifecycle"; }
+probe_parent_before_probe_group_signal() {
+  if [[ "$1" == KILL ]] && (( ${delayProbeCleanup ? 1 : 0} )); then
+    printf 'probe-cleanup-start\n' >>"$HOME/cleanup-lifecycle"
+    /bin/sleep 1.2
+    printf 'probe-cleanup-complete\n' >>"$HOME/cleanup-lifecycle"
+  fi
+}
+rmdir() {
+  if [[ "$1" == "$SUPERVISOR_ACTIVE_PROBE_DIR" ]] &&
+    (( ${failActiveMarkerRemoval ? 1 : 0} )) &&
+    [[ -f "$SUPERVISOR_PROBE_CANCEL_FILE" ]]; then
+    printf 'active-marker-rmdir-failed\n' >>"$HOME/cleanup-lifecycle"
+    return 1
+  fi
+  command rmdir "$@"
+}
+colima() {
+  [[ "$*" == "list --json" ]]
+  ${
+    probe === "inventory"
+      ? `touch "$HOME/probe-ready"`
+      : probe === "sequential"
+        ? `printf '[]\\n'
+  return 0`
+        : "return 1"
+  }
+  /bin/bash -c '
+trap "" TERM
+printf "%s\\n" "$$" >"$HOME/hung-probe.pid"
+while true; do /bin/sleep 30; done
+'
+}
+limactl() {
+  [[ "$*" == "shell colima-profile true" ]]
+  ${probe === "guest" || probe === "sequential" ? `touch "$HOME/probe-ready"` : "return 1"}
+  /bin/bash -c '
+trap "" TERM
+printf "%s\\n" "$$" >"$HOME/hung-probe.pid"
+while true; do /bin/sleep 30; done
+'
+}
+provision_slot_locked() {
+  ${probeCall}
+}
+sleep() {
+  if [[ "$1" == 10 ]]; then
+    exit 0
+  fi
+  /bin/sleep "$1"
+}
+supervise_slot 1
+`,
+  );
+
+  const subprocess = Bun.spawn(["/bin/bash", harness], {
+    env: { ...process.env, HOME: home },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+
+  try {
+    await waitForFile(probeReady, 10_000);
+    await waitForFile(hungProbe, 10_000);
+    if (signal) {
+      subprocess.kill(signal);
+    }
+    const exitCode = await Promise.race([
+      subprocess.exited,
+      Bun.sleep(signal ? 30_000 : 10_000).then(() => null),
+    ]);
+    if (exitCode === null) {
+      subprocess.kill("SIGKILL");
+      await subprocess.exited;
+      throw new Error(`Supervisor did not finish ${probe} readiness probe`);
+    }
+    const [stdout, stderr, cleanupLifecycle, hungProbePid] = await Promise.all([
+      new Response(subprocess.stdout).text(),
+      new Response(subprocess.stderr).text(),
+      readFile(join(home, "cleanup-lifecycle"), "utf8"),
+      readFile(hungProbe, "utf8"),
+    ]);
+    return {
+      cleanupLifecycle,
+      exitCode,
+      hungProbeAlive: processIsRunning(hungProbePid.trim()),
+      leftoverHarnessProcesses: exactHarnessProcesses(harness),
+      stderr,
+      stdout,
+    };
+  } finally {
+    if (subprocess.exitCode === null) {
+      subprocess.kill("SIGKILL");
+      await subprocess.exited;
+    }
+    await cleanupExactHarnessProcesses(harness);
+    await rm(home, { recursive: true, force: true });
+  }
+}
+
+async function runSupervisorPreReadyProbe(signal?: "SIGTERM") {
+  const home = await mkdtemp(join(tmpdir(), "osf-runner-pre-ready-supervisor-"));
+  const harness = join(home, "harness.sh");
+  const sentinelReadyDelay = join(home, "sentinel-ready-delay");
+  const sentinelPidFile = join(home, "sentinel.pid");
+  const probeStartedFile = join(home, "probe-started");
+  await writeFile(
+    harness,
+    `#!/bin/bash
+set -euo pipefail
+source ${JSON.stringify(RUNNERS)}
+mkdir -p "$SUPPORT_DIR"
+require_host_tools() { :; }
+require_host_isolation() { :; }
+ensure_runner_archive() { :; }
+probe_startup_timeout_seconds() { printf '1\n'; }
+acquire_provision_lock() { printf 'acquire\n' >>"$HOME/cleanup-lifecycle"; }
+release_provision_lock() { printf 'release\n' >>"$HOME/cleanup-lifecycle"; }
+cleanup_slot() { printf 'cleanup:%s\n' "$1" >>"$HOME/cleanup-lifecycle"; }
+probe_sentinel_before_ready() {
+  while [[ ! -f "$HOME/allow-sentinel-ready" ]]; do :; done
+}
+probe_parent_after_sentinel_start() {
+  printf '%s\n' "$1" >"$HOME/sentinel.pid"
+  : >"$HOME/sentinel-ready-delay"
+}
+pre_ready_probe() {
+  touch "$HOME/probe-started"
+  while true; do /bin/sleep 30; done
+}
+colima() {
+  pre_ready_probe
+}
+provision_slot_locked() {
+  run_trusted_readiness_probe_with_deadline \
+    colima-inventory ${signal ? 30 : 1}
+}
+sleep() {
+  if [[ "$1" == 10 ]]; then
+    exit 0
+  fi
+  /bin/sleep "$1"
+}
+supervise_slot 1
+`,
+  );
+
+  const subprocess = Bun.spawn(["/bin/bash", harness], {
+    env: { ...process.env, HOME: home },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  let sentinelPid = "";
+
+  try {
+    await waitForFile(sentinelReadyDelay);
+    await waitForFile(sentinelPidFile);
+    sentinelPid = (await readFile(sentinelPidFile, "utf8")).trim();
+    if (signal) {
+      subprocess.kill(signal);
+    }
+    const exitCode = await Promise.race([
+      subprocess.exited,
+      Bun.sleep(3_000).then(() => null),
+    ]);
+    if (exitCode === null) {
+      subprocess.kill("SIGKILL");
+      await subprocess.exited;
+      throw new Error("Supervisor did not finish the pre-ready probe");
+    }
+    const [stdout, stderr, cleanupLifecycle] = await Promise.all([
+      new Response(subprocess.stdout).text(),
+      new Response(subprocess.stderr).text(),
+      readFile(join(home, "cleanup-lifecycle"), "utf8"),
+    ]);
+    let probeStarted = true;
+    try {
+      await access(probeStartedFile);
+    } catch {
+      probeStarted = false;
+    }
+    return {
+      cleanupLifecycle,
+      exitCode,
+      probeStarted,
+      sentinelAlive: processIsRunning(sentinelPid),
+      stderr,
+      stdout,
+    };
+  } finally {
+    if (subprocess.exitCode === null) {
+      subprocess.kill("SIGKILL");
+      await subprocess.exited;
+    }
+    await cleanupExactHarnessProcesses(harness);
     await rm(home, { recursive: true, force: true });
   }
 }
@@ -1151,6 +1656,9 @@ set -e
 
   test("bounds a hard-failed initial Colima start without attempting completion", async () => {
     const result = await runHarness(`
+late_lima_start_attempt_limit() {
+  printf '3\n'
+}
 colima() {
   if [[ "$1" == start ]]; then
     printf '%s\n' "$*" >>"$HOME/colima-starts"
@@ -1172,16 +1680,19 @@ start_result=$?
 set -e
 (( start_result != 0 ))
 [[ "$(grep -c '^start ' "$HOME/colima-starts")" == 1 ]]
-[[ "$(grep -c '^check$' "$HOME/profile-checks")" == 80 ]]
-[[ "$(grep -c '^3$' "$HOME/sleeps")" == 79 ]]
+[[ "$(grep -c '^check$' "$HOME/profile-checks")" == 3 ]]
+[[ "$(grep -c '^3$' "$HOME/sleeps")" == 2 ]]
 [[ ! -e "$HOME/limactl-called" ]]
 `);
 
     expect(result.exitCode, output(result)).toBe(0);
+    expect(await readFile(RUNNERS, "utf8")).toContain(
+      "readonly LATE_LIMA_START_ATTEMPTS=80",
+    );
     expect(result.stderr.toString()).toContain(
       "Colima profile profile stayed Broken after the failed Lima start",
     );
-  });
+  }, 15_000);
 
   test("accepts a rootless linux/amd64 container that executes as x86_64", async () => {
     const result = await runHarness(`
@@ -1382,13 +1893,17 @@ fi
       supervisorStart,
     );
     const supervisor = source.slice(supervisorStart, supervisorEnd);
-    const provisioning = supervisor.indexOf('provision_slot "$slot"');
+    const provisioning = supervisor.indexOf('launch_active_provision "$slot"');
+    const provisionResult = supervisor.indexOf(
+      "wait_for_active_provision_result",
+    );
     const cleanup = supervisor.indexOf('cleanup_slot_serialized "$slot"');
 
     expect(provision).toContain('(set -e; provision_slot_locked "$slot")');
     expect(supervisor).toContain('install_supervisor_exit_traps "$slot"');
     expect(provisioning).toBeGreaterThanOrEqual(0);
-    expect(cleanup).toBeGreaterThan(provisioning);
+    expect(provisionResult).toBeGreaterThan(provisioning);
+    expect(cleanup).toBeGreaterThan(provisionResult);
   });
 
   test("snapshots workflows after isolation and immediately before routing admission", async () => {
@@ -1559,6 +2074,9 @@ set -e
   test("bounds and rejects Running without a working exact-instance guest connection", async () => {
     const result = await runHarness(`
 export COLIMA_HOME="$HOME/.colima"
+late_lima_start_attempt_limit() {
+  printf '3\n'
+}
 colima_profile_status() {
   printf 'Running\n'
 }
@@ -1576,8 +2094,8 @@ wait_for_late_lima_start profile
 wait_result=$?
 set -e
 (( wait_result != 0 ))
-[[ "$(grep -c '^shell$' "$HOME/guest-checks")" == 80 ]]
-[[ "$(grep -c '^3$' "$HOME/sleeps")" == 79 ]]
+[[ "$(grep -c '^shell$' "$HOME/guest-checks")" == 3 ]]
+[[ "$(grep -c '^3$' "$HOME/sleeps")" == 2 ]]
 `);
 
     expect(result.exitCode, output(result)).toBe(0);
@@ -1585,6 +2103,774 @@ set -e
       "Late Lima instance did not become guest-ready: colima-profile",
     );
   });
+
+  test("retries transient Lima SSH status 255 before accepting guest readiness", async () => {
+    const result = await runHarness(`
+export COLIMA_HOME="$HOME/.colima"
+colima_profile_status() {
+  printf 'Running\n'
+}
+limactl() {
+  [[ "$LIMA_HOME" == "$COLIMA_HOME/_lima" ]]
+  [[ "$*" == "shell colima-profile true" ]]
+  printf 'shell\n' >>"$HOME/guest-checks"
+  [[ "$(grep -c '^shell$' "$HOME/guest-checks")" != 1 ]] || return 255
+}
+sleep() {
+  printf '%s\n' "$1" >>"$HOME/sleeps"
+}
+wait_for_late_lima_start profile
+[[ "$(grep -c '^shell$' "$HOME/guest-checks")" == 2 ]]
+[[ "$(grep -c '^3$' "$HOME/sleeps")" == 1 ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("releases an instantly completed probe without signaling its process group", async () => {
+    const result = await runHarness(`
+probe_parent_before_probe_group_signal() {
+  printf '%s\n' "$*" >>"$HOME/group-signal-attempts"
+}
+probe_parent_after_sentinel_wait() {
+  touch "$HOME/sentinel-waited"
+}
+probe_parent_before_pid_lookup() {
+  if [[ -e "$HOME/sentinel-waited" ]]; then
+    touch "$HOME/post-reap-pid-lookup"
+  fi
+}
+instant_probe() {
+  printf 'probe-output\n'
+}
+colima() {
+  instant_probe
+}
+set +e
+probe_output="$(
+  run_trusted_readiness_probe_with_deadline colima-inventory 1
+)"
+probe_result=$?
+set -e
+(( probe_result == 0 ))
+[[ "$probe_output" == probe-output ]]
+[[ ! -e "$HOME/group-signal-attempts" ]]
+[[ ! -e "$HOME/post-reap-pid-lookup" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("clears sentinel identity before a post-wait cancellation hook", async () => {
+    const result = await runHarnessBounded(`
+kill() {
+  printf '%s\n' "$*" >>"$HOME/replacement-signal-attempts"
+}
+probe_parent_after_sentinel_wait() {
+  [[ "$3" == false ]]
+  printf '%s\n' "$2" >"$HOME/reused-sentinel.pid"
+  cancel_probe_deadline 143
+}
+instant_probe() {
+  :
+}
+colima() {
+  instant_probe
+}
+set +e
+run_trusted_readiness_probe_with_deadline colima-inventory 1
+probe_result=$?
+set -e
+(( probe_result == 143 ))
+[[ -s "$HOME/reused-sentinel.pid" ]]
+[[ ! -e "$HOME/replacement-signal-attempts" ]]
+`, 8_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  }, 15_000);
+
+  test("retries interrupted sentinel waits only while the child is active", async () => {
+    const result = await runHarnessBounded(`
+probe_parent_after_sentinel_start() {
+  printf '%s\n' "$1" >"$HOME/sentinel-target.pid"
+}
+probe_sentinel_before_exit() {
+  while [[ ! -f "$HOME/allow-sentinel-exit" ]]; do
+    /bin/sleep 0.001
+  done
+}
+wait() {
+  if [[ -f "$HOME/sentinel-target.pid" ]] &&
+    [[ "$1" == "$(cat "$HOME/sentinel-target.pid")" ]]; then
+    wait_count="$(cat "$HOME/sentinel-wait-count" 2>/dev/null || printf 0)"
+    wait_count="$((wait_count + 1))"
+    printf '%s\n' "$wait_count" >"$HOME/sentinel-wait-count"
+    (( wait_count == 1 )) && return 130
+    (( wait_count == 2 )) && return 143
+  fi
+  builtin wait "$@"
+}
+probe_parent_after_sentinel_wait() {
+  if [[ ! -f "$HOME/sentinel-target.pid" ]] ||
+    [[ "$2" != "$(cat "$HOME/sentinel-target.pid")" ]]; then
+    return 0
+  fi
+  printf '%s:%s\n' "$1" "$3" >>"$HOME/sentinel-waits"
+  if [[ "$1" == 143 && "$3" == true ]]; then
+    touch "$HOME/allow-sentinel-exit"
+  fi
+}
+instant_probe() {
+  :
+}
+colima() {
+  instant_probe
+}
+run_trusted_readiness_probe_with_deadline colima-inventory 1
+[[ "$(cat "$HOME/sentinel-wait-count")" == 3 ]]
+[[ "$(cat "$HOME/sentinel-waits")" == $'130:true\n143:true\n0:false' ]]
+`, 8_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  }, 15_000);
+
+  test("cancels a completed probe before release without blocking", async () => {
+    const result = await runHarnessBounded(`
+probe_parent_after_sentinel_start() {
+  printf '%s\n' "$1" >"$HOME/completed-sentinel.pid"
+}
+probe_parent_before_sentinel_release() {
+  touch "$HOME/pre-release-window"
+  /bin/sh -c '/bin/kill -TERM "$PPID"'
+}
+instant_probe() {
+  :
+}
+colima() {
+  instant_probe
+}
+set +e
+run_trusted_readiness_probe_with_deadline colima-inventory 1
+probe_result=$?
+set -e
+(( probe_result == 143 ))
+[[ -e "$HOME/pre-release-window" ]]
+completed_sentinel_pid="$(cat "$HOME/completed-sentinel.pid")"
+! /bin/kill -0 "$completed_sentinel_pid" 2>/dev/null
+`, 8_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  }, 10_000);
+
+  test("bounds and exactly cleans a broken hanging test harness", async () => {
+    const startedAt = Date.now();
+    await expect(
+      runHarnessBounded(`
+/bin/bash -c '
+trap "" TERM
+while true; do /bin/sleep 30; done
+' &
+while true; do /bin/sleep 30; done
+`, 250),
+    ).rejects.toThrow("Test harness exceeded 250ms");
+    expect(Date.now() - startedAt).toBeLessThan(6_000);
+  }, 8_000);
+
+  test("cleans a parent-exited same-group descendant before draining inherited pipes", async () => {
+    const startedAt = Date.now();
+    const result = await runHarnessBounded(`
+/bin/bash -c '
+trap "" HUP TERM
+printf "pipe-holder:%s\\n" "$$"
+while true; do /bin/sleep 30; done
+' &
+printf 'parent-exit\n'
+`, 4_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(Date.now() - startedAt).toBeLessThan(6_000);
+    const holderPid = result.stdout
+      .toString()
+      .match(/pipe-holder:(\d+)/)?.[1];
+    expect(holderPid).toMatch(/^[1-9][0-9]*$/);
+    expect(processIsRunning(holderPid!)).toBe(false);
+    expect(result.stdout.toString()).toContain("parent-exit\n");
+  }, 8_000);
+
+  test("fails closed and removes a backgrounded probe descendant before returning", async () => {
+    const result = await runHarnessBounded(`
+backgrounding_probe() {
+  /bin/bash -c '
+trap "" TERM
+printf "%s\\n" "$$" >"$HOME/background-probe.pid.tmp"
+mv "$HOME/background-probe.pid.tmp" "$HOME/background-probe.pid"
+while true; do /bin/sleep 30; done
+' </dev/null >/dev/null 2>&1 &
+  while [[ ! -f "$HOME/background-probe.pid" ]]; do /bin/sleep 0.001; done
+}
+colima() {
+  backgrounding_probe
+}
+set +e
+run_trusted_readiness_probe_with_deadline colima-inventory 2
+probe_result=$?
+set -e
+(( probe_result == 125 ))
+background_pid="$(cat "$HOME/background-probe.pid")"
+! kill -0 "$background_pid" 2>/dev/null
+printf 'inspected-before-harness-cleanup\n'
+`, 8_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stdout.toString()).toContain(
+      "inspected-before-harness-cleanup",
+    );
+  });
+
+  test("limits deadlines to the two trusted non-daemonizing readiness probes", async () => {
+    const source = await readFile(RUNNERS, "utf8");
+    expect(
+      source.match(/run_trusted_readiness_probe_with_deadline/g) ?? [],
+    ).toHaveLength(3);
+    expect(
+      source.match(/_run_readiness_probe_process_group/g) ?? [],
+    ).toHaveLength(3);
+    expect(source).toContain(
+      '"$startup_timeout_seconds" "$timeout_seconds" colima list --json',
+    );
+    expect(source).toContain(
+      'limactl shell "colima-${profile}" true',
+    );
+    expect(source).toContain("trusted and non-daemonizing");
+    expect(source).toContain("Never pass a command that can");
+    expect(source).not.toContain("probe_marker_process_ids");
+    expect(source).not.toContain("terminate_marked_probe_processes");
+    expect(source).not.toContain("descendant.marker");
+    expect(source).not.toContain("exec 9<");
+  });
+
+  test("rejects an unsafe Lima profile before invoking the fixed guest probe", async () => {
+    const result = await runHarness(`
+limactl() {
+  touch "$HOME/limactl-called"
+}
+set +e
+run_trusted_readiness_probe_with_deadline lima-guest 1 '../profile'
+probe_result=$?
+set -e
+(( probe_result == 125 ))
+[[ ! -e "$HOME/limactl-called" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("cancels the owned group before publishing the start marker", async () => {
+    const result = await runHarnessBounded(`
+probe_parent_after_sentinel_start() {
+  printf '%s\n' "$1" >"$HOME/transition-sentinel.pid"
+}
+probe_parent_before_start_marker_publication() {
+  touch "$HOME/start-transition"
+  /bin/sh -c '/bin/kill -TERM "$PPID"'
+}
+probe_parent_before_probe_group_signal() {
+  printf '%s:%s\n' "$1" "$2" >>"$HOME/group-signals"
+}
+colima() {
+  touch "$HOME/probe-command-started"
+  while true; do /bin/sleep 30; done
+}
+set +e
+run_trusted_readiness_probe_with_deadline colima-inventory 30
+probe_result=$?
+set -e
+(( probe_result == 143 ))
+[[ -e "$HOME/start-transition" ]]
+[[ "$(cut -d: -f1 "$HOME/group-signals")" == $'TERM\nKILL' ]]
+sentinel_pid="$(cat "$HOME/transition-sentinel.pid")"
+! /bin/kill -0 "$sentinel_pid" 2>/dev/null
+[[ ! -e "$HOME/probe-command-started" ]]
+`, 8_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  }, 10_000);
+
+  test("cleans the owned group when start marker publication fails", async () => {
+    const result = await runHarnessBounded(`
+probe_parent_after_sentinel_start() {
+  printf '%s\n' "$1" >"$HOME/failed-start-sentinel.pid"
+}
+probe_parent_before_probe_group_signal() {
+  printf '%s:%s\n' "$1" "$2" >>"$HOME/group-signals"
+}
+mv() {
+  if [[ "$2" == */start ]]; then
+    touch "$HOME/start-publication-failed"
+    return 1
+  fi
+  command mv "$@"
+}
+colima() {
+  touch "$HOME/probe-command-started"
+}
+set +e
+run_trusted_readiness_probe_with_deadline colima-inventory 1
+probe_result=$?
+set -e
+(( probe_result == 125 ))
+[[ -e "$HOME/start-publication-failed" ]]
+[[ "$(cut -d: -f1 "$HOME/group-signals")" == $'TERM\nKILL' ]]
+sentinel_pid="$(cat "$HOME/failed-start-sentinel.pid")"
+! /bin/kill -0 "$sentinel_pid" 2>/dev/null
+[[ ! -e "$HOME/probe-command-started" ]]
+`, 8_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  }, 10_000);
+
+  test("immediate pre-ready SIGTERM reaps the sentinel before cleanup", async () => {
+    const result = await runSupervisorPreReadyProbe("SIGTERM");
+    expect(result.exitCode, `${result.stdout}${result.stderr}`).toBe(143);
+    expect(result.sentinelAlive).toBe(false);
+    expect(result.probeStarted).toBe(false);
+    expect(result.cleanupLifecycle).toContain("cleanup:1\n");
+  });
+
+  test("forced ready delay times out without creating a probe child", async () => {
+    const result = await runSupervisorPreReadyProbe();
+    expect(result.exitCode, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(result.sentinelAlive).toBe(false);
+    expect(result.probeStarted).toBe(false);
+    expect(result.cleanupLifecycle).toContain("cleanup:1\n");
+  });
+
+  test("requires the durable ownership proof before signaling a probe group", async () => {
+    const result = await runHarness(`
+ownership_file="$HOME/ownership-proven"
+kill() {
+  printf '%s\n' "$*" >>"$HOME/kill-calls"
+}
+set +e
+terminate_owned_probe_process_group 4242 "$ownership_file"
+termination_result=$?
+set -e
+(( termination_result != 0 ))
+[[ ! -e "$HOME/kill-calls" ]]
+
+touch "$ownership_file"
+terminate_owned_probe_process_group 4242 "$ownership_file"
+[[ "$(cat "$HOME/kill-calls")" == $'-TERM -- -4242\n-KILL -- -4242' ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("fails bounded before start when initial group ownership cannot be proven", async () => {
+    const result = await runHarnessBounded(`
+probe_parent_after_sentinel_start() {
+  printf '%s\n' "$1" >"$HOME/unproven-sentinel.pid"
+}
+probe_process_owns_group() { return 1; }
+probe_parent_before_probe_group_signal() {
+  touch "$HOME/group-signal-attempted"
+}
+colima() {
+  touch "$HOME/unproven-probe-started"
+}
+set +e
+run_trusted_readiness_probe_with_deadline colima-inventory 1
+probe_result=$?
+set -e
+(( probe_result == 125 ))
+sentinel_pid="$(cat "$HOME/unproven-sentinel.pid")"
+! /bin/kill -0 "$sentinel_pid" 2>/dev/null
+[[ ! -e "$HOME/group-signal-attempted" ]]
+[[ ! -e "$HOME/unproven-probe-started" ]]
+`, 8_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  }, 10_000);
+
+  test("does not signal provisioning when cancellation publication fails", async () => {
+    const result = await runHarness(`
+set -m
+(
+  trap '' TERM
+  while true; do /bin/sleep 30; done
+) &
+provision_pid=$!
+set +m
+for attempt in {1..100}; do
+  provision_anchor_is_direct_child "$provision_pid" && break
+  /bin/sleep 0.01
+done
+provision_anchor_is_direct_child "$provision_pid"
+SUPERVISOR_PROVISION_PID="$provision_pid"
+SUPERVISOR_PROVISION_STATE=active
+SUPERVISOR_PROBE_CANCEL_FILE="$HOME/cancel"
+SUPERVISOR_ACTIVE_PROBE_DIR="$HOME/active-probe"
+mkdir "$SUPERVISOR_ACTIVE_PROBE_DIR"
+request_active_probe_cancellation() { return 1; }
+kill() {
+  printf '%s\n' "$*" >>"$HOME/kill-calls"
+}
+set +e
+terminate_active_provision
+termination_result=$?
+set -e
+(( termination_result != 0 ))
+[[ ! -e "$HOME/kill-calls" ]]
+/bin/kill -0 "$provision_pid"
+/bin/kill -KILL -- "-$provision_pid"
+builtin wait "$provision_pid" 2>/dev/null || :
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not publish active readiness probe cancellation",
+    );
+  });
+
+  test("does not treat an early worker result as probe-reaped proof", async () => {
+    const result = await runHarness(`
+set -m
+(
+  trap '' TERM
+  while true; do /bin/sleep 30; done
+) &
+provision_pid=$!
+set +m
+for attempt in {1..100}; do
+  provision_anchor_is_direct_child "$provision_pid" && break
+  /bin/sleep 0.01
+done
+provision_anchor_is_direct_child "$provision_pid"
+SUPERVISOR_PROVISION_PID="$provision_pid"
+SUPERVISOR_PROVISION_STATE=active
+SUPERVISOR_PROBE_CANCEL_FILE="$HOME/cancel"
+SUPERVISOR_ACTIVE_PROBE_DIR="$HOME/active-probe"
+SUPERVISOR_PROVISION_RESULT_FILE="$HOME/result"
+SUPERVISOR_PROBE_REAPED_FILE="$HOME/probe-reaped"
+mkdir "$SUPERVISOR_ACTIVE_PROBE_DIR"
+printf '125\n' >"$SUPERVISOR_PROVISION_RESULT_FILE"
+provision_termination_grace_attempt_limit() { printf '2\n'; }
+kill() {
+  printf '%s\n' "$*" >>"$HOME/kill-calls"
+}
+set +e
+terminate_active_provision
+termination_result=$?
+set -e
+(( termination_result != 0 ))
+[[ ! -e "$HOME/kill-calls" ]]
+/bin/kill -0 "$provision_pid"
+/bin/kill -KILL -- "-$provision_pid"
+builtin wait "$provision_pid" 2>/dev/null || :
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Active readiness probe missed its cancellation deadline",
+    );
+  });
+
+  test("fails launch before spawning when fresh protocol state cannot be allocated", async () => {
+    const result = await runHarness(`
+mkdir -p "$SUPPORT_DIR"
+mktemp() { return 1; }
+run_active_provision_anchor() {
+  touch "$HOME/provision-anchor-launched"
+}
+set +e
+launch_active_provision 1
+launch_result=$?
+set -e
+(( launch_result != 0 ))
+[[ ! -e "$HOME/provision-anchor-launched" ]]
+[[ -z "$SUPERVISOR_PROVISION_PROTOCOL_DIR" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not allocate fresh supervisor protocol state",
+    );
+    const source = await readFile(RUNNERS, "utf8");
+    expect(source).toContain(
+      'mktemp -d "${SUPPORT_DIR}/.supervisor-provision.XXXXXX"',
+    );
+    expect(source).not.toContain(".supervisor-provision-$$-");
+  });
+
+  test("fails closed before a probe when its previous reaped proof cannot be reset", async () => {
+    const result = await runHarness(`
+SUPERVISOR_PROBE_REAPED_FILE="$HOME/probe-reaped"
+SUPERVISOR_ACTIVE_PROBE_DIR="$HOME/active-probe"
+printf 'stale\n' >"$SUPERVISOR_PROBE_REAPED_FILE"
+unlink() {
+  if [[ "$1" == "$SUPERVISOR_PROBE_REAPED_FILE" ]]; then
+    return 1
+  fi
+  command unlink "$@"
+}
+colima() {
+  touch "$HOME/probe-invoked"
+}
+set +e
+run_trusted_readiness_probe_with_deadline colima-inventory 1
+probe_result=$?
+set -e
+(( probe_result == 125 ))
+[[ ! -e "$HOME/probe-invoked" ]]
+[[ ! -d "$SUPERVISOR_ACTIVE_PROBE_DIR" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not reset readiness probe reaped proof",
+    );
+  });
+
+  test("finishes cancellation when a post-TERM ownership probe would fail", async () => {
+    const result = await runHarnessBounded(`
+probe_process_owns_group() {
+  local pid="$1"
+  local pgid state
+  if [[ -e "$HOME/fail-next-ownership" ]]; then
+    return 1
+  fi
+  state="$(command ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')"
+  [[ -n "$state" && "$state" != Z* ]] || return 1
+  pgid="$(command ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')"
+  [[ "$pgid" == "$pid" ]]
+}
+probe_parent_before_probe_group_signal() {
+  printf '%s\n' "$1" >>"$HOME/group-signals"
+  [[ "$1" != TERM ]] || touch "$HOME/fail-next-ownership"
+}
+colima() {
+  /bin/bash -c '
+trap "" TERM
+printf "%s\\n" "$$" >"$HOME/transient-ps-probe.pid"
+while true; do /bin/sleep 30; done
+'
+}
+set +e
+run_trusted_readiness_probe_with_deadline colima-inventory 1
+probe_result=$?
+set -e
+(( probe_result == 124 ))
+[[ -e "$HOME/fail-next-ownership" ]]
+[[ "$(cat "$HOME/group-signals")" == $'TERM\nKILL' ]]
+probe_pid="$(cat "$HOME/transient-ps-probe.pid")"
+! /bin/kill -0 "$probe_pid" 2>/dev/null
+`, 8_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  }, 10_000);
+
+  test("times out and kills a Colima inventory probe that never returns", async () => {
+    const startedAt = Date.now();
+    const result = await runHarnessBounded(`
+colima() {
+  [[ "$*" == "list --json" ]]
+  /bin/bash -c '
+trap "" TERM
+printf "%s\\n" "$$" >"$HOME/hung-colima.pid"
+while true; do /bin/sleep 30; done
+'
+}
+set +e
+colima_profile_status profile 1
+probe_result=$?
+set -e
+(( probe_result == 124 ))
+hung_pid="$(cat "$HOME/hung-colima.pid")"
+! kill -0 "$hung_pid" 2>/dev/null
+`, 8_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(result.stderr.toString()).toContain(
+      "Colima profile inventory probe timed out: profile",
+    );
+  }, 10_000);
+
+  test("times out and kills a Lima guest probe that never returns", async () => {
+    const startedAt = Date.now();
+    const result = await runHarnessBounded(`
+export COLIMA_HOME="$HOME/.colima"
+colima_profile_status() {
+  printf 'Running\n'
+}
+limactl() {
+  [[ "$LIMA_HOME" == "$COLIMA_HOME/_lima" ]]
+  [[ "$*" == "shell colima-profile true" ]]
+  /bin/bash -c '
+trap "" TERM
+printf "%s\\n" "$$" >"$HOME/hung-lima.pid"
+while true; do /bin/sleep 30; done
+'
+}
+sleep() {
+  touch "$HOME/slept"
+}
+set +e
+wait_for_late_lima_start profile 1
+probe_result=$?
+set -e
+(( probe_result == 124 ))
+hung_pid="$(cat "$HOME/hung-lima.pid")"
+! kill -0 "$hung_pid" 2>/dev/null
+[[ ! -e "$HOME/slept" ]]
+`, 8_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(result.stderr.toString()).toContain(
+      "Late Lima guest probe timed out: colima-profile",
+    );
+  }, 10_000);
+
+  test("starts a probe after slow setup before applying its runtime deadline", async () => {
+    const result = await runHarnessBounded(`
+probe_startup_timeout_seconds() {
+  printf '3\n'
+}
+probe_sentinel_before_ready() {
+  /bin/sleep 1.2
+}
+slow_start_probe() {
+  /bin/bash -c '
+trap "" TERM
+printf "%s\\n" "$$" >"$HOME/slow-start-probe.pid"
+while true; do /bin/sleep 30; done
+'
+}
+colima() {
+  slow_start_probe
+}
+set +e
+run_trusted_readiness_probe_with_deadline colima-inventory 1
+probe_result=$?
+set -e
+(( probe_result == 124 ))
+slow_start_pid="$(cat "$HOME/slow-start-probe.pid")"
+! kill -0 "$slow_start_pid" 2>/dev/null
+`, 8_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  }, 10_000);
+
+  test("bounds a start-to-command marker stall before invoking the probe", async () => {
+    const result = await runHarnessBounded(`
+probe_startup_timeout_seconds() {
+  printf '1\n'
+}
+probe_child_before_command_start() {
+  trap '' TERM
+  /bin/sh -c 'printf "%s\\n" "$PPID"' >"$HOME/stalled-command-marker.pid"
+  while true; do /bin/sleep 30; done
+}
+must_not_start() {
+  touch "$HOME/probe-command-started"
+}
+colima() {
+  must_not_start
+}
+set +e
+run_trusted_readiness_probe_with_deadline colima-inventory 1
+probe_result=$?
+set -e
+(( probe_result == 124 ))
+stalled_pid="$(cat "$HOME/stalled-command-marker.pid")"
+! /bin/kill -0 "$stalled_pid" 2>/dev/null
+[[ ! -e "$HOME/probe-command-started" ]]
+`, 8_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  }, 10_000);
+
+  test("inventory timeout releases provisioning and reaches serialized cleanup", async () => {
+    const startedAt = Date.now();
+    const result = await runSupervisorReadinessProbe("inventory");
+    expect(result.exitCode, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(result.hungProbeAlive).toBe(false);
+    expect(result.cleanupLifecycle).toContain("cleanup:1\n");
+    expect(result.stderr).toContain(
+      "Colima profile inventory probe timed out: profile",
+    );
+  }, 10_000);
+
+  test("guest timeout releases provisioning and reaches serialized cleanup", async () => {
+    const startedAt = Date.now();
+    const result = await runSupervisorReadinessProbe("guest");
+    expect(result.exitCode, `${result.stdout}${result.stderr}`).toBe(0);
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    expect(result.hungProbeAlive).toBe(false);
+    expect(result.cleanupLifecycle).toContain("cleanup:1\n");
+  }, 10_000);
+
+  test("SIGTERM cancels a hung Lima guest probe and reaches cleanup", async () => {
+    const startedAt = Date.now();
+    const result = await runSupervisorReadinessProbe("guest", "SIGTERM");
+    expect(result.exitCode, `${result.stdout}${result.stderr}`).toBe(143);
+    expect(Date.now() - startedAt).toBeLessThan(25_000);
+    expect(result.hungProbeAlive).toBe(false);
+    expect(result.leftoverHarnessProcesses).toHaveLength(0);
+    expect(result.cleanupLifecycle).toContain("cleanup:1\n");
+  }, 35_000);
+
+  test("SIGTERM waits for delayed probe cleanup before serialized cleanup", async () => {
+    const result = await runSupervisorReadinessProbe(
+      "guest",
+      "SIGTERM",
+      true,
+    );
+    expect(result.exitCode, `${result.stdout}${result.stderr}`).toBe(143);
+    expect(result.hungProbeAlive).toBe(false);
+    expect(result.leftoverHarnessProcesses).toHaveLength(0);
+    expect(result.cleanupLifecycle).toContain(
+      "probe-cleanup-start\nprobe-cleanup-complete\n",
+    );
+    expect(result.cleanupLifecycle.indexOf("cleanup:1\n")).toBeGreaterThan(
+      result.cleanupLifecycle.indexOf("probe-cleanup-complete\n"),
+    );
+  }, 35_000);
+
+  test("does not reuse a completed probe's reaped proof for the next probe", async () => {
+    const result = await runSupervisorReadinessProbe(
+      "sequential",
+      "SIGTERM",
+      true,
+    );
+    expect(result.exitCode, `${result.stdout}${result.stderr}`).toBe(143);
+    expect(result.hungProbeAlive).toBe(false);
+    expect(result.leftoverHarnessProcesses).toHaveLength(0);
+    expect(result.cleanupLifecycle).toContain(
+      "probe-cleanup-start\nprobe-cleanup-complete\n",
+    );
+    expect(result.cleanupLifecycle.indexOf("cleanup:1\n")).toBeGreaterThan(
+      result.cleanupLifecycle.indexOf("probe-cleanup-complete\n"),
+    );
+  }, 35_000);
+
+  test("uses probe-reaped proof when active marker removal keeps failing", async () => {
+    const result = await runSupervisorReadinessProbe(
+      "guest",
+      "SIGTERM",
+      false,
+      true,
+    );
+    expect(result.exitCode, `${result.stdout}${result.stderr}`).toBe(143);
+    expect(result.hungProbeAlive).toBe(false);
+    expect(result.leftoverHarnessProcesses).toHaveLength(0);
+    expect(result.cleanupLifecycle).toContain("cleanup:1\n");
+    expect(result.stderr).toContain(
+      "Proceeding after probe reaped proof with a retained marker",
+    );
+  }, 35_000);
 
   test("rejects Stopped, Absent and unexpected late-start states without waiting", async () => {
     for (const status of ["Stopped", "Absent", "Installing"]) {

@@ -100,6 +100,18 @@ fi
       "Runner neither became online nor completed successfully",
     );
   });
+
+  test("queries known runner state by id instead of a partial inventory", async () => {
+    const result = await runHarness(`
+gh() {
+  [[ "$*" == *"actions/runners/42"* ]]
+  printf 'online:false\n'
+}
+[[ "$(repository_runner_state 42)" == online:false ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
 });
 
 describe("isolation invariants", () => {
@@ -128,6 +140,19 @@ describe("isolation invariants", () => {
   local slot="$1"
   local result
   acquire_provision_lock`);
+  });
+
+  test("verifies durable service identity after a fast runner exit", async () => {
+    const source = await readFile(RUNNERS, "utf8");
+    const start = source.indexOf("verify_unprivileged_runner() {");
+    const end = source.indexOf("\nverify_host_network_boundary() {", start);
+    const verification = source.slice(start, end);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(verification).toContain('-p User --value');
+    expect(verification).toContain('-p SupplementaryGroups --value');
+    expect(verification).not.toContain("Runner.Listener");
   });
 
   test("runs exit cleanup when the process no longer owns a lock", async () => {
@@ -179,7 +204,11 @@ fi
 
   test("cleanup still refuses to delete a busy runner", async () => {
     const result = await runHarness(`
-gh() { printf 'runner-busy\\n'; }
+gh() {
+  [[ "$*" == *"--paginate"* ]]
+  [[ "$*" == *"actions/runners?per_page=100"* ]]
+  printf 'runner-busy\\n'
+}
 delete_matching_runners() { touch "$HOME/deleted-runner"; }
 delete_profile() { touch "$HOME/deleted-profile"; }
 set +e
@@ -193,5 +222,60 @@ set -e
 
     expect(result.exitCode, output(result)).toBe(0);
     expect(result.stderr.toString()).toContain("Refusing to delete busy runner slot 1");
+  });
+
+  test("restores the supervisor when it misses the stop deadline", async () => {
+    const result = await runHarness(`
+preflight_stop() { :; }
+wait_for_supervisor_exit() { return 1; }
+cleanup_slot() { touch "$HOME/cleanup-ran"; }
+disable_local_deploy_runner() { touch "$HOME/deploy-cleanup-ran"; }
+launchctl() {
+  if [[ "$1" == print ]]; then
+    return 1
+  fi
+  if [[ "$1" == bootstrap ]]; then
+    touch "$HOME/supervisor-restored"
+  fi
+}
+set +e
+stop_supervisors
+stop_result=$?
+set -e
+(( stop_result != 0 ))
+[[ -e "$HOME/supervisor-restored" ]]
+[[ ! -e "$HOME/cleanup-ran" ]]
+[[ ! -e "$HOME/deploy-cleanup-ran" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "A supervisor did not stop cleanly; restoring all configured supervisors",
+    );
+  });
+
+  test("fails verify closed when the complete runner inventory is unavailable", async () => {
+    const result = await runHarness(`
+require_host_isolation() { :; }
+verify_host_network_boundary() { :; }
+verify_guest_firewall_behavior() { :; }
+verify_fresh_vm() { :; }
+verify_rootless_docker_firewall_behavior() { :; }
+verify_pre_job_policy() { :; }
+verify_unprivileged_runner() { :; }
+colima() { :; }
+printf 'runner-one\n' >"$SUPPORT_DIR/slot-1.runner"
+gh() { return 1; }
+set +e
+verify_slots
+verify_result=$?
+set -e
+(( verify_result != 0 ))
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not verify the repository runner inventory",
+    );
   });
 });

@@ -122,7 +122,7 @@ delete_matching_runners() {
   local prefix="$1"
   local id ids
   if ! ids="$(
-    gh api "repos/${REPOSITORY}/actions/runners" \
+    gh api --paginate "repos/${REPOSITORY}/actions/runners?per_page=100" \
       --jq ".runners[] | select(.name | startswith(\"${prefix}\")) | .id"
   )"; then
     echo "Could not list repository runners for ${prefix}" >&2
@@ -162,7 +162,7 @@ cleanup_slot() {
   local prefix busy
   prefix="$(runner_prefix_for "$slot")"
   if ! busy="$(
-    gh api "repos/${REPOSITORY}/actions/runners" \
+    gh api --paginate "repos/${REPOSITORY}/actions/runners?per_page=100" \
       --jq ".runners[] | select(.name | startswith(\"${prefix}\")) | select(.busy == true) | .name"
   )"; then
     echo "Could not verify runner state for slot ${slot}; refusing cleanup" >&2
@@ -439,21 +439,20 @@ verify_unprivileged_runner() {
       echo "Runner user can still alter the guest network boundary" >&2
       exit 1
     fi
-    listener_pid=""
-    for attempt in {1..20}; do
-      listener_pid="$(pgrep -u "$RUNNER_USER" -x Runner.Listener | head -1 || true)"
-      [[ -n "$listener_pid" ]] && break
-      sleep 0.25
-    done
-    [[ -n "$listener_pid" ]] || {
-      echo "Runner listener did not start" >&2
+    service_user="$(systemctl show "$RUNNER_SERVICE" -p User --value)"
+    [[ "$service_user" == "$RUNNER_USER" ]] || {
+      echo "Runner service does not use the isolated runner user" >&2
       exit 1
     }
-    docker_gid="$(getent group docker | cut -d: -f3)"
-    if awk -v gid="$docker_gid" "/^Groups:/ { for (i = 2; i <= NF; i++) if (\$i == gid) exit 0; exit 1 }" "/proc/${listener_pid}/status"; then
-      echo "Runner listener inherited the rootful docker group" >&2
+    service_group="$(systemctl show "$RUNNER_SERVICE" -p Group --value)"
+    if [[ -n "$service_group" && "$service_group" != "$(id -gn "$RUNNER_USER")" ]]; then
+      echo "Runner service uses an unexpected primary group" >&2
       exit 1
     fi
+    [[ -z "$(systemctl show "$RUNNER_SERVICE" -p SupplementaryGroups --value)" ]] || {
+      echo "Runner service has supplementary groups" >&2
+      exit 1
+    }
   '
 }
 
@@ -565,7 +564,7 @@ verify_rootless_docker_firewall_behavior() {
 
 repository_runner_id() {
   local runner_name="$1"
-  gh api "repos/${REPOSITORY}/actions/runners?per_page=100" \
+  gh api --paginate "repos/${REPOSITORY}/actions/runners?per_page=100" \
     --jq ".runners[] | select(.name == \"${runner_name}\") | .id" \
     2>/dev/null
 }
@@ -587,9 +586,20 @@ wait_for_repository_runner_id() {
 
 repository_runner_state() {
   local runner_id="$1"
-  gh api "repos/${REPOSITORY}/actions/runners?per_page=100" \
-    --jq ".runners[] | select(.id == ${runner_id}) | \"\(.status):\(.busy)\"" \
-    2>/dev/null
+  local error_file="${SUPPORT_DIR}/runner-state-error.$$" state
+  if state="$(gh api "repos/${REPOSITORY}/actions/runners/${runner_id}" \
+    --jq '"\(.status):\(.busy)"' 2>"$error_file")"; then
+    rm -f "$error_file"
+    printf '%s\n' "$state"
+    return 0
+  fi
+  if grep -Fq '(HTTP 404)' "$error_file"; then
+    rm -f "$error_file"
+    return 0
+  fi
+  cat "$error_file" >&2
+  rm -f "$error_file"
+  return 1
 }
 
 runner_service_active_state() {
@@ -628,11 +638,11 @@ wait_for_runner_online_or_consumed() {
 }
 
 wait_for_ephemeral_runner_completion() {
-  local runner_name="$1"
+  local runner_id="$1"
+  local runner_name="$2"
   local state offline_checks=0
   while true; do
-    if ! state="$(gh api "repos/${REPOSITORY}/actions/runners" \
-      --jq ".runners[] | select(.name == \"${runner_name}\") | \"\(.status):\(.busy)\"" 2>/dev/null)"; then
+    if ! state="$(repository_runner_state "$runner_id")"; then
       sleep 3
       continue
     fi
@@ -749,7 +759,7 @@ provision_slot_locked() {
     printf '%s\n' "$runner_name" >"${SUPPORT_DIR}/slot-${slot}.runner"
     printf '%s\n' "$machine_id" >"${SUPPORT_DIR}/slot-${slot}.machine-id"
     release_provision_lock
-    wait_for_ephemeral_runner_completion "$runner_name" || return 1
+    wait_for_ephemeral_runner_completion "$runner_id" "$runner_name" || return 1
   else
     release_provision_lock
   fi
@@ -891,7 +901,7 @@ preflight_stop() {
   for slot in "${SLOTS[@]}"; do
     prefix="$(runner_prefix_for "$slot")"
     if ! busy="$(
-      gh api "repos/${REPOSITORY}/actions/runners" \
+      gh api --paginate "repos/${REPOSITORY}/actions/runners?per_page=100" \
         --jq ".runners[] | select(.name | startswith(\"${prefix}\")) | select(.busy == true) | .name"
     )"; then
       echo "Could not verify runner state for slot ${slot}; supervisors remain active" >&2
@@ -915,15 +925,22 @@ restore_supervisors() {
 }
 
 stop_supervisors() {
-  local slot plist result
+  local slot plist result wait_result=0
   preflight_stop
   for slot in "${SLOTS[@]}"; do
     plist="$(plist_for "$slot")"
     launchctl bootout "gui/${UID}" "$plist" >/dev/null 2>&1 || true
   done
   for slot in "${SLOTS[@]}"; do
-    wait_for_supervisor_exit "$slot"
+    if ! wait_for_supervisor_exit "$slot"; then
+      wait_result=1
+    fi
   done
+  if (( wait_result != 0 )); then
+    echo "A supervisor did not stop cleanly; restoring all configured supervisors" >&2
+    restore_supervisors || true
+    return 1
+  fi
 
   acquire_provision_lock
   set +e
@@ -940,7 +957,7 @@ stop_supervisors() {
   release_provision_lock
   if (( result != 0 )); then
     echo "Cleanup failed; restoring supervisors so runner state remains managed" >&2
-    restore_supervisors
+    restore_supervisors || true
   fi
   return "$result"
 }
@@ -955,13 +972,13 @@ show_status() {
       echo "slot ${slot}: supervisor stopped"
     fi
   done
-  gh api "repos/${REPOSITORY}/actions/runners" \
+  gh api --paginate "repos/${REPOSITORY}/actions/runners?per_page=100" \
     --jq ".runners[] | select(.name | startswith(\"${RUNNER_NAME_PREFIX}\")) |
       \"\(.name): \(.status), busy=\(.busy), labels=\([.labels[].name] | join(\",\"))\""
 }
 
 verify_slots() {
-  local slot profile runner_name service
+  local slot profile runner_name service repository_runner_names
   for slot in "${SLOTS[@]}"; do
     profile="$(profile_for "$slot")"
     runner_name="$(cat "${SUPPORT_DIR}/slot-${slot}.runner")"
@@ -975,8 +992,14 @@ verify_slots() {
     verify_unprivileged_runner "$profile" "$service"
     colima -p "$profile" ssh -- bash -lc 'printf "machine_id=%s\\n" "$(cat /etc/machine-id)"'
   done
-  if gh api "repos/${REPOSITORY}/actions/runners" \
-    --jq '.runners[].name' | grep -Fxq "$DISABLED_DEPLOY_RUNNER_PREFIX"; then
+  if ! repository_runner_names="$(
+    gh api --paginate "repos/${REPOSITORY}/actions/runners?per_page=100" \
+      --jq '.runners[].name'
+  )"; then
+    echo "Could not verify the repository runner inventory" >&2
+    return 1
+  fi
+  if grep -Fxq "$DISABLED_DEPLOY_RUNNER_PREFIX" <<<"$repository_runner_names"; then
     echo "Local deploy runner must remain unregistered" >&2
     return 1
   fi

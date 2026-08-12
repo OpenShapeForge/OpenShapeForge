@@ -66,6 +66,7 @@ workflow and scripts in its own checkout.
 The actual admission boundary is the runner's pre-job hook. Operators must:
 
 - provision an isolated, ephemeral runner for each job;
+- disable Colima/Lima automatic port forwarding and keep host mounts disabled;
 - run the versioned `scripts/local-actions-runners.sh` supervisor from its
   copied, host-owned installation rather than directly from a checkout;
 - install `scripts/self-hosted-pre-job-policy.sh` as an immutable, root-owned
@@ -73,7 +74,10 @@ The actual admission boundary is the runner's pre-job hook. Operators must:
 - set `ACTIONS_RUNNER_HOOK_JOB_STARTED` in the runner service configuration to
   that installed copy, never to a path inside the checkout; and
 - verify the file ownership and hook configuration before registering or
-  starting the runner.
+  starting the runner; and
+- before registration, keep a wildcard listener alive in the guest while a
+  host-side probe proves that neither loopback nor a wildcard Mac listener can
+  reach it.
 
 If that host-side contract cannot be proved, do not attach the `osf-pr` label.
 The workflow expression and `bun run check:self-hosted-routing` cannot replace

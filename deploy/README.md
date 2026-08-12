@@ -99,8 +99,9 @@ export OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT=28
 `start` stores the validated capacity in the private host support directory.
 Later `status`, `verify` and `stop` calls reuse that configuration when no
 capacity variables are supplied, so a two-slot installation cannot silently be
-managed as one slot. An explicit environment remains authoritative for a
-deliberate migration. The limits are the capacity reserved for these runners,
+managed as one slot. An explicit environment remains authoritative only when
+all three capacity variables are supplied together. The limits are the
+capacity reserved for these runners,
 not a claim derived from the physical host, so they must not exceed what the
 operator has actually made available. The supervisor refuses incomplete,
 invalid or overcommitted capacity before it changes runner state.
@@ -118,7 +119,9 @@ Runner-name prefixes and the isolation-group name can also be overridden with
 the `OPENSHAPEFORGE_RUNNER_*` variables declared at the top of the script.
 Changing the slot count or any of those values is an operator migration: use
 the old configuration to stop only after every configured slot passes the
-busy-runner preflight, then start the new copied installation. Cleanup is
+busy-runner preflight, then start the new copied installation with all three
+capacity values. A lower slot count is rejected while any retired supervisor,
+runner process, repository registration or VM profile still exists. Cleanup is
 serialized but failure-isolated: all configured slots are attempted, and a
 failure restores the supervisors so remaining state stays managed.
 

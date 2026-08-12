@@ -33,6 +33,9 @@ readonly DISABLED_DEPLOY_RUNNER_PREFIX="${OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX:-o
 SLOT_COUNT="${OPENSHAPEFORGE_RUNNER_SLOT_COUNT:-}"
 HOST_CPU_LIMIT="${OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT:-}"
 HOST_MEMORY_GIB_LIMIT="${OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT:-}"
+PERSISTED_SLOT_COUNT=""
+PERSISTED_HOST_CPU_LIMIT=""
+PERSISTED_HOST_MEMORY_GIB_LIMIT=""
 SLOTS=()
 
 require_host_tools() {
@@ -104,11 +107,8 @@ require_positive_integer() {
   fi
 }
 
-load_capacity_configuration() {
+read_persisted_capacity_configuration() {
   local persisted_slot_count persisted_cpu_limit persisted_memory_limit extra read_status=0
-  if [[ -n "$SLOT_COUNT" || -n "$HOST_CPU_LIMIT" || -n "$HOST_MEMORY_GIB_LIMIT" ]]; then
-    return 0
-  fi
   if [[ ! -e "$CAPACITY_CONFIG" ]]; then
     return 0
   fi
@@ -132,9 +132,30 @@ load_capacity_configuration() {
     echo "Runner capacity configuration has unexpected data" >&2
     return 1
   fi
-  SLOT_COUNT="$persisted_slot_count"
-  HOST_CPU_LIMIT="$persisted_cpu_limit"
-  HOST_MEMORY_GIB_LIMIT="$persisted_memory_limit"
+  PERSISTED_SLOT_COUNT="$persisted_slot_count"
+  PERSISTED_HOST_CPU_LIMIT="$persisted_cpu_limit"
+  PERSISTED_HOST_MEMORY_GIB_LIMIT="$persisted_memory_limit"
+  require_positive_integer "persisted runner slot count" "$PERSISTED_SLOT_COUNT"
+  require_positive_integer "persisted runner CPU limit" "$PERSISTED_HOST_CPU_LIMIT"
+  require_positive_integer "persisted runner memory limit" "$PERSISTED_HOST_MEMORY_GIB_LIMIT"
+}
+
+load_capacity_configuration() {
+  local explicit_value_count=0
+  [[ -n "$SLOT_COUNT" ]] && ((explicit_value_count += 1))
+  [[ -n "$HOST_CPU_LIMIT" ]] && ((explicit_value_count += 1))
+  [[ -n "$HOST_MEMORY_GIB_LIMIT" ]] && ((explicit_value_count += 1))
+  if (( explicit_value_count != 0 && explicit_value_count != 3 )); then
+    echo "Runner capacity overrides must set slot count, CPU limit and memory limit together" >&2
+    return 1
+  fi
+
+  read_persisted_capacity_configuration
+  if (( explicit_value_count == 0 )) && [[ -n "$PERSISTED_SLOT_COUNT" ]]; then
+    SLOT_COUNT="$PERSISTED_SLOT_COUNT"
+    HOST_CPU_LIMIT="$PERSISTED_HOST_CPU_LIMIT"
+    HOST_MEMORY_GIB_LIMIT="$PERSISTED_HOST_MEMORY_GIB_LIMIT"
+  fi
 }
 
 persist_capacity_configuration() {
@@ -1304,9 +1325,48 @@ EOF
   plutil -lint "$plist" >/dev/null
 }
 
+verify_capacity_migration() {
+  local slot prefix runners profiles supervisor_pid
+  if [[ -z "$PERSISTED_SLOT_COUNT" ]] || (( SLOT_COUNT >= PERSISTED_SLOT_COUNT )); then
+    return 0
+  fi
+
+  if ! profiles="$(colima list --json 2>/dev/null)"; then
+    echo "Could not inspect Colima profiles before reducing runner capacity" >&2
+    return 1
+  fi
+  for ((slot = SLOT_COUNT + 1; slot <= PERSISTED_SLOT_COUNT; slot++)); do
+    if launchctl print "gui/${UID}/$(agent_label_for "$slot")" >/dev/null 2>&1; then
+      echo "Refusing to retire active runner supervisor slot ${slot}; stop the old capacity first" >&2
+      return 1
+    fi
+    supervisor_pid="$(cat "$(pid_file_for "$slot")" 2>/dev/null || true)"
+    if [[ "$supervisor_pid" =~ ^[0-9]+$ ]] && kill -0 "$supervisor_pid" 2>/dev/null; then
+      echo "Refusing to retire running runner process slot ${slot}; stop the old capacity first" >&2
+      return 1
+    fi
+    prefix="$(runner_prefix_for "$slot")"
+    if ! runners="$(gh api --paginate "repos/${REPOSITORY}/actions/runners?per_page=100" \
+      --jq ".runners[] | select(.name | startswith(\"${prefix}\")) | .name")"; then
+      echo "Could not verify repository runners before reducing runner capacity" >&2
+      return 1
+    fi
+    if [[ -n "$runners" ]]; then
+      echo "Refusing to retire registered runner slot ${slot}: ${runners}" >&2
+      return 1
+    fi
+    if printf '%s\n' "$profiles" | jq -e --arg profile "$(profile_for "$slot")" \
+      'select(.name == $profile)' >/dev/null; then
+      echo "Refusing to retire existing Colima profile slot ${slot}; stop the old capacity first" >&2
+      return 1
+    fi
+  done
+}
+
 start_supervisors() {
   require_host_isolation
   mkdir -p "$SUPPORT_DIR" "$LOG_DIR"
+  verify_capacity_migration
   persist_capacity_configuration
   install -m 0700 "$0" "$INSTALLED_SCRIPT"
   ensure_runner_archive
@@ -1358,13 +1418,17 @@ preflight_stop() {
 }
 
 restore_supervisors() {
-  local slot plist
+  local slot plist result=0
   for slot in "${SLOTS[@]}"; do
     plist="$(plist_for "$slot")"
     if ! launchctl print "gui/${UID}/$(agent_label_for "$slot")" >/dev/null 2>&1; then
-      launchctl bootstrap "gui/${UID}" "$plist"
+      if ! launchctl bootstrap "gui/${UID}" "$plist"; then
+        echo "Could not restore supervisor for slot ${slot}" >&2
+        result=1
+      fi
     fi
   done
+  return "$result"
 }
 
 cleanup_configured_slots() {
@@ -1383,7 +1447,7 @@ cleanup_configured_slots() {
 }
 
 stop_supervisors() {
-  local slot plist result wait_result=0
+  local slot plist result=0 wait_result=0
   preflight_stop
   for slot in "${SLOTS[@]}"; do
     plist="$(plist_for "$slot")"

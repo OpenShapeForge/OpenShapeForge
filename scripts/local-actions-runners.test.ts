@@ -524,7 +524,35 @@ configure_slots
 
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr.toString()).toContain(
-      "Configured slots require 12 CPUs but the declared host limit is 6",
+      "Runner capacity overrides must set slot count, CPU limit and memory limit together",
+    );
+  });
+
+  test("refuses to lower persisted capacity while a retired supervisor is active", async () => {
+    const result = await runHarness(
+      `
+printf '2\\n12\\n28\\n' >"$CAPACITY_CONFIG"
+configure_slots
+launchctl() {
+  [[ "$1" == print && "$2" == *pr-2 ]]
+}
+colima() { [[ "$1" == list ]] && return 0; }
+gh() { :; }
+if verify_capacity_migration; then
+  exit 1
+fi
+[[ "$(cat "$CAPACITY_CONFIG")" == $'2\n12\n28' ]]
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "1",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "6",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "14",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Refusing to retire active runner supervisor slot 2",
     );
   });
 
@@ -737,6 +765,57 @@ set -e
 
     expect(result.exitCode, output(result)).toBe(0);
     expect(result.stdout.toString()).toContain("slot 2: stopped and deleted");
+  });
+
+  test("restores every slot when one supervisor misses the stop deadline", async () => {
+    const result = await runHarness(
+      `
+configure_slots
+preflight_stop() { :; }
+wait_for_supervisor_exit() { [[ "$1" != 1 ]]; }
+cleanup_configured_slots() { touch "$HOME/cleanup-ran"; }
+launchctl() {
+  if [[ "$1" == print ]]; then
+    return 1
+  fi
+  if [[ "$1" == bootstrap ]]; then
+    printf '%s\\n' "$3" >>"$HOME/restore-attempts"
+    [[ "$3" != *pr-1.plist ]]
+    return
+  fi
+}
+set +e
+stop_supervisors
+stop_result=$?
+set -e
+(( stop_result != 0 ))
+[[ ! -e "$HOME/cleanup-ran" ]]
+[[ "$(wc -l <"$HOME/restore-attempts" | tr -d ' ')" == 2 ]]
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "12",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "28",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "A supervisor did not stop cleanly; restoring all configured supervisors",
+    );
+    expect(result.stderr.toString()).toContain("Could not restore supervisor for slot 1");
+  });
+
+  test("queries known runner state by id instead of a first-page inventory", async () => {
+    const result = await runHarness(`
+gh() {
+  [[ "$*" == *"actions/runners/42"* ]]
+  printf 'online:false\\n'
+}
+[[ "$(repository_runner_state 42)" == online:false ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
   });
 
   test("cleans slot state on supervisor exit even when it owns no shared lock", async () => {

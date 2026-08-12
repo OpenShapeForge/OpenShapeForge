@@ -1,12 +1,42 @@
 // SPDX-License-Identifier: BUSL-1.1
 
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const RUNNERS = join(import.meta.dir, "local-actions-runners.sh");
+const LAUNCHER = join(import.meta.dir, "local-actions-launcher.c");
+const LAUNCHER_INSTALLER = join(
+  import.meta.dir,
+  "install-local-actions-launcher.sh",
+);
 const PRE_JOB_POLICY = join(import.meta.dir, "self-hosted-pre-job-policy.sh");
+
+function cString(value: string) {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function programArguments(plist: string) {
+  const block = plist.match(
+    /<key>ProgramArguments<\/key><array>([\s\S]*?)<\/array>/,
+  )?.[1];
+  if (block === undefined) return [];
+  return Array.from(block.matchAll(/<string>(.*?)<\/string>/g), (match) =>
+    match[1]
+      .replaceAll("&quot;", '"')
+      .replaceAll("&apos;", "'")
+      .replaceAll("&gt;", ">")
+      .replaceAll("&lt;", "<")
+      .replaceAll("&amp;", "&"),
+  );
+}
 
 async function runHarness(
   body: string,
@@ -806,8 +836,10 @@ write_launch_agent 1
 write_launch_agent 2
 slot_one_plist="$(plist_for 1)"
 slot_two_plist="$(plist_for 2)"
-grep -Fq '<key>OPENSHAPEFORGE_RUNNER_SLOT</key><string>1</string>' "$slot_one_plist"
-grep -Fq '<key>OPENSHAPEFORGE_RUNNER_SLOT</key><string>2</string>' "$slot_two_plist"
+grep -Fq '    <string>1</string>' "$slot_one_plist"
+grep -Fq '    <string>2</string>' "$slot_two_plist"
+! grep -Fq '<key>OPENSHAPEFORGE_RUNNER_SLOT</key>' "$slot_one_plist"
+! grep -Fq '<key>OPENSHAPEFORGE_RUNNER_SLOT</key>' "$slot_two_plist"
 grep -Fq '<key>OPENSHAPEFORGE_RUNNER_SLOT_COUNT</key><string>2</string>' "$slot_one_plist"
 grep -Fq '<key>OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT</key><string>12</string>' "$slot_two_plist"
 grep -Fq '<key>OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT</key><string>28</string>' "$slot_two_plist"
@@ -820,6 +852,124 @@ grep -Fq '<key>OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT</key><string>28</stri
     );
 
     expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("routes two generated launch agents through the protected launcher to distinct slots", async () => {
+    const home = await mkdtemp(join(tmpdir(), "osf-runner-launcher-"));
+    const harness = join(home, "harness.sh");
+    const supervisor = join(home, "fixed-supervisor.sh");
+    const launcher = join(home, "protected-launcher");
+    const config = join(home, "launcher-config.h");
+    const injected = join(home, "injected");
+
+    try {
+      await writeFile(
+        harness,
+        `#!/usr/bin/env bash
+set -euo pipefail
+source ${JSON.stringify(RUNNERS)}
+configure_slots
+plutil() { :; }
+write_launch_agent 1
+write_launch_agent 2
+`,
+      );
+      const generated = Bun.spawnSync(["bash", harness], {
+        env: {
+          ...process.env,
+          HOME: home,
+          OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+          OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "12",
+          OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "28",
+        },
+      });
+      expect(generated.exitCode, output(generated)).toBe(0);
+
+      await writeFile(
+        supervisor,
+        '#!/usr/bin/env bash\nprintf "%s:%s:%s:egid=%s\\n" "$1" "$2" "$#" "$(id -g)"\n',
+      );
+      await chmod(supervisor, 0o700);
+      await writeFile(
+        config,
+        `#define OSF_SUPERVISOR_PATH "${cString(supervisor)}"
+#define OSF_RUNNER_HOME "${cString(home)}"
+#define OSF_RUNNER_UID ${process.getuid?.() ?? 0}
+`,
+      );
+      const compiled = Bun.spawnSync([
+        "cc",
+        "-std=c11",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        "-include",
+        config,
+        LAUNCHER,
+        "-o",
+        launcher,
+      ]);
+      expect(compiled.exitCode, output(compiled)).toBe(0);
+
+      const launchAgents = await Promise.all(
+        [1, 2].map(async (slot) => {
+          const plist = await readFile(
+            join(
+              home,
+              "Library/LaunchAgents",
+              `com.openshapeforge.actions.pr-${slot}.plist`,
+            ),
+            "utf8",
+          );
+          return programArguments(plist);
+        }),
+      );
+      expect(launchAgents).toEqual([
+        ["/usr/local/libexec/openshapeforge-actions-launcher", "1"],
+        ["/usr/local/libexec/openshapeforge-actions-launcher", "2"],
+      ]);
+
+      await writeFile(injected, `touch ${JSON.stringify(join(home, "unsafe"))}\n`);
+      const results = launchAgents.map((arguments_) =>
+        Bun.spawnSync([launcher, ...arguments_.slice(1)], {
+          env: { ...process.env, BASH_ENV: injected },
+        }),
+      );
+      expect(results.map((result) => result.exitCode)).toEqual([0, 0]);
+      expect(results.map((result) => result.stdout.toString().trim())).toEqual([
+        `supervise-slot:1:2:egid=${process.getegid?.() ?? 0}`,
+        `supervise-slot:2:2:egid=${process.getegid?.() ?? 0}`,
+      ]);
+      expect(await Bun.file(join(home, "unsafe")).exists()).toBe(false);
+
+      const identity = Bun.spawnSync([launcher, "--print-egid"]);
+      expect(identity.exitCode).toBe(0);
+      expect(identity.stdout.toString().trim()).toBe(
+        `${process.getegid?.() ?? 0}:slot-argument-v1`,
+      );
+
+      const arbitraryCommand = Bun.spawnSync([launcher, "status"]);
+      const extraArgument = Bun.spawnSync([launcher, "1", "status"]);
+      expect(arbitraryCommand.exitCode).not.toBe(0);
+      expect(extraArgument.exitCode).not.toBe(0);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  test("preserves privileged Bash mode and refuses a root-bound installer", async () => {
+    const [launcherSource, installerSource] = await Promise.all([
+      readFile(LAUNCHER, "utf8"),
+      readFile(LAUNCHER_INSTALLER, "utf8"),
+    ]);
+
+    expect(launcherSource).toContain('#define OSF_BASH_PATH "/bin/bash"');
+    expect(launcherSource).toContain('      "-p",');
+    expect(launcherSource).toContain(
+      "execve(OSF_BASH_PATH, supervisor_argv, supervisor_environment);",
+    );
+    expect(installerSource).toContain("if (( EUID == 0 )); then");
+    expect(installerSource).toContain("Run this installer as the GUI runner operator");
   });
 
   test("checks every slot before refusing a busy-runner stop", async () => {

@@ -90,11 +90,21 @@ limits unset therefore permits only the safe one-slot default. For example,
 the complete capacity declaration for two slots is:
 
 ```sh
+./scripts/install-local-actions-launcher.sh
 export OPENSHAPEFORGE_RUNNER_SLOT_COUNT=2
 export OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT=12
 export OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT=28
 ./scripts/local-actions-runners.sh start
 ```
+
+Run the installer as the GUI runner operator, without prefixing the command with
+`sudo`; it invokes `sudo` only for the root-owned installation step and refuses
+a root invocation. It compiles the launcher for that operator and fixed
+host-owned supervisor path, then installs it root-owned and setgid to the
+isolation group. The launcher accepts only one positive numeric slot and always
+executes `supervise-slot` from that fixed path through privileged-mode Bash; it
+cannot select another command or executable. Reinstall it after reviewing a
+launcher-source update.
 
 `start` stores the validated capacity in the private host support directory.
 Later `status`, `verify` and `stop` calls reuse that configuration when no

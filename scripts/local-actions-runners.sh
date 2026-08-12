@@ -83,7 +83,7 @@ require_host_isolation() {
     echo "Root-owned setgid runner launcher is not installed correctly" >&2
     exit 1
   }
-  [[ "$($HOST_LAUNCHER --print-egid)" == "$group_id" ]] || {
+  [[ "$($HOST_LAUNCHER --print-egid)" == "${group_id}:slot-argument-v1" ]] || {
     echo "Runner launcher did not assume the isolation group" >&2
     exit 1
   }
@@ -1156,7 +1156,7 @@ provision_slot_locked() {
     MAVEN_VERSION="$MAVEN_VERSION" MAVEN_SHA512="$MAVEN_SHA512" bash -lc '
     set -euo pipefail
     sudo apt-get update >/dev/null
-    sudo apt-get install -y curl git wget unzip zstd jq iptables xz-utils >/dev/null
+    sudo apt-get install -y curl gcc git wget unzip zstd jq iptables xz-utils >/dev/null
     node_archive="/tmp/node-v${NODE_VERSION}-linux-arm64.tar.xz"
     curl -fsSLo "$node_archive" \
       "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-arm64.tar.xz"
@@ -1317,6 +1317,7 @@ write_launch_agent() {
   <key>Label</key><string>${escaped_label}</string>
   <key>ProgramArguments</key><array>
     <string>${escaped_launcher}</string>
+    <string>${slot}</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -1328,7 +1329,6 @@ write_launch_agent() {
     <key>OPENSHAPEFORGE_RUNNER_ISOLATION_GROUP</key><string>${escaped_isolation_group}</string>
     <key>OPENSHAPEFORGE_RUNNER_NAME_PREFIX</key><string>${escaped_runner_prefix}</string>
     <key>OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX</key><string>${escaped_deploy_prefix}</string>
-    <key>OPENSHAPEFORGE_RUNNER_SLOT</key><string>${slot}</string>
     <key>OPENSHAPEFORGE_RUNNER_SLOT_COUNT</key><string>${SLOT_COUNT}</string>
     <key>OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT</key><string>${HOST_CPU_LIMIT}</string>
     <key>OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT</key><string>${HOST_MEMORY_GIB_LIMIT}</string>
@@ -1592,7 +1592,7 @@ main() {
     status) show_status ;;
     verify) verify_slots ;;
     supervise-slot)
-      local requested_slot="${OPENSHAPEFORGE_RUNNER_SLOT:-${2:-}}"
+      local requested_slot="${2:-}"
       slot_is_configured "$requested_slot" || {
         echo "supervise-slot requires a configured slot" >&2
         exit 2

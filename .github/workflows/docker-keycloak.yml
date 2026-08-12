@@ -25,7 +25,7 @@ on:
   # Every pull request, whatever its base branch, for the reason in ci.yml:
   # a stacked PR used to match no trigger and so reported no checks at all
   # (#269). Building and smoke-testing an intermediate branch is the point;
-  # PUBLISH below is what keeps it out of the registry.
+  # the separate hosted publish job keeps it out of the registry.
   pull_request:
   push:
     branches: [main]
@@ -43,47 +43,16 @@ env:
   # Lowercase literal: GHCR rejects the mixed-case ${{ github.repository_owner }}.
   IMAGE: ghcr.io/openshapeforge/openshapeforge-keycloak
 
-  # WHETHER THIS RUN MAY PUBLISH — identical rule to docker-api.yml, and
-  # deliberately so: the two images are deployed as a pair against one tag, so a
-  # ref that publishes one must publish the other. Every step that authenticates
-  # to GHCR, derives tags, or pushes is gated on this and on nothing else.
-  #
-  # It names the two refs allowed to publish rather than the events that must
-  # not, because "not a pull request" stopped being a statement about which code
-  # this is the moment the trigger above widened to every base branch (#269).
-  # A pull request runs with github.ref = refs/pull/<n>/merge, which matches
-  # neither arm, so it cannot publish however it is based — and the event check
-  # says so a second time, independently. It also stops a workflow_dispatch on a
-  # feature branch from pushing :<branch> and :sha-<commit> out of unreviewed
-  # code; dispatch on main or a release tag still publishes.
-  PUBLISH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
-
 jobs:
   build:
     # Named distinctly from the API image job: a required status check is
     # matched by name, and two jobs sharing one name cannot both be required.
+    # Keep the established name even though publication now lives in a separate
+    # hosted job below.
     name: Build, smoke test, push the Keycloak image
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'osf-pr' || 'ubuntu-latest' }}
     permissions:
       contents: read
-      packages: write # required to push to GHCR
-    services:
-      # Keycloak's image is built with `kc.sh build --db=postgres`, so it needs a
-      # real Postgres to reach a ready state. This throwaway instance exists only
-      # for the smoke test; the credentials are local to the runner.
-      postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_DB: keycloak
-          POSTGRES_USER: keycloak
-          POSTGRES_PASSWORD: keycloak
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U keycloak -d keycloak"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -98,6 +67,7 @@ jobs:
         with:
           context: packages/keycloak-spi
           file: packages/keycloak-spi/Dockerfile
+          platforms: linux/amd64
           load: true
           tags: openshapeforge-keycloak:ci
           cache-from: type=gha,scope=keycloak
@@ -108,18 +78,41 @@ jobs:
       # without the SPI — a failure mode the health probe alone cannot catch.
       - name: Verify the SPI provider jar is present
         run: |
-          docker run --rm --entrypoint ls openshapeforge-keycloak:ci \
+          docker run --rm --platform linux/amd64 --entrypoint ls openshapeforge-keycloak:ci \
             /opt/keycloak/providers/openshapeforge-keycloak-spi.jar
 
-      # Prove the image actually reaches a ready state against Postgres. Host
-      # networking lets the container reach the service container on localhost.
+      # Use one explicit bridge network for the smoke-test database and image.
+      # This behaves identically with rootful and rootless Docker and avoids
+      # depending on rootless Docker's intentionally isolated host network.
+      - name: Start smoke-test Postgres
+        run: |
+          docker network create kc-smoke-network
+          docker run -d --name kc-postgres --network kc-smoke-network \
+            -e POSTGRES_DB=keycloak \
+            -e POSTGRES_USER=keycloak \
+            -e POSTGRES_PASSWORD=keycloak \
+            --health-cmd "pg_isready -U keycloak -d keycloak" \
+            --health-interval 2s --health-timeout 3s --health-retries 20 \
+            postgres:18-alpine
+          for i in $(seq 1 40); do
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' kc-postgres)" = healthy ]; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs kc-postgres
+          exit 1
+
+      # Prove the image actually reaches a ready state against Postgres. Publish
+      # only its management port to loopback for the host-side readiness probe.
       - name: Smoke test the image
         run: |
-          docker run -d --name kc-smoke --network host \
+          docker run -d --platform linux/amd64 --name kc-smoke --network kc-smoke-network \
+            -p 127.0.0.1:9000:9000 \
             -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
             -e KC_DB=postgres \
-            -e KC_DB_URL=jdbc:postgresql://localhost:5432/keycloak \
+            -e KC_DB_URL=jdbc:postgresql://kc-postgres:5432/keycloak \
             -e KC_DB_USERNAME=keycloak \
             -e KC_DB_PASSWORD=keycloak \
             -e KC_HEALTH_ENABLED=true \
@@ -127,7 +120,7 @@ jobs:
             -e KC_HOSTNAME_STRICT=false \
             openshapeforge-keycloak:ci start-dev
           # Keycloak serves health on the management port (9000), not 8080.
-          for i in $(seq 1 90); do
+          for i in $(seq 1 180); do
             if curl -fsS http://127.0.0.1:9000/health/ready 2>/dev/null | grep -q '"status": *"UP"'; then
               echo "keycloak ready after ${i}s"
               docker rm -f kc-smoke >/dev/null
@@ -135,7 +128,7 @@ jobs:
             fi
             sleep 1
           done
-          echo "::error::keycloak did not become ready within 90s"
+          echo "::error::keycloak did not become ready within 180s"
           docker logs kc-smoke
           docker rm -f kc-smoke >/dev/null
           exit 1
@@ -153,19 +146,20 @@ jobs:
       # fails — which is exactly the regression worth catching.
       - name: Smoke test the image with a read-only root filesystem
         run: |
-          docker run -d --name kc-rofs --network host \
+          docker run -d --platform linux/amd64 --name kc-rofs --network kc-smoke-network \
+            -p 127.0.0.1:9000:9000 \
             --read-only --tmpfs /tmp --tmpfs /opt/keycloak/data \
             -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
             -e KC_DB=postgres \
-            -e KC_DB_URL=jdbc:postgresql://localhost:5432/keycloak \
+            -e KC_DB_URL=jdbc:postgresql://kc-postgres:5432/keycloak \
             -e KC_DB_USERNAME=keycloak \
             -e KC_DB_PASSWORD=keycloak \
             -e KC_HEALTH_ENABLED=true \
             -e KC_HTTP_ENABLED=true \
             -e KC_HOSTNAME_STRICT=false \
             openshapeforge-keycloak:ci start --optimized
-          for i in $(seq 1 90); do
+          for i in $(seq 1 180); do
             if curl -fsS http://127.0.0.1:9000/health/ready 2>/dev/null | grep -q '"status": *"UP"'; then
               echo "keycloak ready on a read-only rootfs after ${i}s"
               docker rm -f kc-rofs >/dev/null
@@ -173,13 +167,35 @@ jobs:
             fi
             sleep 1
           done
-          echo "::error::keycloak did not become ready on a read-only rootfs within 90s"
+          echo "::error::keycloak did not become ready on a read-only rootfs within 180s"
           docker logs kc-rofs
           docker rm -f kc-rofs >/dev/null
           exit 1
 
+      - name: Clean up smoke-test containers
+        if: always()
+        run: |
+          docker rm -f kc-smoke kc-rofs kc-postgres >/dev/null 2>&1 || true
+          docker network rm kc-smoke-network >/dev/null 2>&1 || true
+
+  # Publication is physically separated from pull-request validation so the
+  # self-hosted runner never receives packages:write, registry credentials, or
+  # a push step. This job is always GitHub-hosted and is fail-closed to main and
+  # v* release refs; workflow_dispatch on a feature branch only validates.
+  publish:
+    name: Publish the Keycloak image
+    needs: build
+    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
       - name: Log in to GHCR
-        if: env.PUBLISH == 'true'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
@@ -187,7 +203,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Derive tags and labels
-        if: env.PUBLISH == 'true'
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
@@ -203,11 +218,10 @@ jobs:
             org.opencontainers.image.description=Keycloak with the OpenShapeForge SPI provider
             org.opencontainers.image.licenses=BUSL-1.1
 
-      # Fully cache-hit from the build above; this step exports and pushes.
-      # Separate from the load build because the local docker exporter cannot
-      # carry provenance/SBOM attestations.
+      # The hosted validation job above populated the same GHA cache. This step
+      # exports and pushes with provenance/SBOM; the self-hosted PR path can
+      # never reach it.
       - name: Push to GHCR
-        if: env.PUBLISH == 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: packages/keycloak-spi

@@ -19,7 +19,7 @@ on:
   # Every pull request, whatever its base branch, for the reason in ci.yml:
   # a stacked PR used to match no trigger and so reported no checks at all
   # (#269). Building and smoke-testing an intermediate branch is the point;
-  # PUBLISH below is what keeps it out of the registry.
+  # the separate hosted publish job keeps it out of the registry.
   pull_request:
   push:
     branches: [main]
@@ -38,34 +38,16 @@ env:
   # (OpenShapeForge), and this is the path values.yaml already ships.
   IMAGE: ghcr.io/openshapeforge/openshapeforge-api
 
-  # WHETHER THIS RUN MAY PUBLISH. Every step that authenticates to GHCR, derives
-  # tags, or pushes is gated on this and on nothing else — one rule, stated once.
-  #
-  # It names the two refs allowed to publish rather than the events that must
-  # not, because "not a pull request" stopped being a statement about which code
-  # this is the moment the trigger above widened to every base branch (#269).
-  # A pull request runs with github.ref = refs/pull/<n>/merge, which matches
-  # neither arm, so it cannot publish however it is based — and the event check
-  # says so a second time, independently.
-  #
-  # It also closes a hole that predates #269: workflow_dispatch on a feature
-  # branch would have pushed :<branch> and :sha-<commit> (metadata-action's
-  # type=ref and type=sha) out of unreviewed code. Dispatch on main or on a
-  # release tag still publishes, which is what that escape hatch is for.
-  #
-  # Fail-closed by construction: any mistake in this expression yields false and
-  # publishes nothing, rather than publishing from somewhere it should not.
-  PUBLISH: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
-
 jobs:
   build:
     # Named distinctly from the Keycloak image job: a required status check is
     # matched by name, and two jobs sharing one name cannot both be required.
+    # Keep the established name even though publication now lives in a separate
+    # hosted job below.
     name: Build, smoke test, push the API image
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'osf-pr' || 'ubuntu-latest' }}
     permissions:
       contents: read
-      packages: write # required to push to GHCR
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -83,6 +65,7 @@ jobs:
         with:
           context: .
           file: apps/api/Dockerfile
+          platforms: linux/amd64
           load: true
           tags: openshapeforge-api:ci
           cache-from: type=gha
@@ -101,7 +84,7 @@ jobs:
       # here rather than in a cluster after a rollout.
       - name: Smoke test the image
         run: |
-          docker run -d --name api-smoke -p 3001:3001 \
+          docker run -d --platform linux/amd64 --name api-smoke -p 3001:3001 \
             --read-only --tmpfs /tmp \
             -e NODE_ENV=development \
             openshapeforge-api:ci
@@ -118,10 +101,24 @@ jobs:
           docker rm -f api-smoke >/dev/null
           exit 1
 
-      # Only authenticate when we actually publish. PR builds (especially from
-      # forks) get a read-only GITHUB_TOKEN and must not push.
+  # Publication is physically separated from pull-request validation so the
+  # self-hosted runner never receives packages:write, registry credentials, or
+  # a push step. This job is always GitHub-hosted and is fail-closed to main and
+  # v* release refs; workflow_dispatch on a feature branch only validates.
+  publish:
+    name: Publish the API image
+    needs: build
+    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
       - name: Log in to GHCR
-        if: env.PUBLISH == 'true'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
@@ -129,7 +126,6 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Derive tags and labels
-        if: env.PUBLISH == 'true'
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
@@ -147,11 +143,10 @@ jobs:
             org.opencontainers.image.description=OpenShapeForge API — generated GraphQL CRUD service with Postgres row-level security
             org.opencontainers.image.licenses=BUSL-1.1
 
-      # Fully cache-hit from the build above; this step just exports and pushes.
-      # provenance/sbom attestations are why this is a separate step — the local
-      # docker exporter used above cannot carry them.
+      # The hosted validation job above populated the same GHA cache. This step
+      # exports and pushes with provenance/SBOM; the self-hosted PR path can
+      # never reach it.
       - name: Push to GHCR
-        if: env.PUBLISH == 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .

@@ -519,19 +519,21 @@ verify_host_network_boundary() {
 
 host_tcp_port_state() {
   local port="$1"
-  local listener_output listener_status=0
-  if listener_output="$(lsof -nP -a -iTCP:"$port" -sTCP:LISTEN 2>/dev/null)"; then
+  local listener_error_file listener_output listener_status=0
+  listener_error_file="$(mktemp "${TMPDIR:-/tmp}/openshapeforge-lsof.XXXXXX")"
+  if listener_output="$(lsof -nP -a -iTCP:"$port" -sTCP:LISTEN 2>"$listener_error_file")"; then
     listener_status=0
   else
     listener_status=$?
   fi
   if (( listener_status == 0 )) && [[ -n "$listener_output" ]]; then
     printf 'bound\n'
-  elif (( listener_status == 1 )) && [[ -z "$listener_output" ]]; then
+  elif (( listener_status == 1 )) && [[ -z "$listener_output" && ! -s "$listener_error_file" ]]; then
     printf 'unbound\n'
   else
     printf 'error\n'
   fi
+  rm -f "$listener_error_file"
 }
 
 assert_host_tcp_port_unbound() {

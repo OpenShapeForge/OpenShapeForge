@@ -261,6 +261,28 @@ set -e
     );
   });
 
+  test("does not inspect or accept a host port when its error log cannot be created", async () => {
+    const result = await runHarness(`
+mktemp() { return 1; }
+lsof() {
+  touch "$HOME/lsof-called"
+  return 1
+}
+[[ "$(host_tcp_port_state 49152)" == error ]]
+[[ ! -e "$HOME/lsof-called" ]]
+set +e
+select_forwarding_probe_port 49152
+selection_result=$?
+set -e
+(( selection_result != 0 ))
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not inspect candidate forwarding probe ports on the Mac",
+    );
+  });
+
   test("fails the live proof closed when a wildcard host listener appears", async () => {
     const result = await runHarness(`
 lsof() {

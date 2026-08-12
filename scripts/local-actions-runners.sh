@@ -483,7 +483,10 @@ verify_host_network_boundary() {
 host_tcp_port_state() {
   local port="$1"
   local listener_error_file listener_output listener_status=0
-  listener_error_file="$(mktemp "${TMPDIR:-/tmp}/openshapeforge-lsof.XXXXXX")"
+  if ! listener_error_file="$(mktemp "${TMPDIR:-/tmp}/openshapeforge-lsof.XXXXXX")"; then
+    printf 'error\n'
+    return 0
+  fi
   if listener_output="$(lsof -nP -a -iTCP:"$port" -sTCP:LISTEN 2>"$listener_error_file")"; then
     listener_status=0
   else

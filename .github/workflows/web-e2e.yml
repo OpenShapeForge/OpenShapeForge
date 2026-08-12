@@ -116,13 +116,14 @@ jobs:
             -v "$PWD/keycloak/openshapeforge-realm.json:/opt/keycloak/data/import/openshapeforge-realm.json:ro" \
             "$image" start-dev --import-realm
 
-      # Keyed on the lockfile because that is what pins @playwright/test, and the
-      # browser build a given release downloads is fixed.
+      # Keyed on OS and architecture because Playwright browser archives are
+      # platform-specific. The lockfile pins @playwright/test, which in turn
+      # fixes the browser build. Do not add an architecture-free restore key.
       - name: Cache the browser binaries
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
 
       - name: Install Chromium and system dependencies (GitHub-hosted)
         if: runner.environment == 'github-hosted'

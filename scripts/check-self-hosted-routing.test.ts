@@ -40,6 +40,20 @@ function injectIntoGates(line: string): string[] {
 }
 
 describe("self-hosted routing negative fixtures", () => {
+  test("keeps Playwright browser caches architecture-specific", () => {
+    const source = baseline[".github/workflows/web-e2e.yml"];
+    const workflow = Bun.YAML.parse(source.replace(/^on:/m, '"on":'));
+    const cacheStep = workflow.jobs["browser-e2e"].steps.find(
+      (step: Record<string, unknown>) =>
+        String(step.uses ?? "").startsWith("actions/cache@"),
+    );
+
+    expect(cacheStep?.with?.key).toBe(
+      "playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}",
+    );
+    expect(cacheStep?.with?.["restore-keys"]).toBeUndefined();
+  });
+
   test("rejects an unlisted workflow regardless of YAML indentation", () => {
     const workflows = {
       ...baseline,

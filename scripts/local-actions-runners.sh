@@ -8,6 +8,7 @@ set -euo pipefail
 
 readonly REPOSITORY="OpenShapeForge/OpenShapeForge"
 readonly SLOTS=(1)
+readonly BROKEN_RECOVERY_PROFILE="osf-pr-1"
 readonly COMMAND="${1:-status}"
 readonly RUNNER_VERSION="2.336.0"
 readonly RUNNER_SHA256="58b758e420b87093fbd4bfddd368074960053e2f1388f01848c82624b90f27d1"
@@ -26,6 +27,7 @@ readonly HOST_FIREWALL_PLIST="/Library/LaunchDaemons/com.openshapeforge.actions.
 readonly HOST_FIREWALL_RULES="/Library/Application Support/OpenShapeForge Actions/pf-anchor.conf"
 readonly ISOLATION_GROUP="${OPENSHAPEFORGE_RUNNER_ISOLATION_GROUP:-_osfci}"
 readonly RUNNER_USER="$(id -un)"
+readonly RUNNER_UID="$(id -u)"
 readonly RUNNER_NAME_PREFIX="${OPENSHAPEFORGE_RUNNER_NAME_PREFIX:-openshapeforge-pr}"
 readonly DISABLED_DEPLOY_RUNNER_PREFIX="${OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX:-openshapeforge-deploy}"
 
@@ -361,7 +363,7 @@ validate_workflow_sha_allow_list() {
 
 require_host_tools() {
   local tool
-  for tool in colima curl dscl gh ifconfig ipconfig jq launchctl limactl lsof nc ps route shasum shlock stat unlink uuidgen; do
+  for tool in colima curl dscl find gh ifconfig ipconfig jq launchctl limactl lsof nc ps route shasum shlock stat unlink uuidgen; do
     command -v "$tool" >/dev/null 2>&1 || {
       echo "Required host tool is missing: $tool" >&2
       exit 1
@@ -466,16 +468,154 @@ delete_matching_runners() {
   return 0
 }
 
-delete_profile() {
+colima_profile_status() {
   local profile="$1"
   local profiles status
   if ! profiles="$(colima list --json 2>/dev/null)"; then
     echo "Could not inspect Colima profile ${profile}" >&2
     return 1
   fi
-  if [[ "$profiles" == *"\"name\":\"${profile}\""* ]]; then
-    status="$(printf '%s\n' "$profiles" | jq -r --arg profile "$profile" \
-      'select(.name == $profile) | .status // empty')"
+  if ! status="$(
+    printf '%s\n' "$profiles" | jq -ser --arg profile "$profile" '
+      if all(.[];
+        type == "object" and
+        ((.name | type) == "string") and
+        ((.name | length) > 0) and
+        ((.status | type) == "string") and
+        ((.status | length) > 0))
+      then
+        [.[] | select(.name == $profile)] as $matches |
+        if ($matches | length) == 0 then "Absent"
+        elif ($matches | length) == 1 then $matches[0].status
+        else error("duplicate Colima profile")
+        end
+      else error("invalid Colima profile inventory")
+      end
+    '
+  )"; then
+    echo "Could not verify Colima profile ${profile}" >&2
+    return 1
+  fi
+  printf '%s\n' "$status"
+}
+
+path_owner_uid() {
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    stat -f '%u' "$1"
+  else
+    stat -c '%u' "$1"
+  fi
+}
+
+require_owned_directory() {
+  local path="$1"
+  local owner
+  if [[ -L "$path" || ! -d "$path" ]]; then
+    echo "Broken profile recovery requires a real directory: ${path}" >&2
+    return 1
+  fi
+  if ! owner="$(path_owner_uid "$path" 2>/dev/null)"; then
+    echo "Could not verify recovery path ownership: ${path}" >&2
+    return 1
+  fi
+  if [[ "$owner" != "$RUNNER_UID" ]]; then
+    echo "Refusing recovery of a foreign-owned path: ${path}" >&2
+    return 1
+  fi
+}
+
+require_disposable_profile_tree() {
+  local path="$1"
+  local unexpected
+  require_owned_directory "$path" || return 1
+  if ! unexpected="$(find -P "$path" -type l -print -quit 2>/dev/null)"; then
+    echo "Could not inspect recovery tree for symlinks: ${path}" >&2
+    return 1
+  fi
+  if [[ -n "$unexpected" ]]; then
+    echo "Refusing recovery of a tree containing symlinks: ${path}" >&2
+    return 1
+  fi
+  if ! unexpected="$(find -P "$path" ! -user "$RUNNER_USER" -print -quit 2>/dev/null)"; then
+    echo "Could not inspect recovery tree ownership: ${path}" >&2
+    return 1
+  fi
+  if [[ -n "$unexpected" ]]; then
+    echo "Refusing recovery of a tree containing foreign-owned state: ${path}" >&2
+    return 1
+  fi
+}
+
+recover_broken_ephemeral_profile() {
+  local profile="$1"
+  local colima_home="${HOME}/.colima"
+  local configured_colima_home="${COLIMA_HOME-${colima_home}}"
+  local lima_home="${colima_home}/_lima"
+  local configured_lima_home="${LIMA_HOME-}"
+  local profile_state="${colima_home}/${BROKEN_RECOVERY_PROFILE}"
+  local lima_state="${lima_home}/colima-${BROKEN_RECOVERY_PROFILE}"
+  local lima_config="${lima_state}/lima.yaml"
+
+  if [[ "$profile" != "$BROKEN_RECOVERY_PROFILE" ]]; then
+    echo "Refusing Broken recovery outside ${BROKEN_RECOVERY_PROFILE}: ${profile}" >&2
+    return 1
+  fi
+  case "$HOME" in
+    /*) ;;
+    *)
+      echo "Refusing Broken recovery with a non-absolute HOME" >&2
+      return 1
+      ;;
+  esac
+  case "$HOME" in
+    /|*/|*/../*|*/..|*/./*|*/.)
+      echo "Refusing Broken recovery with an unexpected HOME path" >&2
+      return 1
+      ;;
+  esac
+  if [[ "$configured_colima_home" != "$colima_home" ]]; then
+    echo "Refusing Broken recovery with an unexpected COLIMA_HOME" >&2
+    return 1
+  fi
+  if [[ -n "$configured_lima_home" && "$configured_lima_home" != "$lima_home" ]]; then
+    echo "Refusing Broken recovery with an unexpected LIMA_HOME" >&2
+    return 1
+  fi
+
+  require_owned_directory "$HOME" || return 1
+  require_owned_directory "$colima_home" || return 1
+  require_owned_directory "$lima_home" || return 1
+  if [[ -e "$lima_config" || -L "$lima_config" ]]; then
+    echo "Refusing Broken recovery when lima.yaml is present or linked" >&2
+    return 1
+  fi
+  require_disposable_profile_tree "$profile_state" || return 1
+  require_disposable_profile_tree "$lima_state" || return 1
+
+  if ! rm -rf -- "$profile_state" "$lima_state"; then
+    echo "Could not remove disposable state for ${BROKEN_RECOVERY_PROFILE}" >&2
+    return 1
+  fi
+  if [[ -e "$profile_state" || -L "$profile_state" || -e "$lima_state" || -L "$lima_state" ]]; then
+    echo "Disposable state for ${BROKEN_RECOVERY_PROFILE} still exists after recovery" >&2
+    return 1
+  fi
+}
+
+delete_profile() {
+  local profile="$1"
+  local status
+  status="$(colima_profile_status "$profile")" || return 1
+  if [[ "$status" != "Absent" ]]; then
+    if [[ "$status" == "Broken" ]]; then
+      recover_broken_ephemeral_profile "$profile" || return 1
+      status="$(colima_profile_status "$BROKEN_RECOVERY_PROFILE")" || return 1
+      if [[ "$status" != "Absent" ]]; then
+        echo "Colima profile ${BROKEN_RECOVERY_PROFILE} still exists after recovery" >&2
+        return 1
+      fi
+      return 0
+    fi
     if [[ "$status" != "Stopped" ]]; then
       colima stop -p "$profile" >/dev/null 2>&1 || true
     fi
@@ -483,6 +623,11 @@ delete_profile() {
       echo "Could not delete Colima profile ${profile}" >&2
       return 1
     fi
+  fi
+  status="$(colima_profile_status "$profile")" || return 1
+  if [[ "$status" != "Absent" ]]; then
+    echo "Colima profile ${profile} still exists after deletion" >&2
+    return 1
   fi
   return 0
 }

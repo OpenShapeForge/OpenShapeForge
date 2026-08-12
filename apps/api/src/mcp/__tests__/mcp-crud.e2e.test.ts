@@ -172,6 +172,14 @@ describe("generated MCP server", () => {
     ]);
   });
 
+  test("rejects a value outside an advertised enum", async () => {
+    const { body } = await callTool(tenantA, "relation_create", {
+      displayName: "invalid-enum",
+      relationType: "spaceship",
+    });
+    expect(toolError(body)).toMatch(/BAD_USER_INPUT: Invalid value for field "relationType"/);
+  });
+
   test("annotates read-only and destructive tools", async () => {
     const { body } = await rpc(tenantA, "tools/list");
     const tools = body.result.tools as { name: string; annotations: any }[];

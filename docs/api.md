@@ -104,6 +104,9 @@ REST-specific semantics:
   (`BAD_USER_INPUT` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403,
   `GENERATED_CRUD_NOT_ENABLED` 404, `DATABASE_NOT_CONFIGURED` 503; anything
   unexpected is a redacted 500).
+- **Enum writes** — authored static/referentiedata vocabularies are carried in
+  the storage manifest and enforced by the shared CRUD writer for GraphQL,
+  REST, and MCP. `null` remains valid for clearing an optional field on update.
 - **OpenAPI** — `bun run generate` also emits
   `apps/api/src/generated/rest/openapi.json` (always, empty `paths` when no
   entity opts in), served verbatim at `GET /api/rest/openapi.json`.

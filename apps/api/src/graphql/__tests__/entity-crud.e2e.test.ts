@@ -235,3 +235,56 @@ for (const table of tables) {
     }
   });
 }
+
+describe("shared enum write invariant", () => {
+  const relation = tables.find((table) => table.name === "erp.relations")!;
+  const relationType = relation.columns.find(
+    (column) => fieldName(column) === "relationType",
+  )!;
+  const optional = tables
+    .flatMap((table) => table.columns.map((column) => ({ table, column })))
+    .find(
+      ({ column }) =>
+        !column.required &&
+        column.immutable !== true &&
+        (column.enumConstraint?.values?.length ?? 0) > 0,
+    )!;
+
+  test("GraphQL rejects a value outside the authored vocabulary", async () => {
+    const result = await gql(
+      tenantA,
+      `mutation($input: CreateRelationInput!) {
+         createRelation(input: $input) { id relationType }
+       }`,
+      { input: { displayName: "invalid-enum", relationType: "spaceship" } },
+    );
+
+    expect(result.data?.createRelation ?? null).toBeNull();
+    expect(result.errors?.[0]?.extensions?.code).toBe("BAD_USER_INPUT");
+    expect(result.errors?.[0]?.message).toContain("relationType");
+  });
+
+  test("GraphQL still clears an optional enum field with null", async () => {
+    const field = fieldName(optional.column);
+    const graphql = optional.table.source!.graphql!;
+    const allowed = optional.column.enumConstraint!.values![0]!;
+    const id = await createRow(optional.table, tenantA, { [field]: allowed });
+
+    const updated = await expectData(
+      tenantA,
+      `mutation($input: Update${graphql.typeName}Input!) {
+         ${graphql.updateMutationName}(input: $input) { id ${field} }
+       }`,
+      { input: { id, [field]: null } },
+    );
+    expect(updated[graphql.updateMutationName][field]).toBeNull();
+  });
+
+  test("the shipped Relation enum metadata matches the advertised field", () => {
+    expect(relationType.enumConstraint?.values).toEqual([
+      "person",
+      "organization",
+      "group",
+    ]);
+  });
+});

@@ -358,6 +358,22 @@ for (const table of restTables) {
   });
 }
 
+describe("REST shared enum write invariant", () => {
+  const relation = restTables.find((table) => table.name === "erp.relations")!;
+  const base = `${REST_MOUNT_PATH}/${relation.source!.rest!.basePath}`;
+
+  test("POST rejects a value outside the authored vocabulary", async () => {
+    const body = await buildCreateBody(relation, tenantA, {
+      relationType: "spaceship",
+    });
+    const response = await rest(tenantA, "POST", base, body);
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe("BAD_USER_INPUT");
+    expect(response.body.error.message).toContain("relationType");
+  });
+});
+
 /**
  * Field-level data protection over REST (#164). The controls live in the
  * shared CRUD core, so REST must behave exactly like GraphQL: a caller holding

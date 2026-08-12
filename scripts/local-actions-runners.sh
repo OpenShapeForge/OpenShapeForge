@@ -31,7 +31,7 @@ readonly DISABLED_DEPLOY_RUNNER_PREFIX="${OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX:-o
 
 require_host_tools() {
   local tool
-  for tool in colima curl dscl gh ifconfig ipconfig jq launchctl nc ps route shasum shlock stat unlink uuidgen; do
+  for tool in colima curl dscl gh ifconfig ipconfig jq launchctl lsof nc ps route shasum shlock stat unlink uuidgen; do
     command -v "$tool" >/dev/null 2>&1 || {
       echo "Required host tool is missing: $tool" >&2
       exit 1
@@ -517,6 +517,148 @@ verify_host_network_boundary() {
   }
 }
 
+host_tcp_port_state() {
+  local port="$1"
+  local listener_output listener_status=0
+  if listener_output="$(lsof -nP -a -iTCP:"$port" -sTCP:LISTEN 2>/dev/null)"; then
+    listener_status=0
+  else
+    listener_status=$?
+  fi
+  if (( listener_status == 0 )) && [[ -n "$listener_output" ]]; then
+    printf 'bound\n'
+  elif (( listener_status == 1 )) && [[ -z "$listener_output" ]]; then
+    printf 'unbound\n'
+  else
+    printf 'error\n'
+  fi
+}
+
+assert_host_tcp_port_unbound() {
+  local port="$1"
+  local state
+  state="$(host_tcp_port_state "$port")"
+  case "$state" in
+    unbound) return 0 ;;
+    bound)
+      echo "TCP port ${port} is bound on the Mac; forwarding proof cannot continue" >&2
+      ;;
+    *) echo "Could not prove that TCP port ${port} is unbound on the Mac" >&2 ;;
+  esac
+  return 1
+}
+
+select_forwarding_probe_port() {
+  local port state
+  for ((port = 49152; port <= 49279; port += 1)); do
+    state="$(host_tcp_port_state "$port")"
+    case "$state" in
+      unbound)
+        printf '%s\n' "$port"
+        return 0
+        ;;
+      bound) ;;
+      *)
+        echo "Could not inspect candidate forwarding probe ports on the Mac" >&2
+        return 1
+        ;;
+    esac
+  done
+  echo "Could not find an unbound forwarding probe port on the Mac" >&2
+  return 1
+}
+
+# Colima is configured with no port forwarder, but admission also proves that
+# behavior live. Keep a wildcard guest listener alive while the Mac checks both
+# loopback families and its complete listener table, then tear it down before a
+# registration token is requested.
+verify_guest_port_forwarding_disabled() {
+  local profile="$1"
+  local attempt result=0
+  local forwarding_probe_port
+
+  forwarding_probe_port="$(select_forwarding_probe_port)" || return 1
+  assert_host_tcp_port_unbound "$forwarding_probe_port" || return 1
+  if ! colima -p "$profile" ssh -- env FORWARDING_PROBE_PORT="$forwarding_probe_port" bash -lc '
+    set -euo pipefail
+    readonly pid_file=/tmp/openshapeforge-forwarding-probe.pid
+    readonly ready_file=/tmp/openshapeforge-forwarding-probe.ready
+    readonly log_file=/tmp/openshapeforge-forwarding-probe.log
+    rm -f "$pid_file" "$ready_file" "$log_file"
+    nohup node -e '"'"'
+      const fs = require("node:fs");
+      const net = require("node:net");
+      const port = Number(process.env.FORWARDING_PROBE_PORT);
+      const server = net.createServer((socket) => {
+        socket.end("HTTP/1.1 200 OK\r\nContent-Length: 6\r\nConnection: close\r\n\r\nready\n");
+      });
+      server.listen(port, "0.0.0.0", () => {
+        fs.writeFileSync("/tmp/openshapeforge-forwarding-probe.ready", "ready\n", { mode: 0o600 });
+      });
+    '"'"' >"$log_file" 2>&1 </dev/null &
+    printf "%s\n" "$!" >"$pid_file"
+    for attempt in {1..20}; do
+      if [[ -f "$ready_file" ]] &&
+        curl -fsS --max-time 1 "http://127.0.0.1:${FORWARDING_PROBE_PORT}" | grep -qx ready; then
+        exit 0
+      fi
+      sleep 0.25
+    done
+    echo "Could not establish the guest port-forwarding probe" >&2
+    exit 1
+  '; then
+    colima -p "$profile" ssh -- bash -lc '
+      pid_file=/tmp/openshapeforge-forwarding-probe.pid
+      [[ -f "$pid_file" ]] && kill "$(cat "$pid_file")" >/dev/null 2>&1 || true
+      rm -f "$pid_file" /tmp/openshapeforge-forwarding-probe.ready \
+        /tmp/openshapeforge-forwarding-probe.log
+    ' >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  for attempt in {1..20}; do
+    if ! assert_host_tcp_port_unbound "$forwarding_probe_port"; then
+      result=1
+      break
+    fi
+    if nc -w 1 -z 127.0.0.1 "$forwarding_probe_port" >/dev/null 2>&1 ||
+      nc -6 -w 1 -z ::1 "$forwarding_probe_port" >/dev/null 2>&1; then
+      echo "Guest TCP port ${forwarding_probe_port} is reachable on the Mac" >&2
+      result=1
+      break
+    fi
+    sleep 0.25
+  done
+
+  if ! colima -p "$profile" ssh -- env FORWARDING_PROBE_PORT="$forwarding_probe_port" bash -lc '
+    set -euo pipefail
+    curl -fsS --max-time 1 "http://127.0.0.1:${FORWARDING_PROBE_PORT}" | grep -qx ready
+  '; then
+    echo "Guest port-forwarding probe stopped before host verification completed" >&2
+    result=1
+  fi
+
+  if ! colima -p "$profile" ssh -- bash -lc '
+    set -euo pipefail
+    readonly pid_file=/tmp/openshapeforge-forwarding-probe.pid
+    [[ -f "$pid_file" ]]
+    pid="$(cat "$pid_file")"
+    [[ "$pid" =~ ^[0-9]+$ ]]
+    kill "$pid"
+    for attempt in {1..20}; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    ! kill -0 "$pid" 2>/dev/null
+    rm -f "$pid_file" /tmp/openshapeforge-forwarding-probe.ready \
+      /tmp/openshapeforge-forwarding-probe.log
+  '; then
+    echo "Could not remove the guest port-forwarding probe" >&2
+    result=1
+  fi
+  return "$result"
+}
+
 # macOS skips PF on lo0, including a usernet proxy connection back to this
 # Mac. Prove that the guest OUTPUT chain blocks that path before any untrusted
 # runner process exists; the runner later loses sudo and cannot alter the rule.
@@ -725,7 +867,7 @@ provision_slot_locked() {
   colima start "$profile" \
     --cpus 6 --memory 14 --root-disk 120 --arch aarch64 --runtime docker \
     --vm-type vz --vz-rosetta --binfmt --mount none --ssh-agent=false --ssh-config=false \
-    --activate=false \
+    --activate=false --port-forwarder none \
     --dns 1.1.1.1 --dns 1.0.0.1 >/dev/null
 
   verify_host_network_boundary "$profile"
@@ -769,6 +911,7 @@ provision_slot_locked() {
   verify_rootless_docker_firewall_behavior "$profile"
   verify_cross_architecture_container_execution "$profile"
   install_pre_job_policy "$profile"
+  verify_guest_port_forwarding_disabled "$profile"
 
   require_host_isolation
   verify_host_network_boundary "$profile"

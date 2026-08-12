@@ -222,6 +222,82 @@ fi
     );
   });
 
+  test("disables forwarding and proves the live boundary before registration", async () => {
+    const source = await readFile(RUNNERS, "utf8");
+    const provisionStart = source.indexOf("provision_slot_locked() {");
+    const provisionEnd = source.indexOf("\nprovision_slot() (", provisionStart);
+    const provision = source.slice(provisionStart, provisionEnd);
+    const forwardingFlag = provision.indexOf("--port-forwarder none");
+    const liveProof = provision.indexOf(
+      'verify_guest_port_forwarding_disabled "$profile"',
+    );
+    const tokenRequest = provision.indexOf("actions/runners/registration-token");
+
+    expect(provisionStart).toBeGreaterThanOrEqual(0);
+    expect(provisionEnd).toBeGreaterThan(provisionStart);
+    expect(forwardingFlag).toBeGreaterThanOrEqual(0);
+    expect(liveProof).toBeGreaterThan(forwardingFlag);
+    expect(tokenRequest).toBeGreaterThan(liveProof);
+  });
+
+  test("fails the live proof closed when a wildcard host listener appears", async () => {
+    const result = await runHarness(`
+lsof() {
+  calls="$(cat "$HOME/lsof-calls" 2>/dev/null || printf 0)"
+  calls="$((calls + 1))"
+  printf '%s\n' "$calls" >"$HOME/lsof-calls"
+  if (( calls <= 2 )); then
+    return 1
+  fi
+  printf 'hostagent 42 user 10u IPv4 TCP *:49152 (LISTEN)\\n'
+}
+nc() { return 1; }
+sleep() { :; }
+colima() {
+  printf '%s\\n' "$*" >>"$HOME/colima-calls"
+  return 0
+}
+set +e
+verify_guest_port_forwarding_disabled profile
+verify_result=$?
+set -e
+(( verify_result != 0 ))
+grep -Fq 'openshapeforge-forwarding-probe.pid' "$HOME/colima-calls"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "TCP port 49152 is bound on the Mac; forwarding proof cannot continue",
+    );
+  });
+
+  test("selects an unbound port, accepts the isolated listener and removes it", async () => {
+    const result = await runHarness(`
+lsof() {
+  if [[ "$*" == *'-iTCP:49152'* ]]; then
+    printf 'service 43 user 10u IPv4 TCP *:49152 (LISTEN)\\n'
+    return 0
+  fi
+  return 1
+}
+nc() {
+  printf '%s\\n' "$*" >>"$HOME/nc-calls"
+  return 1
+}
+sleep() { :; }
+colima() {
+  printf '%s\\n' "$*" >>"$HOME/colima-calls"
+  return 0
+}
+verify_guest_port_forwarding_disabled profile
+grep -Fq -- '-z 127.0.0.1 49153' "$HOME/nc-calls"
+grep -Fq -- '-z ::1 49153' "$HOME/nc-calls"
+grep -Fq 'kill "$pid"' "$HOME/colima-calls"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
   test("verifies durable service identity after a fast runner exit", async () => {
     const source = await readFile(RUNNERS, "utf8");
     const start = source.indexOf("verify_unprivileged_runner() {");

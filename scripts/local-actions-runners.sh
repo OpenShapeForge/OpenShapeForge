@@ -158,6 +158,18 @@ load_capacity_configuration() {
   fi
 }
 
+require_supervisor_capacity_matches_persisted() {
+  if [[ "$COMMAND" != supervise-slot || -z "$PERSISTED_SLOT_COUNT" ]]; then
+    return 0
+  fi
+  if [[ "$SLOT_COUNT" != "$PERSISTED_SLOT_COUNT" ||
+        "$HOST_CPU_LIMIT" != "$PERSISTED_HOST_CPU_LIMIT" ||
+        "$HOST_MEMORY_GIB_LIMIT" != "$PERSISTED_HOST_MEMORY_GIB_LIMIT" ]]; then
+    echo "Runner supervisor capacity differs from the active persisted configuration" >&2
+    return 1
+  fi
+}
+
 persist_capacity_configuration() {
   local temporary_config="${CAPACITY_CONFIG}.tmp.$$"
   {
@@ -178,6 +190,7 @@ configure_slots() {
   require_positive_integer "OPENSHAPEFORGE_RUNNER_SLOT_COUNT" "$SLOT_COUNT"
   require_positive_integer "OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT" "$HOST_CPU_LIMIT"
   require_positive_integer "OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT" "$HOST_MEMORY_GIB_LIMIT"
+  require_supervisor_capacity_matches_persisted
 
   required_cpus=$((SLOT_COUNT * SLOT_CPUS))
   required_memory_gib=$((SLOT_COUNT * SLOT_MEMORY_GIB))
@@ -1326,7 +1339,9 @@ EOF
 }
 
 verify_capacity_migration() {
-  local slot prefix runners profiles supervisor_pid
+  local slot prefix runners profiles supervisor_pid plist backup
+  local retired_plists=()
+  local retired_backups=()
   if [[ -z "$PERSISTED_SLOT_COUNT" ]] || (( SLOT_COUNT >= PERSISTED_SLOT_COUNT )); then
     return 0
   fi
@@ -1360,6 +1375,28 @@ verify_capacity_migration() {
       echo "Refusing to retire existing Colima profile slot ${slot}; stop the old capacity first" >&2
       return 1
     fi
+  done
+
+  for ((slot = SLOT_COUNT + 1; slot <= PERSISTED_SLOT_COUNT; slot++)); do
+    plist="$(plist_for "$slot")"
+    [[ -e "$plist" ]] || continue
+    backup="${plist}.retired.$$"
+    if ! mv -f "$plist" "$backup"; then
+      echo "Could not retire launch agent for slot ${slot}" >&2
+      local restore_index
+      for ((restore_index = 0; restore_index < ${#retired_plists[@]}; restore_index++)); do
+        mv -f "${retired_backups[$restore_index]}" "${retired_plists[$restore_index]}" || true
+      done
+      return 1
+    fi
+    retired_plists+=("$plist")
+    retired_backups+=("$backup")
+  done
+  for backup in "${retired_backups[@]}"; do
+    unlink "$backup" || {
+      echo "Could not remove retired launch agent backup: ${backup}" >&2
+      return 1
+    }
   done
 }
 

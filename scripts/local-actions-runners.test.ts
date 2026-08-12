@@ -8,7 +8,11 @@ import { join } from "node:path";
 const RUNNERS = join(import.meta.dir, "local-actions-runners.sh");
 const PRE_JOB_POLICY = join(import.meta.dir, "self-hosted-pre-job-policy.sh");
 
-async function runHarness(body: string, environment: Record<string, string> = {}) {
+async function runHarness(
+  body: string,
+  environment: Record<string, string> = {},
+  args: string[] = [],
+) {
   const home = await mkdtemp(join(tmpdir(), "osf-runner-lifecycle-"));
   const harness = join(home, "harness.sh");
   await writeFile(
@@ -23,7 +27,7 @@ ${body}
   );
 
   try {
-    return Bun.spawnSync(["bash", harness], {
+    return Bun.spawnSync(["bash", harness, ...args], {
       env: { ...process.env, ...environment, HOME: home },
     });
   } finally {
@@ -553,6 +557,52 @@ fi
     expect(result.exitCode, output(result)).toBe(0);
     expect(result.stderr.toString()).toContain(
       "Refusing to retire active runner supervisor slot 2",
+    );
+  });
+
+  test("retires a dormant higher-slot plist before persisting lower capacity", async () => {
+    const result = await runHarness(
+      `
+printf '2\\n12\\n28\\n' >"$CAPACITY_CONFIG"
+configure_slots
+retired_plist="$(plist_for 2)"
+mkdir -p "$(dirname "$retired_plist")"
+printf 'stale slot two' >"$retired_plist"
+launchctl() { return 1; }
+colima() { [[ "$1" == list ]] && return 0; }
+gh() { :; }
+verify_capacity_migration
+[[ ! -e "$retired_plist" ]]
+persist_capacity_configuration
+[[ "$(cat "$CAPACITY_CONFIG")" == $'1\n6\n14' ]]
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "1",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "6",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "14",
+      },
+    );
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("rejects stale launch-agent capacity after a reduction", async () => {
+    const result = await runHarness(
+      `
+printf '1\\n6\\n14\\n' >"$CAPACITY_CONFIG"
+configure_slots
+`,
+      {
+        OPENSHAPEFORGE_RUNNER_SLOT_COUNT: "2",
+        OPENSHAPEFORGE_RUNNER_HOST_CPU_LIMIT: "12",
+        OPENSHAPEFORGE_RUNNER_HOST_MEMORY_GIB_LIMIT: "28",
+      },
+      ["supervise-slot"],
+    );
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Runner supervisor capacity differs from the active persisted configuration",
     );
   });
 

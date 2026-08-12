@@ -121,7 +121,10 @@ Changing the slot count or any of those values is an operator migration: use
 the old configuration to stop only after every configured slot passes the
 busy-runner preflight, then start the new copied installation with all three
 capacity values. A lower slot count is rejected while any retired supervisor,
-runner process, repository registration or VM profile still exists. Cleanup is
+runner process, repository registration or VM profile still exists. Once that
+preflight passes, retired LaunchAgent files are removed; a stale agent also
+fails closed when its embedded capacity differs from the persisted capacity.
+Cleanup is
 serialized but failure-isolated: all configured slots are attempted, and a
 failure restores the supervisors so remaining state stays managed.
 

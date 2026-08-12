@@ -50,6 +50,9 @@ function upstream(handler: (url: URL, init?: RequestInit) => Response): {
 
 const CONFIG = { endpoint: "https://eu.objectstore.example", region: "eu-west" };
 const SECRETS = { accessKeyId: "AKIAEXAMPLE", secretAccessKey: "s3cr3t-example" };
+const resolvePublicExample = async () => [
+  { address: "93.184.216.34", family: 4 as const },
+];
 
 async function loadExample() {
   const registry = await loadConnectorPackages([contractFor()]);
@@ -138,6 +141,7 @@ describe("invoking the example package", () => {
       secrets: SECRETS,
       input: { prefix: "a/", limit: 10 },
       fetchImpl: stub.fetch,
+      resolveHost: resolvePublicExample,
     });
 
     // The declared output shape, validated on the way back.
@@ -163,6 +167,7 @@ describe("invoking the example package", () => {
       secrets: SECRETS,
       input: {},
       fetchImpl: stub.fetch,
+      resolveHost: resolvePublicExample,
     });
 
     const sent = new Headers(stub.calls[0]?.init?.headers as HeadersInit);
@@ -189,6 +194,7 @@ describe("invoking the example package", () => {
       secrets: SECRETS,
       input: { key: "a/1.txt", requestId: "req-123" },
       fetchImpl: stub.fetch,
+      resolveHost: resolvePublicExample,
     });
 
     const sent = new Headers(stub.calls[0]?.init?.headers as HeadersInit);
@@ -210,6 +216,7 @@ describe("invoking the example package", () => {
         secrets: SECRETS,
         input: { limit: 9000 },
         fetchImpl: stub.fetch,
+        resolveHost: resolvePublicExample,
       }),
     ).rejects.toThrow(/limit/);
     expect(stub.calls).toHaveLength(0);
@@ -231,6 +238,7 @@ describe("invoking the example package", () => {
         secrets: SECRETS,
         input: {},
         fetchImpl: stub.fetch,
+        resolveHost: resolvePublicExample,
       });
       throw new Error("expected an egress refusal");
     } catch (error) {
@@ -255,6 +263,7 @@ describe("invoking the example package", () => {
         secrets: SECRETS,
         input: {},
         fetchImpl: stub.fetch,
+        resolveHost: resolvePublicExample,
       });
       throw new Error("expected a failure");
     } catch (error) {
@@ -286,6 +295,7 @@ describe("invoking the example package", () => {
         secrets: SECRETS,
         input: {},
         fetchImpl: upstream(() => Response.json({})).fetch,
+        resolveHost: resolvePublicExample,
       }),
     ).rejects.toThrow(/must be array/);
   });

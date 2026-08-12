@@ -87,6 +87,7 @@ async function invokeGet(
     secrets: SECRETS,
     input,
     fetchImpl: stub.fetch,
+    resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
   });
 }
 
@@ -247,6 +248,7 @@ describe("writing to an UpdateConnector", () => {
       secrets: SECRETS,
       input,
       fetchImpl: stub.fetch,
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
     });
   }
 
@@ -260,7 +262,9 @@ describe("writing to an UpdateConnector", () => {
       stub,
     );
     expect(stub.calls[0]?.init?.method).toBe(method);
-    expect(stub.calls[0]?.init?.body).toBe(JSON.stringify({ Element: {} }));
+    expect(new TextDecoder().decode(stub.calls[0]?.init?.body as Uint8Array)).toBe(
+      JSON.stringify({ Element: {} }),
+    );
   });
 
   // "It worked and said nothing" is a real AFAS outcome, and the contract
@@ -300,7 +304,12 @@ describe("the connectivity check", () => {
       result: await verify({
         config: CONFIG,
         secrets: SECRETS,
-        fetch: createBoundFetch(contract, AbortSignal.timeout(5_000), stub.fetch),
+        fetch: createBoundFetch(
+          contract,
+          AbortSignal.timeout(5_000),
+          stub.fetch,
+          async () => [{ address: "93.184.216.34", family: 4 }],
+        ),
         signal: AbortSignal.timeout(5_000),
         log: () => {},
       }),

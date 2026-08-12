@@ -30,39 +30,19 @@
  * same interface, for when third-party packages are on the table.
  */
 import { ConnectorContractBoundary, ConnectorBoundaryError } from "./contract-boundary.js";
+import { ConnectorExecutionError } from "./errors.js";
+import {
+  createBoundFetch,
+  type FetchLike,
+  type HostResolver,
+  type ResolvedFetchLike,
+} from "./egress.js";
 import type { ConnectorContract, ConnectorOperationContract } from "./catalog.js";
 
-export type ConnectorExecutionErrorCode =
-  | "CONNECTOR_PROVENANCE_REFUSED"
-  | "CONNECTOR_EGRESS_DENIED"
-  | "CONNECTOR_TIMEOUT"
-  | "CONNECTOR_RATE_LIMITED"
-  | "CONNECTOR_CIRCUIT_OPEN"
-  | "CONNECTOR_UPSTREAM_ERROR"
-  | "CONNECTOR_OAUTH_FAILED"
-  // Distinct from every other failure because it is the only one a retry can
-  // never fix and a person can always fix: the refresh token is spent or
-  // revoked, and somebody has to authorize the installation again.
-  | "CONNECTOR_REAUTHORIZATION_REQUIRED";
-
-export class ConnectorExecutionError extends Error {
-  readonly code: ConnectorExecutionErrorCode;
-  readonly connector: string;
-  readonly operation: string | undefined;
-
-  constructor(
-    code: ConnectorExecutionErrorCode,
-    connector: string,
-    message: string,
-    operation?: string,
-  ) {
-    super(message);
-    this.name = "ConnectorExecutionError";
-    this.code = code;
-    this.connector = connector;
-    this.operation = operation;
-  }
-}
+export { ConnectorExecutionError } from "./errors.js";
+export type { ConnectorExecutionErrorCode } from "./errors.js";
+export { createBoundFetch, hostAllowed } from "./egress.js";
+export type { FetchLike, HostResolver, ResolvedAddress, ResolvedFetchLike } from "./egress.js";
 
 /**
  * What a connector package receives. Deliberately small: resolved
@@ -84,11 +64,6 @@ export class ConnectorExecutionError extends Error {
  * one — which the examples project is, so a connector test could not reach the
  * executor it is testing.
  */
-export type FetchLike = (
-  input: string | URL | Request,
-  init?: RequestInit,
-) => Promise<Response>;
-
 export type ConnectorContext = {
   config: Readonly<Record<string, unknown>>;
   secrets: Readonly<Record<string, string>>;
@@ -129,92 +104,6 @@ export function assertExecutable(contract: ConnectorContract): void {
   }
 }
 
-/**
- * Host matching for `network.egress`. Three forms, narrowest first:
- *
- * | Pattern | Matches |
- * | --- | --- |
- * | `example.com` | that host, exactly |
- * | `*.example.com` | exactly one extra label — `api.example.com`, not `a.b.example.com` |
- * | `**.example.com` | any depth — `api.example.com` AND `api.eu.example.com` |
- *
- * `**.` exists because some vendors do not put their API on a fixed host.
- * Twinfield reports a per-organisation cluster as `api.<cluster>.twinfield.com`,
- * and Dynamics sandboxes sit at `<env>.sandbox.operations.dynamics.com` — two
- * labels deep, where `*.` covers one. Without it a contract has to enumerate
- * every cluster a customer might land on, and an unlisted one presents as an
- * outage.
- *
- * It is a SEPARATE form rather than a widening of `*.`, deliberately. Changing
- * what `*.` means would silently broaden the egress of every contract already
- * written, which is the kind of security regression nobody reviews because no
- * diff shows it.
- *
- * Neither wildcard matches the bare apex, and neither matches a lookalike:
- * `**.example.com` is not `example.com` and not `evil-example.com`. Both
- * properties come from requiring the dot to be part of the suffix.
- */
-export function hostAllowed(host: string, allowlist: readonly string[]): boolean {
-  const candidate = host.toLowerCase();
-  return allowlist.some((entry) => {
-    const pattern = entry.toLowerCase();
-    if (pattern.startsWith("**.")) {
-      const suffix = pattern.slice(2); // ".example.com"
-      if (!candidate.endsWith(suffix)) return false;
-      // At least one label, of any depth. The apex is excluded because the
-      // prefix would be empty.
-      return candidate.length > suffix.length;
-    }
-    if (pattern.startsWith("*.")) {
-      const suffix = pattern.slice(1); // ".example.com"
-      // A wildcard covers exactly one extra label, not arbitrary depth, and
-      // never the bare apex — `*.example.com` is not `evil-example.com`.
-      if (!candidate.endsWith(suffix)) return false;
-      const prefix = candidate.slice(0, -suffix.length);
-      return prefix.length > 0 && !prefix.includes(".");
-    }
-    return candidate === pattern;
-  });
-}
-
-/**
- * A `fetch` bound to the contract's egress allowlist.
- *
- * An empty allowlist means no outbound HTTP at all: the allowlist is the grant,
- * not a filter over an open door. Non-HTTP schemes are refused outright — a
- * `file:` URL is not egress, it is a filesystem read wearing a URL.
- */
-export function createBoundFetch(
-  contract: ConnectorContract,
-  signal: AbortSignal,
-  underlying: FetchLike = fetch,
-): FetchLike {
-  const allowlist = contract.network.egress;
-  return (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = new URL(
-      typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
-    );
-    if (url.protocol !== "https:" && url.protocol !== "http:") {
-      throw new ConnectorExecutionError(
-        "CONNECTOR_EGRESS_DENIED",
-        contract.slug,
-        `Connector "${contract.slug}" attempted a ${url.protocol} request; only http(s) is permitted.`,
-      );
-    }
-    if (!hostAllowed(url.hostname, allowlist)) {
-      throw new ConnectorExecutionError(
-        "CONNECTOR_EGRESS_DENIED",
-        contract.slug,
-        `Connector "${contract.slug}" attempted to reach ${url.hostname}, which its contract ` +
-          "does not declare in network.egress.",
-      );
-    }
-    // The caller's own signal is replaced, not merged: a package must not be
-    // able to opt out of the operation's budget by passing its own.
-    return underlying(input, { ...init, signal });
-  }) as FetchLike;
-}
-
 export type InvokeInput = {
   contract: ConnectorContract;
   operation: ConnectorOperationContract;
@@ -224,8 +113,9 @@ export type InvokeInput = {
   secrets: Record<string, string>;
   input: unknown;
   log?: (message: string, fields?: Record<string, unknown>) => void;
-  /** Injectable for tests. */
-  fetchImpl?: FetchLike;
+  /** Injectable transport and resolver seams for hermetic egress tests. */
+  fetchImpl?: ResolvedFetchLike;
+  resolveHost?: HostResolver;
   /**
    * Wraps the egress-bound fetch before the package receives it.
    *
@@ -266,7 +156,12 @@ export async function invokeOperation(input: InvokeInput): Promise<unknown> {
    */
   const overran = () => Date.now() - startedAt > attemptMs;
 
-  const boundFetch = createBoundFetch(contract, controller.signal, input.fetchImpl);
+  const boundFetch = createBoundFetch(
+    contract,
+    controller.signal,
+    input.fetchImpl,
+    input.resolveHost,
+  );
   const context: ConnectorContext = {
     config: Object.freeze({ ...input.config }),
     secrets: Object.freeze({ ...input.secrets }),

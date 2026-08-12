@@ -153,6 +153,12 @@ jobs:
       - name: Check THIRD-PARTY-NOTICES is up to date
         run: bun run check:notices:linux
 
+      # Manual deploy jobs receive environment credentials. Keep event payloads
+      # out of shell source, forbid branch-selectable manual triggers, and pin
+      # privileged jobs to default-branch code. Unit tests prove each boundary.
+      - name: Check deploy workflow trust boundaries
+        run: bun run test:deploy-workflows && bun run check:deploy-workflows
+
       # A required status check is matched by job NAME. Renaming a job here
       # would silently drop the gate the branch-protection ruleset claims to
       # enforce, so the two are checked against each other.

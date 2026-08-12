@@ -4,17 +4,18 @@ name: Keycloak image
 # Keycloak with the OpenShapeForge SPI provider jar layered on and `kc.sh build`
 # already run — smoke-tests it, and publishes it to GHCR.
 #
-# Trigger/tag behaviour mirrors the API image workflow exactly, so a given git
-# tag produces a matching pair of images:
+# Trigger/tag behaviour mirrors the API image workflow, but the two workflows
+# run independently. A shared SHA tag is usable only after both runs succeed:
 #
 #   pull request (any base) -> build + smoke test only, never push
 #   push to main            -> push :main and :sha-<commit>
 #   tag v*                  -> push :<version>, :<major>.<minor> and :latest
-#   manual run on any other ref -> build + smoke test only, never push
+#   repository dispatch     -> build default-branch SHA and publish :main and
+#                              :sha-<commit>
 #
-# There is deliberately NO paths filter: a tag push must publish this image even
-# when the tagged commit changed nothing under packages/keycloak-spi, otherwise
-# the API and Keycloak images would drift apart at release tags.
+# There is deliberately NO paths filter: this workflow publishes the Keycloak
+# image for every main SHA, release tag and publish-images event, even when that
+# commit changed nothing under packages/keycloak-spi.
 #
 # The realm is NOT baked in. `bun run generate` produces
 # keycloak/openshapeforge-realm.json, which is environment-specific and
@@ -30,7 +31,10 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-  workflow_dispatch:
+  # This event cannot select a branch or tag: GitHub binds it to the default
+  # branch's current SHA.
+  repository_dispatch:
+    types: [publish-images]
 
 concurrency:
   group: docker-keycloak-${{ github.ref }}
@@ -180,12 +184,13 @@ jobs:
 
   # Publication is physically separated from pull-request validation so the
   # self-hosted runner never receives packages:write, registry credentials, or
-  # a push step. This job is always GitHub-hosted and is fail-closed to main and
-  # v* release refs; workflow_dispatch on a feature branch only validates.
+  # a push step. This job is always GitHub-hosted. Repository dispatch can only
+  # publish the default branch; release publication remains a reviewed v* tag
+  # push and cannot select an arbitrary workflow definition.
   publish:
     name: Publish the Keycloak image
     needs: build
-    if: ${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    if: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'repository_dispatch' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -194,6 +199,21 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Preflight — publication request is empty
+        # Stable security-policy anchor used by check:deploy-workflows.
+        id: request
+        if: github.event_name == 'repository_dispatch'
+        env:
+          DISPATCH_PAYLOAD_JSON: ${{ toJSON(github.event.client_payload) }}
+        run: |
+          set -euo pipefail
+          payload_json="$DISPATCH_PAYLOAD_JSON"
+          [ "$payload_json" != "null" ] || payload_json="{}"
+          if ! jq -e 'type == "object" and length == 0' <<<"$payload_json" >/dev/null; then
+            echo "::error::publish-images does not accept client_payload fields"
+            exit 1
+          fi
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0

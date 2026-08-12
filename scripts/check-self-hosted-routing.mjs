@@ -24,7 +24,7 @@ const WORKFLOW_DIR = ".github/workflows";
 const TRUSTED_SOURCE_RUNS_ON =
   "${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'osf-pr' || 'ubuntu-latest' }}";
 const PUBLISH_IF =
-  "${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}";
+  "${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'repository_dispatch' && github.ref == 'refs/heads/main') }}";
 // Reject the context itself, not a list of access syntaxes. GitHub expressions
 // also allow dynamic indexes and object serialization (`secrets[env.NAME]`,
 // `toJSON(secrets)`), so enumerating dot/bracket forms would fail open.
@@ -37,7 +37,7 @@ const SECRET_REFERENCE =
  *
  * routed: same-repository PR -> osf-pr; fork PR and every non-PR -> hosted.
  * hosted: never use osf-pr.
- * publish: hosted plus the fail-closed main/v* publication condition.
+ * publish: hosted plus the fail-closed main/release-tag/default-ref condition.
  */
 const JOB_POLICY = {
   ".github/workflows/backend-agent.yml": {

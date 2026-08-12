@@ -142,6 +142,86 @@ describe("isolation invariants", () => {
   acquire_provision_lock`);
   });
 
+  test("keeps native ARM64 runners and proves amd64 execution before registration", async () => {
+    const source = await readFile(RUNNERS, "utf8");
+    const start = source.indexOf("provision_slot_locked() {");
+    const end = source.indexOf("\nprovision_slot() (", start);
+    const provisioning = source.slice(start, end);
+    const freshVm = provisioning.indexOf('verify_fresh_vm "$profile"');
+    const crossArchitecture = provisioning.indexOf(
+      'verify_cross_architecture_container_execution "$profile"',
+    );
+    const registrationToken = provisioning.indexOf(
+      "actions/runners/registration-token",
+    );
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    expect(provisioning).toContain("--arch aarch64 --runtime docker");
+    expect(provisioning).toContain(
+      "--vm-type vz --vz-rosetta --binfmt --mount none",
+    );
+    expect(provisioning).not.toContain("--arch x86_64");
+    expect(freshVm).toBeGreaterThanOrEqual(0);
+    expect(crossArchitecture).toBeGreaterThan(freshVm);
+    expect(registrationToken).toBeGreaterThan(crossArchitecture);
+  });
+
+  test("accepts a rootless linux/amd64 container that executes as x86_64", async () => {
+    const result = await runHarness(`
+docker() {
+  printf '%s\\n' "$*" >>"$HOME/docker-calls"
+  case "$*" in
+    "pull --platform linux/amd64 alpine:3.20"|"pull --platform linux/arm64 alpine:3.20") ;;
+    "image inspect --format {{.Architecture}} alpine:3.20") printf 'amd64\\n' ;;
+    "run --rm --platform linux/amd64 alpine:3.20 /bin/uname -m") printf 'x86_64\\n' ;;
+    *) return 1 ;;
+  esac
+}
+export -f docker
+colima() {
+  [[ "$1" == -p && "$2" == profile && "$3" == ssh && "$4" == -- ]]
+  [[ "$5" == bash && "$6" == -lc ]]
+  bash -lc "$7"
+}
+verify_cross_architecture_container_execution profile
+grep -Fxq 'pull --platform linux/amd64 alpine:3.20' "$HOME/docker-calls"
+grep -Fxq 'run --rm --platform linux/amd64 alpine:3.20 /bin/uname -m' "$HOME/docker-calls"
+[[ "$(tail -n 1 "$HOME/docker-calls")" == 'pull --platform linux/arm64 alpine:3.20' ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("fails admission when linux/amd64 execution is unavailable", async () => {
+    const result = await runHarness(`
+docker() {
+  printf '%s\\n' "$*" >>"$HOME/docker-calls"
+  case "$*" in
+    "pull --platform linux/amd64 alpine:3.20"|"pull --platform linux/arm64 alpine:3.20") ;;
+    "image inspect --format {{.Architecture}} alpine:3.20") printf 'amd64\\n' ;;
+    "run --rm --platform linux/amd64 alpine:3.20 /bin/uname -m") return 126 ;;
+    *) return 1 ;;
+  esac
+}
+export -f docker
+colima() {
+  [[ "$1" == -p && "$2" == profile && "$3" == ssh && "$4" == -- ]]
+  [[ "$5" == bash && "$6" == -lc ]]
+  bash -lc "$7"
+}
+if verify_cross_architecture_container_execution profile; then
+  exit 1
+fi
+[[ "$(tail -n 1 "$HOME/docker-calls")" == 'pull --platform linux/arm64 alpine:3.20' ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Runner pre-admission cannot execute linux/amd64 containers",
+    );
+  });
+
   test("verifies durable service identity after a fast runner exit", async () => {
     const source = await readFile(RUNNERS, "utf8");
     const start = source.indexOf("verify_unprivileged_runner() {");

@@ -132,6 +132,7 @@ jobs:
           TEST_REDIS_URL: redis://127.0.0.1:6399
         run: >-
           cd apps/api && bun test src/config src/roles src/control
+          src/auth/api-key/*.test.ts
           src/graphql/__tests__/introspection.test.ts
           src/graphql/__tests__/classified-query-guard.unit.test.ts
           src/graphql/__tests__/classified-nullability.unit.test.ts

@@ -393,6 +393,24 @@ async function overwriteStoredRoleSubset(keyId: string, value: unknown): Promise
   }
 }
 
+async function overwriteStoredGrantedRoles(
+  integrationId: string,
+  value: unknown,
+): Promise<void> {
+  const runtime = createDatabaseRuntime({ databaseUrl: DATABASE_URL });
+  try {
+    const result = await sql<{ id: string }>`
+      update platform.api_key_integrations
+         set granted_roles = ${JSON.stringify(value)}::jsonb
+       where id = ${integrationId}
+      returning id
+    `.execute(runtime.db);
+    expect(result.rows[0]?.id).toBe(integrationId);
+  } finally {
+    await runtime.close();
+  }
+}
+
 /** The roles a credential actually resolves to, read back through GraphQL. */
 async function rolesViaGraphql(credential: string): Promise<string[] | undefined> {
   const response = await app!.inject({
@@ -601,6 +619,57 @@ describe.skipIf(!ready)("API keys end to end", () => {
     });
     expect(refused.statusCode).toBe(403);
     expect(JSON.parse(refused.body).error.message).toContain(WRITE_ROLE);
+  }, 30_000);
+
+  test("an omitted rotation persists the checked roles against later realm drift", async () => {
+    const created = await createKey({
+      displayName: `e2e drift ceiling ${randomUUID().slice(0, 8)}`,
+      roles: [WRITE_ROLE],
+    });
+    const { integrationId } = created.body as CreateResponse;
+
+    const issued = await issueAdditionalKey(
+      integrationId,
+      { displayName: "drift bounded" },
+      [WRITE_ROLE],
+    );
+    expect(issued.statusCode).toBe(201);
+    const issuedKeyId = JSON.parse(issued.body).keyId as string;
+
+    const listed = await app!.inject({
+      method: "GET",
+      url: "/api/api-keys",
+      headers: managementHeaders(),
+    });
+    expect(listed.statusCode).toBe(200);
+    const issuedKey = (JSON.parse(listed.body).keys as Array<{
+      id: string;
+      roleSubset: string[] | null;
+    }>).find((key) => key.id === issuedKeyId);
+    expect(issuedKey?.roleSubset).toEqual([WRITE_ROLE]);
+  }, 30_000);
+
+  test("malformed stored integration roles reject issuance without returning a key", async () => {
+    const created = await createKey({
+      displayName: `e2e malformed grant ${randomUUID().slice(0, 8)}`,
+      roles: [WRITE_ROLE],
+    });
+    const { integrationId } = created.body as CreateResponse;
+    await overwriteStoredGrantedRoles(integrationId, { unexpected: true });
+
+    const refused = await issueAdditionalKey(
+      integrationId,
+      { displayName: "must not exist" },
+      [WRITE_ROLE],
+    );
+    expect(refused.statusCode).toBe(409);
+    const error = JSON.parse(refused.body).error as {
+      code: string;
+      message: string;
+    };
+    expect(error.code).toBe("API_KEY_ROLE_POLICY_INVALID");
+    expect(error.message).toContain("no API key was issued");
+    expect(refused.body).not.toContain("token");
   }, 30_000);
 
   test("an empty rotation subset issues a key that authorizes no roles", async () => {

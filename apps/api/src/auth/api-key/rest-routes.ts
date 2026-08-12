@@ -25,7 +25,10 @@ import {
   type ApiKeyServiceDeps,
   type ProvisioningSession,
 } from "./service.js";
-import { normalizeRequestedRoleSubset } from "./role-subset.js";
+import {
+  ApiKeyRolePolicyError,
+  normalizeRequestedRoleSubset,
+} from "./role-subset.js";
 
 export const API_KEY_MOUNT = "/api/api-keys";
 
@@ -46,6 +49,9 @@ function handleError(reply: FastifyReply, error: unknown) {
     return sendError(reply, error.status, error.code, error.message);
   }
   if (error instanceof ApiKeyProvisioningError) {
+    return sendError(reply, error.status, error.code, error.message);
+  }
+  if (error instanceof ApiKeyRolePolicyError) {
     return sendError(reply, error.status, error.code, error.message);
   }
   // Anything else is ours, not the caller's. Do not describe it.

@@ -2,6 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { API_KEY_MANAGE_ROLE, assertMayGrantRoles } from "./ceiling.js";
 import {
+  ApiKeyRolePolicyError,
   normalizeRequestedRoleSubset,
   parseStoredRoleSubset,
   resolveIssuedKeyRolePolicy,
@@ -49,15 +50,18 @@ describe("parseStoredRoleSubset", () => {
 });
 
 describe("resolveIssuedKeyRolePolicy", () => {
-  test("omitted and null subsets check the integration's complete role set", () => {
+  test("omitted and null subsets persist exactly the complete checked role set", () => {
     expect(resolveIssuedKeyRolePolicy(["A", "B"], undefined)).toEqual({
-      roleSubset: null,
+      roleSubset: ["A", "B"],
       rolesForCeiling: ["A", "B"],
     });
     expect(resolveIssuedKeyRolePolicy(["A", "B"], null)).toEqual({
-      roleSubset: null,
+      roleSubset: ["A", "B"],
       rolesForCeiling: ["A", "B"],
     });
+
+    const policy = resolveIssuedKeyRolePolicy(["A", "B"], undefined);
+    expect(policy.roleSubset).toEqual(policy.rolesForCeiling);
   });
 
   test("a caller that lost an integration role is refused", () => {
@@ -85,10 +89,15 @@ describe("resolveIssuedKeyRolePolicy", () => {
     });
   });
 
-  test("malformed stored integration roles cannot produce an unrestricted key", () => {
-    expect(resolveIssuedKeyRolePolicy({ unexpected: true }, undefined)).toEqual({
-      roleSubset: [],
-      rolesForCeiling: [],
-    });
+  test("malformed stored integration roles abort issuance", () => {
+    expect(() =>
+      resolveIssuedKeyRolePolicy({ unexpected: true }, undefined),
+    ).toThrow(ApiKeyRolePolicyError);
+    expect(() =>
+      resolveIssuedKeyRolePolicy({ unexpected: true }, undefined),
+    ).toThrow("no API key was issued");
+    expect(() =>
+      resolveIssuedKeyRolePolicy({ unexpected: true }, ["A"]),
+    ).toThrow(ApiKeyRolePolicyError);
   });
 });

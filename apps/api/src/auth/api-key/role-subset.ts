@@ -2,6 +2,16 @@
 
 export type RoleSubset = string[] | null;
 
+export class ApiKeyRolePolicyError extends Error {
+  readonly code = "API_KEY_ROLE_POLICY_INVALID";
+  readonly status = 409;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ApiKeyRolePolicyError";
+  }
+}
+
 function parseRoleArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   if (
@@ -48,7 +58,7 @@ export function parseStoredRoleSubset(value: unknown, isSqlNull: boolean): RoleS
 
 export type IssuedKeyRolePolicy = {
   /** The exact subset persisted on the new key. */
-  roleSubset: RoleSubset;
+  roleSubset: string[];
   /** The full resulting role set the privilege ceiling must evaluate. */
   rolesForCeiling: string[];
 };
@@ -56,23 +66,25 @@ export type IssuedKeyRolePolicy = {
 /**
  * Resolve the role policy for a key issued against an existing integration.
  *
- * A null subset inherits the integration's complete declared role set. If that
- * stored set is malformed, persisting an empty subset prevents the key from
- * falling through to the service account's unrestricted runtime roles.
+ * A null subset snapshots the integration's complete declared role set into
+ * the key. Persisting the same set the ceiling checks prevents later Keycloak
+ * drift from widening the key. A malformed stored set aborts issuance.
  */
 export function resolveIssuedKeyRolePolicy(
   storedGrantedRoles: unknown,
   requestedSubset: unknown,
 ): IssuedKeyRolePolicy {
+  const grantedRoles = parseRoleArray(decodeStoredJson(storedGrantedRoles));
+  if (!grantedRoles) {
+    throw new ApiKeyRolePolicyError(
+      "The integration's stored role grant is invalid; no API key was issued.",
+    );
+  }
+
   const roleSubset = normalizeRequestedRoleSubset(requestedSubset);
   if (roleSubset !== null) {
     return { roleSubset, rolesForCeiling: [...roleSubset] };
   }
 
-  const grantedRoles = parseRoleArray(decodeStoredJson(storedGrantedRoles));
-  if (!grantedRoles) {
-    return { roleSubset: [], rolesForCeiling: [] };
-  }
-
-  return { roleSubset: null, rolesForCeiling: grantedRoles };
+  return { roleSubset: [...grantedRoles], rolesForCeiling: grantedRoles };
 }

@@ -33,7 +33,10 @@ readonly DISABLED_DEPLOY_RUNNER_PREFIX="${OPENSHAPEFORGE_DEPLOY_RUNNER_PREFIX:-o
 readonly LATE_LIMA_START_ATTEMPTS=80
 readonly LATE_LIMA_START_INTERVAL_SECONDS=3
 readonly LIMA_READINESS_PROBE_TIMEOUT_SECONDS=10
-readonly PROBE_STARTUP_TIMEOUT_SECONDS=5
+# LaunchAgent scheduling and ownership-proof publication share this independent,
+# bounded setup window; command runtime starts only after the handshake.
+readonly PROBE_STARTUP_TIMEOUT_SECONDS=15
+readonly PROBE_STARTUP_TIMEOUT_STATUS=123
 readonly PROVISION_TERMINATION_GRACE_ATTEMPTS=240
 
 late_lima_start_attempt_limit() {
@@ -562,6 +565,10 @@ probe_parent_after_sentinel_start() {
   :
 }
 
+probe_parent_before_ownership_proof_publication() {
+  :
+}
+
 probe_parent_before_start_marker_publication() {
   :
 }
@@ -867,7 +874,7 @@ _run_readiness_probe_process_group() (
       break
     }
     if (( now_epoch >= startup_deadline_epoch )); then
-      result=124
+      result="$PROBE_STARTUP_TIMEOUT_STATUS"
       break
     fi
     /bin/sleep 0.001
@@ -877,24 +884,32 @@ _run_readiness_probe_process_group() (
       result="$cancel_result"
     elif ! probe_process_owns_group "$sentinel_pid"; then
       result=125
+    elif ! probe_parent_before_ownership_proof_publication; then
+      result=125
     elif ! write_probe_state "$ownership_temp_file" "$ownership_file"; then
       result=125
     else
-      # From this point cancellation must terminate the owned group: publishing
-      # start lets the sentinel fork the probe child at any instant.
-      started=true
-      if ! probe_parent_before_start_marker_publication; then
-        result=125
-      elif (( cancel_result != 0 )); then
-        result="$cancel_result"
-      elif ! write_probe_state "$start_temp_file" "$start_file"; then
-        if (( cancel_result != 0 )); then
-          result="$cancel_result"
-        else
+      now_epoch="$(/bin/date +%s)" || result=125
+      if (( result == 0 && now_epoch >= startup_deadline_epoch )); then
+        result="$PROBE_STARTUP_TIMEOUT_STATUS"
+      fi
+      if (( result == 0 )); then
+        # From this point cancellation must terminate the owned group: publishing
+        # start lets the sentinel fork the probe child at any instant.
+        started=true
+        if ! probe_parent_before_start_marker_publication; then
           result=125
+        elif (( cancel_result != 0 )); then
+          result="$cancel_result"
+        elif ! write_probe_state "$start_temp_file" "$start_file"; then
+          if (( cancel_result != 0 )); then
+            result="$cancel_result"
+          else
+            result=125
+          fi
+        elif (( cancel_result != 0 )); then
+          result="$cancel_result"
         fi
-      elif (( cancel_result != 0 )); then
-        result="$cancel_result"
       fi
     fi
   fi
@@ -932,7 +947,7 @@ _run_readiness_probe_process_group() (
       break
     }
     if (( now_epoch >= startup_deadline_epoch )); then
-      result=124
+      result="$PROBE_STARTUP_TIMEOUT_STATUS"
       break
     fi
     /bin/sleep 0.001
@@ -1023,7 +1038,9 @@ colima_profile_status() {
     probe_result=$?
   fi
   if (( probe_result != 0 )); then
-    if (( probe_result == 124 )); then
+    if (( probe_result == PROBE_STARTUP_TIMEOUT_STATUS )); then
+      echo "Colima profile inventory probe startup handshake timed out: ${profile}" >&2
+    elif (( probe_result == 124 )); then
       echo "Colima profile inventory probe timed out: ${profile}" >&2
     fi
     echo "Could not inspect Colima profile ${profile}" >&2
@@ -1085,6 +1102,10 @@ wait_for_late_lima_start() {
           probe_result=$?
         fi
         (( probe_result == 0 )) && return 0
+        if (( probe_result == PROBE_STARTUP_TIMEOUT_STATUS )); then
+          echo "Late Lima guest probe startup handshake timed out: ${instance}" >&2
+          return "$probe_result"
+        fi
         if (( probe_result == 124 )); then
           echo "Late Lima guest probe timed out: ${instance}" >&2
           return "$probe_result"

@@ -2432,6 +2432,8 @@ printf 'inspected-before-harness-cleanup\n'
 
   test("limits deadlines to the two trusted non-daemonizing readiness probes", async () => {
     const source = await readFile(RUNNERS, "utf8");
+    expect(source).toContain("readonly PROBE_STARTUP_TIMEOUT_SECONDS=15");
+    expect(source).toContain("readonly PROBE_STARTUP_TIMEOUT_STATUS=123");
     expect(
       source.match(/run_trusted_readiness_probe_with_deadline/g) ?? [],
     ).toHaveLength(3);
@@ -2865,6 +2867,27 @@ slow_start_pid="$(cat "$HOME/slow-start-probe.pid")"
     expect(result.exitCode, output(result)).toBe(0);
   }, 10_000);
 
+  test("allows delayed ownership-proof publication within the startup budget", async () => {
+    const result = await runHarnessBounded(`
+probe_startup_timeout_seconds() {
+  printf '3\n'
+}
+probe_parent_before_ownership_proof_publication() {
+  /bin/sleep 1.2
+  touch "$HOME/ownership-proof-delay-complete"
+}
+colima() {
+  [[ "$*" == "list --json" ]]
+  printf '[]\n'
+}
+profiles="$(run_trusted_readiness_probe_with_deadline colima-inventory 1)"
+[[ "$profiles" == "[]" ]]
+[[ -e "$HOME/ownership-proof-delay-complete" ]]
+`, 5_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  }, 8_000);
+
   test("bounds a start-to-command marker stall before invoking the probe", async () => {
     const result = await runHarnessBounded(`
 probe_startup_timeout_seconds() {
@@ -2885,7 +2908,7 @@ set +e
 run_trusted_readiness_probe_with_deadline colima-inventory 1
 probe_result=$?
 set -e
-(( probe_result == 124 ))
+(( probe_result == PROBE_STARTUP_TIMEOUT_STATUS ))
 stalled_pid="$(cat "$HOME/stalled-command-marker.pid")"
 ! /bin/kill -0 "$stalled_pid" 2>/dev/null
 [[ ! -e "$HOME/probe-command-started" ]]
@@ -2893,6 +2916,61 @@ stalled_pid="$(cat "$HOME/stalled-command-marker.pid")"
 
     expect(result.exitCode, output(result)).toBe(0);
   }, 10_000);
+
+  test("reports inventory startup and runtime timeouts separately", async () => {
+    const result = await runHarness(`
+probe_timeout_phase=startup
+run_trusted_readiness_probe_with_deadline() {
+  if [[ "$probe_timeout_phase" == startup ]]; then
+    return "$PROBE_STARTUP_TIMEOUT_STATUS"
+  fi
+  return 124
+}
+set +e
+colima_profile_status profile 1 >/dev/null 2>"$HOME/startup-timeout"
+startup_result=$?
+probe_timeout_phase=runtime
+colima_profile_status profile 1 >/dev/null 2>"$HOME/runtime-timeout"
+runtime_result=$?
+set -e
+(( startup_result == PROBE_STARTUP_TIMEOUT_STATUS ))
+(( runtime_result == 124 ))
+grep -Fqx 'Colima profile inventory probe startup handshake timed out: profile' \
+  "$HOME/startup-timeout"
+! grep -Fq 'Colima profile inventory probe timed out: profile' \
+  "$HOME/startup-timeout"
+grep -Fqx 'Colima profile inventory probe timed out: profile' \
+  "$HOME/runtime-timeout"
+! grep -Fq 'startup handshake' "$HOME/runtime-timeout"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("reports Lima guest startup timeout separately", async () => {
+    const result = await runHarness(`
+colima_profile_status() {
+  printf 'Running\n'
+}
+lima_guest_ready() {
+  return "$PROBE_STARTUP_TIMEOUT_STATUS"
+}
+late_lima_start_attempt_limit() {
+  printf '1\n'
+}
+set +e
+wait_for_late_lima_start profile 1 2>"$HOME/startup-timeout"
+probe_result=$?
+set -e
+(( probe_result == PROBE_STARTUP_TIMEOUT_STATUS ))
+grep -Fqx 'Late Lima guest probe startup handshake timed out: colima-profile' \
+  "$HOME/startup-timeout"
+! grep -Fq 'Late Lima guest probe timed out: colima-profile' \
+  "$HOME/startup-timeout"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
 
   test("inventory timeout releases provisioning and reaches serialized cleanup", async () => {
     const startedAt = Date.now();

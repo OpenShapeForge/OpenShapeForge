@@ -120,6 +120,22 @@ gh() {
 `;
 }
 
+const MISSING_LIMA_CONFIG_STATE = `
+colima_home="$HOME/.colima"
+profile_state="$colima_home/osf-pr-1"
+lima_state="$colima_home/_lima/colima-osf-pr-1"
+unrelated_profile="$colima_home/unrelated"
+unrelated_lima="$colima_home/_lima/colima-unrelated"
+shared_runtime="$colima_home/_lima/_networks"
+mkdir -p "$profile_state" "$lima_state" "$unrelated_profile" "$unrelated_lima" "$shared_runtime"
+printf 'profile\\n' >"$profile_state/colima.yaml"
+printf 'disposable disk\\n' >"$lima_state/diffdisk"
+printf 'keep profile\\n' >"$unrelated_profile/sentinel"
+printf 'keep runtime\\n' >"$unrelated_lima/diffdisk"
+printf 'keep network\\n' >"$shared_runtime/sentinel"
+[[ ! -e "$lima_state/lima.yaml" ]]
+`;
+
 async function runHarness(body: string, environment: Record<string, string> = {}) {
   const home = await mkdtemp(join(tmpdir(), "osf-runner-lifecycle-"));
   const harness = join(home, "harness.sh");
@@ -1968,6 +1984,316 @@ set -e
 
     expect(result.exitCode, output(result)).toBe(0);
     expect(result.stderr.toString()).toContain("Refusing to delete busy runner slot 1");
+  });
+
+  test("cleanup refuses to delete when runner state cannot be verified", async () => {
+    const result = await runHarness(`
+gh() { return 1; }
+delete_matching_runners() { touch "$HOME/deleted-runner"; }
+delete_profile() { touch "$HOME/deleted-profile"; }
+set +e
+cleanup_slot 1
+cleanup_result=$?
+set -e
+(( cleanup_result != 0 ))
+[[ ! -e "$HOME/deleted-runner" ]]
+[[ ! -e "$HOME/deleted-profile" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not verify runner state for slot 1; refusing cleanup",
+    );
+  });
+
+  test("removes only exact disposable state when osf-pr-1 lacks lima.yaml", async () => {
+    const result = await runHarness(`
+${MISSING_LIMA_CONFIG_STATE}
+colima() {
+  if [[ "$*" != "list --json" ]]; then
+    touch "$HOME/colima-mutated"
+    return 91
+  fi
+  if [[ -d "$profile_state" || -d "$lima_state" ]]; then
+    printf '%s\\n' '{"name":"osf-pr-1","status":"Broken"}'
+  fi
+  printf '%s\\n' '{"name":"unrelated","status":"Broken"}'
+}
+delete_profile osf-pr-1
+[[ ! -e "$profile_state" ]]
+[[ ! -e "$lima_state" ]]
+[[ ! -e "$HOME/colima-mutated" ]]
+grep -Fq 'keep profile' "$unrelated_profile/sentinel"
+grep -Fq 'keep runtime' "$unrelated_lima/diffdisk"
+grep -Fq 'keep network' "$shared_runtime/sentinel"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("refuses broken recovery for every other Colima profile", async () => {
+    const result = await runHarness(`
+colima() {
+  if [[ "$*" == "list --json" ]]; then
+    printf '%s\\n' '{"name":"osf-deploy","status":"Broken"}'
+    return
+  fi
+  touch "$HOME/colima-mutated"
+}
+set +e
+delete_profile osf-deploy
+delete_result=$?
+set -e
+(( delete_result != 0 ))
+[[ ! -e "$HOME/colima-mutated" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Refusing Broken recovery outside osf-pr-1: osf-deploy",
+    );
+  });
+
+  test("refuses recovery when the missing-lima.yaml condition is not met", async () => {
+    const result = await runHarness(`
+${MISSING_LIMA_CONFIG_STATE}
+printf 'unexpected config\\n' >"$lima_state/lima.yaml"
+colima() {
+  if [[ "$*" == "list --json" ]]; then
+    printf '%s\\n' '{"name":"osf-pr-1","status":"Broken"}'
+    return
+  fi
+  touch "$HOME/colima-mutated"
+}
+set +e
+delete_profile osf-pr-1
+delete_result=$?
+set -e
+(( delete_result != 0 ))
+[[ ! -e "$HOME/colima-mutated" ]]
+[[ -d "$profile_state" ]]
+[[ -d "$lima_state" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Refusing Broken recovery when lima.yaml is present or linked",
+    );
+  });
+
+  test("refuses recovery when exact profile state contains a symlink", async () => {
+    const result = await runHarness(`
+${MISSING_LIMA_CONFIG_STATE}
+ln -s "$unrelated_lima/diffdisk" "$lima_state/foreign-disk"
+colima() {
+  if [[ "$*" == "list --json" ]]; then
+    printf '%s\\n' '{"name":"osf-pr-1","status":"Broken"}'
+    return
+  fi
+  touch "$HOME/colima-mutated"
+}
+set +e
+delete_profile osf-pr-1
+delete_result=$?
+set -e
+(( delete_result != 0 ))
+[[ ! -e "$HOME/colima-mutated" ]]
+[[ -d "$profile_state" ]]
+[[ -d "$lima_state" ]]
+grep -Fq 'keep runtime' "$unrelated_lima/diffdisk"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Refusing recovery of a tree containing symlinks",
+    );
+  });
+
+  test("refuses recovery when an exact state directory is foreign-owned", async () => {
+    const result = await runHarness(`
+${MISSING_LIMA_CONFIG_STATE}
+path_owner_uid() {
+  if [[ "$1" == "$lima_state" ]]; then
+    printf '%s\\n' "$((RUNNER_UID + 1))"
+  else
+    printf '%s\\n' "$RUNNER_UID"
+  fi
+}
+colima() {
+  [[ "$*" == "list --json" ]]
+  printf '%s\\n' '{"name":"osf-pr-1","status":"Broken"}'
+}
+set +e
+delete_profile osf-pr-1
+delete_result=$?
+set -e
+(( delete_result != 0 ))
+[[ -d "$profile_state" ]]
+[[ -d "$lima_state" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Refusing recovery of a foreign-owned path",
+    );
+  });
+
+  test("refuses recovery through an unexpected Colima home", async () => {
+    const result = await runHarness(`
+${MISSING_LIMA_CONFIG_STATE}
+export COLIMA_HOME="$HOME/elsewhere"
+colima() {
+  [[ "$*" == "list --json" ]]
+  printf '%s\\n' '{"name":"osf-pr-1","status":"Broken"}'
+}
+set +e
+delete_profile osf-pr-1
+delete_result=$?
+set -e
+(( delete_result != 0 ))
+[[ -d "$profile_state" ]]
+[[ -d "$lima_state" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Refusing Broken recovery with an unexpected COLIMA_HOME",
+    );
+  });
+
+  test("refuses recovery through a nonempty unexpected Lima home", async () => {
+    const result = await runHarness(`
+${MISSING_LIMA_CONFIG_STATE}
+export LIMA_HOME="$HOME/elsewhere"
+colima() {
+  [[ "$*" == "list --json" ]]
+  printf '%s\\n' '{"name":"osf-pr-1","status":"Broken"}'
+}
+set +e
+delete_profile osf-pr-1
+delete_result=$?
+set -e
+(( delete_result != 0 ))
+[[ -d "$profile_state" ]]
+[[ -d "$lima_state" ]]
+grep -Fq 'keep network' "$shared_runtime/sentinel"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Refusing Broken recovery with an unexpected LIMA_HOME",
+    );
+  });
+
+  test("successful stop recovers Broken state without restoring the supervisor", async () => {
+    const result = await runHarness(`
+${MISSING_LIMA_CONFIG_STATE}
+export LIMA_HOME="$HOME/.colima/_lima"
+gh() { :; }
+colima() {
+  if [[ "$*" != "list --json" ]]; then
+    touch "$HOME/colima-mutated"
+    return 91
+  fi
+  if [[ -d "$profile_state" || -d "$lima_state" ]]; then
+    printf '%s\\n' '{"name":"osf-pr-1","status":"Broken"}'
+  fi
+  printf '%s\\n' '{"name":"unrelated","status":"Broken"}'
+}
+launchctl() {
+  printf '%s\\n' "$*" >>"$HOME/launchctl-calls"
+  if [[ "$1" == bootstrap ]]; then
+    touch "$HOME/supervisor-restored"
+  fi
+}
+pgrep() { return 1; }
+acquire_provision_lock() { printf 'acquire\\n' >>"$HOME/lock-calls"; }
+release_provision_lock() { printf 'release\\n' >>"$HOME/lock-calls"; }
+stop_supervisors
+[[ ! -e "$profile_state" ]]
+[[ ! -e "$lima_state" ]]
+[[ ! -e "$HOME/colima-mutated" ]]
+[[ ! -e "$HOME/supervisor-restored" ]]
+[[ "$(cat "$HOME/lock-calls")" == $'acquire\\nrelease' ]]
+grep -Fq 'bootout gui/' "$HOME/launchctl-calls"
+! grep -Fq 'bootstrap ' "$HOME/launchctl-calls"
+grep -Fq 'keep profile' "$unrelated_profile/sentinel"
+grep -Fq 'keep runtime' "$unrelated_lima/diffdisk"
+grep -Fq 'keep network' "$shared_runtime/sentinel"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stdout.toString()).toContain("slot 1: stopped and deleted");
+  });
+
+  test("fails when Colima still reports the recovered profile", async () => {
+    const result = await runHarness(`
+${MISSING_LIMA_CONFIG_STATE}
+colima() {
+  [[ "$*" == "list --json" ]]
+  printf '%s\\n' '{"name":"osf-pr-1","status":"Broken"}'
+}
+set +e
+delete_profile osf-pr-1
+delete_result=$?
+set -e
+(( delete_result != 0 ))
+[[ ! -e "$profile_state" ]]
+[[ ! -e "$lima_state" ]]
+grep -Fq 'keep runtime' "$unrelated_lima/diffdisk"
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Colima profile osf-pr-1 still exists after recovery",
+    );
+  });
+
+  test("fails closed when deletion cannot be verified", async () => {
+    const result = await runHarness(`
+colima() {
+  if [[ "$*" == "list --json" ]]; then
+    printf '%s\\n' '{"name":"osf-pr-1","status":"Stopped"}'
+    return
+  fi
+  printf '%s\\n' "$*" >>"$HOME/colima-calls"
+  [[ "$*" == "delete -p osf-pr-1 --force" ]]
+}
+set +e
+delete_profile osf-pr-1
+delete_result=$?
+set -e
+(( delete_result != 0 ))
+[[ "$(cat "$HOME/colima-calls")" == "delete -p osf-pr-1 --force" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Colima profile osf-pr-1 still exists after deletion",
+    );
+  });
+
+  test("fails closed on a malformed Colima profile inventory", async () => {
+    const result = await runHarness(`
+colima() {
+  if [[ "$*" == "list --json" ]]; then
+    printf '%s\\n' '{"name":"osf-pr-1"}'
+    return
+  fi
+  touch "$HOME/colima-mutated"
+}
+set +e
+delete_profile osf-pr-1
+delete_result=$?
+set -e
+(( delete_result != 0 ))
+[[ ! -e "$HOME/colima-mutated" ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Could not verify Colima profile osf-pr-1",
+    );
   });
 
   test("restores the supervisor when it misses the stop deadline", async () => {

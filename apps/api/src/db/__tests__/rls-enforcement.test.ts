@@ -96,7 +96,7 @@ async function withDb<T>(
 
 describe("RLS enforcement against the restricted app role", () => {
   test(
-    "migration repairs drifted login and RLS role attributes",
+    "app-role repair helper restores drifted login and RLS attributes",
     async () => {
       const roleName = `osf_app_role_repair_${randomUUID().replaceAll("-", "")}`;
       if (!/^[a-z0-9_]+$/.test(roleName)) {

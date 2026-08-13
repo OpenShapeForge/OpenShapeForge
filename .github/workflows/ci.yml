@@ -107,6 +107,10 @@ jobs:
       - name: Compiler unit tests
         run: bun test packages/compiler
 
+      # The notices generator is a root script, outside packages/compiler.
+      - name: Third-party notices unit tests
+        run: bun run test:notices
+
       # The shipped example plugins carry unit tests that nothing ran until
       # now: `test:compiler` is scoped to packages/compiler and the db/e2e jobs
       # only reach plugin code through the API. A test that never executes is

@@ -238,15 +238,11 @@ export async function applyWorkerRoleMigration(db: OpenShapeForgeDatabase) {
   // Repair the load-bearing attributes if they have drifted — a tampered or
   // hand-created role — but only then.
   //
-  // The app role's equivalent statement is unconditional, and that is a known
-  // source of contention rather than a pattern to copy: `pg_authid` is
-  // CLUSTER-wide, so every migrate against every throwaway scratch database
-  // rewrites the same tuple, and concurrent runs collide with
-  // `tuple concurrently updated`. Adding a second role that did the same would
-  // double the collision surface. Reading `pg_roles` first makes the write
-  // happen on first creation and after tampering, and never on a routine
-  // migrate — so this role contributes no steady-state writes at all. (The app
-  // role's own statement is tracked separately; it is not changed here.)
+  // `pg_authid` is CLUSTER-wide, so an unconditional ALTER ROLE on every
+  // migrate would make concurrent scratch databases rewrite the same tuple
+  // and collide with `tuple concurrently updated`. Like the app-role repair,
+  // reading `pg_roles` first limits writes to first creation and actual drift;
+  // routine migrations remain read-only at the role-catalog boundary.
   await sql`
     do $$
     begin

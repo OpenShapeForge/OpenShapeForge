@@ -1395,9 +1395,15 @@ verify_cross_architecture_container_execution() {
     trap "restore_native_image || true" EXIT
 
     docker pull --platform linux/amd64 "$preflight_image" >/dev/null
-    image_architecture="$(docker image inspect --format "{{.Architecture}}" "$preflight_image")"
-    [[ "$image_architecture" == amd64 ]] || {
-      echo "Runner pre-admission pulled an unexpected container architecture: ${image_architecture}" >&2
+    if ! pulled_platform="$(
+      docker image inspect --platform linux/amd64 \
+        --format "{{.Os}}/{{.Architecture}}" "$preflight_image"
+    )"; then
+      echo "Runner pre-admission cannot inspect the linux/amd64 container image" >&2
+      exit 1
+    fi
+    [[ "$pulled_platform" == linux/amd64 ]] || {
+      echo "Runner pre-admission pulled an unexpected container platform: ${pulled_platform}" >&2
       exit 1
     }
     if ! executed_architecture="$(

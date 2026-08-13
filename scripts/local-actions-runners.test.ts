@@ -1694,14 +1694,25 @@ set -e
     );
   }, 15_000);
 
-  test("accepts a rootless linux/amd64 container that executes as x86_64", async () => {
+  test("selects the amd64 image when native and amd64 variants coexist", async () => {
     const result = await runHarness(`
 docker() {
   printf '%s\\n' "$*" >>"$HOME/docker-calls"
   case "$*" in
-    "pull --platform linux/amd64 alpine:3.20"|"pull --platform linux/arm64 alpine:3.20") ;;
-    "image inspect --format {{.Architecture}} alpine:3.20") printf 'amd64\\n' ;;
-    "run --rm --platform linux/amd64 alpine:3.20 /bin/uname -m") printf 'x86_64\\n' ;;
+    "pull --platform linux/amd64 alpine:3.20") touch "$HOME/amd64-image" ;;
+    "pull --platform linux/arm64 alpine:3.20") touch "$HOME/native-image" ;;
+    "image inspect --format {{.Os}}/{{.Architecture}} alpine:3.20")
+      [[ -e "$HOME/native-image" ]]
+      printf 'linux/arm64\\n'
+      ;;
+    "image inspect --platform linux/amd64 --format {{.Os}}/{{.Architecture}} alpine:3.20")
+      [[ -e "$HOME/amd64-image" ]]
+      printf 'linux/amd64\\n'
+      ;;
+    "run --rm --platform linux/amd64 alpine:3.20 /bin/uname -m")
+      [[ -e "$HOME/amd64-image" ]]
+      printf 'x86_64\\n'
+      ;;
     *) return 1 ;;
   esac
 }
@@ -1711,13 +1722,76 @@ colima() {
   [[ "$5" == bash && "$6" == -lc ]]
   bash -lc "$7"
 }
+touch "$HOME/native-image"
+[[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' alpine:3.20)" == linux/arm64 ]]
 verify_cross_architecture_container_execution profile
 grep -Fxq 'pull --platform linux/amd64 alpine:3.20' "$HOME/docker-calls"
+grep -Fxq 'image inspect --platform linux/amd64 --format {{.Os}}/{{.Architecture}} alpine:3.20' "$HOME/docker-calls"
 grep -Fxq 'run --rm --platform linux/amd64 alpine:3.20 /bin/uname -m' "$HOME/docker-calls"
 [[ "$(tail -n 1 "$HOME/docker-calls")" == 'pull --platform linux/arm64 alpine:3.20' ]]
 `);
 
     expect(result.exitCode, output(result)).toBe(0);
+  });
+
+  test("fails admission when the amd64 image cannot be inspected", async () => {
+    const result = await runHarness(`
+docker() {
+  printf '%s\\n' "$*" >>"$HOME/docker-calls"
+  case "$*" in
+    "pull --platform linux/amd64 alpine:3.20"|"pull --platform linux/arm64 alpine:3.20") ;;
+    "image inspect --platform linux/amd64 --format {{.Os}}/{{.Architecture}} alpine:3.20") return 1 ;;
+    "run --rm --platform linux/amd64 alpine:3.20 /bin/uname -m") touch "$HOME/run-attempted" ;;
+    *) return 1 ;;
+  esac
+}
+export -f docker
+colima() {
+  [[ "$1" == -p && "$2" == profile && "$3" == ssh && "$4" == -- ]]
+  [[ "$5" == bash && "$6" == -lc ]]
+  bash -lc "$7"
+}
+if verify_cross_architecture_container_execution profile; then
+  exit 1
+fi
+[[ ! -e "$HOME/run-attempted" ]]
+[[ "$(tail -n 1 "$HOME/docker-calls")" == 'pull --platform linux/arm64 alpine:3.20' ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Runner pre-admission cannot inspect the linux/amd64 container image",
+    );
+  });
+
+  test("fails admission when the selected image is not linux/amd64", async () => {
+    const result = await runHarness(`
+docker() {
+  printf '%s\\n' "$*" >>"$HOME/docker-calls"
+  case "$*" in
+    "pull --platform linux/amd64 alpine:3.20"|"pull --platform linux/arm64 alpine:3.20") ;;
+    "image inspect --platform linux/amd64 --format {{.Os}}/{{.Architecture}} alpine:3.20") printf 'linux/arm64\\n' ;;
+    "run --rm --platform linux/amd64 alpine:3.20 /bin/uname -m") touch "$HOME/run-attempted" ;;
+    *) return 1 ;;
+  esac
+}
+export -f docker
+colima() {
+  [[ "$1" == -p && "$2" == profile && "$3" == ssh && "$4" == -- ]]
+  [[ "$5" == bash && "$6" == -lc ]]
+  bash -lc "$7"
+}
+if verify_cross_architecture_container_execution profile; then
+  exit 1
+fi
+[[ ! -e "$HOME/run-attempted" ]]
+[[ "$(tail -n 1 "$HOME/docker-calls")" == 'pull --platform linux/arm64 alpine:3.20' ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Runner pre-admission pulled an unexpected container platform: linux/arm64",
+    );
   });
 
   test("fails admission when linux/amd64 execution is unavailable", async () => {
@@ -1726,7 +1800,7 @@ docker() {
   printf '%s\\n' "$*" >>"$HOME/docker-calls"
   case "$*" in
     "pull --platform linux/amd64 alpine:3.20"|"pull --platform linux/arm64 alpine:3.20") ;;
-    "image inspect --format {{.Architecture}} alpine:3.20") printf 'amd64\\n' ;;
+    "image inspect --platform linux/amd64 --format {{.Os}}/{{.Architecture}} alpine:3.20") printf 'linux/amd64\\n' ;;
     "run --rm --platform linux/amd64 alpine:3.20 /bin/uname -m") return 126 ;;
     *) return 1 ;;
   esac
@@ -1746,6 +1820,35 @@ fi
     expect(result.exitCode, output(result)).toBe(0);
     expect(result.stderr.toString()).toContain(
       "Runner pre-admission cannot execute linux/amd64 containers",
+    );
+  });
+
+  test("fails admission when the amd64 container executes as another architecture", async () => {
+    const result = await runHarness(`
+docker() {
+  printf '%s\\n' "$*" >>"$HOME/docker-calls"
+  case "$*" in
+    "pull --platform linux/amd64 alpine:3.20"|"pull --platform linux/arm64 alpine:3.20") ;;
+    "image inspect --platform linux/amd64 --format {{.Os}}/{{.Architecture}} alpine:3.20") printf 'linux/amd64\\n' ;;
+    "run --rm --platform linux/amd64 alpine:3.20 /bin/uname -m") printf 'aarch64\\n' ;;
+    *) return 1 ;;
+  esac
+}
+export -f docker
+colima() {
+  [[ "$1" == -p && "$2" == profile && "$3" == ssh && "$4" == -- ]]
+  [[ "$5" == bash && "$6" == -lc ]]
+  bash -lc "$7"
+}
+if verify_cross_architecture_container_execution profile; then
+  exit 1
+fi
+[[ "$(tail -n 1 "$HOME/docker-calls")" == 'pull --platform linux/arm64 alpine:3.20' ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Runner pre-admission executed an unexpected container architecture: aarch64",
     );
   });
 

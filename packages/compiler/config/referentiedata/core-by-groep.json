@@ -1,5 +1,5 @@
 {
-  "RELATIESOORT": [
+  "RELATIONTYPE": [
     {
       "value": "person",
       "label": {
@@ -22,7 +22,7 @@
       }
     }
   ],
-  "COMMUNICATIETYPE": [
+  "COMMUNICATIONTYPE": [
     {
       "value": "appointment_reminder",
       "label": {
@@ -59,7 +59,7 @@
       }
     }
   ],
-  "COMMUNICATIEKANAAL": [
+  "COMMUNICATIONCHANNEL": [
     {
       "value": "email",
       "label": {
@@ -103,7 +103,7 @@
       }
     }
   ],
-  "COMMUNICATIEVOORKEURSCOPE": [
+  "COMMUNICATIONPREFERENCESCOPE": [
     {
       "value": "relation",
       "label": {
@@ -126,7 +126,7 @@
       }
     }
   ],
-  "COMMUNICATIEVOORKEURSTATUS": [
+  "COMMUNICATIONPREFERENCESTATUS": [
     {
       "value": "active",
       "label": {
@@ -156,7 +156,7 @@
       }
     }
   ],
-  "BETAALGEGEVENSOORT": [
+  "PAYMENTDETAILTYPE": [
     {
       "value": "bank_account",
       "label": {
@@ -186,7 +186,7 @@
       }
     }
   ],
-  "CONTACTGEGEVENSOORT": [
+  "CONTACTDETAILTYPE": [
     {
       "value": "email",
       "label": {
@@ -216,7 +216,7 @@
       }
     }
   ],
-  "CONTACTGEGEVENTOESTEMMINGSSTATUS": [
+  "CONTACTDETAILCONSENTSTATUS": [
     {
       "value": "granted",
       "label": {
@@ -260,7 +260,7 @@
       }
     }
   ],
-  "MESSAGINGKANAAL": [
+  "MESSAGINGCHANNEL": [
     {
       "value": "in_app",
       "label": {
@@ -1863,7 +1863,7 @@
       }
     }
   ],
-  "DOSSIERTYPE": [
+  "CASEFILETYPE": [
     {
       "value": "case_file",
       "label": {
@@ -1907,7 +1907,7 @@
       }
     }
   ],
-  "DOSSIERSTATUS": [
+  "CASEFILESTATUS": [
     {
       "value": "draft",
       "label": {
@@ -1944,7 +1944,7 @@
       }
     }
   ],
-  "DOSSIERCONFIDENTIALITY": [
+  "CASEFILECONFIDENTIALITY": [
     {
       "value": "internal",
       "label": {
@@ -1967,7 +1967,7 @@
       }
     }
   ],
-  "DOSSIERARCHIEFSTATUS": [
+  "CASEFILEARCHIVESTATUS": [
     {
       "value": "open",
       "label": {
@@ -2339,7 +2339,7 @@
       }
     },
     {
-      "value": "dossier",
+      "value": "caseFile",
       "label": {
         "nl": "Dossier",
         "en": "Dossier"
@@ -4276,7 +4276,7 @@
       }
     },
     {
-      "value": "eenmanszaak",
+      "value": "sole_proprietorship",
       "label": {
         "nl": "Eenmanszaak",
         "en": "Sole proprietorship"

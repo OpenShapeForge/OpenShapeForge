@@ -270,14 +270,14 @@ workflow:
 authorization:
   roles:
     read:
-      - Financien.All.Read
-      - Financien.All.ReadWrite
+      - Finance.All.Read
+      - Finance.All.ReadWrite
     create:
-      - Financien.All.ReadWrite
+      - Finance.All.ReadWrite
     update:
-      - Financien.All.ReadWrite
+      - Finance.All.ReadWrite
     delete:
-      - Financien.All.ReadWrite
+      - Finance.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public

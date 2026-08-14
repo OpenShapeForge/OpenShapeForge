@@ -15,14 +15,14 @@ domains:
 authorization:
   roles:
     read:
-      - Relaties.All.Read
-      - Relaties.All.ReadWrite
+      - Relations.All.Read
+      - Relations.All.ReadWrite
     create:
-      - Relaties.All.ReadWrite
+      - Relations.All.ReadWrite
     update:
-      - Relaties.All.ReadWrite
+      - Relations.All.ReadWrite
     delete:
-      - Relaties.All.ReadWrite
+      - Relations.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public
@@ -41,14 +41,14 @@ fields:
       maxLength: 50
     options:
       type: referentiedata
-      referentieGroep: COMMUNICATIETYPE
+      referentieGroep: COMMUNICATIONTYPE
     persisted:
       column: type
       storageClass: core
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: COMMUNICATIETYPE
+        referentieGroep: COMMUNICATIONTYPE
         clearable: false
   - key: scope
     valueType: string
@@ -64,14 +64,14 @@ fields:
       maxLength: 50
     options:
       type: referentiedata
-      referentieGroep: COMMUNICATIEVOORKEURSCOPE
+      referentieGroep: COMMUNICATIONPREFERENCESCOPE
     persisted:
       column: scope
       storageClass: core
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: COMMUNICATIEVOORKEURSCOPE
+        referentieGroep: COMMUNICATIONPREFERENCESCOPE
         clearable: false
   - key: channel
     valueType: string
@@ -87,14 +87,14 @@ fields:
       maxLength: 50
     options:
       type: referentiedata
-      referentieGroep: COMMUNICATIEKANAAL
+      referentieGroep: COMMUNICATIONCHANNEL
     persisted:
       column: channel
       storageClass: core
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: COMMUNICATIEKANAAL
+        referentieGroep: COMMUNICATIONCHANNEL
         clearable: false
   - key: status
     valueType: string
@@ -110,14 +110,14 @@ fields:
       maxLength: 50
     options:
       type: referentiedata
-      referentieGroep: COMMUNICATIEVOORKEURSTATUS
+      referentieGroep: COMMUNICATIONPREFERENCESTATUS
     persisted:
       column: status
       storageClass: core
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: COMMUNICATIEVOORKEURSTATUS
+        referentieGroep: COMMUNICATIONPREFERENCESTATUS
         clearable: false
   - key: isOptedIn
     valueType: boolean

@@ -16,14 +16,14 @@ domains:
 authorization:
   roles:
     read:
-      - Zaken.All.Read
-      - Zaken.All.ReadWrite
+      - Cases.All.Read
+      - Cases.All.ReadWrite
     create:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
     update:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
     delete:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public

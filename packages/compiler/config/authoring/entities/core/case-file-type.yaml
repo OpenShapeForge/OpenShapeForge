@@ -1,14 +1,14 @@
 schemaVersion: 1
 kind: coreEntity
 module: core
-entity: DossierType
-title: Dossier Type
-description: A managed dossier type definition with archival defaults.
+entity: CaseFileType
+title: Case file type
+description: A managed case file type definition with archival defaults.
 language: en
 displayTemplate: "{{name}}"
 filterField: name
 labels:
-  en: Dossier Type
+  en: Case file type
   nl: Dossiertype
 domains:
   - cases
@@ -16,13 +16,13 @@ domains:
 authorization:
   roles:
     read:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
     create:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
     update:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
     delete:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public
@@ -79,7 +79,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: DOSSIERCONFIDENTIALITY
+        referentieGroep: CASEFILECONFIDENTIALITY
         clearable: true
   - key: archiveProfile
     valueType: string

@@ -16,8 +16,8 @@ domains:
 authorization:
   roles:
     read:
-      - Zaken.All.Read
-      - Zaken.All.ReadWrite
+      - Cases.All.Read
+      - Cases.All.ReadWrite
     create:
       - Workflow.Internal.Write
     update:

@@ -19,14 +19,14 @@ mcp: true
 authorization:
   roles:
     read:
-      - Relaties.All.Read
-      - Relaties.All.ReadWrite
+      - Relations.All.Read
+      - Relations.All.ReadWrite
     create:
-      - Relaties.All.ReadWrite
+      - Relations.All.ReadWrite
     update:
-      - Relaties.All.ReadWrite
+      - Relations.All.ReadWrite
     delete:
-      - Relaties.All.ReadWrite
+      - Relations.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public
@@ -79,7 +79,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: RELATIESOORT
+        referentieGroep: RELATIONTYPE
         clearable: false
   - key: relationSubType
     valueType: string
@@ -112,7 +112,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: COMMUNICATIEKANAAL
+        referentieGroep: COMMUNICATIONCHANNEL
         clearable: true
   - key: status
     valueType: string
@@ -281,12 +281,12 @@ relationships:
     label:
       en: Cases
       nl: Zaken
-  - key: dossiers
+  - key: caseFiles
     kind: hasMany
-    target: Dossier
+    target: CaseFile
     foreignKey: relation_id
     label:
-      en: Dossiers
+      en: Case files
       nl: Dossiers
   - key: documents
     kind: hasMany

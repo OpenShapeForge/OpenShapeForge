@@ -22,14 +22,14 @@ retention:
 authorization:
   roles:
     read:
-      - Algemeen.All.Read
-      - Algemeen.All.ReadWrite
+      - General.All.Read
+      - General.All.ReadWrite
     create:
-      - Kwaliteit.All.ReadWrite
+      - Quality.All.ReadWrite
     update:
-      - Kwaliteit.All.ReadWrite
+      - Quality.All.ReadWrite
     delete:
-      - Kwaliteit.All.ReadWrite
+      - Quality.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public

@@ -3,7 +3,7 @@ kind: coreEntity
 module: core
 entity: Document
 title: Document
-description: A governed document record (metadata plus optional file) linked to a dossier, optionally a case, and optionally a relation.
+description: A governed document record (metadata plus optional file) linked to a case file, optionally a case, and optionally a relation.
 language: en
 displayTemplate: "{{title}}"
 filterField: title
@@ -26,13 +26,13 @@ retention:
 authorization:
   roles:
     read:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
     create:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
     update:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
     delete:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public
@@ -353,12 +353,12 @@ fields:
       component: DateTimePicker
       props: {}
 relationships:
-  - key: dossier
+  - key: caseFile
     kind: belongsTo
-    target: Dossier
-    foreignKey: dossier_id
+    target: CaseFile
+    foreignKey: case_file_id
     label:
-      en: Dossier
+      en: Case file
       nl: Dossier
   - key: case
     kind: belongsTo

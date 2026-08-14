@@ -321,14 +321,14 @@ workflow:
 authorization:
   roles:
     read:
-      - Projectontwikkeling.All.Read
-      - Projectontwikkeling.All.ReadWrite
+      - ProjectDevelopment.All.Read
+      - ProjectDevelopment.All.ReadWrite
     create:
-      - Projectontwikkeling.All.ReadWrite
+      - ProjectDevelopment.All.ReadWrite
     update:
-      - Projectontwikkeling.All.ReadWrite
+      - ProjectDevelopment.All.ReadWrite
     delete:
-      - Projectontwikkeling.All.ReadWrite
+      - ProjectDevelopment.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public

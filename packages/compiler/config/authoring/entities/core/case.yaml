@@ -3,7 +3,7 @@ kind: coreEntity
 module: core
 entity: Case
 title: Case
-description: A first-class operational case for service, housing, governance, and dossier-driven work.
+description: A first-class operational case for service, housing, governance, and case-file-driven work.
 language: en
 displayTemplate: "{{title}}"
 filterField: title
@@ -31,14 +31,14 @@ retention:
 authorization:
   roles:
     read:
-      - Zaken.All.Read
-      - Zaken.All.ReadWrite
+      - Cases.All.Read
+      - Cases.All.ReadWrite
     create:
-      - Zaken.All.ReadWrite
+      - Cases.All.ReadWrite
     update:
-      - Zaken.All.ReadWrite
+      - Cases.All.ReadWrite
     delete:
-      - Zaken.All.ReadWrite
+      - Cases.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public
@@ -516,12 +516,12 @@ relationships:
     label:
       en: Primary relation
       nl: Primaire relatie
-  - key: dossier
+  - key: caseFile
     kind: belongsTo
-    target: Dossier
-    foreignKey: dossier_id
+    target: CaseFile
+    foreignKey: case_file_id
     label:
-      en: Dossier
+      en: Case file
       nl: Dossier
   - key: currentQueue
     kind: belongsTo

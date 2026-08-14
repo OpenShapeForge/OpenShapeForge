@@ -17,14 +17,14 @@ mcp: true
 authorization:
   roles:
     read:
-      - Relaties.All.Read
-      - Relaties.All.ReadWrite
+      - Relations.All.Read
+      - Relations.All.ReadWrite
     create:
-      - Relaties.All.ReadWrite
+      - Relations.All.ReadWrite
     update:
-      - Relaties.All.ReadWrite
+      - Relations.All.ReadWrite
     delete:
-      - Relaties.All.ReadWrite
+      - Relations.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public
@@ -62,7 +62,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: CONTACTGEGEVENSOORT
+        referentieGroep: CONTACTDETAILTYPE
         clearable: false
   - key: value
     valueType: string
@@ -188,14 +188,14 @@ fields:
       maxLength: 50
     options:
       type: referentiedata
-      referentieGroep: CONTACTGEGEVENTOESTEMMINGSSTATUS
+      referentieGroep: CONTACTDETAILCONSENTSTATUS
     persisted:
       column: consent_status
       storageClass: core
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: CONTACTGEGEVENTOESTEMMINGSSTATUS
+        referentieGroep: CONTACTDETAILCONSENTSTATUS
         clearable: true
   - key: validFrom
     valueType: date

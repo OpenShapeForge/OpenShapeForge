@@ -15,14 +15,14 @@ domains:
 authorization:
   roles:
     read:
-      - Algemeen.All.Read
-      - Algemeen.All.ReadWrite
+      - General.All.Read
+      - General.All.ReadWrite
     create:
-      - Algemeen.All.ReadWrite
+      - General.All.ReadWrite
     update:
-      - Algemeen.All.ReadWrite
+      - General.All.ReadWrite
     delete:
-      - Algemeen.All.ReadWrite
+      - General.All.ReadWrite
   # Tenant-scoped only, where the origin repo predicated rows on the owning
   # account (`account_id` = `app.current_account_id`). Neither half of that
   # carries over: this runtime exposes only `app.current_user_id()`, which

@@ -15,14 +15,14 @@ domains:
 authorization:
   roles:
     read:
-      - Algemeen.All.Read
-      - Algemeen.All.ReadWrite
+      - General.All.Read
+      - General.All.ReadWrite
     create:
-      - Algemeen.All.ReadWrite
+      - General.All.ReadWrite
     update:
-      - Algemeen.All.ReadWrite
+      - General.All.ReadWrite
     delete:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public

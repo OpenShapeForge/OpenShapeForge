@@ -15,14 +15,14 @@ domains:
 authorization:
   roles:
     read:
-      - Algemeen.All.Read
-      - Algemeen.All.ReadWrite
+      - General.All.Read
+      - General.All.ReadWrite
     create:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
     update:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
     delete:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public
@@ -38,14 +38,14 @@ fields:
       nl: Afleverkanaal waarvoor deze variant bedoeld is.
     options:
       type: referentiedata
-      referentieGroep: MESSAGINGKANAAL
+      referentieGroep: MESSAGINGCHANNEL
     persisted:
       column: channel
       storageClass: core
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: MESSAGINGKANAAL
+        referentieGroep: MESSAGINGCHANNEL
         clearable: false
   - key: locale
     valueType: string

@@ -16,13 +16,13 @@ domains:
 authorization:
   roles:
     read:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
     create:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
     update:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
     delete:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public

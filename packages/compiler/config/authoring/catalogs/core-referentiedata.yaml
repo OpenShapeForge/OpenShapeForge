@@ -2,7 +2,7 @@ schemaVersion: 1
 kind: coreReferentiedataCatalog
 
 groepen:
-  RELATIESOORT:
+  RELATIONTYPE:
     description: Kerncodetabel voor de compacte classificatie van relaties.
     items:
       - value: person
@@ -11,7 +11,7 @@ groepen:
         label: { nl: Organisatie, en: Organization, fr: Organisation }
       - value: group
         label: { nl: Groep, en: Group, fr: Groupe }
-  COMMUNICATIETYPE:
+  COMMUNICATIONTYPE:
     description: Kerncodetabel voor functionele communicatiedoelen en berichttypen.
     items:
       - value: appointment_reminder
@@ -25,7 +25,7 @@ groepen:
       - value: marketing
         label: { nl: Marketing, en: Marketing, fr: Marketing }
 
-  COMMUNICATIEKANAAL:
+  COMMUNICATIONCHANNEL:
     description: Kerncodetabel voor voorkeurkanalen binnen communicatie.
     items:
       - value: email
@@ -41,7 +41,7 @@ groepen:
       - value: in_app
         label: { nl: In-app, en: In-app, fr: In-app }
 
-  COMMUNICATIEVOORKEURSCOPE:
+  COMMUNICATIONPREFERENCESCOPE:
     description: Kerncodetabel voor het toepassingsniveau van communicatievoorkeuren.
     items:
       - value: relation
@@ -51,7 +51,7 @@ groepen:
       - value: tenant
         label: { nl: Tenantstandaard, en: Tenant default, fr: Défaut du locataire }
 
-  COMMUNICATIEVOORKEURSTATUS:
+  COMMUNICATIONPREFERENCESTATUS:
     description: Kerncodetabel voor de levenscyclus van communicatievoorkeuren.
     items:
       - value: active
@@ -63,7 +63,7 @@ groepen:
       - value: expired
         label: { nl: Verlopen, en: Expired, fr: Expiré }
 
-  BETAALGEGEVENSOORT:
+  PAYMENTDETAILTYPE:
     description: >-
       Kerncodetabel voor het soort betaalgegeven. Bewust sectoroverstijgend
       gehouden: jurisdictie- of sectorgebonden vormen (zoals een G-rekening)
@@ -78,7 +78,7 @@ groepen:
       - value: payment_service
         label: { nl: Betaaldienst, en: Payment service, fr: Service de paiement }
 
-  CONTACTGEGEVENSOORT:
+  CONTACTDETAILTYPE:
     description: Kerncodetabel voor het soort contactgegeven.
     items:
       - value: email
@@ -90,7 +90,7 @@ groepen:
       - value: website
         label: { nl: Website, en: Website, fr: Site web }
 
-  CONTACTGEGEVENTOESTEMMINGSSTATUS:
+  CONTACTDETAILCONSENTSTATUS:
     description: Kerncodetabel voor de toestemmingsstatus van een contactgegeven.
     items:
       - value: granted
@@ -106,7 +106,7 @@ groepen:
       - value: unknown
         label: { nl: Onbekend, en: Unknown, fr: Inconnu }
 
-  MESSAGINGKANAAL:
+  MESSAGINGCHANNEL:
     description: Kerncodetabel voor uitgaande messaging-kanalen.
     items:
       - value: in_app
@@ -708,7 +708,7 @@ groepen:
       - value: cancelled
         label: { nl: Geannuleerd, en: Cancelled, fr: Annulé }
 
-  DOSSIERTYPE:
+  CASEFILETYPE:
     description: Kerncodetabel voor hoofdtypen van dossiers.
     items:
       - value: case_file
@@ -724,7 +724,7 @@ groepen:
       - value: personnel_file
         label: { nl: Medewerkersdossier, en: Personnel file, fr: Dossier personnel }
 
-  DOSSIERSTATUS:
+  CASEFILESTATUS:
     description: Kerncodetabel voor de levenscyclus van een dossier.
     items:
       - value: draft
@@ -738,7 +738,7 @@ groepen:
       - value: suspended
         label: { nl: Opgeschort, en: Suspended, fr: Suspendu }
 
-  DOSSIERCONFIDENTIALITY:
+  CASEFILECONFIDENTIALITY:
     description: Kerncodetabel voor vertrouwelijkheid van dossiers.
     items:
       - value: internal
@@ -748,7 +748,7 @@ groepen:
       - value: strictly_confidential
         label: { nl: Zeer vertrouwelijk, en: Strictly confidential, fr: Très confidentiel }
 
-  DOSSIERARCHIEFSTATUS:
+  CASEFILEARCHIVESTATUS:
     description: Kerncodetabel voor archiefstatus van dossiers.
     items:
       - value: open
@@ -891,7 +891,7 @@ groepen:
     items:
       - value: case
         label: { nl: Zaak, en: Case, fr: Cas }
-      - value: dossier
+      - value: caseFile
         label: { nl: Dossier, en: Dossier, fr: Dossier }
 
   MILESTONETYPE:
@@ -1599,7 +1599,7 @@ groepen:
         label: { nl: Vereniging, en: Association }
       - value: cooperatie
         label: { nl: Coöperatie, en: Cooperative }
-      - value: eenmanszaak
+      - value: sole_proprietorship
         label: { nl: Eenmanszaak, en: Sole proprietorship }
       - value: vof
         label: { nl: Vennootschap onder firma (VOF), en: General partnership (VOF) }

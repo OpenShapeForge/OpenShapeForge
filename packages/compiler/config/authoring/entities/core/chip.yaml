@@ -27,15 +27,15 @@ indexes:
 authorization:
   roles:
     read:
-      - Organisatie.All.ReadWrite
-      - Algemeen.All.Read
-      - Algemeen.All.ReadWrite
+      - Organization.All.ReadWrite
+      - General.All.Read
+      - General.All.ReadWrite
     create:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
     update:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
     delete:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
 fields:
   - key: key
     valueType: string

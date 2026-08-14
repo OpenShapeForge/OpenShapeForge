@@ -1,14 +1,14 @@
 schemaVersion: 1
 kind: coreEntity
 module: core
-entity: Dossier
-title: Dossier
-description: A governed dossier that groups cases, documents, and archival context.
+entity: CaseFile
+title: Case file
+description: A governed case file that groups cases, documents, and archival context.
 language: en
 displayTemplate: "{{title}}"
 filterField: title
 labels:
-  en: Dossier
+  en: Case file
   nl: Dossier
 domains:
   - cases
@@ -25,13 +25,13 @@ retention:
 authorization:
   roles:
     read:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
     create:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
     update:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
     delete:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public
@@ -76,19 +76,19 @@ fields:
       props:
         rows: 5
         maxLength: 8000
-  - key: dossierType
+  - key: caseFileType
     valueType: string
     required: true
     label:
-      en: Dossier type
+      en: Case file type
       nl: Dossiertype
     persisted:
-      column: dossier_type
+      column: case_file_type
       storageClass: core
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: DOSSIERTYPE
+        referentieGroep: CASEFILETYPE
         clearable: false
   - key: status
     valueType: string
@@ -102,7 +102,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: DOSSIERSTATUS
+        referentieGroep: CASEFILESTATUS
         clearable: false
   - key: confidentiality
     valueType: string
@@ -116,7 +116,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: DOSSIERCONFIDENTIALITY
+        referentieGroep: CASEFILECONFIDENTIALITY
         clearable: true
   - key: archiveStatus
     valueType: string
@@ -130,7 +130,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: DOSSIERARCHIEFSTATUS
+        referentieGroep: CASEFILEARCHIVESTATUS
         clearable: true
   - key: openedAt
     valueType: datetime
@@ -216,38 +216,38 @@ relationships:
     label:
       en: Primary relation
       nl: Primaire relatie
-  - key: parentDossier
+  - key: parentCaseFile
     kind: belongsTo
-    target: Dossier
-    foreignKey: parent_dossier_id
+    target: CaseFile
+    foreignKey: parent_case_file_id
     label:
-      en: Parent dossier
+      en: Parent case file
       nl: Hoofddossier
-  - key: childDossiers
+  - key: childCaseFiles
     kind: hasMany
-    target: Dossier
-    foreignKey: parent_dossier_id
+    target: CaseFile
+    foreignKey: parent_case_file_id
     label:
-      en: Child dossiers
+      en: Child case files
       nl: Onderliggende dossiers
   - key: cases
     kind: hasMany
     target: Case
-    foreignKey: dossier_id
+    foreignKey: case_file_id
     label:
       en: Cases
       nl: Zaken
   - key: processes
     kind: hasMany
     target: Process
-    foreignKey: dossier_id
+    foreignKey: case_file_id
     label:
       en: Processes
       nl: Processen
   - key: documents
     kind: hasMany
     target: Document
-    foreignKey: dossier_id
+    foreignKey: case_file_id
     label:
       en: Documents
       nl: Documenten

@@ -236,14 +236,14 @@ workflow:
 authorization:
   roles:
     read:
-      - Kwaliteit.All.Read
-      - Kwaliteit.All.ReadWrite
+      - Quality.All.Read
+      - Quality.All.ReadWrite
     create:
-      - Kwaliteit.All.ReadWrite
+      - Quality.All.ReadWrite
     update:
-      - Kwaliteit.All.ReadWrite
+      - Quality.All.ReadWrite
     delete:
-      - Kwaliteit.All.ReadWrite
+      - Quality.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public

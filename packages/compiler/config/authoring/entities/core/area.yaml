@@ -224,14 +224,14 @@ workflow:
 authorization:
   roles:
     read:
-      - Vastgoed.All.Read
-      - Vastgoed.All.ReadWrite
+      - RealEstate.All.Read
+      - RealEstate.All.ReadWrite
     create:
-      - Vastgoed.All.ReadWrite
+      - RealEstate.All.ReadWrite
     update:
-      - Vastgoed.All.ReadWrite
+      - RealEstate.All.ReadWrite
     delete:
-      - Vastgoed.All.ReadWrite
+      - RealEstate.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public

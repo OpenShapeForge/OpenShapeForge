@@ -16,13 +16,13 @@ domains:
 authorization:
   roles:
     read:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
     create:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
     update:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
     delete:
-      - Organisatie.All.ReadWrite
+      - Organization.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public

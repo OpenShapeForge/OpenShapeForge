@@ -201,14 +201,14 @@ workflow:
 authorization:
   roles:
     read:
-      - Onderhoud.All.Read
-      - Onderhoud.All.ReadWrite
+      - Maintenance.All.Read
+      - Maintenance.All.ReadWrite
     create:
-      - Onderhoud.All.ReadWrite
+      - Maintenance.All.ReadWrite
     update:
-      - Onderhoud.All.ReadWrite
+      - Maintenance.All.ReadWrite
     delete:
-      - Onderhoud.All.ReadWrite
+      - Maintenance.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public

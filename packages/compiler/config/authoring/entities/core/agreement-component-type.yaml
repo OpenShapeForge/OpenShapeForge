@@ -264,14 +264,14 @@ workflow:
 authorization:
   roles:
     read:
-      - Overeenkomsten.All.Read
-      - Overeenkomsten.All.ReadWrite
+      - Agreements.All.Read
+      - Agreements.All.ReadWrite
     create:
-      - Overeenkomsten.All.ReadWrite
+      - Agreements.All.ReadWrite
     update:
-      - Overeenkomsten.All.ReadWrite
+      - Agreements.All.ReadWrite
     delete:
-      - Overeenkomsten.All.ReadWrite
+      - Agreements.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public

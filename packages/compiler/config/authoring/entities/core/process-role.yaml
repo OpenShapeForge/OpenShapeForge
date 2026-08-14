@@ -273,14 +273,14 @@ workflow:
 authorization:
   roles:
     read:
-      - Dossier.All.Read
-      - Dossier.All.ReadWrite
+      - CaseFile.All.Read
+      - CaseFile.All.ReadWrite
     create:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
     update:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
     delete:
-      - Dossier.All.ReadWrite
+      - CaseFile.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public

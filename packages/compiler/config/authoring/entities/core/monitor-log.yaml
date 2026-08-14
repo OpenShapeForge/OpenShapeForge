@@ -217,14 +217,14 @@ workflow:
 authorization:
   roles:
     read:
-      - Energie.All.Read
-      - Energie.All.ReadWrite
+      - Energy.All.Read
+      - Energy.All.ReadWrite
     create:
-      - Energie.All.ReadWrite
+      - Energy.All.ReadWrite
     update:
-      - Energie.All.ReadWrite
+      - Energy.All.ReadWrite
     delete:
-      - Energie.All.ReadWrite
+      - Energy.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public

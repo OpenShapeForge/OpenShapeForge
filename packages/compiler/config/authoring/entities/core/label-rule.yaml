@@ -15,14 +15,14 @@ domains:
 authorization:
   roles:
     read:
-      - Algemeen.All.Read
-      - Algemeen.All.ReadWrite
+      - General.All.Read
+      - General.All.ReadWrite
     create:
-      - Algemeen.All.ReadWrite
+      - General.All.ReadWrite
     update:
-      - Algemeen.All.ReadWrite
+      - General.All.ReadWrite
     delete:
-      - Algemeen.All.ReadWrite
+      - General.All.ReadWrite
 fields:
   - key: name
     valueType: string
@@ -74,9 +74,9 @@ fields:
           label:
             en: Task
             nl: Taak
-        - value: Dossier
+        - value: CaseFile
           label:
-            en: Dossier
+            en: Case file
             nl: Dossier
         - value: Document
           label:
@@ -275,8 +275,8 @@ fields:
       en: Validity
       nl: Geldigheid
     description:
-      en: Validity mode of this label rule. `permanent` is always valid; `tijdelijk` honors begindatum/einddatum; `voorwaardelijk` honors the dates plus any context-specific conditions (e.g. tenant or process state).
-      nl: Geldigheidsmodus van deze labelregel. `permanent` is altijd geldig; `tijdelijk` respecteert begindatum/einddatum; `voorwaardelijk` respecteert de datums plus context-specifieke voorwaarden (bv. tenant of procestoestand).
+      en: Validity mode of this label rule. `permanent` is always valid; `temporary` honors startDate/endDate; `conditional` honors the dates plus any context-specific conditions (e.g. tenant or process state).
+      nl: Geldigheidsmodus van deze labelregel. `permanent` is altijd geldig; `temporary` respecteert startDate/endDate; `conditional` respecteert de datums plus context-specifieke voorwaarden (bv. tenant of procestoestand).
     defaultValue: permanent
     options:
       type: static
@@ -285,11 +285,11 @@ fields:
           label:
             en: Permanent
             nl: Permanent
-        - value: tijdelijk
+        - value: temporary
           label:
             en: Temporary
             nl: Tijdelijk
-        - value: voorwaardelijk
+        - value: conditional
           label:
             en: Conditional
             nl: Voorwaardelijk
@@ -298,17 +298,17 @@ fields:
       storageClass: core
     render:
       component: ListSelect
-  - key: begindatum
+  - key: startDate
     valueType: datetime
     required: false
     label:
       en: Start date
       nl: Begindatum
     description:
-      en: Date and time from which this label rule starts evaluating. Only honored when `validity` is `tijdelijk` or `voorwaardelijk`.
-      nl: Datum en tijd vanaf wanneer deze labelregel wordt geevalueerd. Alleen actief als `validity` op `tijdelijk` of `voorwaardelijk` staat.
+      en: Date and time from which this label rule starts evaluating. Only honored when `validity` is `temporary` or `conditional`.
+      nl: Datum en tijd vanaf wanneer deze labelregel wordt geevalueerd. Alleen actief als `validity` op `temporary` of `conditional` staat.
     persisted:
-      column: begindatum
+      column: start_date
       storageClass: core
     render:
       component: DateTimePicker
@@ -317,17 +317,17 @@ fields:
       conditions:
         - field: validity
           operator: isNotEmpty
-  - key: einddatum
+  - key: endDate
     valueType: datetime
     required: false
     label:
       en: End date
       nl: Einddatum
     description:
-      en: Date and time after which this label rule stops evaluating. Only honored when `validity` is `tijdelijk` or `voorwaardelijk`.
-      nl: Datum en tijd waarna deze labelregel niet meer wordt geevalueerd. Alleen actief als `validity` op `tijdelijk` of `voorwaardelijk` staat.
+      en: Date and time after which this label rule stops evaluating. Only honored when `validity` is `temporary` or `conditional`.
+      nl: Datum en tijd waarna deze labelregel niet meer wordt geevalueerd. Alleen actief als `validity` op `temporary` of `conditional` staat.
     persisted:
-      column: einddatum
+      column: end_date
       storageClass: core
     render:
       component: DateTimePicker
@@ -426,8 +426,8 @@ ui:
             nl: Geldigheid
           fields:
             - validity
-            - begindatum
-            - einddatum
+            - startDate
+            - endDate
         - id: expression
           title:
             en: Expression
@@ -464,8 +464,8 @@ ui:
                 nl: Geldigheid
               fields:
                 - validity
-                - begindatum
-                - einddatum
+                - startDate
+                - endDate
             - title:
                 en: Expression
                 nl: Expressie

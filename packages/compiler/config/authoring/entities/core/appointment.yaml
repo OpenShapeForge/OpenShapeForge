@@ -107,7 +107,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: AFSPRAAKSTATUS
+        referentieGroep: APPOINTMENTSTATUS
         clearable: false
   - key: location
     valueType: string

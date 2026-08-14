@@ -1195,7 +1195,7 @@ groepen:
         label: { nl: Buurt, en: Neighborhood }
       - value: place
         label: { nl: Woonplaats, en: Place }
-  AFSPRAAKSTATUS:
+  APPOINTMENTSTATUS:
     description: Lifecycle status of an Appointment.
     items:
       - value: requested
@@ -1334,7 +1334,7 @@ groepen:
         label: { nl: Afgesloten, en: Closed }
       - value: cancelled
         label: { nl: Geannuleerd, en: Cancelled }
-  COMMUNICATIERICHTING:
+  COMMUNICATIONDIRECTION:
     description: Direction of a communication or contact moment.
     items:
       - value: inbound
@@ -1404,7 +1404,7 @@ groepen:
         label: { nl: In afsluiting, en: Closing }
       - value: closed
         label: { nl: Gesloten, en: Closed }
-  GESLACHT:
+  GENDER:
     description: Gender of a natural person.
     items:
       - value: female
@@ -1586,7 +1586,7 @@ groepen:
         label: { nl: Gesloten, en: Closed }
       - value: cancelled
         label: { nl: Geannuleerd, en: Cancelled }
-  ORGANISATIEVORM:
+  LEGALFORM:
     description: Legal form of a legal entity.
     items:
       - value: bv
@@ -1790,7 +1790,7 @@ groepen:
         label: { nl: Verlopen, en: Expired }
       - value: cancelled
         label: { nl: Geannuleerd, en: Cancelled }
-  RELATIEADRESSOORT:
+  ADDRESSTYPE:
     description: Type of address held against a relation.
     items:
       - value: home
@@ -1803,7 +1803,7 @@ groepen:
         label: { nl: Factuuradres, en: Billing }
       - value: other
         label: { nl: Overig, en: Other }
-  RELATIEROLSOORT:
+  RELATIONROLETYPE:
     description: Type of role a relation holds.
     items:
       - value: customer

@@ -148,7 +148,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: GESLACHT
+        referentieGroep: GENDER
         clearable: true
   - key: salutation
     valueType: string

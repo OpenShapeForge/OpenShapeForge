@@ -45,7 +45,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: RELATIEROLSOORT
+        referentieGroep: RELATIONROLETYPE
         clearable: false
   - key: name
     valueType: string

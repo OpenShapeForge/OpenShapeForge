@@ -3134,7 +3134,7 @@
       }
     }
   ],
-  "AFSPRAAKSTATUS": [
+  "APPOINTMENTSTATUS": [
     {
       "value": "requested",
       "label": {
@@ -3527,7 +3527,7 @@
       }
     }
   ],
-  "COMMUNICATIERICHTING": [
+  "COMMUNICATIONDIRECTION": [
     {
       "value": "inbound",
       "label": {
@@ -3721,7 +3721,7 @@
       }
     }
   ],
-  "GESLACHT": [
+  "GENDER": [
     {
       "value": "female",
       "label": {
@@ -4239,7 +4239,7 @@
       }
     }
   ],
-  "ORGANISATIEVORM": [
+  "LEGALFORM": [
     {
       "value": "bv",
       "label": {
@@ -4834,7 +4834,7 @@
       }
     }
   ],
-  "RELATIEADRESSOORT": [
+  "ADDRESSTYPE": [
     {
       "value": "home",
       "label": {
@@ -4871,7 +4871,7 @@
       }
     }
   ],
-  "RELATIEROLSOORT": [
+  "RELATIONROLETYPE": [
     {
       "value": "customer",
       "label": {

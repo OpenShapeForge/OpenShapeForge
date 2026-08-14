@@ -101,7 +101,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: ORGANISATIEVORM
+        referentieGroep: LEGALFORM
         clearable: true
 relationships:
   - key: relation

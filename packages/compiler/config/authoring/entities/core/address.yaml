@@ -45,7 +45,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: RELATIEADRESSOORT
+        referentieGroep: ADDRESSTYPE
         clearable: false
   - key: street
     valueType: string

@@ -99,7 +99,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: COMMUNICATIERICHTING
+        referentieGroep: COMMUNICATIONDIRECTION
         clearable: true
   - key: subject
     valueType: string

@@ -9,6 +9,11 @@
  *     - packages/compiler/config/authoring        # base
  *     - authoring/overlays/my-overlay             # overlay (optional, many)
  *
+ * A deployment appends its own in `authoring.config.local.yaml`, git-ignored
+ * and append-only, so an extension that lives in another repository can be
+ * mounted without this one declaring it. See
+ * AUTHORING_LOCAL_CONFIG_FILENAME below.
+ *
  * Layers are applied in order. An overlay may:
  *   - add new files anywhere (entities, contexts, mappings, views, catalogs)
  *   - patch an entity from an earlier layer by shipping a file with the SAME
@@ -54,29 +59,104 @@ export type AuthoringConfig = {
 };
 
 export const AUTHORING_CONFIG_FILENAME = "authoring.config.yaml";
+/**
+ * Deployment-local addendum to the committed config, git-ignored.
+ *
+ * It exists so a deployment can mount an authoring extension that this
+ * repository must never name. Sector standards are the case in point: they
+ * ship as their own repository or package, contribute their own reference
+ * data and entity patches, and are added HERE rather than to the committed
+ * layer list — which would put the extension back into core by reference.
+ *
+ * It can only APPEND. Nothing in it can remove, reorder or replace a
+ * committed layer or plugin: a local file that could drop the base layer
+ * would turn "my machine builds something different" into a silent state
+ * rather than an additive one. Extensions belong last regardless, since a
+ * later layer is the one that gets to patch earlier ones.
+ */
+export const AUTHORING_LOCAL_CONFIG_FILENAME = "authoring.config.local.yaml";
 const DEFAULT_LAYER = "packages/compiler/config/authoring";
 const BUILD_DIR = ".authoring-build";
 
-export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
-  const configPath = join(repoRoot, AUTHORING_CONFIG_FILENAME);
-  if (!existsSync(configPath)) {
-    return { layers: [DEFAULT_LAYER] };
-  }
-  const parsed = YAML.parse(readFileSync(configPath, "utf8")) as {
+function readConfigFile(
+  path: string,
+  filename: string,
+  { requireLayers }: { requireLayers: boolean },
+): { layers: string[]; plugins: string[] } {
+  const parsed = YAML.parse(readFileSync(path, "utf8")) as {
     layers?: unknown;
     plugins?: unknown;
   } | null;
-  const layers = parsed?.layers;
-  if (!Array.isArray(layers) || layers.length === 0 || layers.some((l) => typeof l !== "string")) {
+  const layers = parsed?.layers ?? (requireLayers ? undefined : []);
+  const invalidLayers =
+    !Array.isArray(layers) ||
+    (requireLayers && layers.length === 0) ||
+    layers.some((entry) => typeof entry !== "string");
+  if (invalidLayers) {
     throw new Error(
-      `${AUTHORING_CONFIG_FILENAME} must declare a non-empty string array "layers".`,
+      requireLayers
+        ? `${filename} must declare a non-empty string array "layers".`
+        : `${filename} "layers" must be a string array.`,
     );
   }
   const plugins = parsed?.plugins ?? [];
   if (!Array.isArray(plugins) || plugins.some((entry) => typeof entry !== "string")) {
-    throw new Error(`${AUTHORING_CONFIG_FILENAME} "plugins" must be a string array.`);
+    throw new Error(`${filename} "plugins" must be a string array.`);
   }
   return { layers: layers as string[], plugins: plugins as string[] };
+}
+
+export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
+  const configPath = join(repoRoot, AUTHORING_CONFIG_FILENAME);
+  const base = existsSync(configPath)
+    ? readConfigFile(configPath, AUTHORING_CONFIG_FILENAME, { requireLayers: true })
+    : { layers: [DEFAULT_LAYER], plugins: [] };
+
+  const localPath = join(repoRoot, AUTHORING_LOCAL_CONFIG_FILENAME);
+  if (!existsSync(localPath)) {
+    return { layers: base.layers, plugins: base.plugins };
+  }
+  const local = readConfigFile(localPath, AUTHORING_LOCAL_CONFIG_FILENAME, {
+    requireLayers: false,
+  });
+
+  // A duplicate is refused rather than de-duplicated. Appending a layer that
+  // is already committed would move it to the end of the order, silently
+  // changing which layer patches which — the opposite of what someone adding
+  // an extension is asking for.
+  for (const [kind, committed, added] of [
+    ["layer", base.layers, local.layers],
+    ["plugin", base.plugins, local.plugins],
+  ] as const) {
+    const duplicate = added.find((entry) => committed.includes(entry));
+    if (duplicate) {
+      throw new Error(
+        `${AUTHORING_LOCAL_CONFIG_FILENAME} re-declares the ${kind} "${duplicate}", which ` +
+          `${AUTHORING_CONFIG_FILENAME} already declares. The local file only appends; ` +
+          `remove the duplicate rather than restating it.`,
+      );
+    }
+  }
+
+  if (local.layers.length > 0 || local.plugins.length > 0) {
+    // Generated artifacts are committed and gate-checked, so a build carrying
+    // extra layers must not look like an ordinary one. CI never has this file;
+    // a developer who does needs to know before `bun run generate` writes an
+    // artifact set nobody else can reproduce.
+    const added = [
+      ...local.layers.map((entry) => `layer ${entry}`),
+      ...local.plugins.map((entry) => `plugin ${entry}`),
+    ].join(", ");
+    console.warn(
+      `[authoring] ${AUTHORING_LOCAL_CONFIG_FILENAME} is active: ${added}. ` +
+        `Generated artifacts will include it — do not commit them.`,
+    );
+  }
+
+  return {
+    layers: [...base.layers, ...local.layers],
+    plugins: [...base.plugins, ...local.plugins],
+  };
 }
 
 /**

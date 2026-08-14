@@ -30,6 +30,40 @@ plugins:
   (That is why this repo, with one configured layer, still materializes
   `.authoring-build/` — the workflow plugin's layer makes it two.)
 
+## `authoring.config.local.yaml` — deployment-local extensions
+
+Git-ignored, same shape, **append-only**. It exists so a deployment can mount
+an authoring extension that this repository must not declare.
+
+That distinction is the point. A sector data standard — VERA, say — belongs in
+its own repository: it ships its own reference-data groups, its own
+`entityPatch` files repointing core fields at them, and `enumMap` transforms
+translating between its codes and core's. Adding it to the committed
+`authoring.config.yaml` would put the extension back into core by reference,
+which is exactly what keeping it out of the tree was meant to avoid. So it goes
+here instead:
+
+```yaml
+# authoring.config.local.yaml — not committed
+layers:
+  - /opt/openshapeforge-vera/authoring     # or a bare package specifier
+plugins:
+  - /opt/openshapeforge-vera/index.ts
+```
+
+- Entries are **appended** after everything in `authoring.config.yaml`, which
+  is also where an extension wants to be: a later layer is the one that gets to
+  patch earlier ones.
+- It cannot remove, reorder or replace a committed layer or plugin.
+  Re-declaring one is an error rather than a silent reordering — moving a
+  committed layer to the end would change which layer patches which.
+- `layers` may be omitted (plugins only), but a malformed file is an error
+  rather than an ignored file.
+- While it is active, every compiler entry point warns. Generated artifacts are
+  committed and gate-checked, so a build carrying extra layers must not look
+  like an ordinary one — **do not commit artifacts generated with it in place.**
+  CI never has this file, so committed artifacts stay canonical.
+
 ## Layer ordering and resolution
 
 Layers are applied strictly in order; later layers see (and may patch) what

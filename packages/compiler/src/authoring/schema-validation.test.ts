@@ -282,3 +282,83 @@ describe("schema and compiler agree", () => {
     });
   }
 });
+
+/**
+ * Both properties below are supported end to end by the compiler and were
+ * missing from the schemas, so authoring either one failed the gate. Neither
+ * was in use by any YAML in this repo, which is exactly why: an unused
+ * property cannot drift visibly. These tests are the standing check, so the
+ * next stretch where nothing authors them does not quietly re-open the gap.
+ */
+describe("coreEntity properties the compiler implements", () => {
+  function coreEntity(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      schemaVersion: 1,
+      kind: "coreEntity",
+      module: "core",
+      entity: "BillingRun",
+      title: "Billing run",
+      language: "en",
+      fields: [{ key: "idempotencyKey", valueType: "string" }],
+      ...overrides,
+    };
+  }
+
+  it("accepts entity-level indexes", () => {
+    // backend-manifest.ts resolves these field keys to columns and emits
+    // CREATE [UNIQUE] INDEX; the schema used to reject the block outright.
+    const document = coreEntity({
+      indexes: [
+        {
+          name: "billing_runs_tenant_idempotency_uidx",
+          fields: ["tenantId", "idempotencyKey"],
+          unique: true,
+        },
+        { name: "billing_runs_tenant_started_idx", fields: ["tenantId", "startedAt"] },
+      ],
+    });
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+  });
+
+  it("rejects an index that names no fields", () => {
+    const document = coreEntity({ indexes: [{ name: "billing_runs_idx", fields: [] }] });
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/indexes\/0\/fields/);
+  });
+
+  it("rejects an index name that is not snake_case", () => {
+    // The name is persisted verbatim as the SQL index name.
+    const document = coreEntity({
+      indexes: [{ name: "BillingRunsIdx", fields: ["tenantId"] }],
+    });
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/indexes\/0\/name/);
+  });
+
+  it("accepts a field's variable suggestions", () => {
+    // generators/pages.ts mirrors this onto the generated page field.
+    const document = coreEntity({
+      fields: [
+        { key: "entityType", valueType: "string" },
+        {
+          key: "descriptionTemplate",
+          valueType: "string",
+          variables: "template",
+          suggestions: { sourceField: "entityType" },
+        },
+      ],
+    });
+    expect(validator.validate(document, "label-rule.yaml")).toBe("core-entity.schema.json");
+  });
+
+  it("rejects an unknown key inside suggestions", () => {
+    const document = coreEntity({
+      fields: [
+        {
+          key: "descriptionTemplate",
+          valueType: "string",
+          suggestions: { sourceEntity: "LabelRule" },
+        },
+      ],
+    });
+    expect(() => validator.validate(document, "label-rule.yaml")).toThrow(/suggestions/);
+  });
+});

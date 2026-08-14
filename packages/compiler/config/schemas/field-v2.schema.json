@@ -165,6 +165,24 @@
         },
         "cardinality": { "$ref": "#/$defs/cardinality" },
         "variables": { "type": "string", "enum": ["none", "whole", "template", "both"], "default": "none" },
+        "suggestions": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "description": "Where the variable suggestions offered for this field come from. Mirrored onto the generated page field so the renderer can offer the right list; pairs with `variables`.",
+          "properties": {
+            "sourceField": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Key of a sibling field whose value determines the available suggestions."
+            },
+            "sourceKey": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Fixed suggestion-source key, when the list does not depend on a sibling field."
+            }
+          }
+        },
         "sortable": { "type": "boolean" },
         "required": { "type": "boolean" },
         "readOnly": {

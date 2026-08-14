@@ -1,0 +1,322 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Process
+title: Case Step Container
+description: Technical container for runtime case steps. Kept on the existing process table until the runtime tables are renamed.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Case Step Container
+  nl: Zaakstapcontainer
+domains:
+  - cases
+  - records
+  - workflow
+authorization:
+  roles:
+    read:
+      - Zaken.All.Read
+      - Zaken.All.ReadWrite
+    create:
+      - Zaken.All.ReadWrite
+    update:
+      - Zaken.All.ReadWrite
+    delete:
+      - Zaken.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    validation:
+      maxLength: 4000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+  - key: processType
+    valueType: string
+    required: true
+    label:
+      en: Process type
+      nl: Procestype
+    persisted:
+      column: process_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PROCESSTYPE
+        clearable: false
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PROCESSSTATUS
+        clearable: false
+  - key: phase
+    valueType: string
+    required: false
+    label:
+      en: Phase
+      nl: Fase
+    validation:
+      maxLength: 100
+    persisted:
+      column: phase
+      storageClass: core
+  - key: currentStepKey
+    valueType: string
+    required: false
+    label:
+      en: Current step key
+      nl: Huidige stapsleutel
+    validation:
+      maxLength: 100
+    persisted:
+      column: current_step_key
+      storageClass: core
+  - key: currentStepLabel
+    valueType: string
+    required: false
+    label:
+      en: Current step label
+      nl: Huidige staplabel
+    validation:
+      maxLength: 200
+    persisted:
+      column: current_step_label
+      storageClass: core
+  - key: workflowTemplate
+    valueType: string
+    required: false
+    label:
+      en: Workflow template
+      nl: Workflowtemplate
+    validation:
+      maxLength: 200
+    persisted:
+      column: workflow_template
+      storageClass: core
+  - key: workflowInstanceRef
+    valueType: string
+    required: false
+    label:
+      en: Workflow instance reference
+      nl: Workflow-instance referentie
+    validation:
+      maxLength: 200
+    persisted:
+      column: workflow_instance_ref
+      storageClass: core
+  - key: priority
+    valueType: string
+    required: false
+    label:
+      en: Priority
+      nl: Prioriteit
+    persisted:
+      column: priority
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEPRIORITY
+        clearable: true
+  - key: startedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Started at
+      nl: Gestart op
+    persisted:
+      column: started_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: dueAt
+    valueType: datetime
+    required: false
+    label:
+      en: Due at
+      nl: Uiterlijk op
+    persisted:
+      column: due_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: completedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Completed at
+      nl: Afgerond op
+    persisted:
+      column: completed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: completedByAccountId
+    valueType: string
+    required: false
+    semanticType: accountId
+    label:
+      en: Completed by
+      nl: Afgerond door
+    description:
+      en: Account that manually completed this case step container.
+      nl: Account dat deze zaakstapcontainer handmatig heeft afgerond.
+    validation:
+      format: uuid
+    persisted:
+      column: completed_by_account_id
+      storageClass: core
+  - key: completionApprovalComment
+    valueType: string
+    required: false
+    label:
+      en: Completion approval comment
+      nl: Afrondingsgoedkeuringsopmerking
+    validation:
+      maxLength: 2000
+    persisted:
+      column: completion_approval_comment
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 2000
+  - key: cancelledAt
+    valueType: datetime
+    required: false
+    label:
+      en: Cancelled at
+      nl: Geannuleerd op
+    persisted:
+      column: cancelled_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: note
+    valueType: string
+    required: false
+    label:
+      en: Note
+      nl: Notitie
+    validation:
+      maxLength: 4000
+    persisted:
+      column: note
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+relationships:
+  - key: template
+    kind: belongsTo
+    target: CaseTemplate
+    foreignKey: case_template_id
+    label:
+      en: Template
+      nl: Sjabloon
+  - key: case
+    kind: belongsTo
+    target: Case
+    foreignKey: case_id
+    label:
+      en: Case
+      nl: Zaak
+  - key: dossier
+    kind: belongsTo
+    target: Dossier
+    foreignKey: dossier_id
+    label:
+      en: Dossier
+      nl: Dossier
+  - key: owner
+    kind: belongsTo
+    target: Account
+    foreignKey: owner_account_id
+    label:
+      en: Owner
+      nl: Proceseigenaar
+  - key: parentProcess
+    kind: belongsTo
+    target: Process
+    foreignKey: parent_process_id
+    label:
+      en: Parent process
+      nl: Hoofdproces
+  - key: childProcesses
+    kind: hasMany
+    target: Process
+    foreignKey: parent_process_id
+    label:
+      en: Child processes
+      nl: Deelprocessen
+  - key: steps
+    kind: hasMany
+    target: ProcessStep
+    foreignKey: process_id
+    label:
+      en: Process steps
+      nl: Processtappen
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+      wait: true

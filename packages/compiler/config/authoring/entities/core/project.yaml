@@ -1,0 +1,334 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Project
+title: Project
+description: Project — top-level container for project-development work, with phases, tasks, roles, budget, and orders.
+language: en
+displayTemplate: "{{code}} {{name}}"
+filterField: code
+labels:
+  en: Project
+  nl: Project
+domains:
+  - project
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique short code identifying the project.
+      nl: Tenant-unieke korte code die het project identificeert.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the project.
+      nl: Menselijk leesbare naam van het project.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-form description of the project.
+      nl: Vrije omschrijving van het project.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 5000
+  - key: status
+    valueType: string
+    required: false
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Current project status (mirrors the active phase status).
+      nl: Huidige projectstatus (spiegelt de status van de actieve fase).
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PROJECTPHASESTATUS
+        clearable: true
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Planned or actual start date of the project.
+      nl: Geplande of werkelijke startdatum van het project.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Planned or actual end date of the project.
+      nl: Geplande of werkelijke einddatum van het project.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: currencyCode
+    valueType: string
+    required: true
+    label:
+      en: Currency
+      nl: Valuta
+    description:
+      en: ISO 4217 currency code for the project amounts.
+      nl: ISO 4217 valutacode voor de bedragen op het project.
+    defaultValue: EUR
+    validation:
+      minLength: 3
+      maxLength: 3
+    persisted:
+      column: currency_code
+      storageClass: core
+  - key: budgetTotal
+    valueType: number
+    required: false
+    label:
+      en: Budget total
+      nl: Totaalbudget
+    description:
+      en: Total budgeted amount for the project.
+      nl: Totaal begroot bedrag voor het project.
+    semanticType: currency
+    persisted:
+      column: budget_total
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the project in an external context.
+      nl: Functionele of zakelijke code van het project in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: parentProject
+    kind: belongsTo
+    target: Project
+    foreignKey: parent_project_id
+    label:
+      en: Parent project
+      nl: Bovenliggend project
+  - key: costDimension
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: cost_dimension_id
+    label:
+      en: Cost dimension
+      nl: Kostendimensie
+ui:
+  routes:
+    list:
+      en: /projects
+      nl: /projecten
+    detail:
+      en: /projects/:id
+      nl: /projecten/:id
+    create:
+      en: /projects/create
+      nl: /projecten/aanmaken
+    edit:
+      en: /projects/:id/edit
+      nl: /projecten/:id/bewerken
+    delete:
+      en: /projects/:id/delete
+      nl: /projecten/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Projects
+        nl: Projecten
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+        - key: status
+          sortable: true
+        - key: startDate
+          sortable: true
+        - key: endDate
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /projects/:id
+        nl: /projecten/:id
+    detail:
+      header:
+        title: "{{name}}"
+        subtitle: "{{code}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Project details
+                nl: Projectgegevens
+              fields:
+                - code
+                - name
+                - status
+            - title:
+                en: Period
+                nl: Periode
+              fields:
+                - startDate
+                - endDate
+            - title:
+                en: Budget
+                nl: Budget
+              fields:
+                - currencyCode
+                - budgetTotal
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create project
+            nl: Project aanmaken
+          groups:
+            - title:
+                en: Project details
+                nl: Projectgegevens
+              fields:
+                - code
+                - name
+                - status
+            - title:
+                en: Period
+                nl: Periode
+              fields:
+                - startDate
+                - endDate
+            - title:
+                en: Budget
+                nl: Budget
+              fields:
+                - currencyCode
+                - budgetTotal
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit project
+            nl: Project bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Projectontwikkeling.All.Read
+      - Projectontwikkeling.All.ReadWrite
+    create:
+      - Projectontwikkeling.All.ReadWrite
+    update:
+      - Projectontwikkeling.All.ReadWrite
+    delete:
+      - Projectontwikkeling.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

@@ -1,0 +1,171 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: MonitorReading
+title: Monitor Reading
+description: Individual reading derived from a monitor measurement.
+language: en
+displayTemplate: "{{readAt}}: {{value}}"
+filterField: id
+labels:
+  en: Monitor reading
+  nl: Monitorwaarde
+domains:
+  - energy
+fields:
+  - key: readAt
+    valueType: datetime
+    required: true
+    label:
+      en: Read at
+      nl: Gelezen op
+    description:
+      en: Timestamp when the reading was taken.
+      nl: Tijdstip waarop de waarde is gelezen.
+    persisted:
+      column: read_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: value
+    valueType: number
+    required: true
+    label:
+      en: Value
+      nl: Waarde
+    description:
+      en: Read value.
+      nl: Gelezen waarde.
+    persisted:
+      column: value
+      storageClass: core
+  - key: unitId
+    valueType: string
+    required: false
+    label:
+      en: Unit
+      nl: Eenheid
+    description:
+      en: Free-form unit identifier (e.g. "kWh", "m3").
+      nl: Vrije eenheidsaanduiding (bv. "kWh", "m3").
+    validation:
+      maxLength: 50
+    persisted:
+      column: unit_id
+      storageClass: core
+relationships:
+  - key: monitorMeasurement
+    kind: belongsTo
+    target: MonitorMeasurement
+    foreignKey: monitor_measurement_id
+    label:
+      en: Monitor measurement
+      nl: Monitormeting
+ui:
+  routes:
+    list:
+      en: /monitor-readings
+      nl: /monitorwaarden
+    detail:
+      en: /monitor-readings/:id
+      nl: /monitorwaarden/:id
+    create:
+      en: /monitor-readings/create
+      nl: /monitorwaarden/aanmaken
+    edit:
+      en: /monitor-readings/:id/edit
+      nl: /monitorwaarden/:id/bewerken
+    delete:
+      en: /monitor-readings/:id/delete
+      nl: /monitorwaarden/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Monitor readings
+        nl: Monitorwaarden
+      columns:
+        - key: readAt
+          sortable: true
+        - key: value
+          sortable: true
+        - key: unitId
+          sortable: true
+      defaultSort:
+        key: readAt
+        direction: desc
+      rowLink:
+        en: /monitor-readings/:id
+        nl: /monitorwaarden/:id
+    detail:
+      header:
+        title: "{{readAt}}"
+        subtitle: "{{value}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Reading details
+                nl: Waardegegevens
+              fields:
+                - readAt
+                - value
+                - unitId
+    form:
+      variants:
+        create:
+          title:
+            en: Create monitor reading
+            nl: Monitorwaarde aanmaken
+          groups:
+            - title:
+                en: Reading details
+                nl: Waardegegevens
+              fields:
+                - readAt
+                - value
+                - unitId
+        edit:
+          extends: create
+          title:
+            en: Edit monitor reading
+            nl: Monitorwaarde bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Energie.All.Read
+      - Energie.All.ReadWrite
+    create:
+      - Energie.All.ReadWrite
+    update:
+      - Energie.All.ReadWrite
+    delete:
+      - Energie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

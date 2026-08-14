@@ -1,0 +1,301 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Encumbrance
+title: Encumbrance
+description: Generic encumbrance on an asset (mortgage, lien, easement, pledge), held by a relation.
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: Encumbrance
+  nl: Zekerheid
+domains:
+  - asset
+fields:
+  - key: encumbranceKind
+    valueType: string
+    required: true
+    label:
+      en: Encumbrance kind
+      nl: Soort zekerheid
+    description:
+      en: Kind of encumbrance (mortgage, lien, easement, pledge, other).
+      nl: Soort zekerheid (hypotheek, beslag, erfdienstbaarheid, pandrecht, anders).
+    persisted:
+      column: encumbrance_kind
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: ENCUMBRANCEKIND
+        clearable: false
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique encumbrance code.
+      nl: Tenant-unieke code van de zekerheid.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-form description of the encumbrance.
+      nl: Vrije omschrijving van de zekerheid.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 5000
+  - key: amount
+    valueType: number
+    required: false
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Optional principal amount associated with the encumbrance.
+      nl: Optioneel hoofdbedrag dat aan de zekerheid is verbonden.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+  - key: currencyCode
+    valueType: string
+    required: true
+    label:
+      en: Currency
+      nl: Valuta
+    description:
+      en: ISO 4217 currency code in which the encumbrance amount is expressed.
+      nl: ISO 4217 valutacode waarin het bedrag van de zekerheid is uitgedrukt.
+    defaultValue: EUR
+    validation:
+      minLength: 3
+      maxLength: 3
+    persisted:
+      column: currency_code
+      storageClass: core
+  - key: validFrom
+    valueType: date
+    required: true
+    label:
+      en: Valid from
+      nl: Geldig vanaf
+    description:
+      en: Date from which the encumbrance is effective.
+      nl: Datum vanaf wanneer de zekerheid geldig is.
+    persisted:
+      column: valid_from
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: validTo
+    valueType: date
+    required: false
+    label:
+      en: Valid to
+      nl: Geldig tot
+    description:
+      en: Date until which the encumbrance is effective.
+      nl: Datum tot wanneer de zekerheid geldig is.
+    persisted:
+      column: valid_to
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the encumbrance in an external context.
+      nl: Functionele of zakelijke code van de zekerheid in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: asset
+    kind: belongsTo
+    target: Asset
+    foreignKey: asset_id
+    label:
+      en: Asset
+      nl: Object
+  - key: holder
+    kind: belongsTo
+    target: Relation
+    foreignKey: holder_relation_id
+    label:
+      en: Holder
+      nl: Houder
+ui:
+  routes:
+    list:
+      en: /encumbrances
+      nl: /zekerheden
+    detail:
+      en: /encumbrances/:id
+      nl: /zekerheden/:id
+    create:
+      en: /encumbrances/create
+      nl: /zekerheden/aanmaken
+    edit:
+      en: /encumbrances/:id/edit
+      nl: /zekerheden/:id/bewerken
+    delete:
+      en: /encumbrances/:id/delete
+      nl: /zekerheden/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Encumbrances
+        nl: Zekerheden
+      columns:
+        - key: code
+          sortable: true
+        - key: encumbranceKind
+          sortable: true
+        - key: amount
+          sortable: true
+        - key: validFrom
+          sortable: true
+        - key: validTo
+          sortable: true
+      defaultSort:
+        key: validFrom
+        direction: desc
+      rowLink:
+        en: /encumbrances/:id
+        nl: /zekerheden/:id
+    detail:
+      header:
+        title: "{{code}}"
+        subtitle: "{{encumbranceKind}}"
+        badges:
+          - encumbranceKind
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Encumbrance details
+                nl: Zekerheidgegevens
+              fields:
+                - code
+                - encumbranceKind
+                - amount
+                - currencyCode
+                - validFrom
+                - validTo
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create encumbrance
+            nl: Zekerheid aanmaken
+          groups:
+            - title:
+                en: Encumbrance details
+                nl: Zekerheidgegevens
+              fields:
+                - code
+                - encumbranceKind
+                - amount
+                - currencyCode
+                - validFrom
+                - validTo
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit encumbrance
+            nl: Zekerheid bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Vastgoed.All.Read
+      - Vastgoed.All.ReadWrite
+    create:
+      - Vastgoed.All.ReadWrite
+    update:
+      - Vastgoed.All.ReadWrite
+    delete:
+      - Vastgoed.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

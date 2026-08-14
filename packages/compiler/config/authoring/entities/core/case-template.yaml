@@ -1,0 +1,240 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: CaseTemplate
+title: Case Template
+description: A reusable case template that defines the expected case steps, roles, variables, and structure. Functional administrators author templates; the system instantiates them when a case is started.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Case Template
+  nl: Zaaksjabloon
+domains:
+  - cases
+  - workflow
+authorization:
+  roles:
+    read:
+      - Zaken.All.Read
+      - Zaken.All.ReadWrite
+    create:
+      - Organisatie.All.ReadWrite
+    update:
+      - Organisatie.All.ReadWrite
+    delete:
+      - Organisatie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: caseType
+    valueType: string
+    required: true
+    label:
+      en: Case type
+      nl: Zaaktype
+    persisted:
+      column: case_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASETYPE
+        clearable: false
+  - key: version
+    valueType: integer
+    required: true
+    label:
+      en: Version
+      nl: Versie
+    defaultValue: 1
+    persisted:
+      column: version
+      storageClass: core
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASETEMPLATESTATUS
+        clearable: false
+  - key: isDefault
+    valueType: boolean
+    required: true
+    label:
+      en: Default for case type
+      nl: Standaard voor zaaktype
+    description:
+      en: When true this template is auto-selected when a case of this type is created
+      nl: Indien waar wordt dit sjabloon automatisch geselecteerd bij het aanmaken van een zaak van dit type
+    defaultValue: false
+    persisted:
+      column: is_default
+      storageClass: core
+  - key: allowAdHocSteps
+    valueType: boolean
+    required: true
+    label:
+      en: Allow ad-hoc steps
+      nl: Ad-hoc stappen toestaan
+    description:
+      en: Whether case workers may add steps that are not part of the template
+      nl: Of medewerkers stappen mogen toevoegen die niet in het sjabloon staan
+    defaultValue: true
+    persisted:
+      column: allow_ad_hoc_steps
+      storageClass: core
+  - key: estimatedDurationHours
+    valueType: integer
+    required: false
+    label:
+      en: Estimated duration (hours)
+      nl: Geschatte doorlooptijd (uren)
+    description:
+      en: Expected total case duration in hours
+      nl: Verwachte totale zaakdoorlooptijd in uren
+    persisted:
+      column: estimated_duration_hours
+      storageClass: core
+  - key: defaultWorkQueueId
+    valueType: string
+    required: false
+    semanticType: workQueueId
+    label:
+      en: Default work queue
+      nl: Standaard werkqueue
+    description:
+      en: Default triage queue for cases created from this template. Step templates can override this queue.
+      nl: Standaard triagequeue voor zaken die vanuit dit sjabloon worden gemaakt. Stapdefinities kunnen deze queue overschrijven.
+    validation:
+      format: uuid
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/core-entity-options?entity=work-queue
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: selectId
+    persisted:
+      column: default_work_queue_id
+      storageClass: core
+  - key: completionApprovalGroupId
+    valueType: string
+    required: false
+    semanticType: relationGroupId
+    label:
+      en: Completion approval group
+      nl: Afrondingsgoedkeuringsgroep
+    description:
+      en: Relation group whose members may manually complete case steps that require approval.
+      nl: Relatiegroep waarvan leden zaakstappen met handmatige goedkeuring mogen afronden.
+    validation:
+      format: uuid
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/core-entity-options?entity=relation-group
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: selectId
+        clearable: true
+    persisted:
+      column: completion_approval_group_id
+      storageClass: core
+  - key: fieldDefinitions
+    valueType: object
+    label:
+      en: Case variables
+      nl: Zaakvariabelen
+    description:
+      en: Field definitions that become the variable contract for cases created from this definition.
+      nl: Velddefinities die het variabelencontract vormen voor zaken die vanuit deze definitie worden gestart.
+    persisted:
+      column: field_definitions
+      storageClass: core
+    layoutFraction: 1
+    cardinality:
+      min: 0
+      max: "unbounded"
+    semanticType: fieldDefinition
+    authoring:
+      profile: workflowInputField
+relationships:
+  - key: steps
+    kind: hasMany
+    target: CaseStepTemplate
+    foreignKey: case_template_id
+    label:
+      en: Case step templates
+      nl: Zaakstapsjablonen
+  - key: defaultWorkQueue
+    kind: belongsTo
+    target: WorkQueue
+    foreignKey: default_work_queue_id
+    label:
+      en: Default work queue
+      nl: Standaard werkqueue
+  - key: completionApprovalGroup
+    kind: belongsTo
+    target: RelationGroup
+    foreignKey: completion_approval_group_id
+    label:
+      en: Completion approval group
+      nl: Afrondingsgoedkeuringsgroep
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+      wait: true

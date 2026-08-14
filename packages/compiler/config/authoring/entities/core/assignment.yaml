@@ -1,0 +1,155 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Assignment
+title: Assignment
+description: A queue or user assignment history record for a case.
+language: en
+displayTemplate: "{{reason}}"
+filterField: reason
+labels:
+  en: Assignment
+  nl: Toewijzing
+domains:
+  - cases
+  - service
+authorization:
+  roles:
+    read:
+      - Zaken.All.Read
+      - Zaken.All.ReadWrite
+    create:
+      - Zaken.All.ReadWrite
+    update:
+      - Zaken.All.ReadWrite
+    delete:
+      - Zaken.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: ASSIGNMENTSTATUS
+        clearable: false
+  - key: assignedAt
+    valueType: datetime
+    required: true
+    label:
+      en: Assigned at
+      nl: Toegewezen op
+    persisted:
+      column: assigned_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: acceptedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Accepted at
+      nl: Geaccepteerd op
+    persisted:
+      column: accepted_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: releasedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Released at
+      nl: Vrijgegeven op
+    persisted:
+      column: released_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: reason
+    valueType: string
+    required: false
+    label:
+      en: Reason
+      nl: Reden
+    validation:
+      maxLength: 500
+    persisted:
+      column: reason
+      storageClass: core
+  - key: skillProfile
+    valueType: string
+    required: false
+    label:
+      en: Skill profile
+      nl: Skillprofiel
+    validation:
+      maxLength: 200
+    persisted:
+      column: skill_profile
+      storageClass: core
+  - key: note
+    valueType: string
+    required: false
+    label:
+      en: Note
+      nl: Notitie
+    validation:
+      maxLength: 2000
+    persisted:
+      column: note
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 2000
+relationships:
+  - key: case
+    kind: belongsTo
+    target: Case
+    foreignKey: case_id
+    label:
+      en: Case
+      nl: Zaak
+  - key: queue
+    kind: belongsTo
+    target: WorkQueue
+    foreignKey: work_queue_id
+    label:
+      en: Queue
+      nl: Queue
+  - key: assignee
+    kind: belongsTo
+    target: Account
+    foreignKey: assignee_account_id
+    label:
+      en: Assignee
+      nl: Behandelaar
+  - key: assignedBy
+    kind: belongsTo
+    target: Account
+    foreignKey: assigned_by_account_id
+    label:
+      en: Assigned by
+      nl: Toegewezen door
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

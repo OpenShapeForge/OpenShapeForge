@@ -1,0 +1,267 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: PriceAdjustment
+title: Price Adjustment
+description: Indexation or manual price adjustment rule (e.g. CPI indexation, regulatory uplift, manual override) applied as of an effective date.
+language: en
+displayTemplate: "{{code}} {{name}}"
+filterField: code
+labels:
+  en: Price adjustment
+  nl: Prijsaanpassing
+domains:
+  - finance
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique short code identifying the price adjustment rule.
+      nl: Tenant-unieke korte code die de prijsaanpassingsregel identificeert.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the price adjustment rule.
+      nl: Menselijk leesbare naam van de prijsaanpassingsregel.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: kind
+    valueType: string
+    required: true
+    label:
+      en: Kind
+      nl: Soort
+    description:
+      en: Kind of price adjustment (CPI indexation, manual, regulatory).
+      nl: Soort prijsaanpassing (CPI-indexering, handmatig, wettelijk).
+    persisted:
+      column: kind
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PRICEADJUSTMENTKIND
+        clearable: false
+  - key: effectiveDate
+    valueType: date
+    required: true
+    label:
+      en: Effective date
+      nl: Ingangsdatum
+    description:
+      en: Date on which the price adjustment becomes effective.
+      nl: Datum waarop de prijsaanpassing van kracht wordt.
+    persisted:
+      column: effective_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: percentage
+    valueType: number
+    required: false
+    label:
+      en: Percentage
+      nl: Percentage
+    description:
+      en: Percentage uplift or reduction applied by this adjustment.
+      nl: Percentage van de verhoging of verlaging die deze aanpassing toepast.
+    persisted:
+      column: percentage
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-form description of the price adjustment rule.
+      nl: Vrije omschrijving van de prijsaanpassingsregel.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 1000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the price adjustment in an external context.
+      nl: Functionele of zakelijke code van de prijsaanpassing in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+ui:
+  routes:
+    list:
+      en: /price-adjustments
+      nl: /prijsaanpassingen
+    detail:
+      en: /price-adjustments/:id
+      nl: /prijsaanpassingen/:id
+    create:
+      en: /price-adjustments/create
+      nl: /prijsaanpassingen/aanmaken
+    edit:
+      en: /price-adjustments/:id/edit
+      nl: /prijsaanpassingen/:id/bewerken
+    delete:
+      en: /price-adjustments/:id/delete
+      nl: /prijsaanpassingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Price adjustments
+        nl: Prijsaanpassingen
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+        - key: kind
+          sortable: true
+        - key: effectiveDate
+          sortable: true
+        - key: percentage
+          sortable: true
+      defaultSort:
+        key: effectiveDate
+        direction: desc
+      rowLink:
+        en: /price-adjustments/:id
+        nl: /prijsaanpassingen/:id
+    detail:
+      header:
+        title: "{{name}}"
+        subtitle: "{{code}}"
+        badges:
+          - kind
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Adjustment details
+                nl: Aanpassingsgegevens
+              fields:
+                - code
+                - name
+                - kind
+                - effectiveDate
+                - percentage
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create price adjustment
+            nl: Prijsaanpassing aanmaken
+          groups:
+            - title:
+                en: Adjustment details
+                nl: Aanpassingsgegevens
+              fields:
+                - code
+                - name
+                - kind
+                - effectiveDate
+                - percentage
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit price adjustment
+            nl: Prijsaanpassing bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

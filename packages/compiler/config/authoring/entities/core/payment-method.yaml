@@ -1,0 +1,219 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: PaymentMethod
+title: Payment Method
+description: Catalog of payment methods (e.g. direct debit, e-mail, SMS, letter, acceptgiro).
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: Payment method
+  nl: Betaalwijze
+domains:
+  - finance
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique payment-method code (REF PAYMENTMETHODCODE).
+      nl: Tenant-unieke betaalwijzecode (REF PAYMENTMETHODCODE).
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PAYMENTMETHODCODE
+        clearable: false
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the payment method.
+      nl: Menselijk leesbare naam van de betaalwijze.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: requiresIban
+    valueType: boolean
+    label:
+      en: Requires IBAN
+      nl: IBAN vereist
+    description:
+      en: Whether using this payment method requires an IBAN to be on file.
+      nl: Of voor deze betaalwijze een IBAN beschikbaar moet zijn.
+    defaultValue: false
+    persisted:
+      column: requires_iban
+      storageClass: core
+  - key: requiresMandate
+    valueType: boolean
+    label:
+      en: Requires mandate
+      nl: Machtiging vereist
+    description:
+      en: Whether using this payment method requires a SEPA direct-debit mandate.
+      nl: Of voor deze betaalwijze een SEPA-incassomachtiging nodig is.
+    defaultValue: false
+    persisted:
+      column: requires_mandate
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the payment method in an external context.
+      nl: Functionele of zakelijke code van de betaalwijze in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+ui:
+  routes:
+    list:
+      en: /payment-methods
+      nl: /betaalwijzen
+    detail:
+      en: /payment-methods/:id
+      nl: /betaalwijzen/:id
+    create:
+      en: /payment-methods/create
+      nl: /betaalwijzen/aanmaken
+    edit:
+      en: /payment-methods/:id/edit
+      nl: /betaalwijzen/:id/bewerken
+    delete:
+      en: /payment-methods/:id/delete
+      nl: /betaalwijzen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Payment methods
+        nl: Betaalwijzen
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+        - key: requiresIban
+          sortable: true
+        - key: requiresMandate
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /payment-methods/:id
+        nl: /betaalwijzen/:id
+    detail:
+      header:
+        title: "{{name}}"
+        subtitle: "{{code}}"
+        badges:
+          - code
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Payment method details
+                nl: Betaalwijzegegevens
+              fields:
+                - code
+                - name
+                - requiresIban
+                - requiresMandate
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create payment method
+            nl: Betaalwijze aanmaken
+          groups:
+            - title:
+                en: Payment method details
+                nl: Betaalwijzegegevens
+              fields:
+                - code
+                - name
+                - requiresIban
+                - requiresMandate
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit payment method
+            nl: Betaalwijze bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

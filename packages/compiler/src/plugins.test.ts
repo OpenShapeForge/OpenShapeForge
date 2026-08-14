@@ -11,6 +11,14 @@ import type { PlatformSchemaManifest } from "./schema.js";
 
 const repoRoot = resolve(import.meta.dir, "../../..");
 
+/**
+ * Both tests below collect the whole artifact corpus TWICE, because what they
+ * assert is determinism. Against the full core catalog that is a few seconds of
+ * real compilation, over bun's 5s default — so state the budget rather than let
+ * corpus growth read as a hang.
+ */
+const FULL_CORPUS_TIMEOUT_MS = 60_000;
+
 describe("compiler plugins", () => {
   test("collectAllArtifacts runs configured plugins deterministically", async () => {
     const first = await collectAllArtifacts(repoRoot);
@@ -27,7 +35,7 @@ describe("compiler plugins", () => {
     expect(second.all.map((a) => [a.path, a.contents])).toEqual(
       first.all.map((a) => [a.path, a.contents]),
     );
-  });
+  }, FULL_CORPUS_TIMEOUT_MS);
 
   test("plugin context exposes compiled entity contracts", async () => {
     const { groups } = await collectAllArtifacts(repoRoot);
@@ -90,7 +98,7 @@ describe("compiler plugins", () => {
 
     // Its generated root is gated by the shared stale/orphan checks.
     expect(first.ownedPaths.roots).toContain("apps/api/src/generated/workflow");
-  });
+  }, FULL_CORPUS_TIMEOUT_MS);
 
   test("workflow plugin contributes the platform workflow catalog tables", async () => {
     const manifest = await loadActivePlatformManifest(repoRoot);

@@ -1,0 +1,285 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Vacancy
+title: Vacancy
+description: Open job vacancy, optionally linked to a position and an org unit, with lifecycle tracking via status and timestamps.
+language: en
+displayTemplate: "{{code}} {{title}}"
+filterField: code
+labels:
+  en: Vacancy
+  nl: Vacature
+domains:
+  - hr
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique vacancy code.
+      nl: Tenant-unieke vacaturecode.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: title
+    valueType: string
+    required: true
+    label:
+      en: Title
+      nl: Titel
+    description:
+      en: Display title of the vacancy.
+      nl: Weergavetitel van de vacature.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: title
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description of the vacancy.
+      nl: Optionele omschrijving van de vacature.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 6
+        maxLength: 5000
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the vacancy.
+      nl: Levenscyclusstatus van de vacature.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: VACANCYSTATUS
+        clearable: false
+  - key: openedAt
+    valueType: date
+    required: true
+    label:
+      en: Opened at
+      nl: Geopend op
+    description:
+      en: Date on which the vacancy was opened.
+      nl: Datum waarop de vacature is geopend.
+    persisted:
+      column: opened_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: closedAt
+    valueType: date
+    required: false
+    label:
+      en: Closed at
+      nl: Gesloten op
+    description:
+      en: Date on which the vacancy was closed.
+      nl: Datum waarop de vacature is gesloten.
+    persisted:
+      column: closed_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the vacancy in an external context.
+      nl: Functionele of zakelijke code van de vacature in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: position
+    kind: belongsTo
+    target: Position
+    foreignKey: position_id
+    label:
+      en: Position
+      nl: Functie
+  - key: orgUnit
+    kind: belongsTo
+    target: OrgUnit
+    foreignKey: org_unit_id
+    label:
+      en: Org unit
+      nl: Organisatorische eenheid
+ui:
+  routes:
+    list:
+      en: /vacancies
+      nl: /vacatures
+    detail:
+      en: /vacancies/:id
+      nl: /vacatures/:id
+    create:
+      en: /vacancies/create
+      nl: /vacatures/aanmaken
+    edit:
+      en: /vacancies/:id/edit
+      nl: /vacatures/:id/bewerken
+    delete:
+      en: /vacancies/:id/delete
+      nl: /vacatures/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Vacancies
+        nl: Vacatures
+      columns:
+        - key: code
+          sortable: true
+        - key: title
+          sortable: true
+        - key: status
+          sortable: true
+        - key: openedAt
+          sortable: true
+        - key: closedAt
+          sortable: true
+      defaultSort:
+        key: openedAt
+        direction: desc
+      rowLink:
+        en: /vacancies/:id
+        nl: /vacatures/:id
+    detail:
+      header:
+        title: "{{code}} {{title}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Vacancy details
+                nl: Vacaturegegevens
+              fields:
+                - code
+                - title
+                - status
+                - openedAt
+                - closedAt
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create vacancy
+            nl: Vacature aanmaken
+          groups:
+            - title:
+                en: Vacancy details
+                nl: Vacaturegegevens
+              fields:
+                - code
+                - title
+                - status
+                - openedAt
+                - closedAt
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit vacancy
+            nl: Vacature bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Organisatie.All.Read
+      - Organisatie.All.ReadWrite
+    create:
+      - Organisatie.All.ReadWrite
+    update:
+      - Organisatie.All.ReadWrite
+    delete:
+      - Organisatie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

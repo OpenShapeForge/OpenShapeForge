@@ -1,0 +1,286 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: BankStatementLine
+title: Bank Statement Line
+description: Single line on a bank statement representing one debit or credit movement.
+language: en
+displayTemplate: "{{counterpartyName}}: {{amount}}"
+filterField: counterpartyName
+labels:
+  en: Bank statement line
+  nl: Bankafschriftregel
+domains:
+  - finance
+fields:
+  - key: valueDate
+    valueType: date
+    required: true
+    label:
+      en: Value date
+      nl: Valutadatum
+    description:
+      en: Value date on which this movement is booked by the bank.
+      nl: Valutadatum waarop deze mutatie door de bank is geboekt.
+    persisted:
+      column: value_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: amount
+    valueType: number
+    required: true
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Amount of the movement (always positive; sign is determined by direction).
+      nl: Bedrag van de mutatie (altijd positief; teken volgt uit richting).
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+  - key: direction
+    valueType: string
+    required: true
+    label:
+      en: Direction
+      nl: Richting
+    description:
+      en: Side of the movement — debit or credit.
+      nl: Zijde van de mutatie — debet of credit.
+    persisted:
+      column: direction
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: LEDGERSIDE
+        clearable: false
+  - key: counterpartyName
+    valueType: string
+    required: false
+    label:
+      en: Counterparty name
+      nl: Naam tegenpartij
+    description:
+      en: Name of the counterparty as reported by the bank.
+      nl: Naam van de tegenpartij zoals gerapporteerd door de bank.
+    validation:
+      maxLength: 200
+    persisted:
+      column: counterparty_name
+      storageClass: core
+  - key: counterpartyIban
+    valueType: string
+    required: false
+    label:
+      en: Counterparty IBAN
+      nl: IBAN tegenpartij
+    description:
+      en: IBAN of the counterparty.
+      nl: IBAN van de tegenpartij.
+    validation:
+      maxLength: 34
+    persisted:
+      column: counterparty_iban
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-text description of the movement (typically the bank narrative).
+      nl: Vrije omschrijving van de mutatie (meestal de banktekst).
+    validation:
+      maxLength: 1000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 1000
+  - key: endToEndId
+    valueType: string
+    required: false
+    label:
+      en: End-to-end ID
+      nl: End-to-end-id
+    description:
+      en: SEPA end-to-end identifier carried by the underlying transaction (max 35 characters).
+      nl: SEPA end-to-end-identificatie van de onderliggende transactie (max 35 tekens).
+    validation:
+      maxLength: 35
+    persisted:
+      column: end_to_end_id
+      storageClass: core
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Reconciliation status of the line.
+      nl: Aflettering-status van de regel.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: BANKSTATEMENTLINESTATUS
+        clearable: false
+relationships:
+  - key: bankStatement
+    kind: belongsTo
+    target: BankStatement
+    foreignKey: bank_statement_id
+    label:
+      en: Bank statement
+      nl: Bankafschrift
+ui:
+  routes:
+    list:
+      en: /bank-statement-lines
+      nl: /bankafschriftregels
+    detail:
+      en: /bank-statement-lines/:id
+      nl: /bankafschriftregels/:id
+    create:
+      en: /bank-statement-lines/create
+      nl: /bankafschriftregels/aanmaken
+    edit:
+      en: /bank-statement-lines/:id/edit
+      nl: /bankafschriftregels/:id/bewerken
+    delete:
+      en: /bank-statement-lines/:id/delete
+      nl: /bankafschriftregels/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Bank statement lines
+        nl: Bankafschriftregels
+      columns:
+        - key: valueDate
+          sortable: true
+        - key: counterpartyName
+          sortable: true
+        - key: amount
+          sortable: true
+        - key: direction
+          sortable: true
+        - key: status
+          sortable: true
+      defaultSort:
+        key: valueDate
+        direction: desc
+      rowLink:
+        en: /bank-statement-lines/:id
+        nl: /bankafschriftregels/:id
+    detail:
+      header:
+        title: "{{counterpartyName}}: {{amount}}"
+        subtitle: "{{valueDate}}"
+        badges:
+          - direction
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Movement
+                nl: Mutatie
+              fields:
+                - valueDate
+                - amount
+                - direction
+                - status
+            - title:
+                en: Counterparty
+                nl: Tegenpartij
+              fields:
+                - counterpartyName
+                - counterpartyIban
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+                - endToEndId
+    form:
+      variants:
+        create:
+          title:
+            en: Create bank statement line
+            nl: Bankafschriftregel aanmaken
+          groups:
+            - title:
+                en: Movement
+                nl: Mutatie
+              fields:
+                - valueDate
+                - amount
+                - direction
+                - status
+            - title:
+                en: Counterparty
+                nl: Tegenpartij
+              fields:
+                - counterpartyName
+                - counterpartyIban
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+                - endToEndId
+        edit:
+          extends: create
+          title:
+            en: Edit bank statement line
+            nl: Bankafschriftregel bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

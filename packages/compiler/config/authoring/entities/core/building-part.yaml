@@ -1,0 +1,250 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: BuildingPart
+title: Building Part
+description: Structural element of a building (roof, facade, foundation). Code is unique within the parent building.
+language: en
+displayTemplate: "{{code}} {{name}}"
+filterField: code
+labels:
+  en: Building part
+  nl: Bouwdeel
+domains:
+  - asset
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Code of the building part, unique within the parent building.
+      nl: Code van het bouwdeel, uniek binnen het bovenliggende pand.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the building part.
+      nl: Menselijk leesbare naam van het bouwdeel.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-form description of the building part.
+      nl: Vrije omschrijving van het bouwdeel.
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+  - key: installedAt
+    valueType: date
+    required: false
+    label:
+      en: Installed at
+      nl: Geïnstalleerd op
+    description:
+      en: Date the building part was installed.
+      nl: Datum waarop het bouwdeel is geïnstalleerd.
+    persisted:
+      column: installed_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: replacedAt
+    valueType: date
+    required: false
+    label:
+      en: Replaced at
+      nl: Vervangen op
+    description:
+      en: Date the building part was replaced.
+      nl: Datum waarop het bouwdeel is vervangen.
+    persisted:
+      column: replaced_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the building part in an external context.
+      nl: Functionele of zakelijke code van het bouwdeel in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: building
+    kind: belongsTo
+    target: Building
+    foreignKey: building_id
+    label:
+      en: Building
+      nl: Pand
+ui:
+  routes:
+    list:
+      en: /building-parts
+      nl: /bouwdelen
+    detail:
+      en: /building-parts/:id
+      nl: /bouwdelen/:id
+    create:
+      en: /building-parts/create
+      nl: /bouwdelen/aanmaken
+    edit:
+      en: /building-parts/:id/edit
+      nl: /bouwdelen/:id/bewerken
+    delete:
+      en: /building-parts/:id/delete
+      nl: /bouwdelen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Building parts
+        nl: Bouwdelen
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+        - key: installedAt
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /building-parts/:id
+        nl: /bouwdelen/:id
+    detail:
+      header:
+        title: "{{code}} {{name}}"
+        subtitle: ""
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Building part details
+                nl: Bouwdeelgegevens
+              fields:
+                - code
+                - name
+                - installedAt
+                - replacedAt
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create building part
+            nl: Bouwdeel aanmaken
+          groups:
+            - title:
+                en: Building part details
+                nl: Bouwdeelgegevens
+              fields:
+                - code
+                - name
+                - installedAt
+                - replacedAt
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit building part
+            nl: Bouwdeel bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Vastgoed.All.Read
+      - Vastgoed.All.ReadWrite
+    create:
+      - Vastgoed.All.ReadWrite
+    update:
+      - Vastgoed.All.ReadWrite
+    delete:
+      - Vastgoed.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

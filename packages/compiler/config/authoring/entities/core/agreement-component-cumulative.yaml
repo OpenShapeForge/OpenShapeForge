@@ -1,0 +1,304 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: AgreementComponentCumulative
+title: Agreement Component Cumulative
+description: Projection — cumulative invoiced amount per agreement component, fiscal period, and source invoice. Populated by the audit/timeline service from invoice events. UIs must never write directly.
+language: en
+displayTemplate: "{{postedAt}}"
+filterField: id
+labels:
+  en: Component cumulative
+  nl: Component cumulatief
+domains:
+  - finance
+  - contracts
+fields:
+  - key: quantity
+    valueType: number
+    required: false
+    label:
+      en: Quantity
+      nl: Aantal
+    description:
+      en: Cumulative quantity invoiced for the component in the period.
+      nl: Cumulatief aantal gefactureerd voor de component in de periode.
+    persisted:
+      column: quantity
+      storageClass: core
+  - key: unitId
+    valueType: string
+    required: false
+    label:
+      en: Unit
+      nl: Eenheid
+    description:
+      en: Free-form unit identifier carried over from the component (e.g. "Day", "Hour").
+      nl: Vrije eenheidsaanduiding overgenomen van de component (bv. "Dag", "Uur").
+    validation:
+      maxLength: 50
+    persisted:
+      column: unit_id
+      storageClass: core
+  - key: unitPrice
+    valueType: number
+    required: false
+    label:
+      en: Unit price
+      nl: Eenheidsprijs
+    description:
+      en: Effective unit price reflected in the projection row.
+      nl: Effectieve eenheidsprijs die in de projectierij is vastgelegd.
+    semanticType: currency
+    persisted:
+      column: unit_price
+      storageClass: core
+  - key: amountBase
+    valueType: number
+    required: false
+    label:
+      en: Base amount
+      nl: Basisbedrag
+    description:
+      en: Cumulative net amount excluding VAT.
+      nl: Cumulatief nettobedrag exclusief BTW.
+    semanticType: currency
+    persisted:
+      column: amount_base
+      storageClass: core
+  - key: amountVat
+    valueType: number
+    required: false
+    label:
+      en: VAT amount
+      nl: BTW-bedrag
+    description:
+      en: Cumulative VAT amount.
+      nl: Cumulatief BTW-bedrag.
+    semanticType: currency
+    persisted:
+      column: amount_vat
+      storageClass: core
+  - key: amountTotal
+    valueType: number
+    required: false
+    label:
+      en: Total amount
+      nl: Totaalbedrag
+    description:
+      en: Cumulative total amount including VAT.
+      nl: Cumulatief totaalbedrag inclusief BTW.
+    semanticType: currency
+    persisted:
+      column: amount_total
+      storageClass: core
+  - key: postedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Posted at
+      nl: Geboekt op
+    description:
+      en: Timestamp at which this projection row was posted by the audit/timeline service.
+      nl: Tijdstip waarop deze projectierij door de audit/timeline-service is geboekt.
+    persisted:
+      column: posted_at
+      storageClass: core
+relationships:
+  - key: agreement
+    kind: belongsTo
+    target: Agreement
+    foreignKey: agreement_id
+    label:
+      en: Agreement
+      nl: Overeenkomst
+  - key: agreementComponent
+    kind: belongsTo
+    target: AgreementComponent
+    foreignKey: agreement_component_id
+    label:
+      en: Agreement component
+      nl: Overeenkomstcomponent
+  - key: fiscalPeriod
+    kind: belongsTo
+    target: FiscalPeriod
+    foreignKey: fiscal_period_id
+    label:
+      en: Fiscal period
+      nl: Boekjaarperiode
+  - key: invoice
+    kind: belongsTo
+    target: Invoice
+    foreignKey: invoice_id
+    label:
+      en: Invoice
+      nl: Factuur
+  - key: vatRate
+    kind: belongsTo
+    target: VatRate
+    foreignKey: vat_rate_id
+    label:
+      en: VAT rate
+      nl: BTW-tarief
+  - key: ledgerAccount
+    kind: belongsTo
+    target: LedgerAccount
+    foreignKey: ledger_account_id
+    label:
+      en: Ledger account
+      nl: Grootboekrekening
+  - key: componentDimension
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: component_dimension_id
+    label:
+      en: Component dimension
+      nl: Componentdimensie
+  - key: dimension1
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: dimension_1_id
+    label:
+      en: Cost dimension 1
+      nl: Kostendimensie 1
+  - key: dimension2
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: dimension_2_id
+    label:
+      en: Cost dimension 2
+      nl: Kostendimensie 2
+  - key: vatDimension
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: vat_dimension_id
+    label:
+      en: VAT dimension
+      nl: BTW-dimensie
+ui:
+  routes:
+    list:
+      en: /agreement-component-cumulatives
+      nl: /component-cumulatieven
+    detail:
+      en: /agreement-component-cumulatives/:id
+      nl: /component-cumulatieven/:id
+    create:
+      en: /agreement-component-cumulatives/create
+      nl: /component-cumulatieven/aanmaken
+    edit:
+      en: /agreement-component-cumulatives/:id/edit
+      nl: /component-cumulatieven/:id/bewerken
+    delete:
+      en: /agreement-component-cumulatives/:id/delete
+      nl: /component-cumulatieven/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Component cumulatives
+        nl: Component cumulatieven
+      columns:
+        - key: postedAt
+          sortable: true
+        - key: quantity
+          sortable: true
+        - key: amountBase
+          sortable: true
+        - key: amountVat
+          sortable: true
+        - key: amountTotal
+          sortable: true
+      defaultSort:
+        key: postedAt
+        direction: desc
+      rowLink:
+        en: /agreement-component-cumulatives/:id
+        nl: /component-cumulatieven/:id
+    detail:
+      header:
+        title: "{{postedAt}}"
+        subtitle: "{{amountTotal}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Cumulative details
+                nl: Cumulatiegegevens
+              fields:
+                - postedAt
+                - quantity
+                - unitId
+                - unitPrice
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - amountBase
+                - amountVat
+                - amountTotal
+    form:
+      variants:
+        create:
+          title:
+            en: Create component cumulative
+            nl: Component cumulatief aanmaken
+          groups:
+            - title:
+                en: Cumulative details
+                nl: Cumulatiegegevens
+              fields:
+                - postedAt
+                - quantity
+                - unitId
+                - unitPrice
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - amountBase
+                - amountVat
+                - amountTotal
+        edit:
+          extends: create
+          title:
+            en: Edit component cumulative
+            nl: Component cumulatief bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Overeenkomsten.All.Read
+      - Overeenkomsten.All.ReadWrite
+    create:
+      - Overeenkomsten.All.ReadWrite
+    update:
+      - Overeenkomsten.All.ReadWrite
+    delete:
+      - Overeenkomsten.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

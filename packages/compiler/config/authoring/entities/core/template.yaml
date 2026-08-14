@@ -1,0 +1,291 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Template
+title: Template
+description: A reusable template definition that groups variants for different delivery channels.
+language: en
+displayTemplate: "{{slug}}"
+filterField: slug
+labels:
+  en: Template
+  nl: Template
+domains:
+  - messaging
+authorization:
+  roles:
+    read:
+      - Algemeen.All.Read
+      - Algemeen.All.ReadWrite
+    create:
+      - Organisatie.All.ReadWrite
+    update:
+      - Organisatie.All.ReadWrite
+    delete:
+      - Organisatie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: slug
+    valueType: string
+    required: true
+    label:
+      en: Slug
+      nl: Slug
+    description:
+      en: Stable functional key used by workflows and integrations.
+      nl: Stabiele functionele sleutel voor workflows en integraties.
+    validation:
+      minLength: 1
+      maxLength: 100
+      pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+    persisted:
+      column: slug
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-friendly display name of the template.
+      nl: Mensvriendelijke weergavenaam van de template.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    description:
+      en: Optional explanation of when this template should be used.
+      nl: Optionele uitleg wanneer deze template gebruikt moet worden.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: category
+    valueType: string
+    required: false
+    label:
+      en: Category
+      nl: Categorie
+    description:
+      en: Functional category such as intake, reminder, billing, or case update.
+      nl: Functionele categorie zoals intake, herinnering, facturatie of dossierupdate.
+    validation:
+      maxLength: 100
+    options:
+      type: referentiedata
+      referentieGroep: NOTIFICATIECATEGORIE
+    persisted:
+      column: category
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: NOTIFICATIECATEGORIE
+        clearable: true
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the template.
+      nl: Levenscyclusstatus van de template.
+    validation:
+      minLength: 1
+      maxLength: 50
+    options:
+      type: referentiedata
+      referentieGroep: NOTIFICATIETEMPLATESTATUS
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: NOTIFICATIETEMPLATESTATUS
+        clearable: false
+  - key: defaultLanguage
+    valueType: string
+    required: false
+    label:
+      en: Default language
+      nl: Standaardtaal
+    description:
+      en: Preferred language for this template when no variant-specific locale is selected.
+      nl: Voorkeurstaal voor deze template wanneer geen variantaal is gekozen.
+    validation:
+      maxLength: 10
+    options:
+      type: referentiedata
+      referentieGroep: MESSAGINGLOCALE
+    persisted:
+      column: default_language
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MESSAGINGLOCALE
+        clearable: true
+  - key: parameters
+    valueType: object
+    label:
+      en: Parameters
+      nl: Parameters
+    description:
+      en: Template parameters as Field[] definitions. These are rendered directly in the workflow inspector.
+      nl: Template parameters als Field[] definities. Deze worden direct gerenderd in de workflow inspector.
+    persisted:
+      column: parameters
+      storageClass: core
+    layoutFraction: 1
+    cardinality:
+      min: 0
+      max: "unbounded"
+    semanticType: fieldDefinition
+    authoring:
+      profile: templateParameter
+relationships:
+  - key: variants
+    kind: hasMany
+    target: TemplateVariant
+    foreignKey: template_id
+    label:
+      en: Variants
+      nl: Varianten
+ui:
+  routes:
+    list:
+      en: /templates
+      nl: /templates
+    detail:
+      en: /templates/:id
+      nl: /templates/:id
+    create:
+      en: /templates/create
+      nl: /templates/aanmaken
+    edit:
+      en: /templates/:id/edit
+      nl: /templates/:id/bewerken
+    delete:
+      en: /templates/:id/delete
+      nl: /templates/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Templates
+        nl: Templates
+      columns:
+        - key: slug
+          sortable: true
+        - key: name
+          sortable: true
+        - key: category
+          sortable: true
+        - key: status
+          sortable: true
+      defaultSort:
+        key: slug
+        direction: asc
+      rowLink:
+        en: /templates/:id
+        nl: /templates/:id
+    detail:
+      header:
+        title: "{{name}}"
+        subtitle: "{{slug}}"
+        badges:
+          - status
+          - category
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Template details
+                nl: Templategegevens
+              fields:
+                - slug
+                - name
+                - description
+                - category
+                - status
+                - defaultLanguage
+            - title:
+                en: Parameters
+                nl: Parameters
+              fields:
+                - parameters
+        - id: variants
+          label:
+            en: Variants
+            nl: Varianten
+          relationship: variants
+    form:
+      variants:
+        create:
+          title:
+            en: Create template
+            nl: Template aanmaken
+          groups:
+            - title:
+                en: Template details
+                nl: Templategegevens
+              fields:
+                - slug
+                - name
+                - description
+                - category
+                - status
+                - defaultLanguage
+            - title:
+                en: Parameters
+                nl: Parameters
+              fields:
+                - parameters
+        edit:
+          extends: create
+          title:
+            en: Edit template
+            nl: Template bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

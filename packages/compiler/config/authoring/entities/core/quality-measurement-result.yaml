@@ -1,0 +1,188 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: QualityMeasurementResult
+title: Quality Measurement Result
+description: The outcome of a quality measurement, capturing assessment scale, value, and response status.
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: Quality Measurement Result
+  nl: Kwaliteitsmetingsresultaat
+domains:
+  - quality
+retention:
+  mode: policyRef
+  policy: quality-retain-7y
+  scope: record
+  startsFrom:
+    strategy: field
+    field: responseDate
+authorization:
+  roles:
+    read:
+      - Kwaliteit.All.Read
+      - Kwaliteit.All.ReadWrite
+    create:
+      - Kwaliteit.All.ReadWrite
+    update:
+      - Kwaliteit.All.ReadWrite
+    delete:
+      - Kwaliteit.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: false
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Human-readable result code.
+      nl: Menselijk leesbare resultaatcode.
+    validation:
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Brief description of the measurement result.
+      nl: Beknopte omschrijving van het metingsresultaat.
+    validation:
+      maxLength: 4000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 4000
+  - key: assessmentScale
+    valueType: string
+    required: false
+    label:
+      en: Assessment scale
+      nl: Beoordelingsschaal
+    description:
+      en: Scale or method used to measure the response.
+      nl: Schaal of methodiek waarmee de reactie is gemeten.
+    persisted:
+      column: assessment_scale
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: ASSESSMENTSCALE
+        clearable: true
+  - key: assessmentValue
+    valueType: string
+    required: false
+    label:
+      en: Assessment value
+      nl: Beoordelingswaarde
+    description:
+      en: Measured value on the specified assessment scale.
+      nl: Gemeten waarde op de opgegeven beoordelingsschaal.
+    validation:
+      maxLength: 200
+    persisted:
+      column: assessment_value
+      storageClass: core
+  - key: responseDate
+    valueType: date
+    required: false
+    label:
+      en: Response date
+      nl: Reactiedatum
+    description:
+      en: Date when the response was received.
+      nl: Datum waarop de reactie is ontvangen.
+    persisted:
+      column: response_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: responseStatus
+    valueType: string
+    required: false
+    label:
+      en: Response status
+      nl: Reactiestatus
+    description:
+      en: Response completeness status.
+      nl: Reactiecompleetheidstatus.
+    persisted:
+      column: response_status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: RESULTRESPONSE
+        clearable: true
+  - key: assessmentExplanation
+    valueType: string
+    required: false
+    label:
+      en: Explanation
+      nl: Toelichting
+    description:
+      en: Brief explanation of the assessment.
+      nl: Korte toelichting bij de beoordeling.
+    validation:
+      maxLength: 4000
+    persisted:
+      column: assessment_explanation
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 4000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional code in a connected source system.
+      nl: Functionele code in een gekoppeld bronsysteem.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: measurementRequest
+    kind: belongsTo
+    target: QualityMeasurementRequest
+    foreignKey: measurement_request_id
+    label:
+      en: Measurement request
+      nl: Metingsverzoek
+  - key: researchAssignment
+    kind: belongsTo
+    target: ResearchAssignment
+    foreignKey: research_assignment_id
+    label:
+      en: Research assignment
+      nl: Onderzoeksopdracht
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

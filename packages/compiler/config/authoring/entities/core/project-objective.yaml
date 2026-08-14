@@ -1,0 +1,239 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ProjectObjective
+title: Project Objective
+description: Stated objective for a project, optionally with a target value and target date.
+language: en
+displayTemplate: "{{code}} {{description}}"
+filterField: code
+labels:
+  en: Project objective
+  nl: Projectdoelstelling
+domains:
+  - project
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Objective code, unique within the project.
+      nl: Doelstellingcode, uniek binnen het project.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: description
+    valueType: string
+    required: true
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Description of the objective.
+      nl: Omschrijving van de doelstelling.
+    validation:
+      minLength: 1
+      maxLength: 1000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 1000
+  - key: targetValue
+    valueType: string
+    required: false
+    label:
+      en: Target value
+      nl: Streefwaarde
+    description:
+      en: Free-form target value (objectives may be qualitative).
+      nl: Vrije streefwaarde (doelstellingen kunnen kwalitatief zijn).
+    validation:
+      maxLength: 200
+    persisted:
+      column: target_value
+      storageClass: core
+  - key: actualValue
+    valueType: string
+    required: false
+    label:
+      en: Actual value
+      nl: Werkelijke waarde
+    description:
+      en: Free-form realised value of the objective.
+      nl: Vrije gerealiseerde waarde van de doelstelling.
+    validation:
+      maxLength: 200
+    persisted:
+      column: actual_value
+      storageClass: core
+  - key: targetDate
+    valueType: date
+    required: false
+    label:
+      en: Target date
+      nl: Streefdatum
+    description:
+      en: Date by which the objective is meant to be achieved.
+      nl: Datum waarop de doelstelling behaald moet zijn.
+    persisted:
+      column: target_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: achievedAt
+    valueType: date
+    required: false
+    label:
+      en: Achieved at
+      nl: Behaald op
+    description:
+      en: Date on which the objective was actually achieved.
+      nl: Datum waarop de doelstelling daadwerkelijk is behaald.
+    persisted:
+      column: achieved_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+relationships:
+  - key: project
+    kind: belongsTo
+    target: Project
+    foreignKey: project_id
+    label:
+      en: Project
+      nl: Project
+ui:
+  routes:
+    list:
+      en: /project-objectives
+      nl: /projectdoelstellingen
+    detail:
+      en: /project-objectives/:id
+      nl: /projectdoelstellingen/:id
+    create:
+      en: /project-objectives/create
+      nl: /projectdoelstellingen/aanmaken
+    edit:
+      en: /project-objectives/:id/edit
+      nl: /projectdoelstellingen/:id/bewerken
+    delete:
+      en: /project-objectives/:id/delete
+      nl: /projectdoelstellingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Project objectives
+        nl: Projectdoelstellingen
+      columns:
+        - key: code
+          sortable: true
+        - key: description
+          sortable: true
+        - key: targetDate
+          sortable: true
+        - key: achievedAt
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /project-objectives/:id
+        nl: /projectdoelstellingen/:id
+    detail:
+      header:
+        title: "{{code}} {{description}}"
+        subtitle: "{{targetValue}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Objective details
+                nl: Doelgegevens
+              fields:
+                - code
+                - description
+            - title:
+                en: Target and result
+                nl: Streefwaarde en resultaat
+              fields:
+                - targetValue
+                - actualValue
+                - targetDate
+                - achievedAt
+    form:
+      variants:
+        create:
+          title:
+            en: Create project objective
+            nl: Projectdoelstelling aanmaken
+          groups:
+            - title:
+                en: Objective details
+                nl: Doelgegevens
+              fields:
+                - code
+                - description
+            - title:
+                en: Target and result
+                nl: Streefwaarde en resultaat
+              fields:
+                - targetValue
+                - actualValue
+                - targetDate
+                - achievedAt
+        edit:
+          extends: create
+          title:
+            en: Edit project objective
+            nl: Projectdoelstelling bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Projectontwikkeling.All.Read
+      - Projectontwikkeling.All.ReadWrite
+    create:
+      - Projectontwikkeling.All.ReadWrite
+    update:
+      - Projectontwikkeling.All.ReadWrite
+    delete:
+      - Projectontwikkeling.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

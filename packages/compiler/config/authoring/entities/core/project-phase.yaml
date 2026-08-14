@@ -1,0 +1,270 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ProjectPhase
+title: Project Phase
+description: Sequenced phase within a project (e.g. initiation, definition, design, preparation, realisation, closure).
+language: en
+displayTemplate: "{{code}} {{name}}"
+filterField: code
+labels:
+  en: Project phase
+  nl: Projectfase
+domains:
+  - project
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Phase code, unique within the project.
+      nl: Fasecode, uniek binnen het project.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the phase.
+      nl: Menselijk leesbare naam van de fase.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-form description of the phase.
+      nl: Vrije omschrijving van de fase.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 1000
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the phase.
+      nl: Levenscyclusstatus van de fase.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PROJECTPHASESTATUS
+        clearable: false
+  - key: sequence
+    valueType: integer
+    required: true
+    label:
+      en: Sequence
+      nl: Volgorde
+    description:
+      en: Sequential order of the phase within the project.
+      nl: Volgnummer van de fase binnen het project.
+    validation:
+      min: 1
+    persisted:
+      column: sequence
+      storageClass: core
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Planned or actual start date of the phase.
+      nl: Geplande of werkelijke startdatum van de fase.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Planned or actual end date of the phase.
+      nl: Geplande of werkelijke einddatum van de fase.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+relationships:
+  - key: project
+    kind: belongsTo
+    target: Project
+    foreignKey: project_id
+    label:
+      en: Project
+      nl: Project
+ui:
+  routes:
+    list:
+      en: /project-phases
+      nl: /projectfasen
+    detail:
+      en: /project-phases/:id
+      nl: /projectfasen/:id
+    create:
+      en: /project-phases/create
+      nl: /projectfasen/aanmaken
+    edit:
+      en: /project-phases/:id/edit
+      nl: /projectfasen/:id/bewerken
+    delete:
+      en: /project-phases/:id/delete
+      nl: /projectfasen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Project phases
+        nl: Projectfasen
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+        - key: sequence
+          sortable: true
+        - key: status
+          sortable: true
+        - key: startDate
+          sortable: true
+      defaultSort:
+        key: sequence
+        direction: asc
+      rowLink:
+        en: /project-phases/:id
+        nl: /projectfasen/:id
+    detail:
+      header:
+        title: "{{code}} {{name}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Phase details
+                nl: Fasegegevens
+              fields:
+                - code
+                - name
+                - status
+                - sequence
+            - title:
+                en: Period
+                nl: Periode
+              fields:
+                - startDate
+                - endDate
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+    form:
+      variants:
+        create:
+          title:
+            en: Create project phase
+            nl: Projectfase aanmaken
+          groups:
+            - title:
+                en: Phase details
+                nl: Fasegegevens
+              fields:
+                - code
+                - name
+                - status
+                - sequence
+            - title:
+                en: Period
+                nl: Periode
+              fields:
+                - startDate
+                - endDate
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+        edit:
+          extends: create
+          title:
+            en: Edit project phase
+            nl: Projectfase bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Projectontwikkeling.All.Read
+      - Projectontwikkeling.All.ReadWrite
+    create:
+      - Projectontwikkeling.All.ReadWrite
+    update:
+      - Projectontwikkeling.All.ReadWrite
+    delete:
+      - Projectontwikkeling.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

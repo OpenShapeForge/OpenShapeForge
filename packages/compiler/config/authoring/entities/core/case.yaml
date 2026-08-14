@@ -1,0 +1,639 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Case
+title: Case
+description: A first-class operational case for service, housing, governance, and dossier-driven work.
+language: en
+displayTemplate: "{{title}}"
+filterField: title
+labels:
+  en: Case
+  nl: Zaak
+domains:
+  - cases
+  - service
+indexes:
+  - name: cases_tenant_code_uidx
+    fields:
+      - tenantId
+      - code
+    unique: true
+retention:
+  mode: policyRef
+  policy: case-delete-7y
+  scope: record
+  startsFrom:
+    strategy: firstNonNull
+    fields:
+      - closedAt
+      - registeredAt
+authorization:
+  roles:
+    read:
+      - Zaken.All.Read
+      - Zaken.All.ReadWrite
+    create:
+      - Zaken.All.ReadWrite
+    update:
+      - Zaken.All.ReadWrite
+    delete:
+      - Zaken.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Human-readable case code.
+      nl: Menselijk leesbare zaakcode.
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: title
+    valueType: string
+    required: true
+    label:
+      en: Title
+      nl: Titel
+    description:
+      en: Short title of the case.
+      nl: Korte titel van de zaak.
+    validation:
+      minLength: 1
+      maxLength: 300
+    persisted:
+      column: title
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    description:
+      en: Full case description and context.
+      nl: Volledige omschrijving en context van de zaak.
+    validation:
+      maxLength: 10000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 6
+        maxLength: 10000
+  - key: category
+    valueType: string
+    required: false
+    label:
+      en: Category
+      nl: Categorie
+    description:
+      en: Functional category of the case.
+      nl: Functionele categorie van de zaak.
+    persisted:
+      column: category
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASECATEGORY
+        clearable: true
+  - key: caseType
+    valueType: string
+    required: true
+    label:
+      en: Case type
+      nl: Zaaktype
+    description:
+      en: Main case type code.
+      nl: Hoofdzaaktypecode.
+    persisted:
+      column: case_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASETYPE
+        clearable: false
+  - key: caseSubType
+    valueType: string
+    required: false
+    label:
+      en: Case subtype
+      nl: Zaaksubtype
+    description:
+      en: More specific subtype inside the selected case type.
+      nl: Meer specifiek subtype binnen het gekozen zaaktype.
+    validation:
+      maxLength: 100
+    persisted:
+      column: case_sub_type
+      storageClass: core
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Current lifecycle status of the case.
+      nl: Huidige levenscyclusstatus van de zaak.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASESTATUS
+        clearable: false
+  - key: routingStatus
+    valueType: string
+    required: false
+    label:
+      en: Routing status
+      nl: Routeringsstatus
+    description:
+      en: Current routing and operational handling stage.
+      nl: Huidige routerings- en behandelfase.
+    persisted:
+      column: routing_status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEROUTINGSTATUS
+        clearable: true
+  - key: priority
+    valueType: string
+    required: false
+    label:
+      en: Priority
+      nl: Prioriteit
+    description:
+      en: Operational priority of the case.
+      nl: Operationele prioriteit van de zaak.
+    persisted:
+      column: priority
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEPRIORITY
+        clearable: true
+  - key: originChannel
+    valueType: string
+    required: false
+    label:
+      en: Origin channel
+      nl: Herkomstkanaal
+    description:
+      en: Channel through which the case originated.
+      nl: Kanaal waarlangs de zaak is ontstaan.
+    persisted:
+      column: origin_channel
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEORIGINCHANNEL
+        clearable: true
+  - key: fieldDefinitions
+    valueType: object
+    label:
+      en: Case variables
+      nl: Zaakvariabelen
+    description:
+      en: Field definitions for case-scoped variables that process and case-step workflows can read and update.
+      nl: Velddefinities voor zaakvariabelen die proces- en zaakstapworkflows kunnen lezen en bijwerken.
+    persisted:
+      column: field_definitions
+      storageClass: core
+    layoutFraction: 1
+    cardinality:
+      min: 0
+      max: "unbounded"
+    semanticType: fieldDefinition
+    authoring:
+      profile: workflowInputField
+  - key: confidentiality
+    valueType: string
+    required: false
+    label:
+      en: Confidentiality
+      nl: Vertrouwelijkheid
+    description:
+      en: Confidentiality classification of the case.
+      nl: Vertrouwelijkheidsclassificatie van de zaak.
+    persisted:
+      column: confidentiality
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASECONFIDENTIALITY
+        clearable: true
+  - key: waitingReason
+    valueType: string
+    required: false
+    label:
+      en: Waiting reason
+      nl: Wachtrede
+    description:
+      en: Why the case is currently waiting or paused.
+      nl: Waarom de zaak momenteel wacht of gepauzeerd is.
+    persisted:
+      column: waiting_reason
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEWAITINGREASON
+        clearable: true
+  - key: breachState
+    valueType: string
+    required: false
+    label:
+      en: Breach state
+      nl: SLA-status
+    description:
+      en: SLA risk or breach state of the case.
+      nl: SLA-risico of overschrijdingsstatus van de zaak.
+    persisted:
+      column: breach_state
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEBREACHSTATE
+        clearable: true
+  - key: registeredAt
+    valueType: datetime
+    required: true
+    label:
+      en: Registered at
+      nl: Geregistreerd op
+    description:
+      en: Timestamp when the case was registered.
+      nl: Tijdstip waarop de zaak is geregistreerd.
+    persisted:
+      column: registered_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: startedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Started at
+      nl: Gestart op
+    description:
+      en: Timestamp when work on the case started.
+      nl: Tijdstip waarop de behandeling van de zaak startte.
+    persisted:
+      column: started_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: routedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Routed at
+      nl: Gerouteerd op
+    description:
+      en: Timestamp when the case was routed to the active queue.
+      nl: Tijdstip waarop de zaak naar de actieve queue is gerouteerd.
+    persisted:
+      column: routed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: lastCustomerContactAt
+    valueType: datetime
+    required: false
+    label:
+      en: Last customer contact at
+      nl: Laatste klantcontact op
+    description:
+      en: Timestamp of the latest meaningful customer contact.
+      nl: Tijdstip van het laatste betekenisvolle klantcontact.
+    persisted:
+      column: last_customer_contact_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: nextActionAt
+    valueType: datetime
+    required: false
+    label:
+      en: Next action at
+      nl: Volgende actie op
+    description:
+      en: Planned timestamp for the next operational action.
+      nl: Gepland tijdstip voor de volgende operationele actie.
+    persisted:
+      column: next_action_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: plannedEndAt
+    valueType: datetime
+    required: false
+    label:
+      en: Planned end at
+      nl: Geplande einddatum
+    description:
+      en: Planned completion timestamp.
+      nl: Gepland afrondmoment.
+    persisted:
+      column: planned_end_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: dueAt
+    valueType: datetime
+    required: false
+    label:
+      en: Due at
+      nl: Uiterste datum
+    description:
+      en: Deadline for the case.
+      nl: Deadline van de zaak.
+    persisted:
+      column: due_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: firstResponseDueAt
+    valueType: datetime
+    required: false
+    label:
+      en: First response due at
+      nl: Eerste reactie uiterlijk op
+    description:
+      en: Deadline for the first response milestone.
+      nl: Deadline voor de eerste reactiemijlpaal.
+    persisted:
+      column: first_response_due_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: resolutionDueAt
+    valueType: datetime
+    required: false
+    label:
+      en: Resolution due at
+      nl: Oplossing uiterlijk op
+    description:
+      en: Deadline for resolution of the case.
+      nl: Deadline voor oplossing van de zaak.
+    persisted:
+      column: resolution_due_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: closedAt
+    valueType: datetime
+    required: false
+    readOnly: true
+    label:
+      en: Closed at
+      nl: Gesloten op
+    description:
+      en: Timestamp when the case was closed.
+      nl: Tijdstip waarop de zaak is gesloten.
+    persisted:
+      column: closed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: portalVisible
+    valueType: boolean
+    required: true
+    label:
+      en: Portal visible
+      nl: Zichtbaar in portaal
+    description:
+      en: Whether the case is visible in customer-facing channels.
+      nl: Of de zaak zichtbaar is in klantgerichte kanalen.
+    defaultValue: true
+    persisted:
+      column: portal_visible
+      storageClass: core
+  - key: resultSummary
+    valueType: string
+    required: false
+    label:
+      en: Result summary
+      nl: Resultaatsamenvatting
+    description:
+      en: Short summary of the achieved result.
+      nl: Korte samenvatting van het behaalde resultaat.
+    validation:
+      maxLength: 500
+    persisted:
+      column: result_summary
+      storageClass: core
+  - key: resultDetails
+    valueType: string
+    required: false
+    label:
+      en: Result details
+      nl: Resultaattoelichting
+    description:
+      en: Detailed result or closure notes.
+      nl: Gedetailleerde resultaat- of afsluitnotities.
+    validation:
+      maxLength: 4000
+    persisted:
+      column: result_details
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+  - key: aiSummary
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: AI summary
+      nl: AI-samenvatting
+    description:
+      en: Cached AI-generated summary of the case context.
+      nl: Opgeslagen AI-samenvatting van de zaakcontext.
+    validation:
+      maxLength: 8000
+    persisted:
+      column: ai_summary
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 6
+        maxLength: 8000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional code in a connected source system.
+      nl: Functionele code in een gekoppeld bronsysteem.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: primaryRelation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Primary relation
+      nl: Primaire relatie
+  - key: dossier
+    kind: belongsTo
+    target: Dossier
+    foreignKey: dossier_id
+    label:
+      en: Dossier
+      nl: Dossier
+  - key: currentQueue
+    kind: belongsTo
+    target: WorkQueue
+    foreignKey: work_queue_id
+    label:
+      en: Current queue
+      nl: Huidige queue
+  - key: slaPolicy
+    kind: belongsTo
+    target: SlaPolicy
+    foreignKey: sla_policy_id
+    label:
+      en: SLA policy
+      nl: SLA-beleid
+  - key: parentCase
+    kind: belongsTo
+    target: Case
+    foreignKey: parent_case_id
+    label:
+      en: Parent case
+      nl: Hoofdzaak
+  - key: childCases
+    kind: hasMany
+    target: Case
+    foreignKey: parent_case_id
+    label:
+      en: Child cases
+      nl: Deelzaken
+  - key: tasks
+    kind: hasMany
+    target: Task
+    foreignKey: case_id
+    label:
+      en: Tasks
+      nl: Taken
+  - key: contactMoments
+    kind: hasMany
+    target: ContactMoment
+    foreignKey: case_id
+    label:
+      en: Contact moments
+      nl: Contactmomenten
+  - key: appointments
+    kind: hasMany
+    target: Appointment
+    foreignKey: case_id
+    label:
+      en: Appointments
+      nl: Afspraken
+  - key: agreements
+    kind: hasMany
+    target: Agreement
+    foreignKey: case_id
+    label:
+      en: Agreements
+      nl: Overeenkomsten
+  - key: statusEvents
+    kind: hasMany
+    target: CaseStatusEvent
+    foreignKey: case_id
+    label:
+      en: Status events
+      nl: Statusgebeurtenissen
+  - key: parties
+    kind: hasMany
+    target: CaseParty
+    foreignKey: case_id
+    label:
+      en: Parties
+      nl: Betrokkenen
+  - key: objectLinks
+    kind: hasMany
+    target: CaseObjectLink
+    foreignKey: case_id
+    label:
+      en: Linked objects
+      nl: Gekoppelde objecten
+  - key: documents
+    kind: hasMany
+    target: Document
+    foreignKey: case_id
+    label:
+      en: Documents
+      nl: Documenten
+  - key: processes
+    kind: hasMany
+    target: Process
+    foreignKey: case_id
+    label:
+      en: Steps
+      nl: Stappen
+  - key: assignments
+    kind: hasMany
+    target: Assignment
+    foreignKey: case_id
+    label:
+      en: Assignments
+      nl: Toewijzingen
+  - key: milestones
+    kind: hasMany
+    target: Milestone
+    foreignKey: case_id
+    label:
+      en: Milestones
+      nl: Mijlpalen
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+      wait: true

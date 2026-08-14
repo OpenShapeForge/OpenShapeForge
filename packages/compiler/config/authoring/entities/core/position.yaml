@@ -1,0 +1,282 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Position
+title: Position
+description: Job position (function) within the organization, optionally placed in an org unit and carrying salary range.
+language: en
+displayTemplate: "{{code}} {{name}}"
+filterField: code
+labels:
+  en: Position
+  nl: Functie
+domains:
+  - hr
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique code identifying the position.
+      nl: Tenant-unieke code voor de functie.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Display name of the position.
+      nl: Weergavenaam van de functie.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description of the position.
+      nl: Optionele omschrijving van de functie.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 6
+        maxLength: 5000
+  - key: salaryRangeMin
+    valueType: number
+    required: false
+    label:
+      en: Salary range min
+      nl: Salarisrange minimum
+    description:
+      en: Lower bound of the salary range for the position.
+      nl: Ondergrens van de salarisrange voor de functie.
+    semanticType: currency
+    persisted:
+      column: salary_range_min
+      storageClass: core
+  - key: salaryRangeMax
+    valueType: number
+    required: false
+    label:
+      en: Salary range max
+      nl: Salarisrange maximum
+    description:
+      en: Upper bound of the salary range for the position.
+      nl: Bovengrens van de salarisrange voor de functie.
+    semanticType: currency
+    persisted:
+      column: salary_range_max
+      storageClass: core
+  - key: currencyCode
+    valueType: string
+    required: true
+    label:
+      en: Currency code
+      nl: Valutacode
+    description:
+      en: ISO 4217 currency code for the salary range.
+      nl: ISO 4217-valutacode voor de salarisrange.
+    validation:
+      maxLength: 3
+    persisted:
+      column: currency_code
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the position in an external context.
+      nl: Functionele of zakelijke code van de functie in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: orgUnit
+    kind: belongsTo
+    target: OrgUnit
+    foreignKey: org_unit_id
+    label:
+      en: Org unit
+      nl: Organisatorische eenheid
+  - key: employeeRoles
+    kind: hasMany
+    target: EmployeeRole
+    foreignKey: position_id
+    label:
+      en: Employee roles
+      nl: Medewerkerrollen
+ui:
+  routes:
+    list:
+      en: /positions
+      nl: /functies
+    detail:
+      en: /positions/:id
+      nl: /functies/:id
+    create:
+      en: /positions/create
+      nl: /functies/aanmaken
+    edit:
+      en: /positions/:id/edit
+      nl: /functies/:id/bewerken
+    delete:
+      en: /positions/:id/delete
+      nl: /functies/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Positions
+        nl: Functies
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+        - key: salaryRangeMin
+          sortable: true
+        - key: salaryRangeMax
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /positions/:id
+        nl: /functies/:id
+    detail:
+      header:
+        title: "{{code}} {{name}}"
+        subtitle: "{{description}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Position details
+                nl: Functiegegevens
+              fields:
+                - code
+                - name
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Compensation
+                nl: Beloning
+              fields:
+                - salaryRangeMin
+                - salaryRangeMax
+                - currencyCode
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create position
+            nl: Functie aanmaken
+          groups:
+            - title:
+                en: Position details
+                nl: Functiegegevens
+              fields:
+                - code
+                - name
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Compensation
+                nl: Beloning
+              fields:
+                - salaryRangeMin
+                - salaryRangeMax
+                - currencyCode
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit position
+            nl: Functie bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Organisatie.All.Read
+      - Organisatie.All.ReadWrite
+    create:
+      - Organisatie.All.ReadWrite
+    update:
+      - Organisatie.All.ReadWrite
+    delete:
+      - Organisatie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

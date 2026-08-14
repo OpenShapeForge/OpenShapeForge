@@ -1,0 +1,195 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: CostDimension
+title: Cost Dimension
+description: Analytical dimension (cost center, project, segment, department) used for ledger-line analysis.
+language: en
+displayTemplate: "{{code}} {{name}}"
+filterField: code
+labels:
+  en: Cost dimension
+  nl: Kostendimensie
+domains:
+  - finance
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique cost-dimension code.
+      nl: Tenant-unieke kostendimensiecode.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the cost dimension.
+      nl: Menselijk leesbare naam van de kostendimensie.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the cost dimension in an external context.
+      nl: Functionele of zakelijke code van de kostendimensie in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: parentCostDimension
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: parent_cost_dimension_id
+    label:
+      en: Parent cost dimension
+      nl: Bovenliggende kostendimensie
+  - key: childCostDimensions
+    kind: hasMany
+    target: CostDimension
+    foreignKey: parent_cost_dimension_id
+    label:
+      en: Child cost dimensions
+      nl: Onderliggende kostendimensies
+ui:
+  routes:
+    list:
+      en: /cost-dimensions
+      nl: /kostendimensies
+    detail:
+      en: /cost-dimensions/:id
+      nl: /kostendimensies/:id
+    create:
+      en: /cost-dimensions/create
+      nl: /kostendimensies/aanmaken
+    edit:
+      en: /cost-dimensions/:id/edit
+      nl: /kostendimensies/:id/bewerken
+    delete:
+      en: /cost-dimensions/:id/delete
+      nl: /kostendimensies/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Cost dimensions
+        nl: Kostendimensies
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /cost-dimensions/:id
+        nl: /kostendimensies/:id
+    detail:
+      header:
+        title: "{{code}} {{name}}"
+        subtitle: ""
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Cost dimension details
+                nl: Kostendimensiegegevens
+              fields:
+                - code
+                - name
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create cost dimension
+            nl: Kostendimensie aanmaken
+          groups:
+            - title:
+                en: Cost dimension details
+                nl: Kostendimensiegegevens
+              fields:
+                - code
+                - name
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit cost dimension
+            nl: Kostendimensie bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

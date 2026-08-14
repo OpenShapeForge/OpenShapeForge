@@ -1,0 +1,253 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: MaintenanceTask
+title: Maintenance Task
+description: Line item on a maintenance order representing a single task to be performed.
+language: en
+displayTemplate: "{{description}}"
+filterField: description
+labels:
+  en: Maintenance task
+  nl: Onderhoudstaak
+domains:
+  - maintenance
+fields:
+  - key: lineNumber
+    valueType: integer
+    required: true
+    label:
+      en: Line number
+      nl: Regelnummer
+    description:
+      en: Sequential line number within the maintenance order.
+      nl: Volgnummer van de regel binnen de onderhoudsorder.
+    validation:
+      min: 1
+    persisted:
+      column: line_number
+      storageClass: core
+  - key: description
+    valueType: string
+    required: true
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Description of the task to be performed.
+      nl: Omschrijving van de uit te voeren taak.
+    validation:
+      minLength: 1
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 500
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the maintenance task.
+      nl: Levenscyclusstatus van de onderhoudstaak.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MAINTENANCETASKSTATUS
+        clearable: false
+  - key: quantity
+    valueType: number
+    required: false
+    label:
+      en: Quantity
+      nl: Aantal
+    description:
+      en: Quantity for this task (multiplied by unit price to compute amount).
+      nl: Aantal voor deze taak (vermenigvuldigd met eenheidsprijs voor bedrag).
+    persisted:
+      column: quantity
+      storageClass: core
+  - key: unitId
+    valueType: string
+    required: false
+    label:
+      en: Unit
+      nl: Eenheid
+    description:
+      en: Free-form unit identifier for this task (e.g. "Hour", "Piece").
+      nl: Vrije eenheidsaanduiding voor deze taak (bv. "Uur", "Stuk").
+    validation:
+      maxLength: 50
+    persisted:
+      column: unit_id
+      storageClass: core
+  - key: unitPrice
+    valueType: number
+    required: false
+    label:
+      en: Unit price
+      nl: Eenheidsprijs
+    description:
+      en: Price per unit for this task.
+      nl: Prijs per eenheid voor deze taak.
+    semanticType: currency
+    persisted:
+      column: unit_price
+      storageClass: core
+  - key: amount
+    valueType: number
+    required: false
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Total amount for this task.
+      nl: Totaalbedrag voor deze taak.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+relationships:
+  - key: maintenanceOrder
+    kind: belongsTo
+    target: MaintenanceOrder
+    foreignKey: maintenance_order_id
+    label:
+      en: Maintenance order
+      nl: Onderhoudsorder
+ui:
+  routes:
+    list:
+      en: /maintenance-tasks
+      nl: /onderhoudstaken
+    detail:
+      en: /maintenance-tasks/:id
+      nl: /onderhoudstaken/:id
+    create:
+      en: /maintenance-tasks/create
+      nl: /onderhoudstaken/aanmaken
+    edit:
+      en: /maintenance-tasks/:id/edit
+      nl: /onderhoudstaken/:id/bewerken
+    delete:
+      en: /maintenance-tasks/:id/delete
+      nl: /onderhoudstaken/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Maintenance tasks
+        nl: Onderhoudstaken
+      columns:
+        - key: lineNumber
+          sortable: true
+        - key: description
+          sortable: true
+        - key: status
+          sortable: true
+        - key: quantity
+          sortable: true
+        - key: amount
+          sortable: true
+      defaultSort:
+        key: lineNumber
+        direction: asc
+      rowLink:
+        en: /maintenance-tasks/:id
+        nl: /onderhoudstaken/:id
+    detail:
+      header:
+        title: "{{description}}"
+        subtitle: "{{status}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Task details
+                nl: Taakgegevens
+              fields:
+                - lineNumber
+                - description
+                - status
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - quantity
+                - unitId
+                - unitPrice
+                - amount
+    form:
+      variants:
+        create:
+          title:
+            en: Create maintenance task
+            nl: Onderhoudstaak aanmaken
+          groups:
+            - title:
+                en: Task details
+                nl: Taakgegevens
+              fields:
+                - lineNumber
+                - description
+                - status
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - quantity
+                - unitId
+                - unitPrice
+                - amount
+        edit:
+          extends: create
+          title:
+            en: Edit maintenance task
+            nl: Onderhoudstaak bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Onderhoud.All.Read
+      - Onderhoud.All.ReadWrite
+    create:
+      - Onderhoud.All.ReadWrite
+    update:
+      - Onderhoud.All.ReadWrite
+    delete:
+      - Onderhoud.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

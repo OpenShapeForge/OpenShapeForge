@@ -1,0 +1,237 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Area
+title: Area
+description: Surface-area record optionally bound to an asset, building, or space.
+language: en
+displayTemplate: "{{value}} {{unitId}}"
+filterField: id
+labels:
+  en: Area
+  nl: Oppervlakte
+domains:
+  - asset
+fields:
+  - key: value
+    valueType: number
+    required: true
+    label:
+      en: Value
+      nl: Waarde
+    description:
+      en: Numeric area value.
+      nl: Numerieke oppervlaktewaarde.
+    persisted:
+      column: value
+      storageClass: core
+  - key: unitId
+    valueType: string
+    required: true
+    label:
+      en: Unit
+      nl: Eenheid
+    description:
+      en: Unit of measurement for the area (default "m2").
+      nl: Meeteenheid voor de oppervlakte (standaard "m2").
+    defaultValue: m2
+    validation:
+      minLength: 1
+      maxLength: 20
+    persisted:
+      column: unit_id
+      storageClass: core
+  - key: measuredAt
+    valueType: date
+    required: false
+    label:
+      en: Measured at
+      nl: Gemeten op
+    description:
+      en: Date on which the area was measured.
+      nl: Datum waarop de oppervlakte is gemeten.
+    persisted:
+      column: measured_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: methodCode
+    valueType: string
+    required: false
+    label:
+      en: Method code
+      nl: Meetmethode
+    description:
+      en: Optional code identifying the measurement method.
+      nl: Optionele code die de meetmethode identificeert.
+    validation:
+      maxLength: 50
+    persisted:
+      column: method_code
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the area in an external context.
+      nl: Functionele of zakelijke code van de oppervlakte in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: asset
+    kind: belongsTo
+    target: Asset
+    foreignKey: asset_id
+    label:
+      en: Asset
+      nl: Object
+  - key: building
+    kind: belongsTo
+    target: Building
+    foreignKey: building_id
+    label:
+      en: Building
+      nl: Pand
+  - key: space
+    kind: belongsTo
+    target: Space
+    foreignKey: space_id
+    label:
+      en: Space
+      nl: Ruimte
+ui:
+  routes:
+    list:
+      en: /areas
+      nl: /oppervlakten
+    detail:
+      en: /areas/:id
+      nl: /oppervlakten/:id
+    create:
+      en: /areas/create
+      nl: /oppervlakten/aanmaken
+    edit:
+      en: /areas/:id/edit
+      nl: /oppervlakten/:id/bewerken
+    delete:
+      en: /areas/:id/delete
+      nl: /oppervlakten/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Areas
+        nl: Oppervlakten
+      columns:
+        - key: value
+          sortable: true
+        - key: unitId
+          sortable: true
+        - key: measuredAt
+          sortable: true
+        - key: methodCode
+          sortable: true
+      defaultSort:
+        key: measuredAt
+        direction: desc
+      rowLink:
+        en: /areas/:id
+        nl: /oppervlakten/:id
+    detail:
+      header:
+        title: "{{value}} {{unitId}}"
+        subtitle: "{{measuredAt}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Area details
+                nl: Oppervlaktegegevens
+              fields:
+                - value
+                - unitId
+                - measuredAt
+                - methodCode
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create area
+            nl: Oppervlakte aanmaken
+          groups:
+            - title:
+                en: Area details
+                nl: Oppervlaktegegevens
+              fields:
+                - value
+                - unitId
+                - measuredAt
+                - methodCode
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit area
+            nl: Oppervlakte bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Vastgoed.All.Read
+      - Vastgoed.All.ReadWrite
+    create:
+      - Vastgoed.All.ReadWrite
+    update:
+      - Vastgoed.All.ReadWrite
+    delete:
+      - Vastgoed.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

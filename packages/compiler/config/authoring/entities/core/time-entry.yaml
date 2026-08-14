@@ -1,0 +1,242 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: TimeEntry
+title: Time Entry
+description: Timesheet entry recording hours worked by an employee on a date, optionally billable to an agreement.
+language: en
+displayTemplate: "{{workedAt}}: {{hours}}h"
+filterField: id
+labels:
+  en: Time entry
+  nl: Tijdsbesteding
+domains:
+  - hr
+fields:
+  - key: workedAt
+    valueType: date
+    required: true
+    label:
+      en: Worked at
+      nl: Werkdatum
+    description:
+      en: Date on which the hours were worked.
+      nl: Datum waarop de uren zijn gewerkt.
+    persisted:
+      column: worked_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: hours
+    valueType: number
+    required: true
+    label:
+      en: Hours
+      nl: Uren
+    description:
+      en: Number of hours worked on this entry.
+      nl: Aantal gewerkte uren in deze regel.
+    validation:
+      min: 0
+      max: 24
+    persisted:
+      column: hours
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description of the work performed.
+      nl: Optionele omschrijving van de uitgevoerde werkzaamheden.
+    validation:
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 500
+  - key: billable
+    valueType: boolean
+    required: false
+    label:
+      en: Billable
+      nl: Factureerbaar
+    description:
+      en: Whether the time can be billed to a customer.
+      nl: Of de tijd doorbelast kan worden aan een klant.
+    persisted:
+      column: billable
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the time entry in an external context.
+      nl: Functionele of zakelijke code van de tijdsbesteding in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: employee
+    kind: belongsTo
+    target: Employee
+    foreignKey: employee_id
+    label:
+      en: Employee
+      nl: Medewerker
+  - key: agreement
+    kind: belongsTo
+    target: Agreement
+    foreignKey: agreement_id
+    label:
+      en: Agreement
+      nl: Overeenkomst
+ui:
+  routes:
+    list:
+      en: /time-entries
+      nl: /tijdsbestedingen
+    detail:
+      en: /time-entries/:id
+      nl: /tijdsbestedingen/:id
+    create:
+      en: /time-entries/create
+      nl: /tijdsbestedingen/aanmaken
+    edit:
+      en: /time-entries/:id/edit
+      nl: /tijdsbestedingen/:id/bewerken
+    delete:
+      en: /time-entries/:id/delete
+      nl: /tijdsbestedingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Time entries
+        nl: Tijdsbestedingen
+      columns:
+        - key: workedAt
+          sortable: true
+        - key: hours
+          sortable: true
+        - key: billable
+          sortable: true
+        - key: description
+          sortable: false
+      defaultSort:
+        key: workedAt
+        direction: desc
+      rowLink:
+        en: /time-entries/:id
+        nl: /tijdsbestedingen/:id
+    detail:
+      header:
+        title: "{{workedAt}}: {{hours}}h"
+        subtitle: "{{description}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Time details
+                nl: Tijdgegevens
+              fields:
+                - workedAt
+                - hours
+                - billable
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create time entry
+            nl: Tijdsbesteding aanmaken
+          groups:
+            - title:
+                en: Time details
+                nl: Tijdgegevens
+              fields:
+                - workedAt
+                - hours
+                - billable
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit time entry
+            nl: Tijdsbesteding bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Organisatie.All.Read
+      - Organisatie.All.ReadWrite
+    create:
+      - Organisatie.All.ReadWrite
+    update:
+      - Organisatie.All.ReadWrite
+    delete:
+      - Organisatie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

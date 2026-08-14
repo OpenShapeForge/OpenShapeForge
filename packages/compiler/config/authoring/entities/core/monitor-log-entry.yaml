@@ -1,0 +1,179 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: MonitorLogEntry
+title: Monitor Log Entry
+description: Individual log line within a monitor log session.
+language: en
+displayTemplate: "{{loggedAt}}: {{message}}"
+filterField: message
+labels:
+  en: Monitor log entry
+  nl: Monitorlogregel
+domains:
+  - energy
+fields:
+  - key: loggedAt
+    valueType: datetime
+    required: true
+    label:
+      en: Logged at
+      nl: Gelogd op
+    description:
+      en: Timestamp when the log entry was recorded.
+      nl: Tijdstip waarop de logregel is vastgelegd.
+    persisted:
+      column: logged_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: level
+    valueType: string
+    required: false
+    label:
+      en: Level
+      nl: Niveau
+    description:
+      en: Log level (e.g. info, warning, error).
+      nl: Logniveau (bv. info, warning, error).
+    validation:
+      maxLength: 50
+    persisted:
+      column: level
+      storageClass: core
+  - key: message
+    valueType: string
+    required: true
+    label:
+      en: Message
+      nl: Bericht
+    description:
+      en: Log message content.
+      nl: Inhoud van de logregel.
+    validation:
+      minLength: 1
+      maxLength: 1000
+    persisted:
+      column: message
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 1000
+relationships:
+  - key: monitorLog
+    kind: belongsTo
+    target: MonitorLog
+    foreignKey: monitor_log_id
+    label:
+      en: Monitor log
+      nl: Monitorlog
+ui:
+  routes:
+    list:
+      en: /monitor-log-entries
+      nl: /monitorlogregels
+    detail:
+      en: /monitor-log-entries/:id
+      nl: /monitorlogregels/:id
+    create:
+      en: /monitor-log-entries/create
+      nl: /monitorlogregels/aanmaken
+    edit:
+      en: /monitor-log-entries/:id/edit
+      nl: /monitorlogregels/:id/bewerken
+    delete:
+      en: /monitor-log-entries/:id/delete
+      nl: /monitorlogregels/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Monitor log entries
+        nl: Monitorlogregels
+      columns:
+        - key: loggedAt
+          sortable: true
+        - key: level
+          sortable: true
+        - key: message
+          sortable: true
+      defaultSort:
+        key: loggedAt
+        direction: desc
+      rowLink:
+        en: /monitor-log-entries/:id
+        nl: /monitorlogregels/:id
+    detail:
+      header:
+        title: "{{loggedAt}}"
+        subtitle: "{{level}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Entry details
+                nl: Regelgegevens
+              fields:
+                - loggedAt
+                - level
+                - message
+    form:
+      variants:
+        create:
+          title:
+            en: Create monitor log entry
+            nl: Monitorlogregel aanmaken
+          groups:
+            - title:
+                en: Entry details
+                nl: Regelgegevens
+              fields:
+                - loggedAt
+                - level
+                - message
+        edit:
+          extends: create
+          title:
+            en: Edit monitor log entry
+            nl: Monitorlogregel bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Energie.All.Read
+      - Energie.All.ReadWrite
+    create:
+      - Energie.All.ReadWrite
+    update:
+      - Energie.All.ReadWrite
+    delete:
+      - Energie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

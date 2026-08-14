@@ -1,0 +1,320 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Address
+title: Address
+description: A physical or postal address associated with a relation.
+language: en
+displayTemplate: "{{street}} {{houseNumber}}"
+filterField: street
+labels:
+  en: Address
+  nl: Adres
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+      - Relaties.All.ReadWrite
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: type
+    valueType: string
+    required: true
+    label:
+      en: Type
+      nl: Type
+    description:
+      en: Type of address (e.g. home, postal, visit, billing).
+      nl: Type adres (bijv. woon, post, bezoek, factuur).
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: RELATIEADRESSOORT
+        clearable: false
+  - key: street
+    valueType: string
+    required: false
+    label:
+      en: Street
+      nl: Straat
+    description:
+      en: Street name.
+      nl: Straatnaam.
+    validation:
+      maxLength: 200
+    persisted:
+      column: street
+      storageClass: core
+    render:
+      component: AddressAutocomplete
+      props:
+        provider: bag
+        country: NL
+  - key: houseNumber
+    valueType: string
+    required: false
+    label:
+      en: House number
+      nl: Huisnummer
+    description:
+      en: House or building number.
+      nl: Huis- of gebouwnummer.
+    validation:
+      maxLength: 20
+    persisted:
+      column: house_number
+      storageClass: core
+  - key: houseNumberAddition
+    valueType: string
+    required: false
+    label:
+      en: House number addition
+      nl: Huisnummertoevoeging
+    description:
+      en: Addition to the house number (e.g. A, bis, II).
+      nl: Toevoeging bij het huisnummer (bijv. A, bis, II).
+    validation:
+      maxLength: 20
+    persisted:
+      column: house_number_addition
+      storageClass: core
+  - key: postalCode
+    valueType: string
+    required: false
+    label:
+      en: Postal code
+      nl: Postcode
+    description:
+      en: Postal code or ZIP code.
+      nl: Postcode.
+    validation:
+      maxLength: 20
+    persisted:
+      column: postal_code
+      storageClass: core
+  - key: city
+    valueType: string
+    required: true
+    label:
+      en: City
+      nl: Plaats
+    description:
+      en: City or municipality name.
+      nl: Plaatsnaam of gemeente.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: city
+      storageClass: core
+  - key: country
+    valueType: string
+    required: false
+    label:
+      en: Country
+      nl: Land
+    description:
+      en: Country name or ISO country code.
+      nl: Landnaam of ISO-landcode.
+    validation:
+      maxLength: 100
+    persisted:
+      column: country
+      storageClass: core
+  - key: latitude
+    valueType: number
+    required: false
+    label:
+      en: Latitude
+      nl: Breedtegraad
+    description:
+      en: Geographic latitude coordinate.
+      nl: Geografische breedtegraadcoördinaat.
+    persisted:
+      column: latitude
+      storageClass: core
+    render:
+      component: MapPicker
+      props:
+        defaultZoom: 13
+        defaultCenter:
+          - 52.0907
+          - 5.1214
+        geocodeProvider: nominatim
+        coordinateField: latitude
+  - key: longitude
+    valueType: number
+    required: false
+    label:
+      en: Longitude
+      nl: Lengtegraad
+    description:
+      en: Geographic longitude coordinate.
+      nl: Geografische lengtegraadcoördinaat.
+    persisted:
+      column: longitude
+      storageClass: core
+    render:
+      component: MapPicker
+      props:
+        defaultZoom: 13
+        defaultCenter:
+          - 52.0907
+          - 5.1214
+        geocodeProvider: nominatim
+        coordinateField: longitude
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: naturalPerson
+    kind: belongsTo
+    target: NaturalPerson
+    foreignKey: natural_person_id
+    label:
+      en: Natural person
+      nl: Natuurlijk persoon
+  - key: legalEntity
+    kind: belongsTo
+    target: LegalEntity
+    foreignKey: legal_entity_id
+    label:
+      en: Legal entity
+      nl: Rechtspersoon
+ui:
+  routes:
+    list:
+      en: /addresses
+      nl: /adressen
+    detail:
+      en: /addresses/:id
+      nl: /adressen/:id
+    create:
+      en: /addresses/create
+      nl: /adressen/aanmaken
+    edit:
+      en: /addresses/:id/edit
+      nl: /adressen/:id/bewerken
+    delete:
+      en: /addresses/:id/delete
+      nl: /adressen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Addresses
+        nl: Adressen
+      columns:
+        - key: type
+          sortable: true
+        - key: street
+          sortable: true
+        - key: city
+          sortable: true
+        - key: postalCode
+          sortable: true
+      defaultSort:
+        key: city
+        direction: asc
+      rowLink:
+        en: /addresses/:id
+        nl: /adressen/:id
+    detail:
+      header:
+        title: "{{street}} {{houseNumber}}{{houseNumberAddition}}, {{city}}"
+        subtitle: "{{type}}"
+        badges:
+          - type
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Address
+                nl: Adres
+              fields:
+                - type
+                - street
+                - houseNumber
+                - houseNumberAddition
+                - postalCode
+                - city
+                - country
+            - title:
+                en: Coordinates
+                nl: Coördinaten
+              fields:
+                - latitude
+                - longitude
+    form:
+      variants:
+        create:
+          title:
+            en: Create address
+            nl: Adres aanmaken
+          groups:
+            - title:
+                en: Address
+                nl: Adres
+              fields:
+                - type
+                - street
+                - houseNumber
+                - houseNumberAddition
+                - postalCode
+                - city
+                - country
+            - title:
+                en: Coordinates
+                nl: Coördinaten
+              fields:
+                - latitude
+                - longitude
+        edit:
+          extends: create
+          title:
+            en: Edit address
+            nl: Adres bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

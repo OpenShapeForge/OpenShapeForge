@@ -1,0 +1,252 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: RelationAssociation
+title: Relation Association
+description: A typed association between two relations, optionally scoped to a context relation.
+language: en
+displayTemplate: "{{associationKind}}"
+filterField: associationKind
+labels:
+  en: Relation Association
+  nl: Relatiekoppeling
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+      - Relaties.All.ReadWrite
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: type
+    valueType: string
+    required: true
+    label:
+      en: Type
+      nl: Type
+    description:
+      en: Type of association between two relations, such as memberOf, contactPersonOf, or guarantorFor.
+      nl: Type koppeling tussen twee relaties, zoals memberOf, contactpersoonVan of borgVoor.
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: type
+      storageClass: core
+  - key: status
+    valueType: string
+    required: false
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the association.
+      nl: Levenscyclusstatus van de koppeling.
+    validation:
+      maxLength: 50
+    persisted:
+      column: status
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description or business context for the association.
+      nl: Optionele omschrijving of zakelijke context van de koppeling.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Date from which the association is effective.
+      nl: Datum vanaf wanneer de koppeling geldig is.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Date until which the association is effective.
+      nl: Datum tot wanneer de koppeling geldig is.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: isPrimary
+    valueType: boolean
+    required: false
+    label:
+      en: Primary
+      nl: Primair
+    description:
+      en: Whether this is the primary association of its type within the given context.
+      nl: Of dit de primaire koppeling van dit type is binnen de gegeven context.
+    persisted:
+      column: is_primary
+      storageClass: core
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: relatedRelation
+    kind: belongsTo
+    target: Relation
+    foreignKey: related_relation_id
+    label:
+      en: Related relation
+      nl: Gerelateerde relatie
+  - key: contextRelation
+    kind: belongsTo
+    target: Relation
+    foreignKey: context_relation_id
+    label:
+      en: Context relation
+      nl: Contextrelatie
+ui:
+  routes:
+    list:
+      en: /relation-associations
+      nl: /relatiekoppelingen
+    detail:
+      en: /relation-associations/:id
+      nl: /relatiekoppelingen/:id
+    create:
+      en: /relation-associations/create
+      nl: /relatiekoppelingen/aanmaken
+    edit:
+      en: /relation-associations/:id/edit
+      nl: /relatiekoppelingen/:id/bewerken
+    delete:
+      en: /relation-associations/:id/delete
+      nl: /relatiekoppelingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Relation Associations
+        nl: Relatiekoppelingen
+      columns:
+        - key: type
+          sortable: true
+        - key: status
+          sortable: true
+        - key: startDate
+          sortable: true
+        - key: endDate
+          sortable: true
+      defaultSort:
+        key: type
+        direction: asc
+      rowLink:
+        en: /relation-associations/:id
+        nl: /relatiekoppelingen/:id
+    detail:
+      header:
+        title: "{{type}}"
+        subtitle: "{{status}}"
+        badges:
+          - type
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Association
+                nl: Koppeling
+              fields:
+                - type
+                - status
+                - startDate
+                - endDate
+                - isPrimary
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+    form:
+      variants:
+        create:
+          title:
+            en: Create relation association
+            nl: Relatiekoppeling aanmaken
+          groups:
+            - title:
+                en: Association
+                nl: Koppeling
+              fields:
+                - type
+                - status
+                - startDate
+                - endDate
+                - isPrimary
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+        edit:
+          extends: create
+          title:
+            en: Edit relation association
+            nl: Relatiekoppeling bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

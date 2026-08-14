@@ -1,0 +1,399 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Document
+title: Document
+description: A governed document record (metadata plus optional file) linked to a dossier, optionally a case, and optionally a relation.
+language: en
+displayTemplate: "{{title}}"
+filterField: title
+labels:
+  en: Document
+  nl: Document
+domains:
+  - cases
+  - records
+retention:
+  mode: policyRef
+  policy: records-archive-7y
+  scope: record
+  startsFrom:
+    strategy: firstNonNull
+    fields:
+      - publishedAt
+      - registeredAt
+      - receivedAt
+authorization:
+  roles:
+    read:
+      - Dossier.All.ReadWrite
+    create:
+      - Dossier.All.ReadWrite
+    update:
+      - Dossier.All.ReadWrite
+    delete:
+      - Dossier.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: false
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Optional business or archive reference code for this document.
+      nl: Optionele bedrijfs- of archiefreferentiecode voor dit document.
+    help:
+      en: Use a stable code from your records policy or source system when one exists.
+      nl: Gebruik een vaste code uit jullie registratie of bronsysteem wanneer die bestaat.
+    validation:
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: title
+    valueType: string
+    required: true
+    label:
+      en: Title
+      nl: Titel
+    description:
+      en: Short title shown in lists, search, and overviews.
+      nl: Korte titel in lijsten, zoekresultaten en overzichten.
+    help:
+      en: Prefer a concise phrase; the long explanation belongs in Description.
+      nl: Houd het beknopt; uitgebreide toelichting hoort bij Beschrijving.
+    validation:
+      minLength: 1
+      maxLength: 300
+    persisted:
+      column: title
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    description:
+      en: Free-text summary of the document purpose or contents.
+      nl: Vrije tekst met het doel of de inhoud van het document.
+    help:
+      en: Use for context that does not fit the title, for example scope or key facts.
+      nl: Gebruik voor context die niet in de titel past, bijvoorbeeld reikwijdte of kernfeiten.
+    validation:
+      maxLength: 8000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 5
+        maxLength: 8000
+  - key: documentType
+    valueType: string
+    required: true
+    label:
+      en: Document type
+      nl: Documenttype
+    description:
+      en: Classification from the registered document type catalog.
+      nl: Classificatie volgens het geregistreerde documenttype.
+    help:
+      en: May drive defaults such as confidentiality and registration requirements.
+      nl: Kan standaarden sturen, zoals vertrouwelijkheid en registratievereisten.
+    persisted:
+      column: document_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: DOCUMENTTYPE
+        clearable: false
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of this document record.
+      nl: Levenscyclusstatus van dit documentrecord.
+    help:
+      en: Examples include draft, registered, published, or superseded—depending on your catalog.
+      nl: Bijvoorbeeld concept, geregistreerd, gepubliceerd of vervangen—afhankelijk van de catalogus.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: DOCUMENTSTATUS
+        clearable: false
+  - key: confidentiality
+    valueType: string
+    required: false
+    label:
+      en: Confidentiality
+      nl: Vertrouwelijkheid
+    description:
+      en: Sensitivity of the document content for access control and handling.
+      nl: Gevoeligheid van de inhoud voor toegang en omgang.
+    help:
+      en: Often defaulted from the document type; override only when the instance differs.
+      nl: Vaak afgeleid van het documenttype; alleen afwijken als dit exemplaar anders is.
+    persisted:
+      column: confidentiality
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: DOCUMENTCONFIDENTIALITY
+        clearable: true
+  - key: source
+    valueType: string
+    required: false
+    label:
+      en: Source
+      nl: Bron
+    description:
+      en: Where the document came from (e.g. channel, batch, or system name).
+      nl: Herkomst van het document (bijv. kanaal, batch of systeemnaam).
+    help:
+      en: Helps audits and traceability; examples include “Portal upload”, “E-mail”, “Scan”.
+      nl: Ondersteunt audits en herleidbaarheid; bijv. “Portaalupload”, “E-mail”, “Scan”.
+    validation:
+      maxLength: 200
+    persisted:
+      column: source
+      storageClass: core
+  - key: author
+    valueType: string
+    required: false
+    label:
+      en: Author
+      nl: Auteur
+    description:
+      en: Person or organisation that authored the content, if known.
+      nl: Persoon of organisatie die de inhoud heeft opgesteld, indien bekend.
+    help:
+      en: Not always the uploader; use the original creator when the document states one.
+      nl: Niet per se de uploader; gebruik de oorspronkelijke auteur als die in het document staat.
+    validation:
+      maxLength: 200
+    persisted:
+      column: author
+      storageClass: core
+  - key: fileName
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: File name
+      nl: Bestandsnaam
+    description:
+      en: Original file name of the stored binary, when applicable.
+      nl: Oorspronkelijke bestandsnaam van het opgeslagen bestand, indien van toepassing.
+    help:
+      en: Set automatically when uploading a file; useful for users and exports.
+      nl: Wordt automatisch gezet bij upload; handig voor gebruikers en exports.
+    validation:
+      maxLength: 255
+    persisted:
+      column: file_name
+      storageClass: core
+  - key: mimeType
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: MIME type
+      nl: MIME-type
+    description:
+      en: Technical MIME type of the stored file (e.g. application/pdf).
+      nl: Technisch MIME-type van het bestand (bijv. application/pdf).
+    help:
+      en: Derived from the upload or storage layer; used for preview and validation rules.
+      nl: Afgeleid van upload of opslag; gebruikt voor preview en validatieregels.
+    validation:
+      maxLength: 150
+    persisted:
+      column: mime_type
+      storageClass: core
+  - key: storageLocation
+    valueType: string
+    required: false
+    label:
+      en: File
+      nl: Bestand
+    description:
+      en: Storage pointer or key for the uploaded binary (object store, blob id, or path token).
+      nl: Opslagpointer of sleutel voor het binaire bestand (objectstore, blob-id of pad-token).
+    help:
+      en: Upload the file here; the platform fills file name, MIME type, and checksum as needed.
+      nl: Upload het bestand hier; het platform vult zo nodig bestandsnaam, MIME-type en checksum.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: storage_location
+      storageClass: core
+    render:
+      component: FileUpload
+      props:
+        fileNameField: fileName
+        mimeTypeField: mimeType
+        checksumField: checksum
+  - key: versionLabel
+    valueType: string
+    required: false
+    label:
+      en: Version label
+      nl: Versielabel
+    description:
+      en: Human-readable label for this version within the version chain.
+      nl: Menselijk leesbaar label voor deze versie binnen de versiereeks.
+    help:
+      en: Examples include “1.0”, “Final”, or “2024-03 concept B”.
+      nl: Bijvoorbeeld “1.0”, “Definitief” of “2024-03 concept B”.
+    validation:
+      maxLength: 50
+    persisted:
+      column: version_label
+      storageClass: core
+  - key: checksum
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: Checksum
+      nl: Checksum
+    description:
+      en: Cryptographic hash of the stored file for integrity verification.
+      nl: Cryptografische hash van het bestand voor integriteitscontrole.
+    help:
+      en: Generated on upload; used to detect tampering or accidental corruption.
+      nl: Gegenereerd bij upload; gebruikt om wijziging of corruptie te detecteren.
+    validation:
+      maxLength: 128
+    persisted:
+      column: checksum
+      storageClass: core
+  - key: isExternal
+    valueType: boolean
+    required: true
+    label:
+      en: External
+      nl: Extern
+    description:
+      en: Whether the document originated outside your organisation.
+      nl: Of het document van buiten de eigen organisatie afkomstig is.
+    help:
+      en: External documents may follow different handling, retention, or publication rules.
+      nl: Externe documenten kunnen andere omgangs-, bewaar- of publicatieregels hebben.
+    defaultValue: false
+    persisted:
+      column: is_external
+      storageClass: core
+  - key: registeredAt
+    valueType: datetime
+    required: false
+    label:
+      en: Registered at
+      nl: Geregistreerd op
+    description:
+      en: When the document was formally registered in the records system.
+      nl: Wanneer het document formeel in de registratie is opgenomen.
+    help:
+      en: Often used as a retention start date together with received and published timestamps.
+      nl: Wordt vaak gebruikt als start voor bewaartermijnen, naast ontvangst- en publicatiedatum.
+    persisted:
+      column: registered_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: receivedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Received at
+      nl: Ontvangen op
+    description:
+      en: When the document was first received by your organisation.
+      nl: Wanneer het document voor het eerst door de organisatie is ontvangen.
+    help:
+      en: May differ from registration or publication, e.g. mail received before formal filing.
+      nl: Kan afwijken van registratie of publicatie, bijv. e-mail eerder dan formele registratie.
+    persisted:
+      column: received_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: publishedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Published at
+      nl: Gepubliceerd op
+    description:
+      en: When the document was finalized or made available to intended recipients.
+      nl: Wanneer het document definitief is gemaakt of beschikbaar is voor de bedoelde ontvangers.
+    help:
+      en: Used for retention and disclosure timelines; optional if not applicable.
+      nl: Gebruikt voor bewaar- en openbaarmakingslijnen; optioneel als niet van toepassing.
+    persisted:
+      column: published_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+relationships:
+  - key: dossier
+    kind: belongsTo
+    target: Dossier
+    foreignKey: dossier_id
+    label:
+      en: Dossier
+      nl: Dossier
+  - key: case
+    kind: belongsTo
+    target: Case
+    foreignKey: case_id
+    label:
+      en: Case
+      nl: Zaak
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: currentVersion
+    kind: belongsTo
+    target: DocumentVersion
+    foreignKey: current_version_id
+    label:
+      en: Current version
+      nl: Huidige versie
+  - key: versions
+    kind: hasMany
+    target: DocumentVersion
+    foreignKey: document_id
+    label:
+      en: Versions
+      nl: Versies
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+      wait: true

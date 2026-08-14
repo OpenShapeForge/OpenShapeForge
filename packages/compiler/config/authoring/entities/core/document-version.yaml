@@ -1,0 +1,168 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: DocumentVersion
+title: Document Version
+description: A versioned binary or logical revision of a document.
+language: en
+displayTemplate: "{{versionLabel}}"
+filterField: versionLabel
+labels:
+  en: Document Version
+  nl: Documentversie
+domains:
+  - cases
+  - records
+authorization:
+  roles:
+    read:
+      - Dossier.All.ReadWrite
+    create:
+      - Dossier.All.ReadWrite
+    update:
+      - Dossier.All.ReadWrite
+    delete:
+      - Organisatie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: versionLabel
+    valueType: string
+    required: true
+    label:
+      en: Version label
+      nl: Versielabel
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: version_label
+      storageClass: core
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: DOCUMENTVERSIONSTATUS
+        clearable: false
+  - key: createdBy
+    valueType: string
+    required: false
+    label:
+      en: Created by
+      nl: Aangemaakt door
+    validation:
+      maxLength: 200
+    persisted:
+      column: created_by
+      storageClass: core
+  - key: fileName
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: File name
+      nl: Bestandsnaam
+    validation:
+      maxLength: 255
+    persisted:
+      column: file_name
+      storageClass: core
+  - key: mimeType
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: MIME type
+      nl: MIME-type
+    validation:
+      maxLength: 150
+    persisted:
+      column: mime_type
+      storageClass: core
+  - key: storageLocation
+    valueType: string
+    required: false
+    label:
+      en: File
+      nl: Bestand
+    validation:
+      maxLength: 1000
+    persisted:
+      column: storage_location
+      storageClass: core
+    render:
+      component: FileUpload
+      props:
+        fileNameField: fileName
+        mimeTypeField: mimeType
+        checksumField: checksum
+  - key: checksum
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: Checksum
+      nl: Checksum
+    validation:
+      maxLength: 128
+    persisted:
+      column: checksum
+      storageClass: core
+  - key: isMajorVersion
+    valueType: boolean
+    required: true
+    label:
+      en: Major version
+      nl: Hoofdversie
+    defaultValue: false
+    persisted:
+      column: is_major_version
+      storageClass: core
+  - key: changeSummary
+    valueType: string
+    required: false
+    label:
+      en: Change summary
+      nl: Wijzigingssamenvatting
+    validation:
+      maxLength: 4000
+    persisted:
+      column: change_summary
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+relationships:
+  - key: document
+    kind: belongsTo
+    target: Document
+    foreignKey: document_id
+    label:
+      en: Document
+      nl: Document
+  - key: account
+    kind: belongsTo
+    target: Account
+    foreignKey: account_id
+    label:
+      en: Account
+      nl: Account
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

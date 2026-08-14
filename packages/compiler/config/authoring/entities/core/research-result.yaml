@@ -1,0 +1,102 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ResearchResult
+title: Research Result
+description: The aggregated result of a research assignment, linking the assignment to its collected answers.
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: Research Result
+  nl: Onderzoeksresultaat
+domains:
+  - quality
+retention:
+  mode: policyRef
+  policy: quality-retain-7y
+  scope: record
+  startsFrom:
+    strategy: field
+    field: completedAt
+authorization:
+  roles:
+    read:
+      - Kwaliteit.All.Read
+      - Kwaliteit.All.ReadWrite
+    create:
+      - Kwaliteit.All.ReadWrite
+    update:
+      - Kwaliteit.All.ReadWrite
+    delete:
+      - Kwaliteit.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: false
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Human-readable result code.
+      nl: Menselijk leesbare resultaatcode.
+    validation:
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: completedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Completed at
+      nl: Afgerond op
+    description:
+      en: Timestamp when the research result was finalized.
+      nl: Tijdstip waarop het onderzoeksresultaat is afgerond.
+    persisted:
+      column: completed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional code in a connected source system.
+      nl: Functionele code in een gekoppeld bronsysteem.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: assignment
+    kind: belongsTo
+    target: ResearchAssignment
+    foreignKey: research_assignment_id
+    label:
+      en: Research assignment
+      nl: Onderzoeksopdracht
+  - key: answers
+    kind: hasMany
+    target: SurveyAnswer
+    foreignKey: research_result_id
+    label:
+      en: Answers
+      nl: Antwoorden
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

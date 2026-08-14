@@ -1,0 +1,156 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: CaseStatusEvent
+title: Case Status Event
+description: A historical status transition on a case.
+language: en
+displayTemplate: "{{actorType}}"
+filterField: actorId
+labels:
+  en: Case Status Event
+  nl: Zaakstatusgebeurtenis
+domains:
+  - cases
+authorization:
+  roles:
+    read:
+      - Zaken.All.Read
+      - Zaken.All.ReadWrite
+    create:
+      - Zaken.All.ReadWrite
+    update:
+      - Zaken.All.ReadWrite
+    delete:
+      - Organisatie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASESTATUS
+        clearable: false
+  - key: statusReason
+    valueType: string
+    required: false
+    label:
+      en: Status reason
+      nl: Statusreden
+    validation:
+      maxLength: 300
+    persisted:
+      column: status_reason
+      storageClass: core
+  - key: enteredAt
+    valueType: datetime
+    required: true
+    label:
+      en: Entered at
+      nl: Bereikt op
+    persisted:
+      column: entered_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: exitedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Exited at
+      nl: Verlopen op
+    persisted:
+      column: exited_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: actorId
+    valueType: string
+    required: false
+    label:
+      en: Actor ID
+      nl: Actor-ID
+    validation:
+      format: uuid
+    persisted:
+      column: actor_id
+      storageClass: core
+  - key: actorType
+    valueType: string
+    required: false
+    label:
+      en: Actor type
+      nl: Actortype
+    persisted:
+      column: actor_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEACTORTYPE
+        clearable: true
+  - key: source
+    valueType: string
+    required: false
+    label:
+      en: Source
+      nl: Bron
+    persisted:
+      column: source
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASESTATUSEVENTSOURCE
+        clearable: true
+  - key: note
+    valueType: string
+    required: false
+    label:
+      en: Note
+      nl: Notitie
+    validation:
+      maxLength: 4000
+    persisted:
+      column: note
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+relationships:
+  - key: case
+    kind: belongsTo
+    target: Case
+    foreignKey: case_id
+    label:
+      en: Case
+      nl: Zaak
+  - key: account
+    kind: belongsTo
+    target: Account
+    foreignKey: account_id
+    label:
+      en: Account
+      nl: Account
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

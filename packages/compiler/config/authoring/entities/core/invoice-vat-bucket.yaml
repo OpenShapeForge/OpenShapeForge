@@ -1,0 +1,159 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: InvoiceVatBucket
+title: Invoice VAT Bucket
+description: Per-rate persisted VAT bucket on an invoice — one row per VatRate referenced on the lines. Persisted snapshot stays stable even if the VatRate is later edited.
+language: en
+displayTemplate: "{{vatRate.code}}"
+filterField: id
+labels:
+  en: Invoice VAT bucket
+  nl: BTW-totaal
+domains:
+  - finance
+fields:
+  - key: amountBase
+    valueType: number
+    required: true
+    label:
+      en: Base amount
+      nl: Basisbedrag
+    description:
+      en: Sum of net (excl. VAT) amounts for invoice lines at this VAT rate.
+      nl: Som van de nettobedragen (excl. BTW) van de factuurregels op dit BTW-tarief.
+    semanticType: currency
+    persisted:
+      column: amount_base
+      storageClass: core
+  - key: amountVat
+    valueType: number
+    required: true
+    label:
+      en: VAT amount
+      nl: BTW-bedrag
+    description:
+      en: Sum of VAT amounts for invoice lines at this VAT rate.
+      nl: Som van de BTW-bedragen van de factuurregels op dit BTW-tarief.
+    semanticType: currency
+    persisted:
+      column: amount_vat
+      storageClass: core
+relationships:
+  - key: invoice
+    kind: belongsTo
+    target: Invoice
+    foreignKey: invoice_id
+    label:
+      en: Invoice
+      nl: Factuur
+  - key: vatRate
+    kind: belongsTo
+    target: VatRate
+    foreignKey: vat_rate_id
+    label:
+      en: VAT rate
+      nl: BTW-tarief
+ui:
+  routes:
+    list:
+      en: /invoice-vat-buckets
+      nl: /btw-totalen
+    detail:
+      en: /invoice-vat-buckets/:id
+      nl: /btw-totalen/:id
+    create:
+      en: /invoice-vat-buckets/create
+      nl: /btw-totalen/aanmaken
+    edit:
+      en: /invoice-vat-buckets/:id/edit
+      nl: /btw-totalen/:id/bewerken
+    delete:
+      en: /invoice-vat-buckets/:id/delete
+      nl: /btw-totalen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Invoice VAT buckets
+        nl: BTW-totalen
+      columns:
+        - key: amountBase
+          sortable: true
+        - key: amountVat
+          sortable: true
+      defaultSort:
+        key: amountBase
+        direction: desc
+      rowLink:
+        en: /invoice-vat-buckets/:id
+        nl: /btw-totalen/:id
+    detail:
+      header:
+        title: "{{amountVat}}"
+        subtitle: "{{amountBase}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Bucket totals
+                nl: Totalen per BTW-tarief
+              fields:
+                - amountBase
+                - amountVat
+    form:
+      variants:
+        create:
+          title:
+            en: Create invoice VAT bucket
+            nl: BTW-totaal aanmaken
+          groups:
+            - title:
+                en: Bucket totals
+                nl: Totalen per BTW-tarief
+              fields:
+                - amountBase
+                - amountVat
+        edit:
+          extends: create
+          title:
+            en: Edit invoice VAT bucket
+            nl: BTW-totaal bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

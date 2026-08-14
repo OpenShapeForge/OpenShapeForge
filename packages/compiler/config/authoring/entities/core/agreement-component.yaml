@@ -1,0 +1,369 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: AgreementComponent
+title: Agreement Component
+description: Line item on an agreement, typed by an agreement component type, with quantities, unit amounts, and per-line VAT rate.
+language: en
+displayTemplate: "{{description}}"
+filterField: description
+labels:
+  en: Agreement component
+  nl: Overeenkomstcomponent
+domains:
+  - finance
+  - contracts
+fields:
+  - key: description
+    valueType: string
+    required: true
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Human-readable description of this line on the agreement.
+      nl: Menselijk leesbare omschrijving van deze regel op de overeenkomst.
+    validation:
+      minLength: 1
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 2000
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Date from which this component is effective on the agreement.
+      nl: Datum vanaf wanneer deze component op de overeenkomst geldig is.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Date until which this component is effective on the agreement.
+      nl: Datum tot wanneer deze component op de overeenkomst geldig is.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: nextProlongationDate
+    valueType: date
+    required: false
+    label:
+      en: Next prolongation date
+      nl: Volgende prolongatiedatum
+    description:
+      en: Cursor — next date the prolongation worker should pick up this component.
+      nl: Cursor — volgende datum waarop de prolongatie-worker deze component moet oppakken.
+    persisted:
+      column: next_prolongation_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endProlongationDate
+    valueType: date
+    required: false
+    label:
+      en: End prolongation date
+      nl: Einde prolongatiedatum
+    description:
+      en: Cursor — date through which prolongation has already produced invoices for this component.
+      nl: Cursor — datum tot waar prolongatie al facturen heeft geproduceerd voor deze component.
+    persisted:
+      column: end_prolongation_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: quantity
+    valueType: number
+    required: false
+    label:
+      en: Quantity
+      nl: Aantal
+    description:
+      en: Quantity for this component (multiplied by unit amount to compute base).
+      nl: Aantal voor deze component (vermenigvuldigd met eenheidsbedrag voor basisbedrag).
+    persisted:
+      column: quantity
+      storageClass: core
+  - key: unitId
+    valueType: string
+    required: false
+    label:
+      en: Unit
+      nl: Eenheid
+    description:
+      en: Free-form unit identifier for this component (e.g. "Day", "Hour").
+      nl: Vrije eenheidsaanduiding voor deze component (bv. "Dag", "Uur").
+    validation:
+      maxLength: 50
+    persisted:
+      column: unit_id
+      storageClass: core
+  - key: unitAmount
+    valueType: number
+    required: false
+    label:
+      en: Unit amount
+      nl: Eenheidsbedrag
+    description:
+      en: Amount per unit (excluding VAT).
+      nl: Bedrag per eenheid (excl. BTW).
+    semanticType: currency
+    persisted:
+      column: unit_amount
+      storageClass: core
+  - key: amountBase
+    valueType: number
+    required: false
+    label:
+      en: Base amount
+      nl: Basisbedrag
+    description:
+      en: Net amount excluding VAT for this component line.
+      nl: Nettobedrag excl. BTW voor deze componentregel.
+    semanticType: currency
+    persisted:
+      column: amount_base
+      storageClass: core
+  - key: amountVat
+    valueType: number
+    required: false
+    label:
+      en: VAT amount
+      nl: BTW-bedrag
+    description:
+      en: VAT amount for this component line.
+      nl: BTW-bedrag voor deze componentregel.
+    semanticType: currency
+    persisted:
+      column: amount_vat
+      storageClass: core
+  - key: amountTotal
+    valueType: number
+    required: false
+    label:
+      en: Total amount
+      nl: Totaalbedrag
+    description:
+      en: Total amount including VAT for this component line.
+      nl: Totaalbedrag incl. BTW voor deze componentregel.
+    semanticType: currency
+    persisted:
+      column: amount_total
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the component in an external context.
+      nl: Functionele of zakelijke code van de component in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: agreement
+    kind: belongsTo
+    target: Agreement
+    foreignKey: agreement_id
+    label:
+      en: Agreement
+      nl: Overeenkomst
+  - key: agreementComponentType
+    kind: belongsTo
+    target: AgreementComponentType
+    foreignKey: agreement_component_type_id
+    label:
+      en: Component type
+      nl: Componenttype
+  - key: vatRate
+    kind: belongsTo
+    target: VatRate
+    foreignKey: vat_rate_id
+    label:
+      en: VAT rate
+      nl: BTW-tarief
+ui:
+  routes:
+    list:
+      en: /agreement-components
+      nl: /overeenkomstcomponenten
+    detail:
+      en: /agreement-components/:id
+      nl: /overeenkomstcomponenten/:id
+    create:
+      en: /agreement-components/create
+      nl: /overeenkomstcomponenten/aanmaken
+    edit:
+      en: /agreement-components/:id/edit
+      nl: /overeenkomstcomponenten/:id/bewerken
+    delete:
+      en: /agreement-components/:id/delete
+      nl: /overeenkomstcomponenten/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Agreement components
+        nl: Overeenkomstcomponenten
+      columns:
+        - key: description
+          sortable: true
+        - key: startDate
+          sortable: true
+        - key: endDate
+          sortable: true
+        - key: amountTotal
+          sortable: true
+      defaultSort:
+        key: startDate
+        direction: desc
+      rowLink:
+        en: /agreement-components/:id
+        nl: /overeenkomstcomponenten/:id
+    detail:
+      header:
+        title: "{{description}}"
+        subtitle: "{{amountTotal}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Component details
+                nl: Componentgegevens
+              fields:
+                - description
+                - startDate
+                - endDate
+                - quantity
+                - unitId
+                - unitAmount
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - amountBase
+                - amountVat
+                - amountTotal
+            - title:
+                en: Prolongation
+                nl: Prolongatie
+              fields:
+                - nextProlongationDate
+                - endProlongationDate
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create agreement component
+            nl: Overeenkomstcomponent aanmaken
+          groups:
+            - title:
+                en: Component details
+                nl: Componentgegevens
+              fields:
+                - description
+                - startDate
+                - endDate
+                - quantity
+                - unitId
+                - unitAmount
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - amountBase
+                - amountVat
+                - amountTotal
+            - title:
+                en: Prolongation
+                nl: Prolongatie
+              fields:
+                - nextProlongationDate
+                - endProlongationDate
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit agreement component
+            nl: Overeenkomstcomponent bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Overeenkomsten.All.Read
+      - Overeenkomsten.All.ReadWrite
+    create:
+      - Overeenkomsten.All.ReadWrite
+    update:
+      - Overeenkomsten.All.ReadWrite
+    delete:
+      - Overeenkomsten.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

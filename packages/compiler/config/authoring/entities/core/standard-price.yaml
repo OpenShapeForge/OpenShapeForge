@@ -1,0 +1,280 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: StandardPrice
+title: Standard Price
+description: Reference price catalogue for maintenance task types, scoped to a validity period.
+language: en
+displayTemplate: "{{code}} {{name}}"
+filterField: code
+labels:
+  en: Standard price
+  nl: Standaardprijs
+domains:
+  - maintenance
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique standard price code.
+      nl: Tenant-unieke standaardprijscode.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the standard price entry.
+      nl: Menselijk leesbare naam van de standaardprijs.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description of the standard price.
+      nl: Optionele omschrijving van de standaardprijs.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 1000
+  - key: unitId
+    valueType: string
+    required: false
+    label:
+      en: Unit
+      nl: Eenheid
+    description:
+      en: Free-form unit identifier (e.g. "Hour", "Piece").
+      nl: Vrije eenheidsaanduiding (bv. "Uur", "Stuk").
+    validation:
+      maxLength: 50
+    persisted:
+      column: unit_id
+      storageClass: core
+  - key: amount
+    valueType: number
+    required: true
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Standard price amount.
+      nl: Standaardprijsbedrag.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+  - key: validFrom
+    valueType: date
+    required: true
+    label:
+      en: Valid from
+      nl: Geldig vanaf
+    description:
+      en: Date from which the standard price is valid.
+      nl: Datum vanaf wanneer de standaardprijs geldig is.
+    persisted:
+      column: valid_from
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: validTo
+    valueType: date
+    required: false
+    label:
+      en: Valid to
+      nl: Geldig tot
+    description:
+      en: Date until which the standard price is valid.
+      nl: Datum tot wanneer de standaardprijs geldig is.
+    persisted:
+      column: valid_to
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the standard price in an external context.
+      nl: Functionele of zakelijke code van de standaardprijs in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+ui:
+  routes:
+    list:
+      en: /standard-prices
+      nl: /standaardprijzen
+    detail:
+      en: /standard-prices/:id
+      nl: /standaardprijzen/:id
+    create:
+      en: /standard-prices/create
+      nl: /standaardprijzen/aanmaken
+    edit:
+      en: /standard-prices/:id/edit
+      nl: /standaardprijzen/:id/bewerken
+    delete:
+      en: /standard-prices/:id/delete
+      nl: /standaardprijzen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Standard prices
+        nl: Standaardprijzen
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+        - key: amount
+          sortable: true
+        - key: validFrom
+          sortable: true
+        - key: validTo
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /standard-prices/:id
+        nl: /standaardprijzen/:id
+    detail:
+      header:
+        title: "{{code}} {{name}}"
+        subtitle: "{{amount}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Standard price details
+                nl: Standaardprijsgegevens
+              fields:
+                - code
+                - name
+                - unitId
+                - amount
+                - validFrom
+                - validTo
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create standard price
+            nl: Standaardprijs aanmaken
+          groups:
+            - title:
+                en: Standard price details
+                nl: Standaardprijsgegevens
+              fields:
+                - code
+                - name
+                - unitId
+                - amount
+                - validFrom
+                - validTo
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit standard price
+            nl: Standaardprijs bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Onderhoud.All.Read
+      - Onderhoud.All.ReadWrite
+    create:
+      - Onderhoud.All.ReadWrite
+    update:
+      - Onderhoud.All.ReadWrite
+    delete:
+      - Onderhoud.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

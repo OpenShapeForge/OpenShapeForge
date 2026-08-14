@@ -1,0 +1,237 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: LegalEntity
+title: Legal Entity
+description: A legal entity such as a company, foundation, or government body. Shared reachability and business contact state should be modeled on the related Relation aggregate.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Legal Entity
+  nl: Rechtspersoon
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+      - Relaties.All.ReadWrite
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Official registered name of the legal entity.
+      nl: Officieel geregistreerde naam van de rechtspersoon.
+    validation:
+      minLength: 1
+      maxLength: 300
+    persisted:
+      column: name
+      storageClass: core
+  - key: registrationNumber
+    valueType: string
+    required: false
+    label:
+      en: Registration number
+      nl: KvK-nummer
+    description:
+      en: Chamber of Commerce or company registration number.
+      nl: Kamer van Koophandel-nummer of handelsregisternummer.
+    validation:
+      maxLength: 50
+    persisted:
+      column: registration_number
+      storageClass: core
+  - key: vatNumber
+    valueType: string
+    required: false
+    label:
+      en: VAT number
+      nl: BTW-nummer
+    description:
+      en: Value Added Tax identification number.
+      nl: BTW-identificatienummer.
+    validation:
+      maxLength: 50
+    persisted:
+      column: vat_number
+      storageClass: core
+  - key: globalLocationNumber
+    valueType: string
+    required: false
+    label:
+      en: Global Location Number
+      nl: GLN-nummer
+    description:
+      en: Global Location Number (GLN) for identification in supply chains.
+      nl: Global Location Number (GLN) voor identificatie in toeleveringsketens.
+    validation:
+      maxLength: 13
+    persisted:
+      column: global_location_number
+      storageClass: core
+  - key: legalForm
+    valueType: string
+    required: false
+    label:
+      en: Legal form
+      nl: Rechtsvorm
+    description:
+      en: Legal form of the entity (e.g. BV, NV, Stichting).
+      nl: Rechtsvorm van de entiteit (bijv. BV, NV, Stichting).
+    validation:
+      maxLength: 100
+    persisted:
+      column: legal_form
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: ORGANISATIEVORM
+        clearable: true
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: addresses
+    kind: hasMany
+    target: Address
+    foreignKey: legal_entity_id
+    label:
+      en: Addresses
+      nl: Adressen
+  - key: contactMoments
+    kind: hasMany
+    target: ContactMoment
+    foreignKey: relation_id
+    via: relation
+    label:
+      en: Contact moments
+      nl: Contactmomenten
+ui:
+  routes:
+    list:
+      en: /legal-entities
+      nl: /rechtspersonen
+    detail:
+      en: /legal-entities/:id
+      nl: /rechtspersonen/:id
+    create:
+      en: /legal-entities/create
+      nl: /rechtspersonen/aanmaken
+    edit:
+      en: /legal-entities/:id/edit
+      nl: /rechtspersonen/:id/bewerken
+    delete:
+      en: /legal-entities/:id/delete
+      nl: /rechtspersonen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Legal Entities
+        nl: Rechtspersonen
+      columns:
+        - key: name
+          sortable: true
+        - key: registrationNumber
+          sortable: true
+        - key: legalForm
+          sortable: true
+        - key: vatNumber
+          sortable: false
+      defaultSort:
+        key: name
+        direction: asc
+      rowLink:
+        en: /legal-entities/:id
+        nl: /rechtspersonen/:id
+    detail:
+      header:
+        title: "{{name}}"
+        subtitle: "{{legalForm}}"
+        badges:
+          - legalForm
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: General
+                nl: Algemeen
+              fields:
+                - name
+                - legalForm
+            - title:
+                en: Registration
+                nl: Registratie
+              fields:
+                - registrationNumber
+                - vatNumber
+                - globalLocationNumber
+    form:
+      variants:
+        create:
+          title:
+            en: Create legal entity
+            nl: Rechtspersoon aanmaken
+          groups:
+            - title:
+                en: General
+                nl: Algemeen
+              fields:
+                - name
+                - legalForm
+            - title:
+                en: Registration
+                nl: Registratie
+              fields:
+                - registrationNumber
+                - vatNumber
+                - globalLocationNumber
+        edit:
+          extends: create
+          title:
+            en: Edit legal entity
+            nl: Rechtspersoon bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

@@ -1,0 +1,147 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: SurveyAnswer
+title: Survey Answer
+description: A respondent's answer to a survey question, including optional explanation.
+language: en
+displayTemplate: "{{answer}}"
+filterField: answer
+labels:
+  en: Survey Answer
+  nl: Vragenlijstantwoord
+domains:
+  - quality
+retention:
+  mode: policyRef
+  policy: quality-retain-7y
+  scope: record
+  startsFrom:
+    strategy: field
+    field: answeredAt
+authorization:
+  roles:
+    read:
+      - Kwaliteit.All.Read
+      - Kwaliteit.All.ReadWrite
+    create:
+      - Kwaliteit.All.ReadWrite
+    update:
+      - Kwaliteit.All.ReadWrite
+    delete:
+      - Kwaliteit.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: false
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Human-readable answer code.
+      nl: Menselijk leesbare antwoordcode.
+    validation:
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: answer
+    valueType: string
+    required: false
+    label:
+      en: Answer
+      nl: Antwoord
+    description:
+      en: The answer given by the respondent.
+      nl: Het antwoord gegeven door de respondent.
+    validation:
+      maxLength: 4000
+    persisted:
+      column: answer
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 4000
+  - key: explanation
+    valueType: string
+    required: false
+    label:
+      en: Explanation
+      nl: Toelichting
+    description:
+      en: Additional explanation or context for the answer.
+      nl: Aanvullende toelichting of context bij het antwoord.
+    validation:
+      maxLength: 4000
+    persisted:
+      column: explanation
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 4000
+  - key: answeredAt
+    valueType: datetime
+    required: false
+    label:
+      en: Answered at
+      nl: Beantwoord op
+    description:
+      en: Timestamp when the answer was given.
+      nl: Tijdstip waarop het antwoord is gegeven.
+    persisted:
+      column: answered_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional code in a connected source system.
+      nl: Functionele code in een gekoppeld bronsysteem.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: question
+    kind: belongsTo
+    target: SurveyQuestion
+    foreignKey: survey_question_id
+    label:
+      en: Question
+      nl: Vraag
+  - key: respondent
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Respondent
+      nl: Respondent
+  - key: researchResult
+    kind: belongsTo
+    target: ResearchResult
+    foreignKey: research_result_id
+    label:
+      en: Research result
+      nl: Onderzoeksresultaat
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

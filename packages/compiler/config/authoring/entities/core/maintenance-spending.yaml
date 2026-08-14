@@ -1,0 +1,207 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: MaintenanceSpending
+title: Maintenance Spending
+description: Actual cost recorded against a maintenance order, posted to a ledger account and optional cost dimension.
+language: en
+displayTemplate: "{{description}}: {{amount}}"
+filterField: description
+labels:
+  en: Maintenance spending
+  nl: Onderhoudsbesteding
+domains:
+  - maintenance
+fields:
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Description of the spending entry.
+      nl: Omschrijving van de bestedingsregel.
+    validation:
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 500
+  - key: spentAt
+    valueType: date
+    required: true
+    label:
+      en: Spent at
+      nl: Besteed op
+    description:
+      en: Date on which the cost was incurred.
+      nl: Datum waarop de kosten zijn gemaakt.
+    persisted:
+      column: spent_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: amount
+    valueType: number
+    required: true
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Spent amount.
+      nl: Besteed bedrag.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+  - key: invoiceReference
+    valueType: string
+    required: false
+    label:
+      en: Invoice reference
+      nl: Factuurreferentie
+    description:
+      en: Free-form reference to the originating purchase invoice (number or external id).
+      nl: Vrije referentie naar de oorspronkelijke inkoopfactuur (nummer of externe id).
+    validation:
+      maxLength: 100
+    persisted:
+      column: invoice_reference
+      storageClass: core
+relationships:
+  - key: maintenanceOrder
+    kind: belongsTo
+    target: MaintenanceOrder
+    foreignKey: maintenance_order_id
+    label:
+      en: Maintenance order
+      nl: Onderhoudsorder
+  - key: ledgerAccount
+    kind: belongsTo
+    target: LedgerAccount
+    foreignKey: ledger_account_id
+    label:
+      en: Ledger account
+      nl: Grootboekrekening
+  - key: costDimension
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: cost_dimension_id
+    label:
+      en: Cost dimension
+      nl: Kostendimensie
+ui:
+  routes:
+    list:
+      en: /maintenance-spendings
+      nl: /onderhoudsbestedingen
+    detail:
+      en: /maintenance-spendings/:id
+      nl: /onderhoudsbestedingen/:id
+    create:
+      en: /maintenance-spendings/create
+      nl: /onderhoudsbestedingen/aanmaken
+    edit:
+      en: /maintenance-spendings/:id/edit
+      nl: /onderhoudsbestedingen/:id/bewerken
+    delete:
+      en: /maintenance-spendings/:id/delete
+      nl: /onderhoudsbestedingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Maintenance spending
+        nl: Onderhoudsbestedingen
+      columns:
+        - key: description
+          sortable: true
+        - key: spentAt
+          sortable: true
+        - key: amount
+          sortable: true
+      defaultSort:
+        key: spentAt
+        direction: desc
+      rowLink:
+        en: /maintenance-spendings/:id
+        nl: /onderhoudsbestedingen/:id
+    detail:
+      header:
+        title: "{{description}}"
+        subtitle: "{{amount}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Spending details
+                nl: Bestedingsgegevens
+              fields:
+                - description
+                - spentAt
+                - amount
+                - invoiceReference
+    form:
+      variants:
+        create:
+          title:
+            en: Create maintenance spending
+            nl: Onderhoudsbesteding aanmaken
+          groups:
+            - title:
+                en: Spending details
+                nl: Bestedingsgegevens
+              fields:
+                - description
+                - spentAt
+                - amount
+                - invoiceReference
+        edit:
+          extends: create
+          title:
+            en: Edit maintenance spending
+            nl: Onderhoudsbesteding bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Onderhoud.All.Read
+      - Onderhoud.All.ReadWrite
+    create:
+      - Onderhoud.All.ReadWrite
+    update:
+      - Onderhoud.All.ReadWrite
+    delete:
+      - Onderhoud.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

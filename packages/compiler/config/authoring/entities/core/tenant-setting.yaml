@@ -1,0 +1,263 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: TenantSetting
+title: Tenant Setting
+description: A generic tenant-scoped setting that can store both plain values and secrets.
+language: en
+displayTemplate: "{{key}}"
+filterField: key
+labels:
+  en: Tenant Setting
+  nl: Tenantinstelling
+domains:
+  - core
+authorization:
+  roles:
+    read:
+      - Organisatie.All.ReadWrite
+    create:
+      - Organisatie.All.ReadWrite
+    update:
+      - Organisatie.All.ReadWrite
+    delete:
+      - Organisatie.All.ReadWrite
+fields:
+  - key: namespace
+    valueType: string
+    required: true
+    label:
+      en: Namespace
+      nl: Namespace
+    description:
+      en: Functional namespace that groups related settings, such as ai.providers.mistral.
+      nl: Functionele namespace die verwante instellingen groepeert, zoals ai.providers.mistral.
+    validation:
+      minLength: 1
+      maxLength: 120
+    persisted:
+      column: namespace
+      storageClass: core
+  - key: key
+    valueType: string
+    required: true
+    label:
+      en: Key
+      nl: Sleutel
+    description:
+      en: Stable setting key within the namespace.
+      nl: Stabiele instellingssleutel binnen de namespace.
+    validation:
+      minLength: 1
+      maxLength: 120
+    persisted:
+      column: key
+      storageClass: core
+  - key: valueType
+    valueType: string
+    required: true
+    label:
+      en: Value type
+      nl: Waardetype
+    description:
+      en: Data shape used by the setting value.
+      nl: Datastructuur die door de instellingswaarde wordt gebruikt.
+    defaultValue: string
+    validation:
+      minLength: 1
+      maxLength: 20
+    options:
+      type: referentiedata
+      referentieGroep: TENANTSETTINGVALUETYPE
+    persisted:
+      column: value_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: TENANTSETTINGVALUETYPE
+        clearable: false
+  - key: valueText
+    valueType: string
+    required: false
+    label:
+      en: Text value
+      nl: Tekstwaarde
+    description:
+      en: Plain string value for text-based settings.
+      nl: Eenvoudige tekenreekswaarde voor tekstinstellingen.
+    validation:
+      maxLength: 4000
+    persisted:
+      column: value_text
+      storageClass: core
+    render:
+      component: Input
+      props:
+        type: password
+        autoComplete: off
+    visibility:
+      conditions:
+        - field: valueType
+          operator: eq
+          value: string
+  - key: valueJson
+    valueType: object
+    required: false
+    label:
+      en: JSON value
+      nl: JSON-waarde
+    description:
+      en: Structured JSON value for object-based settings.
+      nl: Gestructureerde JSON-waarde voor objectgebaseerde instellingen.
+    persisted:
+      column: value_json
+      storageClass: core
+    render:
+      component: JsonFieldEditor
+      props:
+        rows: 10
+    visibility:
+      conditions:
+        - field: valueType
+          operator: eq
+          value: json
+  - key: isSecret
+    valueType: boolean
+    required: true
+    label:
+      en: Secret
+      nl: Geheim
+    description:
+      en: Whether the setting should be stored and handled as a secret.
+      nl: Of de instelling als geheim moet worden opgeslagen en verwerkt.
+    defaultValue: false
+    persisted:
+      column: is_secret
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional explanation of what this setting controls.
+      nl: Optionele uitleg van wat deze instelling regelt.
+    validation:
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 500
+relationships:
+  - key: tenant
+    kind: belongsTo
+    target: Tenant
+    foreignKey: tenant_id
+    label:
+      en: Tenant
+      nl: Tenant
+ui:
+  routes:
+    list:
+      en: /tenant-settings
+      nl: /tenant-settings
+    detail:
+      en: /tenant-settings/:id
+      nl: /tenant-settings/:id
+    create:
+      en: /tenant-settings/create
+      nl: /tenant-settings/aanmaken
+    edit:
+      en: /tenant-settings/:id/edit
+      nl: /tenant-settings/:id/bewerken
+    delete:
+      en: /tenant-settings/:id/delete
+      nl: /tenant-settings/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Tenant settings
+        nl: Tenantinstellingen
+      columns:
+        - key: namespace
+          sortable: true
+        - key: key
+          sortable: true
+        - key: valueType
+          sortable: true
+        - key: isSecret
+          sortable: true
+      defaultSort:
+        key: namespace
+        direction: asc
+      rowLink:
+        en: /tenant-settings/:id
+        nl: /tenant-settings/:id
+    detail:
+      header:
+        title: "{{namespace}}.{{key}}"
+        subtitle: "{{valueType}}"
+        badges:
+          - isSecret
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: setting-details
+          title:
+            en: Setting details
+            nl: Instellingsgegevens
+          fields:
+            - namespace
+            - key
+            - valueType
+            - isSecret
+            - description
+    form:
+      variants:
+        create:
+          title:
+            en: Create tenant setting
+            nl: Tenantinstelling aanmaken
+          groups:
+            - title:
+                en: Setting details
+                nl: Instellingsgegevens
+              fields:
+                - namespace
+                - key
+                - valueType
+                - valueText
+                - valueJson
+                - isSecret
+                - description
+        edit:
+          extends: create
+          title:
+            en: Edit tenant setting
+            nl: Tenantinstelling bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

@@ -1,0 +1,187 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Milestone
+title: Milestone
+description: A deadline-bearing milestone within a case lifecycle.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Milestone
+  nl: Mijlpaal
+domains:
+  - cases
+  - service
+authorization:
+  roles:
+    read:
+      - Zaken.All.Read
+      - Zaken.All.ReadWrite
+    create:
+      - Zaken.All.ReadWrite
+    update:
+      - Zaken.All.ReadWrite
+    delete:
+      - Zaken.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: milestoneType
+    valueType: string
+    required: true
+    label:
+      en: Milestone type
+      nl: Mijlpaaltype
+    persisted:
+      column: milestone_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MILESTONETYPE
+        clearable: false
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MILESTONESTATUS
+        clearable: false
+  - key: startedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Started at
+      nl: Gestart op
+    persisted:
+      column: started_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: dueAt
+    valueType: datetime
+    required: false
+    label:
+      en: Due at
+      nl: Uiterlijk op
+    persisted:
+      column: due_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: pausedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Paused at
+      nl: Gepauzeerd op
+    persisted:
+      column: paused_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: completedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Completed at
+      nl: Afgerond op
+    persisted:
+      column: completed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: breachedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Breached at
+      nl: Overschreden op
+    persisted:
+      column: breached_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: pauseReason
+    valueType: string
+    required: false
+    label:
+      en: Pause reason
+      nl: Pauzereden
+    validation:
+      maxLength: 300
+    persisted:
+      column: pause_reason
+      storageClass: core
+  - key: note
+    valueType: string
+    required: false
+    label:
+      en: Note
+      nl: Notitie
+    validation:
+      maxLength: 2000
+    persisted:
+      column: note
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 2000
+relationships:
+  - key: case
+    kind: belongsTo
+    target: Case
+    foreignKey: case_id
+    label:
+      en: Case
+      nl: Zaak
+  - key: slaPolicy
+    kind: belongsTo
+    target: SlaPolicy
+    foreignKey: sla_policy_id
+    label:
+      en: SLA policy
+      nl: SLA-beleid
+  - key: owner
+    kind: belongsTo
+    target: Account
+    foreignKey: owner_account_id
+    label:
+      en: Owner
+      nl: Eigenaar
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

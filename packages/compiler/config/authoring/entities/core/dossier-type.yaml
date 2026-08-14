@@ -1,0 +1,111 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: DossierType
+title: Dossier Type
+description: A managed dossier type definition with archival defaults.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Dossier Type
+  nl: Dossiertype
+domains:
+  - cases
+  - governance
+authorization:
+  roles:
+    read:
+      - Dossier.All.ReadWrite
+    create:
+      - Organisatie.All.ReadWrite
+    update:
+      - Organisatie.All.ReadWrite
+    delete:
+      - Organisatie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    validation:
+      maxLength: 4000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+  - key: defaultConfidentiality
+    valueType: string
+    required: false
+    label:
+      en: Default confidentiality
+      nl: Standaardvertrouwelijkheid
+    persisted:
+      column: default_confidentiality
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: DOSSIERCONFIDENTIALITY
+        clearable: true
+  - key: archiveProfile
+    valueType: string
+    required: false
+    label:
+      en: Archive profile
+      nl: Archiefprofiel
+    validation:
+      maxLength: 200
+    persisted:
+      column: archive_profile
+      storageClass: core
+  - key: retentionYears
+    valueType: integer
+    required: false
+    label:
+      en: Retention years
+      nl: Bewaarjaren
+    persisted:
+      column: retention_years
+      storageClass: core
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

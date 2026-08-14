@@ -1,0 +1,398 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Debtor
+title: Debtor
+description: Accounts receivable sub-ledger role on a Relation. Carries control account, payment terms, default mandate, dispatch channel, and finance-specific identifiers.
+language: en
+displayTemplate: "{{debtorNumber}}"
+filterField: debtorNumber
+labels:
+  en: Debtor
+  nl: Debiteur
+domains:
+  - finance
+fields:
+  - key: debtorNumber
+    valueType: string
+    required: true
+    label:
+      en: Debtor number
+      nl: Debiteurnummer
+    description:
+      en: Tenant-unique debtor number used in the AR sub-ledger.
+      nl: Tenant-uniek debiteurnummer in de debiteurenadministratie.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: debtor_number
+      storageClass: core
+  - key: status
+    valueType: string
+    required: false
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the debtor role assignment.
+      nl: Levenscyclusstatus van de debiteurroltoewijzing.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: ROLEASSIGNMENTSTATUS
+        clearable: true
+  - key: paymentTerms
+    valueType: string
+    required: false
+    label:
+      en: Payment terms
+      nl: Betalingstermijn
+    description:
+      en: Default payment terms applied to invoices for this debtor.
+      nl: Standaard betalingstermijn die wordt toegepast op facturen voor deze debiteur.
+    persisted:
+      column: payment_terms
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PAYMENTTERMS
+        clearable: true
+  - key: defaultIban
+    valueType: string
+    required: false
+    label:
+      en: Default IBAN
+      nl: Standaard IBAN
+    description:
+      en: IBAN to use for collections from this debtor by default.
+      nl: IBAN die standaard wordt gebruikt voor incasso bij deze debiteur.
+    validation:
+      maxLength: 34
+    persisted:
+      column: default_iban
+      storageClass: core
+  - key: defaultDispatchChannel
+    valueType: string
+    required: false
+    label:
+      en: Default dispatch channel
+      nl: Standaard verzendkanaal
+    description:
+      en: Preferred channel through which invoices are dispatched to this debtor.
+      nl: Voorkeurskanaal waarlangs facturen aan deze debiteur worden verzonden.
+    persisted:
+      column: default_dispatch_channel
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: INVOICEDISPATCHCHANNEL
+        clearable: true
+  - key: creditLimit
+    valueType: number
+    required: false
+    label:
+      en: Credit limit
+      nl: Kredietlimiet
+    description:
+      en: Maximum outstanding amount allowed for this debtor.
+      nl: Maximaal toegestaan openstaand bedrag voor deze debiteur.
+    semanticType: currency
+    persisted:
+      column: credit_limit
+      storageClass: core
+  - key: currentBalance
+    valueType: number
+    required: false
+    label:
+      en: Current balance
+      nl: Huidig saldo
+    description:
+      en: Current outstanding balance — projection populated by the audit/timeline service.
+      nl: Huidig openstaand saldo — projectie die door de audit/timeline-service wordt bijgewerkt.
+    semanticType: currency
+    persisted:
+      column: current_balance
+      storageClass: core
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Date from which the debtor role assignment is effective.
+      nl: Datum vanaf wanneer de debiteurroltoewijzing geldig is.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Date until which the debtor role assignment is effective.
+      nl: Datum tot wanneer de debiteurroltoewijzing geldig is.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: name
+    valueType: string
+    required: false
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Optional human-readable name of the debtor role.
+      nl: Optionele menselijk leesbare naam van de debiteurrol.
+    validation:
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description or business meaning of the debtor role assignment.
+      nl: Optionele omschrijving of zakelijke betekenis van de debiteurroltoewijzing.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the debtor in an external context.
+      nl: Functionele of zakelijke code van de debiteur in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: defaultLedgerAccount
+    kind: belongsTo
+    target: LedgerAccount
+    foreignKey: default_ledger_account_id
+    label:
+      en: Default ledger account
+      nl: Standaard grootboekrekening
+  - key: defaultPaymentMethod
+    kind: belongsTo
+    target: PaymentMethod
+    foreignKey: default_payment_method_id
+    label:
+      en: Default payment method
+      nl: Standaard betaalwijze
+  - key: defaultMandate
+    kind: belongsTo
+    target: DirectDebitMandate
+    foreignKey: default_mandate_id
+    label:
+      en: Default mandate
+      nl: Standaard machtiging
+ui:
+  routes:
+    list:
+      en: /debtors
+      nl: /debiteuren
+    detail:
+      en: /debtors/:id
+      nl: /debiteuren/:id
+    create:
+      en: /debtors/create
+      nl: /debiteuren/aanmaken
+    edit:
+      en: /debtors/:id/edit
+      nl: /debiteuren/:id/bewerken
+    delete:
+      en: /debtors/:id/delete
+      nl: /debiteuren/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Debtors
+        nl: Debiteuren
+      columns:
+        - key: debtorNumber
+          sortable: true
+        - key: name
+          sortable: true
+        - key: status
+          sortable: true
+        - key: paymentTerms
+          sortable: true
+        - key: currentBalance
+          sortable: true
+      defaultSort:
+        key: debtorNumber
+        direction: asc
+      rowLink:
+        en: /debtors/:id
+        nl: /debiteuren/:id
+    detail:
+      header:
+        title: "{{debtorNumber}}"
+        subtitle: "{{name}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Debtor details
+                nl: Debiteurgegevens
+              fields:
+                - debtorNumber
+                - status
+                - paymentTerms
+                - name
+                - startDate
+                - endDate
+            - title:
+                en: Banking and dispatch
+                nl: Bank en verzending
+              fields:
+                - defaultIban
+                - defaultDispatchChannel
+            - title:
+                en: Credit position
+                nl: Kredietpositie
+              fields:
+                - creditLimit
+                - currentBalance
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create debtor
+            nl: Debiteur aanmaken
+          groups:
+            - title:
+                en: Debtor details
+                nl: Debiteurgegevens
+              fields:
+                - debtorNumber
+                - status
+                - paymentTerms
+                - name
+                - startDate
+                - endDate
+            - title:
+                en: Banking and dispatch
+                nl: Bank en verzending
+              fields:
+                - defaultIban
+                - defaultDispatchChannel
+            - title:
+                en: Credit position
+                nl: Kredietpositie
+              fields:
+                - creditLimit
+                - currentBalance
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit debtor
+            nl: Debiteur bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

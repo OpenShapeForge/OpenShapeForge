@@ -1,0 +1,282 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: WorkQueue
+title: Work Queue
+description: A queue that organizes cases and assignments awaiting handling.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Work Queue
+  nl: Werkqueue
+domains:
+  - cases
+  - service
+authorization:
+  roles:
+    read:
+      - Zaken.All.Read
+      - Zaken.All.ReadWrite
+    create:
+      - Organisatie.All.ReadWrite
+    update:
+      - Organisatie.All.ReadWrite
+    delete:
+      - Organisatie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: key
+    valueType: string
+    required: true
+    label:
+      en: Key
+      nl: Sleutel
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: key
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    validation:
+      maxLength: 4000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+  - key: queueType
+    valueType: string
+    required: true
+    label:
+      en: Queue type
+      nl: Queuetype
+    persisted:
+      column: queue_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: WORKQUEUETYPE
+        clearable: false
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: WORKQUEUESTATUS
+        clearable: false
+  - key: assignmentStrategy
+    valueType: string
+    required: true
+    label:
+      en: Assignment strategy
+      nl: Toewijzingsstrategie
+    persisted:
+      column: assignment_strategy
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: WORKQUEUESTRATEGY
+        clearable: false
+  - key: workingHoursProfile
+    valueType: string
+    required: false
+    label:
+      en: Working hours profile
+      nl: Werkurenprofiel
+    validation:
+      maxLength: 200
+    persisted:
+      column: working_hours_profile
+      storageClass: core
+  - key: defaultPriority
+    valueType: string
+    required: false
+    label:
+      en: Default priority
+      nl: Standaardprioriteit
+    persisted:
+      column: default_priority
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEPRIORITY
+        clearable: true
+  - key: autoAssignEnabled
+    valueType: boolean
+    required: true
+    label:
+      en: Auto-assign enabled
+      nl: Auto-toewijzing actief
+    defaultValue: false
+    persisted:
+      column: auto_assign_enabled
+      storageClass: core
+  - key: visibilityRelationGroupId
+    valueType: string
+    required: false
+    label:
+      en: Visibility group
+      nl: Zichtbaarheidsgroep
+    description:
+      en: Relation group whose members can see conversations assigned to this queue. Existing queues may be empty during rollout; create and update APIs require this value.
+      nl: Relatiegroep waarvan leden gesprekken in deze queue kunnen zien. Bestaande queues mogen tijdens rollout leeg zijn; create- en update-APIs vereisen deze waarde.
+    semanticType: relationGroupId
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/core-entity-options?entity=relation-group
+    persisted:
+      column: visibility_relation_group_id
+      storageClass: core
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: selectId
+    validation:
+      format: uuid
+  - key: targetFirstResponseMinutes
+    valueType: integer
+    required: false
+    label:
+      en: Target first response minutes
+      nl: Streefminuten eerste reactie
+    persisted:
+      column: target_first_response_minutes
+      storageClass: core
+  - key: targetResolutionMinutes
+    valueType: integer
+    required: false
+    label:
+      en: Target resolution minutes
+      nl: Streefminuten oplossing
+    persisted:
+      column: target_resolution_minutes
+      storageClass: core
+  - key: escalationAfterMinutes
+    valueType: integer
+    required: false
+    label:
+      en: Escalation after minutes
+      nl: Escaleren na minuten
+    persisted:
+      column: escalation_after_minutes
+      storageClass: core
+  - key: maxActiveAssignments
+    valueType: integer
+    required: false
+    label:
+      en: Max active assignments
+      nl: Max actieve toewijzingen
+    persisted:
+      column: max_active_assignments
+      storageClass: core
+  - key: maxBacklogSize
+    valueType: integer
+    required: false
+    label:
+      en: Max backlog size
+      nl: Max backloggrootte
+    persisted:
+      column: max_backlog_size
+      storageClass: core
+  - key: supportsEscalation
+    valueType: boolean
+    required: true
+    label:
+      en: Supports escalation
+      nl: Ondersteunt escalatie
+    defaultValue: true
+    persisted:
+      column: supports_escalation
+      storageClass: core
+relationships:
+  - key: escalationQueue
+    kind: belongsTo
+    target: WorkQueue
+    foreignKey: escalation_queue_id
+    label:
+      en: Escalation queue
+      nl: Escalatiequeue
+  - key: overflowQueue
+    kind: belongsTo
+    target: WorkQueue
+    foreignKey: overflow_queue_id
+    label:
+      en: Overflow queue
+      nl: Overflowqueue
+  - key: visibilityGroup
+    kind: belongsTo
+    target: RelationGroup
+    foreignKey: visibility_relation_group_id
+    label:
+      en: Visibility group
+      nl: Zichtbaarheidsgroep
+  - key: cases
+    kind: hasMany
+    target: Case
+    foreignKey: work_queue_id
+    label:
+      en: Cases
+      nl: Zaken
+  - key: assignments
+    kind: hasMany
+    target: Assignment
+    foreignKey: work_queue_id
+    label:
+      en: Assignments
+      nl: Toewijzingen
+  - key: incomingEscalations
+    kind: hasMany
+    target: WorkQueue
+    foreignKey: escalation_queue_id
+    label:
+      en: Incoming escalations
+      nl: Inkomende escalaties
+  - key: incomingOverflows
+    kind: hasMany
+    target: WorkQueue
+    foreignKey: overflow_queue_id
+    label:
+      en: Inkomende overflows
+      nl: Inkomende overflows
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

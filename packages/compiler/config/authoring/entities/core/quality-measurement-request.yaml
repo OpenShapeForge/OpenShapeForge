@@ -1,0 +1,195 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: QualityMeasurementRequest
+title: Quality Measurement Request
+description: A request to perform a quality measurement, linking a relation to a research assignment and its results.
+language: en
+displayTemplate: "{{title}}"
+filterField: title
+labels:
+  en: Quality Measurement Request
+  nl: Kwaliteitsmetingsverzoek
+domains:
+  - quality
+retention:
+  mode: policyRef
+  policy: quality-retain-7y
+  scope: record
+  startsFrom:
+    strategy: firstNonNull
+    fields:
+      - closedAt
+      - createdAt
+authorization:
+  roles:
+    read:
+      - Kwaliteit.All.Read
+      - Kwaliteit.All.ReadWrite
+    create:
+      - Kwaliteit.All.ReadWrite
+    update:
+      - Kwaliteit.All.ReadWrite
+    delete:
+      - Kwaliteit.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Human-readable request code.
+      nl: Menselijk leesbare verzoekcode.
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: title
+    valueType: string
+    required: false
+    label:
+      en: Title
+      nl: Titel
+    description:
+      en: Short title of the measurement request.
+      nl: Korte titel van het metingsverzoek.
+    validation:
+      maxLength: 300
+    persisted:
+      column: title
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Detailed description of the quality measurement request.
+      nl: Uitgebreide omschrijving van het kwaliteitsmetingsverzoek.
+    validation:
+      maxLength: 4000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+  - key: measurementKind
+    valueType: string
+    required: false
+    label:
+      en: Kind
+      nl: Soort
+    description:
+      en: Classification of the measurement request.
+      nl: Classificatie van het metingsverzoek.
+    persisted:
+      column: measurement_kind
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: QUALITYMEASUREMENTKIND
+        clearable: true
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Current lifecycle status of the measurement request.
+      nl: Huidige levenscyclusstatus van het metingsverzoek.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: QUALITYMEASUREMENTSTATUS
+        clearable: false
+  - key: closedAt
+    valueType: datetime
+    required: false
+    readOnly: true
+    label:
+      en: Closed at
+      nl: Gesloten op
+    description:
+      en: Timestamp when the request was closed.
+      nl: Tijdstip waarop het verzoek is gesloten.
+    persisted:
+      column: closed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional code in a connected source system.
+      nl: Functionele code in een gekoppeld bronsysteem.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: targetRelation
+    kind: belongsTo
+    target: Relation
+    foreignKey: target_relation_id
+    label:
+      en: Target relation
+      nl: Te enquêteren relatie
+  - key: researchAssignment
+    kind: belongsTo
+    target: ResearchAssignment
+    foreignKey: research_assignment_id
+    label:
+      en: Research assignment
+      nl: Onderzoeksopdracht
+  - key: measurementResult
+    kind: belongsTo
+    target: QualityMeasurementResult
+    foreignKey: measurement_result_id
+    label:
+      en: Measurement result
+      nl: Metingsresultaat
+  - key: case
+    kind: belongsTo
+    target: Case
+    foreignKey: case_id
+    label:
+      en: Related case
+      nl: Gerelateerde zaak
+  - key: contactMoment
+    kind: belongsTo
+    target: ContactMoment
+    foreignKey: contact_moment_id
+    label:
+      en: Contact moment
+      nl: Contactmoment
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+      wait: true

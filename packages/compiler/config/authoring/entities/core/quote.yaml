@@ -1,0 +1,339 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Quote
+title: Quote
+description: Outgoing quote to a relation, optionally linked to an agreement. Lighter status workflow than an invoice.
+language: en
+displayTemplate: "{{quoteNumber}}"
+filterField: quoteNumber
+labels:
+  en: Quote
+  nl: Offerte
+domains:
+  - finance
+fields:
+  - key: quoteStatus
+    valueType: string
+    required: true
+    label:
+      en: Quote status
+      nl: Offertestatus
+    description:
+      en: Lifecycle status of the quote.
+      nl: Levenscyclusstatus van de offerte.
+    persisted:
+      column: quote_status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: QUOTESTATUS
+        clearable: false
+  - key: quoteNumber
+    valueType: string
+    required: true
+    label:
+      en: Quote number
+      nl: Offertenummer
+    description:
+      en: Tenant-unique quote number. Kept as a string so the format may differ from invoice numbers.
+      nl: Tenant-uniek offertenummer. Wordt als tekst opgeslagen zodat het formaat kan afwijken van factuurnummers.
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: quote_number
+      storageClass: core
+  - key: issueDate
+    valueType: date
+    required: true
+    label:
+      en: Issue date
+      nl: Offertedatum
+    description:
+      en: Date the quote was issued.
+      nl: Datum waarop de offerte is uitgegeven.
+    persisted:
+      column: issue_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: expiresAt
+    valueType: date
+    required: false
+    label:
+      en: Expires at
+      nl: Geldig tot
+    description:
+      en: Date on which the quote expires if not accepted.
+      nl: Datum waarop de offerte vervalt indien niet geaccepteerd.
+    persisted:
+      column: expires_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: currencyCode
+    valueType: string
+    required: true
+    label:
+      en: Currency
+      nl: Valuta
+    description:
+      en: ISO 4217 currency code in which the quote is denominated.
+      nl: ISO 4217 valutacode waarin de offerte luidt.
+    defaultValue: EUR
+    validation:
+      minLength: 3
+      maxLength: 3
+    persisted:
+      column: currency_code
+      storageClass: core
+  - key: amountBase
+    valueType: number
+    required: false
+    label:
+      en: Base amount
+      nl: Basisbedrag
+    description:
+      en: Sum of line base amounts, excluding VAT.
+      nl: Som van de basisbedragen van de regels, exclusief BTW.
+    semanticType: currency
+    persisted:
+      column: amount_base
+      storageClass: core
+  - key: amountVat
+    valueType: number
+    required: false
+    label:
+      en: VAT amount
+      nl: BTW-bedrag
+    description:
+      en: Sum of VAT amounts on the quote.
+      nl: Som van de BTW-bedragen op de offerte.
+    semanticType: currency
+    persisted:
+      column: amount_vat
+      storageClass: core
+  - key: amountTotal
+    valueType: number
+    required: false
+    label:
+      en: Total amount
+      nl: Totaalbedrag
+    description:
+      en: Total quote amount including VAT.
+      nl: Totaalbedrag van de offerte inclusief BTW.
+    semanticType: currency
+    persisted:
+      column: amount_total
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-form description of the quote.
+      nl: Vrije omschrijving van de offerte.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 1000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the quote in an external context.
+      nl: Functionele of zakelijke code van de offerte in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: agreement
+    kind: belongsTo
+    target: Agreement
+    foreignKey: agreement_id
+    label:
+      en: Agreement
+      nl: Overeenkomst
+ui:
+  routes:
+    list:
+      en: /quotes
+      nl: /offertes
+    detail:
+      en: /quotes/:id
+      nl: /offertes/:id
+    create:
+      en: /quotes/create
+      nl: /offertes/aanmaken
+    edit:
+      en: /quotes/:id/edit
+      nl: /offertes/:id/bewerken
+    delete:
+      en: /quotes/:id/delete
+      nl: /offertes/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Quotes
+        nl: Offertes
+      columns:
+        - key: quoteNumber
+          sortable: true
+        - key: quoteStatus
+          sortable: true
+        - key: issueDate
+          sortable: true
+        - key: expiresAt
+          sortable: true
+        - key: amountTotal
+          sortable: true
+      defaultSort:
+        key: issueDate
+        direction: desc
+      rowLink:
+        en: /quotes/:id
+        nl: /offertes/:id
+    detail:
+      header:
+        title: "{{quoteNumber}}"
+        subtitle: "{{amountTotal}}"
+        badges:
+          - quoteStatus
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Quote details
+                nl: Offertegegevens
+              fields:
+                - quoteStatus
+                - quoteNumber
+                - issueDate
+                - expiresAt
+                - currencyCode
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - amountBase
+                - amountVat
+                - amountTotal
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create quote
+            nl: Offerte aanmaken
+          groups:
+            - title:
+                en: Quote details
+                nl: Offertegegevens
+              fields:
+                - quoteStatus
+                - quoteNumber
+                - issueDate
+                - expiresAt
+                - currencyCode
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - amountBase
+                - amountVat
+                - amountTotal
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit quote
+            nl: Offerte bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

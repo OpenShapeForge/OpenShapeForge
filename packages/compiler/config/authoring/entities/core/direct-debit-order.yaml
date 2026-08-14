@@ -1,0 +1,274 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: DirectDebitOrder
+title: Direct Debit Order
+description: Pending or executed SEPA direct debit collection, optionally batched into a payment order.
+language: en
+displayTemplate: "{{endToEndId}}"
+filterField: endToEndId
+labels:
+  en: Direct debit order
+  nl: Incasso-opdracht
+domains:
+  - finance
+fields:
+  - key: iban
+    valueType: string
+    required: true
+    label:
+      en: IBAN
+      nl: IBAN
+    description:
+      en: IBAN from which the amount will be (or has been) collected.
+      nl: IBAN waarvan het bedrag wordt (of is) geïncasseerd.
+    validation:
+      maxLength: 34
+    persisted:
+      column: iban
+      storageClass: core
+  - key: amount
+    valueType: number
+    required: true
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Amount to collect under this direct debit order.
+      nl: Te incasseren bedrag voor deze incasso-opdracht.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+  - key: executionDate
+    valueType: date
+    required: true
+    label:
+      en: Execution date
+      nl: Uitvoerdatum
+    description:
+      en: Target date on which the direct debit should be executed by the bank.
+      nl: Beoogde datum waarop de incasso door de bank moet worden uitgevoerd.
+    persisted:
+      column: execution_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: sequenceType
+    valueType: string
+    required: true
+    label:
+      en: Sequence type
+      nl: Volgtype
+    description:
+      en: SEPA sequence type — first, recurrent, one-off, or final.
+      nl: SEPA-volgtype — eerste, terugkerend, eenmalig of laatste.
+    persisted:
+      column: sequence_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: SEPASEQUENCETYPE
+        clearable: false
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the direct debit order.
+      nl: Levenscyclusstatus van de incasso-opdracht.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: DIRECTDEBITORDERSTATUS
+        clearable: false
+  - key: endToEndId
+    valueType: string
+    required: false
+    label:
+      en: End-to-end ID
+      nl: End-to-end-id
+    description:
+      en: SEPA end-to-end identifier carried through to the bank statement (max 35 characters).
+      nl: SEPA end-to-end-identificatie die wordt doorgegeven tot op het bankafschrift (max 35 tekens).
+    validation:
+      maxLength: 35
+    persisted:
+      column: end_to_end_id
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the order in an external context.
+      nl: Functionele of zakelijke code van de opdracht in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: mandate
+    kind: belongsTo
+    target: DirectDebitMandate
+    foreignKey: mandate_id
+    label:
+      en: Mandate
+      nl: Machtiging
+  - key: paymentOrder
+    kind: belongsTo
+    target: PaymentOrder
+    foreignKey: payment_order_id
+    label:
+      en: Payment order
+      nl: Betaalopdracht
+ui:
+  routes:
+    list:
+      en: /direct-debit-orders
+      nl: /incasso-opdrachten
+    detail:
+      en: /direct-debit-orders/:id
+      nl: /incasso-opdrachten/:id
+    create:
+      en: /direct-debit-orders/create
+      nl: /incasso-opdrachten/aanmaken
+    edit:
+      en: /direct-debit-orders/:id/edit
+      nl: /incasso-opdrachten/:id/bewerken
+    delete:
+      en: /direct-debit-orders/:id/delete
+      nl: /incasso-opdrachten/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Direct debit orders
+        nl: Incasso-opdrachten
+      columns:
+        - key: endToEndId
+          sortable: true
+        - key: iban
+          sortable: true
+        - key: amount
+          sortable: true
+        - key: executionDate
+          sortable: true
+        - key: status
+          sortable: true
+        - key: sequenceType
+          sortable: true
+      defaultSort:
+        key: executionDate
+        direction: desc
+      rowLink:
+        en: /direct-debit-orders/:id
+        nl: /incasso-opdrachten/:id
+    detail:
+      header:
+        title: "{{endToEndId}}"
+        subtitle: "{{amount}}"
+        badges:
+          - status
+          - sequenceType
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Order details
+                nl: Opdrachtgegevens
+              fields:
+                - endToEndId
+                - iban
+                - amount
+                - executionDate
+                - status
+                - sequenceType
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create direct debit order
+            nl: Incasso-opdracht aanmaken
+          groups:
+            - title:
+                en: Order details
+                nl: Opdrachtgegevens
+              fields:
+                - endToEndId
+                - iban
+                - amount
+                - executionDate
+                - status
+                - sequenceType
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit direct debit order
+            nl: Incasso-opdracht bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

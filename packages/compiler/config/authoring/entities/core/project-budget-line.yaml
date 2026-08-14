@@ -1,0 +1,197 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ProjectBudgetLine
+title: Project Budget Line
+description: Budget allocation per ledger account, fiscal period, and optional cost dimension within a project budget.
+language: en
+displayTemplate: "{{description}}: {{amount}}"
+filterField: description
+labels:
+  en: Project budget line
+  nl: Projectbudgetregel
+domains:
+  - project
+fields:
+  - key: lineNumber
+    valueType: integer
+    required: true
+    label:
+      en: Line number
+      nl: Regelnummer
+    description:
+      en: Sequential line number within the project budget.
+      nl: Volgnummer van de regel binnen het projectbudget.
+    validation:
+      min: 1
+    persisted:
+      column: line_number
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-form description of the budget allocation.
+      nl: Vrije omschrijving van de budgetallocatie.
+    validation:
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 500
+  - key: amount
+    valueType: number
+    required: true
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Budgeted amount for this line.
+      nl: Begroot bedrag voor deze regel.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+relationships:
+  - key: project
+    kind: belongsTo
+    target: Project
+    foreignKey: project_id
+    label:
+      en: Project
+      nl: Project
+  - key: fiscalPeriod
+    kind: belongsTo
+    target: FiscalPeriod
+    foreignKey: fiscal_period_id
+    label:
+      en: Fiscal period
+      nl: Boekjaarperiode
+  - key: ledgerAccount
+    kind: belongsTo
+    target: LedgerAccount
+    foreignKey: ledger_account_id
+    label:
+      en: Ledger account
+      nl: Grootboekrekening
+  - key: costDimension
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: cost_dimension_id
+    label:
+      en: Cost dimension
+      nl: Kostendimensie
+ui:
+  routes:
+    list:
+      en: /project-budget-lines
+      nl: /projectbudgetregels
+    detail:
+      en: /project-budget-lines/:id
+      nl: /projectbudgetregels/:id
+    create:
+      en: /project-budget-lines/create
+      nl: /projectbudgetregels/aanmaken
+    edit:
+      en: /project-budget-lines/:id/edit
+      nl: /projectbudgetregels/:id/bewerken
+    delete:
+      en: /project-budget-lines/:id/delete
+      nl: /projectbudgetregels/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Project budget lines
+        nl: Projectbudgetregels
+      columns:
+        - key: lineNumber
+          sortable: true
+        - key: description
+          sortable: true
+        - key: amount
+          sortable: true
+      defaultSort:
+        key: lineNumber
+        direction: asc
+      rowLink:
+        en: /project-budget-lines/:id
+        nl: /projectbudgetregels/:id
+    detail:
+      header:
+        title: "{{description}}"
+        subtitle: "{{amount}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Line details
+                nl: Regelgegevens
+              fields:
+                - lineNumber
+                - description
+                - amount
+    form:
+      variants:
+        create:
+          title:
+            en: Create project budget line
+            nl: Projectbudgetregel aanmaken
+          groups:
+            - title:
+                en: Line details
+                nl: Regelgegevens
+              fields:
+                - lineNumber
+                - description
+                - amount
+        edit:
+          extends: create
+          title:
+            en: Edit project budget line
+            nl: Projectbudgetregel bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Projectontwikkeling.All.Read
+      - Projectontwikkeling.All.ReadWrite
+    create:
+      - Projectontwikkeling.All.ReadWrite
+    update:
+      - Projectontwikkeling.All.ReadWrite
+    delete:
+      - Projectontwikkeling.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

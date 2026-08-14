@@ -1,0 +1,491 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Invoice
+title: Invoice
+description: Invoice header. Sales, purchase and credit invoices share this shape; they are distinguished by `invoiceKind`.
+language: en
+displayTemplate: "{{invoiceKind}} {{invoiceNumber}}"
+filterField: invoiceNumber
+labels:
+  en: Invoice
+  nl: Factuur
+domains:
+  - finance
+fields:
+  - key: invoiceKind
+    valueType: string
+    required: true
+    label:
+      en: Invoice kind
+      nl: Factuursoort
+    description:
+      en: Kind of invoice — sales, purchase, or credit.
+      nl: Factuursoort — verkoop, inkoop of creditnota.
+    persisted:
+      column: invoice_kind
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: INVOICEKIND
+        clearable: false
+  - key: invoiceStatus
+    valueType: string
+    required: true
+    label:
+      en: Invoice status
+      nl: Factuurstatus
+    description:
+      en: Lifecycle status of the invoice.
+      nl: Levenscyclusstatus van de factuur.
+    persisted:
+      column: invoice_status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: INVOICESTATUS
+        clearable: false
+  - key: invoiceNumber
+    valueType: integer
+    required: true
+    label:
+      en: Invoice number
+      nl: Factuurnummer
+    description:
+      en: Sequential invoice number, unique within (invoice kind, fiscal period).
+      nl: Volgnummer van de factuur, uniek binnen (factuursoort, boekjaarperiode).
+    validation:
+      min: 1
+    persisted:
+      column: invoice_number
+      storageClass: core
+  - key: issueDate
+    valueType: date
+    required: true
+    label:
+      en: Issue date
+      nl: Factuurdatum
+    description:
+      en: Date the invoice was issued.
+      nl: Datum waarop de factuur is uitgegeven.
+    persisted:
+      column: issue_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: dueDate
+    valueType: date
+    required: false
+    label:
+      en: Due date
+      nl: Vervaldatum
+    description:
+      en: Date by which the invoice is due for payment.
+      nl: Datum waarop de factuur uiterlijk betaald moet zijn.
+    persisted:
+      column: due_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: currencyCode
+    valueType: string
+    required: true
+    label:
+      en: Currency
+      nl: Valuta
+    description:
+      en: ISO 4217 currency code in which the invoice is denominated.
+      nl: ISO 4217 valutacode waarin de factuur luidt.
+    defaultValue: EUR
+    validation:
+      minLength: 3
+      maxLength: 3
+    persisted:
+      column: currency_code
+      storageClass: core
+  - key: amountBase
+    valueType: number
+    required: false
+    label:
+      en: Base amount
+      nl: Basisbedrag
+    description:
+      en: Sum of line base amounts, excluding VAT.
+      nl: Som van de basisbedragen van de regels, exclusief BTW.
+    semanticType: currency
+    persisted:
+      column: amount_base
+      storageClass: core
+  - key: amountVat
+    valueType: number
+    required: false
+    label:
+      en: VAT amount
+      nl: BTW-bedrag
+    description:
+      en: Sum of VAT amounts on the invoice.
+      nl: Som van de BTW-bedragen op de factuur.
+    semanticType: currency
+    persisted:
+      column: amount_vat
+      storageClass: core
+  - key: amountTotal
+    valueType: number
+    required: false
+    label:
+      en: Total amount
+      nl: Totaalbedrag
+    description:
+      en: Total invoice amount including VAT.
+      nl: Totaalbedrag van de factuur inclusief BTW.
+    semanticType: currency
+    persisted:
+      column: amount_total
+      storageClass: core
+  - key: balance
+    valueType: number
+    required: false
+    label:
+      en: Balance
+      nl: Saldo
+    description:
+      en: Outstanding balance on this invoice (total minus payments applied).
+      nl: Openstaand saldo op deze factuur (totaal minus betalingen).
+    semanticType: currency
+    persisted:
+      column: balance
+      storageClass: core
+  - key: iban
+    valueType: string
+    required: false
+    label:
+      en: IBAN
+      nl: IBAN
+    description:
+      en: IBAN to which payment for this invoice should be made (for sales) or from which it was paid (for purchase).
+      nl: IBAN waarop de factuur betaald moet worden (voor verkoop) of waarvan is betaald (voor inkoop).
+    validation:
+      maxLength: 34
+    persisted:
+      column: iban
+      storageClass: core
+  - key: email
+    valueType: string
+    required: false
+    label:
+      en: Email
+      nl: E-mail
+    description:
+      en: Email address used for invoice dispatch.
+      nl: E-mailadres dat is gebruikt voor het versturen van de factuur.
+    validation:
+      maxLength: 320
+    persisted:
+      column: email
+      storageClass: core
+  - key: dispatchChannel
+    valueType: string
+    required: false
+    label:
+      en: Dispatch channel
+      nl: Verzendkanaal
+    description:
+      en: Channel used to dispatch the invoice (email, letter, sms, portal).
+      nl: Kanaal waarmee de factuur is verstuurd (e-mail, brief, sms, portaal).
+    persisted:
+      column: dispatch_channel
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: INVOICEDISPATCHCHANNEL
+        clearable: true
+  - key: descriptionLine1
+    valueType: string
+    required: false
+    label:
+      en: Description line 1
+      nl: Omschrijvingsregel 1
+    description:
+      en: First free-text description line printed on the invoice.
+      nl: Eerste vrije omschrijvingsregel die op de factuur wordt afgedrukt.
+    validation:
+      maxLength: 200
+    persisted:
+      column: description_line_1
+      storageClass: core
+  - key: descriptionLine2
+    valueType: string
+    required: false
+    label:
+      en: Description line 2
+      nl: Omschrijvingsregel 2
+    description:
+      en: Second free-text description line printed on the invoice.
+      nl: Tweede vrije omschrijvingsregel die op de factuur wordt afgedrukt.
+    validation:
+      maxLength: 200
+    persisted:
+      column: description_line_2
+      storageClass: core
+  - key: descriptionLine3
+    valueType: string
+    required: false
+    label:
+      en: Description line 3
+      nl: Omschrijvingsregel 3
+    description:
+      en: Third free-text description line printed on the invoice.
+      nl: Derde vrije omschrijvingsregel die op de factuur wordt afgedrukt.
+    validation:
+      maxLength: 200
+    persisted:
+      column: description_line_3
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the invoice in an external context.
+      nl: Functionele of zakelijke code van de factuur in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: agreement
+    kind: belongsTo
+    target: Agreement
+    foreignKey: agreement_id
+    label:
+      en: Agreement
+      nl: Overeenkomst
+  - key: fiscalPeriod
+    kind: belongsTo
+    target: FiscalPeriod
+    foreignKey: fiscal_period_id
+    label:
+      en: Fiscal period
+      nl: Boekjaarperiode
+  - key: controlLedgerAccount
+    kind: belongsTo
+    target: LedgerAccount
+    foreignKey: control_ledger_account_id
+    label:
+      en: Control ledger account
+      nl: Tussenrekening
+  - key: paymentMethod
+    kind: belongsTo
+    target: PaymentMethod
+    foreignKey: payment_method_id
+    label:
+      en: Payment method
+      nl: Betaalwijze
+  - key: mandate
+    kind: belongsTo
+    target: DirectDebitMandate
+    foreignKey: mandate_id
+    label:
+      en: Mandate
+      nl: Machtiging
+ui:
+  routes:
+    list:
+      en: /invoices
+      nl: /facturen
+    detail:
+      en: /invoices/:id
+      nl: /facturen/:id
+    create:
+      en: /invoices/create
+      nl: /facturen/aanmaken
+    edit:
+      en: /invoices/:id/edit
+      nl: /facturen/:id/bewerken
+    delete:
+      en: /invoices/:id/delete
+      nl: /facturen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Invoices
+        nl: Facturen
+      columns:
+        - key: invoiceKind
+          sortable: true
+        - key: invoiceNumber
+          sortable: true
+        - key: invoiceStatus
+          sortable: true
+        - key: issueDate
+          sortable: true
+        - key: dueDate
+          sortable: true
+        - key: amountTotal
+          sortable: true
+        - key: balance
+          sortable: true
+      defaultSort:
+        key: issueDate
+        direction: desc
+      rowLink:
+        en: /invoices/:id
+        nl: /facturen/:id
+    detail:
+      header:
+        title: "{{invoiceKind}} {{invoiceNumber}}"
+        subtitle: "{{amountTotal}}"
+        badges:
+          - invoiceKind
+          - invoiceStatus
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Invoice details
+                nl: Factuurgegevens
+              fields:
+                - invoiceKind
+                - invoiceStatus
+                - invoiceNumber
+                - issueDate
+                - dueDate
+                - currencyCode
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - amountBase
+                - amountVat
+                - amountTotal
+                - balance
+            - title:
+                en: Dispatch
+                nl: Verzending
+              fields:
+                - iban
+                - email
+                - dispatchChannel
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - descriptionLine1
+                - descriptionLine2
+                - descriptionLine3
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create invoice
+            nl: Factuur aanmaken
+          groups:
+            - title:
+                en: Invoice details
+                nl: Factuurgegevens
+              fields:
+                - invoiceKind
+                - invoiceStatus
+                - invoiceNumber
+                - issueDate
+                - dueDate
+                - currencyCode
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - amountBase
+                - amountVat
+                - amountTotal
+                - balance
+            - title:
+                en: Dispatch
+                nl: Verzending
+              fields:
+                - iban
+                - email
+                - dispatchChannel
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - descriptionLine1
+                - descriptionLine2
+                - descriptionLine3
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit invoice
+            nl: Factuur bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

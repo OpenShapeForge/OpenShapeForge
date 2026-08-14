@@ -1,0 +1,168 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: InvoicePayment
+title: Invoice Payment
+description: Payment applied to an invoice. Distinct from a bank statement line — multiple payments can be applied to the same invoice over time.
+language: en
+displayTemplate: "{{amount}} @ {{paidAt}}"
+filterField: id
+labels:
+  en: Invoice payment
+  nl: Factuurbetaling
+domains:
+  - finance
+fields:
+  - key: paidAt
+    valueType: datetime
+    required: true
+    label:
+      en: Paid at
+      nl: Betaald op
+    description:
+      en: Timestamp at which the payment was applied to the invoice.
+      nl: Tijdstip waarop de betaling op de factuur is verwerkt.
+    persisted:
+      column: paid_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: amount
+    valueType: number
+    required: true
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Amount of the payment applied to the invoice.
+      nl: Bedrag van de betaling dat op de factuur is verwerkt.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+relationships:
+  - key: invoice
+    kind: belongsTo
+    target: Invoice
+    foreignKey: invoice_id
+    label:
+      en: Invoice
+      nl: Factuur
+  - key: paymentMethod
+    kind: belongsTo
+    target: PaymentMethod
+    foreignKey: payment_method_id
+    label:
+      en: Payment method
+      nl: Betaalwijze
+  - key: bankStatementLine
+    kind: belongsTo
+    target: BankStatementLine
+    foreignKey: bank_statement_line_id
+    label:
+      en: Bank statement line
+      nl: Bankafschriftregel
+ui:
+  routes:
+    list:
+      en: /invoice-payments
+      nl: /factuurbetalingen
+    detail:
+      en: /invoice-payments/:id
+      nl: /factuurbetalingen/:id
+    create:
+      en: /invoice-payments/create
+      nl: /factuurbetalingen/aanmaken
+    edit:
+      en: /invoice-payments/:id/edit
+      nl: /factuurbetalingen/:id/bewerken
+    delete:
+      en: /invoice-payments/:id/delete
+      nl: /factuurbetalingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Invoice payments
+        nl: Factuurbetalingen
+      columns:
+        - key: paidAt
+          sortable: true
+        - key: amount
+          sortable: true
+      defaultSort:
+        key: paidAt
+        direction: desc
+      rowLink:
+        en: /invoice-payments/:id
+        nl: /factuurbetalingen/:id
+    detail:
+      header:
+        title: "{{amount}}"
+        subtitle: "{{paidAt}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Payment details
+                nl: Betaalgegevens
+              fields:
+                - paidAt
+                - amount
+    form:
+      variants:
+        create:
+          title:
+            en: Create invoice payment
+            nl: Factuurbetaling aanmaken
+          groups:
+            - title:
+                en: Payment details
+                nl: Betaalgegevens
+              fields:
+                - paidAt
+                - amount
+        edit:
+          extends: create
+          title:
+            en: Edit invoice payment
+            nl: Factuurbetaling bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

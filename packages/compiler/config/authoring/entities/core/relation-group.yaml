@@ -106,6 +106,13 @@ relationships:
     label:
       en: Members
       nl: Leden
+  - key: orgUnit
+    kind: belongsTo
+    target: OrgUnit
+    foreignKey: org_unit_id
+    label:
+      en: Org unit
+      nl: Organisatorische eenheid
 ui:
   routes:
     list:
@@ -211,3 +218,11 @@ ui:
           title:
             en: Edit relation group
             nl: Relatiegroep bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

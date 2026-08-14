@@ -1,0 +1,276 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Account
+title: Account
+description: A user account for platform access, linked to a natural person.
+language: en
+displayTemplate: "{{username}}"
+filterField: username
+labels:
+  en: Account
+  nl: Account
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+      - Relaties.All.ReadWrite
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: username
+    valueType: string
+    required: true
+    label:
+      en: Username
+      nl: Gebruikersnaam
+    description:
+      en: Unique username for login.
+      nl: Unieke gebruikersnaam voor inloggen.
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: username
+      storageClass: core
+  - key: email
+    valueType: string
+    required: true
+    label:
+      en: Email
+      nl: E-mail
+    description:
+      en: Email address associated with the account.
+      nl: E-mailadres gekoppeld aan het account.
+    validation:
+      minLength: 1
+      maxLength: 254
+    persisted:
+      column: email
+      storageClass: core
+  - key: keycloakSub
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: Keycloak subject
+      nl: Keycloak subject
+    description:
+      en: Keycloak user identifier (sub claim) linked to this account. Set on first authenticated request.
+      nl: Keycloak-gebruikersidentifier (sub-claim) gekoppeld aan dit account. Wordt gezet bij eerste geverifieerde verzoek.
+    validation:
+      maxLength: 255
+    persisted:
+      column: keycloak_sub
+      storageClass: core
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Current status of the account (e.g. active, inactive, locked).
+      nl: Huidige status van het account (bijv. actief, inactief, vergrendeld).
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: ACCOUNTSTATUS
+        clearable: false
+  - key: lastLoginAt
+    valueType: datetime
+    required: false
+    readOnly: true
+    label:
+      en: Last login
+      nl: Laatste login
+    description:
+      en: Date and time of the most recent login.
+      nl: Datum en tijd van de meest recente login.
+    persisted:
+      column: last_login_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: validFrom
+    valueType: datetime
+    required: false
+    label:
+      en: Valid from
+      nl: Geldig vanaf
+    description:
+      en: Date and time from which this account is valid.
+      nl: Datum en tijd vanaf wanneer dit account geldig is.
+    persisted:
+      column: valid_from
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: validUntil
+    valueType: datetime
+    required: false
+    label:
+      en: Valid until
+      nl: Geldig tot
+    description:
+      en: Date and time until which this account remains valid.
+      nl: Datum en tijd tot wanneer dit account geldig blijft.
+    persisted:
+      column: valid_until
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: passwordChangedAt
+    valueType: datetime
+    required: false
+    readOnly: true
+    label:
+      en: Password changed at
+      nl: Wachtwoord gewijzigd op
+    description:
+      en: Date and time when the password was last changed.
+      nl: Datum en tijd waarop het wachtwoord voor het laatst is gewijzigd.
+    persisted:
+      column: password_changed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: naturalPerson
+    kind: belongsTo
+    target: NaturalPerson
+    foreignKey: natural_person_id
+    label:
+      en: Natural person
+      nl: Natuurlijk persoon
+ui:
+  routes:
+    list:
+      en: /accounts
+      nl: /accounts
+    detail:
+      en: /accounts/:id
+      nl: /accounts/:id
+    create:
+      en: /accounts/create
+      nl: /accounts/aanmaken
+    edit:
+      en: /accounts/:id/edit
+      nl: /accounts/:id/bewerken
+    delete:
+      en: /accounts/:id/delete
+      nl: /accounts/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Accounts
+        nl: Accounts
+      columns:
+        - key: username
+          sortable: true
+        - key: email
+          sortable: true
+        - key: status
+          sortable: true
+        - key: validUntil
+          sortable: true
+        - key: lastLoginAt
+          sortable: true
+      defaultSort:
+        key: username
+        direction: asc
+      rowLink:
+        en: /accounts/:id
+        nl: /accounts/:id
+    detail:
+      header:
+        title: "{{username}}"
+        subtitle: "{{email}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Account details
+                nl: Accountgegevens
+              fields:
+                - username
+                - email
+                - status
+                - validFrom
+                - validUntil
+                - passwordChangedAt
+                - lastLoginAt
+    form:
+      variants:
+        create:
+          title:
+            en: Create account
+            nl: Account aanmaken
+          groups:
+            - title:
+                en: Account details
+                nl: Accountgegevens
+              fields:
+                - username
+                - email
+                - status
+                - validFrom
+                - validUntil
+        edit:
+          extends: create
+          title:
+            en: Edit account
+            nl: Account bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

@@ -1,0 +1,230 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: MonitorLog
+title: Monitor Log
+description: Logging session associated with an asset, capturing measurements and entries during a time window.
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: Monitor log
+  nl: Monitorlog
+domains:
+  - energy
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique monitor log code.
+      nl: Tenant-unieke code van het monitorlog.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the monitor log.
+      nl: Levenscyclusstatus van het monitorlog.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MONITORLOGSTATUS
+        clearable: false
+  - key: startedAt
+    valueType: datetime
+    required: true
+    label:
+      en: Started at
+      nl: Gestart op
+    description:
+      en: Timestamp when the log started.
+      nl: Tijdstip waarop het log is gestart.
+    persisted:
+      column: started_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: endedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Ended at
+      nl: Geëindigd op
+    description:
+      en: Timestamp when the log ended.
+      nl: Tijdstip waarop het log is geëindigd.
+    persisted:
+      column: ended_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the monitor log in an external context.
+      nl: Functionele of zakelijke code van het monitorlog in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: asset
+    kind: belongsTo
+    target: Asset
+    foreignKey: asset_reference
+    label:
+      en: Asset
+      nl: Object
+ui:
+  routes:
+    list:
+      en: /monitor-logs
+      nl: /monitorlogs
+    detail:
+      en: /monitor-logs/:id
+      nl: /monitorlogs/:id
+    create:
+      en: /monitor-logs/create
+      nl: /monitorlogs/aanmaken
+    edit:
+      en: /monitor-logs/:id/edit
+      nl: /monitorlogs/:id/bewerken
+    delete:
+      en: /monitor-logs/:id/delete
+      nl: /monitorlogs/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Monitor logs
+        nl: Monitorlogs
+      columns:
+        - key: code
+          sortable: true
+        - key: status
+          sortable: true
+        - key: startedAt
+          sortable: true
+        - key: endedAt
+          sortable: true
+      defaultSort:
+        key: startedAt
+        direction: desc
+      rowLink:
+        en: /monitor-logs/:id
+        nl: /monitorlogs/:id
+    detail:
+      header:
+        title: "{{code}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Log details
+                nl: Loggegevens
+              fields:
+                - code
+                - status
+                - startedAt
+                - endedAt
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create monitor log
+            nl: Monitorlog aanmaken
+          groups:
+            - title:
+                en: Log details
+                nl: Loggegevens
+              fields:
+                - code
+                - status
+                - startedAt
+                - endedAt
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit monitor log
+            nl: Monitorlog bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Energie.All.Read
+      - Energie.All.ReadWrite
+    create:
+      - Energie.All.ReadWrite
+    update:
+      - Energie.All.ReadWrite
+    delete:
+      - Energie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

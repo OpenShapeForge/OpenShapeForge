@@ -1,0 +1,147 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: CaseType
+title: Case Type
+description: A managed case type definition with governance and operational defaults.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Case Type
+  nl: Zaaktype
+domains:
+  - cases
+  - governance
+authorization:
+  roles:
+    read:
+      - Zaken.All.Read
+      - Zaken.All.ReadWrite
+    create:
+      - Organisatie.All.ReadWrite
+    update:
+      - Organisatie.All.ReadWrite
+    delete:
+      - Organisatie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    validation:
+      maxLength: 4000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+  - key: category
+    valueType: string
+    required: false
+    label:
+      en: Category
+      nl: Categorie
+    persisted:
+      column: category
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASECATEGORY
+        clearable: true
+  - key: defaultPriority
+    valueType: string
+    required: false
+    label:
+      en: Default priority
+      nl: Standaardprioriteit
+    persisted:
+      column: default_priority
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEPRIORITY
+        clearable: true
+  - key: serviceNormHours
+    valueType: integer
+    required: false
+    label:
+      en: Service norm hours
+      nl: Servicenorm uren
+    persisted:
+      column: service_norm_hours
+      storageClass: core
+  - key: portalVisibleDefault
+    valueType: boolean
+    required: true
+    label:
+      en: Portal visible by default
+      nl: Standaard zichtbaar in portaal
+    defaultValue: true
+    persisted:
+      column: portal_visible_default
+      storageClass: core
+  - key: workflowTemplate
+    valueType: string
+    required: false
+    label:
+      en: Workflow template
+      nl: Workflowtemplate
+    validation:
+      maxLength: 200
+    persisted:
+      column: workflow_template
+      storageClass: core
+  - key: routingProfile
+    valueType: string
+    required: false
+    label:
+      en: Routing profile
+      nl: Routeringsprofiel
+    validation:
+      maxLength: 200
+    persisted:
+      column: routing_profile
+      storageClass: core
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

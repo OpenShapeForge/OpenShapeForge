@@ -56,7 +56,9 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // and Twinfield, each shipping its contract from its own
   // connectors/<slug>/authoring layer.
   "connector.schema.json": 5,
-  "core-entity.schema.json": 4,
+  // The core ERP catalog under packages/compiler/config/authoring/entities/,
+  // excluding `_base.yaml` — a baseEntity, and so unschemad by design.
+  "core-entity.schema.json": 145,
   "retention-policy-catalog.schema.json": 1,
   "semantic-type-catalog.schema.json": 1,
   "transform-catalog.schema.json": 1,

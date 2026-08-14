@@ -1,0 +1,491 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: LabelRule
+title: Label Rule
+description: A configurable rule that evaluates conditions against entity data and displays a badge label when matched.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Label Rule
+  nl: Labelregel
+domains:
+  - core
+authorization:
+  roles:
+    read:
+      - Algemeen.All.Read
+      - Algemeen.All.ReadWrite
+    create:
+      - Algemeen.All.ReadWrite
+    update:
+      - Algemeen.All.ReadWrite
+    delete:
+      - Algemeen.All.ReadWrite
+fields:
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name for this label rule.
+      nl: Leesbare naam voor deze labelregel.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: entityType
+    valueType: string
+    required: true
+    label:
+      en: Entity type
+      nl: Entiteitstype
+    description:
+      en: The entity type this rule applies to, such as Relation or Case.
+      nl: Het entiteitstype waarop deze regel van toepassing is, zoals Relatie of Zaak.
+    validation:
+      minLength: 1
+      maxLength: 120
+    options:
+      type: static
+      items:
+        - value: Relation
+          label:
+            en: Relation
+            nl: Relatie
+        - value: NaturalPerson
+          label:
+            en: Natural person
+            nl: Natuurlijk persoon
+        - value: LegalEntity
+          label:
+            en: Legal entity
+            nl: Rechtspersoon
+        - value: Case
+          label:
+            en: Case
+            nl: Zaak
+        - value: Task
+          label:
+            en: Task
+            nl: Taak
+        - value: Dossier
+          label:
+            en: Dossier
+            nl: Dossier
+        - value: Document
+          label:
+            en: Document
+            nl: Document
+        - value: Agreement
+          label:
+            en: Agreement
+            nl: Overeenkomst
+        - value: Account
+          label:
+            en: Account
+            nl: Account
+        - value: ContactMoment
+          label:
+            en: Contact moment
+            nl: Contactmoment
+        - value: Address
+          label:
+            en: Address
+            nl: Adres
+    persisted:
+      column: entity_type
+      storageClass: core
+    render:
+      component: ListSelect
+  - key: label
+    valueType: string
+    required: true
+    label:
+      en: Label text
+      nl: Labeltekst
+    description:
+      en: The text displayed on the badge when the condition matches.
+      nl: De tekst die op de badge wordt weergegeven wanneer de conditie overeenkomt.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: label
+      storageClass: core
+  - key: variant
+    valueType: string
+    required: true
+    label:
+      en: Variant
+      nl: Variant
+    description:
+      en: Badge visual style variant.
+      nl: Visuele stijlvariant van de badge.
+    defaultValue: default
+    validation:
+      minLength: 1
+      maxLength: 40
+    options:
+      type: static
+      items:
+        - value: default
+          label:
+            en: Default
+            nl: Standaard
+        - value: secondary
+          label:
+            en: Secondary
+            nl: Secundair
+        - value: destructive
+          label:
+            en: Destructive
+            nl: Destructief
+        - value: outline
+          label:
+            en: Outline
+            nl: Omlijning
+    persisted:
+      column: variant
+      storageClass: core
+    render:
+      component: ListSelect
+  - key: key
+    valueType: string
+    required: true
+    label:
+      en: Variable key
+      nl: Variabele-sleutel
+    description:
+      en: Identifier used to surface this rule as a flat top-level variable on the entity (e.g. `isAggressive`, `arrearsTotal`). Must be a valid JS-style identifier — starts with a lowercase letter, contains only letters and digits.
+      nl: Identifier waarmee deze regel als platte top-level variabele op de entiteit beschikbaar wordt (bijv. `isAggressive`, `arrearsTotal`). Moet een geldige JS-achtige identifier zijn — begint met een kleine letter en bevat alleen letters en cijfers.
+    validation:
+      minLength: 1
+      maxLength: 120
+      pattern: ^[a-z][a-zA-Z0-9]*$
+    persisted:
+      column: key
+      storageClass: core
+  - key: outputType
+    valueType: string
+    required: true
+    label:
+      en: Output type
+      nl: Uitvoertype
+    description:
+      en: Type of the value produced by the expression. Drives which field on `LabelValue` carries the result (`boolValue`, `numberValue`, or `stringValue`) and how the variable is typed downstream.
+      nl: Type van de waarde die de expressie oplevert. Bepaalt welk veld op `LabelValue` de uitkomst draagt (`boolValue`, `numberValue` of `stringValue`) en hoe de variabele verderop wordt getypeerd.
+    defaultValue: boolean
+    options:
+      type: static
+      items:
+        - value: boolean
+          label:
+            en: Boolean
+            nl: Boolean
+        - value: number
+          label:
+            en: Number
+            nl: Getal
+        - value: string
+          label:
+            en: String
+            nl: Tekst
+    persisted:
+      column: output_type
+      storageClass: core
+    render:
+      component: ListSelect
+  - key: expression
+    valueType: object
+    required: true
+    label:
+      en: Expression
+      nl: Expressie
+    description:
+      en: Expression evaluated against entity data to produce the label's output value. Supports conditions, arithmetic, string helpers, and aggregates over related collections.
+      nl: Expressie die wordt geëvalueerd tegen entiteitsgegevens om de uitvoerwaarde van het label te produceren. Ondersteunt condities, rekenkundige bewerkingen, tekstfuncties en aggregaties over gerelateerde collecties.
+    semanticType: condition
+    persisted:
+      column: expression
+      storageClass: core
+    visibility:
+      conditions:
+        - field: entityType
+          operator: isNotEmpty
+    variables: template
+    suggestions:
+      sourceField: entityType
+  - key: descriptionTemplate
+    valueType: string
+    required: false
+    label:
+      en: Description template
+      nl: Omschrijvingstemplate
+    description:
+      en: Template with dynamic variables that produces a personalized explanation when the label is clicked.
+      nl: Template met dynamische variabelen dat een gepersonaliseerde uitleg produceert wanneer op het label wordt geklikt.
+    semanticType: variableTemplate
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description_template
+      storageClass: core
+    visibility:
+      conditions:
+        - field: entityType
+          operator: isNotEmpty
+    variables: template
+    suggestions:
+      sourceField: entityType
+  - key: priority
+    valueType: integer
+    required: true
+    label:
+      en: Priority
+      nl: Prioriteit
+    description:
+      en: Display order when multiple labels match. Higher priority labels appear first.
+      nl: Weergavevolgorde wanneer meerdere labels overeenkomen. Labels met hogere prioriteit verschijnen eerst.
+    defaultValue: 0
+    persisted:
+      column: priority
+      storageClass: core
+  - key: active
+    valueType: boolean
+    label:
+      en: Active
+      nl: Actief
+    description:
+      en: Whether this label rule is currently evaluated.
+      nl: Of deze labelregel momenteel wordt geevalueerd.
+    defaultValue: true
+    persisted:
+      column: active
+      storageClass: core
+  - key: validity
+    valueType: string
+    required: true
+    label:
+      en: Validity
+      nl: Geldigheid
+    description:
+      en: Validity mode of this label rule. `permanent` is always valid; `tijdelijk` honors begindatum/einddatum; `voorwaardelijk` honors the dates plus any context-specific conditions (e.g. tenant or process state).
+      nl: Geldigheidsmodus van deze labelregel. `permanent` is altijd geldig; `tijdelijk` respecteert begindatum/einddatum; `voorwaardelijk` respecteert de datums plus context-specifieke voorwaarden (bv. tenant of procestoestand).
+    defaultValue: permanent
+    options:
+      type: static
+      items:
+        - value: permanent
+          label:
+            en: Permanent
+            nl: Permanent
+        - value: tijdelijk
+          label:
+            en: Temporary
+            nl: Tijdelijk
+        - value: voorwaardelijk
+          label:
+            en: Conditional
+            nl: Voorwaardelijk
+    persisted:
+      column: validity
+      storageClass: core
+    render:
+      component: ListSelect
+  - key: begindatum
+    valueType: datetime
+    required: false
+    label:
+      en: Start date
+      nl: Begindatum
+    description:
+      en: Date and time from which this label rule starts evaluating. Only honored when `validity` is `tijdelijk` or `voorwaardelijk`.
+      nl: Datum en tijd vanaf wanneer deze labelregel wordt geevalueerd. Alleen actief als `validity` op `tijdelijk` of `voorwaardelijk` staat.
+    persisted:
+      column: begindatum
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+    visibility:
+      conditions:
+        - field: validity
+          operator: isNotEmpty
+  - key: einddatum
+    valueType: datetime
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Date and time after which this label rule stops evaluating. Only honored when `validity` is `tijdelijk` or `voorwaardelijk`.
+      nl: Datum en tijd waarna deze labelregel niet meer wordt geevalueerd. Alleen actief als `validity` op `tijdelijk` of `voorwaardelijk` staat.
+    persisted:
+      column: einddatum
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+    visibility:
+      conditions:
+        - field: validity
+          operator: isNotEmpty
+relationships:
+  - key: tenant
+    kind: belongsTo
+    target: Tenant
+    foreignKey: tenant_id
+    label:
+      en: Tenant
+      nl: Tenant
+ui:
+  routes:
+    list:
+      en: /label-rules
+      nl: /labelregels
+    detail:
+      en: /label-rules/:id
+      nl: /labelregels/:id
+    create:
+      en: /label-rules/create
+      nl: /labelregels/aanmaken
+    edit:
+      en: /label-rules/:id/edit
+      nl: /labelregels/:id/bewerken
+    delete:
+      en: /label-rules/:id/delete
+      nl: /labelregels/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Label rules
+        nl: Labelregels
+      columns:
+        - key: name
+          sortable: true
+        - key: entityType
+          sortable: true
+        - key: label
+          sortable: true
+        - key: variant
+          sortable: true
+        - key: priority
+          sortable: true
+        - key: active
+          sortable: true
+      defaultSort:
+        key: priority
+        direction: desc
+      rowLink:
+        en: /label-rules/:id
+        nl: /labelregels/:id
+    detail:
+      header:
+        title: "{{name}}"
+        subtitle: "{{entityType}}"
+        badges:
+          - variant
+          - active
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure you want to delete this label rule?
+            nl: Weet je zeker dat je deze labelregel wilt verwijderen?
+          mutation: delete
+      groups:
+        - id: general
+          title:
+            en: General
+            nl: Algemeen
+          fields:
+            - name
+            - key
+            - entityType
+            - outputType
+            - label
+            - variant
+            - priority
+            - active
+        - id: validity
+          title:
+            en: Validity
+            nl: Geldigheid
+          fields:
+            - validity
+            - begindatum
+            - einddatum
+        - id: expression
+          title:
+            en: Expression
+            nl: Expressie
+          fields:
+            - expression
+        - id: description
+          title:
+            en: Description template
+            nl: Omschrijvingstemplate
+          fields:
+            - descriptionTemplate
+    form:
+      variants:
+        create:
+          title:
+            en: Create label rule
+            nl: Labelregel aanmaken
+          groups:
+            - title:
+                en: General
+                nl: Algemeen
+              fields:
+                - name
+                - key
+                - entityType
+                - outputType
+                - label
+                - variant
+                - priority
+                - active
+            - title:
+                en: Validity
+                nl: Geldigheid
+              fields:
+                - validity
+                - begindatum
+                - einddatum
+            - title:
+                en: Expression
+                nl: Expressie
+              fields:
+                - expression
+            - title:
+                en: Description template
+                nl: Omschrijvingstemplate
+              fields:
+                - descriptionTemplate
+        edit:
+          extends: create
+          title:
+            en: Edit label rule
+            nl: Labelregel bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

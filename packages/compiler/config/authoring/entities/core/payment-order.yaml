@@ -1,0 +1,241 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: PaymentOrder
+title: Payment Order
+description: Outgoing payment instruction batch (e.g. SEPA pain.001 file or aggregated direct debit run) sent to a bank.
+language: en
+displayTemplate: "{{referenceNumber}}"
+filterField: referenceNumber
+labels:
+  en: Payment order
+  nl: Betaalopdracht
+domains:
+  - finance
+fields:
+  - key: referenceNumber
+    valueType: string
+    required: true
+    label:
+      en: Reference number
+      nl: Referentienummer
+    description:
+      en: Unique reference number for this payment order, used in correspondence with the bank.
+      nl: Uniek referentienummer voor deze betaalopdracht, gebruikt in correspondentie met de bank.
+    persisted:
+      column: reference_number
+      storageClass: core
+  - key: executionDate
+    valueType: date
+    required: true
+    label:
+      en: Execution date
+      nl: Uitvoerdatum
+    description:
+      en: Target date on which the bank should execute the payment order.
+      nl: Beoogde datum waarop de bank de betaalopdracht moet uitvoeren.
+    persisted:
+      column: execution_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the payment order.
+      nl: Levenscyclusstatus van de betaalopdracht.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PAYMENTORDERSTATUS
+        clearable: false
+  - key: totalAmount
+    valueType: number
+    required: false
+    label:
+      en: Total amount
+      nl: Totaalbedrag
+    description:
+      en: Sum of all instructions in this payment order.
+      nl: Som van alle instructies in deze betaalopdracht.
+    semanticType: currency
+    persisted:
+      column: total_amount
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-text description of the payment order for internal reference.
+      nl: Vrije omschrijving van de betaalopdracht voor interne referentie.
+    validation:
+      maxLength: 200
+    persisted:
+      column: description
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the order in an external context.
+      nl: Functionele of zakelijke code van de opdracht in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: paymentMethod
+    kind: belongsTo
+    target: PaymentMethod
+    foreignKey: payment_method_id
+    label:
+      en: Payment method
+      nl: Betaalwijze
+ui:
+  routes:
+    list:
+      en: /payment-orders
+      nl: /betaalopdrachten
+    detail:
+      en: /payment-orders/:id
+      nl: /betaalopdrachten/:id
+    create:
+      en: /payment-orders/create
+      nl: /betaalopdrachten/aanmaken
+    edit:
+      en: /payment-orders/:id/edit
+      nl: /betaalopdrachten/:id/bewerken
+    delete:
+      en: /payment-orders/:id/delete
+      nl: /betaalopdrachten/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Payment orders
+        nl: Betaalopdrachten
+      columns:
+        - key: referenceNumber
+          sortable: true
+        - key: executionDate
+          sortable: true
+        - key: status
+          sortable: true
+        - key: totalAmount
+          sortable: true
+      defaultSort:
+        key: executionDate
+        direction: desc
+      rowLink:
+        en: /payment-orders/:id
+        nl: /betaalopdrachten/:id
+    detail:
+      header:
+        title: "{{referenceNumber}}"
+        subtitle: "{{totalAmount}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Order details
+                nl: Opdrachtgegevens
+              fields:
+                - referenceNumber
+                - executionDate
+                - status
+                - totalAmount
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create payment order
+            nl: Betaalopdracht aanmaken
+          groups:
+            - title:
+                en: Order details
+                nl: Opdrachtgegevens
+              fields:
+                - referenceNumber
+                - executionDate
+                - status
+                - totalAmount
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit payment order
+            nl: Betaalopdracht bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

@@ -1,0 +1,191 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: MaintenanceRequestSettlement
+title: Maintenance Request Settlement
+description: Charge-back of a maintenance request to a relation, optionally linking the generated invoice.
+language: en
+displayTemplate: "{{description}}: {{amount}}"
+filterField: description
+labels:
+  en: Maintenance request settlement
+  nl: Onderhoudsverzoek-verrekening
+domains:
+  - maintenance
+fields:
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Description of the settlement.
+      nl: Omschrijving van de verrekening.
+    validation:
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 500
+  - key: amount
+    valueType: number
+    required: true
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Settled amount.
+      nl: Verrekend bedrag.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+  - key: settledAt
+    valueType: date
+    required: true
+    label:
+      en: Settled at
+      nl: Verrekend op
+    description:
+      en: Date on which the settlement was made.
+      nl: Datum waarop de verrekening is gemaakt.
+    persisted:
+      column: settled_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+relationships:
+  - key: maintenanceRequest
+    kind: belongsTo
+    target: MaintenanceRequest
+    foreignKey: maintenance_request_id
+    label:
+      en: Maintenance request
+      nl: Onderhoudsverzoek
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: invoice
+    kind: belongsTo
+    target: Invoice
+    foreignKey: invoice_id
+    label:
+      en: Invoice
+      nl: Factuur
+ui:
+  routes:
+    list:
+      en: /maintenance-request-settlements
+      nl: /onderhoudsverzoek-verrekeningen
+    detail:
+      en: /maintenance-request-settlements/:id
+      nl: /onderhoudsverzoek-verrekeningen/:id
+    create:
+      en: /maintenance-request-settlements/create
+      nl: /onderhoudsverzoek-verrekeningen/aanmaken
+    edit:
+      en: /maintenance-request-settlements/:id/edit
+      nl: /onderhoudsverzoek-verrekeningen/:id/bewerken
+    delete:
+      en: /maintenance-request-settlements/:id/delete
+      nl: /onderhoudsverzoek-verrekeningen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Maintenance request settlements
+        nl: Onderhoudsverzoek-verrekeningen
+      columns:
+        - key: description
+          sortable: true
+        - key: amount
+          sortable: true
+        - key: settledAt
+          sortable: true
+      defaultSort:
+        key: settledAt
+        direction: desc
+      rowLink:
+        en: /maintenance-request-settlements/:id
+        nl: /onderhoudsverzoek-verrekeningen/:id
+    detail:
+      header:
+        title: "{{description}}"
+        subtitle: "{{amount}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Settlement details
+                nl: Verrekeninggegevens
+              fields:
+                - description
+                - amount
+                - settledAt
+    form:
+      variants:
+        create:
+          title:
+            en: Create maintenance request settlement
+            nl: Onderhoudsverzoek-verrekening aanmaken
+          groups:
+            - title:
+                en: Settlement details
+                nl: Verrekeninggegevens
+              fields:
+                - description
+                - amount
+                - settledAt
+        edit:
+          extends: create
+          title:
+            en: Edit maintenance request settlement
+            nl: Onderhoudsverzoek-verrekening bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Onderhoud.All.Read
+      - Onderhoud.All.ReadWrite
+    create:
+      - Onderhoud.All.ReadWrite
+    update:
+      - Onderhoud.All.ReadWrite
+    delete:
+      - Onderhoud.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

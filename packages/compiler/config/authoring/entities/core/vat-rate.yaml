@@ -1,0 +1,285 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: VatRate
+title: VAT Rate
+description: VAT rate by validity period, with a posting ledger account and optional cost-dimension dimension.
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: VAT rate
+  nl: BTW-tarief
+domains:
+  - finance
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique VAT-rate code.
+      nl: Tenant-unieke BTW-tariefcode.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: vatType
+    valueType: string
+    required: true
+    label:
+      en: VAT type
+      nl: BTW-soort
+    description:
+      en: Classification of the VAT rate (none, zero, low, high).
+      nl: Classificatie van het BTW-tarief (geen, 0%, laag, hoog).
+    persisted:
+      column: vat_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: VATTYPE
+        clearable: false
+  - key: percentage
+    valueType: number
+    required: true
+    label:
+      en: Percentage
+      nl: Percentage
+    description:
+      en: VAT percentage applied (e.g. 21 for 21%).
+      nl: Toegepast BTW-percentage (bijv. 21 voor 21%).
+    validation:
+      min: 0
+      max: 100
+    persisted:
+      column: percentage
+      storageClass: core
+  - key: validFrom
+    valueType: date
+    required: true
+    label:
+      en: Valid from
+      nl: Geldig vanaf
+    description:
+      en: Date from which this rate is effective.
+      nl: Datum vanaf wanneer dit tarief geldig is.
+    persisted:
+      column: valid_from
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: validTo
+    valueType: date
+    required: false
+    label:
+      en: Valid until
+      nl: Geldig tot
+    description:
+      en: Date until which this rate is effective.
+      nl: Datum tot wanneer dit tarief geldig is.
+    persisted:
+      column: valid_to
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description or business meaning of the VAT rate.
+      nl: Optionele omschrijving of zakelijke betekenis van het BTW-tarief.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the VAT rate in an external context.
+      nl: Functionele of zakelijke code van het BTW-tarief in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: ledgerAccount
+    kind: belongsTo
+    target: LedgerAccount
+    foreignKey: ledger_account_id
+    label:
+      en: Ledger account
+      nl: Grootboekrekening
+  - key: costDimension
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: cost_dimension_id
+    label:
+      en: Cost dimension
+      nl: Kostendimensie
+ui:
+  routes:
+    list:
+      en: /vat-rates
+      nl: /btw-tarieven
+    detail:
+      en: /vat-rates/:id
+      nl: /btw-tarieven/:id
+    create:
+      en: /vat-rates/create
+      nl: /btw-tarieven/aanmaken
+    edit:
+      en: /vat-rates/:id/edit
+      nl: /btw-tarieven/:id/bewerken
+    delete:
+      en: /vat-rates/:id/delete
+      nl: /btw-tarieven/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: VAT rates
+        nl: BTW-tarieven
+      columns:
+        - key: code
+          sortable: true
+        - key: vatType
+          sortable: true
+        - key: percentage
+          sortable: true
+        - key: validFrom
+          sortable: true
+        - key: validTo
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /vat-rates/:id
+        nl: /btw-tarieven/:id
+    detail:
+      header:
+        title: "{{code}}"
+        subtitle: "{{vatType}}"
+        badges:
+          - vatType
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: VAT rate details
+                nl: BTW-tariefgegevens
+              fields:
+                - code
+                - vatType
+                - percentage
+                - validFrom
+                - validTo
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create VAT rate
+            nl: BTW-tarief aanmaken
+          groups:
+            - title:
+                en: VAT rate details
+                nl: BTW-tariefgegevens
+              fields:
+                - code
+                - vatType
+                - percentage
+                - validFrom
+                - validTo
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit VAT rate
+            nl: BTW-tarief bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

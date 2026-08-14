@@ -1,0 +1,322 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ProjectTask
+title: Project Task
+description: Task within a project, optionally scoped to a phase and assigned to a relation.
+language: en
+displayTemplate: "{{code}} {{name}}"
+filterField: code
+labels:
+  en: Project task
+  nl: Projecttaak
+domains:
+  - project
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Task code, unique within the project.
+      nl: Taakcode, uniek binnen het project.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the task.
+      nl: Menselijk leesbare naam van de taak.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Detailed description of the task.
+      nl: Uitgebreide omschrijving van de taak.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 5000
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the task.
+      nl: Levenscyclusstatus van de taak.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PROJECTTASKSTATUS
+        clearable: false
+  - key: priority
+    valueType: string
+    required: false
+    label:
+      en: Priority
+      nl: Prioriteit
+    description:
+      en: Priority of the task.
+      nl: Prioriteit van de taak.
+    persisted:
+      column: priority
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MAINTENANCEPRIORITY
+        clearable: true
+  - key: plannedStartDate
+    valueType: date
+    required: false
+    label:
+      en: Planned start date
+      nl: Geplande startdatum
+    description:
+      en: Date on which the task is planned to start.
+      nl: Datum waarop de taak gepland staat te starten.
+    persisted:
+      column: planned_start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: plannedEndDate
+    valueType: date
+    required: false
+    label:
+      en: Planned end date
+      nl: Geplande einddatum
+    description:
+      en: Date on which the task is planned to end.
+      nl: Datum waarop de taak gepland staat te eindigen.
+    persisted:
+      column: planned_end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: actualStartDate
+    valueType: date
+    required: false
+    label:
+      en: Actual start date
+      nl: Werkelijke startdatum
+    description:
+      en: Date on which the task actually started.
+      nl: Datum waarop de taak daadwerkelijk is gestart.
+    persisted:
+      column: actual_start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: actualEndDate
+    valueType: date
+    required: false
+    label:
+      en: Actual end date
+      nl: Werkelijke einddatum
+    description:
+      en: Date on which the task actually ended.
+      nl: Datum waarop de taak daadwerkelijk is geëindigd.
+    persisted:
+      column: actual_end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+relationships:
+  - key: project
+    kind: belongsTo
+    target: Project
+    foreignKey: project_id
+    label:
+      en: Project
+      nl: Project
+  - key: projectPhase
+    kind: belongsTo
+    target: ProjectPhase
+    foreignKey: project_phase_id
+    label:
+      en: Project phase
+      nl: Projectfase
+  - key: assignedTo
+    kind: belongsTo
+    target: Relation
+    foreignKey: assigned_to_relation_id
+    label:
+      en: Assigned to
+      nl: Toegewezen aan
+ui:
+  routes:
+    list:
+      en: /project-tasks
+      nl: /projecttaken
+    detail:
+      en: /project-tasks/:id
+      nl: /projecttaken/:id
+    create:
+      en: /project-tasks/create
+      nl: /projecttaken/aanmaken
+    edit:
+      en: /project-tasks/:id/edit
+      nl: /projecttaken/:id/bewerken
+    delete:
+      en: /project-tasks/:id/delete
+      nl: /projecttaken/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Project tasks
+        nl: Projecttaken
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+        - key: status
+          sortable: true
+        - key: priority
+          sortable: true
+        - key: plannedStartDate
+          sortable: true
+      defaultSort:
+        key: plannedStartDate
+        direction: asc
+      rowLink:
+        en: /project-tasks/:id
+        nl: /projecttaken/:id
+    detail:
+      header:
+        title: "{{code}} {{name}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+          - priority
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Task details
+                nl: Taakgegevens
+              fields:
+                - code
+                - name
+                - status
+                - priority
+            - title:
+                en: Planning
+                nl: Planning
+              fields:
+                - plannedStartDate
+                - plannedEndDate
+                - actualStartDate
+                - actualEndDate
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+    form:
+      variants:
+        create:
+          title:
+            en: Create project task
+            nl: Projecttaak aanmaken
+          groups:
+            - title:
+                en: Task details
+                nl: Taakgegevens
+              fields:
+                - code
+                - name
+                - status
+                - priority
+            - title:
+                en: Planning
+                nl: Planning
+              fields:
+                - plannedStartDate
+                - plannedEndDate
+                - actualStartDate
+                - actualEndDate
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+        edit:
+          extends: create
+          title:
+            en: Edit project task
+            nl: Projecttaak bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Projectontwikkeling.All.Read
+      - Projectontwikkeling.All.ReadWrite
+    create:
+      - Projectontwikkeling.All.ReadWrite
+    update:
+      - Projectontwikkeling.All.ReadWrite
+    delete:
+      - Projectontwikkeling.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

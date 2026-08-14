@@ -1,0 +1,150 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Survey
+title: Survey
+description: A reusable questionnaire template used for quality measurements, customer satisfaction, or internal audits.
+language: en
+labels:
+  en: Survey
+  nl: Vragenlijst
+domains:
+  - quality
+displayTemplate: "{{title}}"
+filterField: title
+retention:
+  mode: policyRef
+  policy: quality-retain-7y
+  scope: record
+  startsFrom:
+    strategy: field
+    field: createdAt
+authorization:
+  roles:
+    read:
+      - Algemeen.All.Read
+      - Algemeen.All.ReadWrite
+    create:
+      - Kwaliteit.All.ReadWrite
+    update:
+      - Kwaliteit.All.ReadWrite
+    delete:
+      - Kwaliteit.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Human-readable survey code.
+      nl: Menselijk leesbare vragenlijstcode.
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: title
+    valueType: string
+    required: true
+    label:
+      en: Title
+      nl: Titel
+    description:
+      en: Short title of the survey.
+      nl: Korte titel van de vragenlijst.
+    validation:
+      minLength: 1
+      maxLength: 300
+    persisted:
+      column: title
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Detailed description of the survey purpose and scope.
+      nl: Uitgebreide omschrijving van het doel en de reikwijdte van de vragenlijst.
+    validation:
+      maxLength: 4000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+  - key: surveyKind
+    valueType: string
+    required: false
+    label:
+      en: Kind
+      nl: Soort
+    description:
+      en: Classification of the survey.
+      nl: Classificatie van de vragenlijst.
+    persisted:
+      column: survey_kind
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: SURVEYKIND
+        clearable: true
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Current lifecycle status of the survey.
+      nl: Huidige levenscyclusstatus van de vragenlijst.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: SURVEYSTATUS
+        clearable: false
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional code in a connected source system.
+      nl: Functionele code in een gekoppeld bronsysteem.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: questions
+    kind: hasMany
+    target: SurveyQuestion
+    foreignKey: survey_id
+    label:
+      en: Questions
+      nl: Vragen
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+      wait: true

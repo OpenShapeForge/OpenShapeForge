@@ -1,0 +1,200 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: EnergyPerformanceMeasurement
+title: Energy Performance Measurement
+description: Individual measurement underpinning an energy performance certificate.
+language: en
+displayTemplate: "{{measuredAt}}: {{value}}"
+filterField: id
+labels:
+  en: Energy performance measurement
+  nl: Energieprestatiemeting
+domains:
+  - energy
+fields:
+  - key: measuredAt
+    valueType: datetime
+    required: true
+    label:
+      en: Measured at
+      nl: Gemeten op
+    description:
+      en: Timestamp when the measurement was taken.
+      nl: Tijdstip waarop de meting is uitgevoerd.
+    persisted:
+      column: measured_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: value
+    valueType: number
+    required: true
+    label:
+      en: Value
+      nl: Waarde
+    description:
+      en: Measured value.
+      nl: Gemeten waarde.
+    persisted:
+      column: value
+      storageClass: core
+  - key: unitId
+    valueType: string
+    required: false
+    label:
+      en: Unit
+      nl: Eenheid
+    description:
+      en: Free-form unit identifier (e.g. "kWh", "m3").
+      nl: Vrije eenheidsaanduiding (bv. "kWh", "m3").
+    validation:
+      maxLength: 50
+    persisted:
+      column: unit_id
+      storageClass: core
+  - key: notes
+    valueType: string
+    required: false
+    label:
+      en: Notes
+      nl: Notities
+    description:
+      en: Free-form notes about the measurement.
+      nl: Vrije notities over de meting.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: notes
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 1000
+relationships:
+  - key: energyPerformance
+    kind: belongsTo
+    target: EnergyPerformance
+    foreignKey: energy_performance_id
+    label:
+      en: Energy performance
+      nl: Energieprestatie
+ui:
+  routes:
+    list:
+      en: /energy-performance-measurements
+      nl: /energieprestatiemetingen
+    detail:
+      en: /energy-performance-measurements/:id
+      nl: /energieprestatiemetingen/:id
+    create:
+      en: /energy-performance-measurements/create
+      nl: /energieprestatiemetingen/aanmaken
+    edit:
+      en: /energy-performance-measurements/:id/edit
+      nl: /energieprestatiemetingen/:id/bewerken
+    delete:
+      en: /energy-performance-measurements/:id/delete
+      nl: /energieprestatiemetingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Energy performance measurements
+        nl: Energieprestatiemetingen
+      columns:
+        - key: measuredAt
+          sortable: true
+        - key: value
+          sortable: true
+        - key: unitId
+          sortable: true
+      defaultSort:
+        key: measuredAt
+        direction: desc
+      rowLink:
+        en: /energy-performance-measurements/:id
+        nl: /energieprestatiemetingen/:id
+    detail:
+      header:
+        title: "{{measuredAt}}"
+        subtitle: "{{value}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Measurement details
+                nl: Metinggegevens
+              fields:
+                - measuredAt
+                - value
+                - unitId
+            - title:
+                en: Notes
+                nl: Notities
+              fields:
+                - notes
+    form:
+      variants:
+        create:
+          title:
+            en: Create energy performance measurement
+            nl: Energieprestatiemeting aanmaken
+          groups:
+            - title:
+                en: Measurement details
+                nl: Metinggegevens
+              fields:
+                - measuredAt
+                - value
+                - unitId
+            - title:
+                en: Notes
+                nl: Notities
+              fields:
+                - notes
+        edit:
+          extends: create
+          title:
+            en: Edit energy performance measurement
+            nl: Energieprestatiemeting bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Energie.All.Read
+      - Energie.All.ReadWrite
+    create:
+      - Energie.All.ReadWrite
+    update:
+      - Energie.All.ReadWrite
+    delete:
+      - Energie.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

@@ -1,0 +1,393 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ProcessStep
+title: Process Step
+description: A business-visible process step within the current technical process-step table, separate from technical workflow nodes.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Process Step
+  nl: Processtap
+domains:
+  - cases
+  - workflow
+authorization:
+  roles:
+    read:
+      - Zaken.All.Read
+      - Zaken.All.ReadWrite
+    create:
+      - Zaken.All.ReadWrite
+    update:
+      - Zaken.All.ReadWrite
+    delete:
+      - Zaken.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: key
+    valueType: string
+    required: true
+    label:
+      en: Key
+      nl: Sleutel
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: key
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    validation:
+      maxLength: 4000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+  - key: stepType
+    valueType: string
+    required: true
+    label:
+      en: Step type
+      nl: Staptype
+    persisted:
+      column: step_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PROCESSSTEPTYPE
+        clearable: false
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PROCESSSTEPSTATUS
+        clearable: false
+  - key: sequenceNumber
+    valueType: integer
+    required: false
+    label:
+      en: Sequence number
+      nl: Volgnummer
+    persisted:
+      column: sequence_number
+      storageClass: core
+  - key: isMilestone
+    valueType: boolean
+    required: true
+    label:
+      en: Is milestone
+      nl: Is mijlpaal
+    defaultValue: false
+    persisted:
+      column: is_milestone
+      storageClass: core
+  - key: isBlocking
+    valueType: boolean
+    required: true
+    label:
+      en: Is blocking
+      nl: Is blokkerend
+    defaultValue: true
+    persisted:
+      column: is_blocking
+      storageClass: core
+  - key: workflowNodeRef
+    valueType: string
+    required: false
+    label:
+      en: Workflow node reference
+      nl: Workflow-node referentie
+    validation:
+      maxLength: 200
+    persisted:
+      column: workflow_node_ref
+      storageClass: core
+  - key: workflowRunRef
+    valueType: string
+    required: false
+    label:
+      en: Workflow run reference
+      nl: Workflow-run referentie
+    validation:
+      maxLength: 200
+    persisted:
+      column: workflow_run_ref
+      storageClass: core
+  - key: workflowInstanceId
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: Workflow instance ID
+      nl: Workflowinstantie-ID
+    description:
+      en: Durable workflow instance currently executing this process step.
+      nl: Duurzame workflowinstantie die deze processtap uitvoert.
+    validation:
+      maxLength: 200
+    persisted:
+      column: workflow_instance_id
+      storageClass: core
+  - key: workflowNodeInstanceId
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: Workflow node instance ID
+      nl: Workflow-nodeinstantie-ID
+    description:
+      en: Current waiting node within the workflow instance, when the process step is paused.
+      nl: Huidige wachtende node binnen de workflowinstantie wanneer de processtap gepauzeerd is.
+    validation:
+      maxLength: 200
+    persisted:
+      column: workflow_node_instance_id
+      storageClass: core
+  - key: workflowWaitId
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: Workflow wait ID
+      nl: Workflow-wacht-ID
+    description:
+      en: Durable wait token that can be resumed by another orchestrator.
+      nl: Duurzame wait-token die door een andere orchestrator hervat kan worden.
+    validation:
+      maxLength: 200
+    persisted:
+      column: workflow_wait_id
+      storageClass: core
+  - key: requiredInput
+    valueType: object
+    required: false
+    readOnly: true
+    label:
+      en: Required input
+      nl: Benodigde input
+    description:
+      en: Field definitions or prompt metadata currently needed to continue this process step.
+      nl: Velddefinities of promptmetadata die nu nodig zijn om deze processtap voort te zetten.
+    persisted:
+      column: required_input
+      storageClass: core
+    render:
+      component: JsonEditor
+  - key: startedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Started at
+      nl: Gestart op
+    persisted:
+      column: started_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: dueAt
+    valueType: datetime
+    required: false
+    label:
+      en: Due at
+      nl: Uiterlijk op
+    persisted:
+      column: due_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: completedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Completed at
+      nl: Afgerond op
+    persisted:
+      column: completed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: completedByAccountId
+    valueType: string
+    required: false
+    semanticType: accountId
+    label:
+      en: Completed by
+      nl: Afgerond door
+    description:
+      en: Account that manually completed this process step.
+      nl: Account dat deze processtap handmatig heeft afgerond.
+    validation:
+      format: uuid
+    persisted:
+      column: completed_by_account_id
+      storageClass: core
+  - key: completionApprovalComment
+    valueType: string
+    required: false
+    label:
+      en: Completion approval comment
+      nl: Afrondingsgoedkeuringsopmerking
+    validation:
+      maxLength: 2000
+    persisted:
+      column: completion_approval_comment
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 2000
+  - key: waitReason
+    valueType: string
+    required: false
+    label:
+      en: Wait reason
+      nl: Wachtrede
+    validation:
+      maxLength: 300
+    persisted:
+      column: wait_reason
+      storageClass: core
+  - key: resultCode
+    valueType: string
+    required: false
+    label:
+      en: Result code
+      nl: Resultaatcode
+    validation:
+      maxLength: 100
+    persisted:
+      column: result_code
+      storageClass: core
+  - key: note
+    valueType: string
+    required: false
+    label:
+      en: Note
+      nl: Notitie
+    validation:
+      maxLength: 4000
+    persisted:
+      column: note
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+  - key: isAdHoc
+    valueType: boolean
+    required: true
+    label:
+      en: Ad-hoc step
+      nl: Ad-hoc stap
+    description:
+      en: Step was added manually by a case worker and is not part of the original template
+      nl: Stap is handmatig toegevoegd door een medewerker en maakt geen deel uit van het originele sjabloon
+    defaultValue: false
+    persisted:
+      column: is_ad_hoc
+      storageClass: core
+  - key: templateStepKey
+    valueType: string
+    required: false
+    label:
+      en: Process step template key
+      nl: Processtapsjabloon sleutel
+    description:
+      en: Reference to the process step template this was instantiated from
+      nl: Verwijzing naar het processtapsjabloon waarvan dit een instantie is
+    validation:
+      maxLength: 100
+    persisted:
+      column: template_step_key
+      storageClass: core
+relationships:
+  - key: process
+    kind: belongsTo
+    target: Process
+    foreignKey: process_id
+    label:
+      en: Process
+      nl: Proces
+  - key: owner
+    kind: belongsTo
+    target: Account
+    foreignKey: owner_account_id
+    label:
+      en: Owner
+      nl: Eigenaar
+  - key: assignedGroup
+    kind: belongsTo
+    target: RelationGroup
+    foreignKey: assigned_group_id
+    label:
+      en: Assigned group
+      nl: Toegewezen groep
+  - key: predecessorStep
+    kind: belongsTo
+    target: ProcessStep
+    foreignKey: predecessor_step_id
+    label:
+      en: Predecessor step
+      nl: Vorige stap
+  - key: nextSteps
+    kind: hasMany
+    target: ProcessStep
+    foreignKey: predecessor_step_id
+    label:
+      en: Next steps
+      nl: Vervolgstappen
+  - key: tasks
+    kind: hasMany
+    target: Task
+    foreignKey: case_step_id
+    label:
+      en: Tasks
+      nl: Taken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+      wait: true

@@ -1,0 +1,198 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ProjectSpending
+title: Project Spending
+description: Actual cost recorded against a project, optionally tied to a project task and a cost dimension.
+language: en
+displayTemplate: "{{description}}: {{amount}}"
+filterField: description
+labels:
+  en: Project spending
+  nl: Projectbesteding
+domains:
+  - project
+fields:
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-form description of the spending.
+      nl: Vrije omschrijving van de besteding.
+    validation:
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 500
+  - key: spentAt
+    valueType: date
+    required: true
+    label:
+      en: Spent at
+      nl: Bestedingsdatum
+    description:
+      en: Date on which the cost was incurred.
+      nl: Datum waarop de kosten zijn gemaakt.
+    persisted:
+      column: spent_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: amount
+    valueType: number
+    required: true
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Actual amount spent on this line.
+      nl: Werkelijk besteed bedrag voor deze regel.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+relationships:
+  - key: project
+    kind: belongsTo
+    target: Project
+    foreignKey: project_id
+    label:
+      en: Project
+      nl: Project
+  - key: projectTask
+    kind: belongsTo
+    target: ProjectTask
+    foreignKey: project_task_id
+    label:
+      en: Project task
+      nl: Projecttaak
+  - key: ledgerAccount
+    kind: belongsTo
+    target: LedgerAccount
+    foreignKey: ledger_account_id
+    label:
+      en: Ledger account
+      nl: Grootboekrekening
+  - key: costDimension
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: cost_dimension_id
+    label:
+      en: Cost dimension
+      nl: Kostendimensie
+ui:
+  routes:
+    list:
+      en: /project-spendings
+      nl: /projectbestedingen
+    detail:
+      en: /project-spendings/:id
+      nl: /projectbestedingen/:id
+    create:
+      en: /project-spendings/create
+      nl: /projectbestedingen/aanmaken
+    edit:
+      en: /project-spendings/:id/edit
+      nl: /projectbestedingen/:id/bewerken
+    delete:
+      en: /project-spendings/:id/delete
+      nl: /projectbestedingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Project spendings
+        nl: Projectbestedingen
+      columns:
+        - key: spentAt
+          sortable: true
+        - key: description
+          sortable: true
+        - key: amount
+          sortable: true
+      defaultSort:
+        key: spentAt
+        direction: desc
+      rowLink:
+        en: /project-spendings/:id
+        nl: /projectbestedingen/:id
+    detail:
+      header:
+        title: "{{description}}"
+        subtitle: "{{amount}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Spending details
+                nl: Bestedingsgegevens
+              fields:
+                - description
+                - spentAt
+                - amount
+    form:
+      variants:
+        create:
+          title:
+            en: Create project spending
+            nl: Projectbesteding aanmaken
+          groups:
+            - title:
+                en: Spending details
+                nl: Bestedingsgegevens
+              fields:
+                - description
+                - spentAt
+                - amount
+        edit:
+          extends: create
+          title:
+            en: Edit project spending
+            nl: Projectbesteding bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Projectontwikkeling.All.Read
+      - Projectontwikkeling.All.ReadWrite
+    create:
+      - Projectontwikkeling.All.ReadWrite
+    update:
+      - Projectontwikkeling.All.ReadWrite
+    delete:
+      - Projectontwikkeling.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

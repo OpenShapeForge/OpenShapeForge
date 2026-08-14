@@ -1,0 +1,195 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: PaymentPlanInstalment
+title: Payment Plan Instalment
+description: Single instalment within a payment plan, with due date, amount, and optional link to the actual payment that settled it.
+language: en
+displayTemplate: "#{{instalmentNumber}}: {{amount}}"
+filterField: instalmentNumber
+labels:
+  en: Payment plan instalment
+  nl: Termijn
+domains:
+  - finance
+fields:
+  - key: instalmentNumber
+    valueType: integer
+    required: true
+    label:
+      en: Instalment number
+      nl: Termijnnummer
+    description:
+      en: Sequential instalment number within the payment plan.
+      nl: Volgnummer van de termijn binnen de betalingsregeling.
+    validation:
+      min: 1
+    persisted:
+      column: instalment_number
+      storageClass: core
+  - key: dueDate
+    valueType: date
+    required: true
+    label:
+      en: Due date
+      nl: Vervaldatum
+    description:
+      en: Date by which this instalment must be paid.
+      nl: Datum waarop deze termijn moet zijn betaald.
+    persisted:
+      column: due_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: amount
+    valueType: number
+    required: true
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Amount due for this instalment.
+      nl: Verschuldigd bedrag voor deze termijn.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+  - key: paidAt
+    valueType: datetime
+    required: false
+    label:
+      en: Paid at
+      nl: Betaald op
+    description:
+      en: Timestamp at which this instalment was settled, if known.
+      nl: Tijdstip waarop deze termijn is voldaan, indien bekend.
+    persisted:
+      column: paid_at
+      storageClass: core
+relationships:
+  - key: paymentPlan
+    kind: belongsTo
+    target: PaymentPlan
+    foreignKey: payment_plan_id
+    label:
+      en: Payment plan
+      nl: Betalingsregeling
+  - key: invoicePayment
+    kind: belongsTo
+    target: InvoicePayment
+    foreignKey: invoice_payment_id
+    label:
+      en: Invoice payment
+      nl: Factuurbetaling
+ui:
+  routes:
+    list:
+      en: /payment-plan-instalments
+      nl: /termijnen
+    detail:
+      en: /payment-plan-instalments/:id
+      nl: /termijnen/:id
+    create:
+      en: /payment-plan-instalments/create
+      nl: /termijnen/aanmaken
+    edit:
+      en: /payment-plan-instalments/:id/edit
+      nl: /termijnen/:id/bewerken
+    delete:
+      en: /payment-plan-instalments/:id/delete
+      nl: /termijnen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Payment plan instalments
+        nl: Termijnen
+      columns:
+        - key: instalmentNumber
+          sortable: true
+        - key: dueDate
+          sortable: true
+        - key: amount
+          sortable: true
+        - key: paidAt
+          sortable: true
+      defaultSort:
+        key: dueDate
+        direction: asc
+      rowLink:
+        en: /payment-plan-instalments/:id
+        nl: /termijnen/:id
+    detail:
+      header:
+        title: "#{{instalmentNumber}}"
+        subtitle: "{{amount}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Instalment details
+                nl: Termijngegevens
+              fields:
+                - instalmentNumber
+                - dueDate
+                - amount
+                - paidAt
+    form:
+      variants:
+        create:
+          title:
+            en: Create payment plan instalment
+            nl: Termijn aanmaken
+          groups:
+            - title:
+                en: Instalment details
+                nl: Termijngegevens
+              fields:
+                - instalmentNumber
+                - dueDate
+                - amount
+                - paidAt
+        edit:
+          extends: create
+          title:
+            en: Edit payment plan instalment
+            nl: Termijn bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Financien.All.Read
+      - Financien.All.ReadWrite
+    create:
+      - Financien.All.ReadWrite
+    update:
+      - Financien.All.ReadWrite
+    delete:
+      - Financien.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

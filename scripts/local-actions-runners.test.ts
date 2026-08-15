@@ -2502,6 +2502,33 @@ sentinel_pid="$(cat "$HOME/transition-sentinel.pid")"
     expect(result.exitCode, output(result)).toBe(0);
   }, 10_000);
 
+  test("preserves cancellation during ownership-proof publication", async () => {
+    const result = await runHarnessBounded(`
+probe_parent_after_sentinel_start() {
+  printf '%s\n' "$1" >"$HOME/ownership-transition-sentinel.pid"
+}
+probe_parent_before_ownership_proof_publication() {
+  touch "$HOME/ownership-transition"
+  /bin/sh -c '/bin/kill -TERM "$PPID"'
+  return 1
+}
+colima() {
+  touch "$HOME/probe-command-started"
+}
+set +e
+run_trusted_readiness_probe_with_deadline colima-inventory 30
+probe_result=$?
+set -e
+(( probe_result == 143 ))
+[[ -e "$HOME/ownership-transition" ]]
+sentinel_pid="$(cat "$HOME/ownership-transition-sentinel.pid")"
+! /bin/kill -0 "$sentinel_pid" 2>/dev/null
+[[ ! -e "$HOME/probe-command-started" ]]
+`, 8_000);
+
+    expect(result.exitCode, output(result)).toBe(0);
+  }, 10_000);
+
   test("cleans the owned group when start marker publication fails", async () => {
     const result = await runHarnessBounded(`
 probe_parent_after_sentinel_start() {

@@ -886,9 +886,21 @@ _run_readiness_probe_process_group() (
     elif ! probe_process_owns_group "$sentinel_pid"; then
       result=125
     elif ! probe_parent_before_ownership_proof_publication; then
-      result=125
+      if (( cancel_result != 0 )); then
+        result="$cancel_result"
+      else
+        result=125
+      fi
+    elif (( cancel_result != 0 )); then
+      result="$cancel_result"
     elif ! write_probe_state "$ownership_temp_file" "$ownership_file"; then
-      result=125
+      if (( cancel_result != 0 )); then
+        result="$cancel_result"
+      else
+        result=125
+      fi
+    elif (( cancel_result != 0 )); then
+      result="$cancel_result"
     else
       now_epoch="$(/bin/date +%s)" || result=125
       if (( result == 0 && now_epoch >= startup_deadline_epoch )); then

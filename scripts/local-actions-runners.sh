@@ -88,27 +88,36 @@ EOF
 # possible revisions before registration instead of treating head_sha as the
 # workflow revision.
 active_same_repository_workflow_runs() {
-  local status status_pages snapshots='[]' active_runs
-  for status in queued in_progress requested waiting pending; do
-    if ! status_pages="$(
-      gh api --hostname github.com --paginate --slurp \
-        -H "Accept: application/vnd.github+json" \
-        -H "X-GitHub-Api-Version: 2022-11-28" \
-        "repos/${REPOSITORY}/actions/runs?event=pull_request&status=${status}&per_page=100"
-    )"; then
-      echo "Could not enumerate all ${status} pull-request workflow runs" >&2
-      return 1
-    fi
-    if ! snapshots="$(
+  local sweep status status_pages sweep_snapshots snapshots='[]' active_runs
+  for sweep in 1 2; do
+    sweep_snapshots='[]'
+    for status in queued in_progress requested waiting pending; do
+      if ! status_pages="$(
+        gh api --hostname github.com --paginate --slurp \
+          -H "Accept: application/vnd.github+json" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          "repos/${REPOSITORY}/actions/runs?event=pull_request&status=${status}&per_page=100"
+      )"; then
+        echo "Could not enumerate all ${status} pull-request workflow runs" >&2
+        return 1
+      fi
+      if ! sweep_snapshots="$(
+        jq -cn \
+          --argjson snapshots "$sweep_snapshots" \
+          --arg status "$status" \
+          --argjson pages "$status_pages" \
+          '$snapshots + [{status: $status, pages: $pages}]'
+      )"; then
+        echo "Pull-request workflow-run response was incomplete or malformed" >&2
+        return 1
+      fi
+    done
+    snapshots="$(
       jq -cn \
         --argjson snapshots "$snapshots" \
-        --arg status "$status" \
-        --argjson pages "$status_pages" \
-        '$snapshots + [{status: $status, pages: $pages}]'
-    )"; then
-      echo "Pull-request workflow-run response was incomplete or malformed" >&2
-      return 1
-    fi
+        --argjson sweep "$sweep_snapshots" \
+        '$snapshots + [$sweep]'
+    )" || return 1
   done
   if ! active_runs="$(
     printf '%s\n' "$snapshots" | jq -r \
@@ -117,8 +126,24 @@ active_same_repository_workflow_runs() {
       def direct_workflow_path:
         type == "string" and
         test("^\\.github/workflows/[A-Za-z0-9._-]+\\.ya?ml$");
-      if type != "array" or length != 5 or
-        any(.[];
+      def complete_sweep:
+        [.[] as $snapshot |
+          ($snapshot.pages[0].total_count) as $total_count |
+          [$snapshot.pages[].workflow_runs[]] as $status_runs |
+          if any($snapshot.pages[]; .total_count != $total_count) or
+            ($status_runs | length) != $total_count or
+            any($status_runs[]; .status != $snapshot.status)
+          then error("incomplete workflow-run pagination")
+          else $status_runs[]
+          end
+        ] |
+        if group_by(.id) | any(.[]; length != 1)
+        then error("duplicate workflow run")
+        else sort_by(.id)
+        end;
+      if type != "array" or length != 2 or
+        any(.[]; type != "array" or length != 5) or
+        any(.[][];
           type != "object" or
           (.status | type) != "string" or
           (.pages | type) != "array" or (.pages | length) == 0 or
@@ -129,16 +154,11 @@ active_same_repository_workflow_runs() {
             .total_count < 0 or .total_count != (.total_count | floor)))
       then error("invalid workflow-run page")
       else
-        [.[] as $snapshot |
-          ($snapshot.pages[0].total_count) as $total_count |
-          [$snapshot.pages[].workflow_runs[]] as $status_runs |
-          if any($snapshot.pages[]; .total_count != $total_count) or
-            ($status_runs | length) != $total_count or
-            any($status_runs[]; .status != $snapshot.status)
-          then error("incomplete workflow-run pagination")
-          else $status_runs[]
-          end
-        ] as $runs |
+        (.[0] | complete_sweep) as $first_runs |
+        (.[1] | complete_sweep) as $runs |
+        if [$first_runs[] | [.id, .status]] != [$runs[] | [.id, .status]]
+        then error("unstable workflow-run snapshot")
+        else
         if
           any($runs[];
             type != "object" or
@@ -190,6 +210,7 @@ active_same_repository_workflow_runs() {
             .pull_request_head_sha,
             .pull_request_base_sha
           ] | @tsv
+        end
         end
       end
     '

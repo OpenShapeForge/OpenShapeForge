@@ -69,16 +69,8 @@ function hostAuthorizationApi(options: {
   const pages =
     options.pages ?? [
       {
-        total_count: 2,
-        workflow_runs: [
-          {
-            id: WORKFLOW_RUN_ID - 1,
-            event: "pull_request",
-            status: "completed",
-            repository: { full_name: "OpenShapeForge/OpenShapeForge" },
-          },
-          workflowRun(activeStatus),
-        ],
+        total_count: 1,
+        workflow_runs: [workflowRun(activeStatus)],
       },
     ];
   const verifiedRun =
@@ -98,7 +90,13 @@ function hostAuthorizationApi(options: {
 gh() {
   printf '%s\\n' "$*" >>"$HOME/gh-calls"
   if [[ "$*" == *"actions/runs?event=pull_request"* ]]; then
-    ${options.failAt === "enumeration" ? "return 1" : `printf '%s\\n' ${JSON.stringify(JSON.stringify(pages))}; return`}
+    ${options.failAt === "enumeration" ? "return 1" : `
+    if [[ "$*" == *"status=${activeStatus}"* ]]; then
+      printf '%s\\n' ${JSON.stringify(JSON.stringify(pages))}
+    else
+      printf '%s\\n' '[{"total_count":0,"workflow_runs":[]}]'
+    fi
+    return`}
   fi
   if [[ "$*" == *"actions/runs/${WORKFLOW_RUN_ID}/attempts/1"* ]]; then
     ${options.failAt === "run" ? "return 1" : `printf '%s\\n' ${JSON.stringify(JSON.stringify(verifiedRun))}; return`}
@@ -1156,8 +1154,13 @@ grep -Fq -- '--hostname github.com --paginate --slurp' "$HOME/gh-calls"
 grep -Fq -- 'Accept: application/vnd.github+json' "$HOME/gh-calls"
 grep -Fq -- 'Accept: application/vnd.github.raw+json' "$HOME/gh-calls"
 grep -Fq -- 'X-GitHub-Api-Version: 2022-11-28' "$HOME/gh-calls"
-[[ "$(grep -c 'actions/runs?event=pull_request' "$HOME/gh-calls")" == 1 ]]
-! grep -Fq 'status=' "$HOME/gh-calls"
+[[ "$(grep -c 'actions/runs?event=pull_request&status=' "$HOME/gh-calls")" == 5 ]]
+grep -Fq 'status=queued' "$HOME/gh-calls"
+grep -Fq 'status=in_progress' "$HOME/gh-calls"
+grep -Fq 'status=requested' "$HOME/gh-calls"
+grep -Fq 'status=waiting' "$HOME/gh-calls"
+grep -Fq 'status=pending' "$HOME/gh-calls"
+! grep -Fq 'actions/runs?event=pull_request&per_page=100' "$HOME/gh-calls"
 [[ "$(grep -c 'actions/runs/${WORKFLOW_RUN_ID}/attempts/1' "$HOME/gh-calls")" == 1 ]]
 [[ "$(grep -c 'pulls/${PULL_REQUEST_NUMBER}' "$HOME/gh-calls")" == 1 ]]
 [[ "$(grep -c 'contents/.github/workflows/' "$HOME/gh-calls")" == 12 ]]
@@ -1348,8 +1351,23 @@ set -e
 
     expect(result.exitCode, output(result)).toBe(0);
     expect(result.stderr.toString()).toContain(
-      "Could not enumerate all pull-request workflow runs",
+      "Could not enumerate all queued pull-request workflow runs",
     );
+  });
+
+  test("accepts a complete multi-page active-status snapshot", async () => {
+    const secondRun = { ...workflowRun(), id: WORKFLOW_RUN_ID + 1 };
+    const result = await runHarness(`
+${hostAuthorizationApi({
+  pages: [
+    { total_count: 2, workflow_runs: [workflowRun()] },
+    { total_count: 2, workflow_runs: [secondRun] },
+  ],
+})}
+[[ "$(active_same_repository_workflow_runs | wc -l | tr -d ' ')" == 2 ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
   });
 
   test("fails closed when pagination is incomplete", async () => {
@@ -1362,6 +1380,29 @@ authorize_active_workflow_shas
 authorize_result=$?
 set -e
 (( authorize_result != 0 ))
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Pull-request workflow-run response was incomplete or malformed",
+    );
+  });
+
+  test("fails closed when a filtered API response drifts to another status", async () => {
+    const result = await runHarness(`
+${hostAuthorizationApi({
+  pages: [
+    {
+      total_count: 1,
+      workflow_runs: [workflowRun("in_progress")],
+    },
+  ],
+})}
+set +e
+active_same_repository_workflow_runs
+snapshot_result=$?
+set -e
+(( snapshot_result != 0 ))
 `);
 
     expect(result.exitCode, output(result)).toBe(0);

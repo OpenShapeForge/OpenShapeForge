@@ -37,6 +37,7 @@ readonly LIMA_READINESS_PROBE_TIMEOUT_SECONDS=10
 # bounded setup window; command runtime starts only after the handshake.
 readonly PROBE_STARTUP_TIMEOUT_SECONDS=15
 readonly PROBE_STARTUP_TIMEOUT_STATUS=123
+readonly PROBE_COMMAND_FAILURE_STATUS=1
 readonly PROVISION_TERMINATION_GRACE_ATTEMPTS=240
 
 late_lima_start_attempt_limit() {
@@ -969,9 +970,17 @@ _run_readiness_probe_process_group() (
       break
     fi
     if [[ -f "$result_file" && -f "$settled_file" ]]; then
-      if ! IFS= read -r result <"$result_file" || \
-        [[ ! "$result" =~ ^[0-9]+$ ]] || (( result > 255 )); then
+      local command_result
+      if ! IFS= read -r command_result <"$result_file" || \
+        [[ ! "$command_result" =~ ^[0-9]+$ ]] || (( command_result > 255 )); then
         result=125
+      elif (( command_result == 0 )); then
+        result=0
+      else
+        # The fixed readiness commands expose only success versus failure.
+        # Never let a command's raw exit status impersonate this wrapper's
+        # timeout, protocol-error, or cancellation statuses.
+        result="$PROBE_COMMAND_FAILURE_STATUS"
       fi
       if (( cancel_result != 0 )); then
         result="$cancel_result"

@@ -2434,6 +2434,7 @@ printf 'inspected-before-harness-cleanup\n'
     const source = await readFile(RUNNERS, "utf8");
     expect(source).toContain("readonly PROBE_STARTUP_TIMEOUT_SECONDS=15");
     expect(source).toContain("readonly PROBE_STARTUP_TIMEOUT_STATUS=123");
+    expect(source).toContain("readonly PROBE_COMMAND_FAILURE_STATUS=1");
     expect(
       source.match(/run_trusted_readiness_probe_with_deadline/g) ?? [],
     ).toHaveLength(3);
@@ -2971,6 +2972,24 @@ grep -Fqx 'Late Lima guest probe startup handshake timed out: colima-profile' \
 
     expect(result.exitCode, output(result)).toBe(0);
   });
+
+  test.each([123, 124, 125, 130])(
+    "does not interpret command exit status %i as a wrapper status",
+    async (commandStatus) => {
+      const result = await runHarness(`
+colima() {
+  return ${commandStatus}
+}
+set +e
+run_trusted_readiness_probe_with_deadline colima-inventory 1
+probe_result=$?
+set -e
+(( probe_result == PROBE_COMMAND_FAILURE_STATUS ))
+`);
+
+      expect(result.exitCode, output(result)).toBe(0);
+    },
+  );
 
   test("inventory timeout releases provisioning and reaches serialized cleanup", async () => {
     const startedAt = Date.now();

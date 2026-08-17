@@ -37,6 +37,21 @@ function workflowRun(status = "queued") {
   };
 }
 
+const ACTIVE_WORKFLOW_STATUSES = [
+  "queued",
+  "in_progress",
+  "requested",
+  "waiting",
+  "pending",
+];
+
+function workflowRunSweep(status: string) {
+  return ACTIVE_WORKFLOW_STATUSES.map((candidate) => ({
+    total_count: candidate === status ? 1 : 0,
+    workflow_runs: candidate === status ? [workflowRun(status)] : [],
+  })).map((page) => [page]);
+}
+
 function verifiedWorkflowRun(status = "queued") {
   return { ...workflowRun(status), referenced_workflows: [] };
 }
@@ -60,6 +75,7 @@ function currentPullRequest(mergeCommitSha: string | null = MERGE_WORKFLOW_SHA) 
 function hostAuthorizationApi(options: {
   activeStatus?: string;
   pages?: unknown;
+  enumerationResponses?: unknown[];
   verifiedRun?: unknown;
   pullRequest?: unknown;
   failAt?: "enumeration" | "run" | "pull" | "content";
@@ -69,18 +85,23 @@ function hostAuthorizationApi(options: {
   const pages =
     options.pages ?? [
       {
-        total_count: 2,
-        workflow_runs: [
-          {
-            id: WORKFLOW_RUN_ID - 1,
-            event: "pull_request",
-            status: "completed",
-            repository: { full_name: "OpenShapeForge/OpenShapeForge" },
-          },
-          workflowRun(activeStatus),
-        ],
+        total_count: 1,
+        workflow_runs: [workflowRun(activeStatus)],
       },
     ];
+  const activeStatuses = ["queued", "in_progress", "requested", "waiting", "pending"];
+  const emptyPages = [{ total_count: 0, workflow_runs: [] }];
+  const enumerationResponses =
+    options.enumerationResponses ??
+    [1, 2].flatMap(() =>
+      activeStatuses.map((status) => (status === activeStatus ? pages : emptyPages)),
+    );
+  const enumerationCases = enumerationResponses
+    .map(
+      (response, index) =>
+        `${index + 1}) printf '%s\\n' ${JSON.stringify(JSON.stringify(response))} ;;`,
+    )
+    .join("\n      ");
   const verifiedRun =
     options.verifiedRun ?? verifiedWorkflowRun(activeStatus);
   const pullRequest = options.pullRequest ?? currentPullRequest();
@@ -98,7 +119,16 @@ function hostAuthorizationApi(options: {
 gh() {
   printf '%s\\n' "$*" >>"$HOME/gh-calls"
   if [[ "$*" == *"actions/runs?event=pull_request"* ]]; then
-    ${options.failAt === "enumeration" ? "return 1" : `printf '%s\\n' ${JSON.stringify(JSON.stringify(pages))}; return`}
+    ${options.failAt === "enumeration" ? "return 1" : `
+    enumeration_call=0
+    [[ ! -f "$HOME/gh-enumeration-count" ]] || read -r enumeration_call <"$HOME/gh-enumeration-count"
+    (( enumeration_call += 1 ))
+    printf '%s\\n' "$enumeration_call" >"$HOME/gh-enumeration-count"
+    case "$enumeration_call" in
+      ${enumerationCases}
+      *) return 1 ;;
+    esac
+    return`}
   fi
   if [[ "$*" == *"actions/runs/${WORKFLOW_RUN_ID}/attempts/1"* ]]; then
     ${options.failAt === "run" ? "return 1" : `printf '%s\\n' ${JSON.stringify(JSON.stringify(verifiedRun))}; return`}
@@ -1156,8 +1186,13 @@ grep -Fq -- '--hostname github.com --paginate --slurp' "$HOME/gh-calls"
 grep -Fq -- 'Accept: application/vnd.github+json' "$HOME/gh-calls"
 grep -Fq -- 'Accept: application/vnd.github.raw+json' "$HOME/gh-calls"
 grep -Fq -- 'X-GitHub-Api-Version: 2022-11-28' "$HOME/gh-calls"
-[[ "$(grep -c 'actions/runs?event=pull_request' "$HOME/gh-calls")" == 1 ]]
-! grep -Fq 'status=' "$HOME/gh-calls"
+[[ "$(grep -c 'actions/runs?event=pull_request&status=' "$HOME/gh-calls")" == 10 ]]
+grep -Fq 'status=queued' "$HOME/gh-calls"
+grep -Fq 'status=in_progress' "$HOME/gh-calls"
+grep -Fq 'status=requested' "$HOME/gh-calls"
+grep -Fq 'status=waiting' "$HOME/gh-calls"
+grep -Fq 'status=pending' "$HOME/gh-calls"
+! grep -Fq 'actions/runs?event=pull_request&per_page=100' "$HOME/gh-calls"
 [[ "$(grep -c 'actions/runs/${WORKFLOW_RUN_ID}/attempts/1' "$HOME/gh-calls")" == 1 ]]
 [[ "$(grep -c 'pulls/${PULL_REQUEST_NUMBER}' "$HOME/gh-calls")" == 1 ]]
 [[ "$(grep -c 'contents/.github/workflows/' "$HOME/gh-calls")" == 12 ]]
@@ -1348,8 +1383,23 @@ set -e
 
     expect(result.exitCode, output(result)).toBe(0);
     expect(result.stderr.toString()).toContain(
-      "Could not enumerate all pull-request workflow runs",
+      "Could not enumerate all queued pull-request workflow runs",
     );
+  });
+
+  test("accepts a complete multi-page active-status snapshot", async () => {
+    const secondRun = { ...workflowRun(), id: WORKFLOW_RUN_ID + 1 };
+    const result = await runHarness(`
+${hostAuthorizationApi({
+  pages: [
+    { total_count: 2, workflow_runs: [workflowRun()] },
+    { total_count: 2, workflow_runs: [secondRun] },
+  ],
+})}
+[[ "$(active_same_repository_workflow_runs | wc -l | tr -d ' ')" == 2 ]]
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
   });
 
   test("fails closed when pagination is incomplete", async () => {
@@ -1369,6 +1419,55 @@ set -e
       "Pull-request workflow-run response was incomplete or malformed",
     );
   });
+
+  test("fails closed when a filtered API response drifts to another status", async () => {
+    const result = await runHarness(`
+${hostAuthorizationApi({
+  pages: [
+    {
+      total_count: 1,
+      workflow_runs: [workflowRun("in_progress")],
+    },
+  ],
+})}
+set +e
+active_same_repository_workflow_runs
+snapshot_result=$?
+set -e
+(( snapshot_result != 0 ))
+`);
+
+    expect(result.exitCode, output(result)).toBe(0);
+    expect(result.stderr.toString()).toContain(
+      "Pull-request workflow-run response was incomplete or malformed",
+    );
+  });
+
+  for (const [fromStatus, toStatus] of [
+    ["queued", "in_progress"],
+    ["in_progress", "queued"],
+  ] as const) {
+    test(`fails closed when a run transitions from ${fromStatus} to ${toStatus} between sweeps`, async () => {
+      const result = await runHarness(`
+${hostAuthorizationApi({
+  enumerationResponses: [
+    ...workflowRunSweep(fromStatus),
+    ...workflowRunSweep(toStatus),
+  ],
+})}
+set +e
+active_same_repository_workflow_runs
+snapshot_result=$?
+set -e
+(( snapshot_result != 0 ))
+`);
+
+      expect(result.exitCode, output(result)).toBe(0);
+      expect(result.stderr.toString()).toContain(
+        "Pull-request workflow-run response was incomplete or malformed",
+      );
+    });
+  }
 
   for (const [stage, message] of [
     ["run", "Could not verify active workflow run"],

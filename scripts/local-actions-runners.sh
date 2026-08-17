@@ -2436,8 +2436,6 @@ provision_slot_locked() {
 
   service="$(runner_service_for "$runner_name")"
   install_runner_service "$profile" "$service"
-  harden_runner_before_start "$profile" "$service"
-  verify_unprivileged_runner "$profile" "$service"
 
   machine_id="$(colima -p "$profile" ssh -- cat /etc/machine-id)"
   # The listener is still absent and the runner has no routing labels. Take the
@@ -2445,6 +2443,8 @@ provision_slot_locked() {
   approved_workflow_shas="$(authorize_active_workflow_shas)" || return 1
   install_pre_job_policy "$profile" "$approved_workflow_shas"
   verify_pre_job_policy "$profile" "$service"
+  harden_runner_before_start "$profile" "$service"
+  verify_unprivileged_runner "$profile" "$service"
   add_repository_runner_routing_label "$runner_id"
   start_runner_service "$profile" "$service"
   lifecycle_state="$(wait_for_runner_online_or_consumed \

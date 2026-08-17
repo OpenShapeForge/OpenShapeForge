@@ -2018,10 +2018,10 @@ fi
     expect(registration).not.toContain("osf-pr");
     expect(labelClearing).toBeGreaterThan(registrationEnd);
     expect(serviceInstall).toBeGreaterThan(labelClearing);
-    expect(preStartHardening).toBeGreaterThan(serviceInstall);
+    expect(preJobVerification).toBeGreaterThan(serviceInstall);
+    expect(preStartHardening).toBeGreaterThan(preJobVerification);
     expect(isolationVerification).toBeGreaterThan(preStartHardening);
-    expect(preJobVerification).toBeGreaterThan(isolationVerification);
-    expect(labelAdmission).toBeGreaterThan(preJobVerification);
+    expect(labelAdmission).toBeGreaterThan(isolationVerification);
     expect(serviceStart).toBeGreaterThan(labelAdmission);
     expect(lifecyclePoll).toBeGreaterThan(serviceStart);
     expect(provision).not.toContain("harden_and_start_runner");
@@ -2148,12 +2148,51 @@ fi
     expect(loopbackHardening).toBeGreaterThan(initialCompletion);
     expect(liveProof).toBeGreaterThan(loopbackHardening);
     expect(tokenRequest).toBeGreaterThan(liveProof);
-    expect(isolationProof).toBeGreaterThan(tokenRequest);
-    expect(workflowSnapshot).toBeGreaterThan(isolationProof);
+    expect(workflowSnapshot).toBeGreaterThan(tokenRequest);
     expect(policyInstall).toBeGreaterThan(workflowSnapshot);
     expect(policyProof).toBeGreaterThan(policyInstall);
-    expect(routingAdmission).toBeGreaterThan(policyProof);
+    expect(isolationProof).toBeGreaterThan(policyProof);
+    expect(routingAdmission).toBeGreaterThan(isolationProof);
     expect(listenerStart).toBeGreaterThan(routingAdmission);
+  });
+
+  test("installs policy before sudo revocation and keeps admission fail closed", async () => {
+    const source = await readFile(RUNNERS, "utf8");
+    const provisionStart = source.indexOf("provision_slot_locked() {");
+    const provisionEnd = source.indexOf("\nprovision_slot() (", provisionStart);
+    const provision = source.slice(provisionStart, provisionEnd);
+    const policyInstall = provision.indexOf(
+      'install_pre_job_policy "$profile" "$approved_workflow_shas"',
+    );
+    const policyProof = provision.indexOf(
+      'verify_pre_job_policy "$profile" "$service"',
+    );
+    const sudoRevocation = provision.indexOf(
+      'harden_runner_before_start "$profile" "$service"',
+    );
+    const privilegeProof = provision.indexOf(
+      'verify_unprivileged_runner "$profile" "$service"',
+    );
+    const routingAdmission = provision.indexOf(
+      'add_repository_runner_routing_label "$runner_id"',
+    );
+    const listenerStart = provision.indexOf(
+      'start_runner_service "$profile" "$service"',
+    );
+
+    expect(policyInstall).toBeGreaterThanOrEqual(0);
+    expect(policyProof).toBeGreaterThan(policyInstall);
+    expect(sudoRevocation).toBeGreaterThan(policyProof);
+    expect(privilegeProof).toBeGreaterThan(sudoRevocation);
+    expect(routingAdmission).toBeGreaterThan(privilegeProof);
+    expect(listenerStart).toBeGreaterThan(routingAdmission);
+
+    const startStart = source.indexOf("start_runner_service() {");
+    const startEnd = source.indexOf("\nverify_pre_job_policy() {", startStart);
+    const start = source.slice(startStart, startEnd);
+    expect(start).toContain(
+      "test ! -e /etc/sudoers.d/openshapeforge-runner-start",
+    );
   });
 
   test("uses a deterministic guest probe and preserves failure diagnostics", async () => {

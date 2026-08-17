@@ -928,8 +928,10 @@ _run_readiness_probe_process_group() (
   fi
 
   if [[ "$started" == false ]]; then
-    terminate_unready_probe_sentinel "$sentinel_pid" || result=125
-    reap_probe_sentinel >/dev/null 2>&1 || true
+    if [[ "${sentinel_pid:-}" =~ ^[0-9]+$ ]]; then
+      terminate_unready_probe_sentinel "$sentinel_pid" || result=125
+      reap_probe_sentinel >/dev/null 2>&1 || true
+    fi
     return "$result"
   fi
   if (( result != 0 )); then

@@ -1,0 +1,265 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Valuation
+title: Valuation
+description: Generic valuation header for an asset (market, appraisal, policy, tax) at a point in time.
+language: en
+displayTemplate: "{{valuationKind}}: {{amount}} @ {{valuedAt}}"
+filterField: id
+labels:
+  en: Valuation
+  nl: Waardering
+domains:
+  - asset
+fields:
+  - key: valuationKind
+    valueType: string
+    required: true
+    label:
+      en: Valuation kind
+      nl: Waarderingsoort
+    description:
+      en: Kind of valuation (market, appraisal, policy, tax).
+      nl: Soort waardering (markt, taxatie, beleid, fiscaal).
+    persisted:
+      column: valuation_kind
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: VALUATIONKIND
+        clearable: false
+  - key: valuedAt
+    valueType: date
+    required: true
+    label:
+      en: Valued at
+      nl: Gewaardeerd op
+    description:
+      en: Date on which the valuation applies.
+      nl: Datum waarop de waardering geldt.
+    persisted:
+      column: valued_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: amount
+    valueType: number
+    required: true
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Valuation amount.
+      nl: Waarderingsbedrag.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+  - key: currencyCode
+    valueType: string
+    required: true
+    label:
+      en: Currency
+      nl: Valuta
+    description:
+      en: ISO 4217 currency code in which the valuation is expressed.
+      nl: ISO 4217 valutacode waarin de waardering is uitgedrukt.
+    defaultValue: EUR
+    validation:
+      minLength: 3
+      maxLength: 3
+    persisted:
+      column: currency_code
+      storageClass: core
+  - key: notes
+    valueType: string
+    required: false
+    label:
+      en: Notes
+      nl: Notities
+    description:
+      en: Free-form notes about the valuation.
+      nl: Vrije notities over de waardering.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: notes
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 5000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the valuation in an external context.
+      nl: Functionele of zakelijke code van de waardering in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: asset
+    kind: belongsTo
+    target: Asset
+    foreignKey: asset_id
+    label:
+      en: Asset
+      nl: Object
+  - key: valuer
+    kind: belongsTo
+    target: Relation
+    foreignKey: valuer_relation_id
+    label:
+      en: Valuer
+      nl: Taxateur
+ui:
+  routes:
+    list:
+      en: /valuations
+      nl: /waarderingen
+    detail:
+      en: /valuations/:id
+      nl: /waarderingen/:id
+    create:
+      en: /valuations/create
+      nl: /waarderingen/aanmaken
+    edit:
+      en: /valuations/:id/edit
+      nl: /waarderingen/:id/bewerken
+    delete:
+      en: /valuations/:id/delete
+      nl: /waarderingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Valuations
+        nl: Waarderingen
+      columns:
+        - key: valuationKind
+          sortable: true
+        - key: valuedAt
+          sortable: true
+        - key: amount
+          sortable: true
+        - key: currencyCode
+          sortable: true
+      defaultSort:
+        key: valuedAt
+        direction: desc
+      rowLink:
+        en: /valuations/:id
+        nl: /waarderingen/:id
+    detail:
+      header:
+        title: "{{valuationKind}}: {{amount}}"
+        subtitle: "{{valuedAt}}"
+        badges:
+          - valuationKind
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Valuation details
+                nl: Waarderingsgegevens
+              fields:
+                - valuationKind
+                - valuedAt
+                - amount
+                - currencyCode
+            - title:
+                en: Notes
+                nl: Notities
+              fields:
+                - notes
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create valuation
+            nl: Waardering aanmaken
+          groups:
+            - title:
+                en: Valuation details
+                nl: Waarderingsgegevens
+              fields:
+                - valuationKind
+                - valuedAt
+                - amount
+                - currencyCode
+            - title:
+                en: Notes
+                nl: Notities
+              fields:
+                - notes
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit valuation
+            nl: Waardering bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - RealEstate.All.Read
+      - RealEstate.All.ReadWrite
+    create:
+      - RealEstate.All.ReadWrite
+    update:
+      - RealEstate.All.ReadWrite
+    delete:
+      - RealEstate.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

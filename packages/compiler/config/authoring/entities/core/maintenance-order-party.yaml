@@ -1,0 +1,354 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: MaintenanceOrderParty
+title: Maintenance Order Party
+description: Party assigned to a maintenance order, scoped to a role and validity period (canonical role pattern).
+language: en
+displayTemplate: "{{roleType}}"
+filterField: roleType
+labels:
+  en: Maintenance order party
+  nl: Partij op onderhoudsorder
+domains:
+  - maintenance
+fields:
+  - key: roleType
+    valueType: string
+    required: true
+    label:
+      en: Role type
+      nl: Roltype
+    description:
+      en: Role this party plays on the maintenance order (executor, supervisor, etc.).
+      nl: Rol die deze partij vervult op de onderhoudsorder (uitvoerder, toezichthouder, etc.).
+    persisted:
+      column: role_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MAINTENANCEORDERPARTYROLE
+        clearable: false
+  - key: status
+    valueType: string
+    required: false
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of this role assignment.
+      nl: Levenscyclusstatus van deze roltoewijzing.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: ROLEASSIGNMENTSTATUS
+        clearable: true
+  - key: name
+    valueType: string
+    required: false
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Optional human-readable name of the role assignment.
+      nl: Optionele menselijk leesbare naam van de roltoewijzing.
+    validation:
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description or business meaning of the role assignment.
+      nl: Optionele omschrijving of zakelijke betekenis van de roltoewijzing.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Date from which this party is effective on the maintenance order.
+      nl: Datum vanaf wanneer deze partij geldig is op de onderhoudsorder.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Date until which this party is effective on the maintenance order.
+      nl: Datum tot wanneer deze partij geldig is op de onderhoudsorder.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: estimatedHours
+    valueType: number
+    required: false
+    label:
+      en: Estimated hours
+      nl: Geraamde uren
+    description:
+      en: Estimated hours this party will spend on the order.
+      nl: Geraamde uren die deze partij aan de order besteedt.
+    persisted:
+      column: estimated_hours
+      storageClass: core
+  - key: actualHours
+    valueType: number
+    required: false
+    label:
+      en: Actual hours
+      nl: Werkelijke uren
+    description:
+      en: Actual hours this party spent on the order.
+      nl: Werkelijke uren die deze partij aan de order heeft besteed.
+    persisted:
+      column: actual_hours
+      storageClass: core
+  - key: hourlyRate
+    valueType: number
+    required: false
+    label:
+      en: Hourly rate
+      nl: Uurtarief
+    description:
+      en: Hourly rate charged by this party.
+      nl: Uurtarief dat door deze partij wordt gehanteerd.
+    semanticType: currency
+    persisted:
+      column: hourly_rate
+      storageClass: core
+  - key: workCompletedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Work completed at
+      nl: Werk afgerond op
+    description:
+      en: Timestamp when this party completed their work.
+      nl: Tijdstip waarop deze partij het werk heeft afgerond.
+    persisted:
+      column: work_completed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the role assignment in an external context.
+      nl: Functionele of zakelijke code van de roltoewijzing in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: maintenanceOrder
+    kind: belongsTo
+    target: MaintenanceOrder
+    foreignKey: maintenance_order_id
+    label:
+      en: Maintenance order
+      nl: Onderhoudsorder
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+ui:
+  routes:
+    list:
+      en: /maintenance-order-parties
+      nl: /onderhoudsorderpartijen
+    detail:
+      en: /maintenance-order-parties/:id
+      nl: /onderhoudsorderpartijen/:id
+    create:
+      en: /maintenance-order-parties/create
+      nl: /onderhoudsorderpartijen/aanmaken
+    edit:
+      en: /maintenance-order-parties/:id/edit
+      nl: /onderhoudsorderpartijen/:id/bewerken
+    delete:
+      en: /maintenance-order-parties/:id/delete
+      nl: /onderhoudsorderpartijen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Maintenance order parties
+        nl: Partijen op onderhoudsorders
+      columns:
+        - key: roleType
+          sortable: true
+        - key: name
+          sortable: true
+        - key: status
+          sortable: true
+        - key: startDate
+          sortable: true
+        - key: endDate
+          sortable: true
+      defaultSort:
+        key: startDate
+        direction: desc
+      rowLink:
+        en: /maintenance-order-parties/:id
+        nl: /onderhoudsorderpartijen/:id
+    detail:
+      header:
+        title: "{{name || roleType}}"
+        subtitle: "{{status}}"
+        badges:
+          - roleType
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Role details
+                nl: Rolgegevens
+              fields:
+                - roleType
+                - status
+                - name
+                - startDate
+                - endDate
+            - title:
+                en: Hours and rate
+                nl: Uren en tarief
+              fields:
+                - estimatedHours
+                - actualHours
+                - hourlyRate
+                - workCompletedAt
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create maintenance order party
+            nl: Partij op onderhoudsorder aanmaken
+          groups:
+            - title:
+                en: Role details
+                nl: Rolgegevens
+              fields:
+                - roleType
+                - status
+                - name
+                - startDate
+                - endDate
+            - title:
+                en: Hours and rate
+                nl: Uren en tarief
+              fields:
+                - estimatedHours
+                - actualHours
+                - hourlyRate
+                - workCompletedAt
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit maintenance order party
+            nl: Partij op onderhoudsorder bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Maintenance.All.Read
+      - Maintenance.All.ReadWrite
+    create:
+      - Maintenance.All.ReadWrite
+    update:
+      - Maintenance.All.ReadWrite
+    delete:
+      - Maintenance.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

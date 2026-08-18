@@ -1,0 +1,301 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ContactMoment
+title: Contact Moment
+description: A recorded interaction with or about a relation, such as a phone call, email, or chat.
+language: en
+displayTemplate: "{{subject}}"
+filterField: subject
+labels:
+  en: Contact Moment
+  nl: Contactmoment
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relations.All.Read
+      - Relations.All.ReadWrite
+    create:
+      - Relations.All.ReadWrite
+    update:
+      - Relations.All.ReadWrite
+    delete:
+      - Relations.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+retention:
+  mode: policyRef
+  policy: contact-moment-delete-2y
+  scope: record
+  startsFrom:
+    strategy: field
+    field: occurredAt
+fields:
+  - key: channel
+    valueType: string
+    required: true
+    label:
+      en: Channel
+      nl: Kanaal
+    description:
+      en: Communication channel used (e.g. phone, email, chat).
+      nl: Gebruikte communicatiekanaal (bijv. telefoon, e-mail, chat).
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: channel
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: COMMUNICATIONCHANNEL
+        clearable: false
+  - key: type
+    valueType: string
+    required: false
+    label:
+      en: Type
+      nl: Type
+    description:
+      en: Business type or topic of the contact moment.
+      nl: Zakelijk type of onderwerp van het contactmoment.
+    validation:
+      maxLength: 100
+    persisted:
+      column: type
+      storageClass: core
+  - key: detailType
+    valueType: string
+    required: false
+    label:
+      en: Detail type
+      nl: Detailtype
+    description:
+      en: More specific subtype of the contact moment.
+      nl: Meer specifiek subtype van het contactmoment.
+    validation:
+      maxLength: 100
+    persisted:
+      column: detail_type
+      storageClass: core
+  - key: direction
+    valueType: string
+    required: false
+    label:
+      en: Direction
+      nl: Richting
+    description:
+      en: Direction of the communication (inbound or outbound).
+      nl: Richting van de communicatie (inkomend of uitgaand).
+    validation:
+      maxLength: 20
+    persisted:
+      column: direction
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: COMMUNICATIONDIRECTION
+        clearable: true
+  - key: subject
+    valueType: string
+    required: false
+    label:
+      en: Subject
+      nl: Onderwerp
+    description:
+      en: Subject or summary of the contact moment.
+      nl: Onderwerp of samenvatting van het contactmoment.
+    validation:
+      maxLength: 300
+    persisted:
+      column: subject
+      storageClass: core
+  - key: content
+    valueType: string
+    required: false
+    label:
+      en: Content
+      nl: Inhoud
+    description:
+      en: Full content or notes of the contact moment.
+      nl: Volledige inhoud of notities van het contactmoment.
+    validation:
+      maxLength: 10000
+    persisted:
+      column: content
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 6
+        maxLength: 10000
+  - key: occurredAt
+    valueType: datetime
+    required: true
+    label:
+      en: Occurred at
+      nl: Plaatsgevonden op
+    description:
+      en: Date and time when the contact moment occurred.
+      nl: Datum en tijd waarop het contactmoment plaatsvond.
+    persisted:
+      column: occurred_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: relationRole
+    kind: belongsTo
+    target: RelationRole
+    foreignKey: relation_role_id
+    label:
+      en: Relation role
+      nl: Relatierol
+  - key: case
+    kind: belongsTo
+    target: Case
+    foreignKey: case_id
+    label:
+      en: Case
+      nl: Zaak
+  - key: tasks
+    kind: hasMany
+    target: Task
+    foreignKey: contact_moment_id
+    label:
+      en: Tasks
+      nl: Taken
+ui:
+  routes:
+    list:
+      en: /contact-moments
+      nl: /contactmomenten
+    detail:
+      en: /contact-moments/:id
+      nl: /contactmomenten/:id
+    create:
+      en: /contact-moments/create
+      nl: /contactmomenten/aanmaken
+    edit:
+      en: /contact-moments/:id/edit
+      nl: /contactmomenten/:id/bewerken
+    delete:
+      en: /contact-moments/:id/delete
+      nl: /contactmomenten/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Contact Moments
+        nl: Contactmomenten
+      columns:
+        - key: type
+          sortable: true
+        - key: channel
+          sortable: true
+        - key: direction
+          sortable: true
+        - key: subject
+          sortable: true
+        - key: occurredAt
+          sortable: true
+      defaultSort:
+        key: occurredAt
+        direction: desc
+      rowLink:
+        en: /contact-moments/:id
+        nl: /contactmomenten/:id
+    detail:
+      header:
+        title: "{{subject}}"
+        subtitle: "{{channel}} — {{occurredAt}}"
+        badges:
+          - channel
+          - direction
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Contact details
+                nl: Contactgegevens
+              fields:
+                - type
+                - detailType
+                - channel
+                - direction
+                - occurredAt
+                - subject
+            - title:
+                en: Content
+                nl: Inhoud
+              fields:
+                - content
+        - id: tasks
+          label:
+            en: Tasks
+            nl: Taken
+          relationship: tasks
+    form:
+      variants:
+        create:
+          title:
+            en: Create contact moment
+            nl: Contactmoment aanmaken
+          groups:
+            - title:
+                en: Contact details
+                nl: Contactgegevens
+              fields:
+                - type
+                - detailType
+                - channel
+                - direction
+                - occurredAt
+                - subject
+            - title:
+                en: Content
+                nl: Inhoud
+              fields:
+                - content
+        edit:
+          extends: create
+          title:
+            en: Edit contact moment
+            nl: Contactmoment bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

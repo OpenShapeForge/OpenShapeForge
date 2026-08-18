@@ -1,0 +1,233 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: UserOrganizationPermission
+title: User Organization Permission
+description: Explicit permission grant for a root-owned employee targeting a tenant root or organizational unit scope.
+language: en
+displayTemplate: "{{clientId}} {{permissionName}}"
+filterField: permissionName
+labels:
+  en: User organization permission
+  nl: Gebruikersrecht per organisatie
+domains:
+  - core
+  - hr
+authorization:
+  roles:
+    read:
+      - Organization.All.ReadWrite
+    create:
+      - Organization.All.ReadWrite
+    update:
+      - Organization.All.ReadWrite
+    delete:
+      - Organization.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: targetScopeKind
+    valueType: string
+    required: true
+    label:
+      en: Target scope kind
+      nl: Type doelscope
+    description:
+      en: Scope kind targeted by this user grant, either tenant or org_unit.
+      nl: Type scope waarop deze gebruikerstoekenning van toepassing is, tenant of org_unit.
+    defaultValue: org_unit
+    validation:
+      maxLength: 50
+    persisted:
+      column: target_scope_kind
+      storageClass: core
+  - key: clientId
+    valueType: string
+    required: true
+    label:
+      en: Client ID
+      nl: Client-id
+    description:
+      en: Keycloak client that owns the permission role.
+      nl: Keycloak-client die de permissierol bezit.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: client_id
+      storageClass: core
+  - key: permissionName
+    valueType: string
+    required: true
+    label:
+      en: Permission name
+      nl: Permissienaam
+    description:
+      en: Name of the permission role within the client.
+      nl: Naam van de permissierol binnen de client.
+    validation:
+      minLength: 1
+      maxLength: 300
+    persisted:
+      column: permission_name
+      storageClass: core
+  - key: effect
+    valueType: string
+    required: true
+    label:
+      en: Effect
+      nl: Effect
+    description:
+      en: Permission effect. The initial identity model supports allow.
+      nl: Effect van het recht. Het initiële identiteitsmodel ondersteunt allow.
+    defaultValue: allow
+    validation:
+      maxLength: 50
+    persisted:
+      column: effect
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional code of the user permission grant in the source system.
+      nl: Functionele code van de gebruikersrechtentoekenning in het bronsysteem.
+    validation:
+      maxLength: 200
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: employee
+    kind: belongsTo
+    target: Employee
+    foreignKey: employee_id
+    label:
+      en: Employee
+      nl: Medewerker
+  - key: targetTenant
+    kind: belongsTo
+    target: Tenant
+    foreignKey: target_tenant_id
+    label:
+      en: Target tenant
+      nl: Doeltenant
+  - key: targetOrgUnit
+    kind: belongsTo
+    target: OrgUnit
+    foreignKey: target_org_unit_id
+    label:
+      en: Target org unit
+      nl: Doeleenheid
+ui:
+  routes:
+    list:
+      en: /user-organization-permissions
+      nl: /gebruikersrechten-per-organisatie
+    detail:
+      en: /user-organization-permissions/:id
+      nl: /gebruikersrechten-per-organisatie/:id
+    create:
+      en: /user-organization-permissions/create
+      nl: /gebruikersrechten-per-organisatie/aanmaken
+    edit:
+      en: /user-organization-permissions/:id/edit
+      nl: /gebruikersrechten-per-organisatie/:id/bewerken
+    delete:
+      en: /user-organization-permissions/:id/delete
+      nl: /gebruikersrechten-per-organisatie/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: User organization permissions
+        nl: Gebruikersrechten per organisatie
+      columns:
+        - key: clientId
+          sortable: true
+        - key: permissionName
+          sortable: true
+        - key: targetScopeKind
+          sortable: true
+      defaultSort:
+        key: permissionName
+        direction: asc
+      rowLink:
+        en: /user-organization-permissions/:id
+        nl: /gebruikersrechten-per-organisatie/:id
+    detail:
+      header:
+        title: "{{permissionName}}"
+        subtitle: "{{clientId}}"
+        badges:
+          - effect
+          - targetScopeKind
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Permission
+                nl: Recht
+              fields:
+                - targetScopeKind
+                - clientId
+                - permissionName
+                - effect
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+    form:
+      variants:
+        create:
+          title:
+            en: Create user organization permission
+            nl: Gebruikersrecht per organisatie aanmaken
+          groups:
+            - title:
+                en: Permission
+                nl: Recht
+              fields:
+                - targetScopeKind
+                - clientId
+                - permissionName
+                - effect
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+        edit:
+          title:
+            en: Edit user organization permission
+            nl: Gebruikersrecht per organisatie bewerken
+          groups:
+            - title:
+                en: Permission
+                nl: Recht
+              fields:
+                - targetScopeKind
+                - clientId
+                - permissionName
+                - effect
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization

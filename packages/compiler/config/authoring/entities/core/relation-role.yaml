@@ -1,0 +1,301 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: RelationRole
+title: Relation Role
+description: A role assigned to a relation, such as customer, supplier, or employee.
+language: en
+displayTemplate: "{{type}}"
+filterField: type
+labels:
+  en: Relation Role
+  nl: Relatierol
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relations.All.Read
+      - Relations.All.ReadWrite
+    create:
+      - Relations.All.ReadWrite
+    update:
+      - Relations.All.ReadWrite
+    delete:
+      - Relations.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: type
+    valueType: string
+    required: true
+    label:
+      en: Type
+      nl: Type
+    description:
+      en: Type of role (e.g. customer, supplier, employee).
+      nl: Type rol (bijv. klant, leverancier, medewerker).
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: RELATIONROLETYPE
+        clearable: false
+  - key: name
+    valueType: string
+    required: false
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the role assignment.
+      nl: Menselijk leesbare naam van de roltoewijzing.
+    validation:
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description or business meaning of the role.
+      nl: Optionele omschrijving of zakelijke betekenis van de rol.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: status
+    valueType: string
+    required: false
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the role assignment.
+      nl: Levenscyclusstatus van de roltoewijzing.
+    validation:
+      maxLength: 50
+    persisted:
+      column: status
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional code of the role assignment in an external context.
+      nl: Functionele code van de roltoewijzing in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Date from which this role is effective.
+      nl: Datum vanaf wanneer deze rol geldig is.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Date until which this role is effective.
+      nl: Datum tot wanneer deze rol geldig is.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: contextRelation
+    kind: belongsTo
+    target: Relation
+    foreignKey: context_relation_id
+    label:
+      en: Context relation
+      nl: Contextrelatie
+  - key: contactDetails
+    kind: hasMany
+    target: ContactDetail
+    foreignKey: relation_role_id
+    label:
+      en: Contact details
+      nl: Contactgegevens
+  - key: contactMoments
+    kind: hasMany
+    target: ContactMoment
+    foreignKey: relation_role_id
+    label:
+      en: Contact moments
+      nl: Contactmomenten
+  - key: addressAssignments
+    kind: hasMany
+    target: AddressAssignment
+    foreignKey: relation_role_id
+    label:
+      en: Address assignments
+      nl: Adrestoewijzingen
+ui:
+  routes:
+    list:
+      en: /relation-roles
+      nl: /relatierollen
+    detail:
+      en: /relation-roles/:id
+      nl: /relatierollen/:id
+    create:
+      en: /relation-roles/create
+      nl: /relatierollen/aanmaken
+    edit:
+      en: /relation-roles/:id/edit
+      nl: /relatierollen/:id/bewerken
+    delete:
+      en: /relation-roles/:id/delete
+      nl: /relatierollen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Relation Roles
+        nl: Relatierollen
+      columns:
+        - key: type
+          sortable: true
+        - key: name
+          sortable: true
+        - key: status
+          sortable: true
+        - key: startDate
+          sortable: true
+        - key: endDate
+          sortable: true
+      defaultSort:
+        key: type
+        direction: asc
+      rowLink:
+        en: /relation-roles/:id
+        nl: /relatierollen/:id
+    detail:
+      header:
+        title: "{{name || type}}"
+        subtitle: "{{status}}"
+        badges:
+          - type
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Role details
+                nl: Rolgegevens
+              fields:
+                - type
+                - name
+                - status
+                - startDate
+                - endDate
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+    form:
+      variants:
+        create:
+          title:
+            en: Create relation role
+            nl: Relatierol aanmaken
+          groups:
+            - title:
+                en: Role details
+                nl: Rolgegevens
+              fields:
+                - type
+                - name
+                - status
+                - startDate
+                - endDate
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+        edit:
+          extends: create
+          title:
+            en: Edit relation role
+            nl: Relatierol bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

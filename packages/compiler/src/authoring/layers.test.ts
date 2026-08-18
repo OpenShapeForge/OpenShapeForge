@@ -4,7 +4,12 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import YAML from "yaml";
-import { authoringLayerDirs, resolveAuthoringLayers, strategicMerge } from "./layers.js";
+import {
+  authoringLayerDirs,
+  loadAuthoringConfig,
+  resolveAuthoringLayers,
+  strategicMerge,
+} from "./layers.js";
 
 describe("strategicMerge", () => {
   test("objects deep-merge and null deletes a property", () => {
@@ -465,5 +470,102 @@ describe("authoringLayerDirs", () => {
     const dirs = authoringLayerDirs(root);
     expect(dirs).toEqual([join(root, "base")]);
     expect(resolveAuthoringLayers(root)).toBe(dirs[0]!);
+  });
+});
+
+/**
+ * The contract an out-of-tree extension builds against. A sector standard ships
+ * as its own repository — this one must never declare it — so the deployment
+ * appends it here and the committed config stays free of the extension's name.
+ */
+describe("authoring.config.local.yaml", () => {
+  const roots: string[] = [];
+
+  function makeRepo(): string {
+    const root = mkdtempSync(join(tmpdir(), "openshapeforge-localcfg-"));
+    roots.push(root);
+    return root;
+  }
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  function writeConfig(root: string, config: unknown, local?: unknown) {
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, "authoring.config.yaml"), YAML.stringify(config), "utf8");
+    if (local !== undefined) {
+      writeFileSync(join(root, "authoring.config.local.yaml"), YAML.stringify(local), "utf8");
+    }
+  }
+
+  test("appends its layers after the committed ones, so the extension patches last", () => {
+    const root = makeRepo();
+    mkdirSync(join(root, "base"), { recursive: true });
+    mkdirSync(join(root, "ext"), { recursive: true });
+    writeConfig(root, { layers: ["base"] }, { layers: ["ext"] });
+
+    expect(loadAuthoringConfig(root).layers).toEqual(["base", "ext"]);
+    expect(authoringLayerDirs(root)).toEqual([join(root, "base"), join(root, "ext")]);
+  });
+
+  test("an absolute path outside the repo is a valid layer", () => {
+    // The whole point: the extension is not in this tree and never will be.
+    const root = makeRepo();
+    const outside = makeRepo();
+    mkdirSync(join(root, "base"), { recursive: true });
+    writeConfig(root, { layers: ["base"] }, { layers: [outside] });
+
+    expect(authoringLayerDirs(root)).toEqual([join(root, "base"), outside]);
+  });
+
+  test("appends plugins too", () => {
+    const root = makeRepo();
+    mkdirSync(join(root, "base"), { recursive: true });
+    writeConfig(
+      root,
+      { layers: ["base"], plugins: ["./plugins/core.ts"] },
+      { plugins: ["./plugins/ext.ts"] },
+    );
+
+    expect(loadAuthoringConfig(root).plugins).toEqual(["./plugins/core.ts", "./plugins/ext.ts"]);
+  });
+
+  test("absent file changes nothing", () => {
+    const root = makeRepo();
+    mkdirSync(join(root, "base"), { recursive: true });
+    writeConfig(root, { layers: ["base"], plugins: ["./p.ts"] });
+
+    expect(loadAuthoringConfig(root)).toEqual({ layers: ["base"], plugins: ["./p.ts"] });
+  });
+
+  test("cannot remove or reorder a committed layer — only append", () => {
+    // Re-declaring a committed layer would move it to the end and silently
+    // change which layer patches which, so it is refused rather than merged.
+    const root = makeRepo();
+    mkdirSync(join(root, "base"), { recursive: true });
+    writeConfig(root, { layers: ["base", "overlay"] }, { layers: ["base"] });
+
+    expect(() => loadAuthoringConfig(root)).toThrow(/re-declares the layer "base"/);
+  });
+
+  test("rejects a malformed local file rather than ignoring it", () => {
+    const root = makeRepo();
+    mkdirSync(join(root, "base"), { recursive: true });
+    writeConfig(root, { layers: ["base"] }, { layers: "ext" });
+
+    expect(() => loadAuthoringConfig(root)).toThrow(
+      /authoring\.config\.local\.yaml "layers" must be a string array/,
+    );
+  });
+
+  test("a local file with no layers of its own is allowed", () => {
+    const root = makeRepo();
+    mkdirSync(join(root, "base"), { recursive: true });
+    writeConfig(root, { layers: ["base"] }, { plugins: ["./ext.ts"] });
+
+    expect(loadAuthoringConfig(root)).toEqual({ layers: ["base"], plugins: ["./ext.ts"] });
   });
 });

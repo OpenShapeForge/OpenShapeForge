@@ -1,0 +1,176 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: MonitorInterval
+title: Monitor Interval
+description: Catalogued sampling interval used by monitor measurements (e.g. "every 15 minutes").
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: Monitor interval
+  nl: Monitorinterval
+domains:
+  - energy
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique monitor interval code.
+      nl: Tenant-unieke code van het monitorinterval.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: intervalSeconds
+    valueType: integer
+    required: true
+    label:
+      en: Interval (seconds)
+      nl: Interval (seconden)
+    description:
+      en: Sampling interval expressed in seconds.
+      nl: Bemonsteringsinterval uitgedrukt in seconden.
+    validation:
+      min: 1
+    persisted:
+      column: interval_seconds
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description of the monitor interval.
+      nl: Optionele omschrijving van het monitorinterval.
+    validation:
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 500
+ui:
+  routes:
+    list:
+      en: /monitor-intervals
+      nl: /monitorintervallen
+    detail:
+      en: /monitor-intervals/:id
+      nl: /monitorintervallen/:id
+    create:
+      en: /monitor-intervals/create
+      nl: /monitorintervallen/aanmaken
+    edit:
+      en: /monitor-intervals/:id/edit
+      nl: /monitorintervallen/:id/bewerken
+    delete:
+      en: /monitor-intervals/:id/delete
+      nl: /monitorintervallen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Monitor intervals
+        nl: Monitorintervallen
+      columns:
+        - key: code
+          sortable: true
+        - key: intervalSeconds
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /monitor-intervals/:id
+        nl: /monitorintervallen/:id
+    detail:
+      header:
+        title: "{{code}}"
+        subtitle: "{{intervalSeconds}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Interval details
+                nl: Intervalgegevens
+              fields:
+                - code
+                - intervalSeconds
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+    form:
+      variants:
+        create:
+          title:
+            en: Create monitor interval
+            nl: Monitorinterval aanmaken
+          groups:
+            - title:
+                en: Interval details
+                nl: Intervalgegevens
+              fields:
+                - code
+                - intervalSeconds
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+        edit:
+          extends: create
+          title:
+            en: Edit monitor interval
+            nl: Monitorinterval bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Energy.All.Read
+      - Energy.All.ReadWrite
+    create:
+      - Energy.All.ReadWrite
+    update:
+      - Energy.All.ReadWrite
+    delete:
+      - Energy.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

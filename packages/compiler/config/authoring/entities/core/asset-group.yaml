@@ -1,0 +1,224 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: AssetGroup
+title: Asset Group
+description: Hierarchical group of assets used for portfolio segmentation, reporting, and authorization scoping.
+language: en
+displayTemplate: "{{code}} {{name}}"
+filterField: code
+labels:
+  en: Asset group
+  nl: Objectgroep
+domains:
+  - asset
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique asset group code.
+      nl: Tenant-unieke objectgroepcode.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the asset group.
+      nl: Menselijk leesbare naam van de objectgroep.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description of the asset group.
+      nl: Optionele omschrijving van de objectgroep.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 1000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the asset group in an external context.
+      nl: Functionele of zakelijke code van de objectgroep in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: parentAssetGroup
+    kind: belongsTo
+    target: AssetGroup
+    foreignKey: parent_asset_group_id
+    label:
+      en: Parent asset group
+      nl: Bovenliggende objectgroep
+  - key: childAssetGroups
+    kind: hasMany
+    target: AssetGroup
+    foreignKey: parent_asset_group_id
+    label:
+      en: Child asset groups
+      nl: Onderliggende objectgroepen
+ui:
+  routes:
+    list:
+      en: /asset-groups
+      nl: /objectgroepen
+    detail:
+      en: /asset-groups/:id
+      nl: /objectgroepen/:id
+    create:
+      en: /asset-groups/create
+      nl: /objectgroepen/aanmaken
+    edit:
+      en: /asset-groups/:id/edit
+      nl: /objectgroepen/:id/bewerken
+    delete:
+      en: /asset-groups/:id/delete
+      nl: /objectgroepen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Asset groups
+        nl: Objectgroepen
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /asset-groups/:id
+        nl: /objectgroepen/:id
+    detail:
+      header:
+        title: "{{code}} {{name}}"
+        subtitle: ""
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Asset group details
+                nl: Objectgroepgegevens
+              fields:
+                - code
+                - name
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create asset group
+            nl: Objectgroep aanmaken
+          groups:
+            - title:
+                en: Asset group details
+                nl: Objectgroepgegevens
+              fields:
+                - code
+                - name
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit asset group
+            nl: Objectgroep bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - RealEstate.All.Read
+      - RealEstate.All.ReadWrite
+    create:
+      - RealEstate.All.ReadWrite
+    update:
+      - RealEstate.All.ReadWrite
+    delete:
+      - RealEstate.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

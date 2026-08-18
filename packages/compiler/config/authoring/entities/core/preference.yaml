@@ -1,0 +1,244 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Preference
+title: Preference
+description: A generic scoped preference for user interface state, defaults, or other account, relation, and tenant settings.
+language: en
+displayTemplate: "{{key}}"
+filterField: key
+labels:
+  en: Preference
+  nl: Voorkeur
+domains:
+  - core
+authorization:
+  roles:
+    read:
+      - General.All.Read
+      - General.All.ReadWrite
+    create:
+      - General.All.ReadWrite
+    update:
+      - General.All.ReadWrite
+    delete:
+      - General.All.ReadWrite
+  # Tenant-scoped only, where the origin repo predicated rows on the owning
+  # account (`account_id` = `app.current_account_id`). Neither half of that
+  # carries over: this runtime exposes only `app.current_user_id()`, which
+  # holds the Keycloak `sub` (claims.ts), while `account_id` is an Account
+  # row id — Account keeps the subject in its own `keycloak_sub` column, so
+  # the two are different identifiers and comparing them would silently match
+  # nothing. Adding a `user_id` column instead would isolate per user but
+  # break the entity: `ownerScope` is account | relation | tenant, and an
+  # owner axis forces `empty: restricted`, hiding every tenant-scoped
+  # preference from everyone.
+  #
+  # So preferences are currently visible tenant-wide. Restoring per-user
+  # isolation needs a modelling decision first — most likely splitting the
+  # account-scoped rows into their own entity that can carry a real owner
+  # column, rather than widening rowAccess.
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: ownerScope
+    valueType: string
+    required: true
+    label:
+      en: Owner scope
+      nl: Eigenaarsniveau
+    description:
+      en: Scope that owns this preference, such as account, relation, or tenant.
+      nl: Niveau dat eigenaar is van deze voorkeur, zoals account, relatie of tenant.
+    defaultValue: account
+    options:
+      type: referentiedata
+      referentieGroep: PREFERENCEOWNERSCOPE
+    persisted:
+      column: owner_scope
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PREFERENCEOWNERSCOPE
+        clearable: false
+  - key: namespace
+    valueType: string
+    required: true
+    label:
+      en: Namespace
+      nl: Namespace
+    description:
+      en: Functional namespace that groups related preferences, such as ui.workflow or messaging.defaults.
+      nl: Functionele namespace die verwante voorkeuren groepeert, zoals ui.workflow of messaging.defaults.
+    validation:
+      minLength: 1
+      maxLength: 120
+    persisted:
+      column: namespace
+      storageClass: core
+  - key: key
+    valueType: string
+    required: true
+    label:
+      en: Key
+      nl: Sleutel
+    description:
+      en: Stable preference key within the namespace.
+      nl: Stabiele voorkeurssleutel binnen de namespace.
+    validation:
+      minLength: 1
+      maxLength: 120
+    persisted:
+      column: key
+      storageClass: core
+  - key: valueJson
+    valueType: object
+    required: false
+    label:
+      en: Value
+      nl: Waarde
+    description:
+      en: Structured JSON value for this preference.
+      nl: Gestructureerde JSON-waarde voor deze voorkeur.
+    persisted:
+      column: value_json
+      storageClass: core
+    render:
+      component: JsonFieldEditor
+      props:
+        rows: 10
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional explanation of what this preference controls.
+      nl: Optionele uitleg van wat deze voorkeur regelt.
+    validation:
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 500
+relationships:
+  - key: account
+    kind: belongsTo
+    target: Account
+    foreignKey: account_id
+    label:
+      en: Account
+      nl: Account
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+ui:
+  routes:
+    list:
+      en: /preferences
+      nl: /voorkeuren
+    detail:
+      en: /preferences/:id
+      nl: /voorkeuren/:id
+    create:
+      en: /preferences/create
+      nl: /voorkeuren/aanmaken
+    edit:
+      en: /preferences/:id/edit
+      nl: /voorkeuren/:id/bewerken
+    delete:
+      en: /preferences/:id/delete
+      nl: /voorkeuren/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Preferences
+        nl: Voorkeuren
+      columns:
+        - key: ownerScope
+          sortable: true
+        - key: namespace
+          sortable: true
+        - key: key
+          sortable: true
+      defaultSort:
+        key: namespace
+        direction: asc
+      rowLink:
+        en: /preferences/:id
+        nl: /voorkeuren/:id
+    detail:
+      header:
+        title: "{{key}}"
+        subtitle: "{{namespace}}"
+        badges:
+          - ownerScope
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Preference details
+                nl: Voorkeurgegevens
+              fields:
+                - ownerScope
+                - namespace
+                - key
+                - valueJson
+                - description
+    form:
+      variants:
+        create:
+          title:
+            en: Create preference
+            nl: Voorkeur aanmaken
+          groups:
+            - title:
+                en: Preference details
+                nl: Voorkeurgegevens
+              fields:
+                - ownerScope
+                - namespace
+                - key
+                - valueJson
+                - description
+        edit:
+          extends: create
+          title:
+            en: Edit preference
+            nl: Voorkeur bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

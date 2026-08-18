@@ -1,0 +1,276 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: PaymentPlan
+title: Payment Plan
+description: Negotiated payment schedule for a debtor relation. Splits an outstanding balance into a series of instalments.
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: Payment plan
+  nl: Betalingsregeling
+domains:
+  - finance
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique short code identifying the payment plan.
+      nl: Tenant-unieke korte code die de betalingsregeling identificeert.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the payment plan.
+      nl: Levenscyclusstatus van de betalingsregeling.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PAYMENTPLANSTATUS
+        clearable: false
+  - key: startDate
+    valueType: date
+    required: true
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Date on which the payment plan begins.
+      nl: Datum waarop de betalingsregeling start.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Date on which the payment plan is scheduled to end.
+      nl: Datum waarop de betalingsregeling gepland is te eindigen.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: totalAmount
+    valueType: number
+    required: false
+    label:
+      en: Total amount
+      nl: Totaalbedrag
+    description:
+      en: Total amount covered by the payment plan.
+      nl: Totaalbedrag waarvoor de betalingsregeling is afgesloten.
+    semanticType: currency
+    persisted:
+      column: total_amount
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-form description of the payment plan.
+      nl: Vrije omschrijving van de betalingsregeling.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 1000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the payment plan in an external context.
+      nl: Functionele of zakelijke code van de betalingsregeling in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+ui:
+  routes:
+    list:
+      en: /payment-plans
+      nl: /betalingsregelingen
+    detail:
+      en: /payment-plans/:id
+      nl: /betalingsregelingen/:id
+    create:
+      en: /payment-plans/create
+      nl: /betalingsregelingen/aanmaken
+    edit:
+      en: /payment-plans/:id/edit
+      nl: /betalingsregelingen/:id/bewerken
+    delete:
+      en: /payment-plans/:id/delete
+      nl: /betalingsregelingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Payment plans
+        nl: Betalingsregelingen
+      columns:
+        - key: code
+          sortable: true
+        - key: status
+          sortable: true
+        - key: startDate
+          sortable: true
+        - key: endDate
+          sortable: true
+        - key: totalAmount
+          sortable: true
+      defaultSort:
+        key: startDate
+        direction: desc
+      rowLink:
+        en: /payment-plans/:id
+        nl: /betalingsregelingen/:id
+    detail:
+      header:
+        title: "{{code}}"
+        subtitle: "{{totalAmount}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Plan details
+                nl: Regelinggegevens
+              fields:
+                - code
+                - status
+                - startDate
+                - endDate
+                - totalAmount
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create payment plan
+            nl: Betalingsregeling aanmaken
+          groups:
+            - title:
+                en: Plan details
+                nl: Regelinggegevens
+              fields:
+                - code
+                - status
+                - startDate
+                - endDate
+                - totalAmount
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit payment plan
+            nl: Betalingsregeling bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Finance.All.Read
+      - Finance.All.ReadWrite
+    create:
+      - Finance.All.ReadWrite
+    update:
+      - Finance.All.ReadWrite
+    delete:
+      - Finance.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

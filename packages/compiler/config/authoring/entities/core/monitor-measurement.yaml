@@ -1,0 +1,178 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: MonitorMeasurement
+title: Monitor Measurement
+description: Sampled measurement captured by a monitor, optionally tied to an interval and a log.
+language: en
+displayTemplate: "{{measuredAt}}"
+filterField: id
+labels:
+  en: Monitor measurement
+  nl: Monitormeting
+domains:
+  - energy
+fields:
+  - key: measuredAt
+    valueType: datetime
+    required: true
+    label:
+      en: Measured at
+      nl: Gemeten op
+    description:
+      en: Timestamp when the measurement was taken.
+      nl: Tijdstip waarop de meting is uitgevoerd.
+    persisted:
+      column: measured_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: value
+    valueType: number
+    required: true
+    label:
+      en: Value
+      nl: Waarde
+    description:
+      en: Measured value.
+      nl: Gemeten waarde.
+    persisted:
+      column: value
+      storageClass: core
+  - key: unitId
+    valueType: string
+    required: false
+    label:
+      en: Unit
+      nl: Eenheid
+    description:
+      en: Free-form unit identifier (e.g. "kWh", "m3").
+      nl: Vrije eenheidsaanduiding (bv. "kWh", "m3").
+    validation:
+      maxLength: 50
+    persisted:
+      column: unit_id
+      storageClass: core
+relationships:
+  - key: monitorInterval
+    kind: belongsTo
+    target: MonitorInterval
+    foreignKey: monitor_interval_id
+    label:
+      en: Monitor interval
+      nl: Monitorinterval
+  - key: monitorLog
+    kind: belongsTo
+    target: MonitorLog
+    foreignKey: monitor_log_id
+    label:
+      en: Monitor log
+      nl: Monitorlog
+ui:
+  routes:
+    list:
+      en: /monitor-measurements
+      nl: /monitormetingen
+    detail:
+      en: /monitor-measurements/:id
+      nl: /monitormetingen/:id
+    create:
+      en: /monitor-measurements/create
+      nl: /monitormetingen/aanmaken
+    edit:
+      en: /monitor-measurements/:id/edit
+      nl: /monitormetingen/:id/bewerken
+    delete:
+      en: /monitor-measurements/:id/delete
+      nl: /monitormetingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Monitor measurements
+        nl: Monitormetingen
+      columns:
+        - key: measuredAt
+          sortable: true
+        - key: value
+          sortable: true
+        - key: unitId
+          sortable: true
+      defaultSort:
+        key: measuredAt
+        direction: desc
+      rowLink:
+        en: /monitor-measurements/:id
+        nl: /monitormetingen/:id
+    detail:
+      header:
+        title: "{{measuredAt}}"
+        subtitle: "{{value}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Measurement details
+                nl: Metinggegevens
+              fields:
+                - measuredAt
+                - value
+                - unitId
+    form:
+      variants:
+        create:
+          title:
+            en: Create monitor measurement
+            nl: Monitormeting aanmaken
+          groups:
+            - title:
+                en: Measurement details
+                nl: Metinggegevens
+              fields:
+                - measuredAt
+                - value
+                - unitId
+        edit:
+          extends: create
+          title:
+            en: Edit monitor measurement
+            nl: Monitormeting bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Energy.All.Read
+      - Energy.All.ReadWrite
+    create:
+      - Energy.All.ReadWrite
+    update:
+      - Energy.All.ReadWrite
+    delete:
+      - Energy.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

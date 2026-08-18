@@ -1,0 +1,111 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: DocumentType
+title: Document Type
+description: A managed document type definition with registration defaults.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Document Type
+  nl: Documenttype
+domains:
+  - cases
+  - governance
+authorization:
+  roles:
+    read:
+      - CaseFile.All.ReadWrite
+    create:
+      - Organization.All.ReadWrite
+    update:
+      - Organization.All.ReadWrite
+    delete:
+      - Organization.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    validation:
+      maxLength: 4000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+  - key: defaultConfidentiality
+    valueType: string
+    required: false
+    label:
+      en: Default confidentiality
+      nl: Standaardvertrouwelijkheid
+    persisted:
+      column: default_confidentiality
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: DOCUMENTCONFIDENTIALITY
+        clearable: true
+  - key: requiresRegistration
+    valueType: boolean
+    required: true
+    label:
+      en: Requires registration
+      nl: Vereist registratie
+    defaultValue: true
+    persisted:
+      column: requires_registration
+      storageClass: core
+  - key: allowsExternalPublication
+    valueType: boolean
+    required: true
+    label:
+      en: Allows external publication
+      nl: Externe publicatie toegestaan
+    defaultValue: false
+    persisted:
+      column: allows_external_publication
+      storageClass: core
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

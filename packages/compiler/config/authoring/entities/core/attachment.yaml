@@ -1,0 +1,208 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Attachment
+title: Attachment
+description: A lightweight file attachment (image, document, or other media) linked to a parent entity such as a support issue.
+language: en
+displayTemplate: "{{fileName}}"
+filterField: fileName
+labels:
+  en: Attachment
+  nl: Bijlage
+domains:
+  - attachments
+authorization:
+  roles:
+    read:
+      - General.All.Read
+      - General.All.ReadWrite
+    create:
+      - General.All.ReadWrite
+    update:
+      - General.All.ReadWrite
+    delete:
+      - General.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: fileName
+    valueType: string
+    required: true
+    readOnly: true
+    label:
+      en: File name
+      nl: Bestandsnaam
+    description:
+      en: Original name of the uploaded file.
+      nl: Oorspronkelijke naam van het geüploade bestand.
+    validation:
+      maxLength: 255
+    persisted:
+      column: file_name
+      storageClass: core
+  - key: mimeType
+    valueType: string
+    required: true
+    readOnly: true
+    label:
+      en: MIME type
+      nl: MIME-type
+    description:
+      en: Media type of the stored file (e.g. image/png).
+      nl: Mediatype van het bestand (bijv. image/png).
+    validation:
+      maxLength: 150
+    persisted:
+      column: mime_type
+      storageClass: core
+  - key: sizeBytes
+    valueType: integer
+    required: false
+    readOnly: true
+    label:
+      en: Size (bytes)
+      nl: Grootte (bytes)
+    description:
+      en: File size in bytes.
+      nl: Bestandsgrootte in bytes.
+    persisted:
+      column: size_bytes
+      storageClass: core
+  - key: storageLocation
+    valueType: string
+    required: true
+    label:
+      en: File
+      nl: Bestand
+    description:
+      en: Storage pointer to the uploaded file (object store key or path token).
+      nl: Opslagpointer naar het bestand (objectstore-sleutel of pad-token).
+    validation:
+      maxLength: 1000
+    persisted:
+      column: storage_location
+      storageClass: core
+    render:
+      component: FileUpload
+      props:
+        fileNameField: fileName
+        mimeTypeField: mimeType
+        checksumField: checksum
+  - key: checksum
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: Checksum
+      nl: Checksum
+    description:
+      en: SHA-256 checksum of the stored file.
+      nl: SHA-256-checksum van het bestand.
+    validation:
+      maxLength: 128
+    persisted:
+      column: checksum
+      storageClass: core
+relationships:
+  - key: supportIssue
+    kind: belongsTo
+    target: SupportIssue
+    foreignKey: support_issue_id
+    label:
+      en: Support issue
+      nl: Supportverzoek
+ui:
+  routes:
+    list:
+      en: /attachments
+      nl: /attachments
+    detail:
+      en: /attachments/:id
+      nl: /attachments/:id
+    create:
+      en: /attachments/create
+      nl: /attachments/aanmaken
+    edit:
+      en: /attachments/:id/edit
+      nl: /attachments/:id/bewerken
+    delete:
+      en: /attachments/:id/delete
+      nl: /attachments/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Attachments
+        nl: Bijlagen
+      columns:
+        - key: fileName
+          sortable: true
+        - key: mimeType
+          sortable: true
+        - key: sizeBytes
+          sortable: true
+        - key: createdAt
+          sortable: true
+      defaultSort:
+        key: createdAt
+        direction: desc
+      rowLink:
+        en: /attachments/:id
+        nl: /attachments/:id
+    detail:
+      header:
+        title: "{{fileName}}"
+        subtitle: "{{mimeType}}"
+        badges:
+          - mimeType
+      actions:
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: File
+                nl: Bestand
+              fields:
+                - fileName
+                - mimeType
+                - sizeBytes
+                - storageLocation
+                - checksum
+                - createdAt
+    form:
+      variants:
+        create:
+          title:
+            en: Upload attachment
+            nl: Bijlage uploaden
+          groups:
+            - title:
+                en: File
+                nl: Bestand
+              fields:
+                - storageLocation
+        edit:
+          extends: create
+          title:
+            en: Edit attachment
+            nl: Bijlage bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

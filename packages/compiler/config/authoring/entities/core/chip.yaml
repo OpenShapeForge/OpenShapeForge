@@ -1,0 +1,144 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Chip
+title: Chip
+description: A tenant-scoped reusable global text variable for authored messages, templates, and workflow configuration.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Chip
+  nl: Chip
+domains:
+  - core
+indexes:
+  - name: chips_tenant_key_uidx
+    fields:
+      - tenantId
+      - key
+    unique: true
+  - name: chips_tenant_active_category_name_idx
+    fields:
+      - tenantId
+      - isActive
+      - category
+      - name
+authorization:
+  roles:
+    read:
+      - Organization.All.ReadWrite
+      - General.All.Read
+      - General.All.ReadWrite
+    create:
+      - Organization.All.ReadWrite
+    update:
+      - Organization.All.ReadWrite
+    delete:
+      - Organization.All.ReadWrite
+fields:
+  - key: key
+    valueType: string
+    required: true
+    label:
+      en: Variable key
+      nl: Variabele-sleutel
+    description:
+      en: Stable lower-case key used in templates as `{{chips.<key>}}`, for example `general.phone`.
+      nl: Stabiele sleutel in kleine letters die in templates wordt gebruikt als `{{chips.<key>}}`, bijvoorbeeld `general.phone`.
+    validation:
+      minLength: 1
+      maxLength: 160
+      pattern: ^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$
+    persisted:
+      column: key
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: User-facing label shown in autocomplete and administration screens.
+      nl: Leesbare naam in autocomplete en beheerschermen.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: value
+    valueType: string
+    required: true
+    label:
+      en: Value
+      nl: Waarde
+    description:
+      en: Plain text value inserted when this chip is rendered.
+      nl: Platte tekstwaarde die wordt ingevoegd wanneer deze chip wordt gerenderd.
+    validation:
+      minLength: 1
+      maxLength: 8000
+    persisted:
+      column: value
+      storageClass: core
+    render:
+      component: InputMultiline
+      props:
+        rows: 5
+        maxLength: 8000
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional administrator note explaining where this variable is used.
+      nl: Optionele beheernotitie over waar deze variabele wordt gebruikt.
+    validation:
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 500
+  - key: category
+    valueType: string
+    required: false
+    label:
+      en: Category
+      nl: Categorie
+    description:
+      en: Optional grouping label for autocomplete.
+      nl: Optioneel groepeerlabel voor autocomplete.
+    validation:
+      maxLength: 120
+    persisted:
+      column: category
+      storageClass: core
+  - key: isActive
+    valueType: boolean
+    required: true
+    label:
+      en: Active
+      nl: Actief
+    description:
+      en: Inactive chips are hidden from autocomplete but still resolve in already-authored content.
+      nl: Inactieve chips zijn verborgen in autocomplete, maar blijven oplossen in bestaande content.
+    defaultValue: true
+    persisted:
+      column: is_active
+      storageClass: core
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

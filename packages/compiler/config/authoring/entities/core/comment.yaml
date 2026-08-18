@@ -1,0 +1,183 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Comment
+title: Comment
+description: A textual comment attached to another entity (currently support issues), written by a human author or a workflow/AI node.
+language: en
+displayTemplate: "{{body}}"
+filterField: body
+labels:
+  en: Comment
+  nl: Opmerking
+domains:
+  - comments
+authorization:
+  roles:
+    read:
+      - General.All.Read
+      - General.All.ReadWrite
+    create:
+      - General.All.ReadWrite
+    update:
+      - General.All.ReadWrite
+    delete:
+      - Organization.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: body
+    valueType: string
+    required: true
+    label:
+      en: Message
+      nl: Bericht
+    description:
+      en: Body of the comment.
+      nl: Inhoud van de opmerking.
+    validation:
+      minLength: 1
+      maxLength: 5000
+    persisted:
+      column: body
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 5
+        maxLength: 5000
+  - key: source
+    valueType: string
+    required: true
+    label:
+      en: Source
+      nl: Bron
+    description:
+      en: Origin of the comment (human author, workflow AI node, or system).
+      nl: Herkomst van de opmerking (menselijke auteur, AI-workflownode of systeem).
+    defaultValue: human
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: source
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: COMMENTBRON
+        clearable: false
+relationships:
+  - key: supportIssue
+    kind: belongsTo
+    target: SupportIssue
+    foreignKey: support_issue_id
+    label:
+      en: Support issue
+      nl: Supportverzoek
+  - key: author
+    kind: belongsTo
+    target: Relation
+    foreignKey: author_relation_id
+    label:
+      en: Author
+      nl: Auteur
+ui:
+  routes:
+    list:
+      en: /comments
+      nl: /comments
+    detail:
+      en: /comments/:id
+      nl: /comments/:id
+    create:
+      en: /comments/create
+      nl: /comments/aanmaken
+    edit:
+      en: /comments/:id/edit
+      nl: /comments/:id/bewerken
+    delete:
+      en: /comments/:id/delete
+      nl: /comments/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Comments
+        nl: Opmerkingen
+      columns:
+        - key: author
+          sortable: false
+          label:
+            en: Author
+            nl: Auteur
+        - key: body
+          sortable: false
+        - key: source
+          sortable: true
+        - key: createdAt
+          sortable: true
+      defaultSort:
+        key: createdAt
+        direction: desc
+      rowLink:
+        en: /comments/:id
+        nl: /comments/:id
+    detail:
+      header:
+        title: "{{body}}"
+        subtitle: "{{source}}"
+        badges:
+          - source
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Comment
+                nl: Opmerking
+              fields:
+                - body
+                - source
+    form:
+      variants:
+        create:
+          title:
+            en: New comment
+            nl: Nieuwe opmerking
+          groups:
+            - title:
+                en: Comment
+                nl: Opmerking
+              fields:
+                - body
+                - source
+        edit:
+          extends: create
+          title:
+            en: Edit comment
+            nl: Opmerking bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

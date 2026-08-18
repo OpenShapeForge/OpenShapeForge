@@ -1,0 +1,423 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: SupplierRole
+title: Supplier Role
+description: Procurement-side supplier role on a Relation. Carries supplier number, certifications, default IBAN, and rating.
+language: en
+displayTemplate: "{{supplierNumber}}"
+filterField: supplierNumber
+labels:
+  en: Supplier
+  nl: Leverancier
+domains:
+  - relations
+fields:
+  - key: supplierNumber
+    valueType: string
+    required: true
+    label:
+      en: Supplier number
+      nl: Leveranciersnummer
+    description:
+      en: Tenant-unique supplier number.
+      nl: Tenant-uniek leveranciersnummer.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: supplier_number
+      storageClass: core
+  - key: roleType
+    valueType: string
+    required: true
+    label:
+      en: Role type
+      nl: Roltype
+    description:
+      en: Type of supplier role (maintenance, materials, services, etc.).
+      nl: Type leveranciersrol (onderhoud, materialen, diensten, etc.).
+    persisted:
+      column: role_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: SUPPLIERROLE
+        clearable: false
+  - key: status
+    valueType: string
+    required: false
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the supplier role assignment.
+      nl: Levenscyclusstatus van de leveranciersroltoewijzing.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: ROLEASSIGNMENTSTATUS
+        clearable: true
+  - key: vatNumber
+    valueType: string
+    required: false
+    label:
+      en: VAT number
+      nl: BTW-nummer
+    description:
+      en: VAT identification number of the supplier.
+      nl: BTW-identificatienummer van de leverancier.
+    validation:
+      maxLength: 50
+    persisted:
+      column: vat_number
+      storageClass: core
+  - key: chamberOfCommerceNumber
+    valueType: string
+    required: false
+    label:
+      en: Chamber of commerce number
+      nl: KvK-nummer
+    description:
+      en: Chamber of commerce registration number of the supplier.
+      nl: Inschrijvingsnummer Kamer van Koophandel van de leverancier.
+    validation:
+      maxLength: 50
+    persisted:
+      column: chamber_of_commerce_number
+      storageClass: core
+  - key: kvkVerified
+    valueType: boolean
+    required: false
+    label:
+      en: KvK verified
+      nl: KvK geverifieerd
+    description:
+      en: Whether the supplier's chamber of commerce registration has been verified.
+      nl: Of de KvK-inschrijving van de leverancier is geverifieerd.
+    persisted:
+      column: kvk_verified
+      storageClass: core
+  - key: defaultIban
+    valueType: string
+    required: false
+    label:
+      en: Default IBAN
+      nl: Standaard IBAN
+    description:
+      en: IBAN to use for outgoing payments to this supplier by default.
+      nl: IBAN die standaard wordt gebruikt voor uitgaande betalingen aan deze leverancier.
+    validation:
+      maxLength: 34
+    persisted:
+      column: default_iban
+      storageClass: core
+  - key: ratingAverage
+    valueType: number
+    required: false
+    label:
+      en: Rating average
+      nl: Gemiddelde beoordeling
+    description:
+      en: Average rating for the supplier (1-5).
+      nl: Gemiddelde beoordeling voor de leverancier (1-5).
+    validation:
+      min: 1
+      max: 5
+    persisted:
+      column: rating_average
+      storageClass: core
+  - key: certifications
+    valueType: string
+    required: false
+    label:
+      en: Certifications
+      nl: Certificeringen
+    description:
+      en: List of certifications held by the supplier (e.g. "VCA", "ISO9001").
+      nl: Lijst van certificeringen van de leverancier (bv. "VCA", "ISO9001").
+    persisted:
+      column: certifications
+      storageClass: core
+    cardinality:
+      min: 0
+      max: "unbounded"
+    item:
+      key: certification
+      valueType: string
+      required: false
+      label:
+        en: Certification
+        nl: Certificering
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Date from which the supplier role assignment is effective.
+      nl: Datum vanaf wanneer de leveranciersroltoewijzing geldig is.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Date until which the supplier role assignment is effective.
+      nl: Datum tot wanneer de leveranciersroltoewijzing geldig is.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: name
+    valueType: string
+    required: false
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Optional human-readable name of the supplier role.
+      nl: Optionele menselijk leesbare naam van de leveranciersrol.
+    validation:
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description or business meaning of the supplier role assignment.
+      nl: Optionele omschrijving of zakelijke betekenis van de leveranciersroltoewijzing.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the supplier in an external context.
+      nl: Functionele of zakelijke code van de leverancier in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: defaultPaymentMethod
+    kind: belongsTo
+    target: PaymentMethod
+    foreignKey: default_payment_method_id
+    label:
+      en: Default payment method
+      nl: Standaard betaalwijze
+ui:
+  routes:
+    list:
+      en: /supplier-roles
+      nl: /leveranciers
+    detail:
+      en: /supplier-roles/:id
+      nl: /leveranciers/:id
+    create:
+      en: /supplier-roles/create
+      nl: /leveranciers/aanmaken
+    edit:
+      en: /supplier-roles/:id/edit
+      nl: /leveranciers/:id/bewerken
+    delete:
+      en: /supplier-roles/:id/delete
+      nl: /leveranciers/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Suppliers
+        nl: Leveranciers
+      columns:
+        - key: supplierNumber
+          sortable: true
+        - key: name
+          sortable: true
+        - key: roleType
+          sortable: true
+        - key: status
+          sortable: true
+        - key: ratingAverage
+          sortable: true
+      defaultSort:
+        key: supplierNumber
+        direction: asc
+      rowLink:
+        en: /supplier-roles/:id
+        nl: /leveranciers/:id
+    detail:
+      header:
+        title: "{{supplierNumber}}"
+        subtitle: "{{name}}"
+        badges:
+          - roleType
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Supplier details
+                nl: Leveranciersgegevens
+              fields:
+                - supplierNumber
+                - roleType
+                - status
+                - name
+                - startDate
+                - endDate
+            - title:
+                en: Identifiers
+                nl: Identificaties
+              fields:
+                - vatNumber
+                - chamberOfCommerceNumber
+                - kvkVerified
+                - defaultIban
+            - title:
+                en: Ratings and certifications
+                nl: Beoordelingen en certificeringen
+              fields:
+                - ratingAverage
+                - certifications
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create supplier
+            nl: Leverancier aanmaken
+          groups:
+            - title:
+                en: Supplier details
+                nl: Leveranciersgegevens
+              fields:
+                - supplierNumber
+                - roleType
+                - status
+                - name
+                - startDate
+                - endDate
+            - title:
+                en: Identifiers
+                nl: Identificaties
+              fields:
+                - vatNumber
+                - chamberOfCommerceNumber
+                - kvkVerified
+                - defaultIban
+            - title:
+                en: Ratings and certifications
+                nl: Beoordelingen en certificeringen
+              fields:
+                - ratingAverage
+                - certifications
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit supplier
+            nl: Leverancier bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Relations.All.Read
+      - Relations.All.ReadWrite
+    create:
+      - Relations.All.ReadWrite
+    update:
+      - Relations.All.ReadWrite
+    delete:
+      - Relations.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

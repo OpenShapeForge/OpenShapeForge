@@ -1,0 +1,280 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: TemplateVariant
+title: Template Variant
+description: A channel-specific rendering variant of a template.
+language: en
+displayTemplate: "{{channel}}"
+filterField: channel
+labels:
+  en: Template Variant
+  nl: Templatevariant
+domains:
+  - messaging
+authorization:
+  roles:
+    read:
+      - General.All.Read
+      - General.All.ReadWrite
+    create:
+      - Organization.All.ReadWrite
+    update:
+      - Organization.All.ReadWrite
+    delete:
+      - Organization.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: channel
+    valueType: string
+    required: true
+    label:
+      en: Channel
+      nl: Kanaal
+    description:
+      en: Delivery channel this variant is intended for.
+      nl: Afleverkanaal waarvoor deze variant bedoeld is.
+    options:
+      type: referentiedata
+      referentieGroep: MESSAGINGCHANNEL
+    persisted:
+      column: channel
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MESSAGINGCHANNEL
+        clearable: false
+  - key: locale
+    valueType: string
+    required: false
+    label:
+      en: Locale
+      nl: Taalcode
+    description:
+      en: Optional locale code for this variant, such as en or nl.
+      nl: Optionele taalcode voor deze variant, zoals en of nl.
+    validation:
+      maxLength: 10
+    options:
+      type: referentiedata
+      referentieGroep: MESSAGINGLOCALE
+    persisted:
+      column: locale
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MESSAGINGLOCALE
+        clearable: true
+  - key: subjectTemplate
+    valueType: string
+    required: false
+    label:
+      en: Subject template
+      nl: Onderwerptemplate
+    description:
+      en: Subject or title template used for channels that support it.
+      nl: Onderwerp- of titelsjabloon voor kanalen die dat ondersteunen.
+    semanticType: variableTemplate
+    validation:
+      maxLength: 1000
+    persisted:
+      column: subject_template
+      storageClass: core
+    render:
+      component: VariableTemplateInput
+      props:
+        rows: 2
+        maxLength: 1000
+    variables: template
+    suggestions:
+      sourceKey: templateParameters
+  - key: bodyTemplate
+    valueType: string
+    required: true
+    label:
+      en: Body template
+      nl: Berichttemplate
+    description:
+      en: Template body containing the actual message content and dynamic placeholders.
+      nl: Templatebody met de daadwerkelijke berichtinhoud en dynamische placeholders.
+    semanticType: variableTemplate
+    validation:
+      minLength: 1
+      maxLength: 20000
+    persisted:
+      column: body_template
+      storageClass: core
+    render:
+      component: VariableTemplateInput
+      props:
+        rows: 10
+        maxLength: 20000
+    variables: template
+    suggestions:
+      sourceKey: templateParameters
+  - key: bodyFormat
+    valueType: string
+    required: true
+    label:
+      en: Body format
+      nl: Berichtformaat
+    description:
+      en: Rendering format of the template body.
+      nl: Renderformaat van de templatebody.
+    options:
+      type: referentiedata
+      referentieGroep: TEMPLATEBODYFORMAAT
+    persisted:
+      column: body_format
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: TEMPLATEBODYFORMAAT
+        clearable: false
+  - key: isDefault
+    valueType: boolean
+    required: false
+    label:
+      en: Default variant
+      nl: Standaardvariant
+    description:
+      en: Whether this variant should be treated as the default for the channel.
+      nl: Of deze variant als standaard voor het kanaal moet gelden.
+    persisted:
+      column: is_default
+      storageClass: core
+  - key: sortOrder
+    valueType: integer
+    required: false
+    label:
+      en: Sort order
+      nl: Sorteervolgorde
+    description:
+      en: Optional ordering number for variants of the same template.
+      nl: Optioneel volgnummer voor varianten van dezelfde template.
+    persisted:
+      column: sort_order
+      storageClass: core
+relationships:
+  - key: template
+    kind: belongsTo
+    target: Template
+    foreignKey: template_id
+    label:
+      en: Template
+      nl: Template
+ui:
+  routes:
+    list:
+      en: /template-variants
+      nl: /templatevarianten
+    detail:
+      en: /template-variants/:id
+      nl: /templatevarianten/:id
+    create:
+      en: /template-variants/create
+      nl: /templatevarianten/aanmaken
+    edit:
+      en: /template-variants/:id/edit
+      nl: /templatevarianten/:id/bewerken
+    delete:
+      en: /template-variants/:id/delete
+      nl: /templatevarianten/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Template Variants
+        nl: Templatevarianten
+      columns:
+        - key: channel
+          sortable: true
+        - key: locale
+          sortable: true
+        - key: bodyFormat
+          sortable: true
+        - key: isDefault
+          sortable: true
+      defaultSort:
+        key: channel
+        direction: asc
+      rowLink:
+        en: /template-variants/:id
+        nl: /templatevarianten/:id
+    detail:
+      header:
+        title: "{{channel}}"
+        subtitle: "{{locale}}"
+        badges:
+          - bodyFormat
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Variant details
+                nl: Variantgegevens
+              fields:
+                - channel
+                - locale
+                - bodyFormat
+                - isDefault
+                - sortOrder
+                - subjectTemplate
+                - bodyTemplate
+    form:
+      variableSources:
+        - key: templateParameters
+          resolver: templateParameters
+          params:
+            templateIdField: templateId
+      variants:
+        create:
+          title:
+            en: Create template variant
+            nl: Templatevariant aanmaken
+          groups:
+            - title:
+                en: Variant details
+                nl: Variantgegevens
+              fields:
+                - channel
+                - locale
+                - bodyFormat
+                - isDefault
+                - sortOrder
+                - subjectTemplate
+                - bodyTemplate
+        edit:
+          extends: create
+          title:
+            en: Edit template variant
+            nl: Templatevariant bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

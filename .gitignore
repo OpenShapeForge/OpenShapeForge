@@ -11,6 +11,11 @@ next-env.d.ts
 *.tsbuildinfo
 coverage/
 
+# Deployment-local authoring layers/plugins appended to authoring.config.yaml.
+# Ignored on purpose: it names extensions that live in their own repositories
+# and that this one must not declare.
+authoring.config.local.yaml
+
 # Compiler-generated artifacts (recreate with `bun run generate`)
 apps/api/src/generated/connectors/
 apps/api/src/generated/db/

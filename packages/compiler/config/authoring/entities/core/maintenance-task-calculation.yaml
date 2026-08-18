@@ -1,0 +1,214 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: MaintenanceTaskCalculation
+title: Maintenance Task Calculation
+description: Pre-execution cost estimate for a maintenance task, optionally referencing a standard price.
+language: en
+displayTemplate: "{{description}}"
+filterField: description
+labels:
+  en: Maintenance task calculation
+  nl: Onderhoudstaak voorcalculatie
+domains:
+  - maintenance
+fields:
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Description of the calculation line.
+      nl: Omschrijving van de calculatieregel.
+    validation:
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 500
+  - key: quantity
+    valueType: number
+    required: false
+    label:
+      en: Quantity
+      nl: Aantal
+    description:
+      en: Quantity for this calculation line.
+      nl: Aantal voor deze calculatieregel.
+    persisted:
+      column: quantity
+      storageClass: core
+  - key: unitId
+    valueType: string
+    required: false
+    label:
+      en: Unit
+      nl: Eenheid
+    description:
+      en: Free-form unit identifier (e.g. "Hour", "Piece").
+      nl: Vrije eenheidsaanduiding (bv. "Uur", "Stuk").
+    validation:
+      maxLength: 50
+    persisted:
+      column: unit_id
+      storageClass: core
+  - key: unitPrice
+    valueType: number
+    required: false
+    label:
+      en: Unit price
+      nl: Eenheidsprijs
+    description:
+      en: Price per unit for this calculation line.
+      nl: Prijs per eenheid voor deze calculatieregel.
+    semanticType: currency
+    persisted:
+      column: unit_price
+      storageClass: core
+  - key: amount
+    valueType: number
+    required: false
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Total amount for this calculation line.
+      nl: Totaalbedrag voor deze calculatieregel.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+relationships:
+  - key: maintenanceTask
+    kind: belongsTo
+    target: MaintenanceTask
+    foreignKey: maintenance_task_id
+    label:
+      en: Maintenance task
+      nl: Onderhoudstaak
+  - key: standardPrice
+    kind: belongsTo
+    target: StandardPrice
+    foreignKey: standard_price_id
+    label:
+      en: Standard price
+      nl: Standaardprijs
+ui:
+  routes:
+    list:
+      en: /maintenance-task-calculations
+      nl: /onderhoudstaak-voorcalculaties
+    detail:
+      en: /maintenance-task-calculations/:id
+      nl: /onderhoudstaak-voorcalculaties/:id
+    create:
+      en: /maintenance-task-calculations/create
+      nl: /onderhoudstaak-voorcalculaties/aanmaken
+    edit:
+      en: /maintenance-task-calculations/:id/edit
+      nl: /onderhoudstaak-voorcalculaties/:id/bewerken
+    delete:
+      en: /maintenance-task-calculations/:id/delete
+      nl: /onderhoudstaak-voorcalculaties/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Maintenance task calculations
+        nl: Onderhoudstaak voorcalculaties
+      columns:
+        - key: description
+          sortable: true
+        - key: quantity
+          sortable: true
+        - key: unitPrice
+          sortable: true
+        - key: amount
+          sortable: true
+      defaultSort:
+        key: description
+        direction: asc
+      rowLink:
+        en: /maintenance-task-calculations/:id
+        nl: /onderhoudstaak-voorcalculaties/:id
+    detail:
+      header:
+        title: "{{description}}"
+        subtitle: "{{amount}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Calculation details
+                nl: Calculatiegegevens
+              fields:
+                - description
+                - quantity
+                - unitId
+                - unitPrice
+                - amount
+    form:
+      variants:
+        create:
+          title:
+            en: Create maintenance task calculation
+            nl: Onderhoudstaak voorcalculatie aanmaken
+          groups:
+            - title:
+                en: Calculation details
+                nl: Calculatiegegevens
+              fields:
+                - description
+                - quantity
+                - unitId
+                - unitPrice
+                - amount
+        edit:
+          extends: create
+          title:
+            en: Edit maintenance task calculation
+            nl: Onderhoudstaak voorcalculatie bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Maintenance.All.Read
+      - Maintenance.All.ReadWrite
+    create:
+      - Maintenance.All.ReadWrite
+    update:
+      - Maintenance.All.ReadWrite
+    delete:
+      - Maintenance.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

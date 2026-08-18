@@ -1,0 +1,255 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: CaseStepAction
+title: Case Step Action
+description: Runtime action inside a case step. An action either creates a human task or starts a workflow instance.
+language: en
+displayTemplate: "{{actionKey}}"
+filterField: actionKey
+labels:
+  en: Case Step Action
+  nl: Zaakstapactie
+domains:
+  - cases
+  - workflow
+authorization:
+  roles:
+    read:
+      - Cases.All.Read
+      - Cases.All.ReadWrite
+    create:
+      - Workflow.Internal.Write
+    update:
+      - Workflow.Internal.Write
+    delete:
+      - Workflow.Internal.Write
+  rowAccess:
+    enabled: true
+    empty: public
+indexes:
+  - name: case_step_actions_tenant_process_order_idx
+    fields:
+      - tenantId
+      - processId
+      - sequenceNumber
+      - id
+fields:
+  - key: processId
+    valueType: string
+    required: true
+    readOnly: true
+    label:
+      en: Case step ID
+      nl: Zaakstap-ID
+    description:
+      en: Canonical runtime case-step container that owns this action.
+      nl: Canonieke runtime zaakstapcontainer die deze actie bezit.
+    validation:
+      format: uuid
+    persisted:
+      column: process_id
+      storageClass: core
+  - key: processStepId
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: Legacy process step ID
+      nl: Legacy processtap-ID
+    description:
+      en: Optional legacy bridge to the older process-step row while the runtime migrates to process-owned actions.
+      nl: Optionele legacy-koppeling naar de oudere processtaprij terwijl de runtime migreert naar proces-acties.
+    validation:
+      format: uuid
+    persisted:
+      column: process_step_id
+      storageClass: core
+  - key: actionKey
+    valueType: string
+    required: true
+    label:
+      en: Action key
+      nl: Actiesleutel
+    validation:
+      minLength: 1
+      maxLength: 120
+    persisted:
+      column: action_key
+      storageClass: core
+  - key: sequenceNumber
+    valueType: integer
+    required: true
+    label:
+      en: Sequence number
+      nl: Volgnummer
+    persisted:
+      column: sequence_number
+      storageClass: core
+  - key: kind
+    valueType: string
+    required: true
+    label:
+      en: Kind
+      nl: Soort
+    persisted:
+      column: kind
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASESTEPACTIONKIND
+        clearable: false
+  - key: required
+    valueType: boolean
+    required: true
+    label:
+      en: Required
+      nl: Verplicht
+    defaultValue: true
+    persisted:
+      column: required
+      storageClass: core
+  - key: startMode
+    valueType: string
+    required: true
+    label:
+      en: Start mode
+      nl: Startmodus
+    defaultValue: auto
+    persisted:
+      column: start_mode
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASESTEPACTIONSTARTMODE
+        clearable: false
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    defaultValue: pending
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASESTEPACTIONSTATUS
+        clearable: false
+  - key: workflowDefinitionId
+    valueType: string
+    required: false
+    semanticType: workflowDefinitionId
+    label:
+      en: Workflow definition
+      nl: Workflowdefinitie
+    validation:
+      format: uuid
+    persisted:
+      column: workflow_definition_id
+      storageClass: core
+  - key: workflowInstanceId
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: Workflow instance
+      nl: Workflowinstantie
+    validation:
+      format: uuid
+    persisted:
+      column: workflow_instance_id
+      storageClass: core
+  - key: taskTemplate
+    valueType: object
+    required: false
+    label:
+      en: Task template
+      nl: Taaksjabloon
+    persisted:
+      column: task_template
+      storageClass: core
+    render:
+      component: JsonFieldEditor
+  - key: result
+    valueType: object
+    required: false
+    label:
+      en: Result
+      nl: Resultaat
+    persisted:
+      column: result
+      storageClass: core
+    render:
+      component: JsonFieldEditor
+  - key: failureDetails
+    valueType: object
+    required: false
+    label:
+      en: Failure details
+      nl: Foutdetails
+    persisted:
+      column: failure_details
+      storageClass: core
+    render:
+      component: JsonFieldEditor
+  - key: activatedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Activated at
+      nl: Geactiveerd op
+    persisted:
+      column: activated_at
+      storageClass: core
+  - key: completedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Completed at
+      nl: Afgerond op
+    persisted:
+      column: completed_at
+      storageClass: core
+  - key: cancelledAt
+    valueType: datetime
+    required: false
+    label:
+      en: Cancelled at
+      nl: Geannuleerd op
+    persisted:
+      column: cancelled_at
+      storageClass: core
+relationships:
+  - key: process
+    kind: belongsTo
+    target: Process
+    foreignKey: process_id
+    label:
+      en: Case step
+      nl: Zaakstap
+  - key: processStep
+    kind: belongsTo
+    target: ProcessStep
+    foreignKey: process_step_id
+    label:
+      en: Legacy process step
+      nl: Legacy processtap
+  - key: caseStepTemplate
+    kind: belongsTo
+    target: CaseStepTemplate
+    foreignKey: case_step_template_id
+    label:
+      en: Case step template
+      nl: Zaakstapsjabloon
+  - key: task
+    kind: belongsTo
+    target: Task
+    foreignKey: task_id
+    label:
+      en: Task
+      nl: Taak

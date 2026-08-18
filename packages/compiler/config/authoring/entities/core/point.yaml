@@ -1,0 +1,195 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Point
+title: Point
+description: GIS point (latitude/longitude) optionally bound to an asset or a building.
+language: en
+displayTemplate: "{{latitude}}, {{longitude}}"
+filterField: id
+labels:
+  en: Point
+  nl: Punt
+domains:
+  - asset
+fields:
+  - key: latitude
+    valueType: number
+    required: true
+    label:
+      en: Latitude
+      nl: Breedtegraad
+    description:
+      en: Latitude in decimal degrees.
+      nl: Breedtegraad in decimale graden.
+    validation:
+      min: -90
+      max: 90
+    persisted:
+      column: latitude
+      storageClass: core
+  - key: longitude
+    valueType: number
+    required: true
+    label:
+      en: Longitude
+      nl: Lengtegraad
+    description:
+      en: Longitude in decimal degrees.
+      nl: Lengtegraad in decimale graden.
+    validation:
+      min: -180
+      max: 180
+    persisted:
+      column: longitude
+      storageClass: core
+  - key: srid
+    valueType: integer
+    required: false
+    label:
+      en: SRID
+      nl: SRID
+    description:
+      en: Spatial reference system identifier (default 4326 / WGS84).
+      nl: Spatial reference system identifier (standaard 4326 / WGS84).
+    persisted:
+      column: srid
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description of the point.
+      nl: Optionele omschrijving van het punt.
+    validation:
+      maxLength: 200
+    persisted:
+      column: description
+      storageClass: core
+relationships:
+  - key: asset
+    kind: belongsTo
+    target: Asset
+    foreignKey: asset_id
+    label:
+      en: Asset
+      nl: Object
+  - key: building
+    kind: belongsTo
+    target: Building
+    foreignKey: building_id
+    label:
+      en: Building
+      nl: Pand
+ui:
+  routes:
+    list:
+      en: /points
+      nl: /punten
+    detail:
+      en: /points/:id
+      nl: /punten/:id
+    create:
+      en: /points/create
+      nl: /punten/aanmaken
+    edit:
+      en: /points/:id/edit
+      nl: /punten/:id/bewerken
+    delete:
+      en: /points/:id/delete
+      nl: /punten/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Points
+        nl: Punten
+      columns:
+        - key: latitude
+          sortable: true
+        - key: longitude
+          sortable: true
+        - key: description
+          sortable: true
+      defaultSort:
+        key: latitude
+        direction: asc
+      rowLink:
+        en: /points/:id
+        nl: /punten/:id
+    detail:
+      header:
+        title: "{{latitude}}, {{longitude}}"
+        subtitle: "{{description}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Point details
+                nl: Puntgegevens
+              fields:
+                - latitude
+                - longitude
+                - srid
+                - description
+    form:
+      variants:
+        create:
+          title:
+            en: Create point
+            nl: Punt aanmaken
+          groups:
+            - title:
+                en: Point details
+                nl: Puntgegevens
+              fields:
+                - latitude
+                - longitude
+                - srid
+                - description
+        edit:
+          extends: create
+          title:
+            en: Edit point
+            nl: Punt bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - RealEstate.All.Read
+      - RealEstate.All.ReadWrite
+    create:
+      - RealEstate.All.ReadWrite
+    update:
+      - RealEstate.All.ReadWrite
+    delete:
+      - RealEstate.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

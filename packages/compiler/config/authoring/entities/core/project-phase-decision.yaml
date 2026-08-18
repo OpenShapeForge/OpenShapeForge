@@ -1,0 +1,225 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ProjectPhaseDecision
+title: Project Phase Decision
+description: Recorded decision marking a transition or outcome of a project phase (e.g. proceed, pause, cancel).
+language: en
+displayTemplate: "{{outcome}}"
+filterField: outcome
+labels:
+  en: Project phase decision
+  nl: Projectfasebesluit
+domains:
+  - project
+fields:
+  - key: decidedAt
+    valueType: datetime
+    required: true
+    label:
+      en: Decided at
+      nl: Besloten op
+    description:
+      en: Timestamp on which the decision was taken.
+      nl: Tijdstip waarop het besluit is genomen.
+    persisted:
+      column: decided_at
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-form motivation or notes for the decision.
+      nl: Vrije onderbouwing of toelichting bij het besluit.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 5000
+  - key: outcome
+    valueType: string
+    required: true
+    label:
+      en: Outcome
+      nl: Uitkomst
+    description:
+      en: Outcome of the decision (proceed, conditional, pause, cancel).
+      nl: Uitkomst van het besluit (doorgaan, voorwaardelijk, pauzeren, stoppen).
+    persisted:
+      column: outcome
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PROJECTPHASEDECISION
+        clearable: false
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the decision in an external context.
+      nl: Functionele of zakelijke code van het besluit in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: projectPhase
+    kind: belongsTo
+    target: ProjectPhase
+    foreignKey: project_phase_id
+    label:
+      en: Project phase
+      nl: Projectfase
+  - key: decidedBy
+    kind: belongsTo
+    target: Relation
+    foreignKey: decided_by_relation_id
+    label:
+      en: Decided by
+      nl: Besloten door
+ui:
+  routes:
+    list:
+      en: /project-phase-decisions
+      nl: /projectfasebesluiten
+    detail:
+      en: /project-phase-decisions/:id
+      nl: /projectfasebesluiten/:id
+    create:
+      en: /project-phase-decisions/create
+      nl: /projectfasebesluiten/aanmaken
+    edit:
+      en: /project-phase-decisions/:id/edit
+      nl: /projectfasebesluiten/:id/bewerken
+    delete:
+      en: /project-phase-decisions/:id/delete
+      nl: /projectfasebesluiten/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Project phase decisions
+        nl: Projectfasebesluiten
+      columns:
+        - key: outcome
+          sortable: true
+        - key: decidedAt
+          sortable: true
+      defaultSort:
+        key: decidedAt
+        direction: desc
+      rowLink:
+        en: /project-phase-decisions/:id
+        nl: /projectfasebesluiten/:id
+    detail:
+      header:
+        title: "{{outcome}}"
+        subtitle: "{{decidedAt}}"
+        badges:
+          - outcome
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Decision details
+                nl: Besluitgegevens
+              fields:
+                - outcome
+                - decidedAt
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create project phase decision
+            nl: Projectfasebesluit aanmaken
+          groups:
+            - title:
+                en: Decision details
+                nl: Besluitgegevens
+              fields:
+                - outcome
+                - decidedAt
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit project phase decision
+            nl: Projectfasebesluit bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - ProjectDevelopment.All.Read
+      - ProjectDevelopment.All.ReadWrite
+    create:
+      - ProjectDevelopment.All.ReadWrite
+    update:
+      - ProjectDevelopment.All.ReadWrite
+    delete:
+      - ProjectDevelopment.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

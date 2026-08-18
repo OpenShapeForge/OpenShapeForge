@@ -1,0 +1,205 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ResearchAssignment
+title: Research Assignment
+description: An assignment to conduct a survey with a specific relation through a designated channel.
+language: en
+displayTemplate: "{{title}}"
+filterField: title
+labels:
+  en: Research Assignment
+  nl: Onderzoeksopdracht
+domains:
+  - quality
+retention:
+  mode: policyRef
+  policy: quality-retain-7y
+  scope: record
+  startsFrom:
+    strategy: firstNonNull
+    fields:
+      - completedAt
+      - createdAt
+authorization:
+  roles:
+    read:
+      - Quality.All.Read
+      - Quality.All.ReadWrite
+    create:
+      - Quality.All.ReadWrite
+    update:
+      - Quality.All.ReadWrite
+    delete:
+      - Quality.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Human-readable assignment code.
+      nl: Menselijk leesbare opdrachtcode.
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: title
+    valueType: string
+    required: false
+    label:
+      en: Title
+      nl: Titel
+    description:
+      en: Short title of the research assignment.
+      nl: Korte titel van de onderzoeksopdracht.
+    validation:
+      maxLength: 300
+    persisted:
+      column: title
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Detailed description of the research assignment.
+      nl: Uitgebreide omschrijving van de onderzoeksopdracht.
+    validation:
+      maxLength: 4000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+  - key: assignmentKind
+    valueType: string
+    required: false
+    label:
+      en: Kind
+      nl: Soort
+    description:
+      en: Classification of the research assignment.
+      nl: Classificatie van de onderzoeksopdracht.
+    persisted:
+      column: assignment_kind
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: RESEARCHASSIGNMENTKIND
+        clearable: true
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Current status of the research assignment.
+      nl: Huidige status van de onderzoeksopdracht.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: RESEARCHSTATUS
+        clearable: false
+  - key: channel
+    valueType: string
+    required: false
+    label:
+      en: Channel
+      nl: Kanaal
+    description:
+      en: Communication channel used for the research.
+      nl: Communicatiekanaal waarmee het onderzoek wordt uitgevoerd.
+    persisted:
+      column: channel
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: COMMUNICATIONCHANNEL
+        clearable: true
+  - key: completedAt
+    valueType: datetime
+    required: false
+    readOnly: true
+    label:
+      en: Completed at
+      nl: Afgerond op
+    description:
+      en: Timestamp when the assignment was completed.
+      nl: Tijdstip waarop de opdracht is afgerond.
+    persisted:
+      column: completed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional code in a connected source system.
+      nl: Functionele code in een gekoppeld bronsysteem.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: survey
+    kind: belongsTo
+    target: Survey
+    foreignKey: survey_id
+    label:
+      en: Survey
+      nl: Vragenlijst
+  - key: researchResult
+    kind: belongsTo
+    target: ResearchResult
+    foreignKey: research_result_id
+    label:
+      en: Research result
+      nl: Onderzoeksresultaat
+  - key: measurementRequests
+    kind: hasMany
+    target: QualityMeasurementRequest
+    foreignKey: research_assignment_id
+    label:
+      en: Measurement requests
+      nl: Metingsverzoeken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+      wait: true

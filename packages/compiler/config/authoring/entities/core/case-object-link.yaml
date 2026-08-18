@@ -1,0 +1,107 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: CaseObjectLink
+title: Case Object Link
+description: A typed link from a case to another business object.
+language: en
+displayTemplate: "{{objectLabel}}"
+filterField: objectLabel
+labels:
+  en: Case Object Link
+  nl: Zaakobjectkoppeling
+domains:
+  - cases
+authorization:
+  roles:
+    read:
+      - Cases.All.Read
+      - Cases.All.ReadWrite
+    create:
+      - Cases.All.ReadWrite
+    update:
+      - Cases.All.ReadWrite
+    delete:
+      - Cases.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: objectType
+    valueType: string
+    required: true
+    label:
+      en: Object type
+      nl: Objecttype
+    persisted:
+      column: object_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEOBJECTTYPE
+        clearable: false
+  - key: objectLabel
+    valueType: string
+    required: false
+    label:
+      en: Object label
+      nl: Objectlabel
+    validation:
+      maxLength: 300
+    persisted:
+      column: object_label
+      storageClass: core
+  - key: objectUri
+    valueType: string
+    required: false
+    label:
+      en: Object URI
+      nl: Object-URI
+    validation:
+      maxLength: 1000
+    persisted:
+      column: object_uri
+      storageClass: core
+  - key: isPrimary
+    valueType: boolean
+    required: true
+    label:
+      en: Primary
+      nl: Primair
+    defaultValue: false
+    persisted:
+      column: is_primary
+      storageClass: core
+  - key: note
+    valueType: string
+    required: false
+    label:
+      en: Note
+      nl: Notitie
+    validation:
+      maxLength: 2000
+    persisted:
+      column: note
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 2000
+relationships:
+  - key: case
+    kind: belongsTo
+    target: Case
+    foreignKey: case_id
+    label:
+      en: Case
+      nl: Zaak
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

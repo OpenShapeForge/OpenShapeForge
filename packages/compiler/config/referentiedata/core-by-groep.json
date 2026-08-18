@@ -1,5 +1,5 @@
 {
-  "RELATIESOORT": [
+  "RELATIONTYPE": [
     {
       "value": "person",
       "label": {
@@ -22,7 +22,7 @@
       }
     }
   ],
-  "COMMUNICATIETYPE": [
+  "COMMUNICATIONTYPE": [
     {
       "value": "appointment_reminder",
       "label": {
@@ -59,7 +59,7 @@
       }
     }
   ],
-  "COMMUNICATIEKANAAL": [
+  "COMMUNICATIONCHANNEL": [
     {
       "value": "email",
       "label": {
@@ -103,7 +103,7 @@
       }
     }
   ],
-  "COMMUNICATIEVOORKEURSCOPE": [
+  "COMMUNICATIONPREFERENCESCOPE": [
     {
       "value": "relation",
       "label": {
@@ -126,7 +126,7 @@
       }
     }
   ],
-  "COMMUNICATIEVOORKEURSTATUS": [
+  "COMMUNICATIONPREFERENCESTATUS": [
     {
       "value": "active",
       "label": {
@@ -156,7 +156,7 @@
       }
     }
   ],
-  "BETAALGEGEVENSOORT": [
+  "PAYMENTDETAILTYPE": [
     {
       "value": "bank_account",
       "label": {
@@ -186,7 +186,7 @@
       }
     }
   ],
-  "CONTACTGEGEVENSOORT": [
+  "CONTACTDETAILTYPE": [
     {
       "value": "email",
       "label": {
@@ -216,7 +216,7 @@
       }
     }
   ],
-  "CONTACTGEGEVENTOESTEMMINGSSTATUS": [
+  "CONTACTDETAILCONSENTSTATUS": [
     {
       "value": "granted",
       "label": {
@@ -260,7 +260,7 @@
       }
     }
   ],
-  "MESSAGINGKANAAL": [
+  "MESSAGINGCHANNEL": [
     {
       "value": "in_app",
       "label": {
@@ -1863,7 +1863,7 @@
       }
     }
   ],
-  "DOSSIERTYPE": [
+  "CASEFILETYPE": [
     {
       "value": "case_file",
       "label": {
@@ -1907,7 +1907,7 @@
       }
     }
   ],
-  "DOSSIERSTATUS": [
+  "CASEFILESTATUS": [
     {
       "value": "draft",
       "label": {
@@ -1944,7 +1944,7 @@
       }
     }
   ],
-  "DOSSIERCONFIDENTIALITY": [
+  "CASEFILECONFIDENTIALITY": [
     {
       "value": "internal",
       "label": {
@@ -1967,7 +1967,7 @@
       }
     }
   ],
-  "DOSSIERARCHIEFSTATUS": [
+  "CASEFILEARCHIVESTATUS": [
     {
       "value": "open",
       "label": {
@@ -2339,7 +2339,7 @@
       }
     },
     {
-      "value": "dossier",
+      "value": "caseFile",
       "label": {
         "nl": "Dossier",
         "en": "Dossier"
@@ -3057,6 +3057,2141 @@
       "label": {
         "nl": "Afgerond",
         "en": "Completed"
+      }
+    }
+  ],
+  "ACCOUNTSTATUS": [
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "inactive",
+      "label": {
+        "nl": "Inactief",
+        "en": "Inactive"
+      }
+    },
+    {
+      "value": "locked",
+      "label": {
+        "nl": "Geblokkeerd",
+        "en": "Locked"
+      }
+    },
+    {
+      "value": "pending",
+      "label": {
+        "nl": "In afwachting",
+        "en": "Pending"
+      }
+    },
+    {
+      "value": "closed",
+      "label": {
+        "nl": "Beëindigd",
+        "en": "Closed"
+      }
+    }
+  ],
+  "ADMINREGIONLEVEL": [
+    {
+      "value": "municipality",
+      "label": {
+        "nl": "Gemeente",
+        "en": "Municipality"
+      }
+    },
+    {
+      "value": "city_district",
+      "label": {
+        "nl": "Stadsdeel",
+        "en": "City district"
+      }
+    },
+    {
+      "value": "district",
+      "label": {
+        "nl": "Wijk",
+        "en": "District"
+      }
+    },
+    {
+      "value": "neighborhood",
+      "label": {
+        "nl": "Buurt",
+        "en": "Neighborhood"
+      }
+    },
+    {
+      "value": "place",
+      "label": {
+        "nl": "Woonplaats",
+        "en": "Place"
+      }
+    }
+  ],
+  "APPOINTMENTSTATUS": [
+    {
+      "value": "requested",
+      "label": {
+        "nl": "Aangevraagd",
+        "en": "Requested"
+      }
+    },
+    {
+      "value": "scheduled",
+      "label": {
+        "nl": "Ingepland",
+        "en": "Scheduled"
+      }
+    },
+    {
+      "value": "confirmed",
+      "label": {
+        "nl": "Bevestigd",
+        "en": "Confirmed"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    },
+    {
+      "value": "no_show",
+      "label": {
+        "nl": "Niet verschenen",
+        "en": "No show"
+      }
+    }
+  ],
+  "AGREEMENTLINKTYPE": [
+    {
+      "value": "parent",
+      "label": {
+        "nl": "Bovenliggend",
+        "en": "Parent"
+      }
+    },
+    {
+      "value": "replaces",
+      "label": {
+        "nl": "Vervangt",
+        "en": "Replaces"
+      }
+    },
+    {
+      "value": "replaced_by",
+      "label": {
+        "nl": "Vervangen door",
+        "en": "Replaced by"
+      }
+    },
+    {
+      "value": "derived_from",
+      "label": {
+        "nl": "Afgeleid van",
+        "en": "Derived from"
+      }
+    }
+  ],
+  "AGREEMENTPARTYROLE": [
+    {
+      "value": "contractant",
+      "label": {
+        "nl": "Contractant",
+        "en": "Contracting party"
+      }
+    },
+    {
+      "value": "co_contractant",
+      "label": {
+        "nl": "Medecontractant",
+        "en": "Co-contracting party"
+      }
+    },
+    {
+      "value": "payer",
+      "label": {
+        "nl": "Betaler",
+        "en": "Payer"
+      }
+    },
+    {
+      "value": "representative",
+      "label": {
+        "nl": "Vertegenwoordiger",
+        "en": "Representative"
+      }
+    },
+    {
+      "value": "guarantor",
+      "label": {
+        "nl": "Borgsteller",
+        "en": "Guarantor"
+      }
+    },
+    {
+      "value": "occupant",
+      "label": {
+        "nl": "Bewoner",
+        "en": "Occupant"
+      }
+    }
+  ],
+  "ALERTSEVERITY": [
+    {
+      "value": "info",
+      "label": {
+        "nl": "Informatie",
+        "en": "Info"
+      }
+    },
+    {
+      "value": "warning",
+      "label": {
+        "nl": "Waarschuwing",
+        "en": "Warning"
+      }
+    },
+    {
+      "value": "critical",
+      "label": {
+        "nl": "Kritiek",
+        "en": "Critical"
+      }
+    }
+  ],
+  "ALERTSTATUS": [
+    {
+      "value": "open",
+      "label": {
+        "nl": "Open",
+        "en": "Open"
+      }
+    },
+    {
+      "value": "acknowledged",
+      "label": {
+        "nl": "Bevestigd",
+        "en": "Acknowledged"
+      }
+    },
+    {
+      "value": "resolved",
+      "label": {
+        "nl": "Opgelost",
+        "en": "Resolved"
+      }
+    },
+    {
+      "value": "dismissed",
+      "label": {
+        "nl": "Genegeerd",
+        "en": "Dismissed"
+      }
+    }
+  ],
+  "APPOINTMENTOPTIONSTATUS": [
+    {
+      "value": "offered",
+      "label": {
+        "nl": "Aangeboden",
+        "en": "Offered"
+      }
+    },
+    {
+      "value": "accepted",
+      "label": {
+        "nl": "Geaccepteerd",
+        "en": "Accepted"
+      }
+    },
+    {
+      "value": "declined",
+      "label": {
+        "nl": "Afgewezen",
+        "en": "Declined"
+      }
+    },
+    {
+      "value": "expired",
+      "label": {
+        "nl": "Verlopen",
+        "en": "Expired"
+      }
+    },
+    {
+      "value": "withdrawn",
+      "label": {
+        "nl": "Ingetrokken",
+        "en": "Withdrawn"
+      }
+    }
+  ],
+  "ASSETKIND": [
+    {
+      "value": "unit",
+      "label": {
+        "nl": "Eenheid",
+        "en": "Unit"
+      }
+    },
+    {
+      "value": "room",
+      "label": {
+        "nl": "Ruimte",
+        "en": "Room"
+      }
+    },
+    {
+      "value": "building",
+      "label": {
+        "nl": "Gebouw",
+        "en": "Building"
+      }
+    },
+    {
+      "value": "vehicle",
+      "label": {
+        "nl": "Voertuig",
+        "en": "Vehicle"
+      }
+    },
+    {
+      "value": "machine",
+      "label": {
+        "nl": "Machine",
+        "en": "Machine"
+      }
+    },
+    {
+      "value": "equipment",
+      "label": {
+        "nl": "Uitrusting",
+        "en": "Equipment"
+      }
+    },
+    {
+      "value": "other",
+      "label": {
+        "nl": "Overig",
+        "en": "Other"
+      }
+    }
+  ],
+  "BANKSTATEMENTLINESTATUS": [
+    {
+      "value": "unmatched",
+      "label": {
+        "nl": "Niet gematcht",
+        "en": "Unmatched"
+      }
+    },
+    {
+      "value": "suggested",
+      "label": {
+        "nl": "Voorstel",
+        "en": "Suggested"
+      }
+    },
+    {
+      "value": "matched",
+      "label": {
+        "nl": "Gematcht",
+        "en": "Matched"
+      }
+    },
+    {
+      "value": "partially_matched",
+      "label": {
+        "nl": "Deels gematcht",
+        "en": "Partially matched"
+      }
+    },
+    {
+      "value": "ignored",
+      "label": {
+        "nl": "Genegeerd",
+        "en": "Ignored"
+      }
+    }
+  ],
+  "BILLINGAMOUNTTYPE": [
+    {
+      "value": "perPeriod",
+      "label": {
+        "nl": "Per periode",
+        "en": "Per period"
+      }
+    },
+    {
+      "value": "perDay",
+      "label": {
+        "nl": "Per dag",
+        "en": "Per day"
+      }
+    }
+  ],
+  "BILLINGPERIOD": [
+    {
+      "value": "weekly",
+      "label": {
+        "nl": "Wekelijks",
+        "en": "Weekly"
+      }
+    },
+    {
+      "value": "monthly",
+      "label": {
+        "nl": "Maandelijks",
+        "en": "Monthly"
+      }
+    },
+    {
+      "value": "quarterly",
+      "label": {
+        "nl": "Per kwartaal",
+        "en": "Quarterly"
+      }
+    },
+    {
+      "value": "halfYearly",
+      "label": {
+        "nl": "Per half jaar",
+        "en": "Half-yearly"
+      }
+    },
+    {
+      "value": "yearly",
+      "label": {
+        "nl": "Jaarlijks",
+        "en": "Yearly"
+      }
+    }
+  ],
+  "BUDGETSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "submitted",
+      "label": {
+        "nl": "Ingediend",
+        "en": "Submitted"
+      }
+    },
+    {
+      "value": "approved",
+      "label": {
+        "nl": "Goedgekeurd",
+        "en": "Approved"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "closed",
+      "label": {
+        "nl": "Afgesloten",
+        "en": "Closed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "COMMUNICATIONDIRECTION": [
+    {
+      "value": "inbound",
+      "label": {
+        "nl": "Inkomend",
+        "en": "Inbound"
+      }
+    },
+    {
+      "value": "outbound",
+      "label": {
+        "nl": "Uitgaand",
+        "en": "Outbound"
+      }
+    }
+  ],
+  "DIRECTDEBITORDERSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "submitted",
+      "label": {
+        "nl": "Ingediend",
+        "en": "Submitted"
+      }
+    },
+    {
+      "value": "collected",
+      "label": {
+        "nl": "Geïncasseerd",
+        "en": "Collected"
+      }
+    },
+    {
+      "value": "reversed",
+      "label": {
+        "nl": "Gestorneerd",
+        "en": "Reversed"
+      }
+    },
+    {
+      "value": "failed",
+      "label": {
+        "nl": "Mislukt",
+        "en": "Failed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "EMPLOYEEROLEKIND": [
+    {
+      "value": "lead",
+      "label": {
+        "nl": "Leidend",
+        "en": "Lead"
+      }
+    },
+    {
+      "value": "member",
+      "label": {
+        "nl": "Lid",
+        "en": "Member"
+      }
+    },
+    {
+      "value": "manager",
+      "label": {
+        "nl": "Manager",
+        "en": "Manager"
+      }
+    },
+    {
+      "value": "delegate",
+      "label": {
+        "nl": "Gemachtigde",
+        "en": "Delegate"
+      }
+    },
+    {
+      "value": "temporary",
+      "label": {
+        "nl": "Tijdelijk",
+        "en": "Temporary"
+      }
+    }
+  ],
+  "EMPLOYMENTSTATUS": [
+    {
+      "value": "applicant",
+      "label": {
+        "nl": "Sollicitant",
+        "en": "Applicant"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "In dienst",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "suspended",
+      "label": {
+        "nl": "Geschorst",
+        "en": "Suspended"
+      }
+    },
+    {
+      "value": "on_leave",
+      "label": {
+        "nl": "Met verlof",
+        "en": "On leave"
+      }
+    },
+    {
+      "value": "terminated",
+      "label": {
+        "nl": "Uit dienst",
+        "en": "Terminated"
+      }
+    }
+  ],
+  "ENCUMBRANCEKIND": [
+    {
+      "value": "mortgage",
+      "label": {
+        "nl": "Hypotheek",
+        "en": "Mortgage"
+      }
+    },
+    {
+      "value": "lien",
+      "label": {
+        "nl": "Beslag",
+        "en": "Lien"
+      }
+    },
+    {
+      "value": "easement",
+      "label": {
+        "nl": "Erfdienstbaarheid",
+        "en": "Easement"
+      }
+    },
+    {
+      "value": "pledge",
+      "label": {
+        "nl": "Pandrecht",
+        "en": "Pledge"
+      }
+    },
+    {
+      "value": "other",
+      "label": {
+        "nl": "Overig",
+        "en": "Other"
+      }
+    }
+  ],
+  "FISCALPERIODSTATUS": [
+    {
+      "value": "open",
+      "label": {
+        "nl": "Open",
+        "en": "Open"
+      }
+    },
+    {
+      "value": "closing",
+      "label": {
+        "nl": "In afsluiting",
+        "en": "Closing"
+      }
+    },
+    {
+      "value": "closed",
+      "label": {
+        "nl": "Gesloten",
+        "en": "Closed"
+      }
+    }
+  ],
+  "GENDER": [
+    {
+      "value": "female",
+      "label": {
+        "nl": "Vrouw",
+        "en": "Female"
+      }
+    },
+    {
+      "value": "male",
+      "label": {
+        "nl": "Man",
+        "en": "Male"
+      }
+    },
+    {
+      "value": "other",
+      "label": {
+        "nl": "Anders",
+        "en": "Other"
+      }
+    },
+    {
+      "value": "unknown",
+      "label": {
+        "nl": "Onbekend",
+        "en": "Unknown"
+      }
+    },
+    {
+      "value": "undisclosed",
+      "label": {
+        "nl": "Niet opgegeven",
+        "en": "Undisclosed"
+      }
+    }
+  ],
+  "INVOICEDISPATCHCHANNEL": [
+    {
+      "value": "email",
+      "label": {
+        "nl": "E-mail",
+        "en": "Email"
+      }
+    },
+    {
+      "value": "letter",
+      "label": {
+        "nl": "Brief",
+        "en": "Letter"
+      }
+    },
+    {
+      "value": "sms",
+      "label": {
+        "nl": "Sms",
+        "en": "SMS"
+      }
+    },
+    {
+      "value": "portal",
+      "label": {
+        "nl": "Portaal",
+        "en": "Portal"
+      }
+    }
+  ],
+  "INVOICEKIND": [
+    {
+      "value": "sales",
+      "label": {
+        "nl": "Verkoop",
+        "en": "Sales"
+      }
+    },
+    {
+      "value": "purchase",
+      "label": {
+        "nl": "Inkoop",
+        "en": "Purchase"
+      }
+    },
+    {
+      "value": "credit",
+      "label": {
+        "nl": "Credit",
+        "en": "Credit"
+      }
+    }
+  ],
+  "INVOICESTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "issued",
+      "label": {
+        "nl": "Uitgegeven",
+        "en": "Issued"
+      }
+    },
+    {
+      "value": "sent",
+      "label": {
+        "nl": "Verstuurd",
+        "en": "Sent"
+      }
+    },
+    {
+      "value": "partially_paid",
+      "label": {
+        "nl": "Deels betaald",
+        "en": "Partially paid"
+      }
+    },
+    {
+      "value": "paid",
+      "label": {
+        "nl": "Betaald",
+        "en": "Paid"
+      }
+    },
+    {
+      "value": "credited",
+      "label": {
+        "nl": "Gecrediteerd",
+        "en": "Credited"
+      }
+    },
+    {
+      "value": "written_off",
+      "label": {
+        "nl": "Afgeboekt",
+        "en": "Written off"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "LEDGERACCOUNTTYPE": [
+    {
+      "value": "asset",
+      "label": {
+        "nl": "Activa",
+        "en": "Asset"
+      }
+    },
+    {
+      "value": "liability",
+      "label": {
+        "nl": "Passiva",
+        "en": "Liability"
+      }
+    },
+    {
+      "value": "equity",
+      "label": {
+        "nl": "Eigen vermogen",
+        "en": "Equity"
+      }
+    },
+    {
+      "value": "revenue",
+      "label": {
+        "nl": "Opbrengsten",
+        "en": "Revenue"
+      }
+    },
+    {
+      "value": "expense",
+      "label": {
+        "nl": "Kosten",
+        "en": "Expense"
+      }
+    },
+    {
+      "value": "control",
+      "label": {
+        "nl": "Tussenrekening",
+        "en": "Control account"
+      }
+    }
+  ],
+  "LEDGERPOSTINGSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "posted",
+      "label": {
+        "nl": "Geboekt",
+        "en": "Posted"
+      }
+    },
+    {
+      "value": "reversed",
+      "label": {
+        "nl": "Tegengeboekt",
+        "en": "Reversed"
+      }
+    }
+  ],
+  "LEDGERSIDE": [
+    {
+      "value": "debit",
+      "label": {
+        "nl": "Debet",
+        "en": "Debit"
+      }
+    },
+    {
+      "value": "credit",
+      "label": {
+        "nl": "Credit",
+        "en": "Credit"
+      }
+    }
+  ],
+  "MAINTENANCEORDERPARTYROLE": [
+    {
+      "value": "executor",
+      "label": {
+        "nl": "Uitvoerder",
+        "en": "Executor"
+      }
+    },
+    {
+      "value": "supervisor",
+      "label": {
+        "nl": "Toezichthouder",
+        "en": "Supervisor"
+      }
+    },
+    {
+      "value": "client",
+      "label": {
+        "nl": "Opdrachtgever",
+        "en": "Client"
+      }
+    },
+    {
+      "value": "contact",
+      "label": {
+        "nl": "Contactpersoon",
+        "en": "Contact"
+      }
+    },
+    {
+      "value": "inspector",
+      "label": {
+        "nl": "Inspecteur",
+        "en": "Inspector"
+      }
+    }
+  ],
+  "MAINTENANCEORDERSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "issued",
+      "label": {
+        "nl": "Verstrekt",
+        "en": "Issued"
+      }
+    },
+    {
+      "value": "scheduled",
+      "label": {
+        "nl": "Ingepland",
+        "en": "Scheduled"
+      }
+    },
+    {
+      "value": "in_progress",
+      "label": {
+        "nl": "In uitvoering",
+        "en": "In progress"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "settled",
+      "label": {
+        "nl": "Afgerekend",
+        "en": "Settled"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "MAINTENANCEPRIORITY": [
+    {
+      "value": "low",
+      "label": {
+        "nl": "Laag",
+        "en": "Low"
+      }
+    },
+    {
+      "value": "normal",
+      "label": {
+        "nl": "Normaal",
+        "en": "Normal"
+      }
+    },
+    {
+      "value": "high",
+      "label": {
+        "nl": "Hoog",
+        "en": "High"
+      }
+    },
+    {
+      "value": "urgent",
+      "label": {
+        "nl": "Spoed",
+        "en": "Urgent"
+      }
+    },
+    {
+      "value": "emergency",
+      "label": {
+        "nl": "Noodgeval",
+        "en": "Emergency"
+      }
+    }
+  ],
+  "MAINTENANCEREQUESTSTATUS": [
+    {
+      "value": "reported",
+      "label": {
+        "nl": "Gemeld",
+        "en": "Reported"
+      }
+    },
+    {
+      "value": "assessed",
+      "label": {
+        "nl": "Beoordeeld",
+        "en": "Assessed"
+      }
+    },
+    {
+      "value": "planned",
+      "label": {
+        "nl": "Gepland",
+        "en": "Planned"
+      }
+    },
+    {
+      "value": "in_progress",
+      "label": {
+        "nl": "In behandeling",
+        "en": "In progress"
+      }
+    },
+    {
+      "value": "resolved",
+      "label": {
+        "nl": "Opgelost",
+        "en": "Resolved"
+      }
+    },
+    {
+      "value": "rejected",
+      "label": {
+        "nl": "Afgewezen",
+        "en": "Rejected"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "MAINTENANCETASKSTATUS": [
+    {
+      "value": "planned",
+      "label": {
+        "nl": "Gepland",
+        "en": "Planned"
+      }
+    },
+    {
+      "value": "due",
+      "label": {
+        "nl": "Openstaand",
+        "en": "Due"
+      }
+    },
+    {
+      "value": "in_progress",
+      "label": {
+        "nl": "In uitvoering",
+        "en": "In progress"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "skipped",
+      "label": {
+        "nl": "Overgeslagen",
+        "en": "Skipped"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "MANDATESTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "suspended",
+      "label": {
+        "nl": "Opgeschort",
+        "en": "Suspended"
+      }
+    },
+    {
+      "value": "revoked",
+      "label": {
+        "nl": "Ingetrokken",
+        "en": "Revoked"
+      }
+    },
+    {
+      "value": "expired",
+      "label": {
+        "nl": "Verlopen",
+        "en": "Expired"
+      }
+    }
+  ],
+  "MONITORLOGSTATUS": [
+    {
+      "value": "open",
+      "label": {
+        "nl": "Open",
+        "en": "Open"
+      }
+    },
+    {
+      "value": "in_progress",
+      "label": {
+        "nl": "In behandeling",
+        "en": "In progress"
+      }
+    },
+    {
+      "value": "closed",
+      "label": {
+        "nl": "Gesloten",
+        "en": "Closed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "LEGALFORM": [
+    {
+      "value": "bv",
+      "label": {
+        "nl": "Besloten vennootschap (BV)",
+        "en": "Private limited company (BV)"
+      }
+    },
+    {
+      "value": "nv",
+      "label": {
+        "nl": "Naamloze vennootschap (NV)",
+        "en": "Public limited company (NV)"
+      }
+    },
+    {
+      "value": "stichting",
+      "label": {
+        "nl": "Stichting",
+        "en": "Foundation"
+      }
+    },
+    {
+      "value": "vereniging",
+      "label": {
+        "nl": "Vereniging",
+        "en": "Association"
+      }
+    },
+    {
+      "value": "cooperatie",
+      "label": {
+        "nl": "Coöperatie",
+        "en": "Cooperative"
+      }
+    },
+    {
+      "value": "sole_proprietorship",
+      "label": {
+        "nl": "Eenmanszaak",
+        "en": "Sole proprietorship"
+      }
+    },
+    {
+      "value": "vof",
+      "label": {
+        "nl": "Vennootschap onder firma (VOF)",
+        "en": "General partnership (VOF)"
+      }
+    },
+    {
+      "value": "cv",
+      "label": {
+        "nl": "Commanditaire vennootschap (CV)",
+        "en": "Limited partnership (CV)"
+      }
+    },
+    {
+      "value": "maatschap",
+      "label": {
+        "nl": "Maatschap",
+        "en": "Professional partnership"
+      }
+    },
+    {
+      "value": "overheid",
+      "label": {
+        "nl": "Overheidsorgaan",
+        "en": "Government body"
+      }
+    },
+    {
+      "value": "other",
+      "label": {
+        "nl": "Overig",
+        "en": "Other"
+      }
+    }
+  ],
+  "PAYMENTMETHODCODE": [
+    {
+      "value": "direct_debit",
+      "label": {
+        "nl": "Automatische incasso",
+        "en": "Direct debit"
+      }
+    },
+    {
+      "value": "bank_transfer",
+      "label": {
+        "nl": "Bankoverschrijving",
+        "en": "Bank transfer"
+      }
+    },
+    {
+      "value": "ideal",
+      "label": {
+        "nl": "iDEAL",
+        "en": "iDEAL"
+      }
+    },
+    {
+      "value": "card",
+      "label": {
+        "nl": "Kaartbetaling",
+        "en": "Card"
+      }
+    },
+    {
+      "value": "cash",
+      "label": {
+        "nl": "Contant",
+        "en": "Cash"
+      }
+    },
+    {
+      "value": "offset",
+      "label": {
+        "nl": "Verrekening",
+        "en": "Offset"
+      }
+    }
+  ],
+  "PAYMENTORDERSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "approved",
+      "label": {
+        "nl": "Goedgekeurd",
+        "en": "Approved"
+      }
+    },
+    {
+      "value": "submitted",
+      "label": {
+        "nl": "Ingediend",
+        "en": "Submitted"
+      }
+    },
+    {
+      "value": "paid",
+      "label": {
+        "nl": "Betaald",
+        "en": "Paid"
+      }
+    },
+    {
+      "value": "failed",
+      "label": {
+        "nl": "Mislukt",
+        "en": "Failed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "PAYMENTPLANSTATUS": [
+    {
+      "value": "proposed",
+      "label": {
+        "nl": "Voorgesteld",
+        "en": "Proposed"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "defaulted",
+      "label": {
+        "nl": "Niet nagekomen",
+        "en": "Defaulted"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "PAYMENTTERMS": [
+    {
+      "value": "immediate",
+      "label": {
+        "nl": "Direct",
+        "en": "Immediate"
+      }
+    },
+    {
+      "value": "net_14",
+      "label": {
+        "nl": "14 dagen netto",
+        "en": "Net 14 days"
+      }
+    },
+    {
+      "value": "net_30",
+      "label": {
+        "nl": "30 dagen netto",
+        "en": "Net 30 days"
+      }
+    },
+    {
+      "value": "net_60",
+      "label": {
+        "nl": "60 dagen netto",
+        "en": "Net 60 days"
+      }
+    },
+    {
+      "value": "end_of_month",
+      "label": {
+        "nl": "Einde maand",
+        "en": "End of month"
+      }
+    }
+  ],
+  "PRICEADJUSTMENTKIND": [
+    {
+      "value": "cpi_indexation",
+      "label": {
+        "nl": "CPI-indexering",
+        "en": "CPI indexation"
+      }
+    },
+    {
+      "value": "manual",
+      "label": {
+        "nl": "Handmatig",
+        "en": "Manual"
+      }
+    },
+    {
+      "value": "regulatory",
+      "label": {
+        "nl": "Wettelijk",
+        "en": "Regulatory"
+      }
+    }
+  ],
+  "PROCESSROLE": [
+    {
+      "value": "initiator",
+      "label": {
+        "nl": "Initiator",
+        "en": "Initiator"
+      }
+    },
+    {
+      "value": "owner",
+      "label": {
+        "nl": "Eigenaar",
+        "en": "Owner"
+      }
+    },
+    {
+      "value": "executor",
+      "label": {
+        "nl": "Uitvoerder",
+        "en": "Executor"
+      }
+    },
+    {
+      "value": "reviewer",
+      "label": {
+        "nl": "Beoordelaar",
+        "en": "Reviewer"
+      }
+    },
+    {
+      "value": "approver",
+      "label": {
+        "nl": "Fiatteur",
+        "en": "Approver"
+      }
+    },
+    {
+      "value": "observer",
+      "label": {
+        "nl": "Toeschouwer",
+        "en": "Observer"
+      }
+    }
+  ],
+  "PROJECTORDERSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "issued",
+      "label": {
+        "nl": "Verstrekt",
+        "en": "Issued"
+      }
+    },
+    {
+      "value": "in_progress",
+      "label": {
+        "nl": "In uitvoering",
+        "en": "In progress"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "settled",
+      "label": {
+        "nl": "Afgerekend",
+        "en": "Settled"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "PROJECTPHASEDECISION": [
+    {
+      "value": "proceed",
+      "label": {
+        "nl": "Doorgaan",
+        "en": "Proceed"
+      }
+    },
+    {
+      "value": "conditional",
+      "label": {
+        "nl": "Voorwaardelijk",
+        "en": "Conditional"
+      }
+    },
+    {
+      "value": "pause",
+      "label": {
+        "nl": "Pauzeren",
+        "en": "Pause"
+      }
+    },
+    {
+      "value": "cancel",
+      "label": {
+        "nl": "Stoppen",
+        "en": "Cancel"
+      }
+    }
+  ],
+  "PROJECTPHASESTATUS": [
+    {
+      "value": "planned",
+      "label": {
+        "nl": "Gepland",
+        "en": "Planned"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "on_hold",
+      "label": {
+        "nl": "Gepauzeerd",
+        "en": "On hold"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "PROJECTROLE": [
+    {
+      "value": "sponsor",
+      "label": {
+        "nl": "Opdrachtgever",
+        "en": "Sponsor"
+      }
+    },
+    {
+      "value": "lead",
+      "label": {
+        "nl": "Projectleider",
+        "en": "Lead"
+      }
+    },
+    {
+      "value": "member",
+      "label": {
+        "nl": "Teamlid",
+        "en": "Member"
+      }
+    },
+    {
+      "value": "advisor",
+      "label": {
+        "nl": "Adviseur",
+        "en": "Advisor"
+      }
+    },
+    {
+      "value": "observer",
+      "label": {
+        "nl": "Toeschouwer",
+        "en": "Observer"
+      }
+    },
+    {
+      "value": "stakeholder",
+      "label": {
+        "nl": "Belanghebbende",
+        "en": "Stakeholder"
+      }
+    }
+  ],
+  "PROJECTTASKSTATUS": [
+    {
+      "value": "todo",
+      "label": {
+        "nl": "Te doen",
+        "en": "To do"
+      }
+    },
+    {
+      "value": "in_progress",
+      "label": {
+        "nl": "In uitvoering",
+        "en": "In progress"
+      }
+    },
+    {
+      "value": "blocked",
+      "label": {
+        "nl": "Geblokkeerd",
+        "en": "Blocked"
+      }
+    },
+    {
+      "value": "completed",
+      "label": {
+        "nl": "Afgerond",
+        "en": "Completed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "PURCHASEORDERSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "approved",
+      "label": {
+        "nl": "Goedgekeurd",
+        "en": "Approved"
+      }
+    },
+    {
+      "value": "ordered",
+      "label": {
+        "nl": "Besteld",
+        "en": "Ordered"
+      }
+    },
+    {
+      "value": "partially_received",
+      "label": {
+        "nl": "Deels ontvangen",
+        "en": "Partially received"
+      }
+    },
+    {
+      "value": "received",
+      "label": {
+        "nl": "Ontvangen",
+        "en": "Received"
+      }
+    },
+    {
+      "value": "invoiced",
+      "label": {
+        "nl": "Gefactureerd",
+        "en": "Invoiced"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "QUOTESTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "sent",
+      "label": {
+        "nl": "Verstuurd",
+        "en": "Sent"
+      }
+    },
+    {
+      "value": "accepted",
+      "label": {
+        "nl": "Geaccepteerd",
+        "en": "Accepted"
+      }
+    },
+    {
+      "value": "rejected",
+      "label": {
+        "nl": "Afgewezen",
+        "en": "Rejected"
+      }
+    },
+    {
+      "value": "expired",
+      "label": {
+        "nl": "Verlopen",
+        "en": "Expired"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "ADDRESSTYPE": [
+    {
+      "value": "home",
+      "label": {
+        "nl": "Woonadres",
+        "en": "Home"
+      }
+    },
+    {
+      "value": "postal",
+      "label": {
+        "nl": "Postadres",
+        "en": "Postal"
+      }
+    },
+    {
+      "value": "visit",
+      "label": {
+        "nl": "Bezoekadres",
+        "en": "Visiting"
+      }
+    },
+    {
+      "value": "billing",
+      "label": {
+        "nl": "Factuuradres",
+        "en": "Billing"
+      }
+    },
+    {
+      "value": "other",
+      "label": {
+        "nl": "Overig",
+        "en": "Other"
+      }
+    }
+  ],
+  "RELATIONROLETYPE": [
+    {
+      "value": "customer",
+      "label": {
+        "nl": "Klant",
+        "en": "Customer"
+      }
+    },
+    {
+      "value": "supplier",
+      "label": {
+        "nl": "Leverancier",
+        "en": "Supplier"
+      }
+    },
+    {
+      "value": "employee",
+      "label": {
+        "nl": "Medewerker",
+        "en": "Employee"
+      }
+    },
+    {
+      "value": "tenant",
+      "label": {
+        "nl": "Huurder",
+        "en": "Tenant"
+      }
+    },
+    {
+      "value": "owner",
+      "label": {
+        "nl": "Eigenaar",
+        "en": "Owner"
+      }
+    },
+    {
+      "value": "contractor",
+      "label": {
+        "nl": "Aannemer",
+        "en": "Contractor"
+      }
+    },
+    {
+      "value": "partner",
+      "label": {
+        "nl": "Partner",
+        "en": "Partner"
+      }
+    },
+    {
+      "value": "prospect",
+      "label": {
+        "nl": "Prospect",
+        "en": "Prospect"
+      }
+    },
+    {
+      "value": "other",
+      "label": {
+        "nl": "Overig",
+        "en": "Other"
+      }
+    }
+  ],
+  "ROLEASSIGNMENTSTATUS": [
+    {
+      "value": "pending",
+      "label": {
+        "nl": "In afwachting",
+        "en": "Pending"
+      }
+    },
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "suspended",
+      "label": {
+        "nl": "Opgeschort",
+        "en": "Suspended"
+      }
+    },
+    {
+      "value": "ended",
+      "label": {
+        "nl": "Beëindigd",
+        "en": "Ended"
+      }
+    }
+  ],
+  "SEPASEQUENCETYPE": [
+    {
+      "value": "first",
+      "label": {
+        "nl": "Eerste",
+        "en": "First"
+      }
+    },
+    {
+      "value": "recurrent",
+      "label": {
+        "nl": "Doorlopend",
+        "en": "Recurrent"
+      }
+    },
+    {
+      "value": "one_off",
+      "label": {
+        "nl": "Eenmalig",
+        "en": "One-off"
+      }
+    },
+    {
+      "value": "final",
+      "label": {
+        "nl": "Laatste",
+        "en": "Final"
+      }
+    }
+  ],
+  "SUPPLIERROLE": [
+    {
+      "value": "maintenance",
+      "label": {
+        "nl": "Onderhoud",
+        "en": "Maintenance"
+      }
+    },
+    {
+      "value": "materials",
+      "label": {
+        "nl": "Materialen",
+        "en": "Materials"
+      }
+    },
+    {
+      "value": "services",
+      "label": {
+        "nl": "Diensten",
+        "en": "Services"
+      }
+    },
+    {
+      "value": "construction",
+      "label": {
+        "nl": "Bouw",
+        "en": "Construction"
+      }
+    },
+    {
+      "value": "utilities",
+      "label": {
+        "nl": "Nutsvoorzieningen",
+        "en": "Utilities"
+      }
+    },
+    {
+      "value": "other",
+      "label": {
+        "nl": "Overig",
+        "en": "Other"
+      }
+    }
+  ],
+  "VACANCYSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "open",
+      "label": {
+        "nl": "Open",
+        "en": "Open"
+      }
+    },
+    {
+      "value": "on_hold",
+      "label": {
+        "nl": "Gepauzeerd",
+        "en": "On hold"
+      }
+    },
+    {
+      "value": "filled",
+      "label": {
+        "nl": "Vervuld",
+        "en": "Filled"
+      }
+    },
+    {
+      "value": "closed",
+      "label": {
+        "nl": "Gesloten",
+        "en": "Closed"
+      }
+    },
+    {
+      "value": "cancelled",
+      "label": {
+        "nl": "Geannuleerd",
+        "en": "Cancelled"
+      }
+    }
+  ],
+  "VALUATIONKIND": [
+    {
+      "value": "market",
+      "label": {
+        "nl": "Marktwaarde",
+        "en": "Market value"
+      }
+    },
+    {
+      "value": "appraisal",
+      "label": {
+        "nl": "Taxatie",
+        "en": "Appraisal"
+      }
+    },
+    {
+      "value": "policy",
+      "label": {
+        "nl": "Beleidswaarde",
+        "en": "Policy value"
+      }
+    },
+    {
+      "value": "tax",
+      "label": {
+        "nl": "WOZ-waarde",
+        "en": "Tax value"
+      }
+    }
+  ],
+  "VATRETURNSTATUS": [
+    {
+      "value": "draft",
+      "label": {
+        "nl": "Concept",
+        "en": "Draft"
+      }
+    },
+    {
+      "value": "submitted",
+      "label": {
+        "nl": "Ingediend",
+        "en": "Submitted"
+      }
+    },
+    {
+      "value": "accepted",
+      "label": {
+        "nl": "Geaccepteerd",
+        "en": "Accepted"
+      }
+    },
+    {
+      "value": "paid",
+      "label": {
+        "nl": "Betaald",
+        "en": "Paid"
+      }
+    },
+    {
+      "value": "corrected",
+      "label": {
+        "nl": "Gecorrigeerd",
+        "en": "Corrected"
+      }
+    }
+  ],
+  "VATTYPE": [
+    {
+      "value": "none",
+      "label": {
+        "nl": "Geen btw",
+        "en": "None"
+      }
+    },
+    {
+      "value": "zero",
+      "label": {
+        "nl": "Nultarief",
+        "en": "Zero rate"
+      }
+    },
+    {
+      "value": "low",
+      "label": {
+        "nl": "Laag tarief",
+        "en": "Low rate"
+      }
+    },
+    {
+      "value": "high",
+      "label": {
+        "nl": "Hoog tarief",
+        "en": "High rate"
+      }
+    },
+    {
+      "value": "exempt",
+      "label": {
+        "nl": "Vrijgesteld",
+        "en": "Exempt"
+      }
+    },
+    {
+      "value": "reverse_charge",
+      "label": {
+        "nl": "Verlegd",
+        "en": "Reverse charge"
       }
     }
   ]

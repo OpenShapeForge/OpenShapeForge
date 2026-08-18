@@ -1,0 +1,264 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: OrgUnit
+title: Organizational Unit
+description: A unit in the organizational structure (department, team, division). Self-referential parent supports a hierarchy.
+language: en
+displayTemplate: "{{code}} {{name}}"
+filterField: code
+labels:
+  en: Org unit
+  nl: Organisatorische eenheid
+domains:
+  - hr
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique code identifying the org unit.
+      nl: Tenant-unieke code voor de organisatorische eenheid.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Display name of the org unit.
+      nl: Weergavenaam van de organisatorische eenheid.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description of the org unit.
+      nl: Optionele omschrijving van de organisatorische eenheid.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 1000
+  - key: establishedAt
+    valueType: date
+    required: false
+    label:
+      en: Established at
+      nl: Opgericht op
+    description:
+      en: Date on which the org unit was established.
+      nl: Datum waarop de organisatorische eenheid is opgericht.
+    persisted:
+      column: established_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the org unit in an external context.
+      nl: Functionele of zakelijke code van de organisatorische eenheid in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: parentOrgUnit
+    kind: belongsTo
+    target: OrgUnit
+    foreignKey: parent_org_unit_id
+    label:
+      en: Parent org unit
+      nl: Bovenliggende eenheid
+  - key: relationGroups
+    kind: hasMany
+    target: RelationGroup
+    foreignKey: org_unit_id
+    label:
+      en: Relation groups
+      nl: Relatiegroepen
+  - key: employeeRoles
+    kind: hasMany
+    target: EmployeeRole
+    foreignKey: org_unit_id
+    label:
+      en: Employee roles
+      nl: Medewerkerrollen
+  - key: organizationPermissions
+    kind: hasMany
+    target: OrganizationPermission
+    foreignKey: target_org_unit_id
+    label:
+      en: Organization permissions
+      nl: Organisatierechten
+  - key: userOrganizationPermissions
+    kind: hasMany
+    target: UserOrganizationPermission
+    foreignKey: target_org_unit_id
+    label:
+      en: User organization permissions
+      nl: Gebruikersrechten per organisatie
+ui:
+  routes:
+    list:
+      en: /org-units
+      nl: /organisatorische-eenheden
+    detail:
+      en: /org-units/:id
+      nl: /organisatorische-eenheden/:id
+    create:
+      en: /org-units/create
+      nl: /organisatorische-eenheden/aanmaken
+    edit:
+      en: /org-units/:id/edit
+      nl: /organisatorische-eenheden/:id/bewerken
+    delete:
+      en: /org-units/:id/delete
+      nl: /organisatorische-eenheden/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Org units
+        nl: Organisatorische eenheden
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+        - key: establishedAt
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /org-units/:id
+        nl: /organisatorische-eenheden/:id
+    detail:
+      header:
+        title: "{{code}} {{name}}"
+        subtitle: "{{description}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Unit details
+                nl: Eenheidgegevens
+              fields:
+                - code
+                - name
+                - establishedAt
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create org unit
+            nl: Organisatorische eenheid aanmaken
+          groups:
+            - title:
+                en: Unit details
+                nl: Eenheidgegevens
+              fields:
+                - code
+                - name
+                - establishedAt
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit org unit
+            nl: Organisatorische eenheid bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Organization.All.Read
+      - Organization.All.ReadWrite
+    create:
+      - Organization.All.ReadWrite
+    update:
+      - Organization.All.ReadWrite
+    delete:
+      - Organization.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

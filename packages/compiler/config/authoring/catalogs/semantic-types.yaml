@@ -490,30 +490,30 @@ types:
     listUrl: /api/workflow/designer/core-entity-options?entity=document
     displayTemplate: "{{title}}"
     filterField: title
-  dossierTypeId:
+  caseFileTypeId:
     kind: entityId
-    label: { en: "Dossier Type ID", nl: "Dossiertype ID" }
-    pluralLabel: { en: "Dossier Type IDs", nl: "Dossiertype IDs" }
+    label: { en: "Case file type ID", nl: "Dossiertype ID" }
+    pluralLabel: { en: "Case file type IDs", nl: "Dossiertype IDs" }
     valueType: string
     icon: Database
     classification:
       sensitivity: internal
       category: workflow
-    entity: dossier-type
-    listUrl: /api/workflow/designer/core-entity-options?entity=dossier-type
+    entity: case-file-type
+    listUrl: /api/workflow/designer/core-entity-options?entity=case-file-type
     displayTemplate: "{{name}}"
     filterField: name
-  dossierId:
+  caseFileId:
     kind: entityId
-    label: { en: "Dossier ID", nl: "Dossier ID" }
-    pluralLabel: { en: "Dossier IDs", nl: "Dossier IDs" }
+    label: { en: "Case file ID", nl: "Dossier ID" }
+    pluralLabel: { en: "Case file IDs", nl: "Dossier IDs" }
     valueType: string
     icon: Database
     classification:
       sensitivity: internal
       category: workflow
-    entity: dossier
-    listUrl: /api/workflow/designer/core-entity-options?entity=dossier
+    entity: case-file
+    listUrl: /api/workflow/designer/core-entity-options?entity=case-file
     displayTemplate: "{{title}}"
     filterField: title
   labelRuleId:

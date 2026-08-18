@@ -1,0 +1,249 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ConditionAssessment
+title: Condition Assessment
+description: Periodic assessment of an asset's condition, scoring against a configurable scale and optionally linked to an inspection report.
+language: en
+displayTemplate: "{{assessedAt}}"
+filterField: id
+labels:
+  en: Condition assessment
+  nl: Conditiemeting
+domains:
+  - quality
+fields:
+  - key: assessedAt
+    valueType: datetime
+    required: true
+    label:
+      en: Assessed at
+      nl: Beoordeeld op
+    description:
+      en: Timestamp when the assessment was performed.
+      nl: Tijdstip waarop de beoordeling is uitgevoerd.
+    persisted:
+      column: assessed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: score
+    valueType: number
+    required: false
+    label:
+      en: Score
+      nl: Score
+    description:
+      en: Numeric assessment score.
+      nl: Numerieke beoordelingsscore.
+    persisted:
+      column: score
+      storageClass: core
+  - key: scoreScale
+    valueType: string
+    required: false
+    label:
+      en: Score scale
+      nl: Scoreschaal
+    description:
+      en: Scale the score is expressed on.
+      nl: Schaal waarop de score is uitgedrukt.
+    persisted:
+      column: score_scale
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: ASSESSMENTSCALE
+        clearable: true
+  - key: notes
+    valueType: string
+    required: false
+    label:
+      en: Notes
+      nl: Notities
+    description:
+      en: Free-form notes about the assessment.
+      nl: Vrije notities over de beoordeling.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: notes
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 5000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the assessment in an external context.
+      nl: Functionele of zakelijke code van de beoordeling in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: assessedBy
+    kind: belongsTo
+    target: Relation
+    foreignKey: assessed_by_relation_id
+    label:
+      en: Assessed by
+      nl: Beoordeeld door
+  - key: inspectionReport
+    kind: belongsTo
+    target: InspectionReport
+    foreignKey: inspection_report_id
+    label:
+      en: Inspection report
+      nl: Inspectierapport
+  - key: asset
+    kind: belongsTo
+    target: Asset
+    foreignKey: asset_reference
+    label:
+      en: Asset
+      nl: Object
+ui:
+  routes:
+    list:
+      en: /condition-assessments
+      nl: /conditiemetingen
+    detail:
+      en: /condition-assessments/:id
+      nl: /conditiemetingen/:id
+    create:
+      en: /condition-assessments/create
+      nl: /conditiemetingen/aanmaken
+    edit:
+      en: /condition-assessments/:id/edit
+      nl: /conditiemetingen/:id/bewerken
+    delete:
+      en: /condition-assessments/:id/delete
+      nl: /conditiemetingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Condition assessments
+        nl: Conditiemetingen
+      columns:
+        - key: assessedAt
+          sortable: true
+        - key: score
+          sortable: true
+        - key: scoreScale
+          sortable: true
+      defaultSort:
+        key: assessedAt
+        direction: desc
+      rowLink:
+        en: /condition-assessments/:id
+        nl: /conditiemetingen/:id
+    detail:
+      header:
+        title: "{{assessedAt}}"
+        subtitle: "{{score}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Assessment details
+                nl: Beoordelingsgegevens
+              fields:
+                - assessedAt
+                - score
+                - scoreScale
+            - title:
+                en: Notes
+                nl: Notities
+              fields:
+                - notes
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create condition assessment
+            nl: Conditiemeting aanmaken
+          groups:
+            - title:
+                en: Assessment details
+                nl: Beoordelingsgegevens
+              fields:
+                - assessedAt
+                - score
+                - scoreScale
+            - title:
+                en: Notes
+                nl: Notities
+              fields:
+                - notes
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit condition assessment
+            nl: Conditiemeting bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Quality.All.Read
+      - Quality.All.ReadWrite
+    create:
+      - Quality.All.ReadWrite
+    update:
+      - Quality.All.ReadWrite
+    delete:
+      - Quality.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

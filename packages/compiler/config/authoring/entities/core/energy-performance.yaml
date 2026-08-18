@@ -1,0 +1,243 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: EnergyPerformance
+title: Energy Performance
+description: Energy performance certificate or label issued for an asset, scoped to a validity period.
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: Energy performance
+  nl: Energieprestatie
+domains:
+  - energy
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique energy performance code.
+      nl: Tenant-unieke code van de energieprestatie.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: validFrom
+    valueType: date
+    required: true
+    label:
+      en: Valid from
+      nl: Geldig vanaf
+    description:
+      en: Date from which the energy performance is valid.
+      nl: Datum vanaf wanneer de energieprestatie geldig is.
+    persisted:
+      column: valid_from
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: validTo
+    valueType: date
+    required: false
+    label:
+      en: Valid to
+      nl: Geldig tot
+    description:
+      en: Date until which the energy performance is valid.
+      nl: Datum tot wanneer de energieprestatie geldig is.
+    persisted:
+      column: valid_to
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: energyClass
+    valueType: string
+    required: false
+    label:
+      en: Energy class
+      nl: Energieklasse
+    description:
+      en: Energy class label (e.g. "A", "A+", "G").
+      nl: Energieklasselabel (bv. "A", "A+", "G").
+    validation:
+      maxLength: 10
+    persisted:
+      column: energy_class
+      storageClass: core
+  - key: energyIndex
+    valueType: number
+    required: false
+    label:
+      en: Energy index
+      nl: Energie-index
+    description:
+      en: Numeric energy index value.
+      nl: Numerieke energie-indexwaarde.
+    persisted:
+      column: energy_index
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the energy performance in an external context.
+      nl: Functionele of zakelijke code van de energieprestatie in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: asset
+    kind: belongsTo
+    target: Asset
+    foreignKey: asset_reference
+    label:
+      en: Asset
+      nl: Object
+ui:
+  routes:
+    list:
+      en: /energy-performances
+      nl: /energieprestaties
+    detail:
+      en: /energy-performances/:id
+      nl: /energieprestaties/:id
+    create:
+      en: /energy-performances/create
+      nl: /energieprestaties/aanmaken
+    edit:
+      en: /energy-performances/:id/edit
+      nl: /energieprestaties/:id/bewerken
+    delete:
+      en: /energy-performances/:id/delete
+      nl: /energieprestaties/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Energy performances
+        nl: Energieprestaties
+      columns:
+        - key: code
+          sortable: true
+        - key: energyClass
+          sortable: true
+        - key: energyIndex
+          sortable: true
+        - key: validFrom
+          sortable: true
+        - key: validTo
+          sortable: true
+      defaultSort:
+        key: validFrom
+        direction: desc
+      rowLink:
+        en: /energy-performances/:id
+        nl: /energieprestaties/:id
+    detail:
+      header:
+        title: "{{code}}"
+        subtitle: "{{energyClass}}"
+        badges:
+          - energyClass
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Performance details
+                nl: Prestatiegegevens
+              fields:
+                - code
+                - energyClass
+                - energyIndex
+                - validFrom
+                - validTo
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create energy performance
+            nl: Energieprestatie aanmaken
+          groups:
+            - title:
+                en: Performance details
+                nl: Prestatiegegevens
+              fields:
+                - code
+                - energyClass
+                - energyIndex
+                - validFrom
+                - validTo
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit energy performance
+            nl: Energieprestatie bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Energy.All.Read
+      - Energy.All.ReadWrite
+    create:
+      - Energy.All.ReadWrite
+    update:
+      - Energy.All.ReadWrite
+    delete:
+      - Energy.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

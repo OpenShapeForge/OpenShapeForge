@@ -1,0 +1,205 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: SlaPolicy
+title: SLA Policy
+description: A service level policy that drives deadlines and milestones.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: SLA Policy
+  nl: SLA-beleid
+domains:
+  - cases
+  - service
+authorization:
+  roles:
+    read:
+      - Cases.All.Read
+      - Cases.All.ReadWrite
+    create:
+      - Organization.All.ReadWrite
+    update:
+      - Organization.All.ReadWrite
+    delete:
+      - Organization.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    validation:
+      maxLength: 4000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 4000
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: SLAPOLICYSTATUS
+        clearable: false
+  - key: targetEntity
+    valueType: string
+    required: true
+    label:
+      en: Target entity
+      nl: Doelentiteit
+    persisted:
+      column: target_entity
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: SLAPOLICYTARGETENTITY
+        clearable: false
+  - key: firstResponseMinutes
+    valueType: integer
+    required: false
+    label:
+      en: First response minutes
+      nl: Minuten tot eerste reactie
+    persisted:
+      column: first_response_minutes
+      storageClass: core
+  - key: resolutionMinutes
+    valueType: integer
+    required: false
+    label:
+      en: Resolution minutes
+      nl: Minuten tot oplossing
+    persisted:
+      column: resolution_minutes
+      storageClass: core
+  - key: breachWarningMinutes
+    valueType: integer
+    required: false
+    label:
+      en: Breach warning minutes
+      nl: Minuten voor waarschuwing
+    persisted:
+      column: breach_warning_minutes
+      storageClass: core
+  - key: escalationAfterMinutes
+    valueType: integer
+    required: false
+    label:
+      en: Escalation after minutes
+      nl: Escaleren na minuten
+    persisted:
+      column: escalation_after_minutes
+      storageClass: core
+  - key: businessHoursProfile
+    valueType: string
+    required: false
+    label:
+      en: Business hours profile
+      nl: Bedrijfsurenprofiel
+    validation:
+      maxLength: 200
+    persisted:
+      column: business_hours_profile
+      storageClass: core
+  - key: pauseOnWaitingCustomer
+    valueType: boolean
+    required: true
+    label:
+      en: Pause on waiting for customer
+      nl: Pauzeren bij wachten op klant
+    defaultValue: true
+    persisted:
+      column: pause_on_waiting_customer
+      storageClass: core
+  - key: pauseOnPendingExternal
+    valueType: boolean
+    required: true
+    label:
+      en: Pause on pending external dependency
+      nl: Pauzeren bij externe afhankelijkheid
+    defaultValue: true
+    persisted:
+      column: pause_on_pending_external
+      storageClass: core
+  - key: autoCloseOnResolution
+    valueType: boolean
+    required: true
+    label:
+      en: Auto-close on resolution
+      nl: Automatisch sluiten na oplossing
+    defaultValue: false
+    persisted:
+      column: auto_close_on_resolution
+      storageClass: core
+relationships:
+  - key: escalationQueue
+    kind: belongsTo
+    target: WorkQueue
+    foreignKey: escalation_queue_id
+    label:
+      en: Escalation queue
+      nl: Escalatiequeue
+  - key: cases
+    kind: hasMany
+    target: Case
+    foreignKey: sla_policy_id
+    label:
+      en: Cases
+      nl: Zaken
+  - key: milestones
+    kind: hasMany
+    target: Milestone
+    foreignKey: sla_policy_id
+    label:
+      en: Milestones
+      nl: Mijlpalen
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

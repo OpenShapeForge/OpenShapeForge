@@ -1,0 +1,243 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Warranty
+title: Warranty
+description: Warranty granted by a supplier on an asset, scoped to a validity period.
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: Warranty
+  nl: Garantie
+domains:
+  - maintenance
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique warranty code.
+      nl: Tenant-unieke garantiecode.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Description of the warranty terms.
+      nl: Omschrijving van de garantievoorwaarden.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 5000
+  - key: startDate
+    valueType: date
+    required: true
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Date from which the warranty is effective.
+      nl: Datum vanaf wanneer de garantie geldig is.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: true
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Date until which the warranty is effective.
+      nl: Datum tot wanneer de garantie geldig is.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the warranty in an external context.
+      nl: Functionele of zakelijke code van de garantie in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: supplier
+    kind: belongsTo
+    target: Relation
+    foreignKey: supplier_relation_id
+    label:
+      en: Supplier
+      nl: Leverancier
+  - key: asset
+    kind: belongsTo
+    target: Asset
+    foreignKey: asset_reference
+    label:
+      en: Asset
+      nl: Object
+ui:
+  routes:
+    list:
+      en: /warranties
+      nl: /garanties
+    detail:
+      en: /warranties/:id
+      nl: /garanties/:id
+    create:
+      en: /warranties/create
+      nl: /garanties/aanmaken
+    edit:
+      en: /warranties/:id/edit
+      nl: /garanties/:id/bewerken
+    delete:
+      en: /warranties/:id/delete
+      nl: /garanties/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Warranties
+        nl: Garanties
+      columns:
+        - key: code
+          sortable: true
+        - key: startDate
+          sortable: true
+        - key: endDate
+          sortable: true
+      defaultSort:
+        key: endDate
+        direction: asc
+      rowLink:
+        en: /warranties/:id
+        nl: /garanties/:id
+    detail:
+      header:
+        title: "{{code}}"
+        subtitle: "{{endDate}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Warranty details
+                nl: Garantiegegevens
+              fields:
+                - code
+                - startDate
+                - endDate
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create warranty
+            nl: Garantie aanmaken
+          groups:
+            - title:
+                en: Warranty details
+                nl: Garantiegegevens
+              fields:
+                - code
+                - startDate
+                - endDate
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit warranty
+            nl: Garantie bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Maintenance.All.Read
+      - Maintenance.All.ReadWrite
+    create:
+      - Maintenance.All.ReadWrite
+    update:
+      - Maintenance.All.ReadWrite
+    delete:
+      - Maintenance.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

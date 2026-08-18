@@ -1,0 +1,236 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: AddressAssignment
+title: Address Assignment
+description: A dated assignment of an address to a relation, optionally scoped to a role.
+language: en
+displayTemplate: "{{role}}"
+filterField: role
+labels:
+  en: Address Assignment
+  nl: Adrestoewijzing
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relations.All.Read
+      - Relations.All.ReadWrite
+    create:
+      - Relations.All.ReadWrite
+    update:
+      - Relations.All.ReadWrite
+    delete:
+      - Relations.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: type
+    valueType: string
+    required: true
+    label:
+      en: Type
+      nl: Type
+    description:
+      en: Usage type of the assignment, such as residential, postal, billing, or visiting.
+      nl: Gebruikstype van de toewijzing, zoals woon-, post-, factuur- of bezoekadres.
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: type
+      storageClass: core
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Date from which the address assignment is effective.
+      nl: Datum vanaf wanneer de adrestoewijzing geldig is.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Date until which the address assignment is effective.
+      nl: Datum tot wanneer de adrestoewijzing geldig is.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: isPrimary
+    valueType: boolean
+    required: false
+    label:
+      en: Primary
+      nl: Primair
+    description:
+      en: Whether this is the primary address assignment of its type.
+      nl: Of dit de primaire adrestoewijzing van dit type is.
+    persisted:
+      column: is_primary
+      storageClass: core
+  - key: notes
+    valueType: string
+    required: false
+    label:
+      en: Notes
+      nl: Notities
+    description:
+      en: Additional notes about the address assignment.
+      nl: Aanvullende notities bij de adrestoewijzing.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: notes
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: address
+    kind: belongsTo
+    target: Address
+    foreignKey: address_id
+    label:
+      en: Address
+      nl: Adres
+  - key: relationRole
+    kind: belongsTo
+    target: RelationRole
+    foreignKey: relation_role_id
+    label:
+      en: Relation role
+      nl: Relatierol
+ui:
+  routes:
+    list:
+      en: /address-assignments
+      nl: /adrestoewijzingen
+    detail:
+      en: /address-assignments/:id
+      nl: /adrestoewijzingen/:id
+    create:
+      en: /address-assignments/create
+      nl: /adrestoewijzingen/aanmaken
+    edit:
+      en: /address-assignments/:id/edit
+      nl: /adrestoewijzingen/:id/bewerken
+    delete:
+      en: /address-assignments/:id/delete
+      nl: /adrestoewijzingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Address Assignments
+        nl: Adrestoewijzingen
+      columns:
+        - key: type
+          sortable: true
+        - key: startDate
+          sortable: true
+        - key: endDate
+          sortable: true
+        - key: isPrimary
+          sortable: true
+      defaultSort:
+        key: type
+        direction: asc
+      rowLink:
+        en: /address-assignments/:id
+        nl: /adrestoewijzingen/:id
+    detail:
+      header:
+        title: "{{type}}"
+        subtitle: "{{startDate}} – {{endDate}}"
+        badges:
+          - type
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Assignment
+                nl: Toewijzing
+              fields:
+                - type
+                - startDate
+                - endDate
+                - isPrimary
+            - title:
+                en: Notes
+                nl: Notities
+              fields:
+                - notes
+    form:
+      variants:
+        create:
+          title:
+            en: Create address assignment
+            nl: Adrestoewijzing aanmaken
+          groups:
+            - title:
+                en: Assignment
+                nl: Toewijzing
+              fields:
+                - type
+                - startDate
+                - endDate
+                - isPrimary
+            - title:
+                en: Notes
+                nl: Notities
+              fields:
+                - notes
+        edit:
+          extends: create
+          title:
+            en: Edit address assignment
+            nl: Adrestoewijzing bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

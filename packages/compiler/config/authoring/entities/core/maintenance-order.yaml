@@ -1,0 +1,407 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: MaintenanceOrder
+title: Maintenance Order
+description: Order to execute maintenance work; may originate from a maintenance request and bill against an agreement.
+language: en
+displayTemplate: "{{code}} {{title}}"
+filterField: code
+labels:
+  en: Maintenance order
+  nl: Onderhoudsorder
+domains:
+  - maintenance
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique maintenance order code.
+      nl: Tenant-unieke code van de onderhoudsorder.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: title
+    valueType: string
+    required: true
+    label:
+      en: Title
+      nl: Titel
+    description:
+      en: Short title describing the maintenance order.
+      nl: Korte titel die de onderhoudsorder omschrijft.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: title
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Detailed description of the work to be performed.
+      nl: Uitgebreide omschrijving van het uit te voeren werk.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 5000
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the maintenance order.
+      nl: Levenscyclusstatus van de onderhoudsorder.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: MAINTENANCEORDERSTATUS
+        clearable: false
+  - key: issueDate
+    valueType: date
+    required: true
+    label:
+      en: Issue date
+      nl: Uitgiftedatum
+    description:
+      en: Date the order was issued.
+      nl: Datum waarop de order is uitgegeven.
+    persisted:
+      column: issue_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: plannedStartDate
+    valueType: date
+    required: false
+    label:
+      en: Planned start date
+      nl: Geplande startdatum
+    description:
+      en: Date on which the work is planned to start.
+      nl: Datum waarop het werk gepland staat te starten.
+    persisted:
+      column: planned_start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: plannedEndDate
+    valueType: date
+    required: false
+    label:
+      en: Planned end date
+      nl: Geplande einddatum
+    description:
+      en: Date on which the work is planned to end.
+      nl: Datum waarop het werk gepland staat te eindigen.
+    persisted:
+      column: planned_end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: actualStartDate
+    valueType: date
+    required: false
+    label:
+      en: Actual start date
+      nl: Werkelijke startdatum
+    description:
+      en: Date on which the work actually started.
+      nl: Datum waarop het werk daadwerkelijk is gestart.
+    persisted:
+      column: actual_start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: actualEndDate
+    valueType: date
+    required: false
+    label:
+      en: Actual end date
+      nl: Werkelijke einddatum
+    description:
+      en: Date on which the work actually ended.
+      nl: Datum waarop het werk daadwerkelijk is geëindigd.
+    persisted:
+      column: actual_end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: currencyCode
+    valueType: string
+    required: true
+    label:
+      en: Currency
+      nl: Valuta
+    description:
+      en: ISO 4217 currency code for the order amounts.
+      nl: ISO 4217 valutacode voor de bedragen op de order.
+    defaultValue: EUR
+    validation:
+      minLength: 3
+      maxLength: 3
+    persisted:
+      column: currency_code
+      storageClass: core
+  - key: estimatedAmount
+    valueType: number
+    required: false
+    label:
+      en: Estimated amount
+      nl: Geraamd bedrag
+    description:
+      en: Estimated total amount for the order.
+      nl: Geraamd totaalbedrag voor de order.
+    semanticType: currency
+    persisted:
+      column: estimated_amount
+      storageClass: core
+  - key: actualAmount
+    valueType: number
+    required: false
+    label:
+      en: Actual amount
+      nl: Werkelijk bedrag
+    description:
+      en: Actual total amount realized for the order.
+      nl: Werkelijk gerealiseerd totaalbedrag voor de order.
+    semanticType: currency
+    persisted:
+      column: actual_amount
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the maintenance order in an external context.
+      nl: Functionele of zakelijke code van de onderhoudsorder in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: maintenanceRequest
+    kind: belongsTo
+    target: MaintenanceRequest
+    foreignKey: maintenance_request_id
+    label:
+      en: Maintenance request
+      nl: Onderhoudsverzoek
+  - key: agreement
+    kind: belongsTo
+    target: Agreement
+    foreignKey: agreement_id
+    label:
+      en: Agreement
+      nl: Overeenkomst
+  - key: asset
+    kind: belongsTo
+    target: Asset
+    foreignKey: asset_reference
+    label:
+      en: Asset
+      nl: Object
+ui:
+  routes:
+    list:
+      en: /maintenance-orders
+      nl: /onderhoudsorders
+    detail:
+      en: /maintenance-orders/:id
+      nl: /onderhoudsorders/:id
+    create:
+      en: /maintenance-orders/create
+      nl: /onderhoudsorders/aanmaken
+    edit:
+      en: /maintenance-orders/:id/edit
+      nl: /onderhoudsorders/:id/bewerken
+    delete:
+      en: /maintenance-orders/:id/delete
+      nl: /onderhoudsorders/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Maintenance orders
+        nl: Onderhoudsorders
+      columns:
+        - key: code
+          sortable: true
+        - key: title
+          sortable: true
+        - key: status
+          sortable: true
+        - key: issueDate
+          sortable: true
+        - key: plannedStartDate
+          sortable: true
+      defaultSort:
+        key: issueDate
+        direction: desc
+      rowLink:
+        en: /maintenance-orders/:id
+        nl: /onderhoudsorders/:id
+    detail:
+      header:
+        title: "{{code}} {{title}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Order details
+                nl: Ordergegevens
+              fields:
+                - code
+                - title
+                - status
+                - issueDate
+            - title:
+                en: Planning
+                nl: Planning
+              fields:
+                - plannedStartDate
+                - plannedEndDate
+                - actualStartDate
+                - actualEndDate
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - currencyCode
+                - estimatedAmount
+                - actualAmount
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create maintenance order
+            nl: Onderhoudsorder aanmaken
+          groups:
+            - title:
+                en: Order details
+                nl: Ordergegevens
+              fields:
+                - code
+                - title
+                - status
+                - issueDate
+            - title:
+                en: Planning
+                nl: Planning
+              fields:
+                - plannedStartDate
+                - plannedEndDate
+                - actualStartDate
+                - actualEndDate
+            - title:
+                en: Amounts
+                nl: Bedragen
+              fields:
+                - currencyCode
+                - estimatedAmount
+                - actualAmount
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit maintenance order
+            nl: Onderhoudsorder bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Maintenance.All.Read
+      - Maintenance.All.ReadWrite
+    create:
+      - Maintenance.All.ReadWrite
+    update:
+      - Maintenance.All.ReadWrite
+    delete:
+      - Maintenance.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

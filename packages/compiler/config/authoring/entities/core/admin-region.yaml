@@ -1,0 +1,252 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: AdminRegion
+title: Administrative Region
+description: Generic administrative geography (municipality, city district, district, neighborhood, place) organized as a hierarchy.
+language: en
+displayTemplate: "{{regionLevel}}: {{code}}"
+filterField: code
+labels:
+  en: Administrative region
+  nl: Bestuurlijk gebied
+domains:
+  - asset
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique administrative region code.
+      nl: Tenant-unieke code van het bestuurlijke gebied.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the region.
+      nl: Menselijk leesbare naam van het gebied.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: regionLevel
+    valueType: string
+    required: true
+    label:
+      en: Region level
+      nl: Niveau
+    description:
+      en: Administrative level (municipality, city district, district, neighborhood, place).
+      nl: Bestuurlijk niveau (gemeente, stadsdeel, wijk, buurt, plaats).
+    persisted:
+      column: region_level
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: ADMINREGIONLEVEL
+        clearable: false
+  - key: validFrom
+    valueType: date
+    required: false
+    label:
+      en: Valid from
+      nl: Geldig vanaf
+    description:
+      en: Date from which the region is effective.
+      nl: Datum vanaf wanneer het gebied geldig is.
+    persisted:
+      column: valid_from
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: validTo
+    valueType: date
+    required: false
+    label:
+      en: Valid to
+      nl: Geldig tot
+    description:
+      en: Date until which the region is effective.
+      nl: Datum tot wanneer het gebied geldig is.
+    persisted:
+      column: valid_to
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the region in an external context.
+      nl: Functionele of zakelijke code van het gebied in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: parentAdminRegion
+    kind: belongsTo
+    target: AdminRegion
+    foreignKey: parent_admin_region_id
+    label:
+      en: Parent admin region
+      nl: Bovenliggend gebied
+  - key: childAdminRegions
+    kind: hasMany
+    target: AdminRegion
+    foreignKey: parent_admin_region_id
+    label:
+      en: Child admin regions
+      nl: Onderliggende gebieden
+ui:
+  routes:
+    list:
+      en: /admin-regions
+      nl: /bestuurlijke-gebieden
+    detail:
+      en: /admin-regions/:id
+      nl: /bestuurlijke-gebieden/:id
+    create:
+      en: /admin-regions/create
+      nl: /bestuurlijke-gebieden/aanmaken
+    edit:
+      en: /admin-regions/:id/edit
+      nl: /bestuurlijke-gebieden/:id/bewerken
+    delete:
+      en: /admin-regions/:id/delete
+      nl: /bestuurlijke-gebieden/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Admin regions
+        nl: Bestuurlijke gebieden
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+        - key: regionLevel
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /admin-regions/:id
+        nl: /bestuurlijke-gebieden/:id
+    detail:
+      header:
+        title: "{{regionLevel}}: {{code}}"
+        subtitle: "{{name}}"
+        badges:
+          - regionLevel
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Region details
+                nl: Gebiedsgegevens
+              fields:
+                - code
+                - name
+                - regionLevel
+                - validFrom
+                - validTo
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create admin region
+            nl: Bestuurlijk gebied aanmaken
+          groups:
+            - title:
+                en: Region details
+                nl: Gebiedsgegevens
+              fields:
+                - code
+                - name
+                - regionLevel
+                - validFrom
+                - validTo
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit admin region
+            nl: Bestuurlijk gebied bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - RealEstate.All.Read
+      - RealEstate.All.ReadWrite
+    create:
+      - RealEstate.All.ReadWrite
+    update:
+      - RealEstate.All.ReadWrite
+    delete:
+      - RealEstate.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

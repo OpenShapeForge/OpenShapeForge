@@ -76,6 +76,13 @@
       "minLength": 1,
       "description": "Field key used when filtering a list of this entity by free-text input (typeahead in pickers). Wires into generated FilterInput with ilike semantics."
     },
+    "indexes": {
+      "type": "array",
+      "description": "Storage-level indexes, compiled into TableDefinition.indexes and emitted as CREATE [UNIQUE] INDEX IF NOT EXISTS. Declare one only when it backs a runtime contract the engine relies on — e.g. the tenant-scoped uniqueness an idempotent `ON CONFLICT (...) DO NOTHING` insert needs.",
+      "items": {
+        "$ref": "#/$defs/entityIndex"
+      }
+    },
     "fields": {
       "type": "array",
       "minItems": 1,
@@ -357,6 +364,30 @@
     "fieldKey": {
       "type": "string",
       "pattern": "^[a-z][A-Za-z0-9]*$"
+    },
+    "entityIndex": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "fields"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Persisted verbatim as the SQL index name, so it must be unique per entity and snake_case (e.g. billing_run_items_tenant_idempotency_uidx)."
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Entity field keys (camelCase), resolved to persisted column names by the compiler. Put `tenantId` first for tenant-scoped uniqueness so the constraint is naturally tenant-isolated.",
+          "items": {
+            "$ref": "#/$defs/fieldKey"
+          }
+        },
+        "unique": {
+          "type": "boolean",
+          "description": "Emits CREATE UNIQUE INDEX instead of CREATE INDEX."
+        }
+      }
     },
     "validationRule": {
       "type": "object",

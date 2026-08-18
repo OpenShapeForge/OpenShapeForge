@@ -1,0 +1,236 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: LedgerPostingLine
+title: Ledger Posting Line
+description: Journal entry line. Single debit or credit movement against a ledger account, optionally tagged with analytical dimensions.
+language: en
+displayTemplate: "{{lineNumber}}: {{amount}}"
+filterField: description
+labels:
+  en: Ledger posting line
+  nl: Boekingsregel
+domains:
+  - finance
+fields:
+  - key: lineNumber
+    valueType: integer
+    required: true
+    label:
+      en: Line number
+      nl: Regelnummer
+    description:
+      en: Sequential line number within the ledger posting.
+      nl: Volgnummer van de regel binnen de boeking.
+    validation:
+      min: 1
+    persisted:
+      column: line_number
+      storageClass: core
+  - key: side
+    valueType: string
+    required: true
+    label:
+      en: Side
+      nl: Zijde
+    description:
+      en: Whether this line is a debit or credit.
+      nl: Of deze regel een debet- of creditboeking is.
+    persisted:
+      column: side
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: LEDGERSIDE
+        clearable: false
+  - key: amount
+    valueType: number
+    required: true
+    label:
+      en: Amount
+      nl: Bedrag
+    description:
+      en: Monetary amount of the line.
+      nl: Geldbedrag van de regel.
+    semanticType: currency
+    persisted:
+      column: amount
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-text description of the line.
+      nl: Vrije omschrijving van de regel.
+    validation:
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+relationships:
+  - key: ledgerPosting
+    kind: belongsTo
+    target: LedgerPosting
+    foreignKey: ledger_posting_id
+    label:
+      en: Ledger posting
+      nl: Boeking
+  - key: ledgerAccount
+    kind: belongsTo
+    target: LedgerAccount
+    foreignKey: ledger_account_id
+    label:
+      en: Ledger account
+      nl: Grootboekrekening
+  - key: agreement
+    kind: belongsTo
+    target: Agreement
+    foreignKey: agreement_id
+    label:
+      en: Agreement
+      nl: Overeenkomst
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: dimension1
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: dimension_1_id
+    label:
+      en: Cost dimension 1
+      nl: Kostendimensie 1
+  - key: dimension2
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: dimension_2_id
+    label:
+      en: Cost dimension 2
+      nl: Kostendimensie 2
+  - key: vatDimension
+    kind: belongsTo
+    target: CostDimension
+    foreignKey: vat_dimension_id
+    label:
+      en: VAT dimension
+      nl: BTW-dimensie
+ui:
+  routes:
+    list:
+      en: /ledger-posting-lines
+      nl: /boekingsregels
+    detail:
+      en: /ledger-posting-lines/:id
+      nl: /boekingsregels/:id
+    create:
+      en: /ledger-posting-lines/create
+      nl: /boekingsregels/aanmaken
+    edit:
+      en: /ledger-posting-lines/:id/edit
+      nl: /boekingsregels/:id/bewerken
+    delete:
+      en: /ledger-posting-lines/:id/delete
+      nl: /boekingsregels/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Ledger posting lines
+        nl: Boekingsregels
+      columns:
+        - key: lineNumber
+          sortable: true
+        - key: side
+          sortable: true
+        - key: amount
+          sortable: true
+        - key: description
+          sortable: true
+      defaultSort:
+        key: lineNumber
+        direction: asc
+      rowLink:
+        en: /ledger-posting-lines/:id
+        nl: /boekingsregels/:id
+    detail:
+      header:
+        title: "{{lineNumber}}: {{amount}}"
+        subtitle: "{{description}}"
+        badges:
+          - side
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Line details
+                nl: Regelgegevens
+              fields:
+                - lineNumber
+                - side
+                - amount
+                - description
+    form:
+      variants:
+        create:
+          title:
+            en: Create ledger posting line
+            nl: Boekingsregel aanmaken
+          groups:
+            - title:
+                en: Line details
+                nl: Regelgegevens
+              fields:
+                - lineNumber
+                - side
+                - amount
+                - description
+        edit:
+          extends: create
+          title:
+            en: Edit ledger posting line
+            nl: Boekingsregel bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Finance.All.Read
+      - Finance.All.ReadWrite
+    create:
+      - Finance.All.ReadWrite
+    update:
+      - Finance.All.ReadWrite
+    delete:
+      - Finance.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

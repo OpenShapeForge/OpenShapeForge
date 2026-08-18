@@ -1,0 +1,251 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: AppointmentOption
+title: Appointment Option
+description: A candidate time slot offered as part of an appointment request, that can be accepted to produce an appointment.
+language: en
+displayTemplate: "#{{optionNumber}} {{startsAt}}"
+filterField: id
+labels:
+  en: Appointment option
+  nl: Afspraakoptie
+domains:
+  - crm
+  - relations
+fields:
+  - key: optionNumber
+    valueType: integer
+    required: true
+    label:
+      en: Option number
+      nl: Optienummer
+    description:
+      en: Sequential option number within the appointment request.
+      nl: Volgnummer van de optie binnen het afspraakverzoek.
+    persisted:
+      column: option_number
+      storageClass: core
+  - key: startsAt
+    valueType: datetime
+    required: true
+    label:
+      en: Starts at
+      nl: Start op
+    description:
+      en: Date and time when the candidate slot starts.
+      nl: Datum en tijd waarop het voorgestelde tijdvak start.
+    persisted:
+      column: starts_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: endsAt
+    valueType: datetime
+    required: true
+    label:
+      en: Ends at
+      nl: Eindigt op
+    description:
+      en: Date and time when the candidate slot ends.
+      nl: Datum en tijd waarop het voorgestelde tijdvak eindigt.
+    persisted:
+      column: ends_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: location
+    valueType: string
+    required: false
+    label:
+      en: Location
+      nl: Locatie
+    description:
+      en: Location where the appointment would take place if this option is accepted.
+      nl: Locatie waar de afspraak zou plaatsvinden als deze optie wordt geaccepteerd.
+    validation:
+      maxLength: 500
+    persisted:
+      column: location
+      storageClass: core
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the appointment option.
+      nl: Levenscyclusstatus van de afspraakoptie.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: APPOINTMENTOPTIONSTATUS
+        clearable: false
+  - key: notes
+    valueType: string
+    required: false
+    label:
+      en: Notes
+      nl: Notities
+    description:
+      en: Free-form notes about this appointment option.
+      nl: Vrije notities over deze afspraakoptie.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: notes
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 1000
+relationships:
+  - key: appointmentRequest
+    kind: belongsTo
+    target: AppointmentRequest
+    foreignKey: appointment_request_id
+    label:
+      en: Appointment request
+      nl: Afspraakverzoek
+ui:
+  routes:
+    list:
+      en: /appointment-options
+      nl: /afspraakopties
+    detail:
+      en: /appointment-options/:id
+      nl: /afspraakopties/:id
+    create:
+      en: /appointment-options/create
+      nl: /afspraakopties/aanmaken
+    edit:
+      en: /appointment-options/:id/edit
+      nl: /afspraakopties/:id/bewerken
+    delete:
+      en: /appointment-options/:id/delete
+      nl: /afspraakopties/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Appointment options
+        nl: Afspraakopties
+      columns:
+        - key: optionNumber
+          sortable: true
+        - key: startsAt
+          sortable: true
+        - key: endsAt
+          sortable: true
+        - key: status
+          sortable: true
+        - key: location
+          sortable: false
+      defaultSort:
+        key: startsAt
+        direction: asc
+      rowLink:
+        en: /appointment-options/:id
+        nl: /afspraakopties/:id
+    detail:
+      header:
+        title: "#{{optionNumber}} {{startsAt}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Option details
+                nl: Optiegegevens
+              fields:
+                - optionNumber
+                - status
+                - location
+            - title:
+                en: Schedule
+                nl: Planning
+              fields:
+                - startsAt
+                - endsAt
+            - title:
+                en: Notes
+                nl: Notities
+              fields:
+                - notes
+    form:
+      variants:
+        create:
+          title:
+            en: Create appointment option
+            nl: Afspraakoptie aanmaken
+          groups:
+            - title:
+                en: Option details
+                nl: Optiegegevens
+              fields:
+                - optionNumber
+                - status
+                - location
+            - title:
+                en: Schedule
+                nl: Planning
+              fields:
+                - startsAt
+                - endsAt
+            - title:
+                en: Notes
+                nl: Notities
+              fields:
+                - notes
+        edit:
+          extends: create
+          title:
+            en: Edit appointment option
+            nl: Afspraakoptie bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Relations.All.Read
+      - Relations.All.ReadWrite
+    create:
+      - Relations.All.ReadWrite
+    update:
+      - Relations.All.ReadWrite
+    delete:
+      - Relations.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

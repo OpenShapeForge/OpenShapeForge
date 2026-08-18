@@ -1,0 +1,236 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Space
+title: Space
+description: Sub-space within a building (room, floor, area). Code is unique within the parent building.
+language: en
+displayTemplate: "{{code}} {{name}}"
+filterField: code
+labels:
+  en: Space
+  nl: Ruimte
+domains:
+  - asset
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Code of the space, unique within the parent building.
+      nl: Code van de ruimte, uniek binnen het bovenliggende pand.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the space.
+      nl: Menselijk leesbare naam van de ruimte.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: spaceKind
+    valueType: string
+    required: false
+    label:
+      en: Space kind
+      nl: Ruimtesoort
+    description:
+      en: Kind of space (e.g. "room", "floor", "area").
+      nl: Soort ruimte (bijv. "kamer", "verdieping", "gebied").
+    validation:
+      maxLength: 50
+    persisted:
+      column: space_kind
+      storageClass: core
+  - key: area
+    valueType: number
+    required: false
+    label:
+      en: Area
+      nl: Oppervlakte
+    description:
+      en: Surface area of the space in square metres.
+      nl: Oppervlakte van de ruimte in vierkante meters.
+    persisted:
+      column: area
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the space in an external context.
+      nl: Functionele of zakelijke code van de ruimte in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: building
+    kind: belongsTo
+    target: Building
+    foreignKey: building_id
+    label:
+      en: Building
+      nl: Pand
+  - key: parentSpace
+    kind: belongsTo
+    target: Space
+    foreignKey: parent_space_id
+    label:
+      en: Parent space
+      nl: Bovenliggende ruimte
+  - key: childSpaces
+    kind: hasMany
+    target: Space
+    foreignKey: parent_space_id
+    label:
+      en: Child spaces
+      nl: Onderliggende ruimten
+ui:
+  routes:
+    list:
+      en: /spaces
+      nl: /ruimten
+    detail:
+      en: /spaces/:id
+      nl: /ruimten/:id
+    create:
+      en: /spaces/create
+      nl: /ruimten/aanmaken
+    edit:
+      en: /spaces/:id/edit
+      nl: /ruimten/:id/bewerken
+    delete:
+      en: /spaces/:id/delete
+      nl: /ruimten/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Spaces
+        nl: Ruimten
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+        - key: spaceKind
+          sortable: true
+        - key: area
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /spaces/:id
+        nl: /ruimten/:id
+    detail:
+      header:
+        title: "{{code}} {{name}}"
+        subtitle: "{{spaceKind}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Space details
+                nl: Ruimtegegevens
+              fields:
+                - code
+                - name
+                - spaceKind
+                - area
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create space
+            nl: Ruimte aanmaken
+          groups:
+            - title:
+                en: Space details
+                nl: Ruimtegegevens
+              fields:
+                - code
+                - name
+                - spaceKind
+                - area
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit space
+            nl: Ruimte bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - RealEstate.All.Read
+      - RealEstate.All.ReadWrite
+    create:
+      - RealEstate.All.ReadWrite
+    update:
+      - RealEstate.All.ReadWrite
+    delete:
+      - RealEstate.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

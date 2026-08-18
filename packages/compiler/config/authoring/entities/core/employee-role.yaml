@@ -1,0 +1,317 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: EmployeeRole
+title: Employee Role
+description: Role assignment for an employee — captures kind, position, org unit, manager line, allocation, and validity period (canonical role pattern, FK to Employee).
+language: en
+displayTemplate: "{{roleKind}}"
+filterField: roleKind
+labels:
+  en: Employee role
+  nl: Medewerkerrol
+domains:
+  - hr
+fields:
+  - key: roleKind
+    valueType: string
+    required: true
+    label:
+      en: Role kind
+      nl: Rolsoort
+    description:
+      en: Kind of role assigned to the employee (lead, member, manager, delegate, temporary).
+      nl: Soort rol toegekend aan de medewerker (lead, lid, manager, gedelegeerde, tijdelijk).
+    persisted:
+      column: role_kind
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: EMPLOYEEROLEKIND
+        clearable: false
+  - key: status
+    valueType: string
+    required: false
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the role assignment.
+      nl: Levenscyclusstatus van de roltoewijzing.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: ROLEASSIGNMENTSTATUS
+        clearable: true
+  - key: name
+    valueType: string
+    required: false
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Optional human-readable name of the role assignment.
+      nl: Optionele menselijk leesbare naam van de roltoewijzing.
+    validation:
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description or business meaning of the role assignment.
+      nl: Optionele omschrijving of zakelijke betekenis van de roltoewijzing.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Date from which the role assignment is effective.
+      nl: Datum vanaf wanneer de roltoewijzing geldig is.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Date until which the role assignment is effective.
+      nl: Datum tot wanneer de roltoewijzing geldig is.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: allocationPercentage
+    valueType: number
+    required: false
+    label:
+      en: Allocation percentage
+      nl: Inzetpercentage
+    description:
+      en: Percentage of the employee's time allocated to this role (0-100).
+      nl: Percentage van de tijd van de medewerker dat aan deze rol is toegewezen (0-100).
+    validation:
+      min: 0
+      max: 100
+    persisted:
+      column: allocation_percentage
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the role assignment in an external context.
+      nl: Functionele of zakelijke code van de roltoewijzing in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: employee
+    kind: belongsTo
+    target: Employee
+    foreignKey: employee_id
+    label:
+      en: Employee
+      nl: Medewerker
+  - key: orgUnit
+    kind: belongsTo
+    target: OrgUnit
+    foreignKey: org_unit_id
+    label:
+      en: Org unit
+      nl: Organisatorische eenheid
+  - key: position
+    kind: belongsTo
+    target: Position
+    foreignKey: position_id
+    label:
+      en: Position
+      nl: Functie
+  - key: reportsTo
+    kind: belongsTo
+    target: EmployeeRole
+    foreignKey: reports_to_employee_role_id
+    label:
+      en: Reports to
+      nl: Rapporteert aan
+ui:
+  routes:
+    list:
+      en: /employee-roles
+      nl: /medewerkerrollen
+    detail:
+      en: /employee-roles/:id
+      nl: /medewerkerrollen/:id
+    create:
+      en: /employee-roles/create
+      nl: /medewerkerrollen/aanmaken
+    edit:
+      en: /employee-roles/:id/edit
+      nl: /medewerkerrollen/:id/bewerken
+    delete:
+      en: /employee-roles/:id/delete
+      nl: /medewerkerrollen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Employee roles
+        nl: Medewerkerrollen
+      columns:
+        - key: roleKind
+          sortable: true
+        - key: name
+          sortable: true
+        - key: status
+          sortable: true
+        - key: startDate
+          sortable: true
+        - key: endDate
+          sortable: true
+      defaultSort:
+        key: startDate
+        direction: desc
+      rowLink:
+        en: /employee-roles/:id
+        nl: /medewerkerrollen/:id
+    detail:
+      header:
+        title: "{{name || roleKind}}"
+        subtitle: "{{status}}"
+        badges:
+          - roleKind
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Role details
+                nl: Rolgegevens
+              fields:
+                - roleKind
+                - status
+                - name
+                - startDate
+                - endDate
+                - allocationPercentage
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create employee role
+            nl: Medewerkerrol aanmaken
+          groups:
+            - title:
+                en: Role details
+                nl: Rolgegevens
+              fields:
+                - roleKind
+                - status
+                - name
+                - startDate
+                - endDate
+                - allocationPercentage
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit employee role
+            nl: Medewerkerrol bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Organization.All.Read
+      - Organization.All.ReadWrite
+    create:
+      - Organization.All.ReadWrite
+    update:
+      - Organization.All.ReadWrite
+    delete:
+      - Organization.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

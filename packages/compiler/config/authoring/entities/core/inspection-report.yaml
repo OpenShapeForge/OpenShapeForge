@@ -1,0 +1,224 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: InspectionReport
+title: Inspection Report
+description: Report capturing the outcome of an inspection performed on an asset.
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: Inspection report
+  nl: Inspectierapport
+domains:
+  - maintenance
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique inspection report code.
+      nl: Tenant-unieke code van het inspectierapport.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: inspectedAt
+    valueType: datetime
+    required: true
+    label:
+      en: Inspected at
+      nl: Geïnspecteerd op
+    description:
+      en: Timestamp when the inspection was performed.
+      nl: Tijdstip waarop de inspectie is uitgevoerd.
+    persisted:
+      column: inspected_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: summary
+    valueType: string
+    required: false
+    label:
+      en: Summary
+      nl: Samenvatting
+    description:
+      en: Summary of inspection findings.
+      nl: Samenvatting van de inspectiebevindingen.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: summary
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 5000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the inspection report in an external context.
+      nl: Functionele of zakelijke code van het inspectierapport in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: inspector
+    kind: belongsTo
+    target: Relation
+    foreignKey: inspector_relation_id
+    label:
+      en: Inspector
+      nl: Inspecteur
+  - key: asset
+    kind: belongsTo
+    target: Asset
+    foreignKey: asset_reference
+    label:
+      en: Asset
+      nl: Object
+ui:
+  routes:
+    list:
+      en: /inspection-reports
+      nl: /inspectierapporten
+    detail:
+      en: /inspection-reports/:id
+      nl: /inspectierapporten/:id
+    create:
+      en: /inspection-reports/create
+      nl: /inspectierapporten/aanmaken
+    edit:
+      en: /inspection-reports/:id/edit
+      nl: /inspectierapporten/:id/bewerken
+    delete:
+      en: /inspection-reports/:id/delete
+      nl: /inspectierapporten/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Inspection reports
+        nl: Inspectierapporten
+      columns:
+        - key: code
+          sortable: true
+        - key: inspectedAt
+          sortable: true
+      defaultSort:
+        key: inspectedAt
+        direction: desc
+      rowLink:
+        en: /inspection-reports/:id
+        nl: /inspectierapporten/:id
+    detail:
+      header:
+        title: "{{code}}"
+        subtitle: "{{inspectedAt}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Report details
+                nl: Rapportgegevens
+              fields:
+                - code
+                - inspectedAt
+            - title:
+                en: Summary
+                nl: Samenvatting
+              fields:
+                - summary
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create inspection report
+            nl: Inspectierapport aanmaken
+          groups:
+            - title:
+                en: Report details
+                nl: Rapportgegevens
+              fields:
+                - code
+                - inspectedAt
+            - title:
+                en: Summary
+                nl: Samenvatting
+              fields:
+                - summary
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit inspection report
+            nl: Inspectierapport bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Maintenance.All.Read
+      - Maintenance.All.ReadWrite
+    create:
+      - Maintenance.All.ReadWrite
+    update:
+      - Maintenance.All.ReadWrite
+    delete:
+      - Maintenance.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

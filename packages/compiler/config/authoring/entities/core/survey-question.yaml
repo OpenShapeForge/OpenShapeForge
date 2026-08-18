@@ -1,0 +1,217 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: SurveyQuestion
+title: Survey Question
+description: A single question within a survey, supporting various question types and conditional follow-up logic.
+language: en
+displayTemplate: "{{description}}"
+filterField: description
+labels:
+  en: Survey Question
+  nl: Vragenlijstregel
+domains:
+  - quality
+retention:
+  mode: policyRef
+  policy: quality-retain-7y
+  scope: record
+  startsFrom:
+    strategy: field
+    field: createdAt
+authorization:
+  roles:
+    read:
+      - General.All.Read
+      - General.All.ReadWrite
+    create:
+      - Quality.All.ReadWrite
+    update:
+      - Quality.All.ReadWrite
+    delete:
+      - Quality.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: false
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Human-readable question code.
+      nl: Menselijk leesbare vraagcode.
+    validation:
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: questionKind
+    valueType: string
+    required: false
+    label:
+      en: Question type
+      nl: Vraagtype
+    description:
+      en: Type of question.
+      nl: Type vraag.
+    persisted:
+      column: question_kind
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: SURVEYQUESTIONKIND
+        clearable: true
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Question text
+      nl: Vraagtekst
+    description:
+      en: The question as presented to the respondent.
+      nl: De vraag zoals voorgelegd aan de respondent.
+    validation:
+      maxLength: 4000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 4000
+  - key: subject
+    valueType: string
+    required: false
+    label:
+      en: Subject
+      nl: Onderwerp
+    description:
+      en: Thematic subject the question belongs to.
+      nl: Thematisch onderwerp waar de vraag onder valt.
+    persisted:
+      column: subject
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: SURVEYQUESTIONSUBJECT
+        clearable: true
+  - key: origin
+    valueType: string
+    required: false
+    label:
+      en: Origin
+      nl: Herkomst
+    description:
+      en: Origin or source standard of the question.
+      nl: Herkomst of bronstandaard van de vraag.
+    persisted:
+      column: origin
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: SURVEYQUESTIONORIGIN
+        clearable: true
+  - key: sequenceNumber
+    valueType: integer
+    required: false
+    label:
+      en: Sequence number
+      nl: Volgordenummer
+    description:
+      en: Position of the question within the survey.
+      nl: Positie van de vraag binnen de vragenlijst.
+    persisted:
+      column: sequence_number
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional code in a connected source system.
+      nl: Functionele code in een gekoppeld bronsysteem.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+  - key: surveyId
+    valueType: string
+    required: false
+    label:
+      en: Survey ID
+      nl: Vragenlijst-id
+    description:
+      en: Identifier of the survey this question belongs to.
+      nl: Identifier van de vragenlijst waar deze vraag bij hoort.
+    semanticType: surveyId
+    persisted:
+      column: survey_id
+      storageClass: core
+    validation:
+      format: uuid
+  - key: parentQuestionId
+    valueType: string
+    required: false
+    label:
+      en: Parent question ID
+      nl: Bovenliggende vraag-id
+    description:
+      en: Identifier of the parent question for follow-up logic.
+      nl: Identifier van de bovenliggende vraag voor vervolgvraag-logica.
+    semanticType: surveyQuestionId
+    persisted:
+      column: parent_question_id
+      storageClass: core
+    validation:
+      format: uuid
+relationships:
+  - key: survey
+    kind: belongsTo
+    target: Survey
+    foreignKey: survey_id
+    label:
+      en: Survey
+      nl: Vragenlijst
+  - key: parentQuestion
+    kind: belongsTo
+    target: SurveyQuestion
+    foreignKey: parent_question_id
+    label:
+      en: Parent question
+      nl: Bovenliggende vraag
+  - key: childQuestions
+    kind: hasMany
+    target: SurveyQuestion
+    foreignKey: parent_question_id
+    label:
+      en: Follow-up questions
+      nl: Vervolgvragen
+  - key: answers
+    kind: hasMany
+    target: SurveyAnswer
+    foreignKey: survey_question_id
+    label:
+      en: Answers
+      nl: Antwoorden
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list:
+        enabled: true
+        defaultSort:
+          field: sequenceNumber
+          direction: asc
+      update: true
+      delete: true

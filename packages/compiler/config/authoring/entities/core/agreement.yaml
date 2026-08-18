@@ -1,0 +1,336 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Agreement
+title: Agreement
+description: Canonical contract-management agreement linked to a primary relation and optionally to a parent agreement. Hierarchy is strict — every billable agreement is a sub agreement (role=sub) hanging under a non-billable master umbrella (role=master). Billing schedules and components attach only to sub agreements.
+language: en
+displayTemplate: "{{code}}"
+filterField: code
+labels:
+  en: Agreement
+  nl: Overeenkomst
+domains:
+  - contracts
+authorization:
+  roles:
+    read:
+      - Agreements.All.Read
+      - Agreements.All.ReadWrite
+    create:
+      - Agreements.All.ReadWrite
+    update:
+      - Agreements.All.ReadWrite
+    delete:
+      - Agreements.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Human-used agreement code for search, display, and correspondence.
+      nl: Door mensen gebruikte overeenkomstcode voor zoeken, weergave en correspondentie.
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: role
+    valueType: string
+    required: true
+    label:
+      en: Hierarchy role
+      nl: Hierarchierol
+    description:
+      en: Whether this agreement is a non-billable master umbrella or a billable sub agreement under a master.
+      nl: Bepaalt of dit een niet-factureerbare hoofdovereenkomst (master) is of een factureerbare subovereenkomst (sub) onder een master.
+    defaultValue: sub
+    persisted:
+      column: role
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: AGREEMENTROLE
+        clearable: false
+  - key: agreementType
+    valueType: string
+    required: true
+    label:
+      en: Agreement type
+      nl: Overeenkomsttype
+    description:
+      en: Canonical type of agreement, such as lease, service, sale, or employment.
+      nl: Canoniek type overeenkomst, zoals huur, service, koop of arbeid.
+    persisted:
+      column: agreement_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: AGREEMENTTYPE
+        clearable: false
+  - key: agreementSubType
+    valueType: string
+    required: false
+    label:
+      en: Agreement subtype
+      nl: Overeenkomstsubtype
+    description:
+      en: More detailed classification of the agreement inside the chosen type.
+      nl: Nadere classificatie van de overeenkomst binnen het gekozen type.
+    validation:
+      maxLength: 100
+    persisted:
+      column: agreement_sub_type
+      storageClass: core
+  - key: status
+    valueType: string
+    required: false
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Current lifecycle status of the agreement.
+      nl: Huidige levenscyclusstatus van de overeenkomst.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: AGREEMENTSTATUS
+        clearable: true
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Begindatum
+    description:
+      en: Effective start date of the agreement.
+      nl: Ingangsdatum van de overeenkomst.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Effective end date of the agreement.
+      nl: Einddatum van de overeenkomst.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: billingStartDate
+    valueType: date
+    required: false
+    label:
+      en: Billing start date
+      nl: Facturatiebegindatum
+    description:
+      en: Date from which invoicing starts for the agreement.
+      nl: Datum vanaf wanneer de facturatie voor de overeenkomst start.
+    persisted:
+      column: billing_start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: billingEndDate
+    valueType: date
+    required: false
+    label:
+      en: Billing end date
+      nl: Facturatieeinddatum
+    description:
+      en: Date until which invoicing applies for the agreement.
+      nl: Datum tot wanneer facturatie voor de overeenkomst van toepassing is.
+    persisted:
+      column: billing_end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: conceptSentAt
+    valueType: datetime
+    required: false
+    label:
+      en: Concept sent at
+      nl: Concept verstuurd op
+    description:
+      en: Timestamp when a concept version of the agreement was sent.
+      nl: Tijdstip waarop een conceptversie van de overeenkomst is verstuurd.
+    persisted:
+      column: concept_sent_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: sentAt
+    valueType: datetime
+    required: false
+    label:
+      en: Sent at
+      nl: Verstuurd op
+    description:
+      en: Timestamp when the agreement was formally sent.
+      nl: Tijdstip waarop de overeenkomst formeel is verstuurd.
+    persisted:
+      column: sent_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: dispatchStatus
+    valueType: string
+    required: false
+    label:
+      en: Dispatch status
+      nl: Verstuurstatus
+    description:
+      en: Operational status of dispatching or delivering the agreement.
+      nl: Operationele status van het versturen of afleveren van de overeenkomst.
+    validation:
+      maxLength: 100
+    persisted:
+      column: dispatch_status
+      storageClass: core
+  - key: noticeDate
+    valueType: date
+    required: false
+    label:
+      en: Notice date
+      nl: Opzegdatum
+    description:
+      en: Date on which notice was given for the agreement.
+      nl: Datum waarop de overeenkomst is opgezegd.
+    persisted:
+      column: notice_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: noticeTerm
+    valueType: string
+    required: false
+    label:
+      en: Notice term
+      nl: Opzegtermijn
+    description:
+      en: Applicable notice term for terminating the agreement.
+      nl: Geldende opzegtermijn voor het beëindigen van de overeenkomst.
+    validation:
+      maxLength: 100
+    persisted:
+      column: notice_term
+      storageClass: core
+  - key: terminationReason
+    valueType: string
+    required: false
+    label:
+      en: Termination reason
+      nl: Beëindigingsreden
+    description:
+      en: Main reason for ending the agreement.
+      nl: Hoofdreden voor het beëindigen van de overeenkomst.
+    validation:
+      maxLength: 100
+    persisted:
+      column: termination_reason
+      storageClass: core
+  - key: terminationReasonDetail
+    valueType: string
+    required: false
+    label:
+      en: Termination reason detail
+      nl: Detail beëindigingsreden
+    description:
+      en: More detailed termination reason for the agreement.
+      nl: Nader gespecificeerde beëindigingsreden van de overeenkomst.
+    validation:
+      maxLength: 100
+    persisted:
+      column: termination_reason_detail
+      storageClass: core
+  - key: sequenceNumber
+    valueType: string
+    required: false
+    label:
+      en: Sequence number
+      nl: Volgnummer
+    description:
+      en: Functional sequence number of the agreement within its lifecycle.
+      nl: Functioneel volgnummer van de overeenkomst binnen de levenscyclus.
+    validation:
+      maxLength: 50
+    persisted:
+      column: sequence_number
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the agreement in an external context.
+      nl: Functionele of zakelijke code van de overeenkomst in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: case
+    kind: belongsTo
+    target: Case
+    foreignKey: case_id
+    label:
+      en: Case
+      nl: Zaak
+  - key: parentAgreement
+    kind: belongsTo
+    target: Agreement
+    foreignKey: parent_agreement_id
+    label:
+      en: Parent agreement
+      nl: Bovenliggende overeenkomst
+  - key: childAgreements
+    kind: hasMany
+    target: Agreement
+    foreignKey: parent_agreement_id
+    label:
+      en: Child agreements
+      nl: Onderliggende overeenkomsten
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

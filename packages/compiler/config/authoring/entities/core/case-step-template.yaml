@@ -1,0 +1,473 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: CaseStepTemplate
+title: Case Step Template
+description: A reusable case-step template inside a case template. Defines the expected step order, execution policy, completion policy, and ordered actions. Discretionary steps are available but only activated on demand by a case worker.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Case Step Template
+  nl: Zaakstapsjabloon
+domains:
+  - cases
+  - workflow
+authorization:
+  roles:
+    read:
+      - Cases.All.Read
+      - Cases.All.ReadWrite
+    create:
+      - Organization.All.ReadWrite
+    update:
+      - Organization.All.ReadWrite
+    delete:
+      - Organization.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: key
+    valueType: string
+    required: true
+    label:
+      en: Step key
+      nl: Stapsleutel
+    description:
+      en: Unique identifier for this step within the template
+      nl: Unieke sleutel voor deze stap binnen het sjabloon
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: key
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: stepType
+    valueType: string
+    required: true
+    label:
+      en: Step type
+      nl: Staptype
+    persisted:
+      column: step_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PROCESSSTEPTYPE
+        clearable: false
+  - key: sequenceNumber
+    valueType: integer
+    required: true
+    label:
+      en: Sequence number
+      nl: Volgnummer
+    persisted:
+      column: sequence_number
+      storageClass: core
+  - key: executionStyle
+    valueType: string
+    required: true
+    label:
+      en: Execution style
+      nl: Uitvoeringsstijl
+    description:
+      en: Determines how automatic actions inside this step are started and waited for.
+      nl: Bepaalt hoe automatische acties binnen deze stap worden gestart en afgewacht.
+    defaultValue: sequential
+    persisted:
+      column: execution_style
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASESTEPEXECUTIONSTYLE
+        clearable: false
+  - key: completionMode
+    valueType: string
+    required: true
+    label:
+      en: Completion mode
+      nl: Afrondingsmodus
+    description:
+      en: Automatic steps complete when required actions are done. Manual approval steps wait for Complete step authorization inherited from the case template.
+      nl: Automatische stappen ronden af wanneer verplichte acties klaar zijn. Stappen met handmatige goedkeuring wachten op de Afronden-bevoegdheid vanuit het zaaksjabloon.
+    defaultValue: automatic
+    persisted:
+      column: completion_mode
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASESTEPCOMPLETIONMODE
+        clearable: false
+  - key: isMilestone
+    valueType: boolean
+    required: true
+    label:
+      en: Is milestone
+      nl: Is mijlpaal
+    defaultValue: false
+    persisted:
+      column: is_milestone
+      storageClass: core
+  - key: isBlocking
+    valueType: boolean
+    required: true
+    label:
+      en: Is blocking
+      nl: Is blokkerend
+    defaultValue: true
+    persisted:
+      column: is_blocking
+      storageClass: core
+  - key: isDiscretionary
+    valueType: boolean
+    required: true
+    label:
+      en: Discretionary
+      nl: Optioneel
+    description:
+      en: Discretionary steps are available but not automatically created when instantiating the template. A case worker can activate them when needed.
+      nl: Optionele stappen zijn beschikbaar maar worden niet automatisch aangemaakt bij instantiatie. Een medewerker kan ze activeren wanneer nodig.
+    defaultValue: false
+    persisted:
+      column: is_discretionary
+      storageClass: core
+  - key: assignedRole
+    valueType: string
+    required: false
+    label:
+      en: Assigned role
+      nl: Toegewezen rol
+    validation:
+      maxLength: 200
+    persisted:
+      column: assigned_role
+      storageClass: core
+  - key: defaultWorkQueueId
+    valueType: string
+    required: false
+    semanticType: workQueueId
+    label:
+      en: Default work queue
+      nl: Standaard werkqueue
+    description:
+      en: Default queue for this case step and its task templates. If empty, the case-template queue is used.
+      nl: Standaardqueue voor deze zaakstap en bijbehorende taaksjablonen. Indien leeg wordt de queue van het zaaksjabloon gebruikt.
+    validation:
+      format: uuid
+    options:
+      type: remote
+      remoteUrl: /api/workflow/designer/core-entity-options?entity=work-queue
+    render:
+      component: OptionVariablePicker
+      props:
+        valueMode: selectId
+    persisted:
+      column: default_work_queue_id
+      storageClass: core
+  - key: defaultDueOffsetHours
+    valueType: integer
+    required: false
+    label:
+      en: Default due offset (hours)
+      nl: Standaard doorlooptijd (uren)
+    description:
+      en: Hours after step activation to set as due date
+      nl: Uren na activering als deadline
+    persisted:
+      column: default_due_offset_hours
+      storageClass: core
+  - key: predecessorStepKey
+    valueType: string
+    required: false
+    label:
+      en: Predecessor step key
+      nl: Voorganger stapsleutel
+    description:
+      en: Key of the step that must complete before this step can start
+      nl: Sleutel van de stap die afgerond moet zijn voordat deze stap kan starten
+    validation:
+      maxLength: 100
+    persisted:
+      column: predecessor_step_key
+      storageClass: core
+  - key: conditionExpression
+    valueType: string
+    required: false
+    label:
+      en: Condition expression
+      nl: Conditie-expressie
+    description:
+      en: Optional expression. If set the step is only created when the expression evaluates to true. Example - case.priority === 'urgent'
+      nl: Optionele expressie. Stap wordt alleen aangemaakt als expressie waar is.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: condition_expression
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 2
+        maxLength: 1000
+  - key: actions
+    valueType: object
+    required: false
+    label:
+      en: Actions
+      nl: Acties
+    description:
+      en: Ordered inline action templates for this step. Each action has a stable key, sequenceNumber, kind, required, startMode, and task or workflow configuration.
+      nl: Geordende inline actiesjablonen voor deze stap. Elke actie heeft een stabiele sleutel, volgnummer, type, verplichting, startmodus en taak- of workflowconfiguratie.
+    persisted:
+      column: actions
+      storageClass: core
+    layoutFraction: 1
+    cardinality:
+      min: 0
+      max: "unbounded"
+    item:
+      key: action
+      valueType: object
+      children:
+        - key: key
+          valueType: string
+          required: true
+          label:
+            en: Action key
+            nl: Actiesleutel
+          render:
+            component: Input
+        - key: sequenceNumber
+          valueType: integer
+          required: true
+          label:
+            en: Sequence number
+            nl: Volgnummer
+          render:
+            component: NumberInput
+        - key: kind
+          valueType: string
+          required: true
+          label:
+            en: Kind
+            nl: Soort
+          render:
+            component: ReferenceSelect
+            props:
+              referentieGroep: CASESTEPACTIONKIND
+              clearable: false
+        - key: required
+          valueType: boolean
+          required: true
+          label:
+            en: Required
+            nl: Verplicht
+          render:
+            component: Switch
+        - key: startMode
+          valueType: string
+          required: true
+          label:
+            en: Start mode
+            nl: Startmodus
+          render:
+            component: ReferenceSelect
+            props:
+              referentieGroep: CASESTEPACTIONSTARTMODE
+              clearable: false
+        - key: taskTemplate
+          valueType: object
+          required: false
+          label:
+            en: Task template
+            nl: Taaksjabloon
+          children:
+            - key: title
+              valueType: string
+              required: false
+              label:
+                en: Title
+                nl: Titel
+              render:
+                component: Input
+            - key: description
+              valueType: string
+              required: false
+              label:
+                en: Description
+                nl: Beschrijving
+              render:
+                component: Textarea
+                props:
+                  rows: 3
+            - key: type
+              valueType: string
+              required: false
+              label:
+                en: Type
+                nl: Type
+              render:
+                component: ReferenceSelect
+                props:
+                  referentieGroep: TAAKTYPE
+                  clearable: true
+            - key: priority
+              valueType: string
+              required: false
+              label:
+                en: Priority
+                nl: Prioriteit
+              render:
+                component: ReferenceSelect
+                props:
+                  referentieGroep: TAAKPRIORITEIT
+                  clearable: true
+            - key: isBlocking
+              valueType: boolean
+              required: false
+              label:
+                en: Blocking
+                nl: Blokkerend
+              render:
+                component: Switch
+            - key: dueOffsetHours
+              valueType: integer
+              required: false
+              label:
+                en: Due offset (hours)
+                nl: Doorlooptijd (uren)
+              render:
+                component: NumberInput
+            - key: defaultWorkQueueId
+              valueType: string
+              required: false
+              semanticType: workQueueId
+              label:
+                en: Work queue
+                nl: Werkqueue
+              options:
+                type: remote
+                remoteUrl: /api/workflow/designer/core-entity-options?entity=work-queue
+              render:
+                component: OptionVariablePicker
+                props:
+                  valueMode: selectId
+                  clearable: true
+            - key: assignedRole
+              valueType: string
+              required: false
+              label:
+                en: Assigned role
+                nl: Toegewezen rol
+              render:
+                component: Input
+            - key: assignmentMetadata
+              valueType: object
+              required: false
+              label:
+                en: Assignment metadata
+                nl: Toewijzingsmetadata
+              render:
+                component: JsonFieldEditor
+            - key: formDefinition
+              valueType: object
+              required: false
+              label:
+                en: Form definition
+                nl: Formulierdefinitie
+              render:
+                component: JsonFieldEditor
+        - key: workflow
+          valueType: object
+          required: false
+          label:
+            en: Workflow
+            nl: Workflow
+          children:
+            - key: workflowDefinitionId
+              valueType: string
+              required: false
+              semanticType: workflowDefinitionId
+              label:
+                en: Workflow definition
+                nl: Workflowdefinitie
+              options:
+                type: remote
+                remoteUrl: /api/workflow/designer/published-workflows/options?category=process
+              render:
+                component: OptionVariablePicker
+                props:
+                  clearable: true
+                  expectedSemanticType: workflowDefinitionId
+                  selectionSync: publishedWorkflow
+                  optionSectionLabel: Procesworkflows
+relationships:
+  - key: template
+    kind: belongsTo
+    target: CaseTemplate
+    foreignKey: case_template_id
+    label:
+      en: Case template
+      nl: Zaaksjabloon
+  - key: parentStepTemplate
+    kind: belongsTo
+    target: CaseStepTemplate
+    foreignKey: parent_case_step_template_id
+    label:
+      en: Parent case step template
+      nl: Bovenliggend zaakstapsjabloon
+  - key: childStepTemplates
+    kind: hasMany
+    target: CaseStepTemplate
+    foreignKey: parent_case_step_template_id
+    label:
+      en: Child case step templates
+      nl: Child-zaakstapsjablonen
+  - key: defaultWorkQueue
+    kind: belongsTo
+    target: WorkQueue
+    foreignKey: default_work_queue_id
+    label:
+      en: Default work queue
+      nl: Standaard werkqueue
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+      wait: true

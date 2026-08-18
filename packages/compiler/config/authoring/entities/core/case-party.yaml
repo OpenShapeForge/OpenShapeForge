@@ -1,0 +1,134 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: CaseParty
+title: Case Party
+description: A participating party and role on a case.
+language: en
+displayTemplate: "{{displayName}}"
+filterField: displayName
+labels:
+  en: Case Party
+  nl: Zaakbetrokkene
+domains:
+  - cases
+authorization:
+  roles:
+    read:
+      - Cases.All.Read
+      - Cases.All.ReadWrite
+    create:
+      - Cases.All.ReadWrite
+    update:
+      - Cases.All.ReadWrite
+    delete:
+      - Cases.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: role
+    valueType: string
+    required: true
+    label:
+      en: Role
+      nl: Rol
+    persisted:
+      column: role
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEPARTYROLE
+        clearable: false
+  - key: displayName
+    valueType: string
+    required: false
+    label:
+      en: Display name
+      nl: Weergavenaam
+    validation:
+      maxLength: 200
+    persisted:
+      column: display_name
+      storageClass: core
+  - key: isPrimary
+    valueType: boolean
+    required: true
+    label:
+      en: Primary
+      nl: Primair
+    defaultValue: false
+    persisted:
+      column: is_primary
+      storageClass: core
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Startdatum
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: note
+    valueType: string
+    required: false
+    label:
+      en: Note
+      nl: Notitie
+    validation:
+      maxLength: 2000
+    persisted:
+      column: note
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 2000
+relationships:
+  - key: case
+    kind: belongsTo
+    target: Case
+    foreignKey: case_id
+    label:
+      en: Case
+      nl: Zaak
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: relationRole
+    kind: belongsTo
+    target: RelationRole
+    foreignKey: relation_role_id
+    label:
+      en: Relation role
+      nl: Relatierol
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

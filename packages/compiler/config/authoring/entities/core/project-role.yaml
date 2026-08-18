@@ -1,0 +1,327 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ProjectRole
+title: Project Role
+description: Role assignment of a relation on a project, scoped to a role type and a validity period (canonical role pattern).
+language: en
+displayTemplate: "{{roleType}}"
+filterField: roleType
+labels:
+  en: Project role
+  nl: Projectrol
+domains:
+  - project
+fields:
+  - key: roleType
+    valueType: string
+    required: true
+    label:
+      en: Role type
+      nl: Roltype
+    description:
+      en: Role this relation plays on the project (sponsor, lead, member, advisor, observer, stakeholder).
+      nl: Rol die deze relatie op het project vervult (opdrachtgever, projectleider, lid, adviseur, toeschouwer, stakeholder).
+    persisted:
+      column: role_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: PROJECTROLE
+        clearable: false
+  - key: status
+    valueType: string
+    required: false
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of this role assignment.
+      nl: Levenscyclusstatus van deze roltoewijzing.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: ROLEASSIGNMENTSTATUS
+        clearable: true
+  - key: name
+    valueType: string
+    required: false
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Optional human-readable name of the role assignment.
+      nl: Optionele menselijk leesbare naam van de roltoewijzing.
+    validation:
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description or business meaning of the assignment.
+      nl: Optionele omschrijving of zakelijke betekenis van de toewijzing.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Date from which this role is effective on the project.
+      nl: Datum vanaf wanneer deze rol op het project geldig is.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Date until which this role is effective on the project.
+      nl: Datum tot wanneer deze rol op het project geldig is.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: allocationPercentage
+    valueType: number
+    required: false
+    label:
+      en: Allocation percentage
+      nl: Inzetpercentage
+    description:
+      en: Percentage of this relation's time allocated to this project role (0-100).
+      nl: Percentage van de tijd van deze relatie dat aan deze projectrol is toegewezen (0-100).
+    validation:
+      min: 0
+      max: 100
+    persisted:
+      column: allocation_percentage
+      storageClass: core
+  - key: hourlyRate
+    valueType: number
+    required: false
+    label:
+      en: Hourly rate
+      nl: Uurtarief
+    description:
+      en: Hourly rate for this role assignment, when timesheets feed billing.
+      nl: Uurtarief voor deze roltoewijzing, wanneer urenstaten doorlopen naar facturering.
+    semanticType: currency
+    persisted:
+      column: hourly_rate
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the role assignment in an external context.
+      nl: Functionele of zakelijke code van de roltoewijzing in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: project
+    kind: belongsTo
+    target: Project
+    foreignKey: project_id
+    label:
+      en: Project
+      nl: Project
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+ui:
+  routes:
+    list:
+      en: /project-roles
+      nl: /projectrollen
+    detail:
+      en: /project-roles/:id
+      nl: /projectrollen/:id
+    create:
+      en: /project-roles/create
+      nl: /projectrollen/aanmaken
+    edit:
+      en: /project-roles/:id/edit
+      nl: /projectrollen/:id/bewerken
+    delete:
+      en: /project-roles/:id/delete
+      nl: /projectrollen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Project roles
+        nl: Projectrollen
+      columns:
+        - key: roleType
+          sortable: true
+        - key: name
+          sortable: true
+        - key: status
+          sortable: true
+        - key: startDate
+          sortable: true
+        - key: endDate
+          sortable: true
+      defaultSort:
+        key: startDate
+        direction: desc
+      rowLink:
+        en: /project-roles/:id
+        nl: /projectrollen/:id
+    detail:
+      header:
+        title: "{{name || roleType}}"
+        subtitle: "{{status}}"
+        badges:
+          - roleType
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Role details
+                nl: Rolgegevens
+              fields:
+                - roleType
+                - status
+                - name
+                - startDate
+                - endDate
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Allocation and rate
+                nl: Inzet en tarief
+              fields:
+                - allocationPercentage
+                - hourlyRate
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create project role
+            nl: Projectrol aanmaken
+          groups:
+            - title:
+                en: Role details
+                nl: Rolgegevens
+              fields:
+                - roleType
+                - status
+                - name
+                - startDate
+                - endDate
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Allocation and rate
+                nl: Inzet en tarief
+              fields:
+                - allocationPercentage
+                - hourlyRate
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit project role
+            nl: Projectrol bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - ProjectDevelopment.All.Read
+      - ProjectDevelopment.All.ReadWrite
+    create:
+      - ProjectDevelopment.All.ReadWrite
+    update:
+      - ProjectDevelopment.All.ReadWrite
+    delete:
+      - ProjectDevelopment.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

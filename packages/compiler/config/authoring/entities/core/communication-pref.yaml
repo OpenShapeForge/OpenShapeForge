@@ -1,0 +1,322 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: CommunicationPreference
+title: Communication Preference
+description: A business-level communication preference for a relation or contact detail, including preferred channel and consent state.
+language: en
+displayTemplate: "{{type}}"
+filterField: type
+labels:
+  en: Communication Preference
+  nl: Communicatievoorkeur
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relations.All.Read
+      - Relations.All.ReadWrite
+    create:
+      - Relations.All.ReadWrite
+    update:
+      - Relations.All.ReadWrite
+    delete:
+      - Relations.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: type
+    valueType: string
+    required: true
+    label:
+      en: Purpose
+      nl: Doel
+    description:
+      en: Communication purpose or notification type for which this preference applies.
+      nl: Communicatiedoel of notificatietype waarvoor deze voorkeur geldt.
+    validation:
+      minLength: 1
+      maxLength: 50
+    options:
+      type: referentiedata
+      referentieGroep: COMMUNICATIONTYPE
+    persisted:
+      column: type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: COMMUNICATIONTYPE
+        clearable: false
+  - key: scope
+    valueType: string
+    required: true
+    label:
+      en: Scope
+      nl: Scope
+    description:
+      en: Scope at which the preference applies, such as relation, contact detail, or tenant default.
+      nl: Reikwijdte waarop de voorkeur geldt, zoals relatie, contactgegeven of tenant-standaard.
+    defaultValue: relation
+    validation:
+      maxLength: 50
+    options:
+      type: referentiedata
+      referentieGroep: COMMUNICATIONPREFERENCESCOPE
+    persisted:
+      column: scope
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: COMMUNICATIONPREFERENCESCOPE
+        clearable: false
+  - key: channel
+    valueType: string
+    required: true
+    label:
+      en: Channel
+      nl: Kanaal
+    description:
+      en: Communication channel (e.g. email, phone, post).
+      nl: Communicatiekanaal (bijv. e-mail, telefoon, post).
+    validation:
+      minLength: 1
+      maxLength: 50
+    options:
+      type: referentiedata
+      referentieGroep: COMMUNICATIONCHANNEL
+    persisted:
+      column: channel
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: COMMUNICATIONCHANNEL
+        clearable: false
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the preference, such as active, expired, or revoked.
+      nl: Levenscyclusstatus van de voorkeur, zoals actief, verlopen of ingetrokken.
+    defaultValue: active
+    validation:
+      maxLength: 50
+    options:
+      type: referentiedata
+      referentieGroep: COMMUNICATIONPREFERENCESTATUS
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: COMMUNICATIONPREFERENCESTATUS
+        clearable: false
+  - key: isOptedIn
+    valueType: boolean
+    required: true
+    label:
+      en: Opted in
+      nl: Toestemming
+    description:
+      en: Whether the relation has opted in to this communication.
+      nl: Of de relatie toestemming heeft gegeven voor deze communicatie.
+    persisted:
+      column: is_opted_in
+      storageClass: core
+  - key: validFrom
+    valueType: date
+    required: false
+    label:
+      en: Valid from
+      nl: Geldig vanaf
+    description:
+      en: Date from which this preference is effective.
+      nl: Datum vanaf wanneer deze voorkeur geldig is.
+    persisted:
+      column: valid_from
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: validUntil
+    valueType: date
+    required: false
+    label:
+      en: Valid until
+      nl: Geldig tot
+    description:
+      en: Date until which this preference remains effective.
+      nl: Datum tot wanneer deze voorkeur geldig blijft.
+    persisted:
+      column: valid_until
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: source
+    valueType: string
+    required: false
+    label:
+      en: Source
+      nl: Bron
+    description:
+      en: Source from which this preference originated, such as self-service, import, or operator update.
+      nl: Bron waaruit deze voorkeur is ontstaan, zoals selfservice, import of handmatige wijziging.
+    validation:
+      maxLength: 100
+    persisted:
+      column: source
+      storageClass: core
+  - key: notes
+    valueType: string
+    required: false
+    label:
+      en: Notes
+      nl: Notities
+    description:
+      en: Additional notes or context about this preference.
+      nl: Aanvullende notities of context bij deze voorkeur.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: notes
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: contactDetail
+    kind: belongsTo
+    target: ContactDetail
+    foreignKey: contact_detail_id
+    label:
+      en: Contact detail
+      nl: Contactgegeven
+ui:
+  routes:
+    list:
+      en: /communication-preferences
+      nl: /communicatievoorkeuren
+    detail:
+      en: /communication-preferences/:id
+      nl: /communicatievoorkeuren/:id
+    create:
+      en: /communication-preferences/create
+      nl: /communicatievoorkeuren/aanmaken
+    edit:
+      en: /communication-preferences/:id/edit
+      nl: /communicatievoorkeuren/:id/bewerken
+    delete:
+      en: /communication-preferences/:id/delete
+      nl: /communicatievoorkeuren/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Communication Preferences
+        nl: Communicatievoorkeuren
+      columns:
+        - key: type
+          sortable: true
+        - key: scope
+          sortable: true
+        - key: channel
+          sortable: true
+        - key: isOptedIn
+          sortable: true
+      defaultSort:
+        key: type
+        direction: asc
+      rowLink:
+        en: /communication-preferences/:id
+        nl: /communicatievoorkeuren/:id
+    detail:
+      header:
+        title: "{{type}} — {{channel}}"
+        subtitle: "{{scope}}"
+        badges:
+          - type
+          - channel
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Preference details
+                nl: Voorkeurgegevens
+              fields:
+                - type
+                - scope
+                - channel
+                - status
+                - isOptedIn
+                - validFrom
+                - validUntil
+                - source
+                - notes
+    form:
+      variants:
+        create:
+          title:
+            en: Create communication preference
+            nl: Communicatievoorkeur aanmaken
+          groups:
+            - title:
+                en: Preference details
+                nl: Voorkeurgegevens
+              fields:
+                - type
+                - scope
+                - channel
+                - status
+                - isOptedIn
+                - validFrom
+                - validUntil
+                - source
+                - notes
+        edit:
+          extends: create
+          title:
+            en: Edit communication preference
+            nl: Communicatievoorkeur bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

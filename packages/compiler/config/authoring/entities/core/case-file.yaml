@@ -1,0 +1,262 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: CaseFile
+title: Case file
+description: A governed case file that groups cases, documents, and archival context.
+language: en
+displayTemplate: "{{title}}"
+filterField: title
+labels:
+  en: Case file
+  nl: Dossier
+domains:
+  - cases
+  - records
+retention:
+  mode: policyRef
+  policy: records-archive-7y
+  scope: record
+  startsFrom:
+    strategy: firstNonNull
+    fields:
+      - closedAt
+      - openedAt
+authorization:
+  roles:
+    read:
+      - CaseFile.All.ReadWrite
+    create:
+      - CaseFile.All.ReadWrite
+    update:
+      - CaseFile.All.ReadWrite
+    delete:
+      - CaseFile.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    validation:
+      minLength: 1
+      maxLength: 100
+    persisted:
+      column: code
+      storageClass: core
+  - key: title
+    valueType: string
+    required: true
+    label:
+      en: Title
+      nl: Titel
+    validation:
+      minLength: 1
+      maxLength: 300
+    persisted:
+      column: title
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    validation:
+      maxLength: 8000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 5
+        maxLength: 8000
+  - key: caseFileType
+    valueType: string
+    required: true
+    label:
+      en: Case file type
+      nl: Dossiertype
+    persisted:
+      column: case_file_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEFILETYPE
+        clearable: false
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEFILESTATUS
+        clearable: false
+  - key: confidentiality
+    valueType: string
+    required: false
+    label:
+      en: Confidentiality
+      nl: Vertrouwelijkheid
+    persisted:
+      column: confidentiality
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEFILECONFIDENTIALITY
+        clearable: true
+  - key: archiveStatus
+    valueType: string
+    required: false
+    label:
+      en: Archive status
+      nl: Archiefstatus
+    persisted:
+      column: archive_status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: CASEFILEARCHIVESTATUS
+        clearable: true
+  - key: openedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Opened at
+      nl: Geopend op
+    persisted:
+      column: opened_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: closedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Closed at
+      nl: Gesloten op
+    persisted:
+      column: closed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: archiveActionAt
+    valueType: datetime
+    required: false
+    label:
+      en: Archive action at
+      nl: Archiefactie op
+    persisted:
+      column: archive_action_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: retentionUntil
+    valueType: date
+    required: false
+    label:
+      en: Retention until
+      nl: Bewaren tot
+    persisted:
+      column: retention_until
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: aiSummary
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: AI summary
+      nl: AI-samenvatting
+    validation:
+      maxLength: 8000
+    persisted:
+      column: ai_summary
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 6
+        maxLength: 8000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: primaryRelation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Primary relation
+      nl: Primaire relatie
+  - key: parentCaseFile
+    kind: belongsTo
+    target: CaseFile
+    foreignKey: parent_case_file_id
+    label:
+      en: Parent case file
+      nl: Hoofddossier
+  - key: childCaseFiles
+    kind: hasMany
+    target: CaseFile
+    foreignKey: parent_case_file_id
+    label:
+      en: Child case files
+      nl: Onderliggende dossiers
+  - key: cases
+    kind: hasMany
+    target: Case
+    foreignKey: case_file_id
+    label:
+      en: Cases
+      nl: Zaken
+  - key: processes
+    kind: hasMany
+    target: Process
+    foreignKey: case_file_id
+    label:
+      en: Processes
+      nl: Processen
+  - key: documents
+    kind: hasMany
+    target: Document
+    foreignKey: case_file_id
+    label:
+      en: Documents
+      nl: Documenten
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+      wait: true

@@ -1,0 +1,186 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: AgreementLink
+title: Agreement Link
+description: Typed link between two agreements (e.g. parent, replaces, derived-from).
+language: en
+displayTemplate: "{{linkType}}"
+filterField: linkType
+labels:
+  en: Agreement link
+  nl: Overeenkomstkoppeling
+domains:
+  - contracts
+fields:
+  - key: linkType
+    valueType: string
+    required: true
+    label:
+      en: Link type
+      nl: Koppelingstype
+    description:
+      en: Type of link between the two agreements (parent, replaces, replaced-by, derived-from).
+      nl: Type koppeling tussen de twee overeenkomsten (bovenliggend, vervangt, vervangen door, afgeleid van).
+    persisted:
+      column: link_type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: AGREEMENTLINKTYPE
+        clearable: false
+  - key: validFrom
+    valueType: date
+    required: false
+    label:
+      en: Valid from
+      nl: Geldig vanaf
+    description:
+      en: Date from which the link is effective.
+      nl: Datum vanaf wanneer de koppeling geldig is.
+    persisted:
+      column: valid_from
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: validTo
+    valueType: date
+    required: false
+    label:
+      en: Valid until
+      nl: Geldig tot
+    description:
+      en: Date until which the link is effective.
+      nl: Datum tot wanneer de koppeling geldig is.
+    persisted:
+      column: valid_to
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+relationships:
+  - key: fromAgreement
+    kind: belongsTo
+    target: Agreement
+    foreignKey: from_agreement_id
+    label:
+      en: From agreement
+      nl: Van overeenkomst
+  - key: toAgreement
+    kind: belongsTo
+    target: Agreement
+    foreignKey: to_agreement_id
+    label:
+      en: To agreement
+      nl: Naar overeenkomst
+ui:
+  routes:
+    list:
+      en: /agreement-links
+      nl: /overeenkomstkoppelingen
+    detail:
+      en: /agreement-links/:id
+      nl: /overeenkomstkoppelingen/:id
+    create:
+      en: /agreement-links/create
+      nl: /overeenkomstkoppelingen/aanmaken
+    edit:
+      en: /agreement-links/:id/edit
+      nl: /overeenkomstkoppelingen/:id/bewerken
+    delete:
+      en: /agreement-links/:id/delete
+      nl: /overeenkomstkoppelingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Agreement links
+        nl: Overeenkomstkoppelingen
+      columns:
+        - key: linkType
+          sortable: true
+        - key: validFrom
+          sortable: true
+        - key: validTo
+          sortable: true
+      defaultSort:
+        key: validFrom
+        direction: desc
+      rowLink:
+        en: /agreement-links/:id
+        nl: /overeenkomstkoppelingen/:id
+    detail:
+      header:
+        title: "{{linkType}}"
+        subtitle: "{{validFrom}}"
+        badges:
+          - linkType
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Link details
+                nl: Koppelingsgegevens
+              fields:
+                - linkType
+                - validFrom
+                - validTo
+    form:
+      variants:
+        create:
+          title:
+            en: Create agreement link
+            nl: Overeenkomstkoppeling aanmaken
+          groups:
+            - title:
+                en: Link details
+                nl: Koppelingsgegevens
+              fields:
+                - linkType
+                - validFrom
+                - validTo
+        edit:
+          extends: create
+          title:
+            en: Edit agreement link
+            nl: Overeenkomstkoppeling bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Agreements.All.Read
+      - Agreements.All.ReadWrite
+    create:
+      - Agreements.All.ReadWrite
+    update:
+      - Agreements.All.ReadWrite
+    delete:
+      - Agreements.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

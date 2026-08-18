@@ -1,0 +1,362 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: AgreementParty
+title: Agreement Party
+description: Party assigned to an agreement, scoped to a role and a validity period (canonical role pattern).
+language: en
+displayTemplate: "{{partyRole}}"
+filterField: partyRole
+labels:
+  en: Agreement party
+  nl: Overeenkomstpartij
+domains:
+  - contracts
+fields:
+  - key: partyRole
+    valueType: string
+    required: true
+    label:
+      en: Party role
+      nl: Partijrol
+    description:
+      en: Role this party plays on the agreement (contractant, payer, representative, etc.).
+      nl: Rol die deze partij op de overeenkomst vervult (contractant, betaler, vertegenwoordiger, etc.).
+    persisted:
+      column: party_role
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: AGREEMENTPARTYROLE
+        clearable: false
+  - key: status
+    valueType: string
+    required: false
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of this role assignment.
+      nl: Levenscyclusstatus van deze roltoewijzing.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: ROLEASSIGNMENTSTATUS
+        clearable: true
+  - key: name
+    valueType: string
+    required: false
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Optional human-readable name of the role assignment.
+      nl: Optionele menselijk leesbare naam van de roltoewijzing.
+    validation:
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional description or business meaning of the assignment.
+      nl: Optionele omschrijving of zakelijke betekenis van de toewijzing.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 2000
+  - key: startDate
+    valueType: date
+    required: false
+    label:
+      en: Start date
+      nl: Startdatum
+    description:
+      en: Date from which this party is effective on the agreement.
+      nl: Datum vanaf wanneer deze partij geldig is op de overeenkomst.
+    persisted:
+      column: start_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: endDate
+    valueType: date
+    required: false
+    label:
+      en: End date
+      nl: Einddatum
+    description:
+      en: Date until which this party is effective on the agreement.
+      nl: Datum tot wanneer deze partij geldig is op de overeenkomst.
+    persisted:
+      column: end_date
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
+  - key: sharePercentage
+    valueType: number
+    required: false
+    label:
+      en: Share percentage
+      nl: Aandeelpercentage
+    description:
+      en: Percentage of the agreement this party is responsible for (0-100). For role=payer parties on a billable sub-agreement, the active payer shares MUST sum to 100 within rounding tolerance; rounding remainders are absorbed by the primary payer.
+      nl: Percentage van de overeenkomst waarvoor deze partij verantwoordelijk is (0-100). Voor partijen met rol=payer op een factureerbare subovereenkomst MOETEN de actieve aandelen tot 100 sommeren binnen afrondingstolerantie; afrondingsverschillen worden opgevangen door de primaire betaler.
+    validation:
+      min: 0
+      max: 100
+    persisted:
+      column: share_percentage
+      storageClass: core
+  - key: primaryPayer
+    valueType: boolean
+    required: false
+    label:
+      en: Primary payer
+      nl: Primaire betaler
+    description:
+      en: When true, this payer absorbs split-rounding remainders so per-payer collection totals add up to the invoice total exactly. Exactly one active payer per billable sub-agreement should be flagged primary.
+      nl: Indien aangevinkt vangt deze betaler afrondingsverschillen op zodat de som van debiteurensplits exact gelijk is aan het factuurtotaal. Per factureerbare subovereenkomst is precies één actieve betaler primair.
+    defaultValue: false
+    persisted:
+      column: primary_payer
+      storageClass: core
+  - key: paymentDay
+    valueType: integer
+    required: false
+    label:
+      en: Payment day
+      nl: Betaaldag
+    description:
+      en: Preferred day-of-month (1-31) for collection from this party.
+      nl: Voorkeursdag van de maand (1-31) voor incasso bij deze partij.
+    validation:
+      min: 1
+      max: 31
+    persisted:
+      column: payment_day
+      storageClass: core
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the role assignment in an external context.
+      nl: Functionele of zakelijke code van de roltoewijzing in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: agreement
+    kind: belongsTo
+    target: Agreement
+    foreignKey: agreement_id
+    label:
+      en: Agreement
+      nl: Overeenkomst
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: addressAssignment
+    kind: belongsTo
+    target: AddressAssignment
+    foreignKey: address_assignment_id
+    label:
+      en: Address assignment
+      nl: Adrestoewijzing
+  - key: paymentDetail
+    kind: belongsTo
+    target: PaymentDetail
+    foreignKey: payment_detail_id
+    label:
+      en: Payment detail
+      nl: Betaalgegevens
+  - key: preferredPaymentMethod
+    kind: belongsTo
+    target: PaymentMethod
+    foreignKey: preferred_payment_method_id
+    label:
+      en: Preferred payment method
+      nl: Voorkeursbetaalwijze
+ui:
+  routes:
+    list:
+      en: /agreement-parties
+      nl: /overeenkomstpartijen
+    detail:
+      en: /agreement-parties/:id
+      nl: /overeenkomstpartijen/:id
+    create:
+      en: /agreement-parties/create
+      nl: /overeenkomstpartijen/aanmaken
+    edit:
+      en: /agreement-parties/:id/edit
+      nl: /overeenkomstpartijen/:id/bewerken
+    delete:
+      en: /agreement-parties/:id/delete
+      nl: /overeenkomstpartijen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Agreement parties
+        nl: Overeenkomstpartijen
+      columns:
+        - key: partyRole
+          sortable: true
+        - key: name
+          sortable: true
+        - key: status
+          sortable: true
+        - key: startDate
+          sortable: true
+        - key: endDate
+          sortable: true
+      defaultSort:
+        key: startDate
+        direction: desc
+      rowLink:
+        en: /agreement-parties/:id
+        nl: /overeenkomstpartijen/:id
+    detail:
+      header:
+        title: "{{name || partyRole}}"
+        subtitle: "{{status}}"
+        badges:
+          - partyRole
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Role details
+                nl: Rolgegevens
+              fields:
+                - partyRole
+                - status
+                - name
+                - startDate
+                - endDate
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Share and payment
+                nl: Aandeel en betaling
+              fields:
+                - sharePercentage
+                - paymentDay
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create agreement party
+            nl: Overeenkomstpartij aanmaken
+          groups:
+            - title:
+                en: Role details
+                nl: Rolgegevens
+              fields:
+                - partyRole
+                - status
+                - name
+                - startDate
+                - endDate
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Share and payment
+                nl: Aandeel en betaling
+              fields:
+                - sharePercentage
+                - paymentDay
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit agreement party
+            nl: Overeenkomstpartij bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Agreements.All.Read
+      - Agreements.All.ReadWrite
+    create:
+      - Agreements.All.ReadWrite
+    update:
+      - Agreements.All.ReadWrite
+    delete:
+      - Agreements.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

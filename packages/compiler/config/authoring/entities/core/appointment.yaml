@@ -1,0 +1,263 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Appointment
+title: Appointment
+description: A scheduled appointment or meeting associated with a relation.
+language: en
+displayTemplate: "{{subject}}"
+filterField: subject
+labels:
+  en: Appointment
+  nl: Afspraak
+authorization:
+  roles:
+    read:
+      - General.All.Read
+      - General.All.ReadWrite
+    create:
+      - General.All.ReadWrite
+    update:
+      - General.All.ReadWrite
+    delete:
+      - General.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: subject
+    valueType: string
+    required: true
+    label:
+      en: Subject
+      nl: Onderwerp
+    description:
+      en: Subject or title of the appointment.
+      nl: Onderwerp of titel van de afspraak.
+    validation:
+      minLength: 1
+      maxLength: 300
+    persisted:
+      column: subject
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    description:
+      en: Detailed description or agenda of the appointment.
+      nl: Gedetailleerde beschrijving of agenda van de afspraak.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 5000
+  - key: startDateTime
+    valueType: datetime
+    required: true
+    label:
+      en: Start date/time
+      nl: Startdatum/-tijd
+    description:
+      en: Date and time when the appointment starts.
+      nl: Datum en tijd waarop de afspraak begint.
+    persisted:
+      column: start_date_time
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: endDateTime
+    valueType: datetime
+    required: false
+    label:
+      en: End date/time
+      nl: Einddatum/-tijd
+    description:
+      en: Date and time when the appointment ends.
+      nl: Datum en tijd waarop de afspraak eindigt.
+    persisted:
+      column: end_date_time
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Current status of the appointment (e.g. scheduled, completed, cancelled).
+      nl: Huidige status van de afspraak (bijv. gepland, afgerond, geannuleerd).
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: APPOINTMENTSTATUS
+        clearable: false
+  - key: location
+    valueType: string
+    required: false
+    label:
+      en: Location
+      nl: Locatie
+    description:
+      en: Location where the appointment takes place.
+      nl: Locatie waar de afspraak plaatsvindt.
+    validation:
+      maxLength: 300
+    persisted:
+      column: location
+      storageClass: core
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: case
+    kind: belongsTo
+    target: Case
+    foreignKey: case_id
+    label:
+      en: Case
+      nl: Zaak
+  - key: tasks
+    kind: hasMany
+    target: Task
+    foreignKey: appointment_id
+    label:
+      en: Tasks
+      nl: Taken
+ui:
+  routes:
+    list:
+      en: /appointments
+      nl: /afspraken
+    detail:
+      en: /appointments/:id
+      nl: /afspraken/:id
+    create:
+      en: /appointments/create
+      nl: /afspraken/aanmaken
+    edit:
+      en: /appointments/:id/edit
+      nl: /afspraken/:id/bewerken
+    delete:
+      en: /appointments/:id/delete
+      nl: /afspraken/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Appointments
+        nl: Afspraken
+      columns:
+        - key: subject
+          sortable: true
+        - key: startDateTime
+          sortable: true
+        - key: status
+          sortable: true
+        - key: location
+          sortable: false
+      defaultSort:
+        key: startDateTime
+        direction: desc
+      rowLink:
+        en: /appointments/:id
+        nl: /afspraken/:id
+    detail:
+      header:
+        title: "{{subject}}"
+        subtitle: "{{startDateTime}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Appointment details
+                nl: Afspraakgegevens
+              fields:
+                - subject
+                - description
+                - status
+                - location
+            - title:
+                en: Schedule
+                nl: Planning
+              fields:
+                - startDateTime
+                - endDateTime
+        - id: tasks
+          label:
+            en: Tasks
+            nl: Taken
+          relationship: tasks
+    form:
+      variants:
+        create:
+          title:
+            en: Create appointment
+            nl: Afspraak aanmaken
+          groups:
+            - title:
+                en: Appointment details
+                nl: Afspraakgegevens
+              fields:
+                - subject
+                - description
+                - status
+                - location
+            - title:
+                en: Schedule
+                nl: Planning
+              fields:
+                - startDateTime
+                - endDateTime
+        edit:
+          extends: create
+          title:
+            en: Edit appointment
+            nl: Afspraak bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

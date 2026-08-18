@@ -1,0 +1,271 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Tenant
+title: Tenant
+description: A tenant record that anchors tenant-scoped configuration and matches the platform tenant identifier.
+language: en
+displayTemplate: "{{slug}}"
+filterField: slug
+labels:
+  en: Tenant
+  nl: Tenant
+domains:
+  - core
+authorization:
+  roles:
+    read:
+      - Organization.All.ReadWrite
+    create:
+      - Organization.All.ReadWrite
+    update:
+      - Organization.All.ReadWrite
+    delete:
+      - Organization.All.ReadWrite
+fields:
+  - key: slug
+    valueType: string
+    required: true
+    label:
+      en: Slug
+      nl: Slug
+    description:
+      en: Stable tenant key that should match the platform tenant identifier and Keycloak organization alias.
+      nl: Stabiele tenantsleutel die moet overeenkomen met de platform-tenantidentifier en de Keycloak-organisatiealias.
+    validation:
+      minLength: 1
+      maxLength: 120
+      pattern: ^[a-z0-9]+(?:-[a-z0-9]+)*$
+    persisted:
+      column: slug
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-friendly tenant name.
+      nl: Mensvriendelijke tenantnaam.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the tenant.
+      nl: Levenscyclusstatus van de tenant.
+    defaultValue: active
+    validation:
+      minLength: 1
+      maxLength: 50
+    options:
+      type: referentiedata
+      referentieGroep: TENANTSTATUS
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: TENANTSTATUS
+        clearable: false
+  - key: tenantKind
+    valueType: string
+    required: true
+    label:
+      en: Tenant kind
+      nl: Tenantsoort
+    description:
+      en: Discriminator that separates customer tenants from blueprint tenants used as central template libraries.
+      nl: Discriminator die klant-tenants onderscheidt van blueprint-tenants die als centrale templatebibliotheek dienen.
+    defaultValue: customer
+    validation:
+      minLength: 1
+      maxLength: 32
+    persisted:
+      column: tenant_kind
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Optional notes about the tenant.
+      nl: Optionele notities over de tenant.
+    validation:
+      maxLength: 500
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 500
+  - key: avatarStorageLocation
+    valueType: string
+    required: false
+    label:
+      en: Avatar
+      nl: Avatar
+    description:
+      en: Storage location for the tenant avatar image.
+      nl: Opslaglocatie van de tenantavatar.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: avatar_storage_location
+      storageClass: core
+    render:
+      component: FileUpload
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional code or alias of the tenant root organization in the source system.
+      nl: Functionele code of alias van de tenant-hoofdorganisatie in het bronsysteem.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: tenantSettings
+    kind: hasMany
+    target: TenantSetting
+    foreignKey: tenant_id
+    label:
+      en: Tenant settings
+      nl: Tenantinstellingen
+  - key: organizationPermissions
+    kind: hasMany
+    target: OrganizationPermission
+    foreignKey: target_tenant_id
+    label:
+      en: Organization permissions
+      nl: Organisatierechten
+  - key: userOrganizationPermissions
+    kind: hasMany
+    target: UserOrganizationPermission
+    foreignKey: target_tenant_id
+    label:
+      en: User organization permissions
+      nl: Gebruikersrechten per organisatie
+ui:
+  routes:
+    list:
+      en: /tenants
+      nl: /tenants
+    detail:
+      en: /tenants/:id
+      nl: /tenants/:id
+    create:
+      en: /tenants/create
+      nl: /tenants/aanmaken
+    edit:
+      en: /tenants/:id/edit
+      nl: /tenants/:id/bewerken
+    delete:
+      en: /tenants/:id/delete
+      nl: /tenants/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Tenants
+        nl: Tenants
+      columns:
+        - key: slug
+          sortable: true
+        - key: name
+          sortable: true
+        - key: status
+          sortable: true
+      defaultSort:
+        key: slug
+        direction: asc
+      rowLink:
+        en: /tenants/:id
+        nl: /tenants/:id
+    detail:
+      header:
+        title: "{{name}}"
+        subtitle: "{{slug}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Tenant details
+                nl: Tenantgegevens
+              fields:
+                - slug
+                - name
+                - status
+                - description
+                - avatarStorageLocation
+        - id: settings
+          label:
+            en: Settings
+            nl: Instellingen
+          relationship: tenantSettings
+    form:
+      variants:
+        create:
+          title:
+            en: Create tenant
+            nl: Tenant aanmaken
+          groups:
+            - title:
+                en: Tenant details
+                nl: Tenantgegevens
+              fields:
+                - slug
+                - name
+                - status
+                - description
+                - avatarStorageLocation
+        edit:
+          extends: create
+          title:
+            en: Edit tenant
+            nl: Tenant bewerken
+workflow:
+  nodes:
+    actions:
+      create: false
+      getOne: false
+      list: false
+      update: false
+      delete: false

@@ -1,0 +1,383 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: NaturalPerson
+title: Natural Person
+description: A natural person, extending the concept of a relation as an individual. Shared reachability and business contact state should be modeled on the related Relation aggregate.
+language: en
+displayTemplate: "{{firstName}} {{lastName}}"
+filterField: lastName
+labels:
+  en: Natural Person
+  nl: Natuurlijk Persoon
+domains:
+  - relations
+authorization:
+  roles:
+    read:
+      - Relations.All.Read
+      - Relations.All.ReadWrite
+    create:
+      - Relations.All.ReadWrite
+    update:
+      - Relations.All.ReadWrite
+    delete:
+      - Relations.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: firstName
+    valueType: string
+    required: true
+    label:
+      en: First name
+      nl: Voornaam
+    description:
+      en: Legal first name of the person.
+      nl: Officiële voornaam van de persoon.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: first_name
+      storageClass: core
+  - key: lastName
+    valueType: string
+    required: true
+    label:
+      en: Last name
+      nl: Achternaam
+    description:
+      en: Legal last name of the person.
+      nl: Officiële achternaam van de persoon.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: last_name
+      storageClass: core
+  - key: initials
+    valueType: string
+    required: false
+    label:
+      en: Initials
+      nl: Initialen
+    description:
+      en: Initials derived from given names.
+      nl: Initialen afgeleid van voornamen.
+    validation:
+      maxLength: 20
+    persisted:
+      column: initials
+      storageClass: core
+  - key: namePrefix
+    valueType: string
+    required: false
+    label:
+      en: Name prefix
+      nl: Tussenvoegsel
+    description:
+      en: Name prefix (e.g. "van", "de", "van der").
+      nl: Tussenvoegsel (bijv. "van", "de", "van der").
+    validation:
+      maxLength: 30
+    persisted:
+      column: name_prefix
+      storageClass: core
+  - key: birthName
+    valueType: string
+    required: false
+    label:
+      en: Birth name
+      nl: Geboortenaam
+    description:
+      en: Name at birth, if different from current last name.
+      nl: Naam bij geboorte, indien afwijkend van huidige achternaam.
+    validation:
+      maxLength: 200
+    persisted:
+      column: birth_name
+      storageClass: core
+  - key: dateOfBirth
+    valueType: date
+    required: false
+    label:
+      en: Date of birth
+      nl: Geboortedatum
+    description:
+      en: Date of birth of the person.
+      nl: Geboortedatum van de persoon.
+    persisted:
+      column: date_of_birth
+      storageClass: core
+    render:
+      component: DatePicker
+      props:
+        maxDate: today
+  - key: dateOfDeath
+    valueType: date
+    required: false
+    label:
+      en: Date of death
+      nl: Overlijdensdatum
+    description:
+      en: Date of death of the person, if applicable.
+      nl: Overlijdensdatum van de persoon, indien van toepassing.
+    persisted:
+      column: date_of_death
+      storageClass: core
+    render:
+      component: DatePicker
+      props:
+        maxDate: today
+  - key: gender
+    valueType: string
+    required: false
+    label:
+      en: Gender
+      nl: Geslacht
+    description:
+      en: Gender of the person.
+      nl: Geslacht van de persoon.
+    validation:
+      maxLength: 50
+    persisted:
+      column: gender
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: GENDER
+        clearable: true
+  - key: salutation
+    valueType: string
+    required: false
+    label:
+      en: Salutation
+      nl: Aanhef
+    description:
+      en: Preferred salutation (e.g. Mr., Mrs., Dr.).
+      nl: Gewenste aanhef (bijv. Dhr., Mevr., Dr.).
+    validation:
+      maxLength: 50
+    persisted:
+      column: salutation
+      storageClass: core
+  - key: preferredName
+    valueType: string
+    required: false
+    label:
+      en: Preferred name
+      nl: Roepnaam
+    description:
+      en: Informal preferred name (roepnaam).
+      nl: Informele roepnaam.
+    validation:
+      maxLength: 200
+    persisted:
+      column: preferred_name
+      storageClass: core
+  - key: callName
+    valueType: string
+    required: false
+    label:
+      en: Call name
+      nl: Aanschrijfnaam
+    description:
+      en: Formal name used in correspondence (aanschrijfnaam).
+      nl: Formele naam voor correspondentie (aanschrijfnaam).
+    validation:
+      maxLength: 300
+    persisted:
+      column: call_name
+      storageClass: core
+  - key: preferredLanguage
+    valueType: string
+    required: false
+    label:
+      en: Preferred language
+      nl: Voorkeurstaal
+    description:
+      en: Preferred language for communication.
+      nl: Voorkeurstaal voor communicatie.
+    validation:
+      maxLength: 10
+    persisted:
+      column: preferred_language
+      storageClass: core
+  - key: nationality
+    valueType: string
+    required: false
+    label:
+      en: Nationality
+      nl: Nationaliteit
+    description:
+      en: Nationality of the person.
+      nl: Nationaliteit van de persoon.
+    validation:
+      maxLength: 100
+    persisted:
+      column: nationality
+      storageClass: core
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: addresses
+    kind: hasMany
+    target: Address
+    foreignKey: natural_person_id
+    label:
+      en: Addresses
+      nl: Adressen
+  - key: accounts
+    kind: hasMany
+    target: Account
+    foreignKey: natural_person_id
+    label:
+      en: Accounts
+      nl: Accounts
+  - key: contactMoments
+    kind: hasMany
+    target: ContactMoment
+    foreignKey: relation_id
+    via: relation
+    label:
+      en: Contact moments
+      nl: Contactmomenten
+ui:
+  routes:
+    list:
+      en: /natural-persons
+      nl: /natuurlijke-personen
+    detail:
+      en: /natural-persons/:id
+      nl: /natuurlijke-personen/:id
+    create:
+      en: /natural-persons/create
+      nl: /natuurlijke-personen/aanmaken
+    edit:
+      en: /natural-persons/:id/edit
+      nl: /natuurlijke-personen/:id/bewerken
+    delete:
+      en: /natural-persons/:id/delete
+      nl: /natuurlijke-personen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Natural Persons
+        nl: Natuurlijke Personen
+      columns:
+        - key: firstName
+          sortable: true
+        - key: lastName
+          sortable: true
+        - key: dateOfBirth
+          sortable: true
+        - key: nationality
+          sortable: true
+      defaultSort:
+        key: lastName
+        direction: asc
+      rowLink:
+        en: /natural-persons/:id
+        nl: /natuurlijke-personen/:id
+    detail:
+      header:
+        title: "{{firstName}} {{namePrefix}} {{lastName}}"
+        subtitle: "{{dateOfBirth}}"
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Personal details
+                nl: Persoonsgegevens
+              fields:
+                - firstName
+                - namePrefix
+                - lastName
+                - initials
+                - birthName
+                - gender
+                - salutation
+            - title:
+                en: Dates
+                nl: Datums
+              fields:
+                - dateOfBirth
+                - dateOfDeath
+            - title:
+                en: Preferences
+                nl: Voorkeuren
+              fields:
+                - preferredName
+                - callName
+                - preferredLanguage
+                - nationality
+    form:
+      variants:
+        create:
+          title:
+            en: Create natural person
+            nl: Natuurlijk persoon aanmaken
+          groups:
+            - title:
+                en: Personal details
+                nl: Persoonsgegevens
+              fields:
+                - firstName
+                - namePrefix
+                - lastName
+                - initials
+                - birthName
+                - gender
+                - salutation
+            - title:
+                en: Dates
+                nl: Datums
+              fields:
+                - dateOfBirth
+                - dateOfDeath
+            - title:
+                en: Preferences
+                nl: Voorkeuren
+              fields:
+                - preferredName
+                - callName
+                - preferredLanguage
+                - nationality
+        edit:
+          extends: create
+          title:
+            en: Edit natural person
+            nl: Natuurlijk persoon bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

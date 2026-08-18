@@ -1,0 +1,885 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Task
+title: Task
+description: A unit of work assigned to a user and optionally linked to a relation, appointment, or contact moment.
+language: en
+displayTemplate: "{{title}}"
+filterField: title
+labels:
+  en: Task
+  nl: Taak
+domains:
+  - tasks
+authorization:
+  roles:
+    read:
+      - General.All.Read
+      - General.All.ReadWrite
+    create:
+      - General.All.ReadWrite
+    update:
+      - General.All.ReadWrite
+    delete:
+      - General.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: title
+    valueType: string
+    required: true
+    label:
+      en: Title
+      nl: Titel
+    description:
+      en: Short task title.
+      nl: Korte titel van de taak.
+    validation:
+      minLength: 1
+      maxLength: 300
+    persisted:
+      column: title
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    description:
+      en: Detailed task instructions or context.
+      nl: Gedetailleerde instructies of context voor de taak.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 5
+        maxLength: 5000
+  - key: type
+    valueType: string
+    required: true
+    label:
+      en: Type
+      nl: Type
+    description:
+      en: Functional task type such as follow-up, review, intake, or approval.
+      nl: Functioneel taaktype zoals opvolging, beoordeling, intake of goedkeuring.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: type
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: TAAKTYPE
+        clearable: false
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Current lifecycle status of the task.
+      nl: Huidige levenscyclusstatus van de taak.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: TAAKSTATUS
+        clearable: false
+  - key: priority
+    valueType: string
+    required: false
+    label:
+      en: Priority
+      nl: Prioriteit
+    description:
+      en: Relative urgency or importance of the task.
+      nl: Relatieve urgentie of belangrijkheid van de taak.
+    validation:
+      maxLength: 50
+    persisted:
+      column: priority
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: TAAKPRIORITEIT
+        clearable: true
+  - key: workQueueId
+    valueType: string
+    required: false
+    semanticType: workQueueId
+    label:
+      en: Work queue
+      nl: Werkqueue
+    description:
+      en: Queue currently responsible for this task.
+      nl: Queue die momenteel verantwoordelijk is voor deze taak.
+    validation:
+      format: uuid
+    persisted:
+      column: work_queue_id
+      storageClass: core
+    render:
+      component: EntityReferenceDisplay
+  - key: startDateTime
+    valueType: datetime
+    required: false
+    label:
+      en: Start date/time
+      nl: Startdatum/-tijd
+    description:
+      en: Planned start moment of the task.
+      nl: Gepland startmoment van de taak.
+    persisted:
+      column: start_date_time
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: dueDateTime
+    valueType: datetime
+    required: false
+    label:
+      en: Due date/time
+      nl: Uiterste datum/tijd
+    description:
+      en: Deadline for completing the task.
+      nl: Deadline voor het afronden van de taak.
+    persisted:
+      column: due_date_time
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: completedAt
+    valueType: datetime
+    required: false
+    readOnly: true
+    label:
+      en: Completed at
+      nl: Afgerond op
+    description:
+      en: Date and time when the task was completed.
+      nl: Datum en tijd waarop de taak is afgerond.
+    persisted:
+      column: completed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: estimatedMinutes
+    valueType: integer
+    required: false
+    label:
+      en: Estimated minutes
+      nl: Geschatte minuten
+    description:
+      en: Estimated effort in minutes.
+      nl: Geschatte inspanning in minuten.
+    persisted:
+      column: estimated_minutes
+      storageClass: core
+  - key: actualMinutes
+    valueType: integer
+    required: false
+    label:
+      en: Actual minutes
+      nl: Werkelijke minuten
+    description:
+      en: Actual effort spent in minutes.
+      nl: Werkelijke bestede inspanning in minuten.
+    persisted:
+      column: actual_minutes
+      storageClass: core
+  - key: outcome
+    valueType: string
+    required: false
+    label:
+      en: Outcome
+      nl: Resultaat
+    description:
+      en: Captured outcome, resolution, or completion note.
+      nl: Vastgelegd resultaat, oplossing of afrondnotitie.
+    validation:
+      maxLength: 2000
+    persisted:
+      column: outcome
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 2000
+  - key: openUrl
+    valueType: string
+    required: false
+    label:
+      en: Open URL
+      nl: Open-URL
+    description:
+      en: Primary URL or deeplink to open this task in context.
+      nl: Primaire URL of deeplink om deze taak in context te openen.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: open_url
+      storageClass: core
+    render:
+      component: Input
+  - key: metadata
+    valueType: object
+    required: false
+    label:
+      en: Metadata
+      nl: Metadata
+    description:
+      en: Structured metadata for workflow context, assignment hints, and integration state.
+      nl: Gestructureerde metadata voor workflowcontext, toewijzingshints en integratiestatus.
+    persisted:
+      column: metadata
+      storageClass: core
+    children:
+      - key: source
+        valueType: string
+        required: false
+        label:
+          en: Source
+          nl: Bron
+      - key: label
+        valueType: string
+        required: false
+        label:
+          en: Label
+          nl: Label
+      - key: timeout
+        valueType: string
+        required: false
+        label:
+          en: Timeout
+          nl: Time-out
+      - key: assignmentTarget
+        valueType: string
+        required: false
+        label:
+          en: Assignment target
+          nl: Toewijzingsdoel
+      - key: allowedRoles
+        valueType: string
+        required: false
+        label:
+          en: Allowed roles
+          nl: Toegestane rollen
+        cardinality:
+          min: 0
+          max: "unbounded"
+        item:
+          key: role
+          valueType: string
+          required: false
+          label:
+            en: Role
+            nl: Rol
+  - key: formDefinition
+    valueType: object
+    required: false
+    label:
+      en: Form definition
+      nl: Formulierdefinitie
+    description:
+      en: Structured form definition rendered when the task is opened or completed.
+      nl: Gestructureerde formulierdefinitie die wordt getoond wanneer de taak wordt geopend of afgehandeld.
+    persisted:
+      column: form_definition
+      storageClass: core
+    children:
+      - key: schemaVersion
+        valueType: integer
+        required: false
+        label:
+          en: Schema version
+          nl: Schemaversie
+      - key: id
+        valueType: string
+        required: false
+        label:
+          en: ID
+          nl: Id
+      - key: kind
+        valueType: string
+        required: false
+        label:
+          en: Kind
+          nl: Soort
+      - key: mode
+        valueType: string
+        required: false
+        label:
+          en: Mode
+          nl: Modus
+      - key: title
+        valueType: string
+        required: false
+        label:
+          en: Title
+          nl: Titel
+      - key: description
+        valueType: string
+        required: false
+        label:
+          en: Description
+          nl: Beschrijving
+        render:
+          component: Textarea
+          props:
+            rows: 3
+      - key: metadata
+        valueType: object
+        required: false
+        label:
+          en: Metadata
+          nl: Metadata
+        render:
+          component: JsonFieldEditor
+          props:
+            rows: 8
+      - key: presentation
+        valueType: object
+        required: false
+        label:
+          en: Presentation
+          nl: Presentatie
+        children:
+          - key: surface
+            valueType: string
+            required: false
+            label:
+              en: Surface
+              nl: Oppervlak
+          - key: density
+            valueType: string
+            required: false
+            label:
+              en: Density
+              nl: Dichtheid
+          - key: groupInterpretation
+            valueType: string
+            required: false
+            label:
+              en: Group interpretation
+              nl: Groepsinterpretatie
+            cardinality:
+              min: 0
+              max: "unbounded"
+            item:
+              key: interpretation
+              valueType: string
+              required: false
+              label:
+                en: Interpretation
+                nl: Interpretatie
+          - key: layout
+            valueType: object
+            required: false
+            label:
+              en: Layout
+              nl: Layout
+            children:
+              - key: columns
+                valueType: integer
+                required: false
+                label:
+                  en: Columns
+                  nl: Kolommen
+          - key: chrome
+            valueType: object
+            required: false
+            label:
+              en: Chrome
+              nl: Chrome
+            children:
+              - key: showTitle
+                valueType: boolean
+                required: false
+                label:
+                  en: Show title
+                  nl: Toon titel
+              - key: showDescription
+                valueType: boolean
+                required: false
+                label:
+                  en: Show description
+                  nl: Toon beschrijving
+              - key: showGroupTitles
+                valueType: boolean
+                required: false
+                label:
+                  en: Show group titles
+                  nl: Toon groepstitels
+              - key: showGroupDescriptions
+                valueType: boolean
+                required: false
+                label:
+                  en: Show group descriptions
+                  nl: Toon groepsbeschrijvingen
+              - key: showActionBar
+                valueType: boolean
+                required: false
+                label:
+                  en: Show action bar
+                  nl: Toon actiebalk
+      - key: submission
+        valueType: object
+        required: false
+        label:
+          en: Submission
+          nl: Indiening
+        children:
+          - key: successRoute
+            valueType: string
+            required: false
+            label:
+              en: Success route
+              nl: Succesroute
+          - key: successBehavior
+            valueType: string
+            required: false
+            label:
+              en: Success behavior
+              nl: Succesgedrag
+      - key: fields
+        valueType: object
+        label:
+          en: Fields
+          nl: Velden
+        cardinality:
+          min: 0
+          max: "unbounded"
+        semanticType: fieldDefinition
+        authoring:
+          profile: formDefinitionField
+      - key: groups
+        valueType: object
+        required: false
+        label:
+          en: Groups
+          nl: Groepen
+        render:
+          component: JsonFieldEditor
+          props:
+            rows: 12
+        cardinality:
+          min: 0
+          max: "unbounded"
+        item:
+          key: group
+          valueType: object
+      - key: fieldConfig
+        valueType: object
+        required: false
+        label:
+          en: Field config
+          nl: Veldconfiguratie
+        render:
+          component: JsonFieldEditor
+          props:
+            rows: 10
+      - key: actions
+        valueType: object
+        required: false
+        label:
+          en: Actions
+          nl: Acties
+        cardinality:
+          min: 0
+          max: "unbounded"
+        item:
+          key: actionItem
+          valueType: object
+          children:
+            - key: key
+              valueType: string
+              required: true
+              label:
+                en: Key
+                nl: Sleutel
+              render:
+                component: Input
+            - key: label
+              valueType: string
+              required: true
+              label:
+                en: Button label
+                nl: Knop-label
+              render:
+                component: Input
+              localized: true
+            - key: description
+              valueType: string
+              required: false
+              label:
+                en: Helper text
+                nl: Hulptekst
+              render:
+                component: Input
+              localized: true
+            - key: icon
+              valueType: string
+              required: false
+              label:
+                en: Icon
+                nl: Icoon
+              render:
+                component: IconPicker
+            - key: tone
+              valueType: string
+              required: false
+              label:
+                en: Tone
+                nl: Uitstraling
+              options:
+                type: static
+                items:
+                  - value: primary
+                    label:
+                      en: Primary
+                      nl: Primair
+                  - value: default
+                    label:
+                      en: Default
+                      nl: Standaard
+                  - value: destructive
+                    label:
+                      en: Destructive
+                      nl: Destructief
+              render:
+                component: ReferenceSelect
+                props:
+                  clearable: false
+            - key: visibleWhen
+              valueType: object
+              required: false
+              label:
+                en: Visible when
+                nl: Zichtbaar wanneer
+              render:
+                component: JsonFieldEditor
+            - key: disabledWhen
+              valueType: object
+              required: false
+              label:
+                en: Disabled when
+                nl: Uitgeschakeld wanneer
+              render:
+                component: JsonFieldEditor
+            - key: disabledMessage
+              valueType: string
+              required: false
+              label:
+                en: Disabled tooltip
+                nl: Bericht bij uitgeschakeld
+              render:
+                component: Input
+              localized: true
+  - key: output
+    valueType: object
+    required: false
+    label:
+      en: Output
+      nl: Uitvoer
+    description:
+      en: Structured values from the task form (e.g. workflow-defined fields). Omit on create unless importing; set via updateTask when the user submits or saves.
+      nl: Gestructureerde waarden uit het taakformulier (bijv. workflowvelden). Bij aanmaken weglaten tenzij import; zetten via updateTask bij opslaan of afronden.
+    persisted:
+      column: output
+      storageClass: core
+    render:
+      component: JsonFieldEditor
+      props:
+        rows: 10
+  - key: isBlocking
+    valueType: boolean
+    required: false
+    label:
+      en: Blocking
+      nl: Blokkerend
+    description:
+      en: Whether this task blocks further processing.
+      nl: Of deze taak verdere verwerking blokkeert.
+    defaultValue: false
+    persisted:
+      column: is_blocking
+      storageClass: core
+  - key: caseStepId
+    valueType: string
+    required: false
+    readOnly: true
+    semanticType: caseStepId
+    label:
+      en: Case step ID
+      nl: Zaakstap-ID
+    description:
+      en: Runtime case step that created or owns this task. Technically references the current process-step table until the table is renamed.
+      nl: Runtime zaakstap die deze taak heeft aangemaakt of bezit. Verwijst technisch naar de huidige processtaptabel totdat die tabel hernoemd wordt.
+    validation:
+      format: uuid
+    persisted:
+      column: case_step_id
+      storageClass: core
+  - key: caseStepActionId
+    valueType: string
+    required: false
+    readOnly: true
+    label:
+      en: Case step action ID
+      nl: Zaakstapactie-ID
+    description:
+      en: Runtime case-step action that created or owns this task.
+      nl: Runtime zaakstapactie die deze taak heeft aangemaakt of bezit.
+    validation:
+      format: uuid
+    persisted:
+      column: case_step_action_id
+      storageClass: core
+relationships:
+  - key: relation
+    kind: belongsTo
+    target: Relation
+    foreignKey: relation_id
+    label:
+      en: Relation
+      nl: Relatie
+  - key: assignee
+    kind: belongsTo
+    target: Account
+    foreignKey: assignee_account_id
+    label:
+      en: Assignee
+      nl: Toegewezen aan
+  - key: owner
+    kind: belongsTo
+    target: Account
+    foreignKey: owner_account_id
+    label:
+      en: Owner
+      nl: Eigenaar
+  - key: appointment
+    kind: belongsTo
+    target: Appointment
+    foreignKey: appointment_id
+    label:
+      en: Appointment
+      nl: Afspraak
+  - key: contactMoment
+    kind: belongsTo
+    target: ContactMoment
+    foreignKey: contact_moment_id
+    label:
+      en: Contact moment
+      nl: Contactmoment
+  - key: case
+    kind: belongsTo
+    target: Case
+    foreignKey: case_id
+    label:
+      en: Case
+      nl: Zaak
+  - key: workQueue
+    kind: belongsTo
+    target: WorkQueue
+    foreignKey: work_queue_id
+    label:
+      en: Work queue
+      nl: Werkqueue
+  - key: caseStep
+    kind: belongsTo
+    target: ProcessStep
+    foreignKey: case_step_id
+    label:
+      en: Case step
+      nl: Zaakstap
+  - key: parentTask
+    kind: belongsTo
+    target: Task
+    foreignKey: parent_task_id
+    label:
+      en: Parent task
+      nl: Hoofdtaak
+  - key: subtasks
+    kind: hasMany
+    target: Task
+    foreignKey: parent_task_id
+    label:
+      en: Subtasks
+      nl: Subtaken
+ui:
+  routes:
+    list:
+      en: /tasks
+      nl: /taken
+    detail:
+      en: /tasks/:id
+      nl: /taken/:id
+    create:
+      en: /tasks/create
+      nl: /taken/aanmaken
+    edit:
+      en: /tasks/:id/edit
+      nl: /taken/:id/bewerken
+    delete:
+      en: /tasks/:id/delete
+      nl: /taken/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Tasks
+        nl: Taken
+      columns:
+        - key: title
+          sortable: true
+        - key: type
+          sortable: true
+        - key: status
+          sortable: true
+        - key: priority
+          sortable: true
+        - key: dueDateTime
+          sortable: true
+      defaultSort:
+        key: dueDateTime
+        direction: asc
+      rowLink:
+        en: /tasks/:id
+        nl: /taken/:id
+    detail:
+      header:
+        title: "{{title}}"
+        subtitle: "{{status}}"
+        badges:
+          - type
+          - priority
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Task details
+                nl: Taakgegevens
+              fields:
+                - title
+                - description
+                - type
+                - status
+                - priority
+                - isBlocking
+            - title:
+                en: Planning
+                nl: Planning
+              fields:
+                - startDateTime
+                - dueDateTime
+                - completedAt
+                - estimatedMinutes
+                - actualMinutes
+            - title:
+                en: Outcome
+                nl: Resultaat
+              fields:
+                - outcome
+                - output
+            - title:
+                en: Integration
+                nl: Integratie
+              fields:
+                - openUrl
+                - metadata
+                - formDefinition
+        - id: subtasks
+          label:
+            en: Subtasks
+            nl: Subtaken
+          relationship: subtasks
+    form:
+      variants:
+        create:
+          title:
+            en: Create task
+            nl: Taak aanmaken
+          groups:
+            - title:
+                en: Task details
+                nl: Taakgegevens
+              fields:
+                - title
+                - description
+                - type
+                - status
+                - priority
+                - isBlocking
+            - title:
+                en: Planning
+                nl: Planning
+              fields:
+                - startDateTime
+                - dueDateTime
+                - estimatedMinutes
+            - title:
+                en: Outcome
+                nl: Resultaat
+              fields:
+                - outcome
+                - output
+            - title:
+                en: Integration
+                nl: Integratie
+              fields:
+                - openUrl
+                - metadata
+                - formDefinition
+        edit:
+          extends: create
+          title:
+            en: Edit task
+            nl: Taak bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+      wait: true
+      awaitAction: true

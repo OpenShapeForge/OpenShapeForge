@@ -19,18 +19,28 @@ mcp: true
 authorization:
   roles:
     read:
-      - Relaties.All.Read
-      - Relaties.All.ReadWrite
+      - Relations.All.Read
+      - Relations.All.ReadWrite
     create:
-      - Relaties.All.ReadWrite
+      - Relations.All.ReadWrite
     update:
-      - Relaties.All.ReadWrite
+      - Relations.All.ReadWrite
     delete:
-      - Relaties.All.ReadWrite
+      - Relations.All.ReadWrite
   rowAccess:
     enabled: true
     empty: public
 fields:
+  - key: labels
+    valueType: object
+    required: false
+    readOnly: true
+    label:
+      en: Labels
+      nl: Labels
+    description:
+      en: Runtime-resolved label rule outputs for this relation. Not persisted; computed per request from label_rules.
+      nl: Runtime-afgeleide uitkomsten van labelregels voor deze relatie. Niet gepersisteerd; elke request opnieuw bepaald op basis van label_rules.
   - key: displayName
     valueType: string
     required: true
@@ -69,7 +79,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: RELATIESOORT
+        referentieGroep: RELATIONTYPE
         clearable: false
   - key: relationSubType
     valueType: string
@@ -102,7 +112,7 @@ fields:
     render:
       component: ReferenceSelect
       props:
-        referentieGroep: COMMUNICATIEKANAAL
+        referentieGroep: COMMUNICATIONCHANNEL
         clearable: true
   - key: status
     valueType: string
@@ -194,6 +204,131 @@ relationships:
     label:
       en: Relation group
       nl: Relatiegroep
+  - key: roles
+    kind: hasMany
+    target: RelationRole
+    foreignKey: relation_id
+    label:
+      en: Roles
+      nl: Rollen
+  - key: addresses
+    kind: hasMany
+    target: Address
+    foreignKey: relation_id
+    label:
+      en: Addresses
+      nl: Adressen
+  - key: addressAssignments
+    kind: hasMany
+    target: AddressAssignment
+    foreignKey: relation_id
+    label:
+      en: Address assignments
+      nl: Adrestoewijzingen
+  - key: contactDetails
+    kind: hasMany
+    target: ContactDetail
+    foreignKey: relation_id
+    label:
+      en: Contact details
+      nl: Contactgegevens
+  - key: communicationPreferences
+    kind: hasMany
+    target: CommunicationPreference
+    foreignKey: relation_id
+    label:
+      en: Communication preferences
+      nl: Communicatievoorkeuren
+  - key: paymentDetails
+    kind: hasMany
+    target: PaymentDetail
+    foreignKey: relation_id
+    label:
+      en: Payment details
+      nl: Betaalgegevens
+  - key: contactMoments
+    kind: hasMany
+    target: ContactMoment
+    foreignKey: relation_id
+    label:
+      en: Contact moments
+      nl: Contactmomenten
+  - key: accounts
+    kind: hasMany
+    target: Account
+    foreignKey: relation_id
+    label:
+      en: Accounts
+      nl: Accounts
+  - key: tasks
+    kind: hasMany
+    target: Task
+    foreignKey: relation_id
+    label:
+      en: Tasks
+      nl: Taken
+  - key: agreements
+    kind: hasMany
+    target: Agreement
+    foreignKey: relation_id
+    label:
+      en: Agreements
+      nl: Overeenkomsten
+  - key: cases
+    kind: hasMany
+    target: Case
+    foreignKey: relation_id
+    label:
+      en: Cases
+      nl: Zaken
+  - key: caseFiles
+    kind: hasMany
+    target: CaseFile
+    foreignKey: relation_id
+    label:
+      en: Case files
+      nl: Dossiers
+  - key: documents
+    kind: hasMany
+    target: Document
+    foreignKey: relation_id
+    label:
+      en: Documents
+      nl: Documenten
+  - key: associations
+    kind: hasMany
+    target: RelationAssociation
+    foreignKey: relation_id
+    label:
+      en: Associations
+      nl: Koppelingen
+  - key: relatedAssociations
+    kind: hasMany
+    target: RelationAssociation
+    foreignKey: related_relation_id
+    label:
+      en: Related associations
+      nl: Gerelateerde koppelingen
+  - key: contextAssociations
+    kind: hasMany
+    target: RelationAssociation
+    foreignKey: context_relation_id
+    label:
+      en: Context associations
+      nl: Contextkoppelingen
+hooks:
+  beforeCreate:
+    - handler: checkDuplicateRelation
+      failMessage:
+        en: A relation with this name already exists
+        nl: Er bestaat al een relatie met deze naam
+  afterCreate:
+    - handler: sendWelcomeNotification
+  beforeDelete:
+    - handler: checkOpenAgreements
+      failMessage:
+        en: "Cannot delete: open agreements exist"
+        nl: "Kan niet verwijderen: er bestaan openstaande overeenkomsten"
 ui:
   routes:
     list:
@@ -284,6 +419,16 @@ ui:
                 nl: Notities
               fields:
                 - notes
+        - id: agreements
+          label:
+            en: Agreements
+            nl: Overeenkomsten
+          relationship: agreements
+        - id: tasks
+          label:
+            en: Tasks
+            nl: Taken
+          relationship: tasks
     form:
       variants:
         create:
@@ -325,3 +470,11 @@ ui:
           title:
             en: Edit relation
             nl: Relatie bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

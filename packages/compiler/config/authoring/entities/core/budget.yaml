@@ -1,0 +1,240 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: Budget
+title: Budget
+description: Annual budget container scoped to a fiscal year. Holds budget lines per ledger account, fiscal period, and optional cost dimension.
+language: en
+displayTemplate: "{{code}} {{name}}"
+filterField: code
+labels:
+  en: Budget
+  nl: Begroting
+domains:
+  - finance
+fields:
+  - key: code
+    valueType: string
+    required: true
+    label:
+      en: Code
+      nl: Code
+    description:
+      en: Tenant-unique short code identifying the budget.
+      nl: Tenant-unieke korte code die de begroting identificeert.
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: code
+      storageClass: core
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+      nl: Naam
+    description:
+      en: Human-readable name of the budget.
+      nl: Menselijk leesbare naam van de begroting.
+    validation:
+      minLength: 1
+      maxLength: 200
+    persisted:
+      column: name
+      storageClass: core
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Lifecycle status of the budget.
+      nl: Levenscyclusstatus van de begroting.
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: BUDGETSTATUS
+        clearable: false
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Omschrijving
+    description:
+      en: Free-form description of the budget.
+      nl: Vrije omschrijving van de begroting.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 4
+        maxLength: 1000
+  - key: externalCode
+    valueType: string
+    required: false
+    label:
+      en: External code
+      nl: Externe code
+    description:
+      en: Functional or business code of the budget in an external context.
+      nl: Functionele of zakelijke code van de begroting in een externe context.
+    validation:
+      maxLength: 100
+    persisted:
+      column: external_code
+      storageClass: core
+relationships:
+  - key: fiscalYear
+    kind: belongsTo
+    target: FiscalYear
+    foreignKey: fiscal_year_id
+    label:
+      en: Fiscal year
+      nl: Boekjaar
+ui:
+  routes:
+    list:
+      en: /budgets
+      nl: /begrotingen
+    detail:
+      en: /budgets/:id
+      nl: /begrotingen/:id
+    create:
+      en: /budgets/create
+      nl: /begrotingen/aanmaken
+    edit:
+      en: /budgets/:id/edit
+      nl: /begrotingen/:id/bewerken
+    delete:
+      en: /budgets/:id/delete
+      nl: /begrotingen/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Budgets
+        nl: Begrotingen
+      columns:
+        - key: code
+          sortable: true
+        - key: name
+          sortable: true
+        - key: status
+          sortable: true
+      defaultSort:
+        key: code
+        direction: asc
+      rowLink:
+        en: /budgets/:id
+        nl: /begrotingen/:id
+    detail:
+      header:
+        title: "{{name}}"
+        subtitle: "{{code}}"
+        badges:
+          - status
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - title:
+                en: Budget details
+                nl: Begrotingsgegevens
+              fields:
+                - code
+                - name
+                - status
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+    form:
+      variants:
+        create:
+          title:
+            en: Create budget
+            nl: Begroting aanmaken
+          groups:
+            - title:
+                en: Budget details
+                nl: Begrotingsgegevens
+              fields:
+                - code
+                - name
+                - status
+            - title:
+                en: Description
+                nl: Omschrijving
+              fields:
+                - description
+            - title:
+                en: Source
+                nl: Herkomst
+              fields:
+                - externalId
+                - externalCode
+                - sourceAuthority
+                - sourceOrganization
+                - sourceAdministration
+        edit:
+          extends: create
+          title:
+            en: Edit budget
+            nl: Begroting bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true
+authorization:
+  roles:
+    read:
+      - Finance.All.Read
+      - Finance.All.ReadWrite
+    create:
+      - Finance.All.ReadWrite
+    update:
+      - Finance.All.ReadWrite
+    delete:
+      - Finance.All.ReadWrite
+  rowAccess:
+    enabled: true
+    empty: public

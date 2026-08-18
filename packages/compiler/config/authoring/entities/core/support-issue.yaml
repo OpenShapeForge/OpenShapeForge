@@ -1,0 +1,393 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: SupportIssue
+title: Support issue
+description: A user-reported support issue for questions, bugs, feature requests, or access problems.
+language: en
+displayTemplate: "{{subject}}"
+filterField: subject
+labels:
+  en: Support issue
+  nl: Supportverzoek
+domains:
+  - support
+authorization:
+  roles:
+    read:
+      - Support.Issues.ReadOwn
+      - Support.Issues.ReadAll
+      - Support.Issues.Manage
+      - Support.Issues.All
+    create:
+      - Support.Issues.Create
+      - Support.Issues.Manage
+      - Support.Issues.All
+    update:
+      - Support.Issues.Manage
+      - Support.Issues.All
+    delete:
+      - Support.Issues.Manage
+      - Support.Issues.All
+  rowAccess:
+    enabled: true
+    empty: public
+fields:
+  - key: subject
+    valueType: string
+    required: true
+    label:
+      en: Subject
+      nl: Onderwerp
+    description:
+      en: Short summary of the support issue.
+      nl: Korte samenvatting van het supportverzoek.
+    validation:
+      minLength: 1
+      maxLength: 300
+    persisted:
+      column: subject
+      storageClass: core
+  - key: description
+    valueType: string
+    required: false
+    label:
+      en: Description
+      nl: Beschrijving
+    description:
+      en: Detailed description of the problem, question, or request.
+      nl: Gedetailleerde beschrijving van het probleem, de vraag of het verzoek.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: description
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 6
+        maxLength: 5000
+  - key: status
+    valueType: string
+    required: true
+    label:
+      en: Status
+      nl: Status
+    description:
+      en: Current lifecycle status of the support issue.
+      nl: Huidige levenscyclusstatus van het supportverzoek.
+    defaultValue: open
+    validation:
+      minLength: 1
+      maxLength: 50
+    persisted:
+      column: status
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: SUPPORTSTATUS
+        clearable: false
+  - key: priority
+    valueType: string
+    required: false
+    label:
+      en: Priority
+      nl: Prioriteit
+    description:
+      en: Relative urgency or importance of the issue.
+      nl: Relatieve urgentie of belangrijkheid van het verzoek.
+    defaultValue: normal
+    validation:
+      maxLength: 50
+    persisted:
+      column: priority
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: SUPPORTPRIORITEIT
+        clearable: true
+  - key: category
+    valueType: string
+    required: false
+    label:
+      en: Category
+      nl: Categorie
+    description:
+      en: Functional category of the issue such as bug, question, or feature request.
+      nl: Functionele categorie van het verzoek zoals bug, vraag of functieverzoek.
+    validation:
+      maxLength: 50
+    persisted:
+      column: category
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: SUPPORTCATEGORIE
+        clearable: true
+  - key: resolvedAt
+    valueType: datetime
+    required: false
+    readOnly: true
+    label:
+      en: Resolved at
+      nl: Opgelost op
+    description:
+      en: Date and time when the issue was resolved.
+      nl: Datum en tijd waarop het verzoek is opgelost.
+    persisted:
+      column: resolved_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: closedAt
+    valueType: datetime
+    required: false
+    readOnly: true
+    label:
+      en: Closed at
+      nl: Gesloten op
+    description:
+      en: Date and time when the issue was closed.
+      nl: Datum en tijd waarop het verzoek is gesloten.
+    persisted:
+      column: closed_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+  - key: triageSummary
+    valueType: string
+    required: false
+    label:
+      en: Triage summary
+      nl: Triage-samenvatting
+    description:
+      en: Short summary produced by the AI triage workflow.
+      nl: Korte samenvatting gegenereerd door de AI-triage-workflow.
+    validation:
+      maxLength: 1000
+    persisted:
+      column: triage_summary
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 3
+        maxLength: 1000
+  - key: triageSentiment
+    valueType: string
+    required: false
+    label:
+      en: Triage sentiment
+      nl: Triage-sentiment
+    description:
+      en: AI-assessed tone of the reporter's message.
+      nl: Door AI ingeschatte toon van de melding.
+    validation:
+      maxLength: 50
+    persisted:
+      column: triage_sentiment
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: TRIAGESENTIMENT
+        clearable: true
+  - key: triageUrgency
+    valueType: string
+    required: false
+    label:
+      en: Triage urgency
+      nl: Triage-urgentie
+    description:
+      en: AI-assessed urgency of the issue.
+      nl: Door AI ingeschatte urgentie van het verzoek.
+    validation:
+      maxLength: 50
+    persisted:
+      column: triage_urgency
+      storageClass: core
+    render:
+      component: ReferenceSelect
+      props:
+        referentieGroep: TRIAGEURGENTIE
+        clearable: true
+  - key: triageAnalysis
+    valueType: string
+    required: false
+    label:
+      en: Triage analysis
+      nl: Triage-analyse
+    description:
+      en: Free-form analysis produced by the AI triage workflow.
+      nl: Vrije-tekst-analyse gegenereerd door de AI-triage-workflow.
+    validation:
+      maxLength: 5000
+    persisted:
+      column: triage_analysis
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 6
+        maxLength: 5000
+  - key: triagedAt
+    valueType: datetime
+    required: false
+    label:
+      en: Triaged at
+      nl: Getriageerd op
+    description:
+      en: Timestamp when the AI triage workflow last ran.
+      nl: Tijdstip waarop de AI-triage-workflow voor het laatst is gedraaid.
+    persisted:
+      column: triaged_at
+      storageClass: core
+    render:
+      component: DateTimePicker
+      props: {}
+relationships:
+  - key: reporter
+    kind: belongsTo
+    target: Relation
+    foreignKey: reporter_relation_id
+    label:
+      en: Reporter
+      nl: Melder
+  - key: assignee
+    kind: belongsTo
+    target: Account
+    foreignKey: assignee_account_id
+    label:
+      en: Assignee
+      nl: Toegewezen aan
+  - key: comments
+    kind: hasMany
+    target: Comment
+    foreignKey: support_issue_id
+    label:
+      en: Comments
+      nl: Opmerkingen
+  - key: attachments
+    kind: hasMany
+    target: Attachment
+    foreignKey: support_issue_id
+    label:
+      en: Attachments
+      nl: Bijlagen
+ui:
+  routes:
+    list:
+      en: /support-issues
+      nl: /support-issues
+    detail:
+      en: /support-issues/:id
+      nl: /support-issues/:id
+    create:
+      en: /support-issues/create
+      nl: /support-issues/aanmaken
+    edit:
+      en: /support-issues/:id/edit
+      nl: /support-issues/:id/bewerken
+    delete:
+      en: /support-issues/:id/delete
+      nl: /support-issues/:id/verwijderen
+  presentations:
+    list:
+      title:
+        en: Support issues
+        nl: Supportverzoeken
+      columns:
+        - key: subject
+          sortable: true
+        - key: status
+          sortable: true
+        - key: priority
+          sortable: true
+        - key: category
+          sortable: true
+      defaultSort:
+        key: status
+        direction: asc
+      rowLink:
+        en: /support-issues/:id
+        nl: /support-issues/:id
+    detail:
+      header:
+        title: "{{subject}}"
+        subtitle: "{{status}}"
+        badges:
+          - status
+          - priority
+          - category
+      actions:
+        - key: edit
+          label:
+            en: Edit
+            nl: Bewerken
+          route: edit
+        - key: delete
+          label:
+            en: Delete
+            nl: Verwijderen
+          confirm:
+            en: Are you sure?
+            nl: Weet je het zeker?
+          mutation: delete
+      groups:
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          relationships:
+            - name: comments
+            - name: attachments
+          groups:
+            - title:
+                en: Issue
+                nl: Verzoek
+              fields:
+                - subject
+                - description
+                - status
+                - priority
+                - category
+            - title:
+                en: Lifecycle
+                nl: Levenscyclus
+              fields:
+                - resolvedAt
+                - closedAt
+    form:
+      variants:
+        create:
+          title:
+            en: Create support issue
+            nl: Supportverzoek aanmaken
+          groups:
+            - title:
+                en: Issue
+                nl: Verzoek
+              fields:
+                - subject
+                - description
+                - status
+                - priority
+                - category
+        edit:
+          extends: create
+          title:
+            en: Edit support issue
+            nl: Supportverzoek bewerken
+workflow:
+  nodes:
+    actions:
+      create: true
+      getOne: true
+      list: true
+      update: true
+      delete: true

@@ -170,6 +170,10 @@ jobs:
           path: .e2e-report/
           retention-days: 14
           if-no-files-found: ignore
+          # Without this the artifact is silently empty: .e2e-report is a
+          # dot-directory and upload-artifact v4 excludes hidden paths by
+          # default. The first run proved it — "No files were found".
+          include-hidden-files: true
 
       # The same summary, rendered on the workflow run page itself.
       - name: Render the step summary

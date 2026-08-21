@@ -15,6 +15,7 @@ import {
 import {
   createRow,
   fieldName,
+  foreignKeyTargets,
   isMutableColumn,
   tables,
   tablesByTypeName,
@@ -32,6 +33,20 @@ for (const table of tables) {
   describe(`${graphql.typeName} (${table.name}) relationships`, () => {
     for (const relationship of relationships) {
       const targetTable = tablesByTypeName.get(relationship.target)!;
+
+      // Subtype relationships cannot be driven generically: LegalEntity's
+      // hasMany contactMoments joins on contact_moments.relation_id, whose
+      // FOREIGN KEY references erp.relations — a row this factory creates in
+      // erp.legal_entities does not exist there, so setting the child's FK to
+      // the parent's id violates the constraint. Skip when the FK's emitted
+      // target is a different table than the one this test would create in.
+      const fkOwner = relationship.resolve === "belongsTo" ? table : targetTable;
+      const fkRowTable = relationship.resolve === "belongsTo" ? targetTable : table;
+      const emittedTarget =
+        relationship.foreignKey === undefined
+          ? undefined
+          : foreignKeyTargets(fkOwner).get(relationship.foreignKey);
+      if (emittedTarget !== undefined && emittedTarget !== fkRowTable.name) continue;
 
       // The engine populates tenant_id from the session; no input can set it.
       // Driving such a relationship means asserting against the session's own

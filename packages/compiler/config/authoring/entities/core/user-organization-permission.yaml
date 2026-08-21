@@ -16,6 +16,7 @@ domains:
 authorization:
   roles:
     read:
+      - Organization.All.Read
       - Organization.All.ReadWrite
     create:
       - Organization.All.ReadWrite

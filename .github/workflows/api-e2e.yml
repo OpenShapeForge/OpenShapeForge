@@ -66,6 +66,14 @@ jobs:
         with:
           bun-version: 1.3.4
 
+      # SPI targets Java 17 (packages/keycloak-spi/pom.xml). Same pinned action
+      # and cache setup as the keycloak-spi job in ci.yml.
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4.8.0
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
@@ -75,19 +83,28 @@ jobs:
       - name: Generate artifacts
         run: bun run generate
 
+      # Unlike web-e2e.yml this Keycloak needs the identity-configuration SPI:
+      # the control-provisioning suite drives real tenant/organization
+      # provisioning through it (POST /api/control/v1/tenants), which the
+      # stock image answers with an error. Building the jar with Maven and
+      # mounting it into /opt/keycloak/providers keeps the base-image
+      # tag-lockstep trick (the tag is read out of the SPI's own Dockerfile)
+      # while start-dev picks the provider up without a kc.sh build.
+      - name: Build the Keycloak SPI
+        run: mvn -B -q -f packages/keycloak-spi/pom.xml -DskipTests package
+
       # Started before the migrations rather than after, so its ~40s of
       # startup overlaps work that does not need it. Readiness is waited for
       # further down, immediately before the suite mints its first token.
-      #
-      # The stock Keycloak image, not the one packages/keycloak-spi builds —
-      # same reasoning and same tag-lockstep trick as web-e2e.yml. Unlike that
-      # workflow the CONTROL realm is mounted too: the control-provisioning
-      # suite authenticates a platform operator against it.
-      - name: Start Keycloak with both generated realms
+      # Unlike web-e2e.yml the CONTROL realm is mounted too: the
+      # control-provisioning suite authenticates a platform operator against
+      # it.
+      - name: Start Keycloak with both generated realms and the SPI
         run: |
           image=$(grep -m1 '^FROM quay.io/keycloak/keycloak' packages/keycloak-spi/Dockerfile | awk '{print $2}')
           echo "keycloak image: $image"
           docker run -d --name keycloak --network host \
+            -v "$PWD/packages/keycloak-spi/target/openshapeforge-keycloak-spi.jar:/opt/keycloak/providers/openshapeforge-keycloak-spi.jar:ro" \
             -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
             -e KC_HTTP_ENABLED=true \

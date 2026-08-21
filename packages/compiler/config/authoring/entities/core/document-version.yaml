@@ -16,6 +16,7 @@ domains:
 authorization:
   roles:
     read:
+      - CaseFile.All.Read
       - CaseFile.All.ReadWrite
     create:
       - CaseFile.All.ReadWrite

@@ -424,12 +424,24 @@ export function ensureTenantRows(): Promise<void> {
 export function registerSuiteLifecycle() {
   beforeAll(ensureTenantRows);
   afterAll(async () => {
-    for (const row of store.createdRows.splice(0).reverse()) {
-      const graphql = row.table.source!.graphql!;
-      await gql(row.identity, `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`, {
-        id: row.id,
-      }).catch(() => {});
+    // Reverse order (children before the parents they reference), in modest
+    // concurrent batches: the full-catalog sweeps track thousands of rows,
+    // and deleting them one at a time blew past the hook timeout, which bun
+    // reports as an unnamed file-level failure.
+    const rows = store.createdRows.splice(0).reverse();
+    const batchSize = 25;
+    for (let i = 0; i < rows.length; i += batchSize) {
+      await Promise.all(
+        rows.slice(i, i + batchSize).map((row) => {
+          const graphql = row.table.source!.graphql!;
+          return gql(
+            row.identity,
+            `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
+            { id: row.id },
+          ).catch(() => {});
+        }),
+      );
     }
     persistCapture();
-  });
+  }, 120_000);
 }

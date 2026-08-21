@@ -37,18 +37,17 @@ import {
   sampleValue,
   tables,
   tablesByTypeName,
+  untrackRow,
 } from "./e2e/entity-factory.js";
 
 registerSuiteLifecycle();
 
-// Authored Dutch spelling — regression for the manifest's vocabulary union
-// (trusted-context callers send authored names; bearer tokens send the
-// normalized English names the other identities use).
-const dutchWriter: Identity = {
-  tenantId: tenantA.tenantId,
-  userId: randomUUID(),
-  roles: ["Relaties.All.ReadWrite"],
-};
+// The manifest's allow-lists are a vocabulary union: the compiler emits every
+// spelling of a role the authoring produces (an authored Dutch name plus its
+// Keycloak-normalized English form, when they differ). Since #403 the base
+// catalog is authored in English, so most lists carry a single spelling — the
+// per-entity test below therefore iterates whatever the list actually
+// contains, instead of hardcoding a Dutch spelling that no longer exists.
 
 async function expectForbidden(
   identity: Identity,
@@ -152,14 +151,26 @@ for (const table of tables) {
       expect(events.map((event) => event.eventType)).toEqual(["created"]);
     });
 
-    test("the authored Dutch role spelling is accepted (vocabulary union)", async () => {
-      const id = await createRow(table, dutchWriter);
-      const data = await expectData(
-        dutchWriter,
-        `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
-        { id },
-      );
-      expect(data[graphql.deleteMutationName]).toBe(true);
+    test("each allow-listed create role grants the operation on its own (vocabulary union)", async () => {
+      const createRoles = table.source?.authorization?.roles?.create ?? [];
+      expect(createRoles.length).toBeGreaterThan(0);
+      for (const role of createRoles) {
+        const writer: Identity = {
+          tenantId: tenantA.tenantId,
+          userId: randomUUID(),
+          roles: [role],
+        };
+        const id = await createRow(table, writer);
+        // Deleted by the all-write-roles identity: a single create role (e.g.
+        // Support.Issues.Create) need not also appear in the delete list.
+        const data = await expectData(
+          tenantA,
+          `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
+          { id },
+        );
+        expect(data[graphql.deleteMutationName]).toBe(true);
+        untrackRow(id);
+      }
     });
 
     // Field-level redaction (#96/#101): where the entity carries a classified

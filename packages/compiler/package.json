@@ -1,9 +1,23 @@
 {
   "name": "@openshapeforge/compiler",
   "version": "0.1.0",
+  "description": "Compiles OpenShapeForge authoring YAML into database, API, UI and Keycloak artifacts. Runs under Bun; see docs/consuming.md in the repository.",
+  "//private": "Blocks accidental registry publish only. `npm pack` still works — .github/workflows/package-compiler.yml builds the installable tarball and uploads it as a run artifact.",
   "private": true,
   "license": "BUSL-1.1",
   "type": "module",
+  "//exports": "The entry is the TypeScript source: the package runs under Bun only (docs/consuming.md), and Bun executes .ts directly. `./src/*` stays open because the shipped workflow example plugin deep-imports compiler internals.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "//files": "src is the runtime — there is no build step. config must ship too: schema-validation.ts resolves config/schemas relative to its own module, so a tarball without it fails on the first authoring validation.",
+  "files": [
+    "src",
+    "config",
+    "!src/**/*.test.ts"
+  ],
   "scripts": {
     "generate": "bun src/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",

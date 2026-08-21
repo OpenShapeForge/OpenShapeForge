@@ -1,0 +1,91 @@
+name: Package compiler
+
+# Build the installable npm tarball for @openshapeforge/compiler and upload it
+# as a run artifact, so a host repo can consume the compiler (docs/consuming.md)
+# without this repository publishing to a registry. The package is deliberately
+# `private: true` — that blocks `npm publish`, not `npm pack` — so the tarball
+# from this workflow is the ONLY supported distribution channel today.
+#
+# The tarball is proven, not just produced: it is installed into a scratch
+# project outside the workspace and the packaged bin regenerates this repo's own
+# committed artifacts. A tarball that is missing a file (an EJS template, a JSON
+# schema under config/ — both are loaded relative to the package at runtime)
+# fails here rather than on the first consumer's machine.
+#
+# Not part of ci.yml: that workflow's jobs are wired to branch protection by
+# NAME (scripts/check-required-checks.mjs), and this job is a distribution
+# concern, not a merge gate.
+
+on:
+  push:
+    branches: [main]
+  # Path-filtered on purpose — this is not a required check (required checks
+  # must run on every PR, see check-required-checks.mjs), so it only needs to
+  # run when the tarball's contents could change.
+  pull_request:
+    paths:
+      - "packages/compiler/**"
+      - "bun.lock"
+      - "docs/consuming.md"
+      - ".github/workflows/package-compiler.yml"
+  # On-demand, for grabbing a tarball from an arbitrary branch.
+  workflow_dispatch:
+
+concurrency:
+  group: package-compiler-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    name: Pack and smoke-test the compiler tarball
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.4
+
+      # The smoke test regenerates against THIS repo as the host, and the
+      # registered example plugins resolve their imports from the repo's own
+      # node_modules — so the workspace install is needed even though the
+      # tarball itself is built without it.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # LICENSE and README are copied in rather than committed to the package
+      # directory: npm auto-includes both from the package root, the BUSL text
+      # must travel with the tarball, and docs/consuming.md IS the package's
+      # usage documentation — duplicating either in-tree would drift.
+      - name: Pack the tarball
+        run: |
+          cp LICENSE packages/compiler/LICENSE
+          cp docs/consuming.md packages/compiler/README.md
+          mkdir -p /tmp/compiler-pack
+          npm pack --pack-destination /tmp/compiler-pack ./packages/compiler
+
+      # Install the tarball into a scratch project OUTSIDE the workspace (an
+      # in-workspace install would resolve back to packages/compiler and prove
+      # nothing), then run the packaged bin against this repo as the host root.
+      # The generated artifacts are committed and deterministic (ci.yml's
+      # check:generated), so `git diff --exit-code` is the assertion: the
+      # packaged compiler must reproduce them byte-for-byte.
+      - name: Smoke-test the tarball against this repo
+        run: |
+          mkdir -p /tmp/compiler-smoke
+          cd /tmp/compiler-smoke
+          printf '{"name":"compiler-smoke","private":true}\n' > package.json
+          bun add /tmp/compiler-pack/openshapeforge-compiler-*.tgz
+          ./node_modules/.bin/openshapeforge-compiler --repo-root "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" diff --exit-code
+
+      - name: Upload the tarball
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: openshapeforge-compiler-npm-${{ github.sha }}
+          path: /tmp/compiler-pack/openshapeforge-compiler-*.tgz
+          if-no-files-found: error
+          retention-days: 90

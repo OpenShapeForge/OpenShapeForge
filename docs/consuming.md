@@ -4,6 +4,25 @@ The compiler is designed to run against another repository's authoring
 config: outputs are written **relative to the host repo root**, and the
 check-script ownership model travels with it.
 
+## Getting the package
+
+The compiler is not published to a registry. CI builds the installable npm
+tarball on every push to `main` (and on pull requests that touch
+`packages/compiler`): the **Package compiler** workflow
+(`.github/workflows/package-compiler.yml`) uploads it as a run artifact named
+`openshapeforge-compiler-npm-<sha>`. Download it from the workflow run's
+Artifacts section (or `gh run download`), then install it directly:
+
+```sh
+bun add ./openshapeforge-compiler-0.1.0.tgz
+```
+
+The tarball is smoke-tested before upload: CI installs it into a scratch
+project and regenerates this repository's committed artifacts from the
+packaged bin, byte-for-byte. Note that run artifacts require a GitHub login to
+download and expire after 90 days — grab a fresh one from the latest `main`
+run rather than pinning an old link.
+
 ## Setup
 
 1. Depend on `@openshapeforge/compiler` (workspace or package dependency). The

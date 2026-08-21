@@ -31,6 +31,37 @@ const rolelessToken = await getRolelessKeycloakToken();
 const acmeToken = await keycloakTokenFor("acme-verhuurconsulent");
 const betaToken = await keycloakTokenFor("beta-verhuurconsulent");
 
+/** Every role a bearer token carries, realm and client alike. */
+function tokenRoles(token: string): Set<string> {
+  const payload = JSON.parse(
+    Buffer.from(token.split(".")[1]!, "base64url").toString(),
+  ) as {
+    realm_access?: { roles?: string[] };
+    resource_access?: Record<string, { roles?: string[] }>;
+  };
+  return new Set([
+    ...(payload.realm_access?.roles ?? []),
+    ...Object.values(payload.resource_access ?? {}).flatMap((client) => client.roles ?? []),
+  ]);
+}
+
+/**
+ * A table the token's roles can create AND read. tables[0] is whatever sorts
+ * first in the manifest — since the ERP catalog (#403) that is a RealEstate
+ * entity, which verhuurconsulent can only read, so the cross-tenant spec must
+ * pick its entity by the token's actual grants instead of by position.
+ */
+function tableWritableWith(token: string) {
+  const roles = tokenRoles(token);
+  return tables.find((candidate) => {
+    const allow = candidate.source?.authorization?.roles;
+    return (
+      (allow?.create ?? []).some((role) => roles.has(role)) &&
+      (allow?.read ?? []).some((role) => roles.has(role))
+    );
+  });
+}
+
 describe("transport and authentication", () => {
   test("health responds without authentication", async () => {
     const result = await gql(null, "{ health { status role } }");
@@ -156,7 +187,8 @@ describe("transport and authentication", () => {
   test.skipIf(!acmeToken || !betaToken)(
     "a token from another tenant cannot see this tenant's row",
     async () => {
-      const table = tables[0]!;
+      const table = tableWritableWith(acmeToken!)!;
+      expect(table).toBeTruthy();
       const graphql = table.source!.graphql!;
 
       const input: Record<string, unknown> = {};

@@ -12,7 +12,8 @@
  * Every spec file calls `registerSuiteLifecycle()` once; the last afterAll to
  * run drains the remaining created rows and persists the capture.
  */
-import { afterAll, describe as bunDescribe, expect, test as bunTest } from "bun:test";
+import { afterAll, beforeAll, describe as bunDescribe, expect, test as bunTest } from "bun:test";
+import { sql } from "kysely";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -71,6 +72,7 @@ type Store = {
   keycloakToken: Promise<string | null> | null;
   keycloakRolelessToken: Promise<string | null> | null;
   keycloakTokens: Map<string, Promise<string | null>> | null;
+  tenantRowsEnsured: Promise<void> | null;
 };
 
 /**
@@ -129,6 +131,7 @@ const store: Store = ((globalThis as Record<string, any>).__openshapeforgeE2E ??
   keycloakToken: null,
   keycloakRolelessToken: null,
   keycloakTokens: null,
+  tenantRowsEnsured: null,
 } satisfies Store);
 
 export const seed = store.seed;
@@ -393,14 +396,52 @@ function persistCapture() {
  * parents) and rewrites the cumulative capture; the last file to finish
  * leaves the complete picture on disk.
  */
+/**
+ * The harness identities carry random tenant ids that exist nowhere. That was
+ * fine while nothing referenced a tenant, but the ERP catalog gave erp.tenants
+ * inbound foreign keys (label_rules.tenant_id, tenant_settings.tenant_id), so
+ * a row created under a tenant with no erp.tenants row now fails the
+ * constraint. Insert the two identities' tenants once per run, through the
+ * privileged connection the harness already holds. Remote mode skips this:
+ * the deployed environment provisions its tenants for real, and most cluster
+ * specs run without any database access.
+ */
+export function ensureTenantRows(): Promise<void> {
+  if (remoteUrl) return Promise.resolve();
+  store.tenantRowsEnsured ??= (async () => {
+    const db = getRuntime().db;
+    for (const { tenantId } of [tenantA, tenantB]) {
+      await sql`
+        INSERT INTO erp.tenants (id, tenant_id, slug, name)
+        VALUES (${tenantId}, ${tenantId}, ${`e2e-${tenantId}`}, ${`e2e tenant ${tenantId}`})
+        ON CONFLICT (id) DO NOTHING
+      `.execute(db);
+    }
+  })();
+  return store.tenantRowsEnsured;
+}
+
 export function registerSuiteLifecycle() {
+  beforeAll(ensureTenantRows);
   afterAll(async () => {
-    for (const row of store.createdRows.splice(0).reverse()) {
-      const graphql = row.table.source!.graphql!;
-      await gql(row.identity, `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`, {
-        id: row.id,
-      }).catch(() => {});
+    // Reverse order (children before the parents they reference), in modest
+    // concurrent batches: the full-catalog sweeps track thousands of rows,
+    // and deleting them one at a time blew past the hook timeout, which bun
+    // reports as an unnamed file-level failure.
+    const rows = store.createdRows.splice(0).reverse();
+    const batchSize = 25;
+    for (let i = 0; i < rows.length; i += batchSize) {
+      await Promise.all(
+        rows.slice(i, i + batchSize).map((row) => {
+          const graphql = row.table.source!.graphql!;
+          return gql(
+            row.identity,
+            `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
+            { id: row.id },
+          ).catch(() => {});
+        }),
+      );
     }
     persistCapture();
-  });
+  }, 120_000);
 }

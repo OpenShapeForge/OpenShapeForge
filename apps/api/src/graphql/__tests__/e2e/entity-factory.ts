@@ -86,6 +86,13 @@ export function sampleValue(column: Column, marker: string): unknown {
   }
 }
 
+// Distinct per created row, because the ERP catalog carries per-tenant unique
+// columns (cases.code, chips.key, the idempotency keys). A constant marker
+// made the SECOND row of such an entity in the same tenant a duplicate-key
+// error, which surfaced as hundreds of unrelated failures the first time the
+// suite ran against the full catalog in CI.
+let rowSequence = 0;
+
 /**
  * Creates a row for `table`, recursively creating rows for any REQUIRED
  * foreign-key columns first. Returns the new row's id and tracks it for
@@ -103,6 +110,7 @@ export async function createRow(
   const graphql = table.source!.graphql!;
   const fkTargets = foreignKeyTargets(table);
   const input: Record<string, unknown> = {};
+  const marker = `${seed}-${++rowSequence}`;
 
   for (const column of table.columns) {
     if (!isMutableColumn(column)) continue;
@@ -125,7 +133,7 @@ export async function createRow(
       continue; // optional FKs stay unset unless overridden
     }
     if (column.required) {
-      input[field] = sampleValue(column, seed);
+      input[field] = sampleValue(column, marker);
     }
   }
 

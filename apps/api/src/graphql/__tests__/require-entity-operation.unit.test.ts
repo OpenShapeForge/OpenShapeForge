@@ -18,7 +18,10 @@ import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
-const table = getGeneratedCrudTables()[0]!;
+// Pinned by name: tables[0] is whatever sorts first in the manifest, and the
+// assertions below name this entity's Relations.* roles. Since the ERP catalog
+// (#403) the first table is a RealEstate entity, so position is not identity.
+const table = getGeneratedCrudTables().find((t) => t.name === "erp.relations")!;
 const noRoleSession = { tenantId: "tenant", userId: "user", roles: [] as string[] };
 
 function captureThrow(fn: () => unknown): GraphQLError {
@@ -53,10 +56,14 @@ describe("requireEntityOperation", () => {
         roles: ["Relations.All.Read"],
       }),
     ).not.toThrow();
+    // The write role also satisfies delete. (The authored-vs-normalized
+    // vocabulary union is covered by the compiler's backend-manifest tests;
+    // since #403 the shipped catalog is authored in English, so the manifest
+    // carries a single spelling per role.)
     expect(() =>
       requireEntityOperation(table, "delete", {
         ...noRoleSession,
-        roles: ["Relaties.All.ReadWrite"],
+        roles: ["Relations.All.ReadWrite"],
       }),
     ).not.toThrow();
   });

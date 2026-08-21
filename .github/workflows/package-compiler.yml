@@ -1,10 +1,11 @@
 name: Package compiler
 
-# Build the installable npm tarball for @openshapeforge/compiler and upload it
-# as a run artifact, so a host repo can consume the compiler (docs/consuming.md)
-# without this repository publishing to a registry. The package is deliberately
-# `private: true` — that blocks `npm publish`, not `npm pack` — so the tarball
-# from this workflow is the ONLY supported distribution channel today.
+# Build the installable npm tarball for @openshapeforge/compiler, upload it as
+# a run artifact, and — on pushes to main — publish it to the GitHub Packages
+# npm registry so a host repo (docs/consuming.md) can install it by name. The
+# repo is public, so the package is public too; note GitHub's npm registry
+# still requires consumers to authenticate with a read:packages token even for
+# public packages.
 #
 # The tarball is proven, not just produced: it is installed into a scratch
 # project outside the workspace and the packaged bin regenerates this repo's own
@@ -89,3 +90,51 @@ jobs:
           path: /tmp/compiler-pack/openshapeforge-compiler-*.tgz
           if-no-files-found: error
           retention-days: 90
+
+  # Publish to the GitHub Packages npm registry — pushes to main only, and only
+  # when this package.json version is not there yet, so releasing is "bump the
+  # version and merge" and every other main push is a clean no-op. A registry
+  # version is immutable; there is deliberately no force path.
+  #
+  # Its own job, not a step above: it is the only thing here needing
+  # `packages: write`, and the pack job also runs on pull requests, where that
+  # grant would be pure attack surface. It re-packs rather than downloading the
+  # artifact because `npm publish <dir>` packs identically (same npm, same
+  # committed tree — the smoke test in `pack` proved that exact content) and a
+  # download step would add another pinned action for no additional proof.
+  publish:
+    name: Publish to GitHub Packages
+    needs: pack
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # Same pack-time copies as the pack job, for the same reason: the BUSL
+      # text and the usage docs travel with the tarball without being
+      # duplicated in-tree.
+      - name: Stage LICENSE and README
+        run: |
+          cp LICENSE packages/compiler/LICENSE
+          cp docs/consuming.md packages/compiler/README.md
+
+      # The literal ${NODE_AUTH_TOKEN} is expanded by npm itself from the
+      # step-level env at request time — the token never lands on disk.
+      # GitHub's npm registry requires auth for reads too, so the
+      # already-published probe below needs this as much as the publish does.
+      - name: Configure npm for GitHub Packages
+        run: printf '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}\n' > ~/.npmrc
+
+      - name: Publish if this version is not published yet
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(node -p "require('./packages/compiler/package.json').version")
+          if npm view "@openshapeforge/compiler@${version}" version --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
+            echo "@openshapeforge/compiler@${version} is already published; nothing to do."
+            exit 0
+          fi
+          npm publish ./packages/compiler

@@ -6,22 +6,40 @@ check-script ownership model travels with it.
 
 ## Getting the package
 
-The compiler is not published to a registry. CI builds the installable npm
-tarball on every push to `main` (and on pull requests that touch
-`packages/compiler`): the **Package compiler** workflow
-(`.github/workflows/package-compiler.yml`) uploads it as a run artifact named
-`openshapeforge-compiler-npm-<sha>`. Download it from the workflow run's
-Artifacts section (or `gh run download`), then install it directly:
+`@openshapeforge/compiler` is published to the **GitHub Packages npm
+registry** (not npmjs.com) by the **Package compiler** workflow
+(`.github/workflows/package-compiler.yml`) on pushes to `main`, whenever the
+version in `packages/compiler/package.json` is not there yet — releasing is
+"bump the version and merge".
+
+GitHub's npm registry requires authentication even for public packages, so
+consumers need a token with `read:packages` (a classic PAT, or
+`GITHUB_TOKEN` in Actions). Point the `@openshapeforge` scope at the registry
+in the host repo's `.npmrc`:
+
+```ini
+@openshapeforge:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+
+then install by name (Bun and npm both read `.npmrc`):
+
+```sh
+bun add @openshapeforge/compiler
+```
+
+Alternatively, every workflow run — including pull requests touching
+`packages/compiler` — also uploads the tarball as a run artifact named
+`openshapeforge-compiler-npm-<sha>` (90-day retention). Download it from the
+run's Artifacts section (or `gh run download`) and install from the file:
 
 ```sh
 bun add ./openshapeforge-compiler-0.1.0.tgz
 ```
 
-The tarball is smoke-tested before upload: CI installs it into a scratch
-project and regenerates this repository's committed artifacts from the
-packaged bin, byte-for-byte. Note that run artifacts require a GitHub login to
-download and expire after 90 days — grab a fresh one from the latest `main`
-run rather than pinning an old link.
+Either way the content is proven before it ships: CI installs the tarball into
+a scratch project and regenerates this repository's committed artifacts from
+the packaged bin, byte-for-byte.
 
 ## Setup
 

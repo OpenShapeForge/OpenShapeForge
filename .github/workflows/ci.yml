@@ -381,6 +381,7 @@ jobs:
           exit-code: "0"
           format: table
 
-# Follow-up: the full GraphQL e2e suite (apps/api test:e2e) additionally needs a
-# running Keycloak issuer to mint bearer tokens for the transport-auth flows, so
-# it is not wired here yet. Tracked as a follow-up to issue #22.
+# The full GraphQL e2e suite (apps/api test:e2e) additionally needs a running
+# Keycloak issuer to mint bearer tokens for the transport-auth flows, so it runs
+# in its own service-backed workflow: api-e2e.yml (closes the follow-up to
+# issue #22).

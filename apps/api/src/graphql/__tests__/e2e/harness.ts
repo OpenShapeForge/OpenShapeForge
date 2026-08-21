@@ -85,9 +85,32 @@ type Store = {
  * The compiler emits both the authored (Dutch) and Keycloak-normalized
  * (English) spelling of every role, so either matches; these use the
  * normalized spelling that bearer tokens actually carry.
+ *
+ * Derived from the generated manifest rather than hardcoded: the CRUD and
+ * relationship suites iterate EVERY entity the manifest ships, so the grant
+ * list must grow with the catalog. Hardcoding "Relations.All.ReadWrite" broke
+ * the whole generated sweep with "Not authorized to create …" the day the
+ * 145-entity ERP catalog landed (#403) and would break it again on the next
+ * domain. The read-only identity gets every role that appears in a read list
+ * but never in a write list, which keeps "can read everything, can write
+ * nothing" true whatever the catalog contains.
  */
-export const E2E_READWRITE_ROLES = ["Relations.All.ReadWrite"];
-export const E2E_READONLY_ROLES = ["Relations.All.Read"];
+const authorizationRoleLists = getGeneratedCrudTables().map(
+  (table) => table.source?.authorization?.roles,
+);
+const writeRoles = new Set(
+  authorizationRoleLists.flatMap((roles) => [
+    ...(roles?.create ?? []),
+    ...(roles?.update ?? []),
+    ...(roles?.delete ?? []),
+  ]),
+);
+export const E2E_READWRITE_ROLES = [...writeRoles].sort();
+export const E2E_READONLY_ROLES = [
+  ...new Set(authorizationRoleLists.flatMap((roles) => roles?.read ?? [])),
+]
+  .filter((role) => !writeRoles.has(role))
+  .sort();
 
 // readOnly/noRoles reuse tenantA's tenant with fresh users so role denial is
 // isolated from RLS/tenant denial.

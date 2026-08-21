@@ -115,7 +115,14 @@ async function userToken(username: string, password: string): Promise<string | n
       }),
       signal: AbortSignal.timeout(4000),
     });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      // Direct-grant refusals carry the reason ("Account is not fully set
+      // up", "invalid_grant", …); a silent null here costs a CI round-trip.
+      console.error(
+        `[tenant-isolation] token mint for ${username} failed: ${response.status} ${await response.text()}`,
+      );
+      return null;
+    }
     return ((await response.json()) as { access_token?: string }).access_token ?? null;
   } catch {
     return null;
@@ -149,10 +156,38 @@ async function adminFetch(path: string, init: RequestInit = {}): Promise<Respons
 const createdUserIds: string[] = [];
 
 /**
+ * The realm declares no user-profile component, so Keycloak's default
+ * declarative profile applies — and that default REJECTS or silently drops
+ * unmanaged attributes on admin-API writes. The committed dev-realm users get
+ * their `tid` through the import path, which bypasses profile validation, so
+ * the realm works until the first user is created through the admin API — the
+ * exact operation a real onboarding performs. Permit unmanaged attributes
+ * before creating any, or the tid below quietly never reaches the token.
+ */
+let unmanagedAttributesEnsured = false;
+async function ensureUnmanagedAttributes(): Promise<void> {
+  if (unmanagedAttributesEnsured) return;
+  const current = await (await adminFetch("/users/profile")).json() as Record<string, unknown>;
+  if (current.unmanagedAttributePolicy !== "ENABLED") {
+    const updated = await adminFetch("/users/profile", {
+      method: "PUT",
+      body: JSON.stringify({ ...current, unmanagedAttributePolicy: "ENABLED" }),
+    });
+    expect(updated.status).toBe(200);
+  }
+  unmanagedAttributesEnsured = true;
+}
+
+/**
  * A realm user whose token belongs to `tenantId` and carries exactly `roles`:
  * the `tid` user attribute is what the realm's tid-mapper turns into the
  * claim the verifier reads, and the roles are client roles on the audience
  * client — the same wiring the committed dev-realm users use.
+ *
+ * firstName/lastName are not decoration: without them the default profile
+ * marks the account incomplete, and VERIFY_PROFILE turns every direct grant
+ * into "Account is not fully set up" — the token mint returns null and
+ * nothing downstream runs.
  */
 async function createTenantUser(
   username: string,
@@ -160,11 +195,14 @@ async function createTenantUser(
   tenantId: string,
   roles: string[],
 ): Promise<string> {
+  await ensureUnmanagedAttributes();
   const created = await adminFetch("/users", {
     method: "POST",
     body: JSON.stringify({
       username,
       email: `${username}@e2e.invalid`,
+      firstName: "E2E",
+      lastName: "Isolation",
       enabled: true,
       emailVerified: true,
       attributes: { tid: [tenantId] },
@@ -174,6 +212,14 @@ async function createTenantUser(
   expect(created.status).toBe(201);
   const userId = created.headers.get("location")!.split("/").pop()!;
   createdUserIds.push(userId);
+
+  // The tid attribute is the tenant binding; if the profile dropped it the
+  // token would verify fine and then resolve to NO tenant, which surfaces
+  // far away as UNAUTHENTICATED. Fail here, where the cause is visible.
+  const stored = await (await adminFetch(`/users/${userId}`)).json() as {
+    attributes?: Record<string, string[]>;
+  };
+  expect(stored.attributes?.tid).toEqual([tenantId]);
 
   const audience = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE ?? "erp-provider";
   const clients = (await (await adminFetch(`/clients?clientId=${encodeURIComponent(audience)}`)).json()) as Array<{ id: string }>;

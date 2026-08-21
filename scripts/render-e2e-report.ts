@@ -18,13 +18,16 @@ const repoRoot = resolve(import.meta.dir, "..");
 const reportDir = join(repoRoot, ".e2e-report");
 const junitPath = join(reportDir, "junit.xml");
 const htmlPath = join(reportDir, "index.html");
-const testFile = "src/graphql/__tests__";
+const summaryPath = join(reportDir, "summary.md");
+// The same three suites `test:e2e` runs (apps/api package.json) — the report
+// must not gate on a subset of what the plain script gates on.
+const testFiles = ["src/graphql/__tests__", "src/rest/__tests__", "src/mcp/__tests__"];
 
 mkdirSync(reportDir, { recursive: true });
 
 const startedAt = new Date();
 const run = Bun.spawnSync(
-  ["bun", "test", testFile, "--reporter=junit", `--reporter-outfile=${junitPath}`],
+  ["bun", "test", ...testFiles, "--reporter=junit", `--reporter-outfile=${junitPath}`],
   { cwd: join(repoRoot, "apps/api"), env: process.env, stdout: "pipe", stderr: "pipe" },
 );
 const consoleOutput = `${run.stdout.toString()}\n${run.stderr.toString()}`.trim();
@@ -340,6 +343,42 @@ ${(() => {
 `;
 
 writeFileSync(htmlPath, html, "utf8");
+
+// A GitHub-flavored-markdown twin of the HTML summary, for surfaces that
+// render markdown but not HTML files: the Actions step summary and the sticky
+// PR comment api-e2e.yml maintains. Failures and skips are itemized because
+// those are the rows a reviewer acts on; passes are only counted.
+const mdEscape = (value: string) => value.replace(/\|/g, "\\|").replace(/\n/g, " ");
+const summaryMd = [
+  `### API e2e — ${failed > 0 ? "❌ FAILED" : "✅ passed"}`,
+  "",
+  `| passed | failed | skipped | total |`,
+  `| --- | --- | --- | --- |`,
+  `| ${passed} | ${failed} | ${skipped} | ${cases.length} |`,
+  ...(failed > 0
+    ? [
+        "",
+        "**Failed tests**",
+        "",
+        ...cases
+          .filter((c) => c.status === "fail")
+          .map((c) => `- ❌ \`${mdEscape(c.suite)}\` › ${mdEscape(c.name)}`),
+      ]
+    : []),
+  ...(skipped > 0
+    ? [
+        "",
+        "**Skipped tests**",
+        "",
+        ...cases
+          .filter((c) => c.status === "skip")
+          .map((c) => `- ⏭️ \`${mdEscape(c.suite)}\` › ${mdEscape(c.name)}`),
+      ]
+    : []),
+  "",
+].join("\n");
+writeFileSync(summaryPath, summaryMd, "utf8");
+
 console.log(
   `${failed > 0 ? "FAILED" : "passed"} — ${passed}/${cases.length} tests` +
     `${skipped ? ` (${skipped} skipped)` : ""}`,

@@ -28,8 +28,11 @@ concurrency:
   group: api-e2e-${{ github.ref }}
   cancel-in-progress: true
 
+# pull-requests: write exists solely for the sticky results comment the last
+# step maintains; nothing here pushes code or images.
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   api-e2e:
@@ -128,7 +131,11 @@ jobs:
       # minted — correct on a laptop with no Keycloak, but in THIS job a skip
       # means the stack is broken and the gate would silently stop gating. So
       # the summary is checked: any skipped test fails the job.
-      - name: Run the e2e suite
+      # test:e2e:report rather than test:e2e: same three suites, same exit
+      # code, but it also renders .e2e-report/ — index.html (self-contained,
+      # per-test request/response capture), junit.xml, and summary.md. The
+      # report is what makes a failure here diagnosable without a laptop.
+      - name: Run the e2e suite and render the report
         env:
           OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI: http://localhost:8181/realms/openshapeforge/protocol/openid-connect/certs
           OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER: http://localhost:8181/realms/openshapeforge
@@ -138,12 +145,74 @@ jobs:
           OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI: http://localhost:8181/realms/openshapeforge-control/protocol/openid-connect/certs
           OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID: openshapeforge-admin-gateway
           KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API: openshapeforge-auth-api-secret
+        run: bun run test:e2e:report
+
+      # In THIS job a skipped test means a token could not be minted — the
+      # stack is broken and the gate would silently stop gating — so any skip
+      # fails the job. Separate from the run step so the report above is
+      # rendered and published either way.
+      - name: Fail on skipped tests
         run: |
-          set -o pipefail
-          bun run test:e2e 2>&1 | tee /tmp/e2e.log
-          if grep -qE '^[[:space:]]*[1-9][0-9]* skip' /tmp/e2e.log; then
+          # Case-level <skipped> elements — the same thing render-e2e-report.ts
+          # parses, so the guard and the report cannot disagree.
+          if grep -q '<skipped' .e2e-report/junit.xml; then
             echo "::error::e2e tests were skipped — the Keycloak-backed flows did not run. A skip here means minting a token failed, not that the flow is optional."
             exit 1
+          fi
+
+      # The full HTML report, downloadable from the run page.
+      - name: Publish the HTML report
+        id: report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: api-e2e-report
+          path: .e2e-report/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # The same summary, rendered on the workflow run page itself.
+      - name: Render the step summary
+        if: always()
+        run: |
+          if [ -f .e2e-report/summary.md ]; then
+            cat .e2e-report/summary.md >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Full HTML report: ${{ steps.report.outputs.artifact-url }}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # One sticky comment per pull request, edited in place on every run so
+      # the PR carries the latest results instead of accumulating a comment
+      # per push. Matched by the invisible marker, not by author, so it keeps
+      # working whichever token identity posts it.
+      - name: Post the results on the pull request
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          ARTIFACT_URL: ${{ steps.report.outputs.artifact-url }}
+        run: |
+          marker='<!-- api-e2e-report -->'
+          {
+            echo "$marker"
+            if [ -f .e2e-report/summary.md ]; then
+              cat .e2e-report/summary.md
+            else
+              echo "### API e2e — ❌ the suite did not produce a report (the stack failed before tests ran; see the job log)"
+            fi
+            echo ""
+            if [ -n "$ARTIFACT_URL" ]; then
+              echo "📄 [Full HTML report]($ARTIFACT_URL) (per-test request/response capture) · [run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+            fi
+          } > /tmp/comment.md
+          existing=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" --paginate \
+            --jq "[.[] | select(.body | startswith(\"$marker\"))][0].id" 2>/dev/null || true)
+          if [ -n "$existing" ] && [ "$existing" != "null" ]; then
+            gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$existing" \
+              -F body=@/tmp/comment.md > /dev/null
+          else
+            gh api -X POST "repos/${{ github.repository }}/issues/$PR/comments" \
+              -F body=@/tmp/comment.md > /dev/null
           fi
 
       - name: Collect logs from a failure

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { createHash } from "node:crypto";
-import { renderOpenApiSpec } from "./generate-openapi.js";
+import { renderOpenApiSpec, type OpenApiSpecOptions } from "./generate-openapi.js";
 import type {
   ColumnDefinition,
   GeneratedArtifact,
@@ -28,6 +28,7 @@ export const WORKER_DATABASE_ROLE = "openshapeforge_worker";
 
 export type GenerateArtifactsOptions = {
   source?: string;
+  openApi?: OpenApiSpecOptions;
 };
 
 function sqlGeneratedHeader(source: string): string {
@@ -706,7 +707,7 @@ ${renderForeignKeySql(manifest)}
     },
     {
       path: "apps/api/src/generated/rest/openapi.json",
-      contents: renderOpenApiSpec(manifest, source),
+      contents: renderOpenApiSpec(manifest, source, options.openApi),
     },
   ];
 }

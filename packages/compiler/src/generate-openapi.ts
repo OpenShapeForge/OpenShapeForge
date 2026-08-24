@@ -3,15 +3,19 @@
  * OpenAPI 3.1 spec generator for entities that opt into generated REST
  * exposure (`rest:` block in the entity YAML → `TableDefinition.source.rest`).
  *
- * The spec is derived from the same manifest column metadata the GraphQL
- * runtime uses (`sourceField` camelCase names, scalar column types), so both
- * API styles present identical field names and types. The file is emitted on
- * every generate run — with an empty `paths` object when no entity opts in —
- * so the API runtime can statically import it unconditionally.
+ * The manifest remains authoritative for route exposure, physical fields, and
+ * writability. Rich JSON Schema semantics are joined from the already-compiled
+ * entity contracts, so descriptions and validation never have to be rebuilt
+ * from storage columns. A manifest-only scalar fallback covers synthetic
+ * columns such as relationship foreign keys.
  *
- * Determinism: pure function of the manifest; no timestamps, entities sorted
- * by base path.
+ * The file is emitted on every generate run — with an empty `paths` object when
+ * no entity opts in — so the API runtime can statically import it
+ * unconditionally. Determinism: no timestamps; entities sorted by base path.
  */
+import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
+import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
+import { compiledFieldSchema, localizedText } from "./field-json-schema.js";
 import type {
   PlatformSchemaManifest,
   ScalarType,
@@ -21,6 +25,15 @@ import type {
 const REST_MOUNT = "/api/rest/v1";
 
 type JsonObject = Record<string, unknown>;
+
+export type OpenApiEntityInput = {
+  contract: CompiledEntityContract;
+};
+
+export type OpenApiSpecOptions = {
+  entities?: OpenApiEntityInput[];
+  referentiedata?: CoreReferentiedataSnapshot;
+};
 
 function fieldNameForColumn(column: TableDefinition["columns"][number]): string {
   return (
@@ -74,19 +87,56 @@ function entitySchemaName(table: TableDefinition): string {
   return table.source?.authoringEntityName ?? table.name;
 }
 
+function fieldSchemaForColumn(
+  column: TableDefinition["columns"][number],
+  fieldsByKey: Map<string, CompiledField>,
+  referentiedata: CoreReferentiedataSnapshot,
+): { fieldName: string; compiled?: CompiledField; schema: JsonObject } {
+  const fieldName = fieldNameForColumn(column);
+  const compiled = fieldsByKey.get(fieldName);
+  if (!compiled) {
+    return { fieldName, schema: schemaForScalar(column.type) };
+  }
+
+  const schema = compiledFieldSchema(compiled, referentiedata);
+  return { fieldName, compiled, schema };
+}
+
 function columnProperties(
   columns: TableDefinition["columns"],
+  fieldsByKey: Map<string, CompiledField>,
+  referentiedata: CoreReferentiedataSnapshot,
+  requiredMode: "storage" | "create" | "none",
 ): { properties: JsonObject; required: string[] } {
   const properties: JsonObject = {};
   const required: string[] = [];
   for (const column of columns) {
-    const field = fieldNameForColumn(column);
-    properties[field] = schemaForScalar(column.type);
-    if (column.required === true || column.primaryKey === true) {
-      required.push(field);
+    const { fieldName, compiled, schema } = fieldSchemaForColumn(
+      column,
+      fieldsByKey,
+      referentiedata,
+    );
+    properties[fieldName] = schema;
+    const isRequired =
+      requiredMode === "storage"
+        ? column.required === true || column.primaryKey === true
+        : requiredMode === "create"
+          ? compiled?.required ?? column.required === true
+          : false;
+    if (isRequired) {
+      required.push(fieldName);
     }
   }
   return { properties, required };
+}
+
+function entityLabel(contract: CompiledEntityContract | undefined, fallback: string): string {
+  if (!contract) return fallback;
+  return localizedText(contract.entity.labels) ?? contract.entity.title ?? fallback;
+}
+
+function entityDescription(contract: CompiledEntityContract | undefined): string | undefined {
+  return localizedText(contract?.entity.description);
 }
 
 function errorResponse(description: string): JsonObject {
@@ -114,7 +164,12 @@ function entityResponse(name: string, description: string): JsonObject {
 export function renderOpenApiSpec(
   manifest: PlatformSchemaManifest,
   source: string,
+  options: OpenApiSpecOptions = {},
 ): string {
+  const referentiedata = options.referentiedata ?? {};
+  const contractsByEntityName = new Map(
+    (options.entities ?? []).map((entity) => [entity.contract.entity.name, entity.contract]),
+  );
   const restTables = manifest.tables
     .filter(
       (table) =>
@@ -143,45 +198,64 @@ export function renderOpenApiSpec(
     },
   };
   const paths: JsonObject = {};
+  const tags: JsonObject[] = [];
 
   for (const table of restTables) {
     const rest = table.source!.rest!;
     const name = entitySchemaName(table);
-    const read = columnProperties(table.columns);
+    const contract = contractsByEntityName.get(name);
+    const fieldsByKey = new Map(
+      (contract?.model.fields ?? []).map((field) => [field.key, field]),
+    );
+    const label = entityLabel(contract, name);
+    const description = entityDescription(contract);
+    tags.push({ name, ...(description ? { description } : {}) });
+
+    const read = columnProperties(table.columns, fieldsByKey, referentiedata, "storage");
     const creatableColumns = table.columns.filter((column) =>
       isWritableColumn(column, "create"),
     );
     const updatableColumns = table.columns.filter((column) =>
       isWritableColumn(column, "update"),
     );
-    const writable = columnProperties(creatableColumns);
-    // A second body schema only where the two differ, so an entity with no
-    // immutable column keeps exactly the spec it had.
-    const hasImmutable = updatableColumns.length !== creatableColumns.length;
-    const updateSchemaName = hasImmutable ? `${name}UpdateInput` : `${name}Input`;
+    const creatable = columnProperties(
+      creatableColumns,
+      fieldsByKey,
+      referentiedata,
+      "create",
+    );
+    const updatable = columnProperties(
+      updatableColumns,
+      fieldsByKey,
+      referentiedata,
+      "none",
+    );
+    const updateSchemaName = `${name}UpdateInput`;
 
     schemas[name] = {
       type: "object",
+      ...(description ? { description } : {}),
       properties: read.properties,
       ...(read.required.length > 0 ? { required: read.required } : {}),
     };
     schemas[`${name}Input`] = {
       type: "object",
+      description: `Create body for ${label}.`,
       additionalProperties: false,
-      properties: writable.properties,
+      properties: creatable.properties,
+      ...(creatable.required.length > 0 ? { required: creatable.required } : {}),
     };
-    if (hasImmutable) {
-      schemas[updateSchemaName] = {
-        type: "object",
-        additionalProperties: false,
-        properties: columnProperties(updatableColumns).properties,
-        description:
-          "PATCH body. Fields authored immutable are settable at create only " +
-          "and are rejected here.",
-      };
-    }
+    schemas[updateSchemaName] = {
+      type: "object",
+      additionalProperties: false,
+      properties: updatable.properties,
+      description:
+        "PATCH body; omitted fields are left unchanged. Fields authored " +
+        "immutable are settable at create only and are rejected here.",
+    };
     schemas[`${name}List`] = {
       type: "object",
+      description: `A page of ${label} records.`,
       required: ["items", "totalCount", "nextCursor"],
       properties: {
         items: {
@@ -197,8 +271,10 @@ export function renderOpenApiSpec(
     if (rest.operations.list) {
       collectionPath.get = {
         operationId: `list${name}`,
-        summary: `List ${name} records`,
+        summary: `List ${label} records`,
+        tags: [name],
         description:
+          (description ? `${description} ` : "") +
           "Reserved query parameters: first (page size), after (cursor), " +
           "sortField, sortDirection. Any other query parameter is treated as " +
           "an equality filter on the entity field of that name; repeat a " +
@@ -229,7 +305,9 @@ export function renderOpenApiSpec(
     if (rest.operations.create) {
       collectionPath.post = {
         operationId: `create${name}`,
-        summary: `Create a ${name}`,
+        summary: `Create ${label}`,
+        tags: [name],
+        ...(description ? { description } : {}),
         requestBody: {
           required: true,
           content: {
@@ -239,7 +317,7 @@ export function renderOpenApiSpec(
           },
         },
         responses: {
-          "201": entityResponse(name, `Created ${name}`),
+          "201": entityResponse(name, `Created ${label}`),
           "400": errorResponse("Invalid request body"),
           "401": errorResponse("Missing or invalid credentials"),
           "403": errorResponse("Session lacks a required entity role"),
@@ -263,9 +341,11 @@ export function renderOpenApiSpec(
     if (rest.operations.get) {
       itemPath.get = {
         operationId: `get${name}`,
-        summary: `Fetch a ${name} by id`,
+        summary: `Fetch ${label} by id`,
+        tags: [name],
+        ...(description ? { description } : {}),
         responses: {
-          "200": entityResponse(name, `${name} record`),
+          "200": entityResponse(name, `${label} record`),
           "401": errorResponse("Missing or invalid credentials"),
           "403": errorResponse("Session lacks a required entity role"),
           "404": errorResponse("Not found"),
@@ -275,7 +355,9 @@ export function renderOpenApiSpec(
     if (rest.operations.update) {
       itemPath.patch = {
         operationId: `update${name}`,
-        summary: `Partially update a ${name}`,
+        summary: `Partially update ${label}`,
+        tags: [name],
+        ...(description ? { description } : {}),
         requestBody: {
           required: true,
           content: {
@@ -285,7 +367,7 @@ export function renderOpenApiSpec(
           },
         },
         responses: {
-          "200": entityResponse(name, `Updated ${name}`),
+          "200": entityResponse(name, `Updated ${label}`),
           "400": errorResponse("Invalid request body"),
           "401": errorResponse("Missing or invalid credentials"),
           "403": errorResponse("Session lacks a required entity role"),
@@ -296,9 +378,11 @@ export function renderOpenApiSpec(
     if (rest.operations.delete) {
       itemPath.delete = {
         operationId: `delete${name}`,
-        summary: `Delete a ${name}`,
+        summary: `Delete ${label}`,
+        tags: [name],
+        ...(description ? { description } : {}),
         responses: {
-          "204": { description: `${name} deleted` },
+          "204": { description: `${label} deleted` },
           "401": errorResponse("Missing or invalid credentials"),
           "403": errorResponse("Session lacks a required entity role"),
           "404": errorResponse("Not found"),
@@ -324,6 +408,7 @@ export function renderOpenApiSpec(
       },
       schemas,
     },
+    tags,
     paths,
   };
 

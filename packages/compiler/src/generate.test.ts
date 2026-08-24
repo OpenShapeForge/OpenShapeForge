@@ -1806,6 +1806,11 @@ describe("generated REST OpenAPI artifact", () => {
 
     const input = spec.components.schemas.WidgetInput!;
     expect(Object.keys(input.properties ?? {})).toEqual(["displayName", "isActive"]);
+    expect(input.required).toEqual(["displayName"]);
+
+    const update = spec.components.schemas.WidgetUpdateInput!;
+    expect(Object.keys(update.properties ?? {})).toEqual(["displayName", "isActive"]);
+    expect(update.required).toBeUndefined();
   });
 
   it("always emits the artifact — with empty paths when no table opts in", () => {

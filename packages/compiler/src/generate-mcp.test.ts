@@ -129,6 +129,7 @@ describe("buildMcpCatalog", () => {
       const create = catalog.tools.find((tool) => tool.operation === "create")!;
       expect(prop(create.inputSchema, "name")).toMatchObject({
         type: "string",
+        title: "name",
         minLength: 1,
         maxLength: 200,
         pattern: "^[a-z]+$",

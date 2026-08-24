@@ -64,6 +64,10 @@ export interface CompiledField {
   key: string;
   valueType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   cardinality: "single" | "collection";
+  cardinalityBounds?: {
+    min?: number;
+    max?: number | "unbounded";
+  };
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
   required: boolean;

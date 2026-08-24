@@ -1,0 +1,167 @@
+// SPDX-License-Identifier: BUSL-1.1
+import { describe, expect, it } from "bun:test";
+import type { CompiledField } from "./authoring/types.js";
+import { compiledFieldSchema, compiledObjectSchema } from "./field-json-schema.js";
+
+function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): CompiledField {
+  const { key, ...rest } = overrides;
+  return {
+    key,
+    valueType: "string",
+    cardinality: "single",
+    required: false,
+    label: { en: key },
+    render: { component: "Input" },
+    ...rest,
+  };
+}
+
+describe("compiled field JSON Schema projection", () => {
+  it("projects descriptions, validation, defaults, and reference-data enums", () => {
+    const schema = compiledFieldSchema(
+      field({
+        key: "status",
+        required: true,
+        description: { en: "Lifecycle status." },
+        validation: { minLength: 1, maxLength: { value: 50 } },
+        defaultValue: "active",
+        relationship: { kind: "belongsTo", entity: "StatusDefinition" },
+        hints: { aiInstructions: "Choose the closest status." },
+        render: { component: "ReferenceSelect", props: { referentieGroep: "STATUS" } },
+      }),
+      {
+        STATUS: [
+          { value: "active", label: { en: "Active", nl: "Actief" } },
+          { value: "closed", label: { en: "Closed", nl: "Gesloten" } },
+        ],
+      },
+    );
+
+    expect(schema).toEqual({
+      type: "string",
+      minLength: 1,
+      maxLength: 50,
+      title: "status",
+      enum: ["active", "closed"],
+      description:
+        "Lifecycle status. References the StatusDefinition entity. " +
+        "Allowed values: active (Active), closed (Closed).",
+      default: "active",
+    });
+  });
+
+  it("projects nested objects and collection item shapes recursively", () => {
+    const action = field({
+      key: "action",
+      valueType: "object",
+      children: [
+        field({ key: "key", required: true, validation: { minLength: 1 } }),
+        field({
+          key: "kind",
+          required: true,
+          options: {
+            type: "static",
+            items: [
+              { value: "task", label: { en: "Task" } },
+              { value: "workflow", label: { en: "Workflow" } },
+            ],
+          },
+        }),
+      ],
+    });
+    const schema = compiledFieldSchema(
+      field({
+        key: "actions",
+        valueType: "object",
+        cardinality: "collection",
+        description: { en: "Ordered actions." },
+        validation: { minItems: 1 },
+        item: action,
+      }),
+    );
+
+    expect(schema.type).toBe("array");
+    expect(schema.title).toBe("actions");
+    expect(schema.minItems).toBe(1);
+    expect(schema.description).toBe("Ordered actions.");
+    expect(schema.items).toMatchObject({
+      allOf: [
+        { type: "object" },
+        {
+          type: "object",
+          required: ["key", "kind"],
+          additionalProperties: false,
+          properties: {
+            key: { type: "string", minLength: 1 },
+            kind: { type: "string", enum: ["task", "workflow"] },
+          },
+        },
+      ],
+    });
+  });
+
+  it("conjoins outer item constraints with an explicit item schema", () => {
+    const schema = compiledFieldSchema(
+      field({
+        key: "codes",
+        cardinality: "collection",
+        validation: { maxLength: 8 },
+        options: {
+          type: "static",
+          items: [
+            { value: "primary", label: { en: "Primary" } },
+            { value: "backup", label: { en: "Backup" } },
+          ],
+        },
+        item: field({ key: "code", label: { en: "Code" } }),
+      }),
+    );
+
+    expect(schema.items).toEqual({
+      allOf: [
+        { type: "string", maxLength: 8, enum: ["primary", "backup"] },
+        { type: "string", title: "Code", description: "Code" },
+      ],
+    });
+    expect(schema.description).toContain("Allowed values: primary (Primary), backup (Backup).");
+  });
+
+  it("places collection defaults at the level matching their value type", () => {
+    const scalarDefault = compiledFieldSchema(
+      field({ key: "tags", cardinality: "collection", defaultValue: "new" }),
+    );
+    const arrayDefault = compiledFieldSchema(
+      field({ key: "tags", cardinality: "collection", defaultValue: ["new"] }),
+    );
+
+    expect(scalarDefault.default).toBeUndefined();
+    expect(scalarDefault.items).toMatchObject({ default: "new" });
+    expect(arrayDefault.default).toEqual(["new"]);
+    expect((arrayDefault.items as Record<string, unknown>).default).toBeUndefined();
+  });
+
+  it("threads default and nested-required policy through recursive fields", () => {
+    const schema = compiledFieldSchema(
+      field({
+        key: "metadata",
+        valueType: "object",
+        children: [field({ key: "source", required: true, defaultValue: "api" })],
+      }),
+      {},
+      { includeDefault: false, requireNestedRequired: false },
+    );
+
+    expect(schema.required).toBeUndefined();
+    expect(
+      (schema.properties as Record<string, Record<string, unknown>>).source?.default,
+    ).toBeUndefined();
+  });
+
+  it("requires structural fields only when the caller requests it", () => {
+    const fields = [field({ key: "name", required: true }), field({ key: "notes" })];
+    expect(compiledObjectSchema(fields, {}, { requireRequired: true }).required).toEqual([
+      "name",
+    ]);
+    expect(compiledObjectSchema(fields, {}, { requireRequired: false }).required).toBeUndefined();
+  });
+});

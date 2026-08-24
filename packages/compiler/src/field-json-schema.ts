@@ -1,23 +1,22 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The authored field → JSON Schema constraint mapping, shared by every surface
- * that publishes a schema.
+ * Field → JSON Schema mappings shared by every surface that publishes a
+ * schema.
  *
- * Two consumers exist: the MCP tool catalog (what a model is told it may send)
- * and the connector operation schemas (what the runtime validates on both sides
- * of a third-party call). They must agree. If one of them mapped `maxLength`
- * and the other did not, a value would be advertised as acceptable and then
- * rejected — or worse, accepted where the other would have refused.
+ * Connector operation fields use the structural constraint core. Compiled
+ * entity fields additionally use the rich projector at the bottom of this
+ * file, shared by MCP and OpenAPI. If either transport mapped `maxLength`,
+ * nested shapes, or enumerations independently, their advertised contracts
+ * would drift even though they came from the same authored field.
  *
- * Scope is deliberately narrow: type, format, validation bounds, and the
- * collection wrapper. Enumerations and human-facing descriptions stay with each
- * consumer, because those differ by audience — the MCP catalog composes prose
- * for a model and expands referentiedata groups, neither of which belongs in a
- * validation contract.
- *
- * Callers add `enum`, `description` and `default` themselves, in that order,
- * so the emitted key order stays stable per surface.
+ * The rich projector is still a projection, not a second semantic model. Its
+ * only inputs are the existing `CompiledField` and the already-resolved core
+ * reference-data snapshot.
  */
+
+import type { CompiledField } from "./authoring/types.js";
+import type { LocalizedText } from "./authoring/types/common.js";
+import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -158,4 +157,219 @@ export function objectSchemaFrom(
     ...(required.length > 0 ? { required } : {}),
     additionalProperties: false,
   };
+}
+
+export function localizedText(value: LocalizedText | string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === "string") return value.trim() || undefined;
+  return (value.en ?? value.nl ?? value.fr)?.trim() || undefined;
+}
+
+/**
+ * Compose the stable, human-facing description shared by generated transport
+ * schemas. Transport-specific instructions are deliberately added by the
+ * consumer instead of leaking into every projection.
+ */
+export type CompiledFieldDescriptionOptions = {
+  relationshipInstruction?: string;
+};
+
+export function describeCompiledField(
+  field: CompiledField,
+  options: CompiledFieldDescriptionOptions = {},
+): string | undefined {
+  const parts: string[] = [];
+  const label = localizedText(field.label);
+  const description = localizedText(field.description);
+  const help = localizedText(field.help);
+
+  if (description) {
+    parts.push(description);
+  } else if (label) {
+    parts.push(label);
+  }
+  if (help) parts.push(help);
+  if (field.unit) parts.push(`Unit: ${field.unit}.`);
+  if (field.relationship?.entity) {
+    const reference = `References the ${field.relationship.entity} entity`;
+    parts.push(
+      options.relationshipInstruction
+        ? `${reference} — ${options.relationshipInstruction}`
+        : `${reference}.`,
+    );
+  }
+  if (field.computed?.expression) {
+    parts.push("Derived server-side; any supplied value is ignored.");
+  }
+
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+export type CompiledFieldDescription = (field: CompiledField) => string | undefined;
+
+export type CompiledFieldSchemaOptions = {
+  describeField?: CompiledFieldDescription;
+  /** PATCH and filter schemas must never materialize authored defaults. */
+  includeDefault?: boolean;
+  /** Whether required children are structural inside nested object values. */
+  requireNestedRequired?: boolean;
+};
+
+export type CompiledFieldEnumeration = {
+  values: string[];
+  labels: Map<string, string>;
+};
+
+/**
+ * Resolve the two authoring spellings currently in the corpus. `options` is
+ * canonical; `render.props.referentieGroep` remains a compatibility fallback
+ * until those fields are normalized without changing unrelated generated UI.
+ */
+export function resolveCompiledFieldEnumeration(
+  field: CompiledField,
+  referentiedata: CoreReferentiedataSnapshot,
+): CompiledFieldEnumeration | undefined {
+  const options = field.options;
+  const renderGroep = field.render?.props?.referentieGroep;
+
+  if (options?.type === "static" && options.items && options.items.length > 0) {
+    return {
+      values: options.items.map((item) => item.value),
+      labels: new Map(
+        options.items.flatMap((item) => {
+          const label = localizedText(item.label);
+          return label ? [[item.value, label] as const] : [];
+        }),
+      ),
+    };
+  }
+
+  const groep =
+    options?.type === "referentiedata" && options.referentieGroep
+      ? options.referentieGroep
+      : typeof renderGroep === "string"
+        ? renderGroep
+        : undefined;
+  if (!groep) return undefined;
+
+  const items = referentiedata[groep] ?? [];
+  if (items.length === 0) return undefined;
+  return {
+    values: items.map((item) => item.value),
+    labels: new Map(
+      items.flatMap((item) => {
+        const label = localizedText(item.label);
+        return label ? [[item.value, label] as const] : [];
+      }),
+    ),
+  };
+}
+
+function compiledValueSchema(
+  field: CompiledField,
+  referentiedata: CoreReferentiedataSnapshot,
+  options: CompiledFieldSchemaOptions,
+): JsonObject {
+  if (field.valueType === "object" && field.children && field.children.length > 0) {
+    return compiledObjectSchema(field.children, referentiedata, {
+      ...options,
+      requireRequired: options.requireNestedRequired ?? true,
+    });
+  }
+  return constraintsForField(field);
+}
+
+function addCompiledFieldMetadata(
+  schema: JsonObject,
+  field: CompiledField,
+  enumeration: CompiledFieldEnumeration | undefined,
+  describeField: CompiledFieldDescription,
+  options: CompiledFieldSchemaOptions,
+): JsonObject {
+  const title = localizedText(field.label);
+  if (title) {
+    schema.title = title;
+  }
+  if (enumeration) {
+    schema.enum = enumeration.values;
+  }
+
+  const descriptionParts: string[] = [];
+  const fieldDescription = describeField(field);
+  if (fieldDescription) descriptionParts.push(fieldDescription);
+  if (enumeration && enumeration.labels.size > 0) {
+    const rendered = enumeration.values
+      .map((value) => {
+        const label = enumeration.labels.get(value);
+        return label ? `${value} (${label})` : value;
+      })
+      .join(", ");
+    descriptionParts.push(`Allowed values: ${rendered}.`);
+  }
+  if (descriptionParts.length > 0) {
+    schema.description = descriptionParts.join(" ");
+  }
+
+  if (field.defaultValue !== undefined && options.includeDefault !== false) {
+    schema.default = field.defaultValue;
+  }
+  return schema;
+}
+
+/** Project one resolved entity field into deterministic JSON Schema. */
+export function compiledFieldSchema(
+  field: CompiledField,
+  referentiedata: CoreReferentiedataSnapshot = {},
+  options: CompiledFieldSchemaOptions = {},
+): JsonObject {
+  const describeField = options.describeField ?? describeCompiledField;
+  const enumeration = resolveCompiledFieldEnumeration(field, referentiedata);
+  const valueSchema = addCompiledFieldMetadata(
+    compiledValueSchema(field, referentiedata, options),
+    field,
+    enumeration,
+    describeField,
+    options,
+  );
+
+  if (!isCollection(field)) {
+    return valueSchema;
+  }
+
+  const { title, description, default: defaultValue, ...outerItemSchema } = valueSchema;
+  let items: JsonObject = field.item
+    ? {
+        allOf: [
+          outerItemSchema,
+          compiledFieldSchema(field.item, referentiedata, options),
+        ],
+      }
+    : outerItemSchema;
+  const array: JsonObject = { type: "array", items };
+  if (title !== undefined) array.title = title;
+  if (description !== undefined) array.description = description;
+  if (defaultValue !== undefined) {
+    if (Array.isArray(defaultValue)) {
+      array.default = defaultValue;
+    } else {
+      items = { ...items, default: defaultValue };
+      array.items = items;
+    }
+  }
+  const minItems = numericRule(field.validation?.minItems);
+  if (minItems !== undefined) array.minItems = minItems;
+  return array;
+}
+
+/** Project a resolved field list into an object request/value schema. */
+export function compiledObjectSchema(
+  fields: CompiledField[],
+  referentiedata: CoreReferentiedataSnapshot = {},
+  options: { requireRequired: boolean } & CompiledFieldSchemaOptions,
+): JsonObject {
+  return objectSchemaFrom(
+    fields,
+    (field) => compiledFieldSchema(field as CompiledField, referentiedata, options),
+    options,
+  );
 }

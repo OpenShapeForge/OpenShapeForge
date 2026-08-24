@@ -126,7 +126,7 @@ describe("withholdClassified", () => {
     expect(CREATE_SCHEMA.required).toEqual(["accountHolder", "iban"]);
   });
 
-  it("strips nested occurrences, so a wrapped update schema is covered too", () => {
+  it("strips entity fields inside the update values wrapper", () => {
     const updateSchema: AnyRecord = {
       type: "object",
       properties: {
@@ -148,6 +148,49 @@ describe("withholdClassified", () => {
     expect(values.required).toEqual([]);
     // The outer wrapper keeps its own shape.
     expect(result.required).toEqual(["id", "values"]);
+  });
+
+  it("preserves same-named children inside a nested entity object", () => {
+    const createSchema: AnyRecord = {
+      type: "object",
+      properties: {
+        iban: { type: "string" },
+        bankAccount: {
+          type: "object",
+          properties: {
+            iban: { type: "string" },
+            bic: { type: "string" },
+          },
+          required: ["iban"],
+        },
+      },
+      required: ["iban", "bankAccount"],
+    };
+
+    const result = withholdClassified(createSchema, ["iban"]);
+    const bankAccount = (result.properties as AnyRecord).bankAccount as AnyRecord;
+    expect(Object.keys(result.properties as AnyRecord)).toEqual(["bankAccount"]);
+    expect(Object.keys(bankAccount.properties as AnyRecord)).toEqual(["iban", "bic"]);
+    expect(bankAccount.required).toEqual(["iban"]);
+  });
+
+  it("strips classified fields inside the list filter wrapper", () => {
+    const listSchema: AnyRecord = {
+      type: "object",
+      properties: {
+        filter: {
+          type: "object",
+          properties: {
+            iban: { type: "string" },
+            status: { type: "string" },
+          },
+        },
+      },
+    };
+
+    const result = withholdClassified(listSchema, ["iban"]);
+    const filter = (result.properties as AnyRecord).filter as AnyRecord;
+    expect(Object.keys(filter.properties as AnyRecord)).toEqual(["status"]);
   });
 
   it("removes every classified field when more than one is listed", () => {

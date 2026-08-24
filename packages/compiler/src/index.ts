@@ -163,7 +163,10 @@ export async function collectAllArtifacts(
   const referentiedata = await loadCoreReferentiedataSnapshot(repoRoot);
   assertReferentieGroepsResolve(entities, referentiedata);
   const groups: ArtifactCollection["groups"] = {
-    db: generateArtifacts(manifest, { source: activeManifestSource }),
+    db: generateArtifacts(manifest, {
+      source: activeManifestSource,
+      openApi: { entities, referentiedata },
+    }),
     mcp: [
       {
         path: "apps/api/src/generated/mcp/tools.json",

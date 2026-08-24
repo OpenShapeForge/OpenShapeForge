@@ -19,17 +19,28 @@
  * entities sorted by tool prefix, fields in authored order.
  */
 import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
-import type { LocalizedText } from "./authoring/types/common.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import {
-  applyCollectionShape,
-  constraintsForField,
-  isCollection,
-  numericRule,
-  objectSchemaFrom,
+  compiledFieldSchema,
+  compiledObjectSchema,
+  describeCompiledField,
+  localizedText,
 } from "./field-json-schema.js";
 
 type JsonObject = Record<string, unknown>;
+
+function describeMcpField(field: CompiledField): string | undefined {
+  const parts: string[] = [];
+  const semanticDescription = describeCompiledField(field, {
+    relationshipInstruction: "resolve an id with that entity's list tool.",
+  });
+  if (semanticDescription) parts.push(semanticDescription);
+  const aiInstructions = field.hints?.aiInstructions?.trim();
+  if (aiInstructions) parts.push(aiInstructions);
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+const MCP_FIELD_SCHEMA_OPTIONS = { describeField: describeMcpField };
 
 /** Operations whose tools accept no entity fields, only identifiers/paging. */
 const READ_OPERATIONS = new Set(["list", "get"]);
@@ -41,143 +52,6 @@ const READ_OPERATIONS = new Set(["list", "get"]);
  * layer and isWritableColumn in the OpenAPI generator.
  */
 const SERVER_MANAGED_FIELDS = new Set(["id", "tenantId", "createdAt", "updatedAt"]);
-
-function text(value: LocalizedText | string | undefined): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value === "string") return value.trim() || undefined;
-  return (value.en ?? value.nl ?? value.fr)?.trim() || undefined;
-}
-
-/**
- * Compose a parameter description from every authored source, in a fixed
- * order so output stays byte-stable. `hints.aiInstructions` goes last because
- * it is the most specific — an author writing it is correcting whatever the
- * generic label implied.
- */
-function describeField(field: CompiledField): string | undefined {
-  const parts: string[] = [];
-  const label = text(field.label);
-  const description = text(field.description);
-  const help = text(field.help);
-
-  if (description) {
-    parts.push(description);
-  } else if (label) {
-    parts.push(label);
-  }
-  if (help) parts.push(help);
-  if (field.unit) parts.push(`Unit: ${field.unit}.`);
-  if (field.relationship?.entity) {
-    parts.push(
-      `References the ${field.relationship.entity} entity — resolve an id with that entity's list tool.`,
-    );
-  }
-  if (field.computed?.expression) {
-    parts.push("Derived server-side; any supplied value is ignored.");
-  }
-  const aiInstructions = field.hints?.aiInstructions?.trim();
-  if (aiInstructions) parts.push(aiInstructions);
-
-  return parts.length > 0 ? parts.join(" ") : undefined;
-}
-
-/**
- * Resolve a field's closed vocabulary, if it has one.
- *
- * Two authoring spellings reach the same place. `options:` is the documented
- * one. But entities in the wild put the group under `render.props.referentieGroep`
- * (the shape the UI select component consumes), and the shared
- * resolveFieldOptions() does not look there. Reading the render fallback HERE
- * rather than fixing the shared resolver keeps this generator additive:
- * changing resolveFieldOptions would move CompiledField.options into the
- * GraphQL profile types and the web form generators, producing byte-diffs in
- * host repos for no benefit to them.
- */
-function resolveEnum(
-  field: CompiledField,
-  referentiedata: CoreReferentiedataSnapshot,
-): { values: string[]; labels: Map<string, string> } | undefined {
-  const options = field.options;
-  const renderGroep = field.render?.props?.referentieGroep;
-
-  if (options?.type === "static" && options.items && options.items.length > 0) {
-    return {
-      values: options.items.map((item) => item.value),
-      labels: new Map(
-        options.items.flatMap((item) => {
-          const label = text(item.label);
-          return label ? [[item.value, label] as const] : [];
-        }),
-      ),
-    };
-  }
-
-  const groep =
-    options?.type === "referentiedata" && options.referentieGroep
-      ? options.referentieGroep
-      : typeof renderGroep === "string"
-        ? renderGroep
-        : undefined;
-  if (!groep) return undefined;
-
-  const items = referentiedata[groep] ?? [];
-  if (items.length === 0) return undefined;
-  return {
-    values: items.map((item) => item.value),
-    labels: new Map(
-      items.flatMap((item) => {
-        const label = text(item.label);
-        return label ? [[item.value, label] as const] : [];
-      }),
-    ),
-  };
-}
-
-/**
- * The authored field → JSON Schema mapping. This is the whole point of the
- * artifact: every constraint the author already wrote becomes a constraint the
- * model is told about up front, instead of one it discovers through a 400.
- *
- * The constraint half lives in `field-json-schema.ts` because the connector
- * operation schemas must map identically; the enumeration and description half
- * stays here because it is composed for a model, not for a validator.
- */
-function schemaForField(
-  field: CompiledField,
-  referentiedata: CoreReferentiedataSnapshot,
-): JsonObject {
-  const scalar: JsonObject = constraintsForField(field);
-
-  const enumeration = resolveEnum(field, referentiedata);
-  if (enumeration) {
-    scalar.enum = enumeration.values;
-  }
-
-  const descriptionParts: string[] = [];
-  const fieldDescription = describeField(field);
-  if (fieldDescription) descriptionParts.push(fieldDescription);
-  if (enumeration && enumeration.labels.size > 0) {
-    const rendered = enumeration.values
-      .map((value) => {
-        const label = enumeration.labels.get(value);
-        return label ? `${value} (${label})` : value;
-      })
-      .join(", ");
-    descriptionParts.push(`Allowed values: ${rendered}.`);
-  }
-  if (descriptionParts.length > 0) {
-    scalar.description = descriptionParts.join(" ");
-  }
-
-  if (field.defaultValue !== undefined) {
-    scalar.default = field.defaultValue;
-  }
-
-  if (!isCollection(field)) {
-    return scalar;
-  }
-  return applyCollectionShape(scalar, field);
-}
 
 /**
  * Fields a caller may write, mirroring the CRUD layer's writability rule so the
@@ -204,18 +78,6 @@ function writableFields(
       !SERVER_MANAGED_FIELDS.has(field.key) &&
       field.computed === undefined &&
       !(operation === "update" && field.immutable === true),
-  );
-}
-
-function objectSchema(
-  fields: CompiledField[],
-  referentiedata: CoreReferentiedataSnapshot,
-  options: { requireRequired: boolean },
-): JsonObject {
-  return objectSchemaFrom(
-    fields,
-    (field) => schemaForField(field as CompiledField, referentiedata),
-    options,
   );
 }
 
@@ -267,11 +129,11 @@ function annotationsFor(operation: McpToolDefinition["operation"]) {
 }
 
 function entityLabel(contract: CompiledEntityContract): string {
-  return text(contract.entity.labels) ?? contract.entity.title ?? contract.entity.name;
+  return localizedText(contract.entity.labels) ?? contract.entity.title ?? contract.entity.name;
 }
 
 function entityDescription(contract: CompiledEntityContract): string {
-  return text(contract.entity.description) ?? `The ${entityLabel(contract)} entity.`;
+  return localizedText(contract.entity.description) ?? `The ${entityLabel(contract)} entity.`;
 }
 
 function buildToolsForEntity(
@@ -307,7 +169,7 @@ function buildToolsForEntity(
     const filterProperties: JsonObject = {};
     for (const field of fields) {
       if (field.cardinality === "collection" || field.valueType === "object") continue;
-      const schema = schemaForField(field, referentiedata);
+      const schema = compiledFieldSchema(field, referentiedata, MCP_FIELD_SCHEMA_OPTIONS);
       // Filters are always optional and never defaulted — a default here would
       // silently narrow a caller's result set.
       delete schema.default;
@@ -376,7 +238,10 @@ function buildToolsForEntity(
       table,
       title: `Create ${label}`,
       description: `${description} Creates a new record.`,
-      inputSchema: objectSchema(creatable, referentiedata, { requireRequired: true }),
+      inputSchema: compiledObjectSchema(creatable, referentiedata, {
+        requireRequired: true,
+        ...MCP_FIELD_SCHEMA_OPTIONS,
+      }),
       annotations: annotationsFor("create"),
     });
   }
@@ -384,7 +249,11 @@ function buildToolsForEntity(
   if (mcp.operations.update) {
     // Update is a partial: nothing is required beyond the id, because omitting
     // a field means "leave it alone", not "clear it".
-    const patch = objectSchema(updatable, referentiedata, { requireRequired: false });
+    const patch = compiledObjectSchema(updatable, referentiedata, {
+      requireRequired: false,
+      ...MCP_FIELD_SCHEMA_OPTIONS,
+      includeDefault: false,
+    });
     tools.push({
       name: named("update"),
       operation: "update",
@@ -503,15 +372,15 @@ export function buildMcpCatalog(
       ...(contract.entity.filterField ? { filterField: contract.entity.filterField } : {}),
       classifiedFields: classifiedFieldKeys(fields),
       fields: fields.map((field) => {
-        const label = text(field.label);
-        const description = describeField(field);
+        const label = localizedText(field.label);
+        const description = describeMcpField(field);
         return {
           key: field.key,
           ...(label ? { label } : {}),
           ...(description ? { description } : {}),
           required: field.required === true,
           readOnly: field.readOnly === true,
-          schema: schemaForField(field, referentiedata),
+          schema: compiledFieldSchema(field, referentiedata, MCP_FIELD_SCHEMA_OPTIONS),
           ...(field.classification?.sensitivity
             ? { classification: field.classification.sensitivity }
             : {}),

@@ -4,6 +4,43 @@ The compiler is designed to run against another repository's authoring
 config: outputs are written **relative to the host repo root**, and the
 check-script ownership model travels with it.
 
+## Getting the package
+
+`@openshapeforge/compiler` is published to the **GitHub Packages npm
+registry** (not npmjs.com) by the **Package compiler** workflow
+(`.github/workflows/package-compiler.yml`) on pushes to `main`, whenever the
+version in `packages/compiler/package.json` is not there yet — releasing is
+"bump the version and merge".
+
+GitHub's npm registry requires authentication even for public packages, so
+consumers need a token with `read:packages` (a classic PAT, or
+`GITHUB_TOKEN` in Actions). Point the `@openshapeforge` scope at the registry
+in the host repo's `.npmrc`:
+
+```ini
+@openshapeforge:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+
+then install by name (Bun and npm both read `.npmrc`):
+
+```sh
+bun add @openshapeforge/compiler
+```
+
+Alternatively, every workflow run — including pull requests touching
+`packages/compiler` — also uploads the tarball as a run artifact named
+`openshapeforge-compiler-npm-<sha>` (90-day retention). Download it from the
+run's Artifacts section (or `gh run download`) and install from the file:
+
+```sh
+bun add ./openshapeforge-compiler-0.1.0.tgz
+```
+
+Either way the content is proven before it ships: CI installs the tarball into
+a scratch project and regenerates this repository's committed artifacts from
+the packaged bin, byte-for-byte.
+
 ## Setup
 
 1. Depend on `@openshapeforge/compiler` (workspace or package dependency). The

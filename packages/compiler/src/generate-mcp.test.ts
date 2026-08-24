@@ -192,8 +192,32 @@ describe("buildMcpCatalog", () => {
       const create = catalog.tools.find((tool) => tool.operation === "create")!;
       const notes = prop(create.inputSchema, "notes");
       expect(notes.description).toBe(
-        "Free text. References the Relation entity. " +
-          "Resolve an id with that entity's list tool. Never put personal data here.",
+        "Free text. References the Relation entity — resolve an id with that entity's list tool. " +
+          "Never put personal data here.",
+      );
+    });
+
+    it("keeps relationship resolution guidance before computed-field guidance", () => {
+      const catalog = buildMcpCatalog(
+        [
+          input(
+            contract({
+              fields: [
+                field({
+                  key: "relationId",
+                  relationship: { kind: "belongsTo", entity: "Relation" },
+                  computed: { expression: "relation.id", dependencies: ["relation"] },
+                }),
+              ],
+            }),
+          ),
+        ],
+        "test",
+      );
+      const described = catalog.entities[0]?.fields[0]?.description;
+      expect(described).toContain(
+        "References the Relation entity — resolve an id with that entity's list tool. " +
+          "Derived server-side; any supplied value is ignored.",
       );
     });
 
@@ -314,13 +338,31 @@ describe("buildMcpCatalog", () => {
 
     it("makes update a partial — only the id is required", () => {
       const catalog = buildMcpCatalog(
-        [input(contract({ fields: [field({ key: "name", required: true })] }))],
+        [
+          input(
+            contract({
+              fields: [
+                field({ key: "name", required: true, defaultValue: "Unnamed" }),
+                field({
+                  key: "metadata",
+                  valueType: "object",
+                  children: [field({ key: "source", defaultValue: "api" })],
+                }),
+              ],
+            }),
+          ),
+        ],
         "test",
       );
+      const create = catalog.tools.find((tool) => tool.operation === "create")!;
       const update = catalog.tools.find((tool) => tool.operation === "update")!;
       expect(update.inputSchema.required).toEqual(["id", "values"]);
       const values = prop(update.inputSchema, "values");
       expect(values.required).toBeUndefined();
+      expect(prop(create.inputSchema, "name").default).toBe("Unnamed");
+      expect(prop(values, "name").default).toBeUndefined();
+      const metadata = prop(values, "metadata");
+      expect(prop(metadata, "source").default).toBeUndefined();
     });
 
     it("constrains list sorting to scalar fields and mentions the filter field", () => {

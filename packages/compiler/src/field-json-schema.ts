@@ -170,7 +170,14 @@ export function localizedText(value: LocalizedText | string | undefined): string
  * schemas. Transport-specific instructions are deliberately added by the
  * consumer instead of leaking into every projection.
  */
-export function describeCompiledField(field: CompiledField): string | undefined {
+export type CompiledFieldDescriptionOptions = {
+  relationshipInstruction?: string;
+};
+
+export function describeCompiledField(
+  field: CompiledField,
+  options: CompiledFieldDescriptionOptions = {},
+): string | undefined {
   const parts: string[] = [];
   const label = localizedText(field.label);
   const description = localizedText(field.description);
@@ -184,7 +191,12 @@ export function describeCompiledField(field: CompiledField): string | undefined 
   if (help) parts.push(help);
   if (field.unit) parts.push(`Unit: ${field.unit}.`);
   if (field.relationship?.entity) {
-    parts.push(`References the ${field.relationship.entity} entity.`);
+    const reference = `References the ${field.relationship.entity} entity`;
+    parts.push(
+      options.relationshipInstruction
+        ? `${reference} — ${options.relationshipInstruction}`
+        : `${reference}.`,
+    );
   }
   if (field.computed?.expression) {
     parts.push("Derived server-side; any supplied value is ignored.");
@@ -197,6 +209,10 @@ export type CompiledFieldDescription = (field: CompiledField) => string | undefi
 
 export type CompiledFieldSchemaOptions = {
   describeField?: CompiledFieldDescription;
+  /** PATCH and filter schemas must never materialize authored defaults. */
+  includeDefault?: boolean;
+  /** Whether required children are structural inside nested object values. */
+  requireNestedRequired?: boolean;
 };
 
 export type CompiledFieldEnumeration = {
@@ -256,8 +272,8 @@ function compiledValueSchema(
 ): JsonObject {
   if (field.valueType === "object" && field.children && field.children.length > 0) {
     return compiledObjectSchema(field.children, referentiedata, {
-      requireRequired: true,
-      ...(options.describeField ? { describeField: options.describeField } : {}),
+      ...options,
+      requireRequired: options.requireNestedRequired ?? true,
     });
   }
   return constraintsForField(field);
@@ -268,6 +284,7 @@ function addCompiledFieldMetadata(
   field: CompiledField,
   enumeration: CompiledFieldEnumeration | undefined,
   describeField: CompiledFieldDescription,
+  options: CompiledFieldSchemaOptions,
 ): JsonObject {
   const title = localizedText(field.label);
   if (title) {
@@ -293,7 +310,7 @@ function addCompiledFieldMetadata(
     schema.description = descriptionParts.join(" ");
   }
 
-  if (field.defaultValue !== undefined) {
+  if (field.defaultValue !== undefined && options.includeDefault !== false) {
     schema.default = field.defaultValue;
   }
   return schema;
@@ -312,6 +329,7 @@ export function compiledFieldSchema(
     field,
     enumeration,
     describeField,
+    options,
   );
 
   if (!isCollection(field)) {
@@ -319,24 +337,27 @@ export function compiledFieldSchema(
   }
 
   const { title, description, default: defaultValue, ...outerItemSchema } = valueSchema;
-  const items = field.item
-    ? compiledFieldSchema(field.item, referentiedata, options)
+  let items: JsonObject = field.item
+    ? {
+        allOf: [
+          outerItemSchema,
+          compiledFieldSchema(field.item, referentiedata, options),
+        ],
+      }
     : outerItemSchema;
   const array: JsonObject = { type: "array", items };
   if (title !== undefined) array.title = title;
   if (description !== undefined) array.description = description;
-  if (defaultValue !== undefined) array.default = defaultValue;
+  if (defaultValue !== undefined) {
+    if (Array.isArray(defaultValue)) {
+      array.default = defaultValue;
+    } else {
+      items = { ...items, default: defaultValue };
+      array.items = items;
+    }
+  }
   const minItems = numericRule(field.validation?.minItems);
-  const cardinalityMin = field.cardinalityBounds?.min;
-  const effectiveMinItems =
-    minItems === undefined
-      ? cardinalityMin
-      : cardinalityMin === undefined
-        ? minItems
-        : Math.max(minItems, cardinalityMin);
-  if (effectiveMinItems !== undefined) array.minItems = effectiveMinItems;
-  const cardinalityMax = field.cardinalityBounds?.max;
-  if (typeof cardinalityMax === "number") array.maxItems = cardinalityMax;
+  if (minItems !== undefined) array.minItems = minItems;
   return array;
 }
 

@@ -35,6 +35,7 @@ const contract = {
         label: { en: "Display name" },
         description: { en: "Human-readable relation name." },
         validation: { minLength: 1, maxLength: 200 },
+        defaultValue: "Unnamed relation",
       }),
       field({
         key: "relationType",
@@ -50,7 +51,12 @@ const contract = {
         valueType: "object",
         label: { en: "Metadata" },
         children: [
-          field({ key: "source", required: true, label: { en: "Source" } }),
+          field({
+            key: "source",
+            required: true,
+            label: { en: "Source" },
+            defaultValue: "api",
+          }),
           field({ key: "notes", label: { en: "Notes" } }),
         ],
       }),
@@ -61,6 +67,13 @@ const contract = {
         description: { en: "Identifier in the owning external system." },
         relationship: { kind: "belongsTo", entity: "ExternalSystem" },
         hints: { aiInstructions: "Resolve this with the external-system list tool." },
+      }),
+      field({
+        key: "iban",
+        label: { en: "IBAN" },
+        description: { en: "International bank account number." },
+        validation: { maxLength: 34 },
+        classification: { sensitivity: "confidential" },
       }),
     ],
   },
@@ -85,6 +98,7 @@ const manifest: PlatformSchemaManifest = {
         { name: "relation_type", type: "text", required: true, sourceField: "relationType" },
         { name: "metadata", type: "jsonb", sourceField: "metadata" },
         { name: "external_id", type: "text", sourceField: "externalId", immutable: true },
+        { name: "iban", type: "text", sourceField: "iban" },
         { name: "relation_group_id", type: "uuid", sourceField: "relationGroupId" },
         { name: "created_at", type: "timestamptz", required: true },
       ],
@@ -115,7 +129,7 @@ function spec() {
 }
 
 describe("rich generated REST OpenAPI", () => {
-  it("joins compiled descriptions, constraints, defaults, and enums onto manifest fields", () => {
+  it("keeps response properties storage-derived while retaining entity documentation", () => {
     const generated = spec();
     const relation = generated.components.schemas.Relation as {
       description?: string;
@@ -123,21 +137,10 @@ describe("rich generated REST OpenAPI", () => {
     };
 
     expect(relation.description).toBe("Canonical relation aggregate.");
-    expect(relation.properties.displayName).toMatchObject({
-      type: "string",
-      title: "Display name",
-      description: "Human-readable relation name.",
-      minLength: 1,
-      maxLength: 200,
-    });
-    expect(relation.properties.relationType).toMatchObject({
-      type: "string",
-      enum: ["person", "organization"],
-      title: "Relation type",
-    });
-    expect(relation.properties.externalId?.description).toBe(
-      "Identifier in the owning external system. References the ExternalSystem entity.",
-    );
+    expect(relation.properties.displayName).toEqual({ type: "string" });
+    expect(relation.properties.relationType).toEqual({ type: "string" });
+    expect(relation.properties.metadata).toEqual({});
+    expect(relation.properties.iban).toEqual({ type: "string" });
     expect(relation.properties.relationGroupId).toEqual({ type: "string", format: "uuid" });
   });
 
@@ -154,8 +157,26 @@ describe("rich generated REST OpenAPI", () => {
 
     expect(create.required).toEqual(["displayName", "relationType"]);
     expect(create.properties.externalId).toBeDefined();
+    expect(create.properties.displayName).toMatchObject({
+      type: "string",
+      title: "Display name",
+      description: "Human-readable relation name.",
+      minLength: 1,
+      maxLength: 200,
+      default: "Unnamed relation",
+    });
+    expect(create.properties.relationType).toMatchObject({
+      type: "string",
+      enum: ["person", "organization"],
+      title: "Relation type",
+    });
+    expect(create.properties.externalId?.description).toBe(
+      "Identifier in the owning external system. References the ExternalSystem entity.",
+    );
+    expect(create.properties.iban).toEqual({ type: "string" });
     expect(update.required).toBeUndefined();
     expect(update.properties.externalId).toBeUndefined();
+    expect(update.properties.displayName?.default).toBeUndefined();
     expect(create.properties.metadata).toMatchObject({
       type: "object",
       required: ["source"],
@@ -165,6 +186,14 @@ describe("rich generated REST OpenAPI", () => {
         notes: { type: "string", title: "Notes" },
       },
     });
+    expect(
+      (
+        (update.properties.metadata?.properties as Record<
+          string,
+          Record<string, unknown>
+        >)?.source
+      )?.default,
+    ).toBeUndefined();
   });
 
   it("tags operations with the compiled entity description", () => {

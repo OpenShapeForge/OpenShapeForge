@@ -19,18 +19,12 @@ import {
   applyCollectionShape,
   constraintsForField,
   isCollection,
+  localizedText,
   objectSchemaFrom,
   type JsonObject,
 } from "../../field-json-schema.js";
 import type { FieldV2 } from "../types/field-v2.js";
-import type { LocalizedText } from "../types/common.js";
 import type { ConnectorOperationOutput } from "../types/connector.js";
-
-function text(value: LocalizedText | string | undefined): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value === "string") return value.trim() || undefined;
-  return (value.en ?? value.nl ?? value.fr)?.trim() || undefined;
-}
 
 /**
  * A closed vocabulary, when the field declares one. Only `static` options are
@@ -55,8 +49,8 @@ export function connectorFieldSchema(field: FieldV2): JsonObject {
   if (values) scalar.enum = values;
 
   const parts: string[] = [];
-  const description = text(field.description) ?? text(field.label);
-  const help = text(field.help);
+  const description = localizedText(field.description) ?? localizedText(field.label);
+  const help = localizedText(field.help);
   if (description) parts.push(description);
   if (help) parts.push(help);
   if (field.unit) parts.push(`Unit: ${field.unit}.`);

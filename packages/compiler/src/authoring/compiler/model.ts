@@ -42,9 +42,6 @@ export function resolveModelFields(
       render: resolveRender(field, componentCatalog, semType),
       semanticType: field.semanticType,
     };
-    if (field.cardinality && typeof field.cardinality === "object") {
-      compiled.cardinalityBounds = field.cardinality;
-    }
     if (field.readOnly) compiled.readOnly = true;
     if (field.immutable) compiled.immutable = true;
     if (field.description) compiled.description = field.description;

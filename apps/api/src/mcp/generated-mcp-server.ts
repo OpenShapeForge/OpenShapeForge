@@ -162,11 +162,10 @@ function sessionMayInvoke(
 }
 
 /**
- * Strip classified properties out of a tool's input schema for a caller who
- * may not read them. Without this, `tools/list` would enumerate exactly the
- * fields redaction exists to hide, and a model could filter on one to probe
- * for values — the same oracle assertClassifiedQueryFieldsAllowed closes on
- * the call path.
+ * Strip classified entity fields from the root create schema and the two
+ * wrappers that carry entity-field names (`filter` and `values`). Nested JSON
+ * object children are a separate namespace and must not be matched against a
+ * top-level classified field with the same name.
  */
 function withholdClassified(
   schema: Record<string, unknown>,
@@ -175,32 +174,35 @@ function withholdClassified(
   if (classifiedFields.length === 0) return schema;
   const withheld = new Set(classifiedFields);
 
-  const prune = (node: unknown): unknown => {
-    if (!node || typeof node !== "object" || Array.isArray(node)) return node;
-    const source = node as Record<string, unknown>;
-    const result: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(source)) {
-      if (key === "properties" && value && typeof value === "object" && !Array.isArray(value)) {
-        // Filter this level AND descend into what survives: the update tool
-        // nests its writable fields under `values`, so stripping only the top
-        // level would leave the classified field advertised one level down.
-        result[key] = Object.fromEntries(
-          Object.entries(value as Record<string, unknown>)
-            .filter(([name]) => !withheld.has(name))
-            .map(([name, subSchema]) => [name, prune(subSchema)]),
-        );
-        continue;
-      }
-      if (key === "required" && Array.isArray(value)) {
-        result[key] = value.filter((name) => !withheld.has(name as string));
-        continue;
-      }
-      result[key] = prune(value);
+  const pruneObjectLevel = (node: Record<string, unknown>): Record<string, unknown> => {
+    const properties = node.properties;
+    const result = { ...node };
+    if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+      result.properties = Object.fromEntries(
+        Object.entries(properties as Record<string, unknown>).filter(
+          ([name]) => !withheld.has(name),
+        ),
+      );
+    }
+    if (Array.isArray(node.required)) {
+      result.required = node.required.filter((name) => !withheld.has(name as string));
     }
     return result;
   };
 
-  return prune(schema) as Record<string, unknown>;
+  const root = pruneObjectLevel(schema);
+  const properties = root.properties;
+  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return root;
+
+  const projected = { ...(properties as Record<string, unknown>) };
+  for (const wrapper of ["filter", "values"]) {
+    const nested = projected[wrapper];
+    if (nested && typeof nested === "object" && !Array.isArray(nested)) {
+      projected[wrapper] = pruneObjectLevel(nested as Record<string, unknown>);
+    }
+  }
+  root.properties = projected;
+  return root;
 }
 
 function toolsForSession(

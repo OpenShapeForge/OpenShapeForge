@@ -31,11 +31,10 @@ type JsonObject = Record<string, unknown>;
 
 function describeMcpField(field: CompiledField): string | undefined {
   const parts: string[] = [];
-  const semanticDescription = describeCompiledField(field);
+  const semanticDescription = describeCompiledField(field, {
+    relationshipInstruction: "resolve an id with that entity's list tool.",
+  });
   if (semanticDescription) parts.push(semanticDescription);
-  if (field.relationship?.entity) {
-    parts.push(`Resolve an id with that entity's list tool.`);
-  }
   const aiInstructions = field.hints?.aiInstructions?.trim();
   if (aiInstructions) parts.push(aiInstructions);
   return parts.length > 0 ? parts.join(" ") : undefined;
@@ -253,6 +252,7 @@ function buildToolsForEntity(
     const patch = compiledObjectSchema(updatable, referentiedata, {
       requireRequired: false,
       ...MCP_FIELD_SCHEMA_OPTIONS,
+      includeDefault: false,
     });
     tools.push({
       name: named("update"),

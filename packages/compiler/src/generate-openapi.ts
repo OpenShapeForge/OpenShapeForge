@@ -4,10 +4,13 @@
  * exposure (`rest:` block in the entity YAML → `TableDefinition.source.rest`).
  *
  * The manifest remains authoritative for route exposure, physical fields, and
- * writability. Rich JSON Schema semantics are joined from the already-compiled
- * entity contracts, so descriptions and validation never have to be rebuilt
- * from storage columns. A manifest-only scalar fallback covers synthetic
- * columns such as relationship foreign keys.
+ * writability. Request schemas join rich JSON Schema semantics from the
+ * already-compiled entity contracts, so descriptions and validation never
+ * have to be rebuilt from storage columns. Response schemas remain
+ * storage-derived until the same constraints are enforced by every write
+ * transport. A manifest-only scalar fallback also covers synthetic columns
+ * such as relationship foreign keys. Classified request fields deliberately
+ * use that thin storage projection rather than publishing semantic metadata.
  *
  * The file is emitted on every generate run — with an empty `paths` object when
  * no entity opts in — so the API runtime can statically import it
@@ -91,14 +94,21 @@ function fieldSchemaForColumn(
   column: TableDefinition["columns"][number],
   fieldsByKey: Map<string, CompiledField>,
   referentiedata: CoreReferentiedataSnapshot,
+  mode: "storage" | "create" | "update",
 ): { fieldName: string; compiled?: CompiledField; schema: JsonObject } {
   const fieldName = fieldNameForColumn(column);
   const compiled = fieldsByKey.get(fieldName);
-  if (!compiled) {
+  const sensitivity = compiled?.classification?.sensitivity;
+  const classified =
+    sensitivity === "confidential" || sensitivity === "pii" || sensitivity === "bsn";
+  if (!compiled || mode === "storage" || classified) {
     return { fieldName, schema: schemaForScalar(column.type) };
   }
 
-  const schema = compiledFieldSchema(compiled, referentiedata);
+  const schema = compiledFieldSchema(compiled, referentiedata, {
+    includeDefault: mode === "create",
+    requireNestedRequired: true,
+  });
   return { fieldName, compiled, schema };
 }
 
@@ -106,7 +116,7 @@ function columnProperties(
   columns: TableDefinition["columns"],
   fieldsByKey: Map<string, CompiledField>,
   referentiedata: CoreReferentiedataSnapshot,
-  requiredMode: "storage" | "create" | "none",
+  mode: "storage" | "create" | "update",
 ): { properties: JsonObject; required: string[] } {
   const properties: JsonObject = {};
   const required: string[] = [];
@@ -115,12 +125,13 @@ function columnProperties(
       column,
       fieldsByKey,
       referentiedata,
+      mode,
     );
     properties[fieldName] = schema;
     const isRequired =
-      requiredMode === "storage"
+      mode === "storage"
         ? column.required === true || column.primaryKey === true
-        : requiredMode === "create"
+        : mode === "create"
           ? compiled?.required ?? column.required === true
           : false;
     if (isRequired) {
@@ -228,7 +239,7 @@ export function renderOpenApiSpec(
       updatableColumns,
       fieldsByKey,
       referentiedata,
-      "none",
+      "update",
     );
     const updateSchemaName = `${name}UpdateInput`;
 

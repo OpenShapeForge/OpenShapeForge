@@ -9,6 +9,6 @@ RUN mvn dependency:go-offline -B
 COPY src ./src
 RUN mvn package -B -DskipTests
 
-FROM quay.io/keycloak/keycloak:26.5.3@sha256:5a236ae4dd8ece77490115bace15a11a4d15e9cbcf58a490b95a7da2cd71d32a
+FROM quay.io/keycloak/keycloak:26.7.2-0@sha256:6efbadc00f0ed0237610becf11f4101b9c3ad8edf08a5b70c97aa4154ed436ec
 COPY --from=builder /build/target/openshapeforge-keycloak-spi.jar /opt/keycloak/providers/
 RUN /opt/keycloak/bin/kc.sh build --db=postgres --health-enabled=true

@@ -25,6 +25,8 @@ describe("compiled field JSON Schema projection", () => {
         description: { en: "Lifecycle status." },
         validation: { minLength: 1, maxLength: { value: 50 } },
         defaultValue: "active",
+        relationship: { kind: "belongsTo", entity: "StatusDefinition" },
+        hints: { aiInstructions: "Choose the closest status." },
         render: { component: "ReferenceSelect", props: { referentieGroep: "STATUS" } },
       }),
       {
@@ -41,7 +43,9 @@ describe("compiled field JSON Schema projection", () => {
       maxLength: 50,
       title: "status",
       enum: ["active", "closed"],
-      description: "Lifecycle status. Allowed values: active (Active), closed (Closed).",
+      description:
+        "Lifecycle status. References the StatusDefinition entity. " +
+        "Allowed values: active (Active), closed (Closed).",
       default: "active",
     });
   });

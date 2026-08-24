@@ -58,6 +58,9 @@ const contract = {
         key: "externalId",
         immutable: true,
         label: { en: "External ID" },
+        description: { en: "Identifier in the owning external system." },
+        relationship: { kind: "belongsTo", entity: "ExternalSystem" },
+        hints: { aiInstructions: "Resolve this with the external-system list tool." },
       }),
     ],
   },
@@ -132,6 +135,9 @@ describe("rich generated REST OpenAPI", () => {
       enum: ["person", "organization"],
       title: "Relation type",
     });
+    expect(relation.properties.externalId?.description).toBe(
+      "Identifier in the owning external system. References the ExternalSystem entity.",
+    );
     expect(relation.properties.relationGroupId).toEqual({ type: "string", format: "uuid" });
   });
 

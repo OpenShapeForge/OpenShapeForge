@@ -167,8 +167,8 @@ export function localizedText(value: LocalizedText | string | undefined): string
 
 /**
  * Compose the stable, human-facing description shared by generated transport
- * schemas. The AI hint remains last, preserving the MCP catalog's established
- * output while making the same authored guidance visible in OpenAPI.
+ * schemas. Transport-specific instructions are deliberately added by the
+ * consumer instead of leaking into every projection.
  */
 export function describeCompiledField(field: CompiledField): string | undefined {
   const parts: string[] = [];
@@ -184,18 +184,20 @@ export function describeCompiledField(field: CompiledField): string | undefined 
   if (help) parts.push(help);
   if (field.unit) parts.push(`Unit: ${field.unit}.`);
   if (field.relationship?.entity) {
-    parts.push(
-      `References the ${field.relationship.entity} entity — resolve an id with that entity's list tool.`,
-    );
+    parts.push(`References the ${field.relationship.entity} entity.`);
   }
   if (field.computed?.expression) {
     parts.push("Derived server-side; any supplied value is ignored.");
   }
-  const aiInstructions = field.hints?.aiInstructions?.trim();
-  if (aiInstructions) parts.push(aiInstructions);
 
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
+
+export type CompiledFieldDescription = (field: CompiledField) => string | undefined;
+
+export type CompiledFieldSchemaOptions = {
+  describeField?: CompiledFieldDescription;
+};
 
 export type CompiledFieldEnumeration = {
   values: string[];
@@ -250,9 +252,13 @@ export function resolveCompiledFieldEnumeration(
 function compiledValueSchema(
   field: CompiledField,
   referentiedata: CoreReferentiedataSnapshot,
+  options: CompiledFieldSchemaOptions,
 ): JsonObject {
   if (field.valueType === "object" && field.children && field.children.length > 0) {
-    return compiledObjectSchema(field.children, referentiedata, { requireRequired: true });
+    return compiledObjectSchema(field.children, referentiedata, {
+      requireRequired: true,
+      ...(options.describeField ? { describeField: options.describeField } : {}),
+    });
   }
   return constraintsForField(field);
 }
@@ -261,6 +267,7 @@ function addCompiledFieldMetadata(
   schema: JsonObject,
   field: CompiledField,
   enumeration: CompiledFieldEnumeration | undefined,
+  describeField: CompiledFieldDescription,
 ): JsonObject {
   const title = localizedText(field.label);
   if (title) {
@@ -271,7 +278,7 @@ function addCompiledFieldMetadata(
   }
 
   const descriptionParts: string[] = [];
-  const fieldDescription = describeCompiledField(field);
+  const fieldDescription = describeField(field);
   if (fieldDescription) descriptionParts.push(fieldDescription);
   if (enumeration && enumeration.labels.size > 0) {
     const rendered = enumeration.values
@@ -296,12 +303,15 @@ function addCompiledFieldMetadata(
 export function compiledFieldSchema(
   field: CompiledField,
   referentiedata: CoreReferentiedataSnapshot = {},
+  options: CompiledFieldSchemaOptions = {},
 ): JsonObject {
+  const describeField = options.describeField ?? describeCompiledField;
   const enumeration = resolveCompiledFieldEnumeration(field, referentiedata);
   const valueSchema = addCompiledFieldMetadata(
-    compiledValueSchema(field, referentiedata),
+    compiledValueSchema(field, referentiedata, options),
     field,
     enumeration,
+    describeField,
   );
 
   if (!isCollection(field)) {
@@ -310,7 +320,7 @@ export function compiledFieldSchema(
 
   const { title, description, default: defaultValue, ...outerItemSchema } = valueSchema;
   const items = field.item
-    ? compiledFieldSchema(field.item, referentiedata)
+    ? compiledFieldSchema(field.item, referentiedata, options)
     : outerItemSchema;
   const array: JsonObject = { type: "array", items };
   if (title !== undefined) array.title = title;
@@ -334,11 +344,11 @@ export function compiledFieldSchema(
 export function compiledObjectSchema(
   fields: CompiledField[],
   referentiedata: CoreReferentiedataSnapshot = {},
-  options: { requireRequired: boolean },
+  options: { requireRequired: boolean } & CompiledFieldSchemaOptions,
 ): JsonObject {
   return objectSchemaFrom(
     fields,
-    (field) => compiledFieldSchema(field as CompiledField, referentiedata),
+    (field) => compiledFieldSchema(field as CompiledField, referentiedata, options),
     options,
   );
 }

@@ -180,6 +180,7 @@ describe("buildMcpCatalog", () => {
                 field({
                   key: "notes",
                   description: { en: "Free text." },
+                  relationship: { kind: "belongsTo", entity: "Relation" },
                   hints: { aiInstructions: "Never put personal data here." },
                 }),
               ],
@@ -190,7 +191,10 @@ describe("buildMcpCatalog", () => {
       );
       const create = catalog.tools.find((tool) => tool.operation === "create")!;
       const notes = prop(create.inputSchema, "notes");
-      expect(notes.description).toBe("Free text. Never put personal data here.");
+      expect(notes.description).toBe(
+        "Free text. References the Relation entity. " +
+          "Resolve an id with that entity's list tool. Never put personal data here.",
+      );
     });
 
     it("omits computed and server-managed fields from write schemas, but not readOnly", () => {

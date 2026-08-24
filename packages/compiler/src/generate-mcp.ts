@@ -29,6 +29,20 @@ import {
 
 type JsonObject = Record<string, unknown>;
 
+function describeMcpField(field: CompiledField): string | undefined {
+  const parts: string[] = [];
+  const semanticDescription = describeCompiledField(field);
+  if (semanticDescription) parts.push(semanticDescription);
+  if (field.relationship?.entity) {
+    parts.push(`Resolve an id with that entity's list tool.`);
+  }
+  const aiInstructions = field.hints?.aiInstructions?.trim();
+  if (aiInstructions) parts.push(aiInstructions);
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+const MCP_FIELD_SCHEMA_OPTIONS = { describeField: describeMcpField };
+
 /** Operations whose tools accept no entity fields, only identifiers/paging. */
 const READ_OPERATIONS = new Set(["list", "get"]);
 
@@ -156,7 +170,7 @@ function buildToolsForEntity(
     const filterProperties: JsonObject = {};
     for (const field of fields) {
       if (field.cardinality === "collection" || field.valueType === "object") continue;
-      const schema = compiledFieldSchema(field, referentiedata);
+      const schema = compiledFieldSchema(field, referentiedata, MCP_FIELD_SCHEMA_OPTIONS);
       // Filters are always optional and never defaulted — a default here would
       // silently narrow a caller's result set.
       delete schema.default;
@@ -225,7 +239,10 @@ function buildToolsForEntity(
       table,
       title: `Create ${label}`,
       description: `${description} Creates a new record.`,
-      inputSchema: compiledObjectSchema(creatable, referentiedata, { requireRequired: true }),
+      inputSchema: compiledObjectSchema(creatable, referentiedata, {
+        requireRequired: true,
+        ...MCP_FIELD_SCHEMA_OPTIONS,
+      }),
       annotations: annotationsFor("create"),
     });
   }
@@ -233,7 +250,10 @@ function buildToolsForEntity(
   if (mcp.operations.update) {
     // Update is a partial: nothing is required beyond the id, because omitting
     // a field means "leave it alone", not "clear it".
-    const patch = compiledObjectSchema(updatable, referentiedata, { requireRequired: false });
+    const patch = compiledObjectSchema(updatable, referentiedata, {
+      requireRequired: false,
+      ...MCP_FIELD_SCHEMA_OPTIONS,
+    });
     tools.push({
       name: named("update"),
       operation: "update",
@@ -353,14 +373,14 @@ export function buildMcpCatalog(
       classifiedFields: classifiedFieldKeys(fields),
       fields: fields.map((field) => {
         const label = localizedText(field.label);
-        const description = describeCompiledField(field);
+        const description = describeMcpField(field);
         return {
           key: field.key,
           ...(label ? { label } : {}),
           ...(description ? { description } : {}),
           required: field.required === true,
           readOnly: field.readOnly === true,
-          schema: compiledFieldSchema(field, referentiedata),
+          schema: compiledFieldSchema(field, referentiedata, MCP_FIELD_SCHEMA_OPTIONS),
           ...(field.classification?.sensitivity
             ? { classification: field.classification.sensitivity }
             : {}),

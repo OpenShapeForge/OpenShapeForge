@@ -30,7 +30,7 @@
              another surfaces as NoSuchMethodError at first request, not as a build
              failure. `bun run check:keycloak-lockstep` fails the build if the two
              drift. -->
-        <keycloak.version>26.5.3</keycloak.version>
+        <keycloak.version>26.7.2</keycloak.version>
     </properties>
 
     <dependencies>

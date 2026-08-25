@@ -55,6 +55,7 @@ function hashArtifacts(artifactsToHash) {
 
 const groupPairs = [
   ["database", first.groups.db, second.groups.db],
+  ["GraphQL", first.groups.graphql, second.groups.graphql],
   ["MCP", first.groups.mcp, second.groups.mcp],
   ["connectors", first.groups.connectors, second.groups.connectors],
   ["referentiedata", first.groups.referentiedata, second.groups.referentiedata],

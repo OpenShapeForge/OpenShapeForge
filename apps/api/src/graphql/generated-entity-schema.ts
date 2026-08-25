@@ -5,6 +5,7 @@ import {
   type GraphQLResolveInfo,
   type SelectionSetNode,
 } from "graphql";
+import graphqlDocumentation from "../generated/graphql/documentation.json" with { type: "json" };
 import {
   getGeneratedCrudTables,
   getGeneratedEntity,
@@ -26,9 +27,32 @@ type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
 type GraphqlMetadata = NonNullable<NonNullable<GeneratedTable["source"]>["graphql"]>;
 
+export type GraphqlEntityDocumentation = {
+  typeName: string;
+  description?: string;
+  fields: Array<{
+    name: string;
+    description?: string;
+    substringFilterDescription?: string;
+  }>;
+};
+
+export type GraphqlDocumentationCatalog = {
+  entities: GraphqlEntityDocumentation[];
+};
+
+export function createGraphqlDocumentationIndex(
+  catalog: GraphqlDocumentationCatalog,
+): ReadonlyMap<string, GraphqlEntityDocumentation> {
+  return new Map(catalog.entities.map((entity) => [entity.typeName, entity]));
+}
+
 const tables = getGeneratedCrudTables().filter((table) => table.source?.graphql);
 const tablesByGraphqlType = new Map(
   tables.map((table) => [table.source!.graphql!.typeName, table]),
+);
+const documentationByGraphqlType = createGraphqlDocumentationIndex(
+  graphqlDocumentation as GraphqlDocumentationCatalog,
 );
 
 function assertGraphqlMetadata(table: GeneratedTable): GraphqlMetadata {
@@ -94,18 +118,38 @@ function relationFieldType(relationship: GeneratedCrudRelationship) {
     : relationship.target;
 }
 
+function renderDescription(description: string | undefined, indent: string): string {
+  return description ? `${indent}${JSON.stringify(description)}\n` : "";
+}
+
+function appendDescription(
+  description: string | undefined,
+  addition: string,
+): string {
+  return description ? `${description} ${addition}` : addition;
+}
+
 /**
  * Exported for tests: the shipped manifest declares no classified column, so
  * the nullability rule above (#168) has nothing to act on in
  * `generatedEntityTypeDefs` and asserting against it would be vacuous. Calling
  * this with a synthetic table exercises the real rendering path.
  */
-export function renderTypeDefinition(table: GeneratedTable) {
+export function renderTypeDefinition(
+  table: GeneratedTable,
+  documentationIndex: ReadonlyMap<string, GraphqlEntityDocumentation> =
+    documentationByGraphqlType,
+) {
   const graphql = assertGraphqlMetadata(table);
+  const documentation = documentationIndex.get(graphql.typeName);
+  const fieldDocumentation = new Map(
+    (documentation?.fields ?? []).map((field) => [field.name, field]),
+  );
   const columnFields = table.columns
     .map((column) => {
       const field = fieldNameForColumn(column);
-      return `      ${field}: ${graphqlScalarForColumn(column)}${nonNullSuffix(column)}`;
+      return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
+        `      ${field}: ${graphqlScalarForColumn(column)}${nonNullSuffix(column)}`;
     });
   const relationshipFields = (graphql.relationships ?? [])
     .filter((relationship) =>
@@ -129,16 +173,23 @@ export function renderTypeDefinition(table: GeneratedTable) {
   const createInputBody = creatableColumns.length === 0
     ? "      _empty: String"
     : creatableColumns
-        .map((column) => `      ${fieldNameForColumn(column)}: ${graphqlScalarForColumn(column)}`)
+        .map((column) => {
+          const field = fieldNameForColumn(column);
+          return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
+            `      ${field}: ${graphqlScalarForColumn(column)}`;
+        })
         .join("\n");
   const updateInputBody = [
     "      id: ID!",
-    ...updatableColumns.map(
-      (column) => `      ${fieldNameForColumn(column)}: ${graphqlScalarForColumn(column)}`,
-    ),
+    ...updatableColumns.map((column) => {
+      const field = fieldNameForColumn(column);
+      return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
+        `      ${field}: ${graphqlScalarForColumn(column)}`;
+    }),
   ].join("\n");
 
   return `
+${renderDescription(documentation?.description, "    ")}
     type ${graphql.typeName} {
 ${[...columnFields, ...relationshipFields].join("\n")}
     }
@@ -159,7 +210,24 @@ ${table.columns
   .map((column) => {
     const field = fieldNameForColumn(column);
     const scalar = graphqlScalarForColumn(column);
-    return `      ${field}: ${scalar}\n      ${field}In: [${scalar}!]`;
+    const directMatch = column.type === "text"
+      ? "Matches a case-insensitive substring."
+      : "Matches exactly.";
+    const fieldDocumentationEntry = fieldDocumentation.get(field);
+    const directDescription = column.type === "text"
+      ? fieldDocumentationEntry?.substringFilterDescription
+      : fieldDocumentationEntry?.description;
+    return `${renderDescription(
+      appendDescription(directDescription, directMatch),
+      "      ",
+    )}      ${field}: ${scalar}\n` +
+      `${renderDescription(
+        appendDescription(
+          fieldDocumentationEntry?.description,
+          "Matches exactly against any supplied value.",
+        ),
+        "      ",
+      )}      ${field}In: [${scalar}!]`;
   })
   .join("\n")}
     }
@@ -189,28 +257,57 @@ export const generatedEntityTypeDefs = /* GraphQL */ `
     count: Int!
   }
 
-${tables.map(renderTypeDefinition).join("\n")}
+${tables.map((table) => renderTypeDefinition(table)).join("\n")}
 `;
 
+export function renderQueryFields(
+  table: GeneratedTable,
+  documentationIndex: ReadonlyMap<string, GraphqlEntityDocumentation> =
+    documentationByGraphqlType,
+): string {
+  const graphql = assertGraphqlMetadata(table);
+  const documentation = documentationIndex.get(graphql.typeName);
+  return [
+    `${renderDescription(
+      appendDescription(documentation?.description, "Fetches one record by id."),
+      "      ",
+    )}      ${graphql.singleQueryName}(id: ID!): ${graphql.typeName}`,
+    `${renderDescription(
+      appendDescription(documentation?.description, "Returns a page of records."),
+      "      ",
+    )}      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${graphql.typeName}Connection!`,
+  ].join("\n");
+}
+
 export const generatedEntityQueryFields = tables
-  .map((table) => {
-    const graphql = assertGraphqlMetadata(table);
-    return [
-      `      ${graphql.singleQueryName}(id: ID!): ${graphql.typeName}`,
-      `      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${graphql.typeName}Connection!`,
-    ].join("\n");
-  })
+  .map((table) => renderQueryFields(table))
   .join("\n");
 
+export function renderMutationFields(
+  table: GeneratedTable,
+  documentationIndex: ReadonlyMap<string, GraphqlEntityDocumentation> =
+    documentationByGraphqlType,
+): string {
+  const graphql = assertGraphqlMetadata(table);
+  const documentation = documentationIndex.get(graphql.typeName);
+  return [
+    `${renderDescription(
+      appendDescription(documentation?.description, "Creates a record."),
+      "      ",
+    )}      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${graphql.typeName}`,
+    `${renderDescription(
+      appendDescription(documentation?.description, "Partially updates a record."),
+      "      ",
+    )}      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${graphql.typeName}`,
+    `${renderDescription(
+      appendDescription(documentation?.description, "Deletes a record by id."),
+      "      ",
+    )}      ${graphql.deleteMutationName}(id: ID!): Boolean!`,
+  ].join("\n");
+}
+
 export const generatedEntityMutationFields = tables
-  .map((table) => {
-    const graphql = assertGraphqlMetadata(table);
-    return [
-      `      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${graphql.typeName}`,
-      `      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${graphql.typeName}`,
-      `      ${graphql.deleteMutationName}(id: ID!): Boolean!`,
-    ].join("\n");
-  })
+  .map((table) => renderMutationFields(table))
   .join("\n");
 
 function requireGeneratedDb(context: GraphqlContext) {

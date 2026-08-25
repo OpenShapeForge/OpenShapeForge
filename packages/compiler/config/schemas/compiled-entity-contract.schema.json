@@ -148,6 +148,7 @@
                     "column": { "type": "string" },
                     "mappedFrom": { "type": "string" },
                     "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+                    "description": { "type": "string" },
                     "semanticType": { "type": "string" },
                     "render": { "$ref": "#/$defs/compiledViewRender" },
                     "displayRender": { "$ref": "#/$defs/compiledViewRender" },

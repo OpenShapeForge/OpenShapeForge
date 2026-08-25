@@ -19,6 +19,7 @@ import {
 } from "./core-referentiedata-artifacts.js";
 import { generateArtifacts } from "./generate.js";
 import { renderConnectorCatalog } from "./generate-connectors.js";
+import { renderGraphqlDocumentationCatalog } from "./generate-graphql.js";
 import { MODULE_REGISTRY_PATH, renderModuleRegistry } from "./generate-modules.js";
 import { renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
@@ -30,6 +31,7 @@ const defaultRepoRoot = resolve(import.meta.dir, "../../..");
 export type ArtifactCollection = {
   groups: {
     db: GeneratedArtifact[];
+    graphql: GeneratedArtifact[];
     mcp: GeneratedArtifact[];
     connectors: GeneratedArtifact[];
     modules: GeneratedArtifact[];
@@ -167,6 +169,16 @@ export async function collectAllArtifacts(
       source: activeManifestSource,
       openApi: { entities, referentiedata },
     }),
+    graphql: [
+      {
+        path: "apps/api/src/generated/graphql/documentation.json",
+        contents: renderGraphqlDocumentationCatalog(
+          entities.map((entity) => entity.contract),
+          activeManifestSource,
+          referentiedata,
+        ),
+      },
+    ],
     mcp: [
       {
         path: "apps/api/src/generated/mcp/tools.json",
@@ -207,6 +219,7 @@ export async function collectAllArtifacts(
 
   const all = [
     ...groups.db,
+    ...groups.graphql,
     ...groups.mcp,
     ...groups.connectors,
     ...groups.modules,

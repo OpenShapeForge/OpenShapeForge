@@ -88,6 +88,7 @@ export function buildGraphQL(
           type: toGqlType(f),
           column: f.persisted?.column,
           label: f.label ?? semType?.label,
+          description: toGraphQLDescription(f.description ?? semType?.description),
           semanticType: f.semanticType,
           render: componentCatalog ? resolveRender(f, componentCatalog, semType) : undefined,
           displayRender,

@@ -35,7 +35,13 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
+  ErrorCode,
+  ListPromptsRequestSchema,
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
   ListToolsRequestSchema,
+  McpError,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import rawCatalog from "../generated/mcp/tools.json" with { type: "json" };
@@ -94,7 +100,35 @@ type CatalogEntity = {
   toolPrefix: string;
   title: string;
   description: string;
+  domains: string[];
+  displayTemplate?: string;
+  filterField?: string;
   classifiedFields: string[];
+  fields: CatalogField[];
+  relationships: CatalogRelationship[];
+};
+
+type CatalogField = {
+  key: string;
+  label?: string;
+  description?: string;
+  valueType: string;
+  cardinality: string;
+  required: boolean;
+  readOnly: boolean;
+  immutable: boolean;
+  schema: Record<string, unknown>;
+  classification?: string;
+  relationship?: { kind: string; entity: string };
+};
+
+type CatalogRelationship = {
+  key: string;
+  kind: string;
+  target: string;
+  foreignKey?: string;
+  via?: string;
+  label?: string;
 };
 
 /**
@@ -103,7 +137,12 @@ type CatalogEntity = {
  * mismatch surfaces as a runtime miss on a tool name, which the CallTool
  * handler already treats as unknown.
  */
-type Catalog = { tools: CatalogTool[]; entities: CatalogEntity[] };
+type Catalog = {
+  generatedBy: string;
+  source: string;
+  tools: CatalogTool[];
+  entities: CatalogEntity[];
+};
 const catalog = rawCatalog as unknown as Catalog;
 
 /** Which entity role an operation requires — mirrors the CRUD layer's gate. */
@@ -125,6 +164,9 @@ const INSTRUCTIONS =
   "caller's tenant and roles; results are row-level filtered by the database. " +
   "List tools return a page plus a nextCursor — pass it back as `after` to " +
   "continue. Prefer filtering over paging through large result sets.";
+
+const ENTITY_CATALOG_URI = "osf://schema/entities";
+const JSON_MIME_TYPE = "application/json";
 
 function tablesByName(): Map<string, GeneratedTable> {
   return new Map(getGeneratedCrudTables().map((table) => [table.name, table]));
@@ -239,6 +281,122 @@ function describeTool(
     },
   };
 }
+
+type SessionEntity = {
+  entity: CatalogEntity;
+  tools: CatalogTool[];
+};
+
+function entityResourceUri(entity: CatalogEntity): string {
+  return `${ENTITY_CATALOG_URI}/${encodeURIComponent(entity.slug)}`;
+}
+
+function entitiesForSession(
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+): SessionEntity[] {
+  const toolsByEntity = new Map<string, CatalogTool[]>();
+  for (const { tool } of toolsForSession(session, tables)) {
+    const current = toolsByEntity.get(tool.entity) ?? [];
+    current.push(tool);
+    toolsByEntity.set(tool.entity, current);
+  }
+  return catalog.entities.flatMap((entity) => {
+    const tools = toolsByEntity.get(entity.entity);
+    return tools ? [{ entity, tools }] : [];
+  });
+}
+
+function visibleFields(
+  entity: CatalogEntity,
+  table: GeneratedTable | undefined,
+  session: DbSessionInput,
+): CatalogField[] {
+  if (canReadClassifiedColumns(table?.source?.authorization, session)) return entity.fields;
+  const classified = new Set(entity.classifiedFields);
+  return entity.fields.filter((field) => !classified.has(field.key));
+}
+
+function describeEntityResource(
+  entry: SessionEntity,
+  sessionEntities: SessionEntity[],
+  tables: Map<string, GeneratedTable>,
+  session: DbSessionInput,
+) {
+  const { entity, tools } = entry;
+  const fields = visibleFields(entity, tables.get(entity.table), session);
+  const resourceByEntity = new Map(
+    sessionEntities.map((candidate) => [
+      candidate.entity.entity,
+      entityResourceUri(candidate.entity),
+    ]),
+  );
+  const properties = Object.fromEntries(fields.map((field) => [field.key, field.schema]));
+  const required = fields.filter((field) => field.required).map((field) => field.key);
+
+  return {
+    entity: entity.entity,
+    slug: entity.slug,
+    title: entity.title,
+    description: entity.description,
+    domains: entity.domains,
+    ...(entity.displayTemplate ? { displayTemplate: entity.displayTemplate } : {}),
+    ...(entity.filterField ? { filterField: entity.filterField } : {}),
+    jsonSchema: {
+      type: "object",
+      title: entity.title,
+      description: entity.description,
+      properties,
+      ...(required.length > 0 ? { required } : {}),
+      additionalProperties: false,
+    },
+    fields: fields.map((field) => ({
+      ...field,
+      ...(field.relationship
+        ? {
+            relationship: {
+              ...field.relationship,
+              ...(resourceByEntity.get(field.relationship.entity)
+                ? { resourceUri: resourceByEntity.get(field.relationship.entity) }
+                : {}),
+            },
+          }
+        : {}),
+    })),
+    relationships: entity.relationships.map((relationship) => ({
+      ...relationship,
+      ...(resourceByEntity.get(relationship.target)
+        ? { resourceUri: resourceByEntity.get(relationship.target) }
+        : {}),
+    })),
+    operations: tools.map((tool) => ({
+      name: tool.name,
+      operation: tool.operation,
+      title: tool.title,
+      description: tool.description,
+      annotations: tool.annotations,
+    })),
+  };
+}
+
+function describeCatalogResource(entries: SessionEntity[]) {
+  return {
+    catalogId: "openshapeforge.entity-schemas",
+    generatedBy: catalog.generatedBy,
+    source: catalog.source,
+    entities: entries.map(({ entity, tools }) => ({
+      entity: entity.entity,
+      slug: entity.slug,
+      title: entity.title,
+      description: entity.description,
+      domains: entity.domains,
+      resourceUri: entityResourceUri(entity),
+      operations: tools.map((tool) => tool.name),
+    })),
+  };
+}
+
+export const __describeEntityResourceForTests = describeEntityResource;
 
 /**
  * Test-only direct handles on the two classification controls that exist only
@@ -444,10 +602,62 @@ async function invokeTool(
 
 function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Server {
   const server = new Server(SERVER_INFO, {
-    capabilities: { tools: {} },
+    capabilities: { tools: {}, resources: {}, prompts: {} },
     instructions: INSTRUCTIONS,
   });
   const tables = tablesByName();
+
+  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+    const entries = entitiesForSession(session, tables);
+    return {
+      resources: [
+        {
+          uri: ENTITY_CATALOG_URI,
+          name: "entity-catalog",
+          title: "Entity schema catalog",
+          description:
+            "Authorized index of entity schemas compiled from OpenShapeForge authoring YAML.",
+          mimeType: JSON_MIME_TYPE,
+        },
+        ...entries.map(({ entity }) => ({
+          uri: entityResourceUri(entity),
+          name: `entity-${entity.slug}`,
+          title: `${entity.title} schema`,
+          description: entity.description,
+          mimeType: JSON_MIME_TYPE,
+        })),
+      ],
+    };
+  });
+
+  server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+    resourceTemplates: [],
+  }));
+
+  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const entries = entitiesForSession(session, tables);
+    let payload: unknown;
+    if (request.params.uri === ENTITY_CATALOG_URI) {
+      payload = describeCatalogResource(entries);
+    } else {
+      const entry = entries.find(
+        ({ entity }) => entityResourceUri(entity) === request.params.uri,
+      );
+      if (!entry) throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
+      payload = describeEntityResource(entry, entries, tables, session);
+    }
+    return {
+      contents: [
+        {
+          uri: request.params.uri,
+          mimeType: JSON_MIME_TYPE,
+          text: JSON.stringify(payload, null, 2),
+        },
+      ],
+    };
+  });
+
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [] }));
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [

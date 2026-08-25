@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import { buildMcpCatalog, MAX_DEDICATED_TOOLS, type McpCatalogInput } from "./generate-mcp.js";
-import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
+import type {
+  CompiledEntityContract,
+  CompiledField,
+  CompiledRelationship,
+} from "./authoring/types.js";
 
 const field = (overrides: Partial<CompiledField> & { key: string }): CompiledField =>
   ({
@@ -19,6 +23,7 @@ const contract = (
     fields?: CompiledField[];
     mcp?: CompiledEntityContract["mcp"];
     filterField?: string;
+    relationships?: CompiledRelationship[];
   } = {},
 ): CompiledEntityContract =>
   ({
@@ -35,7 +40,10 @@ const contract = (
       ...(overrides.filterField ? { filterField: overrides.filterField } : {}),
     },
     storage: { table: "widgets", columns: [] },
-    model: { fields: overrides.fields ?? [field({ key: "name" })], relationships: [] },
+    model: {
+      fields: overrides.fields ?? [field({ key: "name" })],
+      relationships: overrides.relationships ?? [],
+    },
     graphql: {} as never,
     mcp: overrides.mcp ?? {
       toolPrefix: "widget",
@@ -219,6 +227,45 @@ describe("buildMcpCatalog", () => {
         "References the Relation entity — resolve an id with that entity's list tool. " +
           "Derived server-side; any supplied value is ignored.",
       );
+      expect(catalog.entities[0]?.fields[0]?.relationship).toEqual({
+        kind: "belongsTo",
+        entity: "Relation",
+      });
+      expect(catalog.entities[0]?.fields[0]).toMatchObject({
+        valueType: "string",
+        cardinality: "single",
+        immutable: false,
+      });
+    });
+
+    it("carries authored entity relationships as structural resource metadata", () => {
+      const catalog = buildMcpCatalog(
+        [
+          input(
+            contract({
+              relationships: [
+                {
+                  key: "relation",
+                  kind: "belongsTo",
+                  target: "Relation",
+                  foreignKey: "relation_id",
+                  label: { en: "Relation" },
+                },
+              ],
+            }),
+          ),
+        ],
+        "test",
+      );
+      expect(catalog.entities[0]?.relationships).toEqual([
+        {
+          key: "relation",
+          kind: "belongsTo",
+          target: "Relation",
+          foreignKey: "relation_id",
+          label: "Relation",
+        },
+      ]);
     });
 
     it("omits computed and server-managed fields from write schemas, but not readOnly", () => {

@@ -22,6 +22,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   __assertWritableValuesForTests as assertWritableValues,
+  __describeEntityResourceForTests as describeEntityResource,
   __describeToolForTests as describeTool,
   __sessionMayInvokeForTests as sessionMayInvoke,
   __withholdClassifiedForTests as withholdClassified,
@@ -91,6 +92,54 @@ const CREATE_SCHEMA: AnyRecord = {
   required: ["accountHolder", "iban"],
   additionalProperties: false,
 };
+
+describe("entity schema resource classification", () => {
+  const resourceEntity = {
+    ...(entity(["iban"]) as AnyRecord),
+    domains: ["finance"],
+    fields: [
+      {
+        key: "accountHolder",
+        valueType: "string",
+        cardinality: "single",
+        required: true,
+        readOnly: false,
+        immutable: false,
+        schema: { type: "string" },
+      },
+      {
+        key: "iban",
+        valueType: "string",
+        cardinality: "single",
+        required: true,
+        readOnly: false,
+        immutable: false,
+        classification: "pii",
+        schema: { type: "string", description: "International Bank Account Number." },
+      },
+    ],
+    relationships: [],
+  };
+  const entry = { entity: resourceEntity, tools: [tool(CREATE_SCHEMA)] } as never;
+  const tables = new Map([["erp.payment_details", table()]]) as never;
+
+  it("withholds classified field metadata and JSON Schema from a read-only caller", () => {
+    const described = describeEntityResource(entry, [entry], tables, session(READ)) as any;
+    expect(described.fields.map((field: AnyRecord) => field.key)).toEqual(["accountHolder"]);
+    expect(Object.keys(described.jsonSchema.properties)).toEqual(["accountHolder"]);
+    expect(described.jsonSchema.required).toEqual(["accountHolder"]);
+  });
+
+  it("shows the same compiled field to a caller permitted to read it", () => {
+    const described = describeEntityResource(entry, [entry], tables, session(WRITE)) as any;
+    expect(described.fields.map((field: AnyRecord) => field.key)).toEqual([
+      "accountHolder",
+      "iban",
+    ]);
+    expect(described.fields[1].classification).toBe("pii");
+    expect(Object.keys(described.jsonSchema.properties)).toEqual(["accountHolder", "iban"]);
+  });
+});
 
 describe("withholdClassified", () => {
   it("returns the schema untouched when nothing is classified", () => {

@@ -112,6 +112,11 @@ function toolError(body: any): string | undefined {
   return body?.result?.content?.[0]?.text;
 }
 
+function resourcePayload(body: any): any {
+  const text = body?.result?.contents?.[0]?.text;
+  return text ? JSON.parse(text) : undefined;
+}
+
 const mcpTables = tables.filter((table) => table.source?.mcp);
 
 async function callTool(
@@ -170,6 +175,68 @@ describe("generated MCP server", () => {
       "organization",
       "group",
     ]);
+  });
+
+  test("exposes the authorized YAML-derived entity catalog as MCP resources", async () => {
+    const { status, body } = await rpc(tenantA, "resources/list");
+    expect(status).toBe(200);
+    const resources = body.result.resources as { uri: string; title: string }[];
+    expect(resources[0]?.uri).toBe("osf://schema/entities");
+    expect(resources.slice(1).map((resource) => resource.uri)).toEqual(
+      catalog.entities.map((entity) => `osf://schema/entities/${entity.slug}`),
+    );
+
+    const index = resourcePayload(
+      (await rpc(tenantA, "resources/read", { uri: "osf://schema/entities" })).body,
+    );
+    expect(index.entities.map((entity: any) => entity.entity)).toEqual(
+      catalog.entities.map((entity) => entity.entity),
+    );
+  });
+
+  test("reads rich field, operation and relationship semantics from one entity resource", async () => {
+    const source = catalog.entities.find((entity) => entity.relationships.length > 0);
+    expect(source).toBeDefined();
+    const { status, body } = await rpc(tenantA, "resources/read", {
+      uri: `osf://schema/entities/${source!.slug}`,
+    });
+    expect(status).toBe(200);
+    const resource = resourcePayload(body);
+    expect(resource.description).toBe(source!.description);
+    expect(resource.fields).toHaveLength(source!.fields.length);
+    expect(Object.keys(resource.jsonSchema.properties)).toEqual(
+      source!.fields.map((field) => field.key),
+    );
+    expect(resource.operations.length).toBeGreaterThan(0);
+    expect(resource.relationships).toEqual(
+      source!.relationships.map((relationship) => {
+        const target = catalog.entities.find(
+          (entity) => entity.entity === relationship.target,
+        );
+        return {
+          ...relationship,
+          ...(target ? { resourceUri: `osf://schema/entities/${target.slug}` } : {}),
+        };
+      }),
+    );
+  });
+
+  test("does not enumerate or read entity resources for a session without roles", async () => {
+    const listed = await rpc(noRoles, "resources/list");
+    expect(listed.body.result.resources.map((resource: any) => resource.uri)).toEqual([
+      "osf://schema/entities",
+    ]);
+    const denied = await rpc(noRoles, "resources/read", {
+      uri: `osf://schema/entities/${catalog.entities[0]!.slug}`,
+    });
+    expect(denied.body.error.code).toBe(-32602);
+  });
+
+  test("answers empty optional MCP catalogs without protocol errors", async () => {
+    expect((await rpc(tenantA, "prompts/list")).body.result.prompts).toEqual([]);
+    expect(
+      (await rpc(tenantA, "resources/templates/list")).body.result.resourceTemplates,
+    ).toEqual([]);
   });
 
   test("annotates read-only and destructive tools", async () => {

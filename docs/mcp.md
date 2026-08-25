@@ -94,6 +94,26 @@ Every tool carries annotations derived mechanically from its operation:
 `readOnlyHint` on list/get, `idempotentHint` on update/delete, and
 `destructiveHint` on delete.
 
+## Resource surface
+
+The same compiled catalog is also available as MCP resources. This is schema
+documentation, not a second field model:
+
+- `osf://schema/entities` is the authorized entity index.
+- `osf://schema/entities/{slug}` describes one entity with its authored title,
+  description, domains, JSON Schema, field semantics, relationships and the
+  operations available to the current session.
+
+`resources/list` is role-filtered just like `tools/list`. `resources/read`
+withholds classified fields for a caller who may not read them, using the same
+compiled classification list and authorization rule as the tool projection.
+Relationship metadata links to the target entity resource when that target is
+also visible to the caller.
+
+OpenShapeForge does not currently author MCP prompts or resource templates, so
+their list methods return valid empty catalogs. This keeps generic MCP clients
+from treating an intentionally empty optional surface as a protocol failure.
+
 ## What the field definition contributes
 
 The catalog is generated from the compiled contracts (`model.fields`), not the

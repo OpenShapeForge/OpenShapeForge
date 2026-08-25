@@ -13,6 +13,8 @@ Endpoints (`src/roles/api.ts`):
 | `POST/GET /api/graphql` | GraphQL (GraphiQL enabled unless `NODE_ENV=production`) |
 | `/api/rest/v1/<basePath>[/:id]` | Generated REST (entities that opt in via the `rest:` block) |
 | `GET /api/rest/openapi.json` | Generated OpenAPI 3.1 spec for the REST surface |
+| `POST /api/documents` | Atomically create a document and its first immutable version |
+| `POST /api/documents/:documentId/versions` | Atomically append a version and advance `currentVersion` |
 | `GET /api/health`, `/api/ready`, `/api/graphql/health` | liveness/readiness |
 
 On startup (`onReady`) the API compares the database's applied
@@ -126,6 +128,39 @@ It differs from REST in two ways that matter for authorization: `tools/list` is
 resolved per session, so a caller is never shown a tool it lacks the roles for,
 and classified fields are withheld from the advertised schemas as well as
 redacted from responses. See [mcp.md](mcp.md).
+
+## Document version commands
+
+`Document` is the stable metadata container. Binary and version facts
+(`fileName`, `mimeType`, `storageLocation`, `versionLabel`, `checksum`) exist
+only on `DocumentVersion`. A version always has a `documentId`; the database
+enforces tenant-consistent ownership, unique `(tenant, document, versionLabel)`
+and a `currentVersion` pointer to that same document.
+
+`currentVersionId` is server-managed: generated update inputs and workflow
+forms do not expose it, and a database guard rejects direct application-role
+changes. Optional `caseFileId`, `caseId`, `relationId`, and version `accountId`
+references must also resolve inside the authenticated tenant.
+
+Generated GraphQL, REST and MCP expose `DocumentVersion` read-only. The
+restricted application database role cannot insert, update or delete its rows
+directly, even if a broad grant is accidentally restored: a database trigger
+refuses the write. Mutations use two narrowly scoped commands instead:
+
+Generated `Document` create is disabled as well, so a new container cannot be
+created without its first version; existing metadata remains updateable.
+
+- `POST /api/documents` accepts `{ document, version }`, creates the container
+  and first version, and sets `currentVersion` in one transaction.
+- `POST /api/documents/:documentId/versions` accepts `{ version }`, locks the
+  container, inserts the immutable version, and advances `currentVersion` in
+  one transaction. The lock serializes concurrent appends.
+
+Both require an authenticated tenant/user session with
+`CaseFile.All.ReadWrite`. Success is `201` with
+`{ documentId, documentVersionId }`. A duplicate version label is `409`; bad
+references or values are `400`; an invisible document is `404`. A failure while
+creating the first version rolls back the document too.
 
 ## The tenant control surface
 

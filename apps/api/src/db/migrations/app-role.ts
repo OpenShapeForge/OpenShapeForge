@@ -305,4 +305,29 @@ export async function applyAppRoleGrants(db: OpenShapeForgeDatabase) {
       $$;
     `.execute(db);
   }
+
+  // Documents must be created atomically with their first immutable version,
+  // and DocumentVersion is append-only through the SECURITY DEFINER commands
+  // installed by migration 0007. The broad generated-table sweep above
+  // intentionally remains generic; these final revokes are re-applied on every
+  // migrate so a fresh table, default privilege, or manual grant cannot reopen
+  // direct writes for the runtime role. Generated reads remain available.
+  await sql`
+    do $$
+    begin
+      if to_regclass('erp.documents') is not null then
+        execute format(
+          'revoke insert on erp.documents from %I',
+          ${sql.lit(APP_ROLE)}
+        );
+      end if;
+      if to_regclass('erp.document_versions') is not null then
+        execute format(
+          'revoke insert, update, delete on erp.document_versions from %I',
+          ${sql.lit(APP_ROLE)}
+        );
+      end if;
+    end
+    $$;
+  `.execute(db);
 }

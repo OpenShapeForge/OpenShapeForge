@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadManifest } from "./load-manifest.js";
-import type { PlatformSchemaManifest } from "./schema.js";
+import type { PlatformSchemaManifest, TableDefinition } from "./schema.js";
 
 const manifest: PlatformSchemaManifest = {
   version: 1,
@@ -765,6 +765,53 @@ describe("platform schema generator", () => {
             { name: "credentials_ciphertext", type: "text" },
           ],
         },
+        {
+          schema: "messaging",
+          name: "legacy_inconsistent_entities",
+          tenantScoped: true,
+          generatedCrudEligible: false,
+          generatedCrud: true,
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true },
+            { name: "tenant_id", type: "uuid", required: true },
+          ],
+        },
+        {
+          schema: "messaging",
+          name: "partial_policy_entities",
+          tenantScoped: true,
+          generatedCrudEligible: true,
+          generatedCrud: true,
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true },
+            { name: "tenant_id", type: "uuid", required: true },
+          ],
+          source: {
+            crud: {
+              operations: {
+                list: true,
+                get: true,
+                create: false,
+                update: false,
+                delete: false,
+              },
+            },
+          },
+        },
+        {
+          schema: "messaging",
+          name: "malformed_plugin_policy_entities",
+          tenantScoped: true,
+          generatedCrudEligible: true,
+          generatedCrud: true,
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true },
+            { name: "tenant_id", type: "uuid", required: true },
+          ],
+          // A JS or bare-package plugin can bypass the authoring schema and
+          // contribute this malformed shape. Serialization must fail closed.
+          source: { crud: {} } as unknown as NonNullable<TableDefinition["source"]>,
+        },
       ],
     };
     const manifestJson = generateArtifacts(metadataManifest).find((artifact) =>
@@ -774,6 +821,7 @@ describe("platform schema generator", () => {
       tables: Array<{
         name: string;
         generatedCrud: boolean;
+        generatedCrudEligible: boolean;
         domainInternal: boolean;
         primaryKey: string | null;
       }>;
@@ -793,6 +841,27 @@ describe("platform schema generator", () => {
         generatedCrud: false,
         domainInternal: true,
         primaryKey: "account_id",
+      }),
+    );
+    expect(manifestPayload.tables).toContainEqual(
+      expect.objectContaining({
+        name: "messaging.legacy_inconsistent_entities",
+        generatedCrudEligible: false,
+        generatedCrud: false,
+      }),
+    );
+    expect(manifestPayload.tables).toContainEqual(
+      expect.objectContaining({
+        name: "messaging.partial_policy_entities",
+        generatedCrudEligible: true,
+        generatedCrud: false,
+      }),
+    );
+    expect(manifestPayload.tables).toContainEqual(
+      expect.objectContaining({
+        name: "messaging.malformed_plugin_policy_entities",
+        generatedCrudEligible: true,
+        generatedCrud: false,
       }),
     );
   });

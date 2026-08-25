@@ -93,15 +93,18 @@ a shared harness:
 | `entity-security.e2e.test.ts` | unauthenticated rejection; cross-tenant RLS invisibility; cross-tenant deletes fail and journal nothing |
 | `transport-auth.e2e.test.ts` | public health query; invalid bearer fails closed; real Keycloak password-grant token drives CRUD (skipped unless bearer verification is configured — see below) |
 | `control-provisioning.e2e.test.ts` | tenant → root Organization, sub-organisation → child Organization, both through the real SPI, then RLS isolation of the provisioned tenant (skipped unless the control plane is configured — see below) |
-| `coverage.e2e.test.ts` | backstop: every `generatedCrud` entity is exercised |
+| `coverage.e2e.test.ts` | backstop: every eligible entity is classified into the full-CRUD lifecycle set or the partial-policy set |
 | `e2e/harness.ts` | transport, auth helpers, request/event capture, describe/test wrappers, cleanup lifecycle |
 | `e2e/entity-factory.ts` | manifest-driven row factory (recursively satisfies required FKs, mirrors the engine's column rules) |
 
 Properties worth knowing:
 
-- **Auto-coverage** — the suite loops over the manifest's `generatedCrud`
-  tables at load time. A new entity is covered after `bun run generate`, with
-  zero test-code changes.
+- **Auto-coverage** — full-lifecycle suites loop over manifest entities with
+  all five operations enabled. Partial-policy entities are kept in a separate
+  set-membership backstop; compiler/transport contract tests assert emitted
+  and omitted operations without trying to create rows through a disabled
+  mutation. A new entity is classified after `bun run generate`, with zero
+  test-code changes.
 - **Transport** — by default it runs the real graphql-yoga handler
   **in-process** against the compose Postgres; set
   `E2E_API_URL=http://127.0.0.1:3001` to drive a running API over HTTP
@@ -212,7 +215,7 @@ generated-crud.perf.js`). Requirements: `brew install k6` and a running API
 (`bun run dev:api`); the runner health-checks `API_URL` (default
 `http://127.0.0.1:3001`) first.
 
-- **Scenarios derived from the manifest** — every `generatedCrud` entity gets
+- **Scenarios derived from the manifest** — every full-CRUD entity gets
   its own constant-VUs lifecycle scenario: create (required FK dependencies
   created recursively) → get → list → update → delete, dependencies deleted
   in reverse. **Self-cleaning per iteration** — only append-only

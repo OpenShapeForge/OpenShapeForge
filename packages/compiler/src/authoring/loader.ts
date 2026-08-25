@@ -256,6 +256,7 @@ export function loadEntity(
     const partialPath = join(contextsDir, contextName, "partial", `${entityFileName}.yaml`);
     if (existsSync(partialPath)) {
       const profile = loadYaml<EntityProfile>(partialPath);
+      assertPartialProfileHasNoCrud(profile, partialPath);
       // Profile field keys also flow into codegen (GraphQL profile sub-types,
       // storage columns); validate them at load with the same strict pattern.
       validateFieldKeys(profile.fields, partialPath);
@@ -291,6 +292,18 @@ export function loadEntity(
   return { coreEntity, profiles, mappings, transformCatalog, componentCatalog, semanticTypes, retentionPolicies, appShell, viewDefinition };
 }
 
+export function assertPartialProfileHasNoCrud(
+  profile: EntityProfile,
+  profilePath: string,
+): void {
+  if (profile.crud === undefined) return;
+  throw new Error(
+    `${profilePath} declares crud on a partial entity profile. ` +
+      "CRUD exposure belongs to the owning core/full entity or an entityPatch, " +
+      "because partial field profiles do not own a generated resource.",
+  );
+}
+
 /**
  * Load a full context entity (standalone entity that only exists in a context).
  * Creates a synthetic CoreEntity from the context YAML.
@@ -324,6 +337,7 @@ export function loadContextEntity(
     fields: contextEntity.fields ?? [],
     relationships: contextEntity.relationships,
     workflow: contextEntity.workflow,
+    crud: contextEntity.crud,
     rest: (contextEntity as { rest?: CoreEntity["rest"] }).rest,
     // EntityProfile.authorization is typed for partial-profile field-level
     // extensions (ProfileAuthorizationConfig). A `full/` profile entity is a

@@ -6,6 +6,7 @@
  * `authoring.config.yaml` under `plugins:`.
  */
 import type { CompilerPlugin } from "../../packages/compiler/src/plugins.js";
+import { isGeneratedCrudEligible } from "../../packages/compiler/src/schema.js";
 
 const OUTPUT_PATH = "docs/entities.generated.md";
 
@@ -21,23 +22,33 @@ const plugin: CompilerPlugin = {
     ];
 
     const tables = manifest.tables
-      .filter((table) => table.generatedCrud && table.source?.graphql)
+      .filter((table) => isGeneratedCrudEligible(table) && table.source?.graphql)
       .toSorted((a, b) => `${a.schema}.${a.name}`.localeCompare(`${b.schema}.${b.name}`));
 
     for (const table of tables) {
       const source = table.source!;
       const graphql = source.graphql!;
+      const operationEnabled = (
+        operation: "list" | "get" | "create" | "update" | "delete",
+      ) => source.crud === undefined
+        ? table.generatedCrud === true
+        : source.crud.operations[operation] === true;
       // In-memory tables carry schema and name separately; render qualified.
       lines.push(`## ${graphql.typeName} (\`${table.schema}.${table.name}\`)`);
       const label = source.labels?.en;
       if (label) {
         lines.push("", `${label} — authored in \`${source.path}\`.`);
       }
+      const graphqlOperations = [
+        ...(operationEnabled("list") ? [graphql.listQueryName] : []),
+        ...(operationEnabled("get") ? [graphql.singleQueryName] : []),
+        ...(operationEnabled("create") ? [graphql.createMutationName] : []),
+        ...(operationEnabled("update") ? [graphql.updateMutationName] : []),
+        ...(operationEnabled("delete") ? [graphql.deleteMutationName] : []),
+      ];
       lines.push(
         "",
-        `GraphQL: \`${graphql.listQueryName}\`, \`${graphql.singleQueryName}\`, ` +
-          `\`${graphql.createMutationName}\`, \`${graphql.updateMutationName}\`, ` +
-          `\`${graphql.deleteMutationName}\``,
+        `GraphQL: ${graphqlOperations.map((name) => `\`${name}\``).join(", ")}`,
         "",
         "| column | type | required |",
         "| --- | --- | --- |",

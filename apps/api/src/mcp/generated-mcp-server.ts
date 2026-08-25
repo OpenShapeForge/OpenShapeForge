@@ -48,6 +48,7 @@ import {
   deleteGeneratedEntity,
   getGeneratedEntity,
   getGeneratedCrudTables,
+  isGeneratedCrudOperationEnabled,
   listGeneratedEntities,
   updateGeneratedEntity,
 } from "../graphql/generated-crud.js";
@@ -155,6 +156,7 @@ function sessionMayInvoke(
   operation: keyof typeof OPERATION_ROLE,
   session: DbSessionInput,
 ): boolean {
+  if (!table || !isGeneratedCrudOperationEnabled(table, operation)) return false;
   const required = table?.source?.authorization?.roles?.[OPERATION_ROLE[operation]];
   if (!required || required.length === 0) return false;
   const granted = new Set(session.roles ?? []);

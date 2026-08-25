@@ -32,6 +32,7 @@ import type {
 } from "./views.js";
 import type {
   AuthoredEntityIndex,
+  CrudOperationKey,
   FieldMapping,
   FieldRelationship,
   FieldSuggestions,
@@ -196,6 +197,10 @@ export interface RestSection {
    */
   basePath: string;
   operations: Record<RestOperationKey, boolean>;
+}
+
+export interface CrudSection {
+  operations: Record<CrudOperationKey, boolean>;
 }
 
 export interface CompiledListView {
@@ -480,6 +485,8 @@ export interface CompiledEntityContract {
     fields: CompiledField[];
     relationships: CompiledRelationship[];
   };
+  /** Common upper bound for generated CRUD across every transport. */
+  crud: CrudSection;
   graphql: GraphQLSection;
   /** Present only when the entity opts into generated REST exposure. */
   rest?: RestSection;

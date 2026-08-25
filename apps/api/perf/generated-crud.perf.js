@@ -3,7 +3,7 @@
  * Manifest-driven k6 performance suite for the generated GraphQL CRUD API.
  *
  * Scenarios, request payloads, and thresholds are DERIVED at init time from
- * the generated db manifest — every `generatedCrud` entity gets its own
+ * the generated db manifest — every full legacy `generatedCrud` entity gets its own
  * constant-VUs lifecycle scenario (create -> get -> list -> update -> delete,
  * with required FK dependencies created and cleaned per iteration). Adding a
  * new entity YAML and rerunning `bun run generate` extends the load test
@@ -37,6 +37,8 @@ const graphqlErrors = new Counter("graphql_errors");
 
 const manifest = JSON.parse(open("../src/generated/db/manifest.json"));
 const tables = manifest.tables.filter(
+  // A lifecycle scenario requires all five operations. Partial-policy
+  // entities deliberately carry generatedCrud:false for old-runtime safety.
   (table) => table.generatedCrud && table.source && table.source.graphql,
 );
 const tablesByName = {};
@@ -112,9 +114,20 @@ function textColumnFor(table) {
 // Trusted-context signing (mirrors @openshapeforge/auth applyTrustedContextHeaders)
 // ---------------------------------------------------------------------------
 
-// The generated CRUD layer enforces entity roles; sign and send the
-// normalized ReadWrite role so perf sessions can exercise the full CRUD path.
-const ROLES = "Relations.All.ReadWrite";
+// The generated CRUD layer enforces per-entity roles. The suite spans every
+// full-lifecycle entity, so derive the write grants from the same manifest
+// instead of pinning one domain's role and silently measuring authorization
+// failures when another domain is added.
+const ROLES = [
+  ...new Set(
+    tables.flatMap((table) => {
+      const roles = (table.source.authorization && table.source.authorization.roles) || {};
+      return [...(roles.create || []), ...(roles.update || []), ...(roles.delete || [])];
+    }),
+  ),
+]
+  .sort()
+  .join(",");
 
 function signedHeaders() {
   const timestamp = String(Date.now());

@@ -73,6 +73,12 @@ earlier layers produced. For each file in each layer:
    `kind: entityPatch`) — strategic-merged into the entity **with the same
    slug** from an earlier layer. The patch targets by slug (file stem), not
    by path, so an overlay may place the patch in any `entities/` subfolder.
+
+Generated CRUD exposure is the deliberate exception to ordinary last-writer
+wins merging: `crud.operations` is monotonic. A later `entityPatch` may disable
+an operation but cannot re-enable one disabled by an earlier layer. This lets a
+host set a maximum exposure policy that an installed package/plugin cannot
+widen.
    Patching a slug no earlier layer defines is an error. Later layers may
    patch the same entity again — patches stack.
 2. **`catalogs/*.yaml` with a path that already exists** — strategic-merged

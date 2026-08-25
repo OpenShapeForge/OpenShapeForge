@@ -1,6 +1,7 @@
 // @ts-nocheck
 // SPDX-License-Identifier: BUSL-1.1
 import type { CoreEntity, Field, SemanticTypeDefinition } from "../../../../../packages/compiler/src/authoring/types.js";
+import { resolveCrudOperations } from "../../../../../packages/compiler/src/authoring/compiler/crud.js";
 import type { WorkflowActionConfig, WorkflowActionEntry } from "./types.js";
 import { ACTION_ORDER } from "./types.js";
 import { resolveEntityIdSemanticTypeKey } from "./catalog.js";
@@ -235,7 +236,18 @@ export function getEntityActionConfigs(entity: CoreEntity) {
     return [];
   }
 
+  const crudOperations = resolveCrudOperations(entity.crud);
+  const actionCrudOperation = {
+    create: "create",
+    getOne: "get",
+    list: "list",
+    update: "update",
+    delete: "delete",
+  } as const;
   const enabledActions: WorkflowActionEntry[] = ACTION_ORDER.flatMap((action) => {
+    if (!crudOperations[actionCrudOperation[action]]) {
+      return [];
+    }
     const config = normalizeActionConfig(actionConfigMap[action]);
     if (!config?.enabled) {
       return [];
@@ -245,7 +257,7 @@ export function getEntityActionConfigs(entity: CoreEntity) {
   });
 
   const waitConfig = normalizeActionConfig(actionConfigMap.wait);
-  if (waitConfig?.enabled) {
+  if (waitConfig?.enabled && crudOperations.get) {
     enabledActions.push({
       action: "wait",
       config: waitConfig,
@@ -253,7 +265,7 @@ export function getEntityActionConfigs(entity: CoreEntity) {
   }
 
   const awaitActionConfig = normalizeActionConfig(actionConfigMap.awaitAction);
-  if (awaitActionConfig?.enabled) {
+  if (awaitActionConfig?.enabled && crudOperations.get) {
     enabledActions.push({
       action: "awaitAction",
       config: awaitActionConfig,

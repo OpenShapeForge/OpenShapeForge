@@ -49,11 +49,15 @@ type GeneratedCrudTable = {
   table: string;
   tenantScoped: boolean;
   domainInternal: boolean;
+  generatedCrudEligible?: boolean;
   generatedCrud: boolean;
   primaryKey: string | null;
   columns: GeneratedCrudColumn[];
   source?: {
     authoringEntitySlug?: string;
+    crud?: {
+      operations: Record<"list" | "get" | "create" | "update" | "delete", boolean>;
+    };
     graphql?: {
       typeName: string;
       defaultSort?: { field: string; direction: "asc" | "desc" };
@@ -65,7 +69,12 @@ type GeneratedCrudTable = {
 type ConditionInput = Record<string, unknown>;
 
 const generatedCrudTables = (manifest.tables as GeneratedCrudTable[]).filter(
-  (table) => table.generatedCrud && !table.domainInternal && table.primaryKey,
+  (table) =>
+    !table.domainInternal &&
+    (table.generatedCrudEligible === undefined
+      ? table.generatedCrud === true
+      : table.generatedCrudEligible === true) &&
+    table.primaryKey,
 );
 
 const schemaByWorkflowModule: Record<string, string> = {
@@ -115,6 +124,40 @@ function findTableByGraphqlType(typeName: string) {
   return generatedCrudTables.find(
     (table) => table.source?.graphql?.typeName === typeName,
   ) ?? null;
+}
+
+const WORKFLOW_ACTION_OPERATION = {
+  create: "create",
+  getOne: "get",
+  list: "list",
+  update: "update",
+  delete: "delete",
+  wait: "get",
+  awaitAction: "get",
+} as const;
+
+function isWorkflowEntityActionEnabled(
+  table: GeneratedCrudTable,
+  action: GeneratedWorkflowEntityAction,
+): boolean {
+  const operation = WORKFLOW_ACTION_OPERATION[action];
+  if (table.source?.crud !== undefined) {
+    return table.source.crud.operations?.[operation] === true;
+  }
+  return table.generatedCrud === true;
+}
+
+function requireWorkflowRelationshipRead(
+  table: GeneratedCrudTable,
+  operation: "get" | "list",
+  relationshipName: string,
+): void {
+  const action = operation === "get" ? "getOne" : "list";
+  if (isWorkflowEntityActionEnabled(table, action)) return;
+  throw new Error(
+    `Generated entity list filter relationship "${relationshipName}" requires target ${operation}, ` +
+      `but that operation is disabled for ${table.name}.`,
+  );
 }
 
 function fieldColumnMap(table: GeneratedCrudTable) {
@@ -375,6 +418,7 @@ function compileBelongsToCondition(
   if (!targetTable?.primaryKey) {
     throw new Error(`Generated entity list filter relationship "${relationship.name}" target is not generated CRUD.`);
   }
+  requireWorkflowRelationshipRead(targetTable, "get", relationship.name);
   if (!hasColumn(sourceTable, relationship.foreignKey)) {
     throw new Error(`Generated entity list filter relationship "${relationship.name}" uses missing foreign key "${relationship.foreignKey}".`);
   }
@@ -409,6 +453,7 @@ function compileAggregateCountCondition(
   if (!targetTable) {
     throw new Error(`Generated entity list filter aggregate "${relationship.name}" target is not generated CRUD.`);
   }
+  requireWorkflowRelationshipRead(targetTable, "list", relationship.name);
   if (!hasColumn(targetTable, relationship.foreignKey)) {
     throw new Error(`Generated entity list filter aggregate "${relationship.name}" uses missing foreign key "${relationship.foreignKey}".`);
   }
@@ -743,6 +788,11 @@ function buildHandler(
   table: GeneratedCrudTable,
 ) {
   return async (context: WorkflowNodeBridgeContext): Promise<WorkflowNodeBridgeOutput> => {
+    if (!isWorkflowEntityActionEnabled(table, entry.action)) {
+      throw new Error(
+        `Generated entity workflow action "${entry.action}" is disabled for ${table.name}.`,
+      );
+    }
     switch (entry.action) {
       case "list":
         return executeList(context.db, table, context);
@@ -769,6 +819,9 @@ export function registerGeneratedEntityNodeBridges(): void {
     if (!table) {
       continue;
     }
+    if (!isWorkflowEntityActionEnabled(table, entry.action)) {
+      continue;
+    }
     registerWorkflowNodeBridge(entry.type, buildHandler(entry, table));
   }
 }
@@ -777,6 +830,8 @@ export const __generatedEntityBridgeInternals = {
   compileCondition,
   compileSimpleFilter,
   findTable,
+  isWorkflowEntityActionEnabled,
+  requireWorkflowRelationshipRead,
   listPayloadForHandle,
   listOutputHandle,
   outputRow,

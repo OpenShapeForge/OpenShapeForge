@@ -1,6 +1,5 @@
 // @ts-nocheck
 // SPDX-License-Identifier: BUSL-1.1
-import { generatedCrudDeniedEntitySlugs } from "../../../../../packages/compiler/src/active-manifest.js";
 import type { CoreEntity } from "../../../../../packages/compiler/src/authoring/types.js";
 import type { WorkflowEntityGenerationOptions, RuntimeRegistryEntry, DesignerLazyRegistryEntry, DesignerDetailRegistryEntry, RendererEntityFieldSuggestionEntry } from "./types.js";
 import { loadWorkflowNodeEntities, loadWorkflowNodeSemanticTypes, resolveEntityIdSemanticTypeKey } from "./catalog.js";
@@ -34,7 +33,7 @@ function seedEmptyGeneratedArtifacts(files: Map<string, string>): void {
 
 export function generateWorkflowEntityNodeArtifacts(
   authoringDir: string,
-  options: WorkflowEntityGenerationOptions = { excludeEntitySlugs: generatedCrudDeniedEntitySlugs },
+  options: WorkflowEntityGenerationOptions = {},
 ): Map<string, string> {
   const files = new Map<string, string>();
   const workflowEntities = collectWorkflowEntities(authoringDir, options);

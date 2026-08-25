@@ -122,6 +122,7 @@ type ManifestWorkerTable = {
   table: string;
   workerAccess?: string;
   workerDml?: boolean;
+  generatedCrudEligible?: boolean;
   generatedCrud: boolean;
 };
 
@@ -150,7 +151,7 @@ const hasWorkers = manifestTables.some((table) => table.workerAccess !== undefin
  *     role that cannot reach the table.
  *   - `workerDml` — everything a worker touches inside a session scoped to one
  *     tenant: its run tables, its node catalog, its trigger registry.
- *   - `generatedCrud` — the business entities. Derived rather than declared
+ *   - generated-CRUD eligibility — the business entities. Derived rather than declared
  *     because the compiler emits an `entity.<slug>.<action>` workflow node for
  *     every generated entity, so any workflow may perform CRUD against any of
  *     them; asking each entity's author to name a worker they have never heard
@@ -176,7 +177,9 @@ export function workerGrantedTables(): string[] {
       (table) =>
         table.workerAccess !== undefined ||
         table.workerDml === true ||
-        table.generatedCrud === true,
+        (table.generatedCrudEligible === undefined
+          ? table.generatedCrud === true
+          : table.generatedCrudEligible === true),
     )
     .map((table) => `${table.schema}.${table.table}`)
     .sort();

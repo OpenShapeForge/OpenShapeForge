@@ -29,6 +29,7 @@ import type {
   ScalarType,
   TableDefinition,
 } from "../schema.js";
+import { isGeneratedCrudEligible } from "../schema.js";
 import type { CompiledAuthorization, CompiledField } from "./types/compiled.js";
 import { normalizeKeycloakRoleName } from "./role-names.js";
 
@@ -917,15 +918,29 @@ export function compileAuthoringBackendManifest(
         : `${candidate.origin.context}:${candidate.origin.name}`;
     const domainInternal =
       candidate.origin.kind === "core" && domainInternalEntities.has(candidate.slug);
-    const generatedCrud =
+    const crudOperations = candidate.contract.crud?.operations ?? {
+      list: true,
+      get: true,
+      create: true,
+      update: true,
+      delete: true,
+    };
+    const generatedCrudEligible =
       (candidate.origin.kind === "core"
         ? generatedCrudAllowlist.has(candidateCrudKey)
-        : contextGeneratedCrudAllowlist.has(candidateCrudKey)) && !domainInternal;
+        : contextGeneratedCrudAllowlist.has(candidateCrudKey)) &&
+      Object.values(crudOperations).some(Boolean) &&
+      !domainInternal;
+    // Compatibility guard: runtimes predating per-operation CRUD understand
+    // only `generatedCrud`. Mark partial policies false there so those runtimes
+    // hide the entity instead of exposing operations they cannot interpret.
+    const generatedCrud =
+      generatedCrudEligible && Object.values(crudOperations).every(Boolean);
     // Fail closed: an authored `rest:` block on an entity that is not
     // generated-CRUD enabled (not allowlisted, or domain-internal) is a
     // misconfiguration — REST routes delegate to the generated CRUD layer,
     // so silently dropping the block would hide the authoring intent.
-    if (candidate.contract.rest && !generatedCrud) {
+    if (candidate.contract.rest && !generatedCrudEligible) {
       throw new Error(
         `Entity ${describeCandidateOrigin(candidate)} declares a rest: block but is not ` +
           `generated-CRUD enabled${domainInternal ? " (domain-internal)" : ""}. ` +
@@ -935,7 +950,7 @@ export function compileAuthoringBackendManifest(
     // Same fail-closed reasoning as rest: MCP tools delegate to the generated
     // CRUD layer, so an mcp: block on an entity that has none is authoring
     // intent that would silently evaporate.
-    if (candidate.contract.mcp && !generatedCrud) {
+    if (candidate.contract.mcp && !generatedCrudEligible) {
       throw new Error(
         `Entity ${describeCandidateOrigin(candidate)} declares an mcp: block but is not ` +
           `generated-CRUD enabled${domainInternal ? " (domain-internal)" : ""}. ` +
@@ -1075,6 +1090,7 @@ export function compileAuthoringBackendManifest(
       name,
       tenantScoped,
       domainInternal,
+      generatedCrudEligible,
       generatedCrud,
       columns,
       ...(rowScope ? { rowScope } : {}),
@@ -1084,7 +1100,8 @@ export function compileAuthoringBackendManifest(
         path: candidate.path,
         authoringEntityName: candidate.contract.entity.name,
         authoringEntitySlug: candidate.slug,
-        generatedCrudEligibility: generatedCrud ? "explicitly_enabled" : "explicitly_disabled",
+        generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
+        crud: { operations: crudOperations },
         ...(candidate.contract.entity.labels
           ? { labels: candidate.contract.entity.labels }
           : {}),
@@ -1197,14 +1214,21 @@ export function buildAuthoringBackendReport(
           `tenantScoped current=${currentTable.tenantScoped} candidate=${candidateTable.tenantScoped}`,
         );
       }
-      const currentGeneratedCrud =
-        currentTable.generatedCrud !== false && currentTable.domainInternal !== true;
-      const candidateGeneratedCrud =
-        candidateTable.generatedCrud !== false && candidateTable.domainInternal !== true;
+      const currentGeneratedCrud = isGeneratedCrudEligible(currentTable);
+      const candidateGeneratedCrud = isGeneratedCrudEligible(candidateTable);
       if (currentGeneratedCrud !== candidateGeneratedCrud) {
         changedMetadata.push(
           `generatedCrud current=${currentGeneratedCrud} candidate=${candidateGeneratedCrud}`,
         );
+      }
+      const currentCrudOperations = JSON.stringify(
+        currentTable.source?.crud?.operations ?? null,
+      );
+      const candidateCrudOperations = JSON.stringify(
+        candidateTable.source?.crud?.operations ?? null,
+      );
+      if (currentCrudOperations !== candidateCrudOperations) {
+        changedMetadata.push("crud.operations differ");
       }
       const currentDomainInternal = currentTable.domainInternal === true;
       const candidateDomainInternal = candidateTable.domainInternal === true;

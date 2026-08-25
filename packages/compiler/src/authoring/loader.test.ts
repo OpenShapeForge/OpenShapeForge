@@ -2,11 +2,13 @@
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import {
+  assertPartialProfileHasNoCrud,
   validateEntityContentIdentifiers,
   loadEntity,
   resolveEntityFilePath,
 } from "./loader.js";
 import type { CoreEntity } from "./types.js";
+import type { EntityProfile } from "./types.js";
 
 // Minimal well-formed core entity used as the base for mutation tests. Only the
 // identifier-bearing fields matter to validateEntityContentIdentifiers.
@@ -135,5 +137,19 @@ describe("loadEntity content validation (integration)", () => {
     // `relation` is a real authoring entity under entities/core/.
     expect(resolveEntityFilePath(authoringDir, "relation")).toContain("relation");
     expect(() => loadEntity(authoringDir, "relation")).not.toThrow();
+  });
+});
+
+describe("partial entity profile CRUD policy", () => {
+  it("rejects CRUD declarations that a partial profile cannot own", () => {
+    const profile = {
+      schemaVersion: 1,
+      kind: "entityProfile",
+      entity: "Widget",
+      fields: [],
+      crud: false,
+    } as unknown as EntityProfile;
+    expect(() => assertPartialProfileHasNoCrud(profile, "partial/widget.yaml"))
+      .toThrow(/partial entity profile/);
   });
 });

@@ -441,14 +441,28 @@ export async function loadManifest(path: string): Promise<PlatformSchemaManifest
       throw new Error(`tables[${tableIndex}].domainInternal must be boolean.`);
     }
     if (
+      table.generatedCrudEligible !== undefined &&
+      typeof table.generatedCrudEligible !== "boolean"
+    ) {
+      throw new Error(`tables[${tableIndex}].generatedCrudEligible must be boolean.`);
+    }
+    if (
       table.generatedCrud !== undefined &&
       typeof table.generatedCrud !== "boolean"
     ) {
       throw new Error(`tables[${tableIndex}].generatedCrud must be boolean.`);
     }
-    if (table.domainInternal === true && table.generatedCrud === true) {
+    if (
+      table.domainInternal === true &&
+      (table.generatedCrudEligible === true || table.generatedCrud === true)
+    ) {
       throw new Error(
-        `Domain-internal table ${currentTableKey} cannot enable generatedCrud.`,
+        `Domain-internal table ${currentTableKey} cannot enable generated CRUD.`,
+      );
+    }
+    if (table.generatedCrudEligible === false && table.generatedCrud === true) {
+      throw new Error(
+        `Table ${currentTableKey} cannot set legacy generatedCrud when generatedCrudEligible is false.`,
       );
     }
     if (!Array.isArray(table.columns) || table.columns.length === 0) {

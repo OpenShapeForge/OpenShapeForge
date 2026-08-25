@@ -36,7 +36,7 @@ function captureThrow(fn: () => unknown): GraphQLError {
 
 describe("requireEntityOperation", () => {
   test("denies every operation for a session without matching roles", () => {
-    for (const operation of ["read", "create", "update", "delete"] as const) {
+    for (const operation of ["list", "get", "create", "update", "delete"] as const) {
       const error = captureThrow(() =>
         requireEntityOperation(table, operation, noRoleSession),
       );
@@ -51,7 +51,7 @@ describe("requireEntityOperation", () => {
 
   test("allows an operation when a session role intersects the allow-list", () => {
     expect(() =>
-      requireEntityOperation(table, "read", {
+      requireEntityOperation(table, "get", {
         ...noRoleSession,
         roles: ["Relations.All.Read"],
       }),
@@ -79,15 +79,41 @@ describe("requireEntityOperation", () => {
   });
 
   test("fails closed on a table without role metadata (stale manifest)", () => {
-    const stale = { ...table, name: "erp.stale_table", source: {} } as GeneratedTable;
+    const stale = {
+      ...table,
+      name: "erp.stale_table",
+      source: { crud: table.source?.crud },
+    } as GeneratedTable;
     const error = captureThrow(() =>
-      requireEntityOperation(stale, "read", {
+      requireEntityOperation(stale, "get", {
         ...noRoleSession,
         roles: ["Relations.All.ReadWrite"],
       }),
     );
     expect(error.extensions.code).toBe("FORBIDDEN");
     expect(error.message).toContain("no role metadata");
+  });
+
+  test("fails closed before role checks when the operation policy disables a mutation", () => {
+    const readOnly = {
+      ...table,
+      source: {
+        ...table.source,
+        crud: {
+          operations: { ...table.source!.crud!.operations, update: false },
+        },
+      },
+    } as GeneratedTable;
+    const error = captureThrow(() =>
+      requireEntityOperation(readOnly, "update", {
+        ...noRoleSession,
+        roles: ["Relations.All.ReadWrite"],
+      }),
+    );
+    expect(error.extensions).toMatchObject({
+      code: "GENERATED_CRUD_OPERATION_NOT_ENABLED",
+      status: 404,
+    });
   });
 
   test("relationship traversal gates the TARGET entity's read roles before any DB use", async () => {

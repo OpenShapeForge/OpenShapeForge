@@ -150,6 +150,104 @@ function entityDescription(contract: CompiledEntityContract | undefined): string
   return localizedText(contract?.entity.description);
 }
 
+function withoutPresentationMetadata(schema: JsonObject): JsonObject {
+  const { title: _title, description: _description, default: _default, ...rest } = schema;
+  return rest;
+}
+
+function listParameters(
+  table: TableDefinition,
+  fieldsByKey: Map<string, CompiledField>,
+  referentiedata: CoreReferentiedataSnapshot,
+): JsonObject[] {
+  const sortableFields = table.columns.map(fieldNameForColumn);
+  const primaryKey = table.columns.find((column) => column.primaryKey === true);
+  const primaryKeyField = primaryKey ? fieldNameForColumn(primaryKey) : undefined;
+  const parameters: JsonObject[] = [
+    {
+      name: "first",
+      in: "query",
+      description: "Number of records to return. Defaults to 50 and is limited to 1-200.",
+      schema: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+    },
+    {
+      name: "after",
+      in: "query",
+      description: "Opaque cursor returned as nextCursor by a previous list response.",
+      schema: { type: "string" },
+    },
+    {
+      name: "sortField",
+      in: "query",
+      description: "Entity field to sort by. Defaults to the primary key.",
+      schema: {
+        type: "string",
+        ...(sortableFields.length > 0 ? { enum: sortableFields } : {}),
+        ...(primaryKeyField ? { default: primaryKeyField } : {}),
+      },
+    },
+    {
+      name: "sortDirection",
+      in: "query",
+      description: "Sort direction. Defaults to ascending.",
+      schema: { type: "string", enum: ["asc", "desc"], default: "asc" },
+    },
+  ];
+
+  for (const column of table.columns) {
+    const fieldName = fieldNameForColumn(column);
+    const compiled = fieldsByKey.get(fieldName);
+    if (
+      column.type === "jsonb" ||
+      compiled?.cardinality === "collection" ||
+      compiled?.valueType === "object"
+    ) {
+      continue;
+    }
+
+    const projected = fieldSchemaForColumn(
+      column,
+      fieldsByKey,
+      referentiedata,
+      "update",
+    ).schema;
+    const authoredDescription =
+      typeof projected.description === "string" ? projected.description : undefined;
+    const scalarSchema = withoutPresentationMetadata(projected);
+    const scalarMatch =
+      column.type === "text"
+        ? "Matches a case-insensitive substring."
+        : "Matches exactly.";
+    parameters.push({
+      name: fieldName,
+      in: "query",
+      description: [
+        authoredDescription,
+        scalarMatch,
+        `Repeat this parameter to match any supplied value, or use ${fieldName}In.`,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      schema: scalarSchema,
+    });
+    parameters.push({
+      name: `${fieldName}In`,
+      in: "query",
+      description: [
+        authoredDescription,
+        "Matches exactly against any supplied value. Repeat this parameter to supply multiple values.",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      style: "form",
+      explode: true,
+      schema: { type: "array", items: scalarSchema },
+    });
+  }
+
+  return parameters;
+}
+
 function errorResponse(description: string): JsonObject {
   return {
     description,
@@ -286,25 +384,9 @@ export function renderOpenApiSpec(
         tags: [name],
         description:
           (description ? `${description} ` : "") +
-          "Reserved query parameters: first (page size), after (cursor), " +
-          "sortField, sortDirection. Any other query parameter is treated as " +
-          "an equality filter on the entity field of that name; repeat a " +
-          "parameter, or use the explicit <field>In name (single or " +
-          "repeated), for an IN filter. Unknown filter fields are rejected.",
-        parameters: [
-          {
-            name: "first",
-            in: "query",
-            schema: { type: "integer", minimum: 1 },
-          },
-          { name: "after", in: "query", schema: { type: "string" } },
-          { name: "sortField", in: "query", schema: { type: "string" } },
-          {
-            name: "sortDirection",
-            in: "query",
-            schema: { type: "string", enum: ["asc", "desc"] },
-          },
-        ],
+          "Pagination, sorting, and every supported scalar field filter are " +
+          "documented below. Unknown filter fields are rejected.",
+        parameters: listParameters(table, fieldsByKey, referentiedata),
         responses: {
           "200": entityResponse(`${name}List`, `${name} page`),
           "400": errorResponse("Invalid filter, sort, or pagination input"),
@@ -345,6 +427,7 @@ export function renderOpenApiSpec(
           name: "id",
           in: "path",
           required: true,
+          description: `Unique identifier of the ${label} record.`,
           schema: { type: "string", format: "uuid" },
         },
       ],

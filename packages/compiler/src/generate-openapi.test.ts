@@ -110,6 +110,21 @@ const manifest: PlatformSchemaManifest = {
   ],
 };
 
+type TestParameter = {
+  name: string;
+  in: string;
+  required?: boolean;
+  description?: string;
+  style?: string;
+  explode?: boolean;
+  schema: Record<string, unknown>;
+};
+
+type TestOperation = {
+  tags?: string[];
+  parameters?: TestParameter[];
+};
+
 function spec() {
   return JSON.parse(
     renderOpenApiSpec(manifest, "fixture", {
@@ -123,7 +138,13 @@ function spec() {
     }),
   ) as {
     tags: Array<{ name: string; description?: string }>;
-    paths: Record<string, Record<string, { tags?: string[] }>>;
+    paths: Record<string, {
+      parameters?: TestParameter[];
+      get?: TestOperation;
+      post?: TestOperation;
+      patch?: TestOperation;
+      delete?: TestOperation;
+    }>;
     components: { schemas: Record<string, Record<string, unknown>> };
   };
 }
@@ -202,5 +223,89 @@ describe("rich generated REST OpenAPI", () => {
       { name: "Relation", description: "Canonical relation aggregate." },
     ]);
     expect(generated.paths["/api/rest/v1/relations"]?.post?.tags).toEqual(["Relation"]);
+  });
+
+  it("documents pagination and sorting with the runtime defaults and supported fields", () => {
+    const parameters = spec().paths["/api/rest/v1/relations"]?.get?.parameters ?? [];
+    const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
+
+    expect(byName.get("first")).toEqual({
+      name: "first",
+      in: "query",
+      description: "Number of records to return. Defaults to 50 and is limited to 1-200.",
+      schema: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+    });
+    expect(byName.get("after")?.description).toContain("nextCursor");
+    expect(byName.get("sortField")?.schema).toEqual({
+      type: "string",
+      enum: [
+        "id",
+        "tenantId",
+        "displayName",
+        "relationType",
+        "metadata",
+        "externalId",
+        "iban",
+        "relationGroupId",
+        "createdAt",
+      ],
+      default: "id",
+    });
+    expect(byName.get("sortDirection")?.schema).toEqual({
+      type: "string",
+      enum: ["asc", "desc"],
+      default: "asc",
+    });
+  });
+
+  it("projects scalar field semantics into direct and explicit IN filters", () => {
+    const parameters = spec().paths["/api/rest/v1/relations"]?.get?.parameters ?? [];
+    const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
+
+    expect(byName.get("displayName")).toMatchObject({
+      description:
+        "Human-readable relation name. Matches a case-insensitive substring. " +
+        "Repeat this parameter to match any supplied value, or use displayNameIn.",
+      schema: { type: "string", minLength: 1, maxLength: 200 },
+    });
+    expect(byName.get("displayName")?.schema.default).toBeUndefined();
+    expect(byName.get("relationType")?.schema).toEqual({
+      type: "string",
+      enum: ["person", "organization"],
+    });
+    expect(byName.get("relationType")?.description).toContain(
+      "Allowed values: person (Person), organization (Organization).",
+    );
+    expect(byName.get("relationTypeIn")).toMatchObject({
+      style: "form",
+      explode: true,
+      schema: {
+        type: "array",
+        items: { type: "string", enum: ["person", "organization"] },
+      },
+    });
+    expect(byName.get("relationGroupId")?.schema).toEqual({
+      type: "string",
+      format: "uuid",
+    });
+    expect(byName.has("metadata")).toBe(false);
+    expect(byName.has("metadataIn")).toBe(false);
+    expect(byName.get("iban")?.description).toBe(
+      "Matches a case-insensitive substring. Repeat this parameter to match any supplied value, " +
+        "or use ibanIn.",
+    );
+  });
+
+  it("documents the item path identifier", () => {
+    const parameters = spec().paths["/api/rest/v1/relations/{id}"]?.parameters;
+    expect(parameters).toEqual([
+      {
+        name: "id",
+        in: "path",
+        required: true,
+        description: "Unique identifier of the Relation record.",
+        schema: { type: "string", format: "uuid" },
+      },
+    ]);
   });
 });

@@ -232,7 +232,16 @@ export interface AuthoredEntityIndex {
   unique?: boolean;
 }
 
-export type RestOperationKey = "list" | "get" | "create" | "update" | "delete";
+export type CrudOperationKey = "list" | "get" | "create" | "update" | "delete";
+
+export interface CrudConfig {
+  /** Defaults to true when omitted. `false` disables every generated CRUD operation. */
+  enabled?: boolean;
+  /** Per-operation upper bounds; each defaults to true while CRUD is enabled. */
+  operations?: Partial<Record<CrudOperationKey, boolean>>;
+}
+
+export type RestOperationKey = CrudOperationKey;
 
 export interface RestConfig {
   /** Defaults to true when the `rest` block is present. */
@@ -324,6 +333,14 @@ export interface CoreEntity {
   permissions?: EntityPermissions;
   authorization?: AuthorizationConfig;
   ui?: UIDefinition;
+  /**
+   * Common generated-CRUD policy shared by every transport. Absent or `true`
+   * preserves the historical all-operations default; `false` disables the
+   * entity completely. The object form can make an entity read-only or expose
+   * any smaller operation set. REST, MCP, workflow and later layers may narrow
+   * this policy but never widen it.
+   */
+  crud?: boolean | CrudConfig;
   /**
    * Opt-in generated REST exposure for this entity. Absent or `false` means
    * no REST routes are generated (fail closed, mirroring the generatedCrud
@@ -420,6 +437,7 @@ export interface EntityProfile {
     };
   };
   ui?: UIDefinition;
+  crud?: boolean | CrudConfig;
   workflow?: {
     nodes?: {
       actions?: Partial<Record<

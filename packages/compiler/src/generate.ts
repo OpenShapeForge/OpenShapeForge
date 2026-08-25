@@ -9,6 +9,7 @@ import type {
   ScalarType,
   TableDefinition,
 } from "./schema.js";
+import { isGeneratedCrudEligible } from "./schema.js";
 
 type GroupExpand = NonNullable<RowScopePolicy["group"]>["expand"];
 
@@ -573,6 +574,20 @@ ${dbFields}
 `;
 }
 
+function isLegacyFullCrudCompatible(table: TableDefinition): boolean {
+  const crud = table.source?.crud;
+  if (crud === undefined) return true;
+
+  const operations = crud.operations;
+  return (
+    operations?.list === true &&
+    operations.get === true &&
+    operations.create === true &&
+    operations.update === true &&
+    operations.delete === true
+  );
+}
+
 function renderManifestJson(manifest: PlatformSchemaManifest, source: string): string {
   const checksum = createHash("sha256")
     .update(JSON.stringify(manifest))
@@ -583,11 +598,15 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
     table: table.name,
     tenantScoped: table.tenantScoped,
     domainInternal: table.domainInternal === true,
-    // Fail-closed: a table is CRUD-exposed only when it opts in explicitly
-    // with `generatedCrud: true`. A table that omits the flag (or is
-    // domain-internal) is not exposed, so a forgotten opt-out on a new
-    // sensitive table cannot silently advertise it as CRUD-generated.
-    generatedCrud: table.generatedCrud === true && table.domainInternal !== true,
+    generatedCrudEligible: isGeneratedCrudEligible(table),
+    // Legacy all-or-nothing marker. Partial policies deliberately keep this
+    // false so an older runtime hides them; current runtimes read the explicit
+    // eligibility marker and per-operation source.crud block above.
+    generatedCrud:
+      isGeneratedCrudEligible(table) &&
+      isLegacyFullCrudCompatible(table) &&
+      table.generatedCrud === true &&
+      table.domainInternal !== true,
     primaryKey:
       table.columns.find((column) => column.primaryKey)?.name ?? null,
     columns: table.columns.map((column) => ({
@@ -621,8 +640,7 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
   }));
   const generatedEntities = tables
     .filter((table) =>
-      table.generatedCrud &&
-      !table.domainInternal &&
+      isGeneratedCrudEligible(table) &&
       table.primaryKey &&
       table.source?.graphql
     )

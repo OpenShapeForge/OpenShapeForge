@@ -6,7 +6,6 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
-import { generatedCrudDeniedEntitySlugs } from "../packages/compiler/src/active-manifest.ts";
 import { collectAllArtifacts } from "../packages/compiler/src/index.ts";
 import {
   compilerOwnedGeneratedFiles,
@@ -36,9 +35,6 @@ const second = await collectAllArtifacts(repoRoot);
 const artifacts = first.all;
 const uiArtifacts = first.groups.ui;
 const artifactPathSet = new Set(artifacts.map((artifact) => artifact.path));
-const generatedCrudDeniedFileNames = new Set(
-  [...generatedCrudDeniedEntitySlugs].map((slug) => slug.replace(/-/g, "")),
-);
 
 function hashArtifacts(artifactsToHash) {
   const hash = createHash("sha256");
@@ -175,10 +171,6 @@ async function listNames(root, options = {}) {
     .sort();
 }
 
-function isGeneratedCrudEnabledFileName(name) {
-  return !generatedCrudDeniedFileNames.has(name);
-}
-
 function actionFileName(artifactPath) {
   if (
     !artifactPath.startsWith("apps/web/src/actions/generated/") ||
@@ -220,21 +212,20 @@ if (webPresent) {
   const generatedManifestNames = uiArtifacts
     .filter((artifact) => artifact.path.startsWith("apps/web/src/compiler/entity-manifests/"))
     .map((artifact) => basename(artifact.path, ".ts"))
-    .filter(isGeneratedCrudEnabledFileName)
     .sort();
   const generatedActionNames = uiArtifacts
     .map((artifact) => actionFileName(artifact.path))
-    .filter((name) => name && isGeneratedCrudEnabledFileName(name))
+    .filter(Boolean)
     .sort();
 
   const currentManifestNames = await listNames(
     join(repoRoot, "apps/web/src/compiler/entity-manifests"),
     { suffix: ".ts", stripSuffix: ".ts" },
-  ).then((names) => names.filter(isGeneratedCrudEnabledFileName));
+  );
   const currentActionNames = await listNames(
     join(repoRoot, "apps/web/src/actions/generated"),
     { suffix: ".ts", stripSuffix: ".ts" },
-  ).then((names) => names.filter(isGeneratedCrudEnabledFileName));
+  );
 
   for (const [label, names] of [
     ["generated manifest shard", generatedManifestNames],

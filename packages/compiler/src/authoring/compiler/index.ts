@@ -23,6 +23,7 @@ import { resolveStorageColumns } from "./storage.js";
 import { resolveModelFields } from "./model.js";
 import { resolveRelationships } from "./relationships.js";
 import { buildGraphQL } from "./graphql.js";
+import { buildCrud } from "./crud.js";
 import { buildRest } from "./rest.js";
 import { buildMcp } from "./mcp.js";
 import { buildViews } from "./views.js";
@@ -89,8 +90,9 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   const modelFields = resolveModelFields(coreEntity.fields, componentCatalog, artifacts.semanticTypes);
   const relationships = resolveRelationships(artifacts);
   const graphql = buildGraphQL(coreEntity, profiles, relationships, componentCatalog, artifacts.semanticTypes);
-  const rest = buildRest(coreEntity);
-  const mcp = buildMcp(coreEntity);
+  const crud = buildCrud(coreEntity);
+  const rest = buildRest(coreEntity, crud);
+  const mcp = buildMcp(coreEntity, crud);
   const views = buildViews(coreEntity, profiles, componentCatalog, artifacts.viewDefinition ?? undefined);
 
   validateTimelineIncludes(coreEntity.entity, relationships, views);
@@ -104,7 +106,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   });
 
   return {
-    contractVersion: 1,
+    contractVersion: 2,
     kind: "compiledEntityContract",
     entity: {
       id: `${coreEntity.module}.${coreEntity.entity}`,
@@ -122,6 +124,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     },
     storage: { table: tableName, columns },
     model: { fields: modelFields, relationships },
+    crud,
     graphql,
     ...(rest ? { rest } : {}),
     ...(mcp ? { mcp } : {}),

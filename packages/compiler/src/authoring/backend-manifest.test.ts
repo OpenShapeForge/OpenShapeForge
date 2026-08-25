@@ -305,6 +305,19 @@ describe("generated REST exposure (source.rest bridge)", () => {
     });
   });
 
+  it("applies the common CRUD policy as an upper bound for REST, MCP and runtime CRUD", () => {
+    const manifest = compileRestFixtures(["crud-read-only"], {
+      generatedCrudAllowlist: ["crud-read-only"],
+    });
+    const table = tableByName(manifest, "crud_read_onlies");
+    const expected = { list: true, get: true, create: false, update: false, delete: false };
+    expect(table?.generatedCrudEligible).toBe(true);
+    expect(table?.generatedCrud).toBe(false);
+    expect(table?.source?.crud?.operations).toEqual(expected);
+    expect(table?.source?.rest?.operations).toEqual(expected);
+    expect(table?.source?.mcp?.operations).toEqual(expected);
+  });
+
   it("fails closed when a rest-enabled entity is not generated-CRUD allowlisted", () => {
     expect(() => compileRestFixtures(["rest-enabled"])).toThrow(
       /declares a rest: block but is not generated-CRUD enabled/,

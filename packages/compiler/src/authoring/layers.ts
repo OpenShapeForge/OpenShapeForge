@@ -229,7 +229,9 @@ function walkFiles(root: string, current = root): string[] {
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
-function isPlainObject(value: JsonValue): value is { [key: string]: JsonValue } {
+const CRUD_OPERATION_KEYS = ["list", "get", "create", "update", "delete"] as const;
+
+function isPlainObject(value: JsonValue | undefined): value is { [key: string]: JsonValue } {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -298,6 +300,44 @@ export function strategicMerge(base: JsonValue, patch: JsonValue): JsonValue {
   }
 
   return patch;
+}
+
+function resolvedCrudOperations(document: JsonValue): Record<(typeof CRUD_OPERATION_KEYS)[number], boolean> {
+  const crud = isPlainObject(document) ? document.crud : undefined;
+  if (crud === false) {
+    return Object.fromEntries(CRUD_OPERATION_KEYS.map((operation) => [operation, false])) as Record<
+      (typeof CRUD_OPERATION_KEYS)[number],
+      boolean
+    >;
+  }
+  const config = isPlainObject(crud) ? crud : {};
+  const enabled = config.enabled !== false;
+  const operations = isPlainObject(config.operations) ? config.operations : {};
+  return Object.fromEntries(
+    CRUD_OPERATION_KEYS.map((operation) => [
+      operation,
+      enabled && operations[operation] !== false,
+    ]),
+  ) as Record<(typeof CRUD_OPERATION_KEYS)[number], boolean>;
+}
+
+/**
+ * CRUD exposure is a monotonic security policy across layers. An extension may
+ * make an entity read-only or hide it, but a later package must not restore an
+ * operation its host (or an earlier package) disabled.
+ */
+function assertCrudPolicyOnlyNarrows(base: JsonValue, merged: JsonValue, origin: string): void {
+  const before = resolvedCrudOperations(base);
+  const after = resolvedCrudOperations(merged);
+  const widened = CRUD_OPERATION_KEYS.filter(
+    (operation) => before[operation] === false && after[operation] === true,
+  );
+  if (widened.length > 0) {
+    throw new Error(
+      `${origin} widens crud.operations (${widened.join(", ")}) disabled by an earlier layer. ` +
+        "Entity patches may only narrow generated CRUD exposure; change the owning layer instead.",
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -390,6 +430,11 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
           ) as JsonValue;
           const { kind: _kind, ...patchBody } = parsed as { [key: string]: JsonValue };
           const merged = strategicMerge(baseDoc, patchBody as JsonValue);
+          assertCrudPolicyOnlyNarrows(
+            baseDoc,
+            merged,
+            `entityPatch ${layerDir}/${relativePath}`,
+          );
           const mergedPath = join(buildDir, targetRelative);
           mkdirSync(join(mergedPath, ".."), { recursive: true });
           writeFileSync(mergedPath, YAML.stringify(merged), "utf8");

@@ -11,9 +11,10 @@
  * Input:  Core entity definition (authored `rest` block).
  * Output: RestSection | undefined — undefined means "no REST exposure".
  */
-import type { RestConfig, RestOperationKey, RestSection } from "../types.js";
+import type { CrudSection, RestConfig, RestOperationKey, RestSection } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
 import { deriveTableName } from "./helpers.js";
+import { limitCrudOperations } from "./crud.js";
 
 export const REST_OPERATION_KEYS: readonly RestOperationKey[] = [
   "list",
@@ -30,6 +31,7 @@ const REST_BASE_PATH_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 export function buildRest(
   coreEntity: LoadedArtifacts["coreEntity"],
+  crud?: CrudSection,
 ): RestSection | undefined {
   const authored = coreEntity.rest;
   if (authored === undefined || authored === false) return undefined;
@@ -47,9 +49,12 @@ export function buildRest(
     );
   }
 
-  const operations = Object.fromEntries(
+  const requestedOperations = Object.fromEntries(
     REST_OPERATION_KEYS.map((key) => [key, config.operations?.[key] !== false]),
   ) as Record<RestOperationKey, boolean>;
+  const operations = crud
+    ? limitCrudOperations(requestedOperations, crud)
+    : requestedOperations;
 
   return { basePath, operations };
 }

@@ -361,4 +361,16 @@ describe("coreEntity properties the compiler implements", () => {
     });
     expect(() => validator.validate(document, "label-rule.yaml")).toThrow(/suggestions/);
   });
+
+  it("accepts a read-only common CRUD policy", () => {
+    const document = coreEntity({
+      crud: { operations: { create: false, update: false, delete: false } },
+    });
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+  });
+
+  it("rejects unknown CRUD operations", () => {
+    const document = coreEntity({ crud: { operations: { publish: true } } });
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/crud/);
+  });
 });

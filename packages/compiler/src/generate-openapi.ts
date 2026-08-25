@@ -28,6 +28,7 @@ import type {
   ScalarType,
   TableDefinition,
 } from "./schema.js";
+import { isGeneratedCrudEligible } from "./schema.js";
 
 const REST_MOUNT = "/api/rest/v1";
 const RESERVED_LIST_PARAMETER_NAMES = new Set([
@@ -345,8 +346,7 @@ export function renderOpenApiSpec(
   const restTables = manifest.tables
     .filter(
       (table) =>
-        table.generatedCrud === true &&
-        table.domainInternal !== true &&
+        isGeneratedCrudEligible(table) &&
         table.source?.rest !== undefined,
     )
     .sort((a, b) =>

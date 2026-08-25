@@ -1,0 +1,39 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: CrudReadOnly
+title: CRUD Read Only
+description: Test fixture for a common CRUD policy that narrows every transport.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: CRUD Read Only
+domains:
+  - relations
+crud:
+  operations:
+    create: false
+    update: false
+    delete: false
+rest: true
+mcp: true
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+fields:
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+    persisted:
+      column: name
+      storageClass: core

@@ -279,6 +279,16 @@ export type TableSourceDefinition = {
      */
     defaultSort?: { field: string; direction: "asc" | "desc" };
   };
+  /** Common generated-CRUD upper bound shared by every transport. */
+  crud?: {
+    operations: {
+      list: boolean;
+      get: boolean;
+      create: boolean;
+      update: boolean;
+      delete: boolean;
+    };
+  };
   /**
    * Opt-in generated REST exposure for this table. Present only when the
    * authoring entity declared a `rest:` block AND the table is generated-CRUD
@@ -353,6 +363,16 @@ export type TableDefinition = {
   name: string;
   tenantScoped: boolean;
   domainInternal?: boolean;
+  /**
+   * Current generated-CRUD eligibility marker. New runtimes use this exact
+   * boolean; when absent they fall back to the legacy `generatedCrud` flag.
+   */
+  generatedCrudEligible?: boolean;
+  /**
+   * Legacy all-or-nothing runtime marker. New manifests set this only when all
+   * five common operations are enabled, so an older runtime fails closed for
+   * partial policies it cannot understand.
+   */
   generatedCrud?: boolean;
   columns: ColumnDefinition[];
   indexes?: IndexDefinition[];
@@ -421,7 +441,7 @@ export type TableDefinition = {
    * the tables the core itself must expose (the org-unit closure every session
    * expands its groups through) belong to no plugin and cannot name one.
    *
-   * Not needed on `generatedCrud` tables: a generated entity workflow node
+   * Not needed on generated-CRUD-eligible tables: a generated entity workflow node
    * exists for every one of them, so the grant sweep derives that set rather
    * than making each entity author name a worker they have never heard of.
    * `workerAccess` implies it too — a queue a worker claims from is a queue it
@@ -465,6 +485,15 @@ export type TableDefinition = {
    */
   tenantIdentityColumn?: string;
 };
+
+export function isGeneratedCrudEligible(
+  table: Pick<TableDefinition, "domainInternal" | "generatedCrudEligible" | "generatedCrud">,
+): boolean {
+  if (table.domainInternal === true) return false;
+  return table.generatedCrudEligible === undefined
+    ? table.generatedCrud === true
+    : table.generatedCrudEligible === true;
+}
 
 export type RelationshipRegisterEntry = {
   from: {

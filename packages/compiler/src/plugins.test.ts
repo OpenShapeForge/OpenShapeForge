@@ -7,7 +7,7 @@ import { loadActivePlatformManifest } from "./active-manifest.js";
 import { resolveAuthoringLayers } from "./authoring/layers.js";
 import { collectAllArtifacts } from "./index.js";
 import { mergePluginPlatformTables } from "./plugins.js";
-import type { PlatformSchemaManifest } from "./schema.js";
+import { isGeneratedCrudEligible, type PlatformSchemaManifest } from "./schema.js";
 
 const repoRoot = resolve(import.meta.dir, "../../..");
 
@@ -39,15 +39,15 @@ describe("compiler plugins", () => {
 
   test("plugin context exposes compiled entity contracts", async () => {
     const { groups } = await collectAllArtifacts(repoRoot);
-    // The docs artifact is contract/manifest-driven; every generatedCrud
+    // The docs artifact is contract/manifest-driven; every CRUD-eligible
     // entity must appear exactly once.
     const docs = groups.plugins.find((entry) => entry.name === "entity-docs")!;
     const headings = docs.artifacts[0]!.contents.match(/^## /gm) ?? [];
     const crudTables = groups.db
       .filter((artifact) => artifact.path.endsWith("manifest.json"))
       .flatMap((artifact) =>
-        (JSON.parse(artifact.contents) as { tables: { generatedCrud?: boolean; source?: object }[] }).tables.filter(
-          (table) => table.generatedCrud && table.source,
+        (JSON.parse(artifact.contents) as PlatformSchemaManifest).tables.filter(
+          (table) => isGeneratedCrudEligible(table) && table.source,
         ),
       );
     expect(headings.length).toBe(crudTables.length);

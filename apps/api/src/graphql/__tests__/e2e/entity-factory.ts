@@ -7,7 +7,11 @@
  */
 import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { getGeneratedCrudTables, isWritableColumn } from "../../generated-crud.js";
+import {
+  getGeneratedCrudTables,
+  isGeneratedCrudOperationEnabled,
+  isWritableColumn,
+} from "../../generated-crud.js";
 import {
   createdRows,
   expectData,
@@ -18,7 +22,13 @@ import {
 
 export type Column = GeneratedTable["columns"][number];
 
-export const tables = getGeneratedCrudTables().filter((table) => table.source?.graphql);
+export const eligibleTables = getGeneratedCrudTables().filter((table) => table.source?.graphql);
+export const tables = eligibleTables.filter((table) =>
+  (["list", "get", "create", "update", "delete"] as const).every((operation) =>
+    isGeneratedCrudOperationEnabled(table, operation),
+  ),
+);
+export const partialPolicyTables = eligibleTables.filter((table) => !tables.includes(table));
 export const tablesByTypeName = new Map(
   tables.map((table) => [table.source!.graphql!.typeName, table]),
 );

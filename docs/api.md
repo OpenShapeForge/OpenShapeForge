@@ -22,15 +22,19 @@ generated-schema checksum with the bundled manifest — see
 ## The generic CRUD engine
 
 `src/graphql/generated-entity-schema.ts` builds the SDL and resolvers from
-every manifest table with `generatedCrud: true`, not `domainInternal`, a
-primary key, and a `source.graphql` block. Per entity `Thing` it emits:
+every manifest table with `generatedCrudEligible: true`, not `domainInternal`, a
+primary key, and a `source.graphql` block. The entity's common
+`source.crud.operations` policy decides which root queries and mutations are
+actually emitted and is enforced again inside the shared CRUD service before
+SQL. Per entity `Thing` it can emit:
 
 - `type Thing` — one field per column (snake_case → camelCase via
   `sourceField`), plus relationship fields and `<rel>Aggregate:
   AggregateResult!` (`{ count }`).
 - `ThingConnection` / `ThingEdge` / `PageInfo`, `ThingFilter`, `ThingSort`,
   `CreateThingInput`, `UpdateThingInput`.
-- Queries `thing(id: ID!)` and `things(filter, sort, first, after)`.
+- Queries `thing(id: ID!)` and `things(filter, sort, first, after)` when `get`
+  and `list` are enabled.
 - Mutations `createThing(input)`, `updateThing(input)` (input carries `id`),
   `deleteThing(id): Boolean!`.
 
@@ -83,6 +87,8 @@ resolvers — same auth (`resolveSessionContext`), same tenant scoping and RLS
 session, same role enforcement and field-level classification (see
 [below](#authentication--authorization)), same filter/sort/cursor semantics,
 same camelCase field names. Disabled operations simply have no route (404).
+The transport-specific `rest.operations` flags are intersected with the common
+`crud.operations` policy, so REST can narrow but never widen entity exposure.
 
 REST-specific semantics:
 
@@ -102,7 +108,8 @@ REST-specific semantics:
 - **Errors** — `{ "error": { "code", "message" } }`; the CRUD layer's
   GraphQL error codes map to statuses in `src/rest/http-error.ts`
   (`BAD_USER_INPUT` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403,
-  `GENERATED_CRUD_NOT_ENABLED` 404, `DATABASE_NOT_CONFIGURED` 503; anything
+  `GENERATED_CRUD_NOT_ENABLED` / `GENERATED_CRUD_OPERATION_NOT_ENABLED` 404,
+  `DATABASE_NOT_CONFIGURED` 503; anything
   unexpected is a redacted 500).
 - **OpenAPI** — `bun run generate` also emits
   `apps/api/src/generated/rest/openapi.json` (always, empty `paths` when no
@@ -383,7 +390,7 @@ manifest instead (`db/migrations/worker-role.ts`):
 | --- | --- |
 | `workerAccess` | the queue a worker claims across tenants |
 | `workerDml: true` | everything reached inside one tenant's session — run tables, node catalog, trigger registry |
-| `generatedCrud` | the business entities, because a generated `entity.<slug>.<action>` node exists for every one of them |
+| `generatedCrudEligible` | the business entities, because one or more generated `entity.<slug>.<action>` nodes may exist for them |
 
 `workerDml` is the second declaration, a boolean rather than a role name: the
 grant is made to the single worker LOGIN role, and it is legal on a **global**
@@ -479,7 +486,7 @@ no entity events. Details:
   tokens carry the normalized names from the generated realm, trusted-context
   callers typically send the authored names; both match. Comparison is exact
   and case-sensitive.
-- A generatedCrud table without role metadata (stale artifacts predating the
+- A generated-CRUD-eligible table without role metadata (stale artifacts predating the
   bridge) is **denied** with a distinct "no role metadata" message.
 - Error messages name only the entity and operation, never the allowed role
   list (no role enumeration for authenticated probes).

@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { generatedCrudDeniedEntitySlugs } from "../../../../../packages/compiler/src/active-manifest.js";
+import { resolveCrudOperations } from "../../../../../packages/compiler/src/authoring/compiler/crud.js";
 import { applyBaseEntityToCore, loadBaseEntity } from "../../../../../packages/compiler/src/authoring/base-entity.js";
 import { listEntityFiles } from "../../../../../packages/compiler/src/authoring/loader.js";
 import type { ComponentCatalog, CoreEntity, EntityProfile, Field, SemanticTypeCatalog, SemanticTypeDefinition } from "../../../../../packages/compiler/src/authoring/types.js";
@@ -146,7 +146,7 @@ export function resolveEntityIdSemanticTypeKey(entityName: string, idField?: Fie
   return declared;
 }
 
-function toSyntheticCoreEntity(
+export function toSyntheticCoreEntity(
   contextName: string,
   entityProfile: EntityProfile,
 ): CoreEntity {
@@ -161,6 +161,7 @@ function toSyntheticCoreEntity(
     domains: [...(entityProfile.domains ?? [])],
     fields: entityProfile.fields ?? [],
     relationships: entityProfile.relationships,
+    crud: entityProfile.crud,
     workflow: entityProfile.workflow,
   };
 }
@@ -322,14 +323,15 @@ export function loadWorkflowNodeEntities(authoringDir: string): CoreEntity[] {
 
 export function getWorkflowCoreEntityGraphqlRegistry(
   authoringDir: string,
-  options: WorkflowEntityGenerationOptions = {
-    excludeEntitySlugs: generatedCrudDeniedEntitySlugs,
-  },
+  options: WorkflowEntityGenerationOptions = {},
 ): Record<string, { plural: string; filterType: string; idField: string }> {
   const registry: Record<string, { plural: string; filterType: string; idField: string }> = {};
   for (const entity of loadWorkflowNodeEntities(authoringDir)) {
     const slug = toKebabCase(entity.entity);
     if (options.excludeEntitySlugs?.has(slug)) {
+      continue;
+    }
+    if (!isWorkflowEntityListDiscoverable(entity)) {
       continue;
     }
     if (registry[slug]) {
@@ -342,6 +344,10 @@ export function getWorkflowCoreEntityGraphqlRegistry(
     };
   }
   return registry;
+}
+
+export function isWorkflowEntityListDiscoverable(entity: CoreEntity): boolean {
+  return resolveCrudOperations(entity.crud).list;
 }
 
 /**

@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import YAML from "yaml";
-import { generatedCrudDeniedEntitySlugs } from "../active-manifest.js";
 import {
   discoverContextEntities,
   listEntityFiles,
@@ -138,8 +137,11 @@ function toKebabCase(value: string) {
     .toLowerCase();
 }
 
-function isGeneratedCrudUiEnabled(contract: CompiledAuthoringEntity["contract"]) {
-  return !generatedCrudDeniedEntitySlugs.has(toKebabCase(contract.entity.name));
+export function isGeneratedCrudUiEnabled(contract: CompiledAuthoringEntity["contract"]) {
+  // The stock generated pages assume the complete list/detail/edit surface.
+  // Partial CRUD policies are valid for APIs and workflows, but require a
+  // purpose-built UI rather than pages that reference omitted operations.
+  return Object.values(contract.crud.operations).every(Boolean);
 }
 
 function isGeneratedCrudUiEnabledForEntityName(

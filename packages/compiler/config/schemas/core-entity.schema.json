@@ -259,6 +259,20 @@
         }
       }
     },
+    "crud": {
+      "description": "Common generated-CRUD upper bound shared by GraphQL, REST, MCP and workflow. Absent or true enables all operations for backward compatibility; false disables all. Later entityPatch layers may only narrow this policy.",
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "operations": { "$ref": "#/$defs/crudOperations" }
+          }
+        }
+      ]
+    },
     "rest": {
       "description": "Opt-in generated REST exposure. Absent or false means no REST routes (fail closed). `true` enables all operations under a derived base path; the object form allows per-operation flags and a custom basePath.",
       "oneOf": [
@@ -347,6 +361,17 @@
     }
   },
   "$defs": {
+    "crudOperations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "list": { "type": "boolean" },
+        "get": { "type": "boolean" },
+        "create": { "type": "boolean" },
+        "update": { "type": "boolean" },
+        "delete": { "type": "boolean" }
+      }
+    },
     "localizedText": {
       "type": "object",
       "minProperties": 1,

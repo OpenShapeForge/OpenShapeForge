@@ -176,6 +176,28 @@ function spec() {
 }
 
 describe("rich generated REST OpenAPI", () => {
+  it("emits only allowed routes for a partial policy hidden from legacy runtimes", () => {
+    const partial = structuredClone(manifest);
+    const table = partial.tables[0]!;
+    table.generatedCrudEligible = true;
+    table.generatedCrud = false;
+    table.source!.rest!.operations = {
+      list: true,
+      get: true,
+      create: false,
+      update: false,
+      delete: false,
+    };
+    const rendered = JSON.parse(renderOpenApiSpec(partial, "fixture", {
+      entities: [{ contract }],
+    })) as { paths: Record<string, Record<string, unknown>> };
+    expect(Object.keys(rendered.paths["/api/rest/v1/relations"]!)).toEqual(["get"]);
+    expect(Object.keys(rendered.paths["/api/rest/v1/relations/{id}"]!)).toEqual([
+      "parameters",
+      "get",
+    ]);
+  });
+
   it("keeps response properties storage-derived while retaining entity documentation", () => {
     const generated = spec();
     const relation = generated.components.schemas.Relation as {

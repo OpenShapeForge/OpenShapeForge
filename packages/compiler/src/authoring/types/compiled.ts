@@ -141,6 +141,7 @@ export interface GraphQLProfileType {
     type: string;
     column?: string;
     label?: LocalizedText;
+    description?: string;
     semanticType?: string;
     render?: CompiledRender;
     displayRender?: CompiledRender;

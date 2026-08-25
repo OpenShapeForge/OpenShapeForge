@@ -19,6 +19,7 @@ authoring.config.local.yaml
 # Compiler-generated artifacts (recreate with `bun run generate`)
 apps/api/src/generated/connectors/
 apps/api/src/generated/db/
+apps/api/src/generated/graphql/
 apps/api/src/generated/mcp/
 apps/api/src/generated/modules/
 apps/api/src/generated/page-configs/

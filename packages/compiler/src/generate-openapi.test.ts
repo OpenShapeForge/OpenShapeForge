@@ -75,6 +75,14 @@ const contract = {
         validation: { maxLength: 34 },
         classification: { sensitivity: "confidential" },
       }),
+      field({ key: "first", description: { en: "Business sequence value." } }),
+      field({ key: "status", description: { en: "Current status." } }),
+      field({ key: "statusIn", description: { en: "Status import marker." } }),
+      field({
+        key: "isOptedIn",
+        valueType: "boolean",
+        description: { en: "Whether the relation opted in." },
+      }),
     ],
   },
   rest: {
@@ -99,6 +107,24 @@ const manifest: PlatformSchemaManifest = {
         { name: "metadata", type: "jsonb", sourceField: "metadata" },
         { name: "external_id", type: "text", sourceField: "externalId", immutable: true },
         { name: "iban", type: "text", sourceField: "iban" },
+        { name: "business_first", type: "text", sourceField: "first" },
+        { name: "status", type: "text", sourceField: "status" },
+        { name: "status_in", type: "text", sourceField: "statusIn" },
+        { name: "is_opted_in", type: "boolean", sourceField: "isOptedIn" },
+        { name: "marker", type: "text", sourceField: "marker" },
+        {
+          name: "marker_in",
+          type: "text",
+          sourceField: "markerIn",
+          classification: "confidential",
+        },
+        {
+          name: "private_marker",
+          type: "text",
+          sourceField: "privateMarker",
+          classification: "pii",
+        },
+        { name: "sequence_number", type: "bigint", sourceField: "sequenceNumber" },
         { name: "relation_group_id", type: "uuid", sourceField: "relationGroupId" },
         { name: "created_at", type: "timestamptz", required: true },
       ],
@@ -108,6 +134,21 @@ const manifest: PlatformSchemaManifest = {
       },
     },
   ],
+};
+
+type TestParameter = {
+  name: string;
+  in: string;
+  required?: boolean;
+  description?: string;
+  style?: string;
+  explode?: boolean;
+  schema: Record<string, unknown>;
+};
+
+type TestOperation = {
+  tags?: string[];
+  parameters?: TestParameter[];
 };
 
 function spec() {
@@ -123,7 +164,13 @@ function spec() {
     }),
   ) as {
     tags: Array<{ name: string; description?: string }>;
-    paths: Record<string, Record<string, { tags?: string[] }>>;
+    paths: Record<string, {
+      parameters?: TestParameter[];
+      get?: TestOperation;
+      post?: TestOperation;
+      patch?: TestOperation;
+      delete?: TestOperation;
+    }>;
     components: { schemas: Record<string, Record<string, unknown>> };
   };
 }
@@ -202,5 +249,113 @@ describe("rich generated REST OpenAPI", () => {
       { name: "Relation", description: "Canonical relation aggregate." },
     ]);
     expect(generated.paths["/api/rest/v1/relations"]?.post?.tags).toEqual(["Relation"]);
+  });
+
+  it("documents pagination and sorting with the runtime defaults and supported fields", () => {
+    const parameters = spec().paths["/api/rest/v1/relations"]?.get?.parameters ?? [];
+    const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
+
+    expect(byName.get("first")).toEqual({
+      name: "first",
+      in: "query",
+      description: "Number of records to return. When absent it defaults to 50; supplied values are clamped to 1-200.",
+      schema: { type: "integer", default: 50 },
+    });
+    expect(byName.get("after")?.description).toContain("nextCursor");
+    expect(byName.get("sortField")?.schema).toEqual({
+      type: "string",
+      enum: [
+        "id",
+        "displayName",
+        "relationType",
+        "metadata",
+        "externalId",
+        "first",
+        "status",
+        "statusIn",
+        "isOptedIn",
+        "marker",
+        "sequenceNumber",
+        "relationGroupId",
+        "createdAt",
+      ],
+      default: "id",
+    });
+    expect(byName.get("sortDirection")?.schema).toEqual({
+      type: "string",
+      enum: ["asc", "desc"],
+      default: "asc",
+    });
+  });
+
+  it("projects scalar field semantics into direct and explicit IN filters", () => {
+    const parameters = spec().paths["/api/rest/v1/relations"]?.get?.parameters ?? [];
+    const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
+
+    expect(byName.get("displayName")).toMatchObject({
+      description: "Human-readable relation name. Matches a case-insensitive substring. Repeat this parameter to instead match exactly against any supplied value.",
+      schema: { type: "string" },
+    });
+    expect(byName.get("displayName")?.schema.default).toBeUndefined();
+    expect(byName.get("displayNameIn")?.schema).toEqual({
+      type: "array",
+      items: { type: "string" },
+    });
+    expect(byName.get("relationType")?.schema).toEqual({ type: "string" });
+    expect(byName.get("relationType")?.description).not.toContain("Allowed values:");
+    expect(byName.get("relationTypeIn")?.description).not.toContain("Allowed values:");
+    expect(byName.get("relationTypeIn")).toMatchObject({
+      style: "form",
+      explode: true,
+      schema: {
+        type: "array",
+        items: { type: "string" },
+      },
+    });
+    expect(byName.get("relationGroupId")?.schema).toEqual({
+      type: "string",
+      format: "uuid",
+    });
+    expect(byName.has("metadata")).toBe(false);
+    expect(byName.has("metadataIn")).toBe(false);
+    expect(byName.has("iban")).toBe(false);
+    expect(byName.has("ibanIn")).toBe(false);
+    expect(byName.has("tenantId")).toBe(false);
+    expect(byName.has("tenantIdIn")).toBe(false);
+    expect(byName.has("privateMarker")).toBe(false);
+    expect(byName.has("privateMarkerIn")).toBe(false);
+    expect(byName.get("sequenceNumber")?.schema).toEqual({ type: "integer" });
+  });
+
+  it("avoids transport and explicit-IN parameter name collisions", () => {
+    const parameters = spec().paths["/api/rest/v1/relations"]?.get?.parameters ?? [];
+    const names = parameters.map((parameter) => parameter.name);
+    const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
+
+    expect(new Set(names).size).toBe(names.length);
+    expect(names.filter((name) => name === "first")).toHaveLength(1);
+    expect(byName.get("first")?.description).toContain("Number of records");
+    expect(byName.get("firstIn")?.description).toContain("Business sequence value.");
+    expect(byName.has("statusIn")).toBe(false);
+    expect(byName.get("statusInIn")?.description).toContain("Status import marker.");
+    expect(byName.has("isOptedIn")).toBe(false);
+    expect(byName.get("isOptedInIn")?.schema).toEqual({
+      type: "array",
+      items: { type: "boolean" },
+    });
+    expect(byName.has("markerIn")).toBe(false);
+  });
+
+  it("documents the item path identifier", () => {
+    const parameters = spec().paths["/api/rest/v1/relations/{id}"]?.parameters;
+    expect(parameters).toEqual([
+      {
+        name: "id",
+        in: "path",
+        required: true,
+        description: "Unique identifier of the Relation record.",
+        schema: { type: "string", format: "uuid" },
+      },
+    ]);
   });
 });

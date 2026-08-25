@@ -1,4 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
+/**
+ * Generated entity SDL and resolvers.
+ *
+ * Authored descriptions are intentionally present in the schema used by local
+ * GraphiQL and other development/schema tooling. Production currently blocks
+ * introspection in yoga.ts, so deployed anonymous clients cannot retrieve
+ * them; keeping one schema in every environment avoids runtime schema drift.
+ */
 import {
   GraphQLError,
   Kind,
@@ -37,14 +45,33 @@ export type GraphqlEntityDocumentation = {
   }>;
 };
 
-export type GraphqlDocumentationCatalog = {
-  entities: GraphqlEntityDocumentation[];
-};
-
 export function createGraphqlDocumentationIndex(
-  catalog: GraphqlDocumentationCatalog,
+  catalog: unknown,
 ): ReadonlyMap<string, GraphqlEntityDocumentation> {
-  return new Map(catalog.entities.map((entity) => [entity.typeName, entity]));
+  if (!catalog || typeof catalog !== "object" ||
+      !Array.isArray((catalog as { entities?: unknown }).entities)) {
+    throw new Error("Generated GraphQL documentation must contain an entities array.");
+  }
+  const entities = (catalog as { entities: unknown[] }).entities;
+  for (const entity of entities) {
+    const candidate = entity as Partial<GraphqlEntityDocumentation> | null;
+    if (!candidate || typeof candidate !== "object" ||
+        typeof candidate.typeName !== "string" ||
+        (candidate.description !== undefined && typeof candidate.description !== "string") ||
+        !Array.isArray(candidate.fields) ||
+        candidate.fields.some((field) =>
+          !field || typeof field !== "object" ||
+          typeof field.name !== "string" ||
+          (field.description !== undefined && typeof field.description !== "string") ||
+          (field.substringFilterDescription !== undefined &&
+            typeof field.substringFilterDescription !== "string")
+        )) {
+      throw new Error("Generated GraphQL documentation contains an invalid entity entry.");
+    }
+  }
+  return new Map(
+    (entities as GraphqlEntityDocumentation[]).map((entity) => [entity.typeName, entity]),
+  );
 }
 
 const tables = getGeneratedCrudTables().filter((table) => table.source?.graphql);
@@ -52,7 +79,7 @@ const tablesByGraphqlType = new Map(
   tables.map((table) => [table.source!.graphql!.typeName, table]),
 );
 const documentationByGraphqlType = createGraphqlDocumentationIndex(
-  graphqlDocumentation as GraphqlDocumentationCatalog,
+  graphqlDocumentation,
 );
 
 function assertGraphqlMetadata(table: GeneratedTable): GraphqlMetadata {
@@ -119,7 +146,25 @@ function relationFieldType(relationship: GeneratedCrudRelationship) {
 }
 
 function renderDescription(description: string | undefined, indent: string): string {
-  return description ? `${indent}${JSON.stringify(description)}\n` : "";
+  if (!description) return "";
+  let safe = "";
+  for (let index = 0; index < description.length; index += 1) {
+    const code = description.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = description.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        safe += description.slice(index, index + 2);
+        index += 1;
+      } else {
+        safe += "\ufffd";
+      }
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      safe += "\ufffd";
+    } else {
+      safe += description.charAt(index);
+    }
+  }
+  return `${indent}${JSON.stringify(safe)}\n`;
 }
 
 function appendDescription(
@@ -145,6 +190,7 @@ export function renderTypeDefinition(
   const fieldDocumentation = new Map(
     (documentation?.fields ?? []).map((field) => [field.name, field]),
   );
+  const filterFieldNames = new Set(table.columns.map(fieldNameForColumn));
   const columnFields = table.columns
     .map((column) => {
       const field = fieldNameForColumn(column);
@@ -207,27 +253,42 @@ ${[...columnFields, ...relationshipFields].join("\n")}
 
     input ${graphql.typeName}Filter {
 ${table.columns
-  .map((column) => {
+  .flatMap((column) => {
     const field = fieldNameForColumn(column);
     const scalar = graphqlScalarForColumn(column);
-    const directMatch = column.type === "text"
-      ? "Matches a case-insensitive substring."
-      : "Matches exactly.";
     const fieldDocumentationEntry = fieldDocumentation.get(field);
     const directDescription = column.type === "text"
-      ? fieldDocumentationEntry?.substringFilterDescription
+      ? fieldDocumentationEntry?.substringFilterDescription ??
+        fieldDocumentationEntry?.description
       : fieldDocumentationEntry?.description;
-    return `${renderDescription(
-      appendDescription(directDescription, directMatch),
-      "      ",
-    )}      ${field}: ${scalar}\n` +
-      `${renderDescription(
+    const definitions: string[] = [];
+    // The CRUD layer reserves a trailing `In` for exact-any filters, so a
+    // real field with that suffix has no unambiguous direct filter spelling.
+    if (!field.endsWith("In")) {
+      definitions.push(
+        `${renderDescription(
+          appendDescription(
+            directDescription,
+            column.type === "text"
+              ? "Matches a case-insensitive substring."
+              : "Matches exactly.",
+          ),
+          "      ",
+        )}      ${field}: ${scalar}`,
+      );
+    }
+    // A real `<field>In` column wins the name. Suppress the generated alias
+    // so one authored x/xIn pair cannot make the entire schema invalid.
+    if (!filterFieldNames.has(`${field}In`)) {
+      definitions.push(`${renderDescription(
         appendDescription(
           fieldDocumentationEntry?.description,
           "Matches exactly against any supplied value.",
         ),
         "      ",
-      )}      ${field}In: [${scalar}!]`;
+      )}      ${field}In: [${scalar}!]`);
+    }
+    return definitions;
   })
   .join("\n")}
     }
@@ -262,18 +323,15 @@ ${tables.map((table) => renderTypeDefinition(table)).join("\n")}
 
 export function renderQueryFields(
   table: GeneratedTable,
-  documentationIndex: ReadonlyMap<string, GraphqlEntityDocumentation> =
-    documentationByGraphqlType,
 ): string {
   const graphql = assertGraphqlMetadata(table);
-  const documentation = documentationIndex.get(graphql.typeName);
   return [
     `${renderDescription(
-      appendDescription(documentation?.description, "Fetches one record by id."),
+      `Fetches one ${graphql.typeName} record by id.`,
       "      ",
     )}      ${graphql.singleQueryName}(id: ID!): ${graphql.typeName}`,
     `${renderDescription(
-      appendDescription(documentation?.description, "Returns a page of records."),
+      `Returns a page of ${graphql.typeName} records.`,
       "      ",
     )}      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${graphql.typeName}Connection!`,
   ].join("\n");
@@ -285,22 +343,19 @@ export const generatedEntityQueryFields = tables
 
 export function renderMutationFields(
   table: GeneratedTable,
-  documentationIndex: ReadonlyMap<string, GraphqlEntityDocumentation> =
-    documentationByGraphqlType,
 ): string {
   const graphql = assertGraphqlMetadata(table);
-  const documentation = documentationIndex.get(graphql.typeName);
   return [
     `${renderDescription(
-      appendDescription(documentation?.description, "Creates a record."),
+      `Creates a ${graphql.typeName} record.`,
       "      ",
     )}      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${graphql.typeName}`,
     `${renderDescription(
-      appendDescription(documentation?.description, "Partially updates a record."),
+      `Partially updates a ${graphql.typeName} record.`,
       "      ",
     )}      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${graphql.typeName}`,
     `${renderDescription(
-      appendDescription(documentation?.description, "Deletes a record by id."),
+      `Deletes a ${graphql.typeName} record by id.`,
       "      ",
     )}      ${graphql.deleteMutationName}(id: ID!): Boolean!`,
   ].join("\n");

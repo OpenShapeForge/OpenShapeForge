@@ -111,6 +111,20 @@ const manifest: PlatformSchemaManifest = {
         { name: "status", type: "text", sourceField: "status" },
         { name: "status_in", type: "text", sourceField: "statusIn" },
         { name: "is_opted_in", type: "boolean", sourceField: "isOptedIn" },
+        { name: "marker", type: "text", sourceField: "marker" },
+        {
+          name: "marker_in",
+          type: "text",
+          sourceField: "markerIn",
+          classification: "confidential",
+        },
+        {
+          name: "private_marker",
+          type: "text",
+          sourceField: "privateMarker",
+          classification: "pii",
+        },
+        { name: "sequence_number", type: "bigint", sourceField: "sequenceNumber" },
         { name: "relation_group_id", type: "uuid", sourceField: "relationGroupId" },
         { name: "created_at", type: "timestamptz", required: true },
       ],
@@ -244,24 +258,24 @@ describe("rich generated REST OpenAPI", () => {
     expect(byName.get("first")).toEqual({
       name: "first",
       in: "query",
-      description: "Number of records to return. Defaults to 50 and is limited to 1-200.",
-      schema: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+      description: "Number of records to return. When absent it defaults to 50; supplied values are clamped to 1-200.",
+      schema: { type: "integer", default: 50 },
     });
     expect(byName.get("after")?.description).toContain("nextCursor");
     expect(byName.get("sortField")?.schema).toEqual({
       type: "string",
       enum: [
         "id",
-        "tenantId",
         "displayName",
         "relationType",
         "metadata",
         "externalId",
-        "iban",
         "first",
         "status",
         "statusIn",
         "isOptedIn",
+        "marker",
+        "sequenceNumber",
         "relationGroupId",
         "createdAt",
       ],
@@ -279,25 +293,23 @@ describe("rich generated REST OpenAPI", () => {
     const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
 
     expect(byName.get("displayName")).toMatchObject({
-      description: "Human-readable relation name. Matches a case-insensitive substring.",
+      description: "Human-readable relation name. Matches a case-insensitive substring. Repeat this parameter to instead match exactly against any supplied value.",
       schema: { type: "string" },
     });
     expect(byName.get("displayName")?.schema.default).toBeUndefined();
     expect(byName.get("displayNameIn")?.schema).toEqual({
       type: "array",
-      items: { type: "string", minLength: 1, maxLength: 200 },
+      items: { type: "string" },
     });
     expect(byName.get("relationType")?.schema).toEqual({ type: "string" });
     expect(byName.get("relationType")?.description).not.toContain("Allowed values:");
-    expect(byName.get("relationTypeIn")?.description).toContain(
-      "Allowed values: person (Person), organization (Organization).",
-    );
+    expect(byName.get("relationTypeIn")?.description).not.toContain("Allowed values:");
     expect(byName.get("relationTypeIn")).toMatchObject({
       style: "form",
       explode: true,
       schema: {
         type: "array",
-        items: { type: "string", enum: ["person", "organization"] },
+        items: { type: "string" },
       },
     });
     expect(byName.get("relationGroupId")?.schema).toEqual({
@@ -306,9 +318,13 @@ describe("rich generated REST OpenAPI", () => {
     });
     expect(byName.has("metadata")).toBe(false);
     expect(byName.has("metadataIn")).toBe(false);
-    expect(byName.get("iban")?.description).toBe(
-      "Matches a case-insensitive substring.",
-    );
+    expect(byName.has("iban")).toBe(false);
+    expect(byName.has("ibanIn")).toBe(false);
+    expect(byName.has("tenantId")).toBe(false);
+    expect(byName.has("tenantIdIn")).toBe(false);
+    expect(byName.has("privateMarker")).toBe(false);
+    expect(byName.has("privateMarkerIn")).toBe(false);
+    expect(byName.get("sequenceNumber")?.schema).toEqual({ type: "integer" });
   });
 
   it("avoids transport and explicit-IN parameter name collisions", () => {
@@ -327,6 +343,7 @@ describe("rich generated REST OpenAPI", () => {
       type: "array",
       items: { type: "boolean" },
     });
+    expect(byName.has("markerIn")).toBe(false);
   });
 
   it("documents the item path identifier", () => {

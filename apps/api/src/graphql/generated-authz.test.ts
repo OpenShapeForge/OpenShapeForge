@@ -136,6 +136,7 @@ describe("field-level data protection (#96/#101)", () => {
       { name: "public_label", sourceField: "publicLabel" },
       { name: "secret_note", classification: "confidential" as const },
       { name: "personal_email", sourceField: "emailAddress", classification: "pii" as const },
+      { name: "is_opted_in", sourceField: "isOptedIn", classification: "pii" as const },
     ];
 
     const forbiddenQueries = [
@@ -143,6 +144,8 @@ describe("field-level data protection (#96/#101)", () => {
       ["a generated FieldIn classified filter", { emailAddressIn: ["jane@example.com"] }, undefined],
       ["a classified sort", undefined, { field: "emailAddress", direction: "asc" }],
       ["a snake-case mapped classified filter", { secretNote: "top-secret" }, undefined],
+      ["an In-suffix classified filter", { isOptedInIn: [true] }, undefined],
+      ["an In-suffix classified sort", undefined, { field: "isOptedIn", direction: "asc" }],
     ] as const;
 
     for (const [label, filter, sort] of forbiddenQueries) {

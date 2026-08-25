@@ -35,6 +35,28 @@ export type GraphqlDocumentationCatalog = {
   entities: GraphqlEntityDocumentation[];
 };
 
+/** GraphQL string literals cannot contain unpaired UTF-16 surrogates. */
+export function sanitizeGraphqlDescription(value: string): string {
+  let result = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        result += value.slice(index, index + 2);
+        index += 1;
+      } else {
+        result += "\ufffd";
+      }
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      result += "\ufffd";
+    } else {
+      result += value.charAt(index);
+    }
+  }
+  return result;
+}
+
 function isRestricted(field: Pick<CompiledField, "classification">): boolean {
   const sensitivity = field.classification?.sensitivity;
   return sensitivity === "confidential" || sensitivity === "pii" || sensitivity === "bsn";
@@ -48,7 +70,9 @@ function compiledDescription(
   const description = compiledFieldSchema(field, referentiedata, {
     includeDefault: false,
   }).description;
-  return typeof description === "string" ? description : undefined;
+  return typeof description === "string"
+    ? sanitizeGraphqlDescription(description)
+    : undefined;
 }
 
 export function buildGraphqlDocumentationCatalog(
@@ -62,20 +86,32 @@ export function buildGraphqlDocumentationCatalog(
       const coreFieldsByName = new Map(
         contract.model.fields.map((field) => [field.key, field]),
       );
+      const belongsToBySyntheticId = new Map(
+        contract.model.relationships
+          .filter((relationship) => relationship.kind === "belongsTo")
+          .map((relationship) => [`${relationship.key}Id`, relationship]),
+      );
 
       for (const field of contract.graphql.fields) {
         const compiled = coreFieldsByName.get(field.name);
+        const relationship = belongsToBySyntheticId.get(field.name);
         const description = compiled
           ? compiledDescription(compiled, referentiedata)
-          : undefined;
-        const substringFilterDescription =
+          : relationship
+            ? `References the ${relationship.target} entity.`
+            : undefined;
+        const baseDescription =
           compiled && !isRestricted(compiled)
             ? describeCompiledField(compiled)
             : undefined;
+        const substringFilterDescription = baseDescription
+          ? sanitizeGraphqlDescription(baseDescription)
+          : undefined;
+        if (!description && !substringFilterDescription) continue;
         fields.set(field.name, {
           name: field.name,
           ...(description ? { description } : {}),
-          ...(substringFilterDescription
+          ...(substringFilterDescription && substringFilterDescription !== description
             ? { substringFilterDescription }
             : {}),
         });
@@ -83,16 +119,19 @@ export function buildGraphqlDocumentationCatalog(
 
       for (const profile of Object.values(contract.graphql.profileTypes)) {
         for (const field of profile.fields) {
-          const sensitivity = field.classification?.sensitivity;
-          const restricted =
-            sensitivity === "confidential" || sensitivity === "pii" || sensitivity === "bsn";
-          const description = restricted
-            ? undefined
-            : field.description ?? localizedText(field.label);
+          // A context field may add documentation, but it must never replace
+          // the canonical core-field projection with a thinner profile label.
+          if (coreFieldsByName.has(field.name) || fields.has(field.name) || isRestricted(field)) {
+            continue;
+          }
+          const rawDescription = field.description ?? localizedText(field.label);
+          const description = rawDescription
+            ? sanitizeGraphqlDescription(rawDescription)
+            : undefined;
+          if (!description) continue;
           fields.set(field.name, {
             name: field.name,
-            ...(description ? { description } : {}),
-            ...(description ? { substringFilterDescription: description } : {}),
+            description,
           });
         }
       }
@@ -100,7 +139,7 @@ export function buildGraphqlDocumentationCatalog(
       return {
         typeName: contract.graphql.typeName,
         ...(contract.graphql.description
-          ? { description: contract.graphql.description }
+          ? { description: sanitizeGraphqlDescription(contract.graphql.description) }
           : {}),
         fields: [...fields.values()].sort((left, right) =>
           left.name.localeCompare(right.name),

@@ -9,6 +9,7 @@ import {
 } from "graphql";
 import {
   createGraphqlDocumentationIndex,
+  generatedEntityTypeDefs,
   renderMutationFields,
   renderQueryFields,
   renderTypeDefinition,
@@ -32,7 +33,6 @@ const temporaryDirectories: string[] = [];
 
 type CompilerFunctions = {
   compileAuthoringBackendManifest: (...args: any[]) => any;
-  buildGraphqlDocumentationCatalog: (...args: any[]) => any;
   buildMcpCatalog: (...args: any[]) => any;
   renderGraphqlDocumentationCatalog: (...args: any[]) => string;
   renderOpenApiSpec: (...args: any[]) => string;
@@ -55,7 +55,6 @@ async function loadCompilerFunctions(): Promise<CompilerFunctions> {
   ]);
   return {
     compileAuthoringBackendManifest: backendManifest.compileAuthoringBackendManifest,
-    buildGraphqlDocumentationCatalog: graphql.buildGraphqlDocumentationCatalog,
     renderGraphqlDocumentationCatalog: graphql.renderGraphqlDocumentationCatalog,
     buildMcpCatalog: mcp.buildMcpCatalog,
     renderOpenApiSpec: openApi.renderOpenApiSpec,
@@ -100,7 +99,6 @@ describe("authoring description projections", () => {
   test("one changed YAML entity and field description reaches OpenAPI, MCP, and GraphQL introspection", async () => {
     const {
       compileAuthoringBackendManifest,
-      buildGraphqlDocumentationCatalog,
       buildMcpCatalog,
       renderGraphqlDocumentationCatalog,
       renderOpenApiSpec,
@@ -173,10 +171,6 @@ describe("authoring description projections", () => {
       )?.name?.description,
     ).toBe(RICH_FIELD_DESCRIPTION);
 
-    const graphqlCatalog = buildGraphqlDocumentationCatalog(
-      [compiled],
-      "description fixture",
-    );
     const graphqlArtifactPath = join(
       temporaryDirectories[0]!,
       "documentation.json",
@@ -189,7 +183,6 @@ describe("authoring description projections", () => {
     const serializedGraphqlCatalog = JSON.parse(
       readFileSync(graphqlArtifactPath, "utf8"),
     );
-    expect(serializedGraphqlCatalog).toEqual(graphqlCatalog);
     const documentationIndex = createGraphqlDocumentationIndex(
       serializedGraphqlCatalog,
     );
@@ -205,13 +198,11 @@ describe("authoring description projections", () => {
       type Query {
         ${renderQueryFields(
           table! as Parameters<typeof renderQueryFields>[0],
-          documentationIndex,
         )}
       }
       type Mutation {
         ${renderMutationFields(
           table! as Parameters<typeof renderMutationFields>[0],
-          documentationIndex,
         )}
       }
     `);
@@ -258,19 +249,67 @@ describe("authoring description projections", () => {
       `${RICH_FIELD_DESCRIPTION} Matches exactly against any supplied value.`,
     );
     expect(descriptionFor("queryRoot", graphqlMetadata.singleQueryName)).toBe(
-      `${ENTITY_DESCRIPTION} Fetches one record by id.`,
+      "Fetches one RestEnabled record by id.",
     );
     expect(descriptionFor("queryRoot", graphqlMetadata.listQueryName)).toBe(
-      `${ENTITY_DESCRIPTION} Returns a page of records.`,
+      "Returns a page of RestEnabled records.",
     );
     expect(descriptionFor("mutationRoot", graphqlMetadata.createMutationName)).toBe(
-      `${ENTITY_DESCRIPTION} Creates a record.`,
+      "Creates a RestEnabled record.",
     );
     expect(descriptionFor("mutationRoot", graphqlMetadata.updateMutationName)).toBe(
-      `${ENTITY_DESCRIPTION} Partially updates a record.`,
+      "Partially updates a RestEnabled record.",
     );
     expect(descriptionFor("mutationRoot", graphqlMetadata.deleteMutationName)).toBe(
-      `${ENTITY_DESCRIPTION} Deletes a record by id.`,
+      "Deletes a RestEnabled record by id.",
     );
+  });
+
+  test("the shipped JSON artifact is wired through the production default renderer", async () => {
+    const schema = buildSchema(`
+      scalar JSON
+      ${generatedEntityTypeDefs}
+      type Query { _health: String }
+    `);
+    const result = await graphql({
+      schema,
+      source: `{
+        entity: __type(name: "ContactDetail") {
+          description
+          fields { name description }
+        }
+        filter: __type(name: "ContactDetailFilter") {
+          inputFields { name description }
+        }
+        position: __type(name: "Position") {
+          fields { name description }
+        }
+        communicationFilter: __type(name: "CommunicationPreferenceFilter") {
+          inputFields { name description }
+        }
+      }`,
+    });
+    expect(result.errors).toBeUndefined();
+    const data = result.data as Record<string, any>;
+    expect(data.entity?.description).toBe(
+      "A contact detail such as a phone number, email address, or other reachability channel.",
+    );
+    expect(
+      data.entity?.fields.find((field: any) => field.name === "type")?.description,
+    ).toContain("Allowed values: email (E-mail)");
+    expect(
+      data.filter?.inputFields.find((field: any) => field.name === "type")?.description,
+    ).not.toContain("Allowed values:");
+    expect(
+      data.filter?.inputFields.find((field: any) => field.name === "typeIn")?.description,
+    ).toContain("Allowed values: email (E-mail)");
+    expect(
+      data.position?.fields.find((field: any) => field.name === "orgUnitId")?.description,
+    ).toBe("References the OrgUnit entity.");
+    const communicationFilterNames = data.communicationFilter?.inputFields.map(
+      (field: any) => field.name,
+    );
+    expect(communicationFilterNames).not.toContain("isOptedIn");
+    expect(communicationFilterNames).toContain("isOptedInIn");
   });
 });

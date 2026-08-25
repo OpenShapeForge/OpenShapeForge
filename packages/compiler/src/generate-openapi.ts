@@ -100,6 +100,20 @@ function entitySchemaName(table: TableDefinition): string {
   return table.source?.authoringEntityName ?? table.name;
 }
 
+function isRestrictedSensitivity(sensitivity: string | undefined): boolean {
+  return sensitivity === "confidential" || sensitivity === "pii" || sensitivity === "bsn";
+}
+
+function isRestrictedColumn(
+  column: TableDefinition["columns"][number],
+): boolean {
+  return isRestrictedSensitivity(column.classification);
+}
+
+function isRestrictedField(field: CompiledField | undefined): boolean {
+  return isRestrictedSensitivity(field?.classification?.sensitivity);
+}
+
 function fieldSchemaForColumn(
   column: TableDefinition["columns"][number],
   fieldsByKey: Map<string, CompiledField>,
@@ -108,9 +122,7 @@ function fieldSchemaForColumn(
 ): { fieldName: string; compiled?: CompiledField; schema: JsonObject } {
   const fieldName = fieldNameForColumn(column);
   const compiled = fieldsByKey.get(fieldName);
-  const sensitivity = compiled?.classification?.sensitivity;
-  const classified =
-    sensitivity === "confidential" || sensitivity === "pii" || sensitivity === "bsn";
+  const classified = isRestrictedField(compiled) || isRestrictedColumn(column);
   if (!compiled || mode === "storage" || classified) {
     return { fieldName, schema: schemaForScalar(column.type) };
   }
@@ -160,26 +172,55 @@ function entityDescription(contract: CompiledEntityContract | undefined): string
   return localizedText(contract?.entity.description);
 }
 
-function withoutPresentationMetadata(schema: JsonObject): JsonObject {
-  const { title: _title, description: _description, default: _default, ...rest } = schema;
-  return rest;
+/** Only constraints the REST query parser actually validates. */
+function filterSchemaForColumn(
+  column: TableDefinition["columns"][number],
+): JsonObject {
+  switch (column.type) {
+    case "uuid":
+      return { type: "string", format: "uuid" };
+    case "date":
+      return { type: "string", format: "date" };
+    case "timestamptz":
+      return { type: "string", format: "date-time" };
+    case "boolean":
+      return { type: "boolean" };
+    case "integer":
+      return { type: "integer" };
+    case "bigint":
+      return { type: "integer" };
+    case "numeric":
+      return { type: "number" };
+    default:
+      // Authored enum/length/pattern rules are not validated by
+      // coerceFilterValue; publishing them would overstate the request
+      // contract. UUID/date/date-time have explicit runtime validation above.
+      return { type: "string" };
+  }
 }
 
 function listParameters(
   table: TableDefinition,
   fieldsByKey: Map<string, CompiledField>,
-  referentiedata: CoreReferentiedataSnapshot,
 ): JsonObject[] {
-  const sortableFields = table.columns.map(fieldNameForColumn);
-  const fieldNames = new Set(sortableFields);
+  const sortableFields = table.columns
+    .filter((column) =>
+      column.name !== "tenant_id" &&
+      !isRestrictedColumn(column) &&
+      !isRestrictedField(fieldsByKey.get(fieldNameForColumn(column)))
+    )
+    .map(fieldNameForColumn);
+  // Collision detection must include hidden fields too: the runtime resolves
+  // a real `xIn` column before it considers the generated alias for `x`.
+  const fieldNames = new Set(table.columns.map(fieldNameForColumn));
   const primaryKey = table.columns.find((column) => column.primaryKey === true);
   const primaryKeyField = primaryKey ? fieldNameForColumn(primaryKey) : undefined;
   const parameters: JsonObject[] = [
     {
       name: "first",
       in: "query",
-      description: "Number of records to return. Defaults to 50 and is limited to 1-200.",
-      schema: { type: "integer", minimum: 1, maximum: 200, default: 50 },
+      description: "Number of records to return. When absent it defaults to 50; supplied values are clamped to 1-200.",
+      schema: { type: "integer", default: 50 },
     },
     {
       name: "after",
@@ -209,6 +250,9 @@ function listParameters(
     const fieldName = fieldNameForColumn(column);
     const compiled = fieldsByKey.get(fieldName);
     if (
+      column.name === "tenant_id" ||
+      isRestrictedColumn(column) ||
+      isRestrictedField(compiled) ||
       column.type === "jsonb" ||
       compiled?.cardinality === "collection" ||
       compiled?.valueType === "object"
@@ -216,15 +260,10 @@ function listParameters(
       continue;
     }
 
-    const projected = fieldSchemaForColumn(
-      column,
-      fieldsByKey,
-      referentiedata,
-      "update",
-    ).schema;
-    const authoredDescription =
-      typeof projected.description === "string" ? projected.description : undefined;
-    const scalarSchema = withoutPresentationMetadata(projected);
+    const authoredDescription = compiled
+      ? describeCompiledField(compiled)
+      : undefined;
+    const scalarSchema = filterSchemaForColumn(column);
     const inParameterName = `${fieldName}In`;
     // The CRUD condition builder interprets every key ending in `In` as an
     // array-filter alias. Such a field therefore cannot be addressed through
@@ -241,18 +280,17 @@ function listParameters(
         description: [
           substringDescription,
           column.type === "text"
-            ? "Matches a case-insensitive substring."
-            : "Matches exactly.",
+            ? "Matches a case-insensitive substring. Repeat this parameter to instead match exactly against any supplied value."
+            : "Matches exactly. Repeat this parameter to match against any supplied value.",
         ]
           .filter(Boolean)
           .join(" "),
-        // Text equality constraints describe complete stored values, not the
-        // substring search term accepted by the runtime.
-        schema: column.type === "text" ? { type: "string" } : scalarSchema,
+        schema: scalarSchema,
       });
     }
-    // A real field with the same name wins in the REST parser. Omitting this
-    // alias mirrors that precedence and preserves unique OpenAPI parameters.
+    // A real field with the same name makes this transport spelling
+    // ambiguous. Omitting the alias preserves unique parameters; callers can
+    // still repeat the documented plain parameter for exact-any matching.
     if (!fieldNames.has(inParameterName)) {
       parameters.push({
         name: inParameterName,
@@ -411,7 +449,7 @@ export function renderOpenApiSpec(
           (description ? `${description} ` : "") +
           "Pagination, sorting, and every supported scalar field filter are " +
           "documented below. Unknown filter fields are rejected.",
-        parameters: listParameters(table, fieldsByKey, referentiedata),
+        parameters: listParameters(table, fieldsByKey),
         responses: {
           "200": entityResponse(`${name}List`, `${name} page`),
           "400": errorResponse("Invalid filter, sort, or pagination input"),

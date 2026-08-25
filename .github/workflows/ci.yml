@@ -133,8 +133,11 @@ jobs:
         run: >-
           cd apps/api && bun test src/config src/roles src/control
           src/graphql/__tests__/introspection.test.ts
+          src/graphql/generated-authz.test.ts
           src/graphql/__tests__/classified-query-guard.unit.test.ts
           src/graphql/__tests__/classified-nullability.unit.test.ts
+          src/graphql/__tests__/description-projection.unit.test.ts
+          src/graphql/__tests__/immutable-writability.unit.test.ts
           src/graphql/__tests__/query-hardening.unit.test.ts
 
       # Determinism + freshness gate: regenerates twice and fails on drift, so

@@ -300,6 +300,35 @@ for (const table of restTables) {
       expect(response.body.error.code).toBe("BAD_USER_INPUT");
     });
 
+    test("GET list rejects an invalid UUID filter with 400 before querying Postgres", async () => {
+      const response = await rest(tenantA, "GET", `${base}?id=not-a-uuid`);
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe("BAD_USER_INPUT");
+      expect(response.body.error.message).toContain("expects a UUID");
+    });
+
+    test("GET list rejects an invalid RFC 3339 date-time filter with 400", async () => {
+      const response = await rest(
+        tenantA,
+        "GET",
+        `${base}?createdAt=2020-02-30T25%3A00%3A00Z`,
+      );
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe("BAD_USER_INPUT");
+      expect(response.body.error.message).toContain("expects an RFC 3339 date-time");
+    });
+
+    const dateColumn = table.columns.find((column) => column.type === "date");
+    if (dateColumn) {
+      const field = fieldName(dateColumn);
+      test(`GET list rejects an invalid ${field} date filter with 400`, async () => {
+        const response = await rest(tenantA, "GET", `${base}?${field}=2020-02-30`);
+        expect(response.status).toBe(400);
+        expect(response.body.error.code).toBe("BAD_USER_INPUT");
+        expect(response.body.error.message).toContain("expects a date in YYYY-MM-DD format");
+      });
+    }
+
     const sortColumn = textColumnFor(table);
     if (sortColumn) {
       const field = fieldName(sortColumn);

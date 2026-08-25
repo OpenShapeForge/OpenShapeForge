@@ -18,7 +18,11 @@
  */
 import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
-import { compiledFieldSchema, localizedText } from "./field-json-schema.js";
+import {
+  compiledFieldSchema,
+  describeCompiledField,
+  localizedText,
+} from "./field-json-schema.js";
 import type {
   PlatformSchemaManifest,
   ScalarType,
@@ -26,6 +30,12 @@ import type {
 } from "./schema.js";
 
 const REST_MOUNT = "/api/rest/v1";
+const RESERVED_LIST_PARAMETER_NAMES = new Set([
+  "first",
+  "after",
+  "sortField",
+  "sortDirection",
+]);
 
 type JsonObject = Record<string, unknown>;
 
@@ -161,6 +171,7 @@ function listParameters(
   referentiedata: CoreReferentiedataSnapshot,
 ): JsonObject[] {
   const sortableFields = table.columns.map(fieldNameForColumn);
+  const fieldNames = new Set(sortableFields);
   const primaryKey = table.columns.find((column) => column.primaryKey === true);
   const primaryKeyField = primaryKey ? fieldNameForColumn(primaryKey) : undefined;
   const parameters: JsonObject[] = [
@@ -214,35 +225,49 @@ function listParameters(
     const authoredDescription =
       typeof projected.description === "string" ? projected.description : undefined;
     const scalarSchema = withoutPresentationMetadata(projected);
-    const scalarMatch =
-      column.type === "text"
-        ? "Matches a case-insensitive substring."
-        : "Matches exactly.";
-    parameters.push({
-      name: fieldName,
-      in: "query",
-      description: [
-        authoredDescription,
-        scalarMatch,
-        `Repeat this parameter to match any supplied value, or use ${fieldName}In.`,
-      ]
-        .filter(Boolean)
-        .join(" "),
-      schema: scalarSchema,
-    });
-    parameters.push({
-      name: `${fieldName}In`,
-      in: "query",
-      description: [
-        authoredDescription,
-        "Matches exactly against any supplied value. Repeat this parameter to supply multiple values.",
-      ]
-        .filter(Boolean)
-        .join(" "),
-      style: "form",
-      explode: true,
-      schema: { type: "array", items: scalarSchema },
-    });
+    const inParameterName = `${fieldName}In`;
+    // The CRUD condition builder interprets every key ending in `In` as an
+    // array-filter alias. Such a field therefore cannot be addressed through
+    // a direct scalar query parameter; only its unambiguous `<field>In` alias
+    // is documented below.
+    if (!RESERVED_LIST_PARAMETER_NAMES.has(fieldName) && !fieldName.endsWith("In")) {
+      const substringDescription =
+        column.type === "text" && authoredDescription && compiled
+          ? describeCompiledField(compiled)
+          : authoredDescription;
+      parameters.push({
+        name: fieldName,
+        in: "query",
+        description: [
+          substringDescription,
+          column.type === "text"
+            ? "Matches a case-insensitive substring."
+            : "Matches exactly.",
+        ]
+          .filter(Boolean)
+          .join(" "),
+        // Text equality constraints describe complete stored values, not the
+        // substring search term accepted by the runtime.
+        schema: column.type === "text" ? { type: "string" } : scalarSchema,
+      });
+    }
+    // A real field with the same name wins in the REST parser. Omitting this
+    // alias mirrors that precedence and preserves unique OpenAPI parameters.
+    if (!fieldNames.has(inParameterName)) {
+      parameters.push({
+        name: inParameterName,
+        in: "query",
+        description: [
+          authoredDescription,
+          "Matches exactly against any supplied value. Repeat this parameter to supply multiple values.",
+        ]
+          .filter(Boolean)
+          .join(" "),
+        style: "form",
+        explode: true,
+        schema: { type: "array", items: scalarSchema },
+      });
+    }
   }
 
   return parameters;

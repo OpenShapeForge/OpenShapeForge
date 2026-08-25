@@ -75,6 +75,14 @@ const contract = {
         validation: { maxLength: 34 },
         classification: { sensitivity: "confidential" },
       }),
+      field({ key: "first", description: { en: "Business sequence value." } }),
+      field({ key: "status", description: { en: "Current status." } }),
+      field({ key: "statusIn", description: { en: "Status import marker." } }),
+      field({
+        key: "isOptedIn",
+        valueType: "boolean",
+        description: { en: "Whether the relation opted in." },
+      }),
     ],
   },
   rest: {
@@ -99,6 +107,10 @@ const manifest: PlatformSchemaManifest = {
         { name: "metadata", type: "jsonb", sourceField: "metadata" },
         { name: "external_id", type: "text", sourceField: "externalId", immutable: true },
         { name: "iban", type: "text", sourceField: "iban" },
+        { name: "business_first", type: "text", sourceField: "first" },
+        { name: "status", type: "text", sourceField: "status" },
+        { name: "status_in", type: "text", sourceField: "statusIn" },
+        { name: "is_opted_in", type: "boolean", sourceField: "isOptedIn" },
         { name: "relation_group_id", type: "uuid", sourceField: "relationGroupId" },
         { name: "created_at", type: "timestamptz", required: true },
       ],
@@ -246,6 +258,10 @@ describe("rich generated REST OpenAPI", () => {
         "metadata",
         "externalId",
         "iban",
+        "first",
+        "status",
+        "statusIn",
+        "isOptedIn",
         "relationGroupId",
         "createdAt",
       ],
@@ -263,17 +279,17 @@ describe("rich generated REST OpenAPI", () => {
     const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
 
     expect(byName.get("displayName")).toMatchObject({
-      description:
-        "Human-readable relation name. Matches a case-insensitive substring. " +
-        "Repeat this parameter to match any supplied value, or use displayNameIn.",
-      schema: { type: "string", minLength: 1, maxLength: 200 },
+      description: "Human-readable relation name. Matches a case-insensitive substring.",
+      schema: { type: "string" },
     });
     expect(byName.get("displayName")?.schema.default).toBeUndefined();
-    expect(byName.get("relationType")?.schema).toEqual({
-      type: "string",
-      enum: ["person", "organization"],
+    expect(byName.get("displayNameIn")?.schema).toEqual({
+      type: "array",
+      items: { type: "string", minLength: 1, maxLength: 200 },
     });
-    expect(byName.get("relationType")?.description).toContain(
+    expect(byName.get("relationType")?.schema).toEqual({ type: "string" });
+    expect(byName.get("relationType")?.description).not.toContain("Allowed values:");
+    expect(byName.get("relationTypeIn")?.description).toContain(
       "Allowed values: person (Person), organization (Organization).",
     );
     expect(byName.get("relationTypeIn")).toMatchObject({
@@ -291,9 +307,26 @@ describe("rich generated REST OpenAPI", () => {
     expect(byName.has("metadata")).toBe(false);
     expect(byName.has("metadataIn")).toBe(false);
     expect(byName.get("iban")?.description).toBe(
-      "Matches a case-insensitive substring. Repeat this parameter to match any supplied value, " +
-        "or use ibanIn.",
+      "Matches a case-insensitive substring.",
     );
+  });
+
+  it("avoids transport and explicit-IN parameter name collisions", () => {
+    const parameters = spec().paths["/api/rest/v1/relations"]?.get?.parameters ?? [];
+    const names = parameters.map((parameter) => parameter.name);
+    const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
+
+    expect(new Set(names).size).toBe(names.length);
+    expect(names.filter((name) => name === "first")).toHaveLength(1);
+    expect(byName.get("first")?.description).toContain("Number of records");
+    expect(byName.get("firstIn")?.description).toContain("Business sequence value.");
+    expect(byName.has("statusIn")).toBe(false);
+    expect(byName.get("statusInIn")?.description).toContain("Status import marker.");
+    expect(byName.has("isOptedIn")).toBe(false);
+    expect(byName.get("isOptedInIn")?.schema).toEqual({
+      type: "array",
+      items: { type: "boolean" },
+    });
   });
 
   it("documents the item path identifier", () => {

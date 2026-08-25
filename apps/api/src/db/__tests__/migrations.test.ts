@@ -170,7 +170,8 @@ describe("generated schema migration", () => {
         // workflow node catalog's `category` to jsonb and is a no-op here — the
         // table does not exist yet on a fresh install — but it is still
         // RECORDED, which is what stops it running against the first database
-        // that later grows the table. A fresh install applies all five in
+        // that later grows the table. 0007 installs the authoritative document
+        // version constraints and commands. A fresh install applies all six in
         // order; the list mirrors the registry in migrations/versioned/index.ts.
         expect(first.versionedApplied).toEqual([
           "0002_org-unit-closure-trigger",
@@ -178,6 +179,7 @@ describe("generated schema migration", () => {
           "0004_org-unit-reparent-cycle-guard",
           "0005_org-unit-keycloak-link",
           "0006_workflow-node-category-localized",
+          "0007_document-version-authority",
         ]);
 
         await withDb(url, async (db) => {

@@ -11,10 +11,11 @@ import {
   registerOperationalRoutes,
   type OperationalRoutesOptions,
 } from "@openshapeforge/observability/fastify";
-import type {
-  ReadinessCheck,
-  Registry,
-  SanitizedErrorReport,
+import {
+  sanitizeError,
+  type ReadinessCheck,
+  type Registry,
+  type SanitizedErrorReport,
 } from "@openshapeforge/observability";
 import type { GraphqlCorsPolicy } from "@openshapeforge/observability/yoga";
 import Fastify from "fastify";
@@ -102,6 +103,8 @@ export function createApiApp(
     readinessChecks?: readonly ReadinessCheck[];
     /** Override only for controlled tests that need immediate readiness transitions. */
     readinessCacheMs?: number;
+    /** Capture the real structured logger in focused privacy regressions. */
+    logStream?: { write(message: string): void };
   },
 ) {
   const modules: ModuleRegistry = options.modules ?? { loaded: [], failures: [] };
@@ -112,7 +115,22 @@ export function createApiApp(
   // rate-limit key) behind the ingress; requestTimeout bounds the whole request
   // so a slow/hung request cannot pin a worker (issue #130).
   const app = Fastify({
-    logger: { level: process.env.LOG_LEVEL ?? "info" },
+    logger: {
+      level: process.env.LOG_LEVEL ?? "info",
+      // URLs can contain GraphQL documents, OAuth codes, or entity IDs, while
+      // addresses and user agents are unnecessary high-cardinality identifiers.
+      serializers: {
+        req: (request) => ({ method: request.method }),
+        res: (reply) => ({ statusCode: reply.statusCode }),
+        err: (error) => ({
+          ...sanitizeError(error, "http.error"),
+          type: "Error",
+          message: "Redacted error.",
+          stack: "",
+        }),
+      },
+      ...(options.logStream ? { stream: options.logStream } : {}),
+    },
     trustProxy: limits.trustProxy,
     requestTimeout: limits.requestTimeoutMs,
   });

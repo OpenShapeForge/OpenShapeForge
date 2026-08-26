@@ -96,6 +96,42 @@ describe("operational readiness", () => {
 });
 
 describe("bounded GraphQL observability", () => {
+  test("omits request URLs, addresses, and user agents from real structured logs", async () => {
+    const lines: string[] = [];
+    const secret = "logger-query-secret-7f3a";
+    const userAgent = "private-client-fingerprint-91b2";
+    const forwardedAddress = "198.51.100.77";
+    const app = createApiApp({
+      cors: false,
+      readinessChecks: [],
+      logStream: { write: (line) => lines.push(line) },
+    });
+    try {
+      const response = await app.inject({
+        method: "GET",
+        url: `/api/health?query=${secret}&variables=${secret}`,
+        headers: {
+          "user-agent": userAgent,
+          "x-forwarded-for": forwardedAddress,
+        },
+      });
+      expect(response.statusCode).toBe(200);
+      app.log.error({
+        err: Object.assign(new Error(secret), { name: userAgent, code: secret }),
+      }, "Synthetic logger privacy check.");
+    } finally {
+      await app.close();
+    }
+    const output = lines.join("");
+    expect(output).toContain("incoming request");
+    expect(output).not.toContain(secret);
+    expect(output).not.toContain(userAgent);
+    expect(output).not.toContain(forwardedAddress);
+    expect(output).not.toContain("remoteAddress");
+    expect(output).not.toContain("/api/health?");
+    expect(output).toContain('"category":"http.error"');
+  });
+
   test("exports low-cardinality metrics and reports unexpected errors without request data", async () => {
     const registry = new Registry();
     const reports: SanitizedErrorReport[] = [];

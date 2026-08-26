@@ -119,6 +119,7 @@ export type VersionedMigrationLedgerStatus = {
   ready: boolean;
   missing: string[];
   mismatched: string[];
+  unexpected: string[];
 };
 
 /** Read-only readiness check for the complete immutable migration registry. */
@@ -126,15 +127,13 @@ export async function verifyVersionedMigrationLedger(
   db: Kysely<any>,
   migrations: readonly VersionedMigration[],
 ): Promise<VersionedMigrationLedgerStatus> {
-  if (migrations.length === 0) return { ready: true, missing: [], mismatched: [] };
-  validateVersionedRegistry(migrations);
-  const versions = migrations.map((migration) => migration.version);
+  if (migrations.length > 0) validateVersionedRegistry(migrations);
   const ledger = await sql<{ version: string; checksum: string | null }>`
     select version, checksum
     from platform.schema_migrations
-    where version in (${sql.join(versions)})
   `.execute(db);
   const recorded = new Map(ledger.rows.map((row) => [row.version, row.checksum]));
+  const expected = new Set(migrations.map((migration) => migration.version));
   const missing: string[] = [];
   const mismatched: string[] = [];
   for (const migration of migrations) {
@@ -145,10 +144,17 @@ export async function verifyVersionedMigrationLedger(
       mismatched.push(migration.version);
     }
   }
+  const unexpected = ledger.rows
+    .map((row) => row.version)
+    .filter((version) => /^\d{4}_/.test(version))
+    .filter((version) => version !== "0001_generated_platform_schema")
+    .filter((version) => !expected.has(version))
+    .sort();
   return {
-    ready: missing.length === 0 && mismatched.length === 0,
+    ready: missing.length === 0 && mismatched.length === 0 && unexpected.length === 0,
     missing,
     mismatched,
+    unexpected,
   };
 }
 

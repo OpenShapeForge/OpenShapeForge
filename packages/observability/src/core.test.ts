@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 import { Registry } from "prom-client";
 import Fastify from "fastify";
 import { registerOperationalRoutes } from "./fastify.js";
@@ -70,13 +71,67 @@ describe("observability core", () => {
     applyBoundedHttpSpanAttributes(span, {
       url: `/api/graphql?query=PrivateDocument&variables=${secret}&code=${secret}`,
     } as never);
-    expect(Object.fromEntries(attributes)).toEqual({
-      "http.target": "/api/graphql",
-      "url.full": "/api/graphql",
+    expect(Object.fromEntries(attributes)).toMatchObject({
+      "http.target": "[REDACTED]",
+      "http.url": "[REDACTED]",
+      "url.full": "[REDACTED]",
+      "url.path": "[REDACTED]",
       "url.query": "[REDACTED]",
+      "user_agent.original": "[REDACTED]",
+      "client.address": "[REDACTED]",
+      "network.peer.address": "[REDACTED]",
+      "network.peer.port": 0,
     });
     expect(JSON.stringify(Object.fromEntries(attributes))).not.toContain(secret);
   });
+
+  test("redacts identifiers in spans delivered to the configured exporter", async () => {
+    const secret = "span-secret-user-agent-7f3a";
+    const script = `
+      const collected = [];
+      const exporter = {
+        export(spans, done) {
+          collected.push(...spans.map((span) => span.attributes));
+          done({ code: 0 });
+        },
+        shutdown() { return Promise.resolve(); },
+      };
+      const otel = await import("./src/otel.ts");
+      otel.bootstrapOpenTelemetry({ serviceName: "export-test", traceExporter: exporter });
+      const { trace } = await import("@opentelemetry/api");
+      const span = trace.getTracer("export-test").startSpan("request");
+      span.setAttribute("url.full", "http://127.0.0.1/private/${secret}?query=${secret}");
+      span.setAttribute("url.path", "/private/${secret}");
+      span.setAttribute("user_agent.original", "${secret}");
+      span.setAttribute("client.address", "198.51.100.77");
+      span.setAttribute("network.peer.address", "198.51.100.77");
+      otel.applyBoundedHttpSpanAttributes(span, {});
+      span.end();
+      await otel.shutdownOpenTelemetry();
+      process.stdout.write(JSON.stringify(collected));
+    `;
+    const process = Bun.spawn(["bun", "--eval", script], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [exitCode, stdout, stderr] = await Promise.all([
+      process.exited,
+      new Response(process.stdout).text(),
+      new Response(process.stderr).text(),
+    ]);
+    expect(stderr).toBe("");
+    expect(exitCode).toBe(0);
+    const exported = JSON.parse(stdout) as Record<string, unknown>[];
+    expect(exported).toHaveLength(1);
+    expect(stdout).not.toContain(secret);
+    expect(stdout).not.toContain("198.51.100.77");
+    for (const attributes of exported) {
+      expect(attributes["user_agent.original"]).toBe("[REDACTED]");
+      expect(attributes["client.address"]).toBe("[REDACTED]");
+      expect(attributes["network.peer.address"]).toBe("[REDACTED]");
+    }
+  }, 15_000);
 
   test("keeps the OTel lifecycle process-global across module reloads", async () => {
     const first = bootstrapOpenTelemetry({
@@ -102,6 +157,19 @@ describe("observability core", () => {
       errorType: "Error",
     });
     expect(JSON.stringify(report)).not.toMatch(/private|database|token|stack|cause/i);
+  });
+
+  test("maps attacker-controlled error names and plausible codes to fixed values", () => {
+    const error = Object.assign(new Error("private"), {
+      name: "AliceSmith",
+      code: "SECRET123",
+    });
+    expect(sanitizeError(error, "graphql.unexpected")).toEqual({
+      category: "graphql.unexpected",
+      errorType: "Error",
+    });
+    expect(sanitizeError(Object.assign(new TypeError(), { code: "ETIMEDOUT" }), "network"))
+      .toEqual({ category: "network", errorType: "TypeError", errorCode: "ETIMEDOUT" });
   });
 
   test("runs every readiness check and exposes only status", async () => {

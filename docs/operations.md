@@ -7,8 +7,11 @@ web app uses `/api/graphql/persisted`: its build-generated manifest maps the
 SHA-256 of each canonical operation to the query. That endpoint rejects raw,
 unknown, or stale operations. A deliberate integration-only web call may opt
 back into the integration profile in `executeGraphqlRequest`. During a rolling
-deployment, the authenticated web server retries one exact persisted-query miss
-once through that integration profile; other errors never trigger a fallback.
+deployment, the authenticated web server retries Yoga's exact persisted-query
+miss once through that integration profile, but only when its own generated
+manifest contains the canonical operation. Other errors and runtime-built
+documents never trigger a fallback; the first attempt is hash-only, so a
+mutation cannot execute twice.
 
 ## Consumer-owned CORS
 
@@ -29,7 +32,8 @@ choice visible in their values rather than hiding it in the shared package.
 
 - `/api/health` is process liveness and does not contact dependencies.
 - `/api/ready` checks the database, generated-schema checksum, every immutable
-  versioned-migration ledger checksum, and runtime module initialization. A
+  versioned-migration ledger checksum, absence of database-ahead migrations,
+  and runtime module initialization. A
   one-second cache and single-flight execution bound probe bursts. It returns
   503 until every dependency is ready and exposes only fixed names/statuses.
 - `/api/metrics` is Prometheus text using one registry per process. GraphQL
@@ -42,8 +46,10 @@ Readiness and metrics use the ordinary request-rate boundary; only constant-time
 liveness is exempt.
 
 Unexpected GraphQL exceptions are masked for callers and centrally reduced to
-a category, safe error type, and optional uppercase error code. Messages,
-stacks, causes, headers, variables, and request data never enter that report.
+a category, allowlisted error type, and optional allowlisted operational code.
+Messages, stacks, causes, headers, variables, and request data never enter that
+report. Structured request logs likewise retain only the HTTP method and
+response status, not URLs, addresses, or user-agent fingerprints.
 
 ## Tracing and GraphiQL
 
@@ -51,9 +57,10 @@ OpenTelemetry starts before framework and database imports. It remains off
 unless `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT` is
 set; non-local exporters require HTTPS. `OTEL_TRACES_EXPORTER=none` disables it
 explicitly. The consumer owns exporter infrastructure and sampling policy.
-Automatic instrumentation is restricted to HTTP and Fastify. Query strings are
-redacted, while GraphQL document/resolver and database spans are disabled so
-tenant data cannot enter the exporter by default.
+Automatic instrumentation directly loads only HTTP and Fastify. Raw URLs,
+paths, query strings, client/peer addresses, ports, and user-agent fingerprints
+are replaced with fixed values. GraphQL document/resolver and database spans
+are disabled so tenant data cannot enter the exporter by default.
 
 GraphiQL is available only outside production. Its default health query is
 safe without credentials and explains where a local bearer header belongs;

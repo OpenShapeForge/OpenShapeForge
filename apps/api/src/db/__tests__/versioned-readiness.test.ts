@@ -28,12 +28,12 @@ afterAll(async () => {
 });
 
 describe("versioned migration readiness", () => {
-  test("detects missing and checksum-drifted entries in the complete registry", async () => {
+  test("detects missing, checksum-drifted, and database-ahead ledger entries", async () => {
     const runtime = createDatabaseRuntime({ databaseUrl: databaseUrl.toString() });
     try {
       await runtime.db.connection().execute((db) => runMigrationChain(db));
       expect(await verifyVersionedMigrationLedger(runtime.db, versionedMigrations))
-        .toEqual({ ready: true, missing: [], mismatched: [] });
+        .toEqual({ ready: true, missing: [], mismatched: [], unexpected: [] });
 
       const missing = versionedMigrations[0]!.version;
       const mismatched = versionedMigrations[1]!.version;
@@ -45,7 +45,20 @@ describe("versioned migration readiness", () => {
       `.execute(runtime.db);
 
       expect(await verifyVersionedMigrationLedger(runtime.db, versionedMigrations))
-        .toEqual({ ready: false, missing: [missing], mismatched: [mismatched] });
+        .toEqual({
+          ready: false,
+          missing: [missing],
+          mismatched: [mismatched],
+          unexpected: [],
+        });
+
+      await sql`
+        insert into platform.schema_migrations (version, checksum, applied_by)
+        values (${"9999_future-incompatible"}, ${"future-checksum"}, ${"future-test"})
+      `.execute(runtime.db);
+      const ahead = await verifyVersionedMigrationLedger(runtime.db, versionedMigrations);
+      expect(ahead.ready).toBe(false);
+      expect(ahead.unexpected).toEqual(["9999_future-incompatible"]);
     } finally {
       await runtime.close();
     }

@@ -66,6 +66,7 @@
     "typecheck:plugin-web": "./apps/api/node_modules/.bin/tsc --noEmit -p examples/plugins/workflow/web/tsconfig.json",
     "test:compiler": "bun test packages/compiler",
     "test:observability": "bun run --cwd packages/observability test",
+    "test:web-transport": "bun test scripts/web-graphql-transport.test.ts",
     "test:layout": "bun test packages/workflow-layout",
     "test:examples": "bun test examples",
     "//test:connectors": "./connectors and not connectors: bun test treats a bare argument as a path SUBSTRING, so `bun test connectors` also sweeps apps/api/src/connectors and reports its pre-existing failures as this suite's.",

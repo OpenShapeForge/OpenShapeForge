@@ -6,12 +6,28 @@ export type SanitizedErrorReport = {
   errorCode?: string;
 };
 
-const SAFE_ERROR_CODE = /^[A-Z][A-Z0-9_]{1,63}$/;
+const SAFE_ERROR_TYPES = new Set([
+  "AggregateError",
+  "Error",
+  "GraphQLError",
+  "RangeError",
+  "ReferenceError",
+  "SyntaxError",
+  "TypeError",
+]);
+const SAFE_ERROR_CODES = new Set([
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "ENOTFOUND",
+  "EPIPE",
+  "ETIMEDOUT",
+]);
 
 function errorCode(error: unknown): string | undefined {
   if (!error || typeof error !== "object") return undefined;
   const candidate = (error as { code?: unknown }).code;
-  return typeof candidate === "string" && SAFE_ERROR_CODE.test(candidate)
+  return typeof candidate === "string" && SAFE_ERROR_CODES.has(candidate)
     ? candidate
     : undefined;
 }
@@ -26,10 +42,9 @@ export function sanitizeError(
   error: unknown,
   category: string,
 ): SanitizedErrorReport {
-  const errorType =
-    error instanceof Error && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(error.name)
-      ? error.name
-      : "Error";
+  const errorType = error instanceof Error && SAFE_ERROR_TYPES.has(error.name)
+    ? error.name
+    : "Error";
   const code = errorCode(error);
   return {
     category,

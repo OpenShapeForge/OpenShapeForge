@@ -80,7 +80,7 @@ describe("API rate limiting", () => {
     });
   }
 
-  test("liveness/readiness probes are never throttled", async () => {
+  test("keeps constant-time liveness exempt and bounds readiness probes", async () => {
     process.env[RATE_LIMIT_MAX_ENV] = "1";
     app = createApiApp({
       cors: false,
@@ -91,9 +91,9 @@ describe("API rate limiting", () => {
       const res = await app.inject({ method: "GET", url: "/api/health" });
       expect(res.statusCode).toBe(200);
     }
-    for (let i = 0; i < 5; i++) {
-      const res = await app.inject({ method: "GET", url: "/api/ready" });
-      expect(res.statusCode).toBe(200);
-    }
+    expect((await app.inject({ method: "GET", url: "/api/ready" })).statusCode)
+      .toBe(200);
+    expect((await app.inject({ method: "GET", url: "/api/ready" })).statusCode)
+      .toBe(429);
   });
 });

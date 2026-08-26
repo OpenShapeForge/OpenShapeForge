@@ -110,7 +110,7 @@ export function createApiReadinessChecks(
         );
         if (!versioned.ready) {
           throw new Error(
-            `Versioned migration ledger is incomplete or has checksum drift (${versioned.missing.length} missing, ${versioned.mismatched.length} mismatched).`,
+            `Versioned migration ledger is incompatible (${versioned.missing.length} missing, ${versioned.mismatched.length} mismatched, ${versioned.unexpected.length} unexpected).`,
           );
         }
       },

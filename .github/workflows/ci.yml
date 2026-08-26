@@ -105,6 +105,9 @@ jobs:
       - name: Observability unit tests
         run: bun run test:observability
 
+      - name: Web GraphQL transport tests
+        run: bun run test:web-transport
+
       # The shipped example plugins carry unit tests that nothing ran until
       # now: `test:compiler` is scoped to packages/compiler and the db/e2e jobs
       # only reach plugin code through the API. A test that never executes is

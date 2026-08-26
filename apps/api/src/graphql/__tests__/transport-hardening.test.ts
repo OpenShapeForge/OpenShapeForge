@@ -213,7 +213,7 @@ describe("persisted first-party GraphQL profile", () => {
     expect(authenticated.json().data.health.status).toBe("ok");
   });
 
-  test("supports one authenticated raw retry for a stale web manifest", async () => {
+  test("accepts an authenticated raw operation after a separate persisted miss", async () => {
     process.env.NODE_ENV = "production";
     process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = "rolling-fallback-secret";
     __resetSessionResolverForTests();

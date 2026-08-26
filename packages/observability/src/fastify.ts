@@ -15,6 +15,8 @@ export type OperationalRoutesOptions = {
   registry?: Registry;
   metricsPath?: string;
   readinessPath?: string;
+  /** Host-owned bounded codes that may cross into private operational logs. */
+  allowedReadinessErrorCodes?: ReadonlySet<string>;
   /** Short cache collapses probe bursts; set to zero only in controlled tests. */
   readinessCacheMs?: number;
 };
@@ -39,7 +41,11 @@ export function registerOperationalRoutes(
       for (const check of result.checks) {
         if (check.status === "not_ready") {
           app.log.error(
-            sanitizeError(check.error, `readiness.${check.name}`),
+            sanitizeError(
+              check.error,
+              `readiness.${check.name}`,
+              options.allowedReadinessErrorCodes,
+            ),
             `Readiness check "${check.name}" failed.`,
           );
         }

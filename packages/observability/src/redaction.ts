@@ -15,7 +15,7 @@ const SAFE_ERROR_TYPES = new Set([
   "SyntaxError",
   "TypeError",
 ]);
-const SAFE_ERROR_CODES = new Set([
+const SAFE_TRANSPORT_ERROR_CODES = new Set([
   "EAI_AGAIN",
   "ECONNREFUSED",
   "ECONNRESET",
@@ -24,10 +24,14 @@ const SAFE_ERROR_CODES = new Set([
   "ETIMEDOUT",
 ]);
 
-function errorCode(error: unknown): string | undefined {
+function errorCode(
+  error: unknown,
+  allowedHostCodes?: ReadonlySet<string>,
+): string | undefined {
   if (!error || typeof error !== "object") return undefined;
   const candidate = (error as { code?: unknown }).code;
-  return typeof candidate === "string" && SAFE_ERROR_CODES.has(candidate)
+  return typeof candidate === "string" &&
+      (SAFE_TRANSPORT_ERROR_CODES.has(candidate) || allowedHostCodes?.has(candidate))
     ? candidate
     : undefined;
 }
@@ -41,11 +45,12 @@ function errorCode(error: unknown): string | undefined {
 export function sanitizeError(
   error: unknown,
   category: string,
+  allowedHostCodes?: ReadonlySet<string>,
 ): SanitizedErrorReport {
   const errorType = error instanceof Error && SAFE_ERROR_TYPES.has(error.name)
     ? error.name
     : "Error";
-  const code = errorCode(error);
+  const code = errorCode(error, allowedHostCodes);
   return {
     category,
     errorType,

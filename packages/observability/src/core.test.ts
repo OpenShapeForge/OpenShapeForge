@@ -207,6 +207,21 @@ describe("observability core", () => {
     });
     expect(sanitizeError(Object.assign(new TypeError(), { code: "ETIMEDOUT" }), "network"))
       .toEqual({ category: "network", errorType: "TypeError", errorCode: "ETIMEDOUT" });
+    const hostCodes = new Set(["VERSIONED_LEDGER_AHEAD"]);
+    expect(sanitizeError(
+      Object.assign(new Error("private migration details"), { code: "VERSIONED_LEDGER_AHEAD" }),
+      "readiness.schema",
+      hostCodes,
+    )).toEqual({
+      category: "readiness.schema",
+      errorType: "Error",
+      errorCode: "VERSIONED_LEDGER_AHEAD",
+    });
+    expect(sanitizeError(
+      Object.assign(new Error("private"), { code: "ATTACKER_CONTROLLED" }),
+      "readiness.schema",
+      hostCodes,
+    ).errorCode).toBeUndefined();
   });
 
   test("runs every readiness check and exposes only status", async () => {

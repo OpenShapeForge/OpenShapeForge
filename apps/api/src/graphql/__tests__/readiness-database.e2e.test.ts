@@ -6,6 +6,7 @@ import { SQL } from "bun";
 import { Registry } from "@openshapeforge/observability";
 import { createDatabaseRuntime } from "../../db/connection.js";
 import { runMigrationChain } from "../../db/migration-chain.js";
+import { GENERATED_SCHEMA_MIGRATION_VERSION } from "../../db/schema-drift.js";
 import { createApiApp } from "../../roles/api.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -16,6 +17,8 @@ databaseUrl.pathname = `/${databaseName}`;
 const admin = new SQL(ADMIN_URL, { max: 1 });
 let app: ReturnType<typeof createApiApp> | null = null;
 let proxy: Server | null = null;
+let control: SQL | null = null;
+const logLines: string[] = [];
 
 if (!/^[a-z0-9_]+$/.test(databaseName) || new URL(ADMIN_URL).pathname === "/openshapeforge_dev") {
   throw new Error("Refusing an unsafe readiness outage scratch database target.");
@@ -24,6 +27,7 @@ if (!/^[a-z0-9_]+$/.test(databaseName) || new URL(ADMIN_URL).pathname === "/open
 afterAll(async () => {
   await app?.close().catch(() => undefined);
   await new Promise<void>((resolve) => proxy?.close(() => resolve()) ?? resolve());
+  await control?.close();
   await admin.unsafe(`drop database if exists "${databaseName}" with (force)`);
   await admin.close();
 });
@@ -55,7 +59,7 @@ describe("live dependency-aware readiness", () => {
       databaseUrl: unavailableUrl.toString(),
       readinessCacheMs: 0,
       metricsRegistry: new Registry(),
-      logStream: { write: () => undefined },
+      logStream: { write: (line) => logLines.push(line) },
     });
     await app.ready();
     const unavailable = await app.inject({ method: "GET", url: "/api/ready" });
@@ -89,5 +93,41 @@ describe("live dependency-aware readiness", () => {
     expect(recovered.statusCode).toBe(200);
     expect(recovered.json().status).toBe("ready");
     expect((await app.inject({ method: "GET", url: "/api/health" })).statusCode).toBe(200);
+
+    control = new SQL(databaseUrl.toString(), { max: 1 });
+    const checksumRows = await control`
+      select checksum from platform.schema_migrations
+      where version = ${GENERATED_SCHEMA_MIGRATION_VERSION}
+    ` as unknown as { checksum: string }[];
+    const generatedChecksum = checksumRows[0]?.checksum;
+    if (!generatedChecksum) throw new Error("Generated migration checksum was not recorded.");
+
+    logLines.length = 0;
+    await control`
+      update platform.schema_migrations set checksum = ${"stale-readiness-proof"}
+      where version = ${GENERATED_SCHEMA_MIGRATION_VERSION}
+    `;
+    const behind = await app.inject({ method: "GET", url: "/api/ready" });
+    expect(behind.statusCode).toBe(503);
+    expect(behind.body).not.toContain("GENERATED_SCHEMA_BEHIND");
+    expect(logLines.join("")).toContain('"errorCode":"GENERATED_SCHEMA_BEHIND"');
+    await control`
+      update platform.schema_migrations set checksum = ${generatedChecksum}
+      where version = ${GENERATED_SCHEMA_MIGRATION_VERSION}
+    `;
+
+    logLines.length = 0;
+    await control`
+      insert into platform.schema_migrations (version, checksum, applied_by)
+      values (${"9999_readiness_future"}, ${"future-proof"}, ${"readiness-test"})
+    `;
+    const ahead = await app.inject({ method: "GET", url: "/api/ready" });
+    expect(ahead.statusCode).toBe(503);
+    expect(ahead.body).not.toContain("VERSIONED_LEDGER_AHEAD");
+    expect(logLines.join("")).toContain('"errorCode":"VERSIONED_LEDGER_AHEAD"');
+    expect(logLines.join("")).not.toContain(databaseName);
+    await control`
+      delete from platform.schema_migrations where version = ${"9999_readiness_future"}
+    `;
   }, 90_000);
 });

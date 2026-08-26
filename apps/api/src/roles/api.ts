@@ -48,6 +48,7 @@ import {
   type RateLimitMetrics,
 } from "./rate-limit.js";
 import {
+  API_READINESS_ERROR_CODES,
   createApiReadinessChecks,
   enforceGeneratedSchemaFreshness,
 } from "./api-readiness.js";
@@ -270,6 +271,7 @@ export function createApiApp(
     );
     registerOperationalRoutes(routes, {
       readinessChecks,
+      allowedReadinessErrorCodes: API_READINESS_ERROR_CODES,
       ...(options.metricsRegistry ? { registry: options.metricsRegistry } : {}),
       ...(options.readinessCacheMs !== undefined
         ? { readinessCacheMs: options.readinessCacheMs }

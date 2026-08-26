@@ -13,6 +13,18 @@ import { versionedMigrations } from "../db/migrations/versioned/index.js";
 
 const DRIFT_CHECK_TIMEOUT_MS = 5_000;
 
+export const API_READINESS_ERROR_CODES = new Set([
+  "GENERATED_SCHEMA_BEHIND",
+  "GENERATED_SCHEMA_UNMIGRATED",
+  "VERSIONED_LEDGER_AHEAD",
+  "VERSIONED_LEDGER_MISMATCH",
+  "VERSIONED_LEDGER_MISSING",
+]);
+
+function readinessError(code: string): Error {
+  return Object.assign(new Error("A database schema dependency is incompatible."), { code });
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
@@ -102,15 +114,23 @@ export function createApiReadinessChecks(
         if (!databaseRuntime) throw new Error("Database runtime is not configured.");
         const drift = await checkGeneratedSchemaDrift(databaseRuntime.db);
         if (drift.status !== "ok") {
-          throw new Error(`Generated schema readiness is ${drift.status}.`);
+          throw readinessError(
+            drift.status === "behind"
+              ? "GENERATED_SCHEMA_BEHIND"
+              : "GENERATED_SCHEMA_UNMIGRATED",
+          );
         }
         const versioned = await verifyVersionedMigrationLedger(
           databaseRuntime.db,
           versionedMigrations,
         );
         if (!versioned.ready) {
-          throw new Error(
-            `Versioned migration ledger is incompatible (${versioned.missing.length} missing, ${versioned.mismatched.length} mismatched, ${versioned.unexpected.length} unexpected).`,
+          throw readinessError(
+            versioned.unexpected.length > 0
+              ? "VERSIONED_LEDGER_AHEAD"
+              : versioned.mismatched.length > 0
+                ? "VERSIONED_LEDGER_MISMATCH"
+                : "VERSIONED_LEDGER_MISSING",
           );
         }
       },

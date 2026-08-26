@@ -89,6 +89,10 @@ export function bootstrapOpenTelemetry(
   }
   if (!traceExporter) throw new Error("Tracing requires an endpoint or exporter.");
   lifecycle.sdk = new NodeSDK({
+    // The default host/process detectors export stable host IDs, usernames,
+    // executable paths and command arguments. Hosts opt into extra resource
+    // metadata outside this privacy-bounded core.
+    autoDetectResources: false,
     resource: resourceFromAttributes({
       "service.name": options.serviceName,
       ...(options.serviceNamespace

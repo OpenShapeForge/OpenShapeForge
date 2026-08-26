@@ -4,8 +4,12 @@ import { applyTrustedContextHeaders } from "../packages/auth/src/index.js";
 import { Registry } from "../packages/observability/src/index.js";
 import webManifest from "../apps/web/src/generated/persisted-operations.json" with { type: "json" };
 import { __resetSessionResolverForTests } from "../apps/api/src/auth/identity.js";
+import type { RuntimeModule } from "../apps/api/src/modules/contract.js";
 import { createApiApp } from "../apps/api/src/roles/api.js";
-import { executeGraphqlTransport } from "../apps/web/src/lib/server/persisted-operation-core.js";
+import {
+  createPersistedOperationEnvelope,
+  executeGraphqlTransport,
+} from "../apps/web/src/lib/server/persisted-operation-core.js";
 
 const savedEnv = {
   node: process.env.NODE_ENV,
@@ -18,10 +22,28 @@ const contextSecret = "live-rolling-transport-secret-438";
 const tenantId = "11111111-1111-4111-8111-111111111111";
 const userId = "22222222-2222-4222-8222-222222222222";
 let app: ReturnType<typeof createApiApp> | null = null;
+let mutationExecutions = 0;
+const temporaryWebOperations = new Set<string>();
+const rollingModule: RuntimeModule = {
+  name: "rolling-operation-proof",
+  graphql: () => ({
+    mutationFields: "rollingCounter: Int!",
+    resolvers: {
+      Mutation: {
+        rollingCounter: () => ++mutationExecutions,
+      },
+    },
+  }),
+};
 
 afterEach(async () => {
   await app?.close();
   app = null;
+  mutationExecutions = 0;
+  for (const hash of temporaryWebOperations) {
+    delete (webManifest.operations as Record<string, string>)[hash];
+  }
+  temporaryWebOperations.clear();
   for (const [name, value] of [
     ["NODE_ENV", savedEnv.node],
     ["OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET", savedEnv.secret],
@@ -41,6 +63,15 @@ function generatedOperation(operationName: string): string {
   );
   if (!operation) throw new Error(`Missing generated operation ${operationName}.`);
   return operation;
+}
+
+function installWebOperation(query: string): { canonical: string; hash: string } {
+  const envelope = createPersistedOperationEnvelope(query);
+  const canonical = envelope.canonicalQuery;
+  const hash = envelope.persistedBody.extensions.persistedQuery.sha256Hash;
+  (webManifest.operations as Record<string, string>)[hash] = canonical;
+  temporaryWebOperations.add(hash);
+  return { canonical, hash };
 }
 
 function identityHeaders(): Headers {
@@ -85,10 +116,12 @@ function liveInput(origin: string, headers: Headers, query: string, calls: Reque
 }
 
 describe("live web to API rolling persisted-operation contract", () => {
-  test("retries a stale query and mutation once with identity and rate limits intact", async () => {
+  test("executes a stale mutation exactly once with identity and rate limits intact", async () => {
     process.env.API_RATE_LIMIT_MAX_TRUSTED = "4";
+    const mutation = installWebOperation("mutation RollingCounter { rollingCounter }");
     const origin = await listen({
       cors: false,
+      modules: { loaded: [rollingModule], failures: [] },
       persistedOperations: { operationNames: [], operations: {} },
     });
     const headers = identityHeaders();
@@ -104,10 +137,10 @@ describe("live web to API rolling persisted-operation contract", () => {
       .errors[0]?.extensions.code).toBe("DATABASE_NOT_CONFIGURED");
 
     const mutationResult = await executeGraphqlTransport({
-      ...liveInput(origin, headers, generatedOperation("PersistTaskOutput"), calls),
-      variables: { input: { id: crypto.randomUUID(), output: {} } },
+      ...liveInput(origin, headers, mutation.canonical, calls),
     });
-    expect((mutationResult.payload as { errors: unknown[] }).errors.length).toBeGreaterThan(0);
+    expect(mutationResult.payload).toEqual({ data: { rollingCounter: 1 } });
+    expect(mutationExecutions).toBe(1);
     expect(calls).toHaveLength(4);
     for (const [index, call] of calls.entries()) {
       const body = JSON.parse(String(call.body));
@@ -123,18 +156,45 @@ describe("live web to API rolling persisted-operation contract", () => {
     expect(limited.status).toBe(429);
   });
 
-  test("does not retry a manifest hit", async () => {
-    const origin = await listen({ cors: false });
+  test("executes a manifest-hit mutation once without a raw retry", async () => {
+    const mutation = installWebOperation("mutation RollingCounter { rollingCounter }");
+    const origin = await listen({
+      cors: false,
+      modules: { loaded: [rollingModule], failures: [] },
+      persistedOperations: {
+        operationNames: ["RollingCounter"],
+        operations: { [mutation.hash]: mutation.canonical },
+      },
+    });
     const calls: RequestInit[] = [];
     const result = await executeGraphqlTransport(liveInput(
       origin,
       identityHeaders(),
-      generatedOperation("HealthProbe"),
+      mutation.canonical,
       calls,
     ));
-    expect(result.payload).toEqual({ data: { health: { status: "ok", role: "api" } } });
+    expect(result.payload).toEqual({ data: { rollingCounter: 1 } });
+    expect(mutationExecutions).toBe(1);
     expect(calls).toHaveLength(1);
     expect(JSON.parse(String(calls[0]!.body)).query).toBeUndefined();
+  });
+
+  test("never executes a runtime-only mutation after a hash miss", async () => {
+    const origin = await listen({
+      cors: false,
+      modules: { loaded: [rollingModule], failures: [] },
+      persistedOperations: { operationNames: [], operations: {} },
+    });
+    const calls: RequestInit[] = [];
+    const result = await executeGraphqlTransport(liveInput(
+      origin,
+      identityHeaders(),
+      "mutation RuntimeOnlyCounter { rollingCounter }",
+      calls,
+    ));
+    expect(JSON.stringify(result.payload)).toMatch(/PersistedQueryNotFound/);
+    expect(mutationExecutions).toBe(0);
+    expect(calls).toHaveLength(1);
   });
 
   test("applies GraphQL Armor to the authenticated raw fallback", async () => {

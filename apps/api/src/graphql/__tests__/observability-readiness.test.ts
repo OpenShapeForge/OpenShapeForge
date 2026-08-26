@@ -137,6 +137,8 @@ describe("bounded GraphQL observability", () => {
     expect(output).not.toContain(userAgent);
     expect(output).not.toContain(forwardedAddress);
     expect(output).not.toContain("remoteAddress");
+    expect(output).not.toContain('"pid"');
+    expect(output).not.toContain('"hostname"');
     expect(output).not.toContain("/api/health?");
     expect(output).toContain('"category":"http.error"');
     expect(output).toContain('"module":"bounded-test-module"');

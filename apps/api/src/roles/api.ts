@@ -122,6 +122,9 @@ export function createApiApp(
   const app = Fastify({
     logger: {
       level: process.env.LOG_LEVEL ?? "info",
+      // Pino's defaults include pid and hostname; both are unnecessary and a
+      // developer hostname may itself contain a person's name.
+      base: { service: "openshapeforge-api" },
       // URLs can contain GraphQL documents, OAuth codes, or entity IDs, while
       // addresses and user agents are unnecessary high-cardinality identifiers.
       serializers: {

@@ -91,7 +91,10 @@ describe("observability core", () => {
       const collected = [];
       const exporter = {
         export(spans, done) {
-          collected.push(...spans.map((span) => span.attributes));
+          collected.push(...spans.map((span) => ({
+            attributes: span.attributes,
+            resource: span.resource.attributes,
+          })));
           done({ code: 0 });
         },
         shutdown() { return Promise.resolve(); },
@@ -139,18 +142,31 @@ describe("observability core", () => {
     ]);
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
-    const exported = JSON.parse(stdout) as Record<string, unknown>[];
+    const exported = JSON.parse(stdout) as {
+      attributes: Record<string, unknown>;
+      resource: Record<string, unknown>;
+    }[];
     expect(exported.length).toBeGreaterThan(0);
     expect(stdout).not.toContain(secret);
     expect(stdout).not.toContain("198.51.100.77");
     expect(stdout).not.toContain("tenant-");
-    for (const attributes of exported) {
+    for (const { attributes, resource } of exported) {
       expect(attributes["user_agent.original"]).toBe("[REDACTED]");
       expect(attributes["client.address"]).toBe("[REDACTED]");
       expect(attributes["network.peer.address"]).toBe("[REDACTED]");
       expect(attributes["server.address"]).toBe("[REDACTED]");
       expect(attributes["server.port"]).toBe(0);
       expect(attributes["http.request.method_original"]).toBe("[REDACTED]");
+      expect(resource["service.name"]).toBe("export-test");
+      for (const forbidden of [
+        "host.name",
+        "host.id",
+        "process.owner",
+        "process.executable.path",
+        "process.command_args",
+      ]) {
+        expect(resource[forbidden]).toBeUndefined();
+      }
     }
   }, 15_000);
 

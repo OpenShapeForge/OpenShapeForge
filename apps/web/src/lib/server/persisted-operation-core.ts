@@ -17,13 +17,16 @@ const operations = persistedManifest.operations as Record<string, string>;
 /** Match only Yoga's exact persisted allowlist miss contract. */
 export function isPersistedOperationMiss(payload: unknown): boolean {
   if (!payload || typeof payload !== "object") return false;
+  if (Object.keys(payload).length !== 1) return false;
   const errors = (payload as {
     errors?: { message?: unknown; extensions?: { code?: unknown } }[];
   }).errors;
-  return Boolean(errors?.some((error) =>
-    error.message === "PersistedQueryNotFound" &&
-    error.extensions?.code === "PERSISTED_QUERY_NOT_IN_LIST"
-  ));
+  if (!Array.isArray(errors) || errors.length !== 1) return false;
+  const error = errors[0];
+  if (!error || Object.keys(error).sort().join(",") !== "extensions,message") return false;
+  if (!error.extensions || Object.keys(error.extensions).join(",") !== "code") return false;
+  return error.message === "PersistedQueryNotFound" &&
+    error.extensions.code === "PERSISTED_QUERY_NOT_IN_LIST";
 }
 
 /** Canonical APQ envelope for the build-generated first-party allowlist. */

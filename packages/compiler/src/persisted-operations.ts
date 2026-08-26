@@ -186,7 +186,10 @@ export async function generatePersistedOperationArtifacts(input: {
   pageConfigs: unknown;
 }): Promise<GeneratedArtifact[]> {
   const operations = new Set<string>();
-  const checkedInSources = await glob("apps/web/src/**/*.{ts,tsx}", {
+  const checkedInSources = await glob([
+    "apps/web/src/**/*.{ts,tsx}",
+    "examples/plugins/*/web/**/*.{ts,tsx}",
+  ], {
     cwd: input.repoRoot,
     nodir: true,
     ignore: ["apps/web/src/compiler/**", "apps/web/src/generated/**", "apps/web/src/app/(generated)/**", "apps/web/src/actions/generated/**"],

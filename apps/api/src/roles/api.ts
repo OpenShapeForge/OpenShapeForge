@@ -23,7 +23,10 @@ import { readApiLimits } from "../config/limits.js";
 import { readGraphqlCorsPolicy } from "../config/graphql-cors.js";
 import { assertProductionEnv } from "../config/production-guard.js";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js";
-import { createGraphqlYoga } from "../graphql/yoga.js";
+import {
+  createGraphqlYoga,
+  type PersistedOperationManifest,
+} from "../graphql/yoga.js";
 import { headersFromFastify } from "../http/headers.js";
 import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
 import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
@@ -99,6 +102,8 @@ export function createApiApp(
     modules?: ModuleRegistry;
     metricsRegistry?: Registry;
     reportUnexpectedError?: (report: SanitizedErrorReport) => void;
+    /** Controlled host override used to prove rolling manifest compatibility. */
+    persistedOperations?: PersistedOperationManifest;
     /** Focused route tests may replace external dependencies with controlled checks. */
     readinessChecks?: readonly ReadinessCheck[];
     /** Override only for controlled tests that need immediate readiness transitions. */
@@ -233,6 +238,9 @@ export function createApiApp(
         ...dbOptions,
         cors: options.cors,
         modules: initialised.loaded,
+        ...(options.persistedOperations
+          ? { persistedOperations: options.persistedOperations }
+          : {}),
         ...(options.metricsRegistry ? { metricsRegistry: options.metricsRegistry } : {}),
         reportUnexpectedError: options.reportUnexpectedError ?? ((report) =>
           routes.log.error(report, "Unexpected GraphQL execution error.")),
@@ -243,8 +251,8 @@ export function createApiApp(
     // absence is otherwise invisible until a query 404s. Say so once, here.
     for (const failure of initialised.failures) {
       routes.log.error(
-        { module: failure.name, specifier: failure.specifier, reason: failure.reason },
-        `Runtime module "${failure.name}" was not loaded: ${failure.message}`,
+        { module: failure.name, reason: failure.reason },
+        "A runtime module was not loaded.",
       );
     }
 

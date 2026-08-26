@@ -13,6 +13,25 @@ manifest contains the canonical operation. Other errors and runtime-built
 documents never trigger a fallback; the first attempt is hash-only, so a
 mutation cannot execute twice.
 
+## Observability package boundary
+
+`packages/observability` is owned and released with this repository as a small
+private workspace package. Its framework-neutral registry, redaction,
+readiness, and telemetry bootstrap sit below thin Fastify and Yoga adapters;
+the API supplies every OSF schema, context, label, dependency, and policy
+decision. The dependency direction is therefore API to observability and never
+observability to the compiler, generated schema, authentication, or tenant
+model.
+
+The API host is the first consumer; other OSF process roles are the intended
+second consumer when they need the same lifecycle primitives. Keeping this in
+`apps/api` would make that reuse duplicative, while `packages/compiler` and
+`packages/auth` have unrelated ownership and dependency graphs. A separate
+repository would add publication and coordinated-version overhead before a
+second release consumer exists. The workspace boundary still gives that later
+extraction a stable configuration API, so upgrades do not couple product
+schema changes to observability infrastructure.
+
 ## Consumer-owned CORS
 
 The API will not start without an explicit CORS choice:

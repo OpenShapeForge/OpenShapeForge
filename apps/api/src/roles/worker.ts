@@ -185,7 +185,7 @@ export async function startWorkerRole(
       const available = [...workers.keys()].sort();
       throw new Error(
         failure
-          ? `Worker role "${role}" is unavailable: module "${failure.name}" was not loaded (${failure.reason} — ${failure.message}).`
+          ? `Worker role "${role}" is unavailable: its module was not loaded (${failure.reason}).`
           : `Unknown worker role "${role}". Contributed roles: ${
               available.length > 0 ? available.join(", ") : "(none)"
             }.`,
@@ -196,8 +196,8 @@ export async function startWorkerRole(
     // otherwise invisible until something it owns fails to happen.
     for (const failure of initialised.failures) {
       log.error(
-        { module: failure.name, specifier: failure.specifier, reason: failure.reason },
-        `Runtime module "${failure.name}" was not loaded: ${failure.message}`,
+        { module: failure.name, reason: failure.reason },
+        "A runtime module was not loaded.",
       );
     }
 

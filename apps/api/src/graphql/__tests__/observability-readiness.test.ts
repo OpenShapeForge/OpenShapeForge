@@ -104,6 +104,15 @@ describe("bounded GraphQL observability", () => {
     const app = createApiApp({
       cors: false,
       readinessChecks: [],
+      modules: {
+        loaded: [],
+        failures: [{
+          name: "bounded-test-module",
+          specifier: `file:///private/${secret}/module.ts`,
+          reason: "module_missing",
+          message: `Import failed with token ${secret}`,
+        }],
+      },
       logStream: { write: (line) => lines.push(line) },
     });
     try {
@@ -130,6 +139,9 @@ describe("bounded GraphQL observability", () => {
     expect(output).not.toContain("remoteAddress");
     expect(output).not.toContain("/api/health?");
     expect(output).toContain('"category":"http.error"');
+    expect(output).toContain('"module":"bounded-test-module"');
+    expect(output).toContain('"reason":"module_missing"');
+    expect(output).toContain("A runtime module was not loaded.");
   });
 
   test("exports low-cardinality metrics and reports unexpected errors without request data", async () => {

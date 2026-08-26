@@ -51,12 +51,17 @@ export function applyBoundedHttpSpanAttributes(
     "net.peer.ip",
     "net.peer.name",
     "network.peer.address",
+    "network.local.address",
+    "server.address",
+    "http.request.method_original",
   ]) {
     span.setAttribute(attribute, "[REDACTED]");
   }
   span.setAttribute("net.peer.port", 0);
   span.setAttribute("client.port", 0);
   span.setAttribute("network.peer.port", 0);
+  span.setAttribute("network.local.port", 0);
+  span.setAttribute("server.port", 0);
 }
 
 /**

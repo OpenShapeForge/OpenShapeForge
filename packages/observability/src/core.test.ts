@@ -85,7 +85,7 @@ describe("observability core", () => {
     expect(JSON.stringify(Object.fromEntries(attributes))).not.toContain(secret);
   });
 
-  test("redacts identifiers in spans delivered to the configured exporter", async () => {
+  test("redacts identifiers from a live instrumented HTTP request", async () => {
     const secret = "span-secret-user-agent-7f3a";
     const script = `
       const collected = [];
@@ -98,15 +98,32 @@ describe("observability core", () => {
       };
       const otel = await import("./src/otel.ts");
       otel.bootstrapOpenTelemetry({ serviceName: "export-test", traceExporter: exporter });
-      const { trace } = await import("@opentelemetry/api");
-      const span = trace.getTracer("export-test").startSpan("request");
-      span.setAttribute("url.full", "http://127.0.0.1/private/${secret}?query=${secret}");
-      span.setAttribute("url.path", "/private/${secret}");
-      span.setAttribute("user_agent.original", "${secret}");
-      span.setAttribute("client.address", "198.51.100.77");
-      span.setAttribute("network.peer.address", "198.51.100.77");
-      otel.applyBoundedHttpSpanAttributes(span, {});
-      span.end();
+      const Fastify = (await import("fastify")).default;
+      const app = Fastify({ logger: false });
+      app.get("/health", async () => ({ status: "ok" }));
+      await app.listen({ host: "127.0.0.1", port: 0 });
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("Missing listener address.");
+      const { request } = await import("node:http");
+      await new Promise((resolve, reject) => {
+        const outgoing = request({
+          host: "127.0.0.1",
+          port: address.port,
+          path: "/health?code=${secret}",
+          method: "gEt",
+          headers: {
+            host: "tenant-${secret}.example.test:54321",
+            "user-agent": "${secret}",
+            "x-forwarded-for": "198.51.100.77",
+          },
+        }, (response) => {
+          response.resume();
+          response.on("end", resolve);
+        });
+        outgoing.on("error", reject);
+        outgoing.end();
+      });
+      await app.close();
       await otel.shutdownOpenTelemetry();
       process.stdout.write(JSON.stringify(collected));
     `;
@@ -123,13 +140,17 @@ describe("observability core", () => {
     expect(stderr).toBe("");
     expect(exitCode).toBe(0);
     const exported = JSON.parse(stdout) as Record<string, unknown>[];
-    expect(exported).toHaveLength(1);
+    expect(exported.length).toBeGreaterThan(0);
     expect(stdout).not.toContain(secret);
     expect(stdout).not.toContain("198.51.100.77");
+    expect(stdout).not.toContain("tenant-");
     for (const attributes of exported) {
       expect(attributes["user_agent.original"]).toBe("[REDACTED]");
       expect(attributes["client.address"]).toBe("[REDACTED]");
       expect(attributes["network.peer.address"]).toBe("[REDACTED]");
+      expect(attributes["server.address"]).toBe("[REDACTED]");
+      expect(attributes["server.port"]).toBe(0);
+      expect(attributes["http.request.method_original"]).toBe("[REDACTED]");
     }
   }, 15_000);
 

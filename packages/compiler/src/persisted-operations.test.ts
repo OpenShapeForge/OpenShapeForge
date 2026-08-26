@@ -28,6 +28,12 @@ describe("persisted operation artifacts", () => {
           : "mutation RenameThing($id: ID!) { renameThing(id: $id) }";
       `,
     );
+    const pluginWebDir = join(repoRoot, "examples/plugins/workflow/web");
+    await mkdir(pluginWebDir, { recursive: true });
+    await writeFile(
+      join(pluginWebDir, "page.tsx"),
+      "const query = `query PluginWebThing { health { status } }`;",
+    );
     const generatedWebSources = new Map([
       [
         "generated/action.ts",
@@ -54,6 +60,7 @@ describe("persisted operation artifacts", () => {
       "ConfigThing",
       "GeneratedThing",
       "HealthProbe",
+      "PluginWebThing",
       "RenameThing",
     ]);
     const canonical = print(parse("query HealthProbe { health { role status } }"));

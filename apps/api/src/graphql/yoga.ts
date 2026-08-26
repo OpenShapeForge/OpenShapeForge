@@ -48,9 +48,11 @@ export type CreateGraphqlYogaOptions = {
   modules?: readonly RuntimeModule[] | undefined;
   metricsRegistry?: Registry;
   reportUnexpectedError?: (report: SanitizedErrorReport) => void;
+  /** Host-selected generated manifest; injectable for rolling-deployment contract tests. */
+  persistedOperations?: PersistedOperationManifest;
 };
 
-type PersistedOperationManifest = {
+export type PersistedOperationManifest = {
   operationNames: string[];
   operations: Record<string, string>;
 };
@@ -105,6 +107,7 @@ const DEFAULT_MAX_TOKENS = 1000;
 const DEFAULT_MAX_DIRECTIVES = 50;
 
 export function createGraphqlYoga(options: CreateGraphqlYogaOptions) {
+  const operationManifest = options.persistedOperations ?? persistedOperations;
   const maxDepth = readPositiveIntEnv("GRAPHQL_MAX_DEPTH", DEFAULT_MAX_DEPTH);
   const maxAliases = readPositiveIntEnv(
     "GRAPHQL_MAX_ALIASES",
@@ -137,7 +140,7 @@ export function createGraphqlYoga(options: CreateGraphqlYogaOptions) {
     }),
     plugins: [
       usePersistedOperations({
-        getPersistedOperation: (key) => persistedOperations.operations[key] ?? null,
+        getPersistedOperation: (key) => operationManifest.operations[key] ?? null,
         // Arbitrary documents are a development or authenticated-integration
         // profile selected by the Fastify host after it verifies identity.
         allowArbitraryOperations: (request) =>
@@ -146,7 +149,7 @@ export function createGraphqlYoga(options: CreateGraphqlYogaOptions) {
       }),
       createYogaMetricsPlugin({
         metricPrefix: "openshapeforge",
-        allowedOperationNames: new Set(persistedOperations.operationNames),
+        allowedOperationNames: new Set(operationManifest.operationNames),
         ...(options.metricsRegistry ? { registry: options.metricsRegistry } : {}),
       }),
       // Cheapest first: token and directive counts reject a flooding document

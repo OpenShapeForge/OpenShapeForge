@@ -90,3 +90,13 @@ export function statusFromGraphqlPayload(payload: unknown): number {
       return 400;
   }
 }
+
+/** Exact APQ miss used for one authenticated rolling-deploy fallback. */
+export function isPersistedQueryNotFoundPayload(payload: unknown): boolean {
+  if (!payload || typeof payload !== "object") return false;
+  const errors = (payload as GraphqlPayload<unknown>).errors;
+  return Boolean(errors?.some((error) =>
+    error.extensions?.code === "PERSISTED_QUERY_NOT_FOUND" ||
+    error.message === "PersistedQueryNotFound",
+  ));
+}

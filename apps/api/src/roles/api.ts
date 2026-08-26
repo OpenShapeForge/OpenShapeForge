@@ -34,6 +34,8 @@ import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
 import { registerProtectedResourceMetadata } from "../mcp/protected-resource-metadata.js";
 import { registerApiKeyRestRoutes } from "../auth/api-key/rest-routes.js";
 import { readApiKeyProvisioningConfig } from "../auth/api-key/runtime-config.js";
+import { resolveSessionContext } from "../auth/identity.js";
+import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { initRuntimeModules, loadRuntimeModules, type ModuleRegistry } from "../modules/registry.js";
 import {
   classifyRequest,
@@ -54,14 +56,12 @@ declare module "fastify" {
 }
 
 /**
- * Liveness/readiness endpoints are exempt from rate limiting: kubelet probes hit
- * them on a fixed schedule and must never be throttled, and they perform no
- * database or resolver work, so exempting them opens no amplification path.
+ * Only constant-time liveness endpoints are exempt. Readiness and metrics use
+ * the ordinary bounded anonymous budget; readiness also coalesces dependency
+ * work in the observability adapter.
  */
 const RATE_LIMIT_EXEMPT_PATHS = new Set([
   "/api/health",
-  "/api/ready",
-  "/api/metrics",
   "/api/graphql/health",
 ]);
 
@@ -100,6 +100,8 @@ export function createApiApp(
     reportUnexpectedError?: (report: SanitizedErrorReport) => void;
     /** Focused route tests may replace external dependencies with controlled checks. */
     readinessChecks?: readonly ReadinessCheck[];
+    /** Override only for controlled tests that need immediate readiness transitions. */
+    readinessCacheMs?: number;
   },
 ) {
   const modules: ModuleRegistry = options.modules ?? { loaded: [], failures: [] };
@@ -240,6 +242,9 @@ export function createApiApp(
     registerOperationalRoutes(routes, {
       readinessChecks,
       ...(options.metricsRegistry ? { registry: options.metricsRegistry } : {}),
+      ...(options.readinessCacheMs !== undefined
+        ? { readinessCacheMs: options.readinessCacheMs }
+        : {}),
     } satisfies OperationalRoutesOptions);
 
     routes.get("/api/graphql/health", async () => ({
@@ -257,9 +262,22 @@ export function createApiApp(
         if (!ready) throw new Error("GraphQL was not initialised before serving.");
         const yogaUrl = new URL(request.url, origin);
         const requestHeaders = headersFromFastify(request.headers);
+        // These markers are host-owned. Never let a caller self-select a less
+        // restrictive execution profile by sending the internal header.
+        requestHeaders.delete("x-openshapeforge-persisted-profile");
+        requestHeaders.delete("x-openshapeforge-arbitrary-profile");
+        let verifiedSession: TrustedSessionContext | undefined;
         if (url.endsWith("/persisted")) {
           yogaUrl.pathname = "/api/graphql";
           requestHeaders.set("x-openshapeforge-persisted-profile", "enforced");
+        } else if (process.env.NODE_ENV !== "production") {
+          // Development keeps GraphiQL usable, including its POST requests.
+          requestHeaders.set("x-openshapeforge-arbitrary-profile", "development");
+        } else {
+          verifiedSession = await resolveSessionContext(requestHeaders, dbOptions);
+          if (verifiedSession.credential !== "none" && verifiedSession.tenantId && verifiedSession.userId) {
+            requestHeaders.set("x-openshapeforge-arbitrary-profile", "authenticated");
+          }
         }
         const response = await ready.yoga.fetch(
           yogaUrl,
@@ -271,6 +289,7 @@ export function createApiApp(
           {
             fastifyRequest: request,
             fastifyReply: reply,
+            ...(verifiedSession ? { verifiedSession } : {}),
           },
         );
 

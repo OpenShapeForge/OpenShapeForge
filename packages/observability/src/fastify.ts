@@ -15,6 +15,8 @@ export type OperationalRoutesOptions = {
   registry?: Registry;
   metricsPath?: string;
   readinessPath?: string;
+  /** Short cache collapses probe bursts; set to zero only in controlled tests. */
+  readinessCacheMs?: number;
 };
 
 /** Register pull metrics and dependency-aware readiness on the host server. */
@@ -23,6 +25,31 @@ export function registerOperationalRoutes(
   options: OperationalRoutesOptions,
 ): void {
   const registry = options.registry ?? getProcessPrometheusRegistry();
+  const cacheMs = options.readinessCacheMs ?? 1_000;
+  let cached: { expiresAt: number; result: Awaited<ReturnType<typeof runReadinessChecks>> } | null = null;
+  let inFlight: ReturnType<typeof runReadinessChecks> | null = null;
+
+  const probe = async () => {
+    const now = Date.now();
+    if (cached && cached.expiresAt > now) return cached.result;
+    if (inFlight) return inFlight;
+    inFlight = runReadinessChecks(options.readinessChecks, options.readinessTimeoutMs);
+    try {
+      const result = await inFlight;
+      for (const check of result.checks) {
+        if (check.status === "not_ready") {
+          app.log.error(
+            sanitizeError(check.error, `readiness.${check.name}`),
+            `Readiness check "${check.name}" failed.`,
+          );
+        }
+      }
+      cached = { expiresAt: Date.now() + cacheMs, result };
+      return result;
+    } finally {
+      inFlight = null;
+    }
+  };
 
   app.get(options.metricsPath ?? "/api/metrics", async (_request, reply) => {
     reply.header("content-type", registry.contentType);
@@ -30,18 +57,7 @@ export function registerOperationalRoutes(
   });
 
   app.get(options.readinessPath ?? "/api/ready", async (_request, reply) => {
-    const result = await runReadinessChecks(
-      options.readinessChecks,
-      options.readinessTimeoutMs,
-    );
-    for (const check of result.checks) {
-      if (check.status === "not_ready") {
-        app.log.error(
-          sanitizeError(check.error, `readiness.${check.name}`),
-          `Readiness check "${check.name}" failed.`,
-        );
-      }
-    }
+    const result = await probe();
     if (!result.ready) reply.code(503);
     return publicReadinessBody(result);
   });

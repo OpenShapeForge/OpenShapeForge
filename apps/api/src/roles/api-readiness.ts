@@ -8,6 +8,8 @@ import {
   type GeneratedSchemaDriftResult,
 } from "../db/schema-drift.js";
 import type { ModuleRegistry } from "../modules/registry.js";
+import { verifyVersionedMigrationLedger } from "../db/migrations/versioned-runner.js";
+import { versionedMigrations } from "../db/migrations/versioned/index.js";
 
 const DRIFT_CHECK_TIMEOUT_MS = 5_000;
 
@@ -101,6 +103,15 @@ export function createApiReadinessChecks(
         const drift = await checkGeneratedSchemaDrift(databaseRuntime.db);
         if (drift.status !== "ok") {
           throw new Error(`Generated schema readiness is ${drift.status}.`);
+        }
+        const versioned = await verifyVersionedMigrationLedger(
+          databaseRuntime.db,
+          versionedMigrations,
+        );
+        if (!versioned.ready) {
+          throw new Error(
+            `Versioned migration ledger is incomplete or has checksum drift (${versioned.missing.length} missing, ${versioned.mismatched.length} mismatched).`,
+          );
         }
       },
     },

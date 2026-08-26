@@ -12,6 +12,7 @@ import { buildGraphqlGatewayRequestContext } from "./graphql-client/context";
 import {
   GraphqlProxyError,
   extractPayloadMessage,
+  isPersistedQueryNotFoundPayload,
   statusFromGraphqlPayload,
   type GraphqlPayload,
 } from "./graphql-client/errors";
@@ -196,6 +197,8 @@ export async function executeGraphqlRequest<TData>(input: {
 
   const requestPromise = (async () => {
     let response: Response;
+    let payload: unknown;
+    let isJsonResponse = false;
     let responseStatus: number | undefined;
     const operation = readGraphqlOperation(input.query);
     const trace = {
@@ -220,19 +223,44 @@ export async function executeGraphqlRequest<TData>(input: {
         input.variables,
         operation.name,
       );
-      response = await fetch(endpoint, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(profile === "persisted"
-          ? persistedBody
-          : {
-              query: canonicalQuery,
-              ...(operation.name ? { operationName: operation.name } : {}),
-              variables: input.variables,
-            }),
-        cache: requestCache,
-        next: requestCache === "no-store" ? undefined : { revalidate: 30 },
-      });
+      const request = async (url: string, body: unknown) => {
+        const result = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          cache: requestCache,
+          next: requestCache === "no-store" ? undefined : { revalidate: 30 },
+        });
+        const contentType = result.headers.get("content-type") ?? "";
+        const json = contentType.includes("application/json");
+        const resultPayload = json
+          ? await result.json().catch(() => null)
+          : await result.text().catch(() => null);
+        return { result, resultPayload, json };
+      };
+      const rawBody = {
+        query: canonicalQuery,
+        ...(operation.name ? { operationName: operation.name } : {}),
+        variables: input.variables,
+      };
+      let attempt = await request(
+        endpoint,
+        profile === "persisted" ? persistedBody : rawBody,
+      );
+      // The server-side web client has already established a verified bearer
+      // or signed trusted-context identity. A single raw retry bridges a
+      // rolling deployment where web and API manifests momentarily differ.
+      if (
+        profile === "persisted" &&
+        attempt.result.ok &&
+        attempt.json &&
+        isPersistedQueryNotFoundPayload(attempt.resultPayload)
+      ) {
+        attempt = await request(buildGatewayGraphqlUrl().toString(), rawBody);
+      }
+      response = attempt.result;
+      payload = attempt.resultPayload;
+      isJsonResponse = attempt.json;
       responseStatus = response.status;
     } catch (cause) {
       const message = `GraphQL backend unreachable at ${endpoint}`;
@@ -250,10 +278,6 @@ export async function executeGraphqlRequest<TData>(input: {
     }
 
     const contentType = response.headers.get("content-type") ?? "";
-    const isJsonResponse = contentType.includes("application/json");
-    const payload = isJsonResponse
-      ? await response.json().catch(() => null)
-      : await response.text().catch(() => null);
 
     if (!response.ok) {
       const error = new GraphqlProxyError(

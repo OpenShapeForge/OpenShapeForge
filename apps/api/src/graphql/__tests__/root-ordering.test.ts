@@ -15,10 +15,10 @@ import {
   generatedEntityMutationFields,
   generatedEntityQueryFields,
 } from "../generated-entity-schema.js";
-import { buildGraphqlSchema } from "../schema.js";
+import { buildGraphqlSchema, sortRootFieldDefinitions } from "../schema.js";
 
 function sortedFields(fields: string): string[] {
-  return declaredFieldNames(fields).sort((left, right) => left.localeCompare(right));
+  return declaredFieldNames(fields).sort();
 }
 
 function expectedRootOrder() {
@@ -38,6 +38,14 @@ function expectedRootOrder() {
 }
 
 describe("GraphQL root ordering", () => {
+  test("uses locale-independent codepoint order for case and underscore", () => {
+    expect(declaredFieldNames(sortRootFieldDefinitions(`
+      zeta: String
+      _internal: String
+      alpha: String
+      Alpha: String
+    `))).toEqual(["Alpha", "_internal", "alpha", "zeta"]);
+  });
   test("introspection preserves stable groups and descriptions across schema builds", async () => {
     const expected = expectedRootOrder();
     const snapshots = await Promise.all(

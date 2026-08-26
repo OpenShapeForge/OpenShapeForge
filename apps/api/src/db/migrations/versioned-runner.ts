@@ -115,6 +115,43 @@ async function migrationFileChecksum(
   return createHash("sha256").update(contents).digest("hex");
 }
 
+export type VersionedMigrationLedgerStatus = {
+  ready: boolean;
+  missing: string[];
+  mismatched: string[];
+};
+
+/** Read-only readiness check for the complete immutable migration registry. */
+export async function verifyVersionedMigrationLedger(
+  db: Kysely<any>,
+  migrations: readonly VersionedMigration[],
+): Promise<VersionedMigrationLedgerStatus> {
+  if (migrations.length === 0) return { ready: true, missing: [], mismatched: [] };
+  validateVersionedRegistry(migrations);
+  const versions = migrations.map((migration) => migration.version);
+  const ledger = await sql<{ version: string; checksum: string | null }>`
+    select version, checksum
+    from platform.schema_migrations
+    where version in (${sql.join(versions)})
+  `.execute(db);
+  const recorded = new Map(ledger.rows.map((row) => [row.version, row.checksum]));
+  const missing: string[] = [];
+  const mismatched: string[] = [];
+  for (const migration of migrations) {
+    const checksum = recorded.get(migration.version);
+    if (checksum === undefined) {
+      missing.push(migration.version);
+    } else if (checksum !== await migrationFileChecksum(migration)) {
+      mismatched.push(migration.version);
+    }
+  }
+  return {
+    ready: missing.length === 0 && mismatched.length === 0,
+    missing,
+    mismatched,
+  };
+}
+
 export async function applyVersionedMigrations(
   db: Kysely<any>,
   migrations: readonly VersionedMigration[],

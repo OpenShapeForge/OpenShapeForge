@@ -1,12 +1,14 @@
 # GraphQL operations and observability
 
-The API exposes two GraphQL transport profiles. `/api/graphql` remains the
-integration endpoint and accepts arbitrary operations subject to authentication,
+The API exposes two GraphQL transport profiles. In production, `/api/graphql`
+accepts arbitrary operations only after verified integration authentication,
 authorization, tenant isolation, rate limits, and GraphQL Armor. The generated
 web app uses `/api/graphql/persisted`: its build-generated manifest maps the
 SHA-256 of each canonical operation to the query. That endpoint rejects raw,
 unknown, or stale operations. A deliberate integration-only web call may opt
-back into the integration profile in `executeGraphqlRequest`.
+back into the integration profile in `executeGraphqlRequest`. During a rolling
+deployment, the authenticated web server retries one exact persisted-query miss
+once through that integration profile; other errors never trigger a fallback.
 
 ## Consumer-owned CORS
 
@@ -26,14 +28,18 @@ choice visible in their values rather than hiding it in the shared package.
 ## Operational endpoints
 
 - `/api/health` is process liveness and does not contact dependencies.
-- `/api/ready` checks the database, generated-schema checksum, and runtime
-  module initialization each time. It returns 503 until every dependency is
-  ready and exposes only fixed check names/statuses.
+- `/api/ready` checks the database, generated-schema checksum, every immutable
+  versioned-migration ledger checksum, and runtime module initialization. A
+  one-second cache and single-flight execution bound probe bursts. It returns
+  503 until every dependency is ready and exposes only fixed names/statuses.
 - `/api/metrics` is Prometheus text using one registry per process. GraphQL
   labels are limited to operation type, build-known operation names, fixed
   phase, and expected/unexpected classification. Resolver, path, raw URL,
   tenant, user, variables, headers, and arbitrary operation-name labels are
   intentionally absent.
+
+Readiness and metrics use the ordinary request-rate boundary; only constant-time
+liveness is exempt.
 
 Unexpected GraphQL exceptions are masked for callers and centrally reduced to
 a category, safe error type, and optional uppercase error code. Messages,
@@ -45,6 +51,9 @@ OpenTelemetry starts before framework and database imports. It remains off
 unless `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT` is
 set; non-local exporters require HTTPS. `OTEL_TRACES_EXPORTER=none` disables it
 explicitly. The consumer owns exporter infrastructure and sampling policy.
+Automatic instrumentation is restricted to HTTP and Fastify. Query strings are
+redacted, while GraphQL document/resolver and database spans are disabled so
+tenant data cannot enter the exporter by default.
 
 GraphiQL is available only outside production. Its default health query is
 safe without credentials and explains where a local bearer header belongs;

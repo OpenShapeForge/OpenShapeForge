@@ -19,6 +19,27 @@ const syntheticModule: RuntimeModule = {
 };
 
 describe("operational readiness", () => {
+  test("rate-limits dependency and metrics probes while keeping liveness exempt", async () => {
+    const original = process.env.API_RATE_LIMIT_MAX;
+    process.env.API_RATE_LIMIT_MAX = "1";
+    let app = createApiApp({ cors: false, readinessChecks: [] });
+    try {
+      expect((await app.inject({ method: "GET", url: "/api/health" })).statusCode).toBe(200);
+      expect((await app.inject({ method: "GET", url: "/api/health" })).statusCode).toBe(200);
+      expect((await app.inject({ method: "GET", url: "/api/ready" })).statusCode).toBe(200);
+      expect((await app.inject({ method: "GET", url: "/api/ready" })).statusCode).toBe(429);
+
+      await app.close();
+      app = createApiApp({ cors: false, readinessChecks: [] });
+      expect((await app.inject({ method: "GET", url: "/api/metrics" })).statusCode).toBe(200);
+      expect((await app.inject({ method: "GET", url: "/api/metrics" })).statusCode).toBe(429);
+    } finally {
+      await app.close();
+      if (original === undefined) delete process.env.API_RATE_LIMIT_MAX;
+      else process.env.API_RATE_LIMIT_MAX = original;
+    }
+  });
+
   test("keeps liveness healthy and recovers readiness without a restart", async () => {
     let databaseReady = false;
     let schemaReady = false;
@@ -39,6 +60,7 @@ describe("operational readiness", () => {
         },
         { name: "runtime_modules", check: () => undefined },
       ],
+      readinessCacheMs: 0,
     });
 
     try {

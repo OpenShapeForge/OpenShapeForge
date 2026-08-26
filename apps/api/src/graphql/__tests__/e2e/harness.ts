@@ -214,6 +214,7 @@ export async function gql(
   } else if (identity) {
     applyTrustedContextHeaders(headers, identity, { secret: SECRET });
   }
+  if (!remoteUrl) headers.set("x-openshapeforge-arbitrary-profile", "authenticated");
   const body = JSON.stringify({ query, variables });
   const request = new Request(`${remoteUrl ?? "http://e2e.internal"}/api/graphql`, {
     method: "POST",

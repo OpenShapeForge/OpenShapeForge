@@ -57,6 +57,7 @@ async function statementsFor(query: string): Promise<string[]> {
   applyTrustedContextHeaders(headers, tenantA, {
     secret: process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET!,
   });
+  headers.set("x-openshapeforge-arbitrary-profile", "authenticated");
   const response = await yoga.fetch(
     new Request("http://e2e.internal/api/graphql", {
       method: "POST",

@@ -3,6 +3,7 @@ import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentation
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { resourceFromAttributes } from "@opentelemetry/resources";
 import { NodeSDK } from "@opentelemetry/sdk-node";
+import type { ClientRequest, IncomingMessage } from "node:http";
 
 export type OpenTelemetryBootstrapOptions = {
   /** Omit to keep tracing disabled rather than exporting to an implicit host. */
@@ -12,21 +13,72 @@ export type OpenTelemetryBootstrapOptions = {
   headers?: Record<string, string>;
 };
 
-let sdk: NodeSDK | null = null;
+const OTEL_STATE_KEY = Symbol.for("openshapeforge.observability.otel-state");
+type OtelGlobal = typeof globalThis & {
+  [OTEL_STATE_KEY]?: { sdk: NodeSDK | null };
+};
+
+function state() {
+  const target = globalThis as OtelGlobal;
+  return (target[OTEL_STATE_KEY] ??= { sdk: null });
+}
+
+const REDACTED_QUERY_PARAMS = [
+  "query", "variables", "extensions", "code", "state", "token",
+  "access_token", "refresh_token", "id_token", "session_state", "key", "secret",
+  "sig", "Signature", "AWSAccessKeyId", "X-Goog-Signature",
+];
+
+function safeTarget(raw: string | undefined): { target: string; hadQuery: boolean } {
+  if (!raw) return { target: "/", hadQuery: false };
+  try {
+    const parsed = new URL(raw, "http://telemetry.invalid");
+    return { target: parsed.pathname || "/", hadQuery: Boolean(parsed.search) };
+  } catch {
+    return { target: "/", hadQuery: raw.includes("?") };
+  }
+}
+
+/** Overwrite attributes that otherwise carry OAuth or GraphQL query strings. */
+export function applyBoundedHttpSpanAttributes(
+  span: { setAttribute(name: string, value: string): unknown },
+  request: ClientRequest | IncomingMessage,
+): void {
+  const raw = "path" in request && typeof request.path === "string"
+    ? request.path
+    : "url" in request ? request.url : undefined;
+  const safe = safeTarget(raw);
+  span.setAttribute("http.target", safe.target);
+  span.setAttribute("url.full", safe.target);
+  if (safe.hadQuery) span.setAttribute("url.query", "[REDACTED]");
+}
 
 /**
- * Start instrumentation before framework/database modules are imported.
- * Idempotence protects watch mode; the host owns endpoint and service policy.
+ * Start tracing before framework/database modules are imported. Only bounded
+ * HTTP and Fastify spans are enabled: GraphQL documents/resolvers and SQL are
+ * deliberately excluded because they may carry tenant or personal data.
  */
 export function bootstrapOpenTelemetry(
   options: OpenTelemetryBootstrapOptions,
 ): NodeSDK | null {
-  if (sdk || !options.tracesEndpoint) return sdk;
+  const lifecycle = state();
+  if (lifecycle.sdk || !options.tracesEndpoint) return lifecycle.sdk;
   const endpoint = new URL(options.tracesEndpoint);
   if (endpoint.protocol !== "https:" && endpoint.hostname !== "localhost" && endpoint.hostname !== "127.0.0.1") {
     throw new Error("The OTLP traces endpoint must use HTTPS outside localhost.");
   }
-  sdk = new NodeSDK({
+  const configured = getNodeAutoInstrumentations({
+    "@opentelemetry/instrumentation-http": {
+      redactedQueryParams: REDACTED_QUERY_PARAMS,
+      requestHook: applyBoundedHttpSpanAttributes,
+    },
+    "@opentelemetry/instrumentation-graphql": { enabled: false },
+  });
+  const allowed = new Set([
+    "@opentelemetry/instrumentation-http",
+    "@opentelemetry/instrumentation-fastify",
+  ]);
+  lifecycle.sdk = new NodeSDK({
     resource: resourceFromAttributes({
       "service.name": options.serviceName,
       ...(options.serviceNamespace
@@ -37,14 +89,15 @@ export function bootstrapOpenTelemetry(
       url: endpoint.toString(),
       ...(options.headers ? { headers: { ...options.headers } } : {}),
     }),
-    instrumentations: [getNodeAutoInstrumentations()],
+    instrumentations: configured.filter((item) => allowed.has(item.instrumentationName)),
   });
-  sdk.start();
-  return sdk;
+  lifecycle.sdk.start();
+  return lifecycle.sdk;
 }
 
 export async function shutdownOpenTelemetry(): Promise<void> {
-  const active = sdk;
-  sdk = null;
+  const lifecycle = state();
+  const active = lifecycle.sdk;
+  lifecycle.sdk = null;
   await active?.shutdown();
 }

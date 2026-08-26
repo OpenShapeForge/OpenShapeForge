@@ -13,11 +13,13 @@ import {
 } from "graphql-yoga";
 import type { Registry } from "prom-client";
 import { boundedLabel, sanitizeError, type SanitizedErrorReport } from "./redaction.js";
-import { getProcessPrometheusRegistry } from "./registry.js";
+import {
+  getProcessPrometheusRegistry,
+  getProcessYogaMetricsPlugins,
+} from "./registry.js";
 
 const OPERATION_TYPES = new Set(["query", "mutation", "subscription"]);
 const ERROR_PHASES = new Set(["parse", "validate", "context", "execute", "subscribe"]);
-const metricsPlugins = new WeakMap<Registry, { fingerprint: string; plugin: Plugin }>();
 
 export type FixedCorsPolicy = Exclude<CORSOptions, false> & {
   origin: string | string[];
@@ -125,12 +127,13 @@ export function createYogaMetricsPlugin(options: YogaMetricsOptions): Plugin {
     options.metricPrefix,
     [...options.allowedOperationNames].sort(),
   ]);
+  const metricsPlugins = getProcessYogaMetricsPlugins();
   const cached = metricsPlugins.get(registry);
   if (cached) {
     if (cached.fingerprint !== fingerprint) {
       throw new Error("A Prometheus registry cannot be reused with different Yoga metric policy.");
     }
-    return cached.plugin;
+    return cached.plugin as Plugin;
   }
   const metricName = (suffix: string) => `${options.metricPrefix}_${suffix}`;
   const labels = (params: OperationParams) =>

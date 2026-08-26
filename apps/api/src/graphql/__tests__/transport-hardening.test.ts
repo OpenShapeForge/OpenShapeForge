@@ -4,10 +4,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { FastifyInstance } from "fastify";
 import persistedManifest from "../../generated/graphql/persisted-operations.json" with { type: "json" };
 import { createApiApp } from "../../roles/api.js";
+import { applyTrustedContextHeaders } from "@openshapeforge/auth";
+import { __resetSessionResolverForTests } from "../../auth/identity.js";
 
 const originalNodeEnv = process.env.NODE_ENV;
 const originalRateLimit = process.env.API_RATE_LIMIT_MAX;
 const originalMaxDepth = process.env.GRAPHQL_MAX_DEPTH;
+const originalContextSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
 let app: FastifyInstance | null = null;
 
 afterEach(async () => {
@@ -19,6 +22,9 @@ afterEach(async () => {
   else process.env.API_RATE_LIMIT_MAX = originalRateLimit;
   if (originalMaxDepth === undefined) delete process.env.GRAPHQL_MAX_DEPTH;
   else process.env.GRAPHQL_MAX_DEPTH = originalMaxDepth;
+  if (originalContextSecret === undefined) delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+  else process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = originalContextSecret;
+  __resetSessionResolverForTests();
 });
 
 function persistedEntry(operationName: string): [string, string] {
@@ -172,6 +178,62 @@ describe("persisted first-party GraphQL profile", () => {
     const [healthHash] = persistedEntry("HealthProbe");
     expect((await persistedRequest(healthHash)).statusCode).not.toBe(429);
     expect((await persistedRequest(healthHash)).statusCode).toBe(429);
+  });
+
+  test("requires verified production identity and ignores caller-supplied profile markers", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = "transport-hardening-secret";
+    __resetSessionResolverForTests();
+    app = createApiApp({ cors: false });
+    const payload = { query: "query IntegrationHealth { health { status } }" };
+
+    const anonymous = await app.inject({
+      method: "POST",
+      url: "/api/graphql",
+      headers: {
+        "content-type": "application/json",
+        "x-openshapeforge-arbitrary-profile": "authenticated",
+      },
+      payload,
+    });
+    expect(JSON.stringify(anonymous.json())).toMatch(/PersistedQueryOnly/);
+
+    const trusted = new Headers({ "content-type": "application/json" });
+    applyTrustedContextHeaders(trusted, {
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      userId: "22222222-2222-4222-8222-222222222222",
+      roles: [],
+    }, { secret: "transport-hardening-secret" });
+    const authenticated = await app.inject({
+      method: "POST",
+      url: "/api/graphql",
+      headers: Object.fromEntries(trusted.entries()),
+      payload,
+    });
+    expect(authenticated.json().data.health.status).toBe("ok");
+  });
+
+  test("supports one authenticated raw retry for a stale web manifest", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = "rolling-fallback-secret";
+    __resetSessionResolverForTests();
+    app = createApiApp({ cors: false });
+    const stale = await persistedRequest("f".repeat(64));
+    expect(JSON.stringify(stale.json())).toMatch(/PersistedQueryNotFound/);
+
+    const headers = new Headers({ "content-type": "application/json" });
+    applyTrustedContextHeaders(headers, {
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      userId: "22222222-2222-4222-8222-222222222222",
+      roles: [],
+    }, { secret: "rolling-fallback-secret" });
+    const fallback = await app.inject({
+      method: "POST",
+      url: "/api/graphql",
+      headers: Object.fromEntries(headers.entries()),
+      payload: { query: "query HealthProbe { health { status role } }" },
+    });
+    expect(fallback.json().data.health).toEqual({ status: "ok", role: "api" });
   });
 });
 

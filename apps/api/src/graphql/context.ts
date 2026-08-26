@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { resolveSessionContext } from "../auth/identity.js";
-import type { SessionCredential, SessionScope } from "../auth/trusted-context.js";
+import type {
+  SessionCredential,
+  SessionScope,
+  TrustedSessionContext,
+} from "../auth/trusted-context.js";
 
 export type GraphqlSessionContext = {
   tenantId: string | null;
@@ -36,13 +40,16 @@ export type GraphqlContext = Record<string, unknown> & {
 
 export type CreateGraphqlContextOptions = {
   db?: OpenShapeForgeDatabase | undefined;
+  /** Host-verified identity avoids repeating API-key or bearer verification. */
+  resolvedSession?: TrustedSessionContext | undefined;
 };
 
 export async function createGraphqlContext(
   headers: Headers,
   options: CreateGraphqlContextOptions = {},
 ): Promise<GraphqlContext> {
-  const resolved = await resolveSessionContext(headers, { db: options.db });
+  const resolved = options.resolvedSession ??
+    await resolveSessionContext(headers, { db: options.db });
   const session: GraphqlSessionContext = {
     tenantId: resolved.tenantId,
     userId: resolved.userId,

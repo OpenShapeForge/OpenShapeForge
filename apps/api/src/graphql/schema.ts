@@ -172,7 +172,9 @@ export function sortRootFieldDefinitions(fields: string): string {
   const document = parse(`type Root {\n${fields}\n}`);
   const root = document.definitions[0] as ObjectTypeDefinitionNode;
   return [...(root.fields ?? [])]
-    .sort((left, right) => left.name.value.localeCompare(right.name.value))
+    .sort((left, right) => left.name.value < right.name.value
+      ? -1
+      : left.name.value > right.name.value ? 1 : 0)
     .map((field: FieldDefinitionNode) => print(field))
     .join("\n");
 }

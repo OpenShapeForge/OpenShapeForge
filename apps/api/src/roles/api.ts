@@ -7,14 +7,21 @@
  * worker, and entity-event fanout wiring are intentionally absent.
  */
 import rateLimit from "@fastify/rate-limit";
-import Fastify, { type FastifyBaseLogger } from "fastify";
-import { readApiLimits } from "../config/limits.js";
-import { assertProductionEnv } from "../config/production-guard.js";
-import { createDatabaseRuntime, type DatabaseRuntime, type OpenShapeForgeDatabase } from "../db/connection.js";
 import {
-  checkGeneratedSchemaDrift,
-  type GeneratedSchemaDriftResult,
-} from "../db/schema-drift.js";
+  registerOperationalRoutes,
+  type OperationalRoutesOptions,
+} from "@openshapeforge/observability/fastify";
+import type {
+  ReadinessCheck,
+  Registry,
+  SanitizedErrorReport,
+} from "@openshapeforge/observability";
+import type { GraphqlCorsPolicy } from "@openshapeforge/observability/yoga";
+import Fastify from "fastify";
+import { readApiLimits } from "../config/limits.js";
+import { readGraphqlCorsPolicy } from "../config/graphql-cors.js";
+import { assertProductionEnv } from "../config/production-guard.js";
+import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js";
 import { createGraphqlYoga } from "../graphql/yoga.js";
 import { headersFromFastify } from "../http/headers.js";
 import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
@@ -34,6 +41,10 @@ import {
   createRedisRateLimitStore,
   type RateLimitMetrics,
 } from "./rate-limit.js";
+import {
+  createApiReadinessChecks,
+  enforceGeneratedSchemaFreshness,
+} from "./api-readiness.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -41,9 +52,6 @@ declare module "fastify" {
     rateLimitMetrics: RateLimitMetrics;
   }
 }
-
-/** Startup drift check must not delay readiness meaningfully. */
-const DRIFT_CHECK_TIMEOUT_MS = 5000;
 
 /**
  * Liveness/readiness endpoints are exempt from rate limiting: kubelet probes hit
@@ -53,6 +61,7 @@ const DRIFT_CHECK_TIMEOUT_MS = 5000;
 const RATE_LIMIT_EXEMPT_PATHS = new Set([
   "/api/health",
   "/api/ready",
+  "/api/metrics",
   "/api/graphql/health",
 ]);
 
@@ -60,85 +69,6 @@ function isRateLimitExempt(url: string): boolean {
   const queryStart = url.indexOf("?");
   const path = queryStart === -1 ? url : url.slice(0, queryStart);
   return RATE_LIMIT_EXEMPT_PATHS.has(path);
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`${label} timed out after ${ms}ms`)),
-      ms,
-    );
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
-}
-
-function driftBanner(drift: GeneratedSchemaDriftResult): string {
-  return [
-    "============================================================================",
-    `GENERATED SCHEMA DRIFT DETECTED (status: ${drift.status})`,
-    drift.status === "unmigrated"
-      ? "The database has no applied generated-schema migration record (fresh DB?)."
-      : "The database's generated schema is BEHIND the manifest bundled in this build.",
-    `  recorded checksum: ${drift.recordedChecksum ?? "<none>"}`,
-    `  bundled checksum:  ${drift.bundledChecksum}`,
-    "Run `bun run db:migrate` to bring the database up to date.",
-    "============================================================================",
-  ].join("\n");
-}
-
-/**
- * Compare the connected database's applied generated-schema checksum with the
- * bundled manifest. In production a drifted (or unverifiable) schema is fatal;
- * in development it logs loudly but never blocks startup.
- */
-async function enforceGeneratedSchemaFreshness(
-  log: FastifyBaseLogger,
-  db: OpenShapeForgeDatabase,
-): Promise<void> {
-  const production = process.env.NODE_ENV === "production";
-
-  let drift: GeneratedSchemaDriftResult;
-  try {
-    drift = await withTimeout(
-      checkGeneratedSchemaDrift(db),
-      DRIFT_CHECK_TIMEOUT_MS,
-      "generated schema drift check",
-    );
-  } catch (error) {
-    if (production) {
-      throw new Error(
-        "Unable to verify generated schema freshness at startup; refusing to serve.",
-        { cause: error },
-      );
-    }
-    log.error(
-      { err: error },
-      "Generated schema drift check failed at startup (database unreachable?); continuing without verification.",
-    );
-    return;
-  }
-
-  if (drift.status === "ok") {
-    log.debug(
-      { checksum: drift.bundledChecksum },
-      "Generated schema drift check: database matches the bundled manifest.",
-    );
-    return;
-  }
-
-  if (production) {
-    throw new Error(driftBanner(drift));
-  }
-  log.warn(driftBanner(drift));
 }
 
 function bodyFromFastify(method: string, body: unknown): BodyInit | undefined {
@@ -157,6 +87,7 @@ function bodyFromFastify(method: string, body: unknown): BodyInit | undefined {
 
 export function createApiApp(
   options: {
+    cors: GraphqlCorsPolicy;
     databaseUrl?: string;
     /**
      * Runtime modules resolved by the caller. Kept a parameter rather than
@@ -165,7 +96,11 @@ export function createApiApp(
      * anything. `startApiRole` does the loading for the real process.
      */
     modules?: ModuleRegistry;
-  } = {},
+    metricsRegistry?: Registry;
+    reportUnexpectedError?: (report: SanitizedErrorReport) => void;
+    /** Focused route tests may replace external dependencies with controlled checks. */
+    readinessChecks?: readonly ReadinessCheck[];
+  },
 ) {
   const modules: ModuleRegistry = options.modules ?? { loaded: [], failures: [] };
   const limits = readApiLimits();
@@ -273,7 +208,16 @@ export function createApiApp(
   // plugin loads) would silently escape the limiter.
   void app.register(async (routes) => {
     const initialised = await initRuntimeModules(modules, dbOptions);
-    ready = { yoga: createGraphqlYoga({ ...dbOptions, modules: initialised.loaded }) };
+    ready = {
+      yoga: createGraphqlYoga({
+        ...dbOptions,
+        cors: options.cors,
+        modules: initialised.loaded,
+        ...(options.metricsRegistry ? { metricsRegistry: options.metricsRegistry } : {}),
+        reportUnexpectedError: options.reportUnexpectedError ?? ((report) =>
+          routes.log.error(report, "Unexpected GraphQL execution error.")),
+      }),
+    };
 
     // A module that failed to load or initialise contributes nothing, and its
     // absence is otherwise invisible until a query 404s. Say so once, here.
@@ -289,29 +233,39 @@ export function createApiApp(
       role: "api",
     }));
 
-    routes.get("/api/ready", async () => ({
-      status: "ready",
-      role: "api",
-    }));
+    const readinessChecks = options.readinessChecks ?? createApiReadinessChecks(
+      databaseRuntime,
+      initialised,
+    );
+    registerOperationalRoutes(routes, {
+      readinessChecks,
+      ...(options.metricsRegistry ? { registry: options.metricsRegistry } : {}),
+    } satisfies OperationalRoutesOptions);
 
     routes.get("/api/graphql/health", async () => ({
       status: "ok",
       role: "api",
     }));
 
-    routes.route({
-      url: "/api/graphql",
+    for (const url of ["/api/graphql", "/api/graphql/persisted"]) routes.route({
+      url,
       method: ["GET", "POST", "OPTIONS"],
       handler: async (request, reply) => {
         const origin = `${request.protocol}://${request.headers.host ?? "localhost"}`;
         // `ready` is assigned at the top of this same registration, before any
         // route can be reached; the check is a type guard, not a race.
         if (!ready) throw new Error("GraphQL was not initialised before serving.");
+        const yogaUrl = new URL(request.url, origin);
+        const requestHeaders = headersFromFastify(request.headers);
+        if (url.endsWith("/persisted")) {
+          yogaUrl.pathname = "/api/graphql";
+          requestHeaders.set("x-openshapeforge-persisted-profile", "enforced");
+        }
         const response = await ready.yoga.fetch(
-          new URL(request.url, origin),
+          yogaUrl,
           {
             method: request.method,
-            headers: headersFromFastify(request.headers),
+            headers: requestHeaders,
             body: bodyFromFastify(request.method, request.body),
           },
           {
@@ -366,6 +320,7 @@ export async function startApiRole() {
   const port = Number(process.env.PORT ?? 3001);
   const host = process.env.HOST ?? "0.0.0.0";
   const app = createApiApp({
+    cors: readGraphqlCorsPolicy(),
     ...(process.env.DATABASE_URL ? { databaseUrl: process.env.DATABASE_URL } : {}),
     modules: await loadRuntimeModules(),
   });

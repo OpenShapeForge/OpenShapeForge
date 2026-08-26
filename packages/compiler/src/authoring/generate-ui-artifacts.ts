@@ -17,6 +17,7 @@ import { normalizeKeycloakRoleName } from "./generators/keycloak.js";
 import type { EntityManifestEntryData } from "./generators/app.js";
 import type { RuntimeMetadataData } from "./generators/manifest.js";
 import type { ViewDefinition } from "./types.js";
+import { generatePersistedOperationArtifacts } from "../persisted-operations.js";
 
 export type AuthoringUiArtifact = {
   path: string;
@@ -303,6 +304,7 @@ function keepGreenfieldSafeArtifacts(files: Map<string, string>): AuthoringUiArt
 }
 export async function generateAuthoringUiArtifacts(
   authoringDir: string,
+  repoRoot: string,
 ): Promise<AuthoringUiArtifact[]> {
   const entityNames = listEntityFiles(authoringDir).map((file) => file.slug);
   const compiled: CompiledAuthoringEntity[] = [];
@@ -435,7 +437,13 @@ export async function generateAuthoringUiArtifacts(
     generatedFiles.set(path, contents);
   }
 
-  return keepGreenfieldSafeArtifacts(generatedFiles);
+  const persisted = await generatePersistedOperationArtifacts({
+    repoRoot,
+    generatedWebSources: generatedFiles,
+    pageConfigs: pageConfigBundles,
+  });
+  return [...keepGreenfieldSafeArtifacts(generatedFiles), ...persisted]
+    .sort((left, right) => left.path.localeCompare(right.path));
 }
 
 export async function writeAuthoringUiArtifacts(

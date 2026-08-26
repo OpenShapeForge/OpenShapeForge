@@ -44,7 +44,7 @@ const runtime = createDatabaseRuntime({
     if (event.level === "query") statements.push(event.query.sql);
   },
 });
-const yoga = createGraphqlYoga({ db: runtime.db });
+const yoga = createGraphqlYoga({ cors: false, db: runtime.db });
 
 afterAll(async () => {
   await runtime.close();

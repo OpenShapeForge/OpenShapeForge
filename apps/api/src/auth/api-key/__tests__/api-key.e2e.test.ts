@@ -280,7 +280,7 @@ beforeAll(async () => {
   if (!ready) return;
   __resetSessionResolverForTests();
   __resetExchangeCacheForTests();
-  app = createApiApp({ databaseUrl: DATABASE_URL });
+  app = createApiApp({ cors: false, databaseUrl: DATABASE_URL });
   await app.ready();
 });
 

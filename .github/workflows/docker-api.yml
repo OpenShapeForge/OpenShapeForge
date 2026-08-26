@@ -104,6 +104,7 @@ jobs:
           docker run -d --name api-smoke -p 3001:3001 \
             --read-only --tmpfs /tmp \
             -e NODE_ENV=development \
+            -e OPENSHAPEFORGE_GRAPHQL_CORS_MODE=disabled \
             openshapeforge-api:ci
           for i in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:3001/api/health | grep -q '"status":"ok"'; then

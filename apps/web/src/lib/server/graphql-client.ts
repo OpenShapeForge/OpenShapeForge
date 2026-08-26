@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { getCachedSession } from "@/lib/cached-session";
 import { GRAPHQL_CACHE_VERSION_COOKIE } from "@/lib/graphql-cache-version";
 import { buildGatewayGraphqlUrl } from "@/lib/server/gateway";
+import { createPersistedOperationEnvelope } from "@/lib/server/persisted-operation";
 import { startWebTelemetrySpan } from "@/lib/server/opentelemetry";
 import { applyTraceHeaders, readTraceContext } from "@/lib/server/trace-context";
 import { buildGraphqlGatewayRequestContext } from "./graphql-client/context";
@@ -147,8 +148,19 @@ export async function executeGraphqlRequest<TData>(input: {
    * refresh immediately after a mutation cannot reuse an older definition.
    */
   queryCache?: boolean;
+  /**
+   * Fixed first-party operations use the generated persisted manifest. Only
+   * callers that deliberately build a query at runtime may choose the existing
+   * authenticated integration profile.
+   */
+  profile?: "persisted" | "integration";
 }): Promise<TData> {
-  const endpoint = buildGatewayGraphqlUrl().toString();
+  const gatewayUrl = buildGatewayGraphqlUrl();
+  const profile = input.profile ?? "persisted";
+  if (profile === "persisted") {
+    gatewayUrl.pathname = `${gatewayUrl.pathname.replace(/\/$/, "")}/persisted`;
+  }
+  const endpoint = gatewayUrl.toString();
   const { headers, session } = await buildGraphqlGatewayRequestContext({
     traceHeaders: input.traceHeaders,
   });
@@ -203,13 +215,21 @@ export async function executeGraphqlRequest<TData>(input: {
     applyTraceHeaders(headers, span.traceContext());
     try {
       const requestCache = input.cache ?? "no-store";
+      const { canonicalQuery, persistedBody } = createPersistedOperationEnvelope(
+        input.query,
+        input.variables,
+        operation.name,
+      );
       response = await fetch(endpoint, {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          query: input.query,
-          variables: input.variables,
-        }),
+        body: JSON.stringify(profile === "persisted"
+          ? persistedBody
+          : {
+              query: canonicalQuery,
+              ...(operation.name ? { operationName: operation.name } : {}),
+              variables: input.variables,
+            }),
         cache: requestCache,
         next: requestCache === "no-store" ? undefined : { revalidate: 30 },
       });

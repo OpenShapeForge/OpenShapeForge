@@ -91,7 +91,11 @@ function findLicenseText(dir: string): string | null {
         return false;
       }
     });
-  return match === undefined ? null : readFileSync(join(dir, match), "utf8").trim();
+  if (match === undefined) return null;
+  return readFileSync(join(dir, match), "utf8")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+$/gm, "")
+    .trim();
 }
 
 /** Recursively collect package.json paths under a directory (bounded). */

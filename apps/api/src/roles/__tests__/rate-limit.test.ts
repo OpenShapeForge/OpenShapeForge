@@ -25,7 +25,7 @@ afterEach(async () => {
 describe("API rate limiting", () => {
   test("throttles a non-exempt route with 429 + Retry-After once the budget is spent", async () => {
     process.env[RATE_LIMIT_MAX_ENV] = "3";
-    app = createApiApp();
+    app = createApiApp({ cors: false });
 
     // The first `max` requests are admitted (whatever the handler returns);
     // the very next one is rejected by the limiter.
@@ -64,7 +64,7 @@ describe("API rate limiting", () => {
   ] as const) {
     test(`${transport} reports a throttled request as 429, not a redacted 500`, async () => {
       process.env[RATE_LIMIT_MAX_ENV] = "2";
-      app = createApiApp();
+      app = createApiApp({ cors: false });
 
       let limited: Awaited<ReturnType<FastifyInstance["inject"]>> | undefined;
       for (let i = 0; i < 6 && !limited; i++) {
@@ -82,7 +82,10 @@ describe("API rate limiting", () => {
 
   test("liveness/readiness probes are never throttled", async () => {
     process.env[RATE_LIMIT_MAX_ENV] = "1";
-    app = createApiApp();
+    app = createApiApp({
+      cors: false,
+      readinessChecks: [{ name: "controlled", check: () => undefined }],
+    });
 
     for (let i = 0; i < 5; i++) {
       const res = await app.inject({ method: "GET", url: "/api/health" });

@@ -40,7 +40,9 @@ function identity(roles: string[]): Identity {
 let app: ReturnType<typeof createApiApp> | null = null;
 function getApp() {
   app ??= createApiApp(
-    process.env.DATABASE_URL ? { databaseUrl: process.env.DATABASE_URL } : {},
+    process.env.DATABASE_URL
+      ? { cors: false, databaseUrl: process.env.DATABASE_URL }
+      : { cors: false },
   );
   return app;
 }

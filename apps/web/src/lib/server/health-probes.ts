@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import "server-only";
 import { buildGatewayUrl, getGatewayGraphqlPath } from "@/lib/server/gateway";
+import { createPersistedOperationEnvelope } from "@/lib/server/persisted-operation";
 
 export type CheckName = "keycloak" | "graphql";
 export type CheckResult = { ok: boolean; latencyMs: number | null; error?: string };
@@ -72,12 +73,14 @@ export async function probeGraphql(): Promise<CheckResult> {
   const timer = setTimeout(() => ctl.abort(), getGraphqlProbeTimeoutMs());
   const start = performance.now();
   try {
-    const res = await fetch(buildGatewayUrl(getGatewayGraphqlPath()).toString(), {
+    const endpoint = buildGatewayUrl(getGatewayGraphqlPath());
+    endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/persisted`;
+    const query = "query HealthProbe { health { status role } }";
+    const { persistedBody } = createPersistedOperationEnvelope(query, undefined, "HealthProbe");
+    const res = await fetch(endpoint.toString(), {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        query: "query HealthProbe { health { status role } }",
-      }),
+      body: JSON.stringify(persistedBody),
       signal: ctl.signal,
       cache: "no-store",
     });

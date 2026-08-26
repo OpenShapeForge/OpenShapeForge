@@ -49,7 +49,7 @@ const KEY_FIELDS = `
 
 export async function listApiKeys(): Promise<ApiKeyRow[]> {
   const data = await executeGraphqlRequest<{ apiKeys?: ApiKeyRow[] }>({
-    query: `query { apiKeys { ${KEY_FIELDS} } }`,
+    query: `query ListApiKeys { apiKeys { ${KEY_FIELDS} } }`,
   });
   return data?.apiKeys ?? [];
 }
@@ -61,7 +61,7 @@ export async function listApiKeys(): Promise<ApiKeyRow[]> {
  */
 export async function listGrantableRoles(): Promise<string[]> {
   const data = await executeGraphqlRequest<{ grantableApiKeyRoles?: string[] }>({
-    query: `query { grantableApiKeyRoles }`,
+    query: `query ListGrantableApiKeyRoles { grantableApiKeyRoles }`,
   });
   return data?.grantableApiKeyRoles ?? [];
 }
@@ -75,7 +75,7 @@ export async function createApiKeyIntegration(input: {
     createApiKeyIntegration?: MintedApiKey;
   }>({
     query: `
-      mutation ($input: CreateApiKeyIntegrationInput!) {
+      mutation CreateApiKeyIntegration($input: CreateApiKeyIntegrationInput!) {
         createApiKeyIntegration(input: $input) {
           integrationId
           keyId
@@ -103,7 +103,7 @@ export async function rotateApiKey(input: {
 }): Promise<MintedApiKey> {
   const data = await executeGraphqlRequest<{ issueApiKey?: MintedApiKey }>({
     query: `
-      mutation ($input: IssueApiKeyInput!) {
+      mutation IssueApiKey($input: IssueApiKeyInput!) {
         issueApiKey(input: $input) {
           integrationId
           keyId
@@ -121,7 +121,7 @@ export async function rotateApiKey(input: {
 
 export async function revokeApiKey(keyId: string): Promise<void> {
   await executeGraphqlRequest<{ revokeApiKey?: boolean }>({
-    query: `mutation ($keyId: ID!) { revokeApiKey(keyId: $keyId) }`,
+    query: `mutation RevokeApiKey($keyId: ID!) { revokeApiKey(keyId: $keyId) }`,
     variables: { keyId },
   });
 }
@@ -129,7 +129,7 @@ export async function revokeApiKey(keyId: string): Promise<void> {
 export async function disableApiKeyIntegration(integrationId: string): Promise<void> {
   await executeGraphqlRequest<{ disableApiKeyIntegration?: boolean }>({
     query: `
-      mutation ($integrationId: ID!) {
+      mutation DisableApiKeyIntegration($integrationId: ID!) {
         disableApiKeyIntegration(integrationId: $integrationId)
       }`,
     variables: { integrationId },

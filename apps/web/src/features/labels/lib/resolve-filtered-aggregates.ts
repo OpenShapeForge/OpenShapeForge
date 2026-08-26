@@ -107,7 +107,7 @@ function buildFilteredAggregateQuery(
     return `    ${alias}: ${req.aggregateField}(filter: ${filterJson}) { ${req.subField} }`;
   });
 
-  return `query ($id: ID!) {
+  return `query FilteredAggregates($id: ID!) {
   ${queryField}(id: $id) {
 ${aliasedFields.join("\n")}
   }
@@ -160,6 +160,7 @@ export async function resolveFilteredAggregates(
     const result = await executeGraphqlRequest<Record<string, unknown>>({
       query,
       variables: { id: entityId },
+      profile: "integration",
     });
     resolvedEntity = (result as Record<string, unknown>)?.[queryField] as Record<string, unknown> | null;
   } catch {

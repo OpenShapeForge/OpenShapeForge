@@ -87,6 +87,7 @@ beforeAll(async () => {
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??=
     "openshapeforge-local-dev-context-secret";
   api = createApiApp({
+    cors: false,
     databaseUrl: scratchUrl({ username: APP_ROLE, password: "openshapeforge_app" }),
   });
   await api.ready();

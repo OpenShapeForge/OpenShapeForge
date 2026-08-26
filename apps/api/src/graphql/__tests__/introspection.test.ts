@@ -37,7 +37,7 @@ async function graphql(instance: FastifyInstance, query: string) {
 describe("GraphQL introspection", () => {
   test("is rejected in production (__schema returns no data)", async () => {
     process.env.NODE_ENV = "production";
-    app = createApiApp();
+    app = createApiApp({ cors: false });
     const body = await graphql(app, INTROSPECTION_QUERY);
     expect(body.data).toBeFalsy();
     expect((body.errors ?? []).map((e) => e.message).join(" ")).toMatch(/introspection/i);
@@ -45,14 +45,14 @@ describe("GraphQL introspection", () => {
 
   test("stays enabled in development", async () => {
     process.env.NODE_ENV = "development";
-    app = createApiApp();
+    app = createApiApp({ cors: false });
     const body = await graphql(app, INTROSPECTION_QUERY);
     expect((body.data as { __schema?: { queryType?: { name?: string } } })?.__schema?.queryType?.name).toBe("Query");
   });
 
   test("a normal query (__typename) still works in production — the rule is surgical", async () => {
     process.env.NODE_ENV = "production";
-    app = createApiApp();
+    app = createApiApp({ cors: false });
     const body = await graphql(app, "{ __typename }");
     expect(body.errors).toBeFalsy();
     expect(body.data?.__typename).toBe("Query");

@@ -18,10 +18,19 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
-import { createDatabaseRuntime, type DatabaseRuntime } from "../../../db/connection.js";
+import {
+  createDatabaseRuntime,
+  readMigrateDatabaseUrl,
+  type DatabaseRuntime,
+} from "../../../db/connection.js";
 import { listEntityEvents } from "../../../platform/entity-events.js";
 import { getGeneratedCrudTables } from "../../generated-crud.js";
 import { createGraphqlYoga } from "../../yoga.js";
+export {
+  getKeycloakToken,
+  getRolelessKeycloakToken,
+  keycloakTokenFor,
+} from "./keycloak.js";
 
 process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??= "openshapeforge-local-dev-context-secret";
 process.env.DATABASE_URL ??= "postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev";
@@ -68,10 +77,8 @@ type Store = {
   capturedEventReads: CapturedEventRead[];
   createdRows: CreatedRow[];
   runtime: DatabaseRuntime | null;
+  seedRuntime: DatabaseRuntime | null;
   yoga: ReturnType<typeof createGraphqlYoga> | null;
-  keycloakToken: Promise<string | null> | null;
-  keycloakRolelessToken: Promise<string | null> | null;
-  keycloakTokens: Map<string, Promise<string | null>> | null;
   tenantRowsEnsured: Promise<void> | null;
 };
 
@@ -127,10 +134,8 @@ const store: Store = ((globalThis as Record<string, any>).__openshapeforgeE2E ??
   capturedEventReads: [],
   createdRows: [],
   runtime: null,
+  seedRuntime: null,
   yoga: null,
-  keycloakToken: null,
-  keycloakRolelessToken: null,
-  keycloakTokens: null,
   tenantRowsEnsured: null,
 } satisfies Store);
 
@@ -193,7 +198,7 @@ export function getRuntime(): DatabaseRuntime {
 }
 
 function yogaHandler() {
-  store.yoga ??= createGraphqlYoga({ db: getRuntime().db });
+  store.yoga ??= createGraphqlYoga({ cors: false, db: getRuntime().db });
   return store.yoga;
 }
 
@@ -277,99 +282,6 @@ export async function eventsFor(
 }
 
 // ---------------------------------------------------------------------------
-// Keycloak bearer support
-// ---------------------------------------------------------------------------
-
-async function fetchKeycloakToken(
-  username: string,
-  password: string,
-): Promise<string | null> {
-  const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
-  if (!issuer) return null;
-  try {
-    const response = await fetch(`${issuer}/protocol/openid-connect/token`, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "password",
-        client_id: process.env.E2E_KEYCLOAK_CLIENT_ID ?? "openshapeforge-gateway",
-        client_secret: process.env.E2E_KEYCLOAK_CLIENT_SECRET ?? "dev-secret",
-        username,
-        password,
-      }),
-      signal: AbortSignal.timeout(4000),
-    });
-    if (!response.ok) return null;
-    const body = (await response.json()) as { access_token?: string };
-    return body.access_token ?? null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Password for a seeded realm user.
- *
- * A development realm carries the committed literal; a production realm carries
- * a generated one, supplied as E2E_USER_PASSWORD_<USERNAME>. The fallback keeps
- * local runs working with no environment at all, which is the same bargain the
- * compiler strikes when it authors these as `${env:VAR:-test}`.
- */
-function passwordFor(username: string): string {
-  const key = `E2E_USER_PASSWORD_${username.replace(/[^A-Za-z0-9]/g, "_").toUpperCase()}`;
-  return process.env[key] ?? "test";
-}
-
-/**
- * A token for any realm user, memoized per username so a spec can hold several
- * identities at once without re-authenticating.
- */
-export function keycloakTokenFor(
-  username: string,
-  password = passwordFor(username),
-): Promise<string | null> {
-  store.keycloakTokens ??= new Map();
-  let token = store.keycloakTokens.get(username);
-  if (!token) {
-    token = fetchKeycloakToken(username, password);
-    store.keycloakTokens.set(username, token);
-  }
-  return token;
-}
-
-/** A token for a user that HOLDS realm roles (acme-directie by default). */
-export function getKeycloakToken(): Promise<string | null> {
-  const username = process.env.E2E_KEYCLOAK_USERNAME ?? "acme-directie";
-  store.keycloakToken ??= fetchKeycloakToken(
-    username,
-    process.env.E2E_KEYCLOAK_PASSWORD ?? passwordFor(username),
-  );
-  return store.keycloakToken;
-}
-
-/**
- * A token for a real, ENABLED realm user that holds NO realm roles.
- *
- * This is the counterpart the bearer coverage was missing. Proving a token with
- * the right role is accepted does not prove roles are read at all — an
- * authorizer that ignored the token's roles and allowed everything would pass
- * that test unchanged. Only a valid token that must be REFUSED distinguishes
- * "roles are enforced" from "requests are waved through".
- *
- * The role-less identity has to come from Keycloak rather than a synthetic
- * trusted-context header, because the claim path under test is exactly the one
- * that maps realm_access.roles out of a JWT.
- */
-export function getRolelessKeycloakToken(): Promise<string | null> {
-  const username = process.env.E2E_KEYCLOAK_NOACCESS_USERNAME ?? "acme-noaccess";
-  store.keycloakRolelessToken ??= fetchKeycloakToken(
-    username,
-    process.env.E2E_KEYCLOAK_NOACCESS_PASSWORD ?? passwordFor(username),
-  );
-  return store.keycloakRolelessToken;
-}
-
-// ---------------------------------------------------------------------------
 // Lifecycle: cleanup + capture persistence (idempotent, per spec file)
 // ---------------------------------------------------------------------------
 
@@ -409,7 +321,12 @@ function persistCapture() {
 export function ensureTenantRows(): Promise<void> {
   if (remoteUrl) return Promise.resolve();
   store.tenantRowsEnsured ??= (async () => {
-    const db = getRuntime().db;
+    // Tenant registry seeding is setup, not an API request: the restricted app
+    // role is correctly blocked by RLS before it has a tenant session.
+    store.seedRuntime ??= createDatabaseRuntime({
+      databaseUrl: readMigrateDatabaseUrl(),
+    });
+    const db = store.seedRuntime.db;
     for (const { tenantId } of [tenantA, tenantB]) {
       await sql`
         INSERT INTO erp.tenants (id, tenant_id, slug, name)

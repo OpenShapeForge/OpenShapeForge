@@ -35,7 +35,10 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
   ListToolsRequestSchema,
+  ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import rawCatalog from "../generated/mcp/tools.json" with { type: "json" };
@@ -104,7 +107,22 @@ type CatalogEntity = {
  * mismatch surfaces as a runtime miss on a tool name, which the CallTool
  * handler already treats as unknown.
  */
-type Catalog = { tools: CatalogTool[]; entities: CatalogEntity[] };
+type CatalogResource = {
+  uri: string;
+  name: string;
+  description: string;
+  templateUri: string;
+  templateName: string;
+  templateDescription: string;
+  entity: string;
+  table: string;
+};
+
+type Catalog = {
+  tools: CatalogTool[];
+  entities: CatalogEntity[];
+  resources?: CatalogResource[];
+};
 const catalog = rawCatalog as unknown as Catalog;
 
 /** Which entity role an operation requires — mirrors the CRUD layer's gate. */
@@ -217,6 +235,30 @@ function toolsForSession(
     .map((tool) => ({ tool, entity: entitiesByName.get(tool.entity) }));
 }
 
+const catalogResources: CatalogResource[] = catalog.resources ?? [];
+
+/**
+ * A resource is a read surface, so visibility and reads are both gated on the
+ * entity's read role — the same rule `get`/`list` tools follow. Like the tool
+ * listing, an unauthorized resource is omitted rather than erroring.
+ */
+function resourcesForSession(
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+  resources: CatalogResource[] = catalogResources,
+): CatalogResource[] {
+  return resources.filter((resource) =>
+    sessionMayInvoke(tables.get(resource.table), "get", session),
+  );
+}
+
+/**
+ * Cap on rows a catalogue resource read returns. A resource has no cursor
+ * protocol, so the cap keeps one read bounded; a catalogue larger than this
+ * needs the list tool, which pages.
+ */
+const RESOURCE_READ_LIMIT = 200;
+
 function describeTool(
   tool: CatalogTool,
   entity: CatalogEntity | undefined,
@@ -253,6 +295,7 @@ export const __withholdClassifiedForTests = withholdClassified;
 export const __assertWritableValuesForTests = assertWritableValues;
 export const __sessionMayInvokeForTests = sessionMayInvoke;
 export const __describeToolForTests = describeTool;
+export const __resourcesForSessionForTests = resourcesForSession;
 
 type ToolResult = {
   content: { type: "text"; text: string }[];
@@ -446,7 +489,10 @@ async function invokeTool(
 
 function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Server {
   const server = new Server(SERVER_INFO, {
-    capabilities: { tools: {} },
+    capabilities: {
+      tools: {},
+      ...(catalogResources.length > 0 ? { resources: {} } : {}),
+    },
     instructions: INSTRUCTIONS,
   });
   const tables = tablesByName();
@@ -470,6 +516,77 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
       })),
     ],
   }));
+
+  if (catalogResources.length > 0) {
+    server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+      resources: resourcesForSession(session, tables).map((resource) => ({
+        uri: resource.uri,
+        name: resource.name,
+        description: resource.description,
+        mimeType: "application/json",
+      })),
+    }));
+
+    server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+      resourceTemplates: resourcesForSession(session, tables).map((resource) => ({
+        uriTemplate: resource.templateUri,
+        name: resource.templateName,
+        description: resource.templateDescription,
+        mimeType: "application/json",
+      })),
+    }));
+
+    server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      const uri = request.params.uri;
+      // An unknown resource and one the caller may not read get the same
+      // answer, mirroring the tool path: the listing already omitted both.
+      const notFound = () => new HttpError(404, "NOT_FOUND", `Unknown resource "${uri}".`);
+
+      const readable = resourcesForSession(session, tables);
+      const direct = readable.find((resource) => resource.uri === uri);
+      if (direct) {
+        const table = tables.get(direct.table);
+        if (!table) throw notFound();
+        const result = await listGeneratedEntities(db, session, {
+          table: table.name,
+          limit: RESOURCE_READ_LIMIT,
+        });
+        return {
+          contents: [
+            {
+              uri,
+              mimeType: "application/json",
+              text: JSON.stringify(
+                result.rows.map((row) => serializeRow(table, row)),
+                null,
+                2,
+              ),
+            },
+          ],
+        };
+      }
+
+      const templated = readable.find((resource) => uri.startsWith(`${resource.uri}/`));
+      if (templated) {
+        const id = uri.slice(templated.uri.length + 1);
+        const table = tables.get(templated.table);
+        if (!table || id.length === 0 || id.includes("/")) throw notFound();
+        const row = await getGeneratedEntity(db, session, { table: table.name, id });
+        if (!row) throw notFound();
+        return {
+          contents: [
+            {
+              uri,
+              mimeType: "application/json",
+              text: JSON.stringify(serializeRow(table, row), null, 2),
+            },
+          ],
+        };
+      }
+
+      throw notFound();
+    });
+  }
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;

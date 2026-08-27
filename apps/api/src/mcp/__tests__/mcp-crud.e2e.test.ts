@@ -194,8 +194,8 @@ describe("generated MCP server", () => {
     );
   });
 
-  test("reads rich field, operation and relationship semantics from one entity resource", async () => {
-    const source = catalog.entities.find((entity) => entity.relationships.length > 0);
+  test("reads field, operation and only authorized relationship semantics", async () => {
+    const source = catalog.entities.find((entity) => entity.entity === "Relation");
     expect(source).toBeDefined();
     const { status, body } = await rpc(tenantA, "resources/read", {
       uri: `osf://schema/entities/${source!.slug}`,
@@ -204,21 +204,56 @@ describe("generated MCP server", () => {
     const resource = resourcePayload(body);
     expect(resource.description).toBe(source!.description);
     expect(resource.fields).toHaveLength(source!.fields.length);
-    expect(Object.keys(resource.jsonSchema.properties)).toEqual(
-      source!.fields.map((field) => field.key),
-    );
+    expect(resource).not.toHaveProperty("jsonSchema");
     expect(resource.operations.length).toBeGreaterThan(0);
     expect(resource.relationships).toEqual(
-      source!.relationships.map((relationship) => {
-        const target = catalog.entities.find(
-          (entity) => entity.entity === relationship.target,
-        );
-        return {
-          ...relationship,
-          ...(target ? { resourceUri: `osf://schema/entities/${target.slug}` } : {}),
-        };
-      }),
+      source!.relationships
+        .filter((relationship) =>
+          catalog.entities.some((entity) => entity.entity === relationship.target),
+        )
+        .map((relationship) => {
+          const target = catalog.entities.find(
+            (entity) => entity.entity === relationship.target,
+          )!;
+          return {
+            ...relationship,
+            resourceUri: `osf://schema/entities/${target.slug}`,
+          };
+        }),
     );
+    expect(resource.relationships.map((relationship: any) => relationship.target)).not.toContain(
+      "Account",
+    );
+  });
+
+  test("uses operation tool schemas as the authoritative write contract", async () => {
+    const paymentDetail = catalog.entities.find(
+      (entity) => entity.entity === "PaymentDetail",
+    );
+    expect(paymentDetail).toBeDefined();
+
+    const resource = resourcePayload(
+      (
+        await rpc(tenantA, "resources/read", {
+          uri: `osf://schema/entities/${paymentDetail!.slug}`,
+        })
+      ).body,
+    );
+    const { body } = await rpc(tenantA, "tools/list");
+    const create = (body.result.tools as { name: string; inputSchema: any }[]).find(
+      (tool) => tool.name === "payment_detail_create",
+    );
+
+    expect(resource).not.toHaveProperty("jsonSchema");
+    expect(
+      resource.fields
+        .filter((field: any) => field.readOnly)
+        .map((field: any) => field.key),
+    ).toEqual(expect.arrayContaining(["id", "createdAt", "updatedAt"]));
+    for (const field of ["id", "createdAt", "updatedAt"]) {
+      expect(Object.keys(create!.inputSchema.properties)).not.toContain(field);
+    }
+    expect(create!.inputSchema.required).toEqual(["type"]);
   });
 
   test("does not enumerate or read entity resources for a session without roles", async () => {

@@ -326,15 +326,18 @@ function describeEntityResource(
   session: DbSessionInput,
 ) {
   const { entity, tools } = entry;
-  const fields = visibleFields(entity, tables.get(entity.table), session);
   const resourceByEntity = new Map(
     sessionEntities.map((candidate) => [
       candidate.entity.entity,
       entityResourceUri(candidate.entity),
     ]),
   );
-  const properties = Object.fromEntries(fields.map((field) => [field.key, field.schema]));
-  const required = fields.filter((field) => field.required).map((field) => field.key);
+  const fields = visibleFields(entity, tables.get(entity.table), session).filter(
+    (field) => !field.relationship || resourceByEntity.has(field.relationship.entity),
+  );
+  const relationships = entity.relationships.filter((relationship) =>
+    resourceByEntity.has(relationship.target),
+  );
 
   return {
     entity: entity.entity,
@@ -344,32 +347,20 @@ function describeEntityResource(
     domains: entity.domains,
     ...(entity.displayTemplate ? { displayTemplate: entity.displayTemplate } : {}),
     ...(entity.filterField ? { filterField: entity.filterField } : {}),
-    jsonSchema: {
-      type: "object",
-      title: entity.title,
-      description: entity.description,
-      properties,
-      ...(required.length > 0 ? { required } : {}),
-      additionalProperties: false,
-    },
     fields: fields.map((field) => ({
       ...field,
       ...(field.relationship
         ? {
             relationship: {
               ...field.relationship,
-              ...(resourceByEntity.get(field.relationship.entity)
-                ? { resourceUri: resourceByEntity.get(field.relationship.entity) }
-                : {}),
+              resourceUri: resourceByEntity.get(field.relationship.entity),
             },
           }
         : {}),
     })),
-    relationships: entity.relationships.map((relationship) => ({
+    relationships: relationships.map((relationship) => ({
       ...relationship,
-      ...(resourceByEntity.get(relationship.target)
-        ? { resourceUri: resourceByEntity.get(relationship.target) }
-        : {}),
+      resourceUri: resourceByEntity.get(relationship.target),
     })),
     operations: tools.map((tool) => ({
       name: tool.name,

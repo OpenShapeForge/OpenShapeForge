@@ -126,11 +126,10 @@ describe("entity schema resource classification", () => {
   const entry = { entity: resourceEntity, tools: [tool(CREATE_SCHEMA)] } as never;
   const tables = new Map([["erp.payment_details", table()]]) as never;
 
-  it("withholds classified field metadata and JSON Schema from a read-only caller", () => {
+  it("withholds classified field metadata from a read-only caller", () => {
     const described = describeEntityResource(entry, [entry], tables, session(READ)) as any;
     expect(described.fields.map((field: AnyRecord) => field.key)).toEqual(["accountHolder"]);
-    expect(Object.keys(described.jsonSchema.properties)).toEqual(["accountHolder"]);
-    expect(described.jsonSchema.required).toEqual(["accountHolder"]);
+    expect(described).not.toHaveProperty("jsonSchema");
   });
 
   it("shows the same compiled field to a caller permitted to read it", () => {
@@ -140,7 +139,76 @@ describe("entity schema resource classification", () => {
       "iban",
     ]);
     expect(described.fields[1].classification).toBe("pii");
-    expect(Object.keys(described.jsonSchema.properties)).toEqual(["accountHolder", "iban"]);
+    expect(described).not.toHaveProperty("jsonSchema");
+  });
+});
+
+describe("entity schema resource relationships", () => {
+  const relatedField = {
+    key: "relationId",
+    valueType: "string",
+    cardinality: "single",
+    required: true,
+    readOnly: false,
+    immutable: false,
+    schema: { type: "string", format: "uuid" },
+    relationship: { kind: "belongsTo", entity: "Relation" },
+  };
+  const hiddenRelatedField = {
+    ...relatedField,
+    key: "accountId",
+    relationship: { kind: "belongsTo", entity: "Account" },
+  };
+  const resourceEntity = {
+    ...(entity([]) as AnyRecord),
+    domains: ["finance"],
+    fields: [relatedField, hiddenRelatedField],
+    relationships: [
+      {
+        key: "relation",
+        kind: "belongsTo",
+        target: "Relation",
+        foreignKey: "relation_id",
+      },
+      {
+        key: "account",
+        kind: "belongsTo",
+        target: "Account",
+        foreignKey: "account_id",
+      },
+    ],
+  };
+  const relation = {
+    entity: "Relation",
+    slug: "relation",
+    table: "erp.relations",
+    title: "Relation",
+  } as never;
+  const entry = { entity: resourceEntity, tools: [tool(CREATE_SCHEMA)] } as never;
+  const relationEntry = { entity: relation, tools: [] } as never;
+  const tables = new Map([["erp.payment_details", table()]]) as never;
+
+  it("omits relationship fields and metadata whose target is not session-visible", () => {
+    const described = describeEntityResource(
+      entry,
+      [entry, relationEntry],
+      tables,
+      session(READ),
+    ) as any;
+
+    expect(described.fields.map((field: AnyRecord) => field.key)).toEqual(["relationId"]);
+    expect(described.fields[0].relationship.resourceUri).toBe(
+      "osf://schema/entities/relation",
+    );
+    expect(described.relationships).toEqual([
+      {
+        key: "relation",
+        kind: "belongsTo",
+        target: "Relation",
+        foreignKey: "relation_id",
+        resourceUri: "osf://schema/entities/relation",
+      },
+    ]);
   });
 });
 

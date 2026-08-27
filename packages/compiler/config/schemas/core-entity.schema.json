@@ -329,6 +329,18 @@
                 "delete": { "$ref": "#/$defs/mcpOperation" }
               }
             },
+            "discovery": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*$"
+                },
+                "description": { "type": "string" }
+              }
+            },
             "resource": {
               "type": "object",
               "additionalProperties": false,

@@ -156,6 +156,23 @@ export function buildMcp(
         );
       }
     }
+    if (authored.execution) {
+      const execution = authored.execution;
+      if (!fieldKeys.has(execution.bindingsField)) {
+        throw new Error(
+          `mcp derivedTools.execution bindingsField ${JSON.stringify(execution.bindingsField)} ` +
+            `on entity "${coreEntity.entity}" does not name an authored field.`,
+        );
+      }
+      for (const [option, value] of Object.entries(execution)) {
+        if (typeof value !== "string" || value.length === 0) {
+          throw new Error(
+            `mcp derivedTools.execution ${option} on entity "${coreEntity.entity}" must be ` +
+              `a non-empty string.`,
+          );
+        }
+      }
+    }
     derivedTools = authored;
   }
 

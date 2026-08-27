@@ -322,6 +322,14 @@ export interface McpDerivedToolsConfig {
    * the runtime translates into the derived tool's input JSON Schema.
    */
   inputFieldsField: string;
+  /**
+   * Opt-in declarative execution: calling a derived tool runs its bindings
+   * against the referenced operation/provider/connection rows, whose fields
+   * follow the canonical OSF integration vocabulary (transport, method,
+   * pathTemplate, baseUrlTemplate, auth, egressHosts, responseMapping, …).
+   * Absent, a derived tool call answers 501.
+   */
+  execution?: McpDerivedExecutionConfig;
 }
 
 export interface McpElicitOnCreateConfig {

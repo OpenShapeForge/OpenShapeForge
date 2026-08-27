@@ -378,6 +378,21 @@ export type McpElicitOnCreateDefinition = {
   message?: string;
 };
 
+export type McpDerivedExecutionDefinition = {
+  bindingsField: string;
+  operationRef: string;
+  operationEntity: string;
+  /** Physical table of the operation entity, resolved at catalog build. */
+  operationTable: string;
+  providerRef: string;
+  providerEntity: string;
+  providerTable: string;
+  connectionEntity: string;
+  connectionTable: string;
+  connectionProviderRef: string;
+  connectionValuesField: string;
+};
+
 export type McpDerivedToolsDefinition = {
   entity: string;
   table: string;
@@ -386,6 +401,7 @@ export type McpDerivedToolsDefinition = {
   titleField?: string;
   descriptionField: string;
   inputFieldsField: string;
+  execution?: McpDerivedExecutionDefinition;
 };
 
 export type McpCatalog = {
@@ -439,6 +455,23 @@ function resolveSourceTable(
     );
   }
   return source.table;
+}
+
+/** Resolve an entity name to its physical table, failing closed at build. */
+function resolveEntityTable(
+  inputs: McpCatalogInput[],
+  entityName: string,
+  owningEntity: string,
+  option: string,
+): string {
+  const found = inputs.find((input) => input.contract.entity.name === entityName);
+  if (!found) {
+    throw new Error(
+      `mcp ${option} on entity "${owningEntity}" names entity "${entityName}", ` +
+        `which is not part of this catalog.`,
+    );
+  }
+  return found.table;
 }
 
 export function buildMcpCatalog(
@@ -546,6 +579,7 @@ export function buildMcpCatalog(
     }
 
     if (mcp.derivedTools) {
+      const execution = mcp.derivedTools.execution;
       derivedTools.push({
         entity: contract.entity.name,
         table: input.table,
@@ -554,6 +588,38 @@ export function buildMcpCatalog(
         ...(mcp.derivedTools.titleField ? { titleField: mcp.derivedTools.titleField } : {}),
         descriptionField: mcp.derivedTools.descriptionField,
         inputFieldsField: mcp.derivedTools.inputFieldsField,
+        ...(execution
+          ? {
+              execution: {
+                bindingsField: execution.bindingsField,
+                operationRef: execution.operationRef,
+                operationEntity: execution.operationEntity,
+                operationTable: resolveEntityTable(
+                  inputs,
+                  execution.operationEntity,
+                  contract.entity.name,
+                  "derivedTools.execution.operationEntity",
+                ),
+                providerRef: execution.providerRef,
+                providerEntity: execution.providerEntity,
+                providerTable: resolveEntityTable(
+                  inputs,
+                  execution.providerEntity,
+                  contract.entity.name,
+                  "derivedTools.execution.providerEntity",
+                ),
+                connectionEntity: execution.connectionEntity,
+                connectionTable: resolveEntityTable(
+                  inputs,
+                  execution.connectionEntity,
+                  contract.entity.name,
+                  "derivedTools.execution.connectionEntity",
+                ),
+                connectionProviderRef: execution.connectionProviderRef,
+                connectionValuesField: execution.connectionValuesField,
+              },
+            }
+          : {}),
       });
     }
   }

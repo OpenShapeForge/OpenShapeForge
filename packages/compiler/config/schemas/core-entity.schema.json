@@ -368,7 +368,31 @@
                 "keyField": { "type": "string" },
                 "titleField": { "type": "string" },
                 "descriptionField": { "type": "string" },
-                "inputFieldsField": { "type": "string" }
+                "inputFieldsField": { "type": "string" },
+                "execution": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "bindingsField",
+                    "operationRef",
+                    "operationEntity",
+                    "providerRef",
+                    "providerEntity",
+                    "connectionEntity",
+                    "connectionProviderRef",
+                    "connectionValuesField"
+                  ],
+                  "properties": {
+                    "bindingsField": { "type": "string" },
+                    "operationRef": { "type": "string" },
+                    "operationEntity": { "type": "string" },
+                    "providerRef": { "type": "string" },
+                    "providerEntity": { "type": "string" },
+                    "connectionEntity": { "type": "string" },
+                    "connectionProviderRef": { "type": "string" },
+                    "connectionValuesField": { "type": "string" }
+                  }
+                }
               }
             }
           }

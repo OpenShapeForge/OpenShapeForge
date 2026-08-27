@@ -71,6 +71,7 @@ import {
   redactElicitedValues,
   type ElicitOnCreateEntry,
 } from "./elicitation.js";
+import { executeBinding, orderedBindings } from "./declarative-execution.js";
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
@@ -360,6 +361,26 @@ async function derivedToolsForSession(
     }
   }
   return tools;
+}
+
+/**
+ * Ungated tenant-scoped single-row read for the execution path. Same
+ * rationale as derivedToolsForSession: the caller holds NONE of the defining
+ * entities' CRUD roles, yet the runtime executes their rows on the caller's
+ * behalf; withDbSession still scopes every read to the caller's tenant.
+ */
+async function runtimeRowByFilter(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+  tableName: string,
+  filter: Record<string, unknown>,
+): Promise<Record<string, unknown> | null> {
+  const table = tables.get(tableName);
+  if (!table) return null;
+  const result = await listGeneratedEntitiesForTable(db, session, table, { limit: 1, filter });
+  const row = result.rows[0];
+  return row ? serializeRow(table, row) : null;
 }
 
 /**
@@ -910,15 +931,98 @@ function buildServer(
           (tool) => tool.name === name,
         );
         if (derived) {
-          return failed(
-            new HttpError(
-              501,
-              "NOT_IMPLEMENTED",
-              `Tool "${name}" is defined by a stored ${derived.entity} record, but ` +
-                `execution of derived tools is not implemented yet. The definition can ` +
-                `be inspected via its ${derived.entity} resource or management tools.`,
-            ),
-          );
+          const entry = catalogDerivedTools.find((candidate) => candidate.table === derived.table);
+          const execution = entry?.execution;
+          if (!execution) {
+            return failed(
+              new HttpError(
+                501,
+                "NOT_IMPLEMENTED",
+                `Tool "${name}" is defined by a stored ${derived.entity} record, but ` +
+                  `its projection does not declare execution. The definition can be ` +
+                  `inspected via its ${derived.entity} resource or management tools.`,
+              ),
+            );
+          }
+          try {
+            const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+            assertDeclaredProperties(derived.inputSchema, args, "argument");
+            const requiredInputs = Array.isArray(derived.inputSchema.required)
+              ? (derived.inputSchema.required as string[])
+              : [];
+            for (const key of requiredInputs) {
+              if (args[key] === undefined || args[key] === null || args[key] === "") {
+                throw new HttpError(400, "VALIDATION", `Input "${key}" is required.`);
+              }
+            }
+
+            const serviceRow = await runtimeRowByFilter(db, session, tables, derived.table, {
+              id: derived.rowId,
+            });
+            if (!serviceRow) throw new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`);
+
+            // Later bindings see earlier outputs alongside the caller's
+            // inputs, which is what makes read→act chains expressible.
+            const accumulated: Record<string, unknown> = {};
+            for (const binding of orderedBindings(serviceRow, execution.bindingsField)) {
+              const operationId = binding[execution.operationRef];
+              const operationRow =
+                typeof operationId === "string"
+                  ? await runtimeRowByFilter(db, session, tables, execution.operationTable, {
+                      id: operationId,
+                    })
+                  : null;
+              if (!operationRow) {
+                throw new HttpError(
+                  400,
+                  "SERVICE_MISCONFIGURED",
+                  `A binding references a missing ${execution.operationEntity}.`,
+                );
+              }
+              const providerId = operationRow[execution.providerRef];
+              const providerRow =
+                typeof providerId === "string"
+                  ? await runtimeRowByFilter(db, session, tables, execution.providerTable, {
+                      id: providerId,
+                    })
+                  : null;
+              if (!providerRow) {
+                throw new HttpError(
+                  400,
+                  "SERVICE_MISCONFIGURED",
+                  `The ${execution.operationEntity} references a missing ${execution.providerEntity}.`,
+                );
+              }
+              const connectionRow = await runtimeRowByFilter(
+                db,
+                session,
+                tables,
+                execution.connectionTable,
+                { [execution.connectionProviderRef]: providerId },
+              );
+              if (!connectionRow) {
+                throw new HttpError(
+                  400,
+                  "CONNECTION_MISSING",
+                  `No ${execution.connectionEntity} is configured for this ` +
+                    `${execution.providerEntity}; an administrator must create one first.`,
+                );
+              }
+              const outputs = await executeBinding({
+                binding,
+                operationRow,
+                providerRow,
+                connectionValues: connectionRow[execution.connectionValuesField],
+                serviceInputs: { ...args, ...accumulated },
+                secretScope: entityForTable(execution.connectionTable)?.elicitOnCreate
+                  ?.sourceTable ?? execution.providerTable,
+              });
+              Object.assign(accumulated, outputs);
+            }
+            return ok(accumulated);
+          } catch (error) {
+            return failed(error);
+          }
         }
       }
       return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));

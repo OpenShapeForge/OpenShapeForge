@@ -18,6 +18,8 @@
  * compiler package.
  */
 
+import type { ExecutionCatalogEntry } from "./declarative-execution.js";
+
 export type DerivedToolsCatalogEntry = {
   entity: string;
   table: string;
@@ -26,6 +28,7 @@ export type DerivedToolsCatalogEntry = {
   titleField?: string;
   descriptionField: string;
   inputFieldsField: string;
+  execution?: ExecutionCatalogEntry;
 };
 
 export type DerivedTool = {

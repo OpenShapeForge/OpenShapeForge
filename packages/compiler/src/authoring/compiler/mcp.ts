@@ -15,7 +15,7 @@
  * Input:  Core entity definition (authored `mcp` block).
  * Output: McpSection | undefined — undefined means "no MCP exposure".
  */
-import type { CrudSection, McpConfig, McpDerivedToolsConfig, McpOperationConfig, McpOperationKey, McpResourceConfig, McpSection } from "../types.js";
+import type { CrudSection, McpConfig, McpDerivedToolsConfig, McpElicitOnCreateConfig, McpOperationConfig, McpOperationKey, McpResourceConfig, McpSection } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
 import { limitCrudOperations } from "./crud.js";
 
@@ -159,6 +159,30 @@ export function buildMcp(
     derivedTools = authored;
   }
 
+  let elicitOnCreate: McpElicitOnCreateConfig | undefined;
+  if (config.elicitOnCreate) {
+    const authored = config.elicitOnCreate;
+    const fieldKeys = new Set((coreEntity.fields ?? []).map((field) => field.key));
+    for (const [option, fieldKey] of [
+      ["sourceField", authored.sourceField],
+      ["into", authored.into],
+    ] as const) {
+      if (!fieldKey || !fieldKeys.has(fieldKey)) {
+        throw new Error(
+          `mcp elicitOnCreate ${option} ${JSON.stringify(fieldKey)} on entity ` +
+            `"${coreEntity.entity}" does not name an authored field.`,
+        );
+      }
+    }
+    if (!authored.sourceEntity || !authored.definitionsField) {
+      throw new Error(
+        `mcp elicitOnCreate on entity "${coreEntity.entity}" needs sourceEntity and ` +
+          `definitionsField naming where the elicitable field definitions live.`,
+      );
+    }
+    elicitOnCreate = authored;
+  }
+
   return {
     toolPrefix,
     tools: style,
@@ -166,5 +190,6 @@ export function buildMcp(
     ...(Object.keys(toolOverrides).length > 0 ? { toolOverrides } : {}),
     ...(resource ? { resource } : {}),
     ...(derivedTools ? { derivedTools } : {}),
+    ...(elicitOnCreate ? { elicitOnCreate } : {}),
   };
 }

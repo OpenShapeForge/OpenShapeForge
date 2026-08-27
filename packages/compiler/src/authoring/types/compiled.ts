@@ -203,6 +203,14 @@ export interface McpSection {
     description?: string;
     templateDescription?: string;
   };
+  /** Authored create-time elicitation config, validated at compile. */
+  elicitOnCreate?: {
+    sourceField: string;
+    sourceEntity: string;
+    definitionsField: string;
+    into: string;
+    message?: string;
+  };
   /** Authored row-to-tool projection config, validated at compile. */
   derivedTools?: {
     roles: string[];

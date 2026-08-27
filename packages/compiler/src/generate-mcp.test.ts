@@ -587,3 +587,62 @@ describe("derived tools catalog", () => {
     expect(buildMcpCatalog([input(contract())], "test").derivedTools).toEqual([]);
   });
 });
+
+describe("elicitOnCreate catalog", () => {
+  const source = contract({
+    name: "Provider",
+    fields: [field({ key: "configFields" })],
+    mcp: {
+      toolPrefix: "provider",
+      tools: "dedicated",
+      operations: { list: false, get: true, create: false, update: false, delete: false },
+    },
+  });
+  const owner = (elicit: Record<string, unknown>) =>
+    contract({
+      name: "Widget",
+      fields: [field({ key: "adapterId" }), field({ key: "configurationValues" })],
+      mcp: {
+        toolPrefix: "widget",
+        tools: "dedicated",
+        operations: { list: false, get: true, create: true, update: false, delete: true },
+        elicitOnCreate: elicit,
+      } as never,
+    });
+  const elicit = {
+    sourceField: "adapterId",
+    sourceEntity: "Provider",
+    definitionsField: "configFields",
+    into: "configurationValues",
+  };
+
+  it("resolves the source table and excludes the target field from the create schema", () => {
+    const catalog = buildMcpCatalog(
+      [input(owner(elicit), "widget"), input(source, "provider")],
+      "test",
+    );
+    const entry = catalog.entities.find((entity) => entity.entity === "Widget");
+    expect(entry?.elicitOnCreate).toEqual({ ...elicit, sourceTable: "erp.widgets" });
+    const create = catalog.tools.find(
+      (tool) => tool.entity === "Widget" && tool.operation === "create",
+    );
+    const properties = create?.inputSchema.properties as Record<string, unknown>;
+    expect(properties.adapterId).toBeDefined();
+    expect(properties.configurationValues).toBeUndefined();
+  });
+
+  it("fails closed on a dangling source entity or field", () => {
+    expect(() => buildMcpCatalog([input(owner(elicit), "widget")], "test")).toThrow(
+      /not part of this catalog/,
+    );
+    expect(() =>
+      buildMcpCatalog(
+        [
+          input(owner({ ...elicit, definitionsField: "missing" }), "widget"),
+          input(source, "provider"),
+        ],
+        "test",
+      ),
+    ).toThrow(/has no field "missing"/);
+  });
+});

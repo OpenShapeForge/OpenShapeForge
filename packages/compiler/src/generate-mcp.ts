@@ -150,7 +150,11 @@ function buildToolsForEntity(
   if (!mcp) return [];
 
   const fields = contract.model.fields;
-  const creatable = writableFields(fields, "create");
+  // The elicited target field never appears in the create schema: its values
+  // come from the person at the client via elicitation, not from the model.
+  const creatable = writableFields(fields, "create").filter(
+    (field) => field.key !== mcp.elicitOnCreate?.into,
+  );
   const updatable = writableFields(fields, "update");
   const label = entityLabel(contract);
   const description = entityDescription(contract);
@@ -324,6 +328,7 @@ export type McpEntityCatalogEntry = {
    * read them, so the schema itself is not an enumeration oracle.
    */
   classifiedFields: string[];
+  elicitOnCreate?: McpElicitOnCreateDefinition;
   fields: {
     key: string;
     label?: string;
@@ -363,6 +368,16 @@ export type McpResourceDefinition = {
   table: string;
 };
 
+export type McpElicitOnCreateDefinition = {
+  sourceField: string;
+  sourceEntity: string;
+  /** Physical table of the source entity, resolved at catalog build. */
+  sourceTable: string;
+  definitionsField: string;
+  into: string;
+  message?: string;
+};
+
 export type McpDerivedToolsDefinition = {
   entity: string;
   table: string;
@@ -397,6 +412,35 @@ export type McpCatalogInput = {
  */
 export const MAX_DEDICATED_TOOLS = 60;
 
+/**
+ * Resolve the elicitation source entity to its physical table, failing closed
+ * at build time: a dangling source would otherwise surface as a runtime miss
+ * on the first create call.
+ */
+function resolveSourceTable(
+  inputs: McpCatalogInput[],
+  elicit: { sourceEntity: string; definitionsField: string },
+  owningEntity: string,
+): string {
+  const source = inputs.find((input) => input.contract.entity.name === elicit.sourceEntity);
+  if (!source) {
+    throw new Error(
+      `mcp elicitOnCreate on entity "${owningEntity}" names source entity ` +
+        `"${elicit.sourceEntity}", which is not part of this catalog.`,
+    );
+  }
+  const hasField = source.contract.model.fields.some(
+    (field) => field.key === elicit.definitionsField,
+  );
+  if (!hasField) {
+    throw new Error(
+      `mcp elicitOnCreate on entity "${owningEntity}": source entity ` +
+        `"${elicit.sourceEntity}" has no field "${elicit.definitionsField}".`,
+    );
+  }
+  return source.table;
+}
+
 export function buildMcpCatalog(
   inputs: McpCatalogInput[],
   source: string,
@@ -430,6 +474,18 @@ export function buildMcpCatalog(
         : {}),
       ...(contract.entity.filterField ? { filterField: contract.entity.filterField } : {}),
       classifiedFields: classifiedFieldKeys(fields),
+      ...(mcp.elicitOnCreate
+        ? {
+            elicitOnCreate: {
+              sourceField: mcp.elicitOnCreate.sourceField,
+              sourceEntity: mcp.elicitOnCreate.sourceEntity,
+              sourceTable: resolveSourceTable(inputs, mcp.elicitOnCreate, contract.entity.name),
+              definitionsField: mcp.elicitOnCreate.definitionsField,
+              into: mcp.elicitOnCreate.into,
+              ...(mcp.elicitOnCreate.message ? { message: mcp.elicitOnCreate.message } : {}),
+            },
+          }
+        : {}),
       fields: fields.map((field) => {
         const label = localizedText(field.label);
         const description = describeMcpField(field);

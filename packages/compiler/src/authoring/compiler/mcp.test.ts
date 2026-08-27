@@ -162,6 +162,31 @@ describe("buildMcp", () => {
     ).toThrow(/does not name an authored field/);
   });
 
+  it("carries a validated elicitOnCreate block through to the section", () => {
+    const elicitOnCreate = {
+      sourceField: "value",
+      sourceEntity: "Widget",
+      definitionsField: "configFields",
+      into: "value",
+    };
+    expect(buildMcp(entityWithMcp({ elicitOnCreate }))?.elicitOnCreate).toEqual(elicitOnCreate);
+  });
+
+  it("rejects elicitOnCreate naming unknown local fields", () => {
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          elicitOnCreate: {
+            sourceField: "missing",
+            sourceEntity: "Widget",
+            definitionsField: "x",
+            into: "value",
+          },
+        }),
+      ),
+    ).toThrow(/does not name an authored field/);
+  });
+
   it("rejects a toolPrefix that could break out of a tool-name position", () => {
     for (const hostile of ["a-b", "Upper", "with space", "quote\"y", "{id}", "1leading"]) {
       expect(() => buildMcp(entityWithMcp({ toolPrefix: hostile }))).toThrow(

@@ -324,6 +324,24 @@ export interface McpDerivedToolsConfig {
   inputFieldsField: string;
 }
 
+export interface McpElicitOnCreateConfig {
+  /** Local field whose value references the source row (e.g. a relation id). */
+  sourceField: string;
+  /** Entity whose row carries the field definitions to elicit. */
+  sourceEntity: string;
+  /** Field on the source row holding the FieldDefinition collection. */
+  definitionsField: string;
+  /**
+   * Local field the elicited values are stored into. Excluded from the
+   * create tool's input schema: these values come from the person at the
+   * client, never from the model, and anything the model passes anyway is
+   * discarded before the elicited values are stored.
+   */
+  into: string;
+  /** Optional custom prompt shown above the elicitation form. */
+  message?: string;
+}
+
 export interface McpConfig {
   /** Defaults to true when the `mcp` block is present. */
   enabled?: boolean;
@@ -354,6 +372,13 @@ export interface McpConfig {
    * own admins author new tools as data instead of code.
    */
   derivedTools?: McpDerivedToolsConfig;
+  /**
+   * Opt-in MCP elicitation on the create operation: the runtime collects the
+   * values for the source row's field definitions directly from the person at
+   * the client via a standard elicitation form, so tenant configuration and
+   * secrets never travel through model context or tool arguments.
+   */
+  elicitOnCreate?: McpElicitOnCreateConfig;
 }
 
 export interface CoreEntity {

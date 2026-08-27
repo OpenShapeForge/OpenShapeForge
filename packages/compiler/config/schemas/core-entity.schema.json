@@ -343,6 +343,18 @@
                 "templateDescription": { "type": "string" }
               }
             },
+            "elicitOnCreate": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["sourceField", "sourceEntity", "definitionsField", "into"],
+              "properties": {
+                "sourceField": { "type": "string" },
+                "sourceEntity": { "type": "string" },
+                "definitionsField": { "type": "string" },
+                "into": { "type": "string" },
+                "message": { "type": "string" }
+              }
+            },
             "derivedTools": {
               "type": "object",
               "additionalProperties": false,

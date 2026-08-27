@@ -62,6 +62,11 @@ import {
   type DerivedTool,
   type DerivedToolsCatalogEntry,
 } from "./derived-tools.js";
+import {
+  collectElicitedValues,
+  redactElicitedValues,
+  type ElicitOnCreateEntry,
+} from "./elicitation.js";
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
@@ -106,6 +111,7 @@ type CatalogEntity = {
   title: string;
   description: string;
   classifiedFields: string[];
+  elicitOnCreate?: ElicitOnCreateEntry;
 };
 
 /**
@@ -168,6 +174,26 @@ function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
   return Object.fromEntries(
     table.columns.map((column) => [fieldNameForColumn(column), row[column.name]]),
   );
+}
+
+/**
+ * serializeRow plus elicited-secret redaction: for an entity whose create
+ * elicits configuration, the target field's encrypted values leave the server
+ * only as the `__set__` sentinel.
+ */
+function serializeRowForEntity(
+  entity: CatalogEntity | undefined,
+  table: GeneratedTable,
+  row: Record<string, unknown>,
+) {
+  const serialized = serializeRow(table, row);
+  return entity?.elicitOnCreate
+    ? redactElicitedValues(serialized, entity.elicitOnCreate.into)
+    : serialized;
+}
+
+function entityForTable(table: string): CatalogEntity | undefined {
+  return catalog.entities.find((entity) => entity.table === table);
 }
 
 /**
@@ -478,7 +504,7 @@ async function invokeTool(
         includeTotalCount: true,
       });
       return ok({
-        items: result.rows.map((row) => serializeRow(table, row)),
+        items: result.rows.map((row) => serializeRowForEntity(entity, table, row)),
         totalCount: result.totalCount,
         nextCursor: result.nextCursor,
       });
@@ -490,18 +516,25 @@ async function invokeTool(
         id: requireId(args),
       });
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      return ok(serializeRow(table, row));
+      return ok(serializeRowForEntity(entity, table, row));
     }
 
     case "create": {
       const values = requireArguments(args);
-      assertDeclaredProperties(tool.inputSchema, values, "field");
-      assertWritableValues(values, entity, table, session);
+      // The elicited target field is server-set (collected from the person at
+      // the client before this ran), so it is exempt from the declared-schema
+      // and writable checks that guard MODEL-supplied fields.
+      const elicitField = entity?.elicitOnCreate?.into;
+      const modelValues = elicitField
+        ? Object.fromEntries(Object.entries(values).filter(([key]) => key !== elicitField))
+        : values;
+      assertDeclaredProperties(tool.inputSchema, modelValues, "field");
+      assertWritableValues(modelValues, entity, table, session);
       const row = await createGeneratedEntity(db, session, {
         table: table.name,
         values,
       });
-      return ok(serializeRow(table, row));
+      return ok(serializeRowForEntity(entity, table, row));
     }
 
     case "update": {
@@ -520,7 +553,7 @@ async function invokeTool(
         values,
       });
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      return ok(serializeRow(table, row));
+      return ok(serializeRowForEntity(entity, table, row));
     }
 
     case "delete": {
@@ -612,7 +645,7 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
               uri,
               mimeType: "application/json",
               text: JSON.stringify(
-                result.rows.map((row) => serializeRow(table, row)),
+                result.rows.map((row) => serializeRowForEntity(entityForTable(direct.table), table, row)),
                 null,
                 2,
               ),
@@ -633,7 +666,7 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
             {
               uri,
               mimeType: "application/json",
-              text: JSON.stringify(serializeRow(table, row), null, 2),
+              text: JSON.stringify(serializeRowForEntity(entityForTable(templated.table), table, row), null, 2),
             },
           ],
         };
@@ -705,7 +738,37 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
     }
     const entity = catalog.entities.find((item) => item.entity === match.entity);
     try {
-      return await invokeTool(match, entity, table, db, session, request.params.arguments);
+      let callArguments = request.params.arguments;
+      if (match.operation === "create" && entity?.elicitOnCreate) {
+        const elicit = entity.elicitOnCreate;
+        const modelArguments = { ...((callArguments ?? {}) as Record<string, unknown>) };
+        // The model is not a channel for elicited values: whatever it sent for
+        // the target field is discarded before the person is asked.
+        delete modelArguments[elicit.into];
+
+        const sourceId = modelArguments[elicit.sourceField];
+        const sourceTable = tables.get(elicit.sourceTable);
+        let sourceRow: Record<string, unknown> | null = null;
+        if (typeof sourceId === "string" && sourceTable) {
+          try {
+            const row = await getGeneratedEntity(db, session, {
+              table: sourceTable.name,
+              id: sourceId,
+            });
+            if (row) sourceRow = serializeRow(sourceTable, row);
+          } catch {
+            // Unauthorized and missing get the same NOT_FOUND from the
+            // collector, mirroring the tool-listing principle.
+          }
+        }
+        callArguments = await collectElicitedValues({
+          server,
+          elicit,
+          sourceRow,
+          values: modelArguments,
+        });
+      }
+      return await invokeTool(match, entity, table, db, session, callArguments);
     } catch (error) {
       return failed(error);
     }

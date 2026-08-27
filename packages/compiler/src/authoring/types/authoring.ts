@@ -304,6 +304,26 @@ export interface McpResourceConfig {
   templateDescription?: string;
 }
 
+export interface McpDerivedToolsConfig {
+  /**
+   * Roles whose sessions are offered the derived tools. Deliberately separate
+   * from the entity's CRUD roles: the audience of the derived tools is
+   * usually NOT the audience allowed to manage the defining rows.
+   */
+  roles: string[];
+  /** Field whose value names the derived tool (sanitized to snake_case). */
+  keyField: string;
+  /** Field whose value becomes the derived tool's title. */
+  titleField?: string;
+  /** Field whose value becomes the derived tool's description. */
+  descriptionField: string;
+  /**
+   * Field holding the collection of canonical FieldDefinition objects that
+   * the runtime translates into the derived tool's input JSON Schema.
+   */
+  inputFieldsField: string;
+}
+
 export interface McpConfig {
   /** Defaults to true when the `mcp` block is present. */
   enabled?: boolean;
@@ -327,6 +347,13 @@ export interface McpConfig {
    * the entity's read operations.
    */
   resource?: McpResourceConfig;
+  /**
+   * Opt-in runtime projection of this entity's ROWS as MCP tools: each stored
+   * record becomes one tool, named from keyField and typed from the canonical
+   * FieldDefinition collection in inputFieldsField. This is how a deployment's
+   * own admins author new tools as data instead of code.
+   */
+  derivedTools?: McpDerivedToolsConfig;
 }
 
 export interface CoreEntity {

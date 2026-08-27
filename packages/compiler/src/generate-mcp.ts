@@ -363,12 +363,23 @@ export type McpResourceDefinition = {
   table: string;
 };
 
+export type McpDerivedToolsDefinition = {
+  entity: string;
+  table: string;
+  roles: string[];
+  keyField: string;
+  titleField?: string;
+  descriptionField: string;
+  inputFieldsField: string;
+};
+
 export type McpCatalog = {
   generatedBy: string;
   source: string;
   entities: McpEntityCatalogEntry[];
   tools: McpToolDefinition[];
   resources: McpResourceDefinition[];
+  derivedTools: McpDerivedToolsDefinition[];
 };
 
 export type McpCatalogInput = {
@@ -398,6 +409,7 @@ export function buildMcpCatalog(
   const entities: McpEntityCatalogEntry[] = [];
   const tools: McpToolDefinition[] = [];
   const resources: McpResourceDefinition[] = [];
+  const derivedTools: McpDerivedToolsDefinition[] = [];
 
   for (const input of opted) {
     const { contract } = input;
@@ -476,6 +488,18 @@ export function buildMcpCatalog(
         table: input.table,
       });
     }
+
+    if (mcp.derivedTools) {
+      derivedTools.push({
+        entity: contract.entity.name,
+        table: input.table,
+        roles: [...mcp.derivedTools.roles],
+        keyField: mcp.derivedTools.keyField,
+        ...(mcp.derivedTools.titleField ? { titleField: mcp.derivedTools.titleField } : {}),
+        descriptionField: mcp.derivedTools.descriptionField,
+        inputFieldsField: mcp.derivedTools.inputFieldsField,
+      });
+    }
   }
 
   const seenResourceUris = new Map<string, McpResourceDefinition>();
@@ -529,6 +553,7 @@ export function buildMcpCatalog(
     entities,
     tools,
     resources,
+    derivedTools,
   };
 }
 

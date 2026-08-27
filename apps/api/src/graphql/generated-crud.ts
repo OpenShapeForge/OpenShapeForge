@@ -538,7 +538,14 @@ function buildSortExpression(
     : sql`${sql.id("row_source", column.name)} asc`;
 }
 
-async function listGeneratedEntitiesForTable(
+/**
+ * Role-ungated list for RUNTIME surfaces (not callers): tenant scoping and
+ * row-level security still apply via withDbSession, but the entity-role gate
+ * is deliberately absent — the derived-tools projection reads definition rows
+ * on behalf of an audience that holds none of the entity's CRUD roles. Every
+ * caller-facing path must keep going through listGeneratedEntities.
+ */
+export async function listGeneratedEntitiesForTable(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   table: GeneratedCrudTable,

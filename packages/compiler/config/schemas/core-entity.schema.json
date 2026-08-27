@@ -342,6 +342,22 @@
                 "description": { "type": "string" },
                 "templateDescription": { "type": "string" }
               }
+            },
+            "derivedTools": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["roles", "keyField", "descriptionField", "inputFieldsField"],
+              "properties": {
+                "roles": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "minItems": 1
+                },
+                "keyField": { "type": "string" },
+                "titleField": { "type": "string" },
+                "descriptionField": { "type": "string" },
+                "inputFieldsField": { "type": "string" }
+              }
             }
           }
         }

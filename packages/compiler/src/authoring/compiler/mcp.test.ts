@@ -135,6 +135,33 @@ describe("buildMcp", () => {
     }
   });
 
+  it("carries a validated derivedTools block through to the section", () => {
+    const derivedTools = {
+      roles: ["viewer"],
+      keyField: "value",
+      descriptionField: "value",
+      inputFieldsField: "value",
+    };
+    expect(buildMcp(entityWithMcp({ derivedTools }))?.derivedTools).toEqual(derivedTools);
+  });
+
+  it("rejects derivedTools with an empty audience or unknown fields", () => {
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          derivedTools: { roles: [], keyField: "value", descriptionField: "value", inputFieldsField: "value" },
+        }),
+      ),
+    ).toThrow(/non-empty roles list/);
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          derivedTools: { roles: ["viewer"], keyField: "missing", descriptionField: "value", inputFieldsField: "value" },
+        }),
+      ),
+    ).toThrow(/does not name an authored field/);
+  });
+
   it("rejects a toolPrefix that could break out of a tool-name position", () => {
     for (const hostile of ["a-b", "Upper", "with space", "quote\"y", "{id}", "1leading"]) {
       expect(() => buildMcp(entityWithMcp({ toolPrefix: hostile }))).toThrow(

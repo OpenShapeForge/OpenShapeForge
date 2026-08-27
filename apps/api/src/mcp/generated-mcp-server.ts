@@ -56,8 +56,15 @@ import {
   getGeneratedCrudTables,
   isGeneratedCrudOperationEnabled,
   listGeneratedEntities,
+  listGeneratedEntitiesForTable,
   updateGeneratedEntity,
 } from "../graphql/generated-crud.js";
+import {
+  derivedToolsFromRows,
+  sessionInAudience,
+  type DerivedTool,
+  type DerivedToolsCatalogEntry,
+} from "./derived-tools.js";
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
@@ -155,6 +162,7 @@ type Catalog = {
   tools: CatalogTool[];
   entities: CatalogEntity[];
   resources?: CatalogResource[];
+  derivedTools?: DerivedToolsCatalogEntry[];
 };
 const catalog = rawCatalog as unknown as Catalog;
 
@@ -286,6 +294,45 @@ function resourcesForSession(
   return resources.filter((resource) =>
     sessionMayInvoke(tables.get(resource.table), "get", session),
   );
+}
+
+const catalogDerivedTools: DerivedToolsCatalogEntry[] = catalog.derivedTools ?? [];
+
+/**
+ * Cap on rows a definition table contributes to the derived-tool projection.
+ * A deployment authoring more definitions than this needs curation, not a
+ * longer tool list — tool selection quality degrades well before the cap.
+ */
+const DERIVED_TOOLS_ROW_LIMIT = 100;
+
+/**
+ * The per-session derived tools: definition rows read tenant-scoped (but
+ * deliberately outside the entity-role gate — see
+ * listGeneratedEntitiesForTable) for every projection whose audience roles
+ * admit the session. Static catalog names are reserved so a stored
+ * definition can never shadow a product tool.
+ */
+async function derivedToolsForSession(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+): Promise<DerivedTool[]> {
+  const reserved = new Set(catalog.tools.map((tool) => tool.name));
+  const tools: DerivedTool[] = [];
+  for (const entry of catalogDerivedTools) {
+    if (!sessionInAudience(entry, session.roles)) continue;
+    const table = tables.get(entry.table);
+    if (!table) continue;
+    const result = await listGeneratedEntitiesForTable(db, session, table, {
+      limit: DERIVED_TOOLS_ROW_LIMIT,
+    });
+    const rows = result.rows.map((row) => serializeRow(table, row));
+    for (const tool of derivedToolsFromRows(entry, rows, reserved)) {
+      reserved.add(tool.name);
+      tools.push(tool);
+    }
+  }
+  return tools;
 }
 
 /**
@@ -747,6 +794,14 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
       ...toolsForSession(session, tables).map(({ tool, entity }) =>
         describeTool(tool, entity, tables.get(tool.table), session),
       ),
+      // Derived tools: definition rows projected per session and per tenant.
+      ...(await derivedToolsForSession(db, session, tables)).map((tool) => ({
+        name: tool.name,
+        ...(tool.title ? { title: tool.title } : {}),
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+      })),
       // Connector operations join the SAME catalog, filtered by the same
       // session, so a caller sees one tool list rather than two surfaces with
       // different rules. The shared 60-tool budget is enforced at compile time.
@@ -799,6 +854,27 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
     // the listing already omitted both, so distinguishing them would leak
     // which entities exist.
     if (!match || !table || !sessionMayInvoke(table, match.operation, session)) {
+      // Not a static tool — a derived (row-defined) tool may own the name.
+      // Execution of derived tools is a later slice: the definition names an
+      // intent, but the connection/execution machinery that fulfils it does
+      // not exist yet, so the honest answer is a clear failure, not a stub
+      // success an agent would act on.
+      if (catalogDerivedTools.length > 0) {
+        const derived = (await derivedToolsForSession(db, session, tables)).find(
+          (tool) => tool.name === name,
+        );
+        if (derived) {
+          return failed(
+            new HttpError(
+              501,
+              "NOT_IMPLEMENTED",
+              `Tool "${name}" is defined by a stored ${derived.entity} record, but ` +
+                `execution of derived tools is not implemented yet. The definition can ` +
+                `be inspected via its ${derived.entity} resource or management tools.`,
+            ),
+          );
+        }
+      }
       return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
     }
     const entity = catalog.entities.find((item) => item.entity === match.entity);

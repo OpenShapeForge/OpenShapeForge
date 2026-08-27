@@ -15,7 +15,7 @@
  * Input:  Core entity definition (authored `mcp` block).
  * Output: McpSection | undefined — undefined means "no MCP exposure".
  */
-import type { CrudSection, McpConfig, McpOperationConfig, McpOperationKey, McpResourceConfig, McpSection } from "../types.js";
+import type { CrudSection, McpConfig, McpDerivedToolsConfig, McpOperationConfig, McpOperationKey, McpResourceConfig, McpSection } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
 import { limitCrudOperations } from "./crud.js";
 
@@ -131,11 +131,40 @@ export function buildMcp(
     resource = config.resource;
   }
 
+  let derivedTools: McpDerivedToolsConfig | undefined;
+  if (config.derivedTools) {
+    const authored = config.derivedTools;
+    if (!Array.isArray(authored.roles) || authored.roles.length === 0) {
+      throw new Error(
+        `mcp derivedTools on entity "${coreEntity.entity}" needs a non-empty roles list — ` +
+          `an empty audience would advertise the derived tools to nobody, which is ` +
+          `always a configuration mistake.`,
+      );
+    }
+    const fieldKeys = new Set((coreEntity.fields ?? []).map((field) => field.key));
+    for (const [option, fieldKey] of [
+      ["keyField", authored.keyField],
+      ["descriptionField", authored.descriptionField],
+      ["inputFieldsField", authored.inputFieldsField],
+      ...(authored.titleField !== undefined ? [["titleField", authored.titleField]] : []),
+    ] as const) {
+      if (!fieldKey || !fieldKeys.has(fieldKey)) {
+        throw new Error(
+          `mcp derivedTools ${option} ${JSON.stringify(fieldKey)} on entity ` +
+            `"${coreEntity.entity}" does not name an authored field. The runtime reads ` +
+            `these fields from stored rows to build each derived tool.`,
+        );
+      }
+    }
+    derivedTools = authored;
+  }
+
   return {
     toolPrefix,
     tools: style,
     operations,
     ...(Object.keys(toolOverrides).length > 0 ? { toolOverrides } : {}),
     ...(resource ? { resource } : {}),
+    ...(derivedTools ? { derivedTools } : {}),
   };
 }

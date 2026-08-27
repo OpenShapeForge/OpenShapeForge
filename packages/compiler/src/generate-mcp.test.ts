@@ -559,3 +559,31 @@ describe("resource catalog", () => {
     ).toThrow(/Duplicate MCP resource uri "app:\/\/shared"/);
   });
 });
+
+describe("derived tools catalog", () => {
+  it("emits the derivedTools projection config for opted-in entities", () => {
+    const mcp = {
+      toolPrefix: "widget",
+      tools: "dedicated" as const,
+      operations: { list: false, get: true, create: true, update: true, delete: true },
+      derivedTools: {
+        roles: ["viewer"],
+        keyField: "name",
+        descriptionField: "name",
+        inputFieldsField: "name",
+      },
+    };
+    const catalog = buildMcpCatalog([input(contract({ mcp }))], "test");
+    expect(catalog.derivedTools).toEqual([
+      {
+        entity: "Widget",
+        table: "erp.widgets",
+        roles: ["viewer"],
+        keyField: "name",
+        descriptionField: "name",
+        inputFieldsField: "name",
+      },
+    ]);
+    expect(buildMcpCatalog([input(contract())], "test").derivedTools).toEqual([]);
+  });
+});

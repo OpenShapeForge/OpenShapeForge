@@ -203,6 +203,14 @@ export interface McpSection {
     description?: string;
     templateDescription?: string;
   };
+  /** Authored row-to-tool projection config, validated at compile. */
+  derivedTools?: {
+    roles: string[];
+    keyField: string;
+    titleField?: string;
+    descriptionField: string;
+    inputFieldsField: string;
+  };
 }
 
 export interface RestSection {

@@ -138,11 +138,23 @@ type CatalogRelationship = {
  * mismatch surfaces as a runtime miss on a tool name, which the CallTool
  * handler already treats as unknown.
  */
+type CatalogResource = {
+  uri: string;
+  name: string;
+  description: string;
+  templateUri: string;
+  templateName: string;
+  templateDescription: string;
+  entity: string;
+  table: string;
+};
+
 type Catalog = {
   generatedBy: string;
   source: string;
   tools: CatalogTool[];
   entities: CatalogEntity[];
+  resources?: CatalogResource[];
 };
 const catalog = rawCatalog as unknown as Catalog;
 
@@ -258,6 +270,30 @@ function toolsForSession(
     .filter((tool) => sessionMayInvoke(tables.get(tool.table), tool.operation, session))
     .map((tool) => ({ tool, entity: entitiesByName.get(tool.entity) }));
 }
+
+const catalogResources: CatalogResource[] = catalog.resources ?? [];
+
+/**
+ * A resource is a read surface, so visibility and reads are both gated on the
+ * entity's read role — the same rule `get`/`list` tools follow. Like the tool
+ * listing, an unauthorized resource is omitted rather than erroring.
+ */
+function resourcesForSession(
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+  resources: CatalogResource[] = catalogResources,
+): CatalogResource[] {
+  return resources.filter((resource) =>
+    sessionMayInvoke(tables.get(resource.table), "get", session),
+  );
+}
+
+/**
+ * Cap on rows a catalogue resource read returns. A resource has no cursor
+ * protocol, so the cap keeps one read bounded; a catalogue larger than this
+ * needs the list tool, which pages.
+ */
+const RESOURCE_READ_LIMIT = 200;
 
 function describeTool(
   tool: CatalogTool,
@@ -420,6 +456,7 @@ export const __withholdClassifiedForTests = withholdClassified;
 export const __assertWritableValuesForTests = assertWritableValues;
 export const __sessionMayInvokeForTests = sessionMayInvoke;
 export const __describeToolForTests = describeTool;
+export const __resourcesForSessionForTests = resourcesForSession;
 
 type ToolResult = {
   content: { type: "text"; text: string }[];
@@ -620,6 +657,7 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const entries = entitiesForSession(session, tables);
+    const authoredResources = resourcesForSession(session, tables);
     return {
       resources: [
         {
@@ -637,12 +675,23 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
           description: entity.description,
           mimeType: JSON_MIME_TYPE,
         })),
+        ...authoredResources.map((resource) => ({
+          uri: resource.uri,
+          name: resource.name,
+          description: resource.description,
+          mimeType: JSON_MIME_TYPE,
+        })),
       ],
     };
   });
 
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
-    resourceTemplates: [],
+    resourceTemplates: resourcesForSession(session, tables).map((resource) => ({
+      uriTemplate: resource.templateUri,
+      name: resource.templateName,
+      description: resource.templateDescription,
+      mimeType: JSON_MIME_TYPE,
+    })),
   }));
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
@@ -650,12 +699,35 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
     let payload: unknown;
     if (request.params.uri === ENTITY_CATALOG_URI) {
       payload = describeCatalogResource(entries);
-    } else {
+    } else if (request.params.uri.startsWith(`${ENTITY_CATALOG_URI}/`)) {
       const entry = entries.find(
         ({ entity }) => entityResourceUri(entity) === request.params.uri,
       );
       if (!entry) throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
       payload = describeEntityResource(entry, entries, tables, session);
+    } else {
+      const uri = request.params.uri;
+      const readable = resourcesForSession(session, tables);
+      const direct = readable.find((resource) => resource.uri === uri);
+      if (direct) {
+        const table = tables.get(direct.table);
+        if (!table) throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
+        const result = await listGeneratedEntities(db, session, {
+          table: table.name,
+          limit: RESOURCE_READ_LIMIT,
+        });
+        payload = result.rows.map((row) => serializeRow(table, row));
+      } else {
+        const templated = readable.find((resource) => uri.startsWith(`${resource.uri}/`));
+        const id = templated ? uri.slice(templated.uri.length + 1) : "";
+        const table = templated ? tables.get(templated.table) : undefined;
+        if (!table || id.length === 0 || id.includes("/")) {
+          throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
+        }
+        const row = await getGeneratedEntity(db, session, { table: table.name, id });
+        if (!row) throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
+        payload = serializeRow(table, row);
+      }
     }
     return {
       contents: [

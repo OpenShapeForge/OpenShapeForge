@@ -23,6 +23,7 @@ import type {
   CompiledField,
   CompiledRelationship,
 } from "./authoring/types.js";
+import { pluralize } from "./authoring/compiler/helpers.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import {
   compiledFieldSchema,
@@ -167,7 +168,14 @@ function buildToolsForEntity(
   };
 
   const named = (operation: McpToolDefinition["operation"]) =>
-    mcp.tools === "dedicated" ? `${mcp.toolPrefix}_${operation}` : `osf_${operation}`;
+    mcp.tools === "dedicated"
+      ? (mcp.toolOverrides?.[operation]?.name ?? `${mcp.toolPrefix}_${operation}`)
+      : `osf_${operation}`;
+
+  // Authored description wins outright: an author writing one is correcting
+  // the composed default, so nothing is appended to it.
+  const described = (operation: McpToolDefinition["operation"], fallback: string) =>
+    mcp.toolOverrides?.[operation]?.description ?? fallback;
 
   if (mcp.operations.list) {
     const filterProperties: JsonObject = {};
@@ -185,10 +193,12 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: `List ${label}`,
-      description:
+      description: described(
+        "list",
         `${description} Returns a page of records. Text filters match on substring; ` +
-        `other types match exactly.` +
-        (filterField ? ` Free-text search is usually best against "${filterField}".` : ""),
+          `other types match exactly.` +
+          (filterField ? ` Free-text search is usually best against "${filterField}".` : ""),
+      ),
       inputSchema: {
         type: "object",
         properties: {
@@ -228,7 +238,7 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: `Get ${label}`,
-      description: `${description} Fetches a single record by id.`,
+      description: described("get", `${description} Fetches a single record by id.`),
       inputSchema: idSchema,
       annotations: annotationsFor("get"),
     });
@@ -241,7 +251,7 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: `Create ${label}`,
-      description: `${description} Creates a new record.`,
+      description: described("create", `${description} Creates a new record.`),
       inputSchema: compiledObjectSchema(creatable, referentiedata, {
         requireRequired: true,
         ...MCP_FIELD_SCHEMA_OPTIONS,
@@ -264,7 +274,10 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: `Update ${label}`,
-      description: `${description} Partially updates a record; omitted fields are left unchanged.`,
+      description: described(
+        "update",
+        `${description} Partially updates a record; omitted fields are left unchanged.`,
+      ),
       inputSchema: {
         type: "object",
         properties: {
@@ -285,7 +298,7 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: `Delete ${label}`,
-      description: `${description} Permanently deletes a record by id.`,
+      description: described("delete", `${description} Permanently deletes a record by id.`),
       inputSchema: idSchema,
       annotations: annotationsFor("delete"),
     });
@@ -337,11 +350,25 @@ export type McpEntityCatalogEntry = {
   }[];
 };
 
+export type McpResourceDefinition = {
+  /** Direct catalogue resource URI, exactly as authored. */
+  uri: string;
+  name: string;
+  description: string;
+  /** Single-record template, derived as `<uri>/{id}`. */
+  templateUri: string;
+  templateName: string;
+  templateDescription: string;
+  entity: string;
+  table: string;
+};
+
 export type McpCatalog = {
   generatedBy: string;
   source: string;
   entities: McpEntityCatalogEntry[];
   tools: McpToolDefinition[];
+  resources: McpResourceDefinition[];
 };
 
 export type McpCatalogInput = {
@@ -370,6 +397,7 @@ export function buildMcpCatalog(
 
   const entities: McpEntityCatalogEntry[] = [];
   const tools: McpToolDefinition[] = [];
+  const resources: McpResourceDefinition[] = [];
 
   for (const input of opted) {
     const { contract } = input;
@@ -430,6 +458,55 @@ export function buildMcpCatalog(
     });
 
     tools.push(...buildToolsForEntity(contract, input.table, referentiedata));
+
+    if (mcp.resource) {
+      const pluralLabel = pluralize(entityLabel(contract));
+      resources.push({
+        uri: mcp.resource.uri,
+        name: mcp.resource.name ?? pluralLabel,
+        description:
+          mcp.resource.description ??
+          `Read the ${pluralLabel} currently available to the caller.`,
+        templateUri: `${mcp.resource.uri}/{id}`,
+        templateName: `Specific ${entityLabel(contract)}`,
+        templateDescription:
+          mcp.resource.templateDescription ??
+          `Read one ${entityLabel(contract)} by its identifier.`,
+        entity: contract.entity.name,
+        table: input.table,
+      });
+    }
+  }
+
+  const seenResourceUris = new Map<string, McpResourceDefinition>();
+  for (const resource of resources) {
+    const existing = seenResourceUris.get(resource.uri);
+    if (existing) {
+      throw new Error(
+        `Duplicate MCP resource uri "${resource.uri}": authored on both ` +
+          `${existing.entity} and ${resource.entity}. Every entity resource needs its ` +
+          `own uri because the runtime dispatches reads on it.`,
+      );
+    }
+    seenResourceUris.set(resource.uri, resource);
+  }
+
+  // With authored name overrides in play, uniqueness is no longer guaranteed
+  // by the prefix derivation — fail closed on any collision, since the runtime
+  // dispatches on the name.
+  const seenNames = new Map<string, McpToolDefinition>();
+  for (const tool of tools) {
+    if (tool.name.startsWith("osf_")) continue;
+    const existing = seenNames.get(tool.name);
+    if (existing) {
+      throw new Error(
+        `Duplicate MCP tool name "${tool.name}": emitted for both ` +
+          `${existing.entity}.${existing.operation} and ${tool.entity}.${tool.operation}. ` +
+          `Adjust the authored mcp name override or toolPrefix so every dedicated tool ` +
+          `name is unique.`,
+      );
+    }
+    seenNames.set(tool.name, tool);
   }
 
   const dedicatedCount = tools.filter((tool) => !tool.name.startsWith("osf_")).length;
@@ -451,6 +528,7 @@ export function buildMcpCatalog(
     source,
     entities,
     tools,
+    resources,
   };
 }
 

@@ -268,6 +268,42 @@ export type McpOperationKey = RestOperationKey;
  */
 export type McpToolStyle = "dedicated" | "generic";
 
+export interface McpOperationConfig {
+  /** Defaults to true. */
+  enabled?: boolean;
+  /**
+   * Override the complete generated tool name for this operation, replacing
+   * the `<toolPrefix>_<operation>` default (`dedicated` style only — the
+   * shared `osf_*` tools cannot be renamed per entity). Emitted verbatim into
+   * tool names, so the compiler restricts it to `^[a-z][a-z0-9_]*$` and
+   * fails closed on a duplicate across the catalog.
+   */
+  name?: string;
+  /**
+   * Override the generated tool description for this operation (`dedicated`
+   * style only). Use for short, operational, entity-specific guidance; the
+   * compiler-composed default is used when absent.
+   */
+  description?: string;
+}
+
+export interface McpResourceConfig {
+  /**
+   * Absolute URI of the entity's MCP catalogue resource, e.g.
+   * `app://things`. The single-record resource template is derived from it
+   * as `<uri>/{id}`. Restricted to `scheme://path` with safe characters,
+   * because it is emitted verbatim into the MCP resource listing that the
+   * runtime dispatches on.
+   */
+  uri: string;
+  /** Human-readable resource name; defaults to the entity's plural label. */
+  name?: string;
+  /** Resource description; defaults to a composed one naming the entity. */
+  description?: string;
+  /** Description of the derived single-record template. */
+  templateDescription?: string;
+}
+
 export interface McpConfig {
   /** Defaults to true when the `mcp` block is present. */
   enabled?: boolean;
@@ -279,8 +315,18 @@ export interface McpConfig {
   toolPrefix?: string;
   /** Defaults to `dedicated`. */
   tools?: McpToolStyle;
-  /** Per-operation flags; each defaults to true when MCP is enabled. */
-  operations?: Partial<Record<McpOperationKey, boolean>>;
+  /**
+   * Per-operation flags; each defaults to true when MCP is enabled. The
+   * object form additionally overrides the generated tool name and/or
+   * description for that operation.
+   */
+  operations?: Partial<Record<McpOperationKey, boolean | McpOperationConfig>>;
+  /**
+   * Opt-in MCP resource exposure: a direct catalogue resource at `uri` plus
+   * a derived `<uri>/{id}` template for one record. Reads are authorized like
+   * the entity's read operations.
+   */
+  resource?: McpResourceConfig;
 }
 
 export interface CoreEntity {

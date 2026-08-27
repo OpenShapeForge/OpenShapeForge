@@ -463,3 +463,99 @@ describe("buildMcpCatalog", () => {
     expect(() => buildMcpCatalog(many, "test")).toThrow(/over the 60 limit/);
   });
 });
+
+describe("authored tool overrides", () => {
+  const mcpWithOverrides = {
+    toolPrefix: "widget",
+    tools: "dedicated" as const,
+    operations: { list: false, get: true, create: true, update: true, delete: true },
+    toolOverrides: {
+      get: { name: "read_widget", description: "Read one Widget by id." },
+      update: { name: "edit_widget" },
+    },
+  };
+
+  it("uses override names and descriptions, composed defaults elsewhere", () => {
+    const catalog = buildMcpCatalog([input(contract({ mcp: mcpWithOverrides }))], "test");
+    const byOperation = new Map(catalog.tools.map((tool) => [tool.operation, tool]));
+    expect(byOperation.get("get")?.name).toBe("read_widget");
+    expect(byOperation.get("get")?.description).toBe("Read one Widget by id.");
+    expect(byOperation.get("update")?.name).toBe("edit_widget");
+    // Description override was not authored for update: composed default stays.
+    expect(byOperation.get("update")?.description).toContain("Partially updates");
+    expect(byOperation.get("create")?.name).toBe("widget_create");
+    expect(byOperation.get("delete")?.name).toBe("widget_delete");
+  });
+
+  it("fails closed on a duplicate dedicated tool name across the catalog", () => {
+    const first = contract({
+      name: "Widget",
+      mcp: {
+        toolPrefix: "widget",
+        tools: "dedicated",
+        operations: { list: false, get: true, create: false, update: false, delete: false },
+        toolOverrides: { get: { name: "read_thing" } },
+      },
+    });
+    const second = contract({
+      name: "Gadget",
+      mcp: {
+        toolPrefix: "gadget",
+        tools: "dedicated",
+        operations: { list: false, get: true, create: false, update: false, delete: false },
+        toolOverrides: { get: { name: "read_thing" } },
+      },
+    });
+    expect(() =>
+      buildMcpCatalog([input(first, "widget"), input(second, "gadget")], "test"),
+    ).toThrow(/Duplicate MCP tool name "read_thing"/);
+  });
+});
+
+describe("resource catalog", () => {
+  const mcpWithResource = {
+    toolPrefix: "widget",
+    tools: "dedicated" as const,
+    operations: { list: false, get: true, create: true, update: true, delete: true },
+    resource: { uri: "app://widgets", description: "Read the widget catalogue." },
+  };
+
+  it("emits a direct resource plus derived template with label fallbacks", () => {
+    const catalog = buildMcpCatalog([input(contract({ mcp: mcpWithResource }))], "test");
+    expect(catalog.resources).toEqual([
+      {
+        uri: "app://widgets",
+        name: "Widgets",
+        description: "Read the widget catalogue.",
+        templateUri: "app://widgets/{id}",
+        templateName: "Specific Widget",
+        templateDescription: "Read one Widget by its identifier.",
+        entity: "Widget",
+        table: "erp.widgets",
+      },
+    ]);
+  });
+
+  it("emits an empty resources array when nothing opts in", () => {
+    expect(buildMcpCatalog([input(contract())], "test").resources).toEqual([]);
+  });
+
+  it("fails closed on a duplicate resource uri across entities", () => {
+    const duplicated = (name: string, prefix: string) =>
+      contract({
+        name,
+        mcp: {
+          toolPrefix: prefix,
+          tools: "dedicated",
+          operations: { list: false, get: true, create: false, update: false, delete: false },
+          resource: { uri: "app://shared" },
+        },
+      });
+    expect(() =>
+      buildMcpCatalog(
+        [input(duplicated("Widget", "widget"), "widget"), input(duplicated("Gadget", "gadget"), "gadget")],
+        "test",
+      ),
+    ).toThrow(/Duplicate MCP resource uri "app:\/\/shared"/);
+  });
+});

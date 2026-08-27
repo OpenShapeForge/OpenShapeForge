@@ -322,11 +322,25 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "list": { "type": "boolean" },
-                "get": { "type": "boolean" },
-                "create": { "type": "boolean" },
-                "update": { "type": "boolean" },
-                "delete": { "type": "boolean" }
+                "list": { "$ref": "#/$defs/mcpOperation" },
+                "get": { "$ref": "#/$defs/mcpOperation" },
+                "create": { "$ref": "#/$defs/mcpOperation" },
+                "update": { "$ref": "#/$defs/mcpOperation" },
+                "delete": { "$ref": "#/$defs/mcpOperation" }
+              }
+            },
+            "resource": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["uri"],
+              "properties": {
+                "uri": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9+.-]*://[A-Za-z0-9][A-Za-z0-9/_-]*[A-Za-z0-9]$"
+                },
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "templateDescription": { "type": "string" }
               }
             }
           }
@@ -361,6 +375,24 @@
     }
   },
   "$defs": {
+    "mcpOperation": {
+      "description": "Per-operation MCP flag. The object form additionally overrides the generated tool name and/or description for that operation (dedicated style only).",
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "name": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            },
+            "description": { "type": "string" }
+          }
+        }
+      ]
+    },
     "crudOperations": {
       "type": "object",
       "additionalProperties": false,

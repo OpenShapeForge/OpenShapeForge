@@ -186,6 +186,23 @@ export interface McpSection {
    */
   tools: McpToolStyle;
   operations: Record<McpOperationKey, boolean>;
+  /**
+   * Authored per-operation tool name/description overrides (`dedicated`
+   * style only). generate-mcp.ts consumes these when it emits the catalog;
+   * an absent entry means the compiler-composed default applies.
+   */
+  toolOverrides?: Partial<Record<McpOperationKey, { name?: string; description?: string }>>;
+  /**
+   * Authored MCP resource exposure, validated but not defaulted — the
+   * catalog generator resolves the name/description fallbacks because it
+   * owns the label helpers.
+   */
+  resource?: {
+    uri: string;
+    name?: string;
+    description?: string;
+    templateDescription?: string;
+  };
 }
 
 export interface RestSection {

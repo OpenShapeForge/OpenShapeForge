@@ -15,7 +15,7 @@
  * Input:  Core entity definition (authored `mcp` block).
  * Output: McpSection | undefined — undefined means "no MCP exposure".
  */
-import type { CrudSection, McpConfig, McpDerivedToolsConfig, McpElicitOnCreateConfig, McpOperationConfig, McpOperationKey, McpResourceConfig, McpSection } from "../types.js";
+import type { CrudSection, McpConfig, McpDerivedToolsConfig, McpDiscoveryConfig, McpElicitOnCreateConfig, McpOperationConfig, McpOperationKey, McpResourceConfig, McpSection } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
 import { limitCrudOperations } from "./crud.js";
 
@@ -200,6 +200,17 @@ export function buildMcp(
     elicitOnCreate = authored;
   }
 
+  let discovery: McpDiscoveryConfig | undefined;
+  if (config.discovery) {
+    if (!MCP_TOOL_PREFIX_PATTERN.test(config.discovery.name ?? "")) {
+      throw new Error(
+        `Unsafe mcp discovery name ${JSON.stringify(config.discovery.name)} on entity ` +
+          `"${coreEntity.entity}" — must match ${MCP_TOOL_PREFIX_PATTERN}.`,
+      );
+    }
+    discovery = config.discovery;
+  }
+
   return {
     toolPrefix,
     tools: style,
@@ -208,5 +219,6 @@ export function buildMcp(
     ...(resource ? { resource } : {}),
     ...(derivedTools ? { derivedTools } : {}),
     ...(elicitOnCreate ? { elicitOnCreate } : {}),
+    ...(discovery ? { discovery } : {}),
   };
 }

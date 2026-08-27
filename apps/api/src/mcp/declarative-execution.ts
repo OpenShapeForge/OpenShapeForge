@@ -119,7 +119,96 @@ type AuthConfig = {
   passwordFrom?: unknown;
   headerName?: unknown;
   tokenFrom?: unknown;
+  tokenUrl?: unknown;
+  scopes?: unknown;
+  clientIdFrom?: unknown;
+  clientSecretFrom?: unknown;
 };
+
+/**
+ * Client-credentials tokens cached per (tokenUrl, clientId) until shortly
+ * before expiry, so a burst of tool calls costs one token round-trip. The
+ * cache holds bearer tokens only — never the client secret.
+ */
+const oauthTokenCache = new Map<string, { token: string; expiresAtMs: number }>();
+
+async function clientCredentialsToken(input: {
+  config: AuthConfig;
+  plain: Record<string, string>;
+  secret: Record<string, string>;
+  egress: readonly string[];
+  fetchImpl: typeof fetch;
+}): Promise<string> {
+  const { config } = input;
+  const tokenUrlRaw = typeof config.tokenUrl === "string" ? config.tokenUrl : "";
+  const credentialSources = { ...input.plain, ...input.secret };
+  const tokenUrl = new URL(resolveTemplate(tokenUrlRaw, input.plain, "auth.tokenUrl"));
+  if (tokenUrl.protocol !== "https:" && tokenUrl.protocol !== "http:") {
+    throw new HttpError(400, "EGRESS_DENIED", "Only http(s) token endpoints are supported.");
+  }
+  if (!hostAllowed(tokenUrl.hostname, input.egress)) {
+    throw new HttpError(
+      403,
+      "EGRESS_DENIED",
+      `Token endpoint host ${tokenUrl.hostname} is not in the provider's egress allow-list.`,
+    );
+  }
+  const clientIdKey = typeof config.clientIdFrom === "string" ? config.clientIdFrom : "clientId";
+  const clientSecretKey =
+    typeof config.clientSecretFrom === "string" ? config.clientSecretFrom : "clientSecret";
+  const clientId = credentialSources[clientIdKey];
+  const clientSecret = credentialSources[clientSecretKey];
+  if (clientId === undefined || clientSecret === undefined) {
+    throw new HttpError(
+      400,
+      "CONNECTION_INCOMPLETE",
+      `OAuth client credentials need the connection values "${clientIdKey}" and "${clientSecretKey}".`,
+    );
+  }
+
+  const cacheKey = `${tokenUrl.href}\u0000${clientId}`;
+  const cached = oauthTokenCache.get(cacheKey);
+  if (cached && cached.expiresAtMs > Date.now()) return cached.token;
+
+  const form = new URLSearchParams({ grant_type: "client_credentials" });
+  const scopes = Array.isArray(config.scopes)
+    ? (config.scopes as unknown[]).filter((scope): scope is string => typeof scope === "string")
+    : [];
+  if (scopes.length > 0) form.set("scope", scopes.join(" "));
+  const response = await input.fetchImpl(tokenUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+      accept: "application/json",
+    },
+    body: form.toString(),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new HttpError(
+      502,
+      "TOKEN_ENDPOINT_ERROR",
+      `Token endpoint answered ${response.status}.`,
+    );
+  }
+  let payload: { access_token?: unknown; expires_in?: unknown };
+  try {
+    payload = JSON.parse(text) as typeof payload;
+  } catch {
+    throw new HttpError(502, "TOKEN_ENDPOINT_ERROR", "Token endpoint response is not JSON.");
+  }
+  if (typeof payload.access_token !== "string") {
+    throw new HttpError(502, "TOKEN_ENDPOINT_ERROR", "Token endpoint returned no access_token.");
+  }
+  const expiresInS = typeof payload.expires_in === "number" ? payload.expires_in : 300;
+  oauthTokenCache.set(cacheKey, {
+    token: payload.access_token,
+    expiresAtMs: Date.now() + Math.max(0, expiresInS - 60) * 1000,
+  });
+  return payload.access_token;
+}
 
 /**
  * Auth headers from the provider's declarative auth block. Secrets enter here
@@ -214,16 +303,40 @@ export type ExecuteBindingInput = {
  * request from the canonical operation/provider fields, enforce egress, call,
  * and map the (optionally rootPath-extracted) response onto service outputs.
  */
+/** All schemes; the OAuth one needs I/O, so acquisition is async. */
+export async function acquireAuthHeaders(input: {
+  auth: unknown;
+  plain: Record<string, string>;
+  secret: Record<string, string>;
+  egress: readonly string[];
+  fetchImpl: typeof fetch;
+}): Promise<Record<string, string>> {
+  const config =
+    input.auth && typeof input.auth === "object" ? (input.auth as AuthConfig) : undefined;
+  if (config?.scheme === "oauth2ClientCredentials") {
+    const token = await clientCredentialsToken({
+      config,
+      plain: input.plain,
+      secret: input.secret,
+      egress: input.egress,
+      fetchImpl: input.fetchImpl,
+    });
+    return { authorization: `Bearer ${token}` };
+  }
+  return buildAuthHeaders(input.auth, input.plain, input.secret);
+}
+
 export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRecord> {
   const { binding, operationRow, providerRow, serviceInputs } = input;
   const keyring = input.keyring ?? keyringFromEnv(process.env[KEYRING_ENV]);
   const fetchImpl = input.fetchImpl ?? fetch;
 
-  if (providerRow.transport !== "rest") {
+  const transport = providerRow.transport;
+  if (transport !== "rest" && transport !== "graphql") {
     throw new HttpError(
       501,
       "NOT_IMPLEMENTED",
-      `Transport "${String(providerRow.transport)}" is not executable yet; only rest is.`,
+      `Transport "${String(transport)}" is not executable; rest and graphql are.`,
     );
   }
 
@@ -240,10 +353,24 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
 
   const operationInputs = applyMapping(serviceInputs, binding.inputMapping);
   const operation = (operationRow.operation ?? {}) as JsonRecord;
-  const method = typeof operation.method === "string" ? operation.method.toUpperCase() : "GET";
+  const isGraphql = transport === "graphql";
+  const method = isGraphql
+    ? "POST"
+    : typeof operation.method === "string"
+      ? operation.method.toUpperCase()
+      : "GET";
+  // GraphQL posts to the endpoint itself; a pathTemplate is optional there
+  // (e.g. "/graphql") and required for REST.
   const pathTemplate = typeof operation.pathTemplate === "string" ? operation.pathTemplate : "";
-  if (!pathTemplate.startsWith("/")) {
+  if (!isGraphql && !pathTemplate.startsWith("/")) {
     throw new HttpError(400, "OPERATION_MISCONFIGURED", "Operation pathTemplate must start with /.");
+  }
+  if (isGraphql && typeof operation.graphqlOperation !== "string") {
+    throw new HttpError(
+      400,
+      "OPERATION_MISCONFIGURED",
+      "A graphql operation needs operation.graphqlOperation.",
+    );
   }
 
   // URL positions resolve from PLAIN values and inputs only — never secrets.
@@ -261,7 +388,7 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
     "provider baseUrlTemplate",
   );
   const usedInPath = new Set<string>();
-  const path = pathTemplate.replace(PLACEHOLDER, (_match, key: string) => {
+  const path = (isGraphql && pathTemplate === "" ? "" : pathTemplate).replace(PLACEHOLDER, (_match, key: string) => {
     const value = urlSources[key];
     if (value === undefined) {
       throw new HttpError(400, "TEMPLATE_UNRESOLVED", `Path placeholder "{${key}}" has no value.`);
@@ -290,10 +417,19 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
   );
   const headers: Record<string, string> = {
     accept: "application/json",
-    ...buildAuthHeaders(providerRow.auth, plain, secret),
+    ...(await acquireAuthHeaders({
+      auth: providerRow.auth,
+      plain,
+      secret,
+      egress,
+      fetchImpl,
+    })),
   };
   let body: string | undefined;
-  if (method === "GET" || method === "DELETE") {
+  if (isGraphql) {
+    headers["content-type"] = "application/json";
+    body = JSON.stringify({ query: operation.graphqlOperation, variables: remaining });
+  } else if (method === "GET" || method === "DELETE") {
     for (const [key, value] of Object.entries(remaining)) {
       if (value !== null && typeof value !== "object") url.searchParams.set(key, String(value));
     }
@@ -324,6 +460,14 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
     throw new HttpError(502, "PROVIDER_ERROR", "Provider response is not valid JSON.");
   }
 
+  if (isGraphql) {
+    const errors = (parsed as JsonRecord | null)?.errors;
+    if (Array.isArray(errors) && errors.length > 0) {
+      throw new HttpError(502, "PROVIDER_ERROR", "Provider answered with GraphQL errors.");
+    }
+    parsed = (parsed as JsonRecord | null)?.data ?? null;
+  }
+
   const responseMapping = (operationRow.responseMapping ?? {}) as JsonRecord;
   const extracted = extractPath(parsed, responseMapping.rootPath);
   const fieldPaths = Array.isArray(responseMapping.fieldPaths)
@@ -343,7 +487,18 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
         : { result: extracted };
   }
 
-  return applyMapping(operationOutputs, binding.outputMapping);
+  const mapped = applyMapping(operationOutputs, binding.outputMapping);
+
+  // Cursor pagination surfaces as data: the next-page cursor (when the
+  // operation declares where it lives) rides along as `nextCursor`, and the
+  // author feeds it back through a service input mapped onto the page
+  // parameter. The engine stays single-request per call.
+  const pagination = (operationRow.pagination ?? {}) as JsonRecord;
+  if (pagination.style === "cursor" && typeof pagination.cursorPath === "string") {
+    const cursor = extractPath(parsed, pagination.cursorPath);
+    if (cursor !== undefined && cursor !== null) mapped.nextCursor = cursor;
+  }
+  return mapped;
 }
 
 /** Bindings in authored order; a malformed entry fails closed by index. */

@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import {
+  acquireAuthHeaders,
   applyMapping,
   buildAuthHeaders,
   executeBinding,
@@ -176,5 +177,128 @@ describe("executeBinding", () => {
     );
     expect(plain).toEqual({ subdomain: "acme" });
     expect(secret).toEqual({ apiToken: "tok-9" });
+  });
+});
+
+describe("oauth2ClientCredentials", () => {
+  it("acquires and caches a token from the egress-checked endpoint", async () => {
+    const calls: { url: string; body: string }[] = [];
+    const impl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), body: String(init?.body ?? "") });
+      return Response.json({ access_token: "cc-tok", expires_in: 3600 });
+    }) as typeof fetch;
+    const auth = {
+      scheme: "oauth2ClientCredentials",
+      tokenUrl: "https://auth.example.com/token",
+      scopes: ["read"],
+    };
+    const context = {
+      auth,
+      plain: { clientId: "id-1" },
+      secret: { clientSecret: "sec-1" },
+      egress: ["auth.example.com"],
+      fetchImpl: impl,
+    };
+    const first = await acquireAuthHeaders(context);
+    const second = await acquireAuthHeaders(context);
+    expect(first.authorization).toBe("Bearer cc-tok");
+    expect(second.authorization).toBe("Bearer cc-tok");
+    expect(calls.length).toBe(1);
+    expect(calls[0]?.body).toContain("grant_type=client_credentials");
+    expect(calls[0]?.body).toContain("scope=read");
+  });
+
+  it("refuses a token endpoint outside the egress allow-list", async () => {
+    await expect(
+      acquireAuthHeaders({
+        auth: { scheme: "oauth2ClientCredentials", tokenUrl: "https://evil.example.net/token" },
+        plain: { clientId: "id" },
+        secret: { clientSecret: "sec" },
+        egress: ["auth.example.com"],
+        fetchImpl: fetch,
+      }),
+    ).rejects.toThrow(/egress allow-list/);
+  });
+});
+
+describe("graphql transport", () => {
+  const KEYRING2 = keyringFromEnv(`test:${Buffer.alloc(32, 5).toString("base64")}`)!;
+
+  it("posts the stored operation with variables and unwraps data", async () => {
+    const calls: { url: string; body: string }[] = [];
+    const impl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), body: String(init?.body ?? "") });
+      return Response.json({ data: { tickets: { total: 7 } } });
+    }) as typeof fetch;
+    const outputs = await executeBinding({
+      binding: { outputMapping: [{ from: "total", to: "count" }] },
+      operationRow: {
+        operation: { graphqlOperation: "query($q:String){tickets(q:$q){total}}", pathTemplate: "/graphql" },
+        responseMapping: { rootPath: "tickets" },
+      },
+      providerRow: {
+        transport: "graphql",
+        baseUrlTemplate: "https://gql.example.com",
+        egressHosts: ["gql.example.com"],
+      },
+      connectionValues: {},
+      serviceInputs: { q: "x" },
+      keyring: KEYRING2,
+      fetchImpl: impl,
+      secretScope: "erp.providers",
+    });
+    expect(outputs).toEqual({ count: 7 });
+    expect(calls[0]?.url).toBe("https://gql.example.com/graphql");
+    expect(JSON.parse(calls[0]!.body)).toEqual({
+      query: "query($q:String){tickets(q:$q){total}}",
+      variables: { q: "x" },
+    });
+  });
+
+  it("surfaces GraphQL errors as provider errors", async () => {
+    const impl = (async () =>
+      Response.json({ errors: [{ message: "boom" }] })) as unknown as typeof fetch;
+    await expect(
+      executeBinding({
+        binding: {},
+        operationRow: { operation: { graphqlOperation: "query{x}" } },
+        providerRow: {
+          transport: "graphql",
+          baseUrlTemplate: "https://gql.example.com",
+          egressHosts: ["gql.example.com"],
+        },
+        connectionValues: {},
+        serviceInputs: {},
+        keyring: KEYRING2,
+        fetchImpl: impl,
+        secretScope: "erp.providers",
+      }),
+    ).rejects.toThrow(/GraphQL errors/);
+  });
+});
+
+describe("cursor pagination", () => {
+  it("surfaces the next-page cursor from the declared path", async () => {
+    const impl = (async () =>
+      Response.json({ data: { items: [1] }, meta: { after: "cur-2" } })) as unknown as typeof fetch;
+    const outputs = await executeBinding({
+      binding: {},
+      operationRow: {
+        operation: { method: "GET", pathTemplate: "/items" },
+        responseMapping: { rootPath: "data" },
+        pagination: { style: "cursor", cursorPath: "meta.after" },
+      },
+      providerRow: {
+        transport: "rest",
+        baseUrlTemplate: "https://api.example.com",
+        egressHosts: ["api.example.com"],
+      },
+      connectionValues: {},
+      serviceInputs: {},
+      fetchImpl: impl,
+      secretScope: "erp.providers",
+    });
+    expect(outputs.nextCursor).toBe("cur-2");
+    expect(outputs.items).toEqual([1]);
   });
 });

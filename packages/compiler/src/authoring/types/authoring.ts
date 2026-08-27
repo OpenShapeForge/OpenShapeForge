@@ -350,6 +350,13 @@ export interface McpElicitOnCreateConfig {
   message?: string;
 }
 
+export interface McpDiscoveryConfig {
+  /** Tool name, e.g. `discover_provider`; same alphabet as other tool names. */
+  name: string;
+  /** Override the composed tool description. */
+  description?: string;
+}
+
 export interface McpConfig {
   /** Defaults to true when the `mcp` block is present. */
   enabled?: boolean;
@@ -373,6 +380,13 @@ export interface McpConfig {
    * the entity's read operations.
    */
   resource?: McpResourceConfig;
+  /**
+   * Opt-in schema discovery tool: given a row id, the runtime fetches the
+   * row's declared schema document (canonical fields `discovery`, `schemaUrl`,
+   * `egressHosts`) and returns a compact operation summary. Visibility follows
+   * the entity's read role.
+   */
+  discovery?: McpDiscoveryConfig;
   /**
    * Opt-in runtime projection of this entity's ROWS as MCP tools: each stored
    * record becomes one tool, named from keyField and typed from the canonical

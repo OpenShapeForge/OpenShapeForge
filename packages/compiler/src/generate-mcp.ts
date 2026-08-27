@@ -404,6 +404,13 @@ export type McpDerivedToolsDefinition = {
   execution?: McpDerivedExecutionDefinition;
 };
 
+export type McpDiscoveryToolDefinition = {
+  name: string;
+  description: string;
+  entity: string;
+  table: string;
+};
+
 export type McpCatalog = {
   generatedBy: string;
   source: string;
@@ -411,6 +418,7 @@ export type McpCatalog = {
   tools: McpToolDefinition[];
   resources: McpResourceDefinition[];
   derivedTools: McpDerivedToolsDefinition[];
+  discoveryTools: McpDiscoveryToolDefinition[];
 };
 
 export type McpCatalogInput = {
@@ -487,6 +495,7 @@ export function buildMcpCatalog(
   const tools: McpToolDefinition[] = [];
   const resources: McpResourceDefinition[] = [];
   const derivedTools: McpDerivedToolsDefinition[] = [];
+  const discoveryTools: McpDiscoveryToolDefinition[] = [];
 
   for (const input of opted) {
     const { contract } = input;
@@ -578,6 +587,17 @@ export function buildMcpCatalog(
       });
     }
 
+    if (mcp.discovery) {
+      discoveryTools.push({
+        name: mcp.discovery.name,
+        description:
+          mcp.discovery.description ??
+          `Fetch and summarize the declared API schema of one ${entityLabel(contract)} by its identifier.`,
+        entity: contract.entity.name,
+        table: input.table,
+      });
+    }
+
     if (mcp.derivedTools) {
       const execution = mcp.derivedTools.execution;
       derivedTools.push({
@@ -641,6 +661,14 @@ export function buildMcpCatalog(
   // by the prefix derivation — fail closed on any collision, since the runtime
   // dispatches on the name.
   const seenNames = new Map<string, McpToolDefinition>();
+  for (const discovery of discoveryTools) {
+    seenNames.set(discovery.name, {
+      name: discovery.name,
+      operation: "get",
+      entity: discovery.entity,
+      table: discovery.table,
+    } as McpToolDefinition);
+  }
   for (const tool of tools) {
     if (tool.name.startsWith("osf_")) continue;
     const existing = seenNames.get(tool.name);
@@ -676,6 +704,7 @@ export function buildMcpCatalog(
     tools,
     resources,
     derivedTools,
+    discoveryTools,
   };
 }
 

@@ -72,6 +72,7 @@ import {
   type ElicitOnCreateEntry,
 } from "./elicitation.js";
 import { executeBinding, orderedBindings } from "./declarative-execution.js";
+import { discoverProviderSchema } from "./discovery.js";
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
@@ -164,6 +165,13 @@ type CatalogResource = {
   table: string;
 };
 
+type CatalogDiscoveryTool = {
+  name: string;
+  description: string;
+  entity: string;
+  table: string;
+};
+
 type Catalog = {
   generatedBy: string;
   source: string;
@@ -171,6 +179,7 @@ type Catalog = {
   entities: CatalogEntity[];
   resources?: CatalogResource[];
   derivedTools?: DerivedToolsCatalogEntry[];
+  discoveryTools?: CatalogDiscoveryTool[];
 };
 const catalog = rawCatalog as unknown as Catalog;
 
@@ -325,6 +334,17 @@ function resourcesForSession(
 }
 
 const catalogDerivedTools: DerivedToolsCatalogEntry[] = catalog.derivedTools ?? [];
+const catalogDiscoveryTools: CatalogDiscoveryTool[] = catalog.discoveryTools ?? [];
+
+/** Discovery follows the entity's read role, like the resource surface. */
+function discoveryToolsForSession(
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+): CatalogDiscoveryTool[] {
+  return catalogDiscoveryTools.filter((tool) =>
+    sessionMayInvoke(tables.get(tool.table), "get", session),
+  );
+}
 
 /**
  * Cap on rows a definition table contributes to the derived-tool projection.
@@ -861,6 +881,23 @@ function buildServer(
       ...toolsForSession(session, tables).map(({ tool, entity }) =>
         describeTool(tool, entity, tables.get(tool.table), session),
       ),
+      ...discoveryToolsForSession(session, tables).map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: {
+              type: "string",
+              format: "uuid",
+              description: `Identifier of the ${tool.entity} to discover.`,
+            },
+          },
+          required: ["id"],
+          additionalProperties: false,
+        },
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+      })),
       // Derived tools: definition rows projected per session and per tenant.
       ...(await derivedToolsForSession(db, session, tables)).map((tool) => ({
         name: tool.name,
@@ -910,6 +947,25 @@ function buildServer(
           request.params.arguments ?? {},
         );
         return ok(result);
+      } catch (error) {
+        return failed(error);
+      }
+    }
+
+    const discoveryTool = catalogDiscoveryTools.find((tool) => tool.name === name);
+    if (discoveryTool) {
+      const table = tables.get(discoveryTool.table);
+      if (!table || !sessionMayInvoke(table, "get", session)) {
+        return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
+      }
+      try {
+        const id = (request.params.arguments as Record<string, unknown> | undefined)?.id;
+        if (typeof id !== "string") {
+          throw new HttpError(400, "VALIDATION", "Argument \"id\" is required.");
+        }
+        const row = await getGeneratedEntity(db, session, { table: table.name, id });
+        if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
+        return ok(await discoverProviderSchema(serializeRow(table, row)));
       } catch (error) {
         return failed(error);
       }

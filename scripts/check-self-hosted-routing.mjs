@@ -24,12 +24,12 @@ const WORKFLOW_DIR = ".github/workflows";
 const TRUSTED_SOURCE_RUNS_ON =
   "${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'osf-pr' || 'ubuntu-latest' }}";
 const PUBLISH_IF =
-  "${{ github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}";
-// Reject the context itself, not a list of access syntaxes. GitHub expressions
-// also allow dynamic indexes and object serialization (`secrets[env.NAME]`,
-// `toJSON(secrets)`), so enumerating dot/bracket forms would fail open.
-const SECRET_REFERENCE =
-  /\$\{\{(?:(?!\}\})[\s\S])*\bsecrets\b(?:(?!\}\})[\s\S])*\}\}/i;
+  "${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}";
+// Reject the context token anywhere in routed configuration. Parsing expression
+// terminators is unsafe because a quoted `}}` inside format() is valid and can
+// hide a later secret access. A false positive in human-readable YAML is safer
+// than letting a new access syntax reach an infrastructure-owned runner.
+const SECRET_REFERENCE = /\bsecrets\b/i;
 
 /**
  * Every workflow job is inventoried deliberately. Adding a job without making
@@ -189,7 +189,9 @@ function buildsCanonicalImagePlatform(path, job) {
 function routedJobProblems(path, workflow, job) {
   const problems = [];
   if (!hasPullRequestTrigger(workflow)) {
-    problems.push(`${path}#${job.id} is routed but its workflow has no pull_request trigger`);
+    problems.push(
+      `${path}#${job.id} is routed but its workflow has no pull_request trigger`,
+    );
   }
   if (job.config["runs-on"] !== TRUSTED_SOURCE_RUNS_ON) {
     problems.push(
@@ -207,7 +209,18 @@ function routedJobProblems(path, workflow, job) {
   if (containsSecretReference(job.config)) {
     problems.push(`${path}#${job.id} contains repository/environment secrets`);
   }
-  if (isMapping(job.config.permissions) && job.config.permissions.packages === "write") {
+  if (Object.hasOwn(job.config, "needs")) {
+    problems.push(
+      `${path}#${job.id} must not consume outputs from another job`,
+    );
+  }
+  if (usesAction(job, "actions/download-artifact@")) {
+    problems.push(`${path}#${job.id} must not download cross-job artifacts`);
+  }
+  if (
+    isMapping(job.config.permissions) &&
+    job.config.permissions.packages === "write"
+  ) {
     problems.push(`${path}#${job.id} contains packages: write`);
   }
   if (usesAction(job, "docker/login-action@")) {
@@ -240,13 +253,22 @@ function hostedJobProblems(path, job, mode) {
 
   if (mode === "publish") {
     if (job.config.if !== PUBLISH_IF) {
-      problems.push(`${path}#${job.id} must use the canonical main/v* publish condition`);
+      problems.push(
+        `${path}#${job.id} must use the canonical main/v* publish condition`,
+      );
     }
-    if (!isMapping(job.config.permissions) || job.config.permissions.packages !== "write") {
-      problems.push(`${path}#${job.id} must own the isolated packages: write permission`);
+    if (
+      !isMapping(job.config.permissions) ||
+      job.config.permissions.packages !== "write"
+    ) {
+      problems.push(
+        `${path}#${job.id} must own the isolated packages: write permission`,
+      );
     }
     if (!usesAction(job, "docker/login-action@") || !pushesImage(job)) {
-      problems.push(`${path}#${job.id} must contain the isolated registry login and push steps`);
+      problems.push(
+        `${path}#${job.id} must contain the isolated registry login and push steps`,
+      );
     }
   }
 
@@ -290,7 +312,9 @@ export function auditWorkflowSources(workflows) {
 
     for (const job of jobs) {
       if (!Object.hasOwn(policy, job.id)) {
-        problems.push(`${path}#${job.id} has no explicit runner security policy`);
+        problems.push(
+          `${path}#${job.id} has no explicit runner security policy`,
+        );
         continue;
       }
       const mode = policy[job.id];

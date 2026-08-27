@@ -150,6 +150,8 @@ jobs:
       - name: Check authoring matches its schemas
         run: bun run check:authoring-schemas
 
+      # Platform-native optional dependencies make notices host-dependent.
+      # Verify the canonical Linux set in the digest-pinned linux/amd64 image.
       - name: Check THIRD-PARTY-NOTICES is up to date
         run: bun run check:notices:linux
 

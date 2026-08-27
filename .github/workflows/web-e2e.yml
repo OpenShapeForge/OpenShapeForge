@@ -228,3 +228,7 @@ jobs:
             /tmp/web.log
           retention-days: 7
           if-no-files-found: ignore
+
+      - name: Clean up Keycloak
+        if: always()
+        run: docker rm -f keycloak >/dev/null 2>&1 || true

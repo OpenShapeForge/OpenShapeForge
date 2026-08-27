@@ -62,7 +62,10 @@ jobs:
 
   test("rejects workflow-level permissions: write-all", () => {
     const problems = auditMutation(".github/workflows/ci.yml", (source) =>
-      source.replace("permissions:\n  contents: read", "permissions: write-all"),
+      source.replace(
+        "permissions:\n  contents: read",
+        "permissions: write-all",
+      ),
     );
     expect(problems).toContain(
       ".github/workflows/ci.yml has routed jobs but workflow permissions are not exactly contents: read",
@@ -186,6 +189,48 @@ jobs:
     );
     expect(problems).toContain(
       ".github/workflows/ci.yml#gates contains repository/environment secrets",
+    );
+  });
+
+  test("rejects a secret reference after a quoted expression terminator", () => {
+    const problems = injectIntoGates(
+      `    env:\n      LEAK: "\${{ format('}} {0}', secrets.GITHUB_TOKEN) }}"`,
+    );
+    expect(problems).toContain(
+      ".github/workflows/ci.yml#gates contains repository/environment secrets",
+    );
+  });
+
+  test("rejects routed jobs that consume another job's outputs", () => {
+    const problems = injectIntoGates("    needs: prepare");
+    expect(problems).toContain(
+      ".github/workflows/ci.yml#gates must not consume outputs from another job",
+    );
+  });
+
+  test("rejects routed jobs that download cross-job artifacts", () => {
+    const problems = auditMutation(".github/workflows/ci.yml", (source) =>
+      source.replace(
+        "      - uses: actions/checkout@",
+        "      - uses: actions/download-artifact@0123456789abcdef0123456789abcdef01234567\n      - uses: actions/checkout@",
+      ),
+    );
+    expect(problems).toContain(
+      ".github/workflows/ci.yml#gates must not download cross-job artifacts",
+    );
+  });
+
+  test("rejects a publish denylist that would admit pull_request_target", () => {
+    const problems = auditMutation(
+      ".github/workflows/docker-api.yml",
+      (source) =>
+        source.replace(
+          "(github.event_name == 'push' || github.event_name == 'workflow_dispatch')",
+          "github.event_name != 'pull_request'",
+        ),
+    );
+    expect(problems).toContain(
+      ".github/workflows/docker-api.yml#publish must use the canonical main/v* publish condition",
     );
   });
 

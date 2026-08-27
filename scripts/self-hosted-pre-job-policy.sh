@@ -21,6 +21,29 @@ deny() {
 [[ "${GITHUB_REPOSITORY:-}" == "$EXPECTED_REPOSITORY" ]] || deny
 [[ -n "${GITHUB_EVENT_PATH:-}" && -r "$GITHUB_EVENT_PATH" ]] || deny
 
+command -v jq >/dev/null 2>&1 || {
+  echo "Self-hosted runner policy requires jq, but jq is not installed." >&2
+  deny
+}
+
+# Workflow-level `env:` can shadow the default variables passed to a job-started
+# hook. Do not trust the event path merely because it came through a GITHUB_*
+# name: require the runner-created payload location and ownership as well. A PR
+# has not executed when this hook runs, so it cannot create or alter this file
+# on the required ephemeral runner.
+event_path="$(realpath "$GITHUB_EVENT_PATH" 2>/dev/null)" || deny
+[[ "$event_path" == */_work/_temp/_github_workflow/event.json ]] || deny
+
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  event_uid="$(stat -f '%u' "$event_path")" || deny
+  event_mode="$(stat -f '%Lp' "$event_path")" || deny
+else
+  event_uid="$(stat -c '%u' "$event_path")" || deny
+  event_mode="$(stat -c '%a' "$event_path")" || deny
+fi
+[[ "$event_uid" == "$(id -u)" ]] || deny
+(( (8#$event_mode & 8#022) == 0 )) || deny
+
 jq -e --arg repository "$EXPECTED_REPOSITORY" '
   .repository.full_name == $repository and
   .pull_request.base.repo.full_name == $repository and

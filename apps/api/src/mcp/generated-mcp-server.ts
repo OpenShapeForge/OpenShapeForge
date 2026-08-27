@@ -729,9 +729,19 @@ async function invokeTool(
   }
 }
 
-function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Server {
+function buildServer(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  onDerivedDefinitionChanged?: (table: string, tenantId: string | null) => void,
+): Server {
   const server = new Server(SERVER_INFO, {
-    capabilities: { tools: {}, resources: {}, prompts: {} },
+    capabilities: {
+      // listChanged is advertised only when the tool list can actually change
+      // mid-session — i.e. when stored rows project as tools.
+      tools: catalogDerivedTools.length > 0 ? { listChanged: true } : {},
+      resources: {},
+      prompts: {},
+    },
     instructions: INSTRUCTIONS,
   });
   const tables = tablesByName();
@@ -946,7 +956,20 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
           relatedRequestId: extra.requestId,
         });
       }
-      return await invokeTool(match, entity, table, db, session, callArguments);
+      const outcome = await invokeTool(match, entity, table, db, session, callArguments);
+      // A successful mutation on a table whose rows project as tools changes
+      // other sessions' tool lists — tell them, so they re-list instead of
+      // discovering the change on their next reconnect.
+      if (
+        onDerivedDefinitionChanged &&
+        !(outcome as { isError?: boolean }).isError &&
+        match.operation !== "get" &&
+        match.operation !== "list" &&
+        catalogDerivedTools.some((entry) => entry.table === match.table)
+      ) {
+        onDerivedDefinitionChanged(match.table, session.tenantId ?? null);
+      }
+      return outcome;
     } catch (error) {
       return failed(error);
     }
@@ -1043,6 +1066,7 @@ export function registerGeneratedMcpServer(
       server: Server;
       tenantId: string;
       userId: string;
+      roles: string[];
       lastSeenMs: number;
     };
     const mcpSessions = new Map<string, McpSessionEntry>();
@@ -1058,6 +1082,29 @@ export function registerGeneratedMcpServer(
       }
     }, 60 * 1000);
     sweep.unref();
+
+    /**
+     * Fan a tools/list_changed out to every live session of the SAME tenant
+     * whose roles could see tools derived from `table` — audience roles or
+     * any role with an operation on the defining entity. A session without an
+     * open notification stream simply misses the nudge; delivery is
+     * best-effort by design.
+     */
+    const notifyDerivedDefinitionChanged = (table: string, tenantId: string | null): void => {
+      const audiences = catalogDerivedTools
+        .filter((entry) => entry.table === table)
+        .flatMap((entry) => entry.roles);
+      if (audiences.length === 0) return;
+      const audience = new Set(audiences);
+      for (const entry of mcpSessions.values()) {
+        if (tenantId && entry.tenantId !== tenantId) continue;
+        if (!entry.roles.some((role) => audience.has(role))) continue;
+        void entry.server.sendToolListChanged().catch(() => {
+          // No open stream on this session; it will see the change on its
+          // next tools/list.
+        });
+      }
+    };
 
     const isInitializeBody = (body: unknown): boolean => {
       const messages = Array.isArray(body) ? body : [body];
@@ -1097,7 +1144,7 @@ export function registerGeneratedMcpServer(
         }
 
         if (request.method === "POST" && isInitializeBody(request.body)) {
-          const server = buildServer(db, session);
+          const server = buildServer(db, session, notifyDerivedDefinitionChanged);
           const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (id) => {
@@ -1106,6 +1153,7 @@ export function registerGeneratedMcpServer(
                 server,
                 tenantId: session.tenantId as string,
                 userId: session.userId as string,
+                roles: [...(session.roles ?? [])],
                 lastSeenMs: Date.now(),
               });
             },
@@ -1124,8 +1172,9 @@ export function registerGeneratedMcpServer(
 
         // Sessionless non-initialize request: the pre-session stateless
         // single-shot behaviour, kept for probes and legacy callers. No
-        // server-initiated exchange is possible on this path.
-        const server = buildServer(db, session);
+        // server-initiated exchange is possible on this path, but a mutation
+        // made through it still nudges the live sessions.
+        const server = buildServer(db, session, notifyDerivedDefinitionChanged);
         const transport = new StreamableHTTPServerTransport({
           enableJsonResponse: true,
         });

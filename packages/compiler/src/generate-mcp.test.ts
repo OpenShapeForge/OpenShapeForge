@@ -203,6 +203,38 @@ describe("buildMcpCatalog", () => {
       expect(create.inputSchema.required).toEqual(["name"]);
     });
 
+    it("bundles the recursive FieldDefinition contract for semantic fields", () => {
+      const catalog = buildMcpCatalog(
+        [
+          input(
+            contract({
+              fields: [
+                field({
+                  key: "definition",
+                  valueType: "object",
+                  semanticType: "fieldDefinition",
+                }),
+              ],
+            }),
+          ),
+        ],
+        "test",
+      );
+      const create = catalog.tools.find((tool) => tool.operation === "create")!;
+
+      expect(prop(create.inputSchema, "definition").$ref).toBe("#/$defs/fieldDefinition");
+      expect(create.inputSchema.$defs).toMatchObject({
+        fieldDefinition: expect.any(Object),
+      });
+      const update = catalog.tools.find((tool) => tool.operation === "update")!;
+      const values = prop(update.inputSchema, "values");
+      expect(prop(values, "definition").$ref).toBe("#/$defs/fieldDefinition");
+      expect(values.$defs).toBeUndefined();
+      expect(update.inputSchema.$defs).toMatchObject({
+        fieldDefinition: expect.any(Object),
+      });
+    });
+
     it("turns static options into an enum with labels in the description", () => {
       const catalog = buildMcpCatalog(
         [

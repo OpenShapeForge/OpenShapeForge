@@ -30,6 +30,7 @@ import {
   compiledObjectSchema,
   describeCompiledField,
   localizedText,
+  splitBundledDefinitions,
 } from "./field-json-schema.js";
 
 type JsonObject = Record<string, unknown>;
@@ -321,11 +322,13 @@ function buildToolsForEntity(
   if (mcp.operations.update) {
     // Update is a partial: nothing is required beyond the id, because omitting
     // a field means "leave it alone", not "clear it".
-    const patch = compiledObjectSchema(updatable, referentiedata, {
-      requireRequired: false,
-      ...MCP_FIELD_SCHEMA_OPTIONS,
-      includeDefault: false,
-    });
+    const { schema: patch, definitions } = splitBundledDefinitions(
+      compiledObjectSchema(updatable, referentiedata, {
+        requireRequired: false,
+        ...MCP_FIELD_SCHEMA_OPTIONS,
+        includeDefault: false,
+      }),
+    );
     tools.push({
       name: named("update"),
       operation: "update",
@@ -348,6 +351,7 @@ function buildToolsForEntity(
         },
         required: ["id", "values"],
         additionalProperties: false,
+        ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
       },
       annotations: annotationsFor("update"),
     });

@@ -17,13 +17,17 @@
  */
 import {
   applyCollectionShape,
+  bundleFieldDefinitionSchema,
   constraintsForField,
+  FIELD_DEFINITION_SEMANTIC_TYPE,
+  fieldDefinitionValueSchema,
   isCollection,
   localizedText,
   objectSchemaFrom,
+  splitBundledDefinitions,
   type JsonObject,
 } from "../../field-json-schema.js";
-import type { FieldV2 } from "../types/field-v2.js";
+import type { FieldDefinition } from "../types/field-definition.js";
 import type { ConnectorOperationOutput } from "../types/connector.js";
 
 /**
@@ -32,7 +36,7 @@ import type { ConnectorOperationOutput } from "../types/connector.js";
  * talking to a remote system has no business inheriting this platform's code
  * tables into its wire contract.
  */
-function staticEnum(field: FieldV2): string[] | undefined {
+function staticEnum(field: FieldDefinition): string[] | undefined {
   const options = field.options;
   if (options?.type !== "static" || !options.items?.length) return undefined;
   return options.items.map((item) => item.value);
@@ -42,8 +46,11 @@ function staticEnum(field: FieldV2): string[] | undefined {
  * Key order matches the MCP catalog's: constraints, then enum, then
  * description, then default, then the collection wrapper.
  */
-export function connectorFieldSchema(field: FieldV2): JsonObject {
-  const scalar = constraintsForField(field);
+function connectorFieldSchemaWithoutDefinitions(field: FieldDefinition): JsonObject {
+  const scalar =
+    field.semanticType === FIELD_DEFINITION_SEMANTIC_TYPE
+      ? fieldDefinitionValueSchema()
+      : constraintsForField(field);
 
   const values = staticEnum(field);
   if (values) scalar.enum = values;
@@ -61,10 +68,19 @@ export function connectorFieldSchema(field: FieldV2): JsonObject {
   return isCollection(field) ? applyCollectionShape(scalar, field) : scalar;
 }
 
-export function connectorObjectSchema(fields: FieldV2[]): JsonObject {
-  return objectSchemaFrom(fields, (field) => connectorFieldSchema(field as FieldV2), {
-    requireRequired: true,
-  });
+export function connectorFieldSchema(field: FieldDefinition): JsonObject {
+  return bundleFieldDefinitionSchema(connectorFieldSchemaWithoutDefinitions(field), [field]);
+}
+
+export function connectorObjectSchema(fields: FieldDefinition[]): JsonObject {
+  return bundleFieldDefinitionSchema(
+    objectSchemaFrom(
+      fields,
+      (field) => connectorFieldSchemaWithoutDefinitions(field as FieldDefinition),
+      { requireRequired: true },
+    ),
+    fields,
+  );
 }
 
 export type ConnectorOperationSchemas = {
@@ -78,15 +94,20 @@ export type ConnectorOperationSchemas = {
  * bare object where the contract promised a list.
  */
 export function buildOperationSchemas(
-  input: FieldV2[],
+  input: FieldDefinition[],
   output: ConnectorOperationOutput,
 ): ConnectorOperationSchemas {
   const rowSchema = connectorObjectSchema(output.fields);
+  const { schema: row, definitions } = splitBundledDefinitions(rowSchema);
   return {
     input: connectorObjectSchema(input),
     output:
       output.cardinality === "many"
-        ? { type: "array", items: rowSchema }
+        ? {
+            type: "array",
+            items: row,
+            ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
+          }
         : rowSchema,
   };
 }

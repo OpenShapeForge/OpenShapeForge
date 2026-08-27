@@ -25,6 +25,8 @@ import {
   compiledFieldSchema,
   describeCompiledField,
   localizedText,
+  rebaseJsonSchemaReferences,
+  splitBundledDefinitions,
 } from "./field-json-schema.js";
 import type {
   PlatformSchemaManifest,
@@ -34,6 +36,9 @@ import type {
 import { isGeneratedCrudEligible } from "./schema.js";
 
 const REST_MOUNT = "/api/rest/v1";
+const FIELD_DEFINITION_COMPONENT = "OpenShapeForgeFieldDefinition";
+const FIELD_DEFINITION_DEFS_BASE =
+  `#/components/schemas/${FIELD_DEFINITION_COMPONENT}/$defs/`;
 const RESERVED_LIST_PARAMETER_NAMES = new Set([
   "first",
   "after",
@@ -152,16 +157,37 @@ function columnProperties(
   fieldsByKey: Map<string, CompiledField>,
   referentiedata: CoreReferentiedataSnapshot,
   mode: "storage" | "create" | "update",
-): { properties: JsonObject; required: string[] } {
+): { properties: JsonObject; required: string[]; definitions: JsonObject } {
   const properties: JsonObject = {};
   const required: string[] = [];
+  const definitions: JsonObject = {};
   for (const column of columns) {
-    const { fieldName, compiled, schema } = fieldSchemaForColumn(
+    const { fieldName, compiled, schema: bundledSchema } = fieldSchemaForColumn(
       column,
       fieldsByKey,
       referentiedata,
       mode,
     );
+    const { schema: unbundledSchema, definitions: bundledDefinitions } =
+      splitBundledDefinitions(bundledSchema);
+    const hasDefinitions = Object.keys(bundledDefinitions).length > 0;
+    const schema = hasDefinitions
+      ? (rebaseJsonSchemaReferences(
+          unbundledSchema,
+          "#/$defs/",
+          FIELD_DEFINITION_DEFS_BASE,
+        ) as JsonObject)
+      : unbundledSchema;
+    if (hasDefinitions) {
+      Object.assign(
+        definitions,
+        rebaseJsonSchemaReferences(
+          bundledDefinitions,
+          "#/$defs/",
+          FIELD_DEFINITION_DEFS_BASE,
+        ) as JsonObject,
+      );
+    }
     properties[fieldName] = schema;
     const isRequired =
       mode === "storage"
@@ -174,7 +200,7 @@ function columnProperties(
       required.push(fieldName);
     }
   }
-  return { properties, required };
+  return { properties, required, definitions };
 }
 
 function entityLabel(
@@ -438,6 +464,17 @@ export function renderOpenApiSpec(
       "update",
     );
     const updateSchemaName = `${name}UpdateInput`;
+    const fieldDefinitionDefinitions = {
+      ...read.definitions,
+      ...creatable.definitions,
+      ...updatable.definitions,
+    };
+    if (Object.keys(fieldDefinitionDefinitions).length > 0) {
+      schemas[FIELD_DEFINITION_COMPONENT] = {
+        $ref: `${FIELD_DEFINITION_DEFS_BASE}fieldDefinition`,
+        $defs: fieldDefinitionDefinitions,
+      };
+    }
 
     schemas[name] = {
       type: "object",

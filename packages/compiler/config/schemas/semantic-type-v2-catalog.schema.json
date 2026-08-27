@@ -16,15 +16,15 @@
         "required": ["label", "valueType"],
         "properties": {
           "kind": { "type": "string", "enum": ["scalar", "entityId", "entity", "object"] },
-          "label": { "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json#/$defs/localizedText" },
-          "pluralLabel": { "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json#/$defs/localizedText" },
+          "label": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/localizedText" },
+          "pluralLabel": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/localizedText" },
           "valueType": {
             "type": "string",
             "enum": ["string", "integer", "number", "boolean", "date", "datetime", "object"]
           },
           "cardinality": { "type": "string", "enum": ["single", "collection"] },
-          "validation": { "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json#/$defs/validation" },
-          "options": { "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json#/$defs/fieldOptions" },
+          "validation": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/validation" },
+          "options": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/fieldOptions" },
           "render": {
             "type": "object",
             "additionalProperties": false,
@@ -60,7 +60,7 @@
           "filterField": { "type": "string" },
           "children": {
             "type": "array",
-            "items": { "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json" }
+            "items": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json" }
           }
         },
         "allOf": [

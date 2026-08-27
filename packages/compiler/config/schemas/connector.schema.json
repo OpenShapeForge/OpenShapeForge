@@ -93,10 +93,10 @@
         "fields": {
           "type": "array",
           "items": {
-            "description": "A field, plus the one connector-only addition. Refs the OPEN property set and closes the shape here: a ref of the closed $defs/fieldV2 would reject `secret`, because a closure cannot see the allOf branch beside it.",
+            "description": "A field, plus the one connector-only addition. Refs the OPEN property set and closes the shape here: a ref of the closed $defs/fieldDefinition would reject `secret`, because a closure cannot see the allOf branch beside it.",
             "allOf": [
               {
-                "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json#/$defs/fieldV2Properties"
+                "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/fieldDefinitionProperties"
               },
               {
                 "type": "object",
@@ -271,7 +271,7 @@
         "input": {
           "type": "array",
           "items": {
-            "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json"
+            "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json"
           }
         },
         "output": {
@@ -283,7 +283,7 @@
             "fields": {
               "type": "array",
               "items": {
-                "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json"
+                "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json"
               }
             }
           }
@@ -385,7 +385,7 @@
         "payload": {
           "type": "array",
           "items": {
-            "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json"
+            "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json"
           }
         }
       }

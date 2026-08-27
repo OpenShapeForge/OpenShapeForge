@@ -219,8 +219,15 @@ export async function collectElicitedValues(input: {
   elicit: ElicitOnCreateEntry;
   sourceRow: Record<string, unknown> | null;
   values: Record<string, unknown>;
+  /**
+   * The in-flight tool call's request id. Without it the SDK would try to
+   * deliver the elicitation request on a standalone notification stream the
+   * client may never have opened; relating it routes the request onto the
+   * SSE response stream of the call itself.
+   */
+  relatedRequestId: string | number;
 }): Promise<Record<string, unknown>> {
-  const { server, elicit, sourceRow, values } = input;
+  const { server, elicit, sourceRow, values, relatedRequestId } = input;
   if (!sourceRow) {
     throw new HttpError(
       404,
@@ -260,10 +267,13 @@ export async function collectElicitedValues(input: {
         : "") +
       (skipped.length > 0 ? `(Not collected in this form: ${skipped.join(", ")}.)` : "");
 
-  const result = await server.elicitInput({
-    message: message.trim(),
-    requestedSchema: schema as never,
-  });
+  const result = await server.elicitInput(
+    {
+      message: message.trim(),
+      requestedSchema: schema as never,
+    },
+    { relatedRequestId },
+  );
   if (result.action !== "accept") {
     throw new HttpError(
       400,

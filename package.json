@@ -77,9 +77,9 @@
     "test:perf": "bun scripts/run-perf.ts",
     "scan:dependencies": "bash scripts/scan-dependencies.sh",
     "notices": "bun scripts/gen-third-party-notices.ts",
-    "//notices:linux": "Regenerates the committed notices on the linux/amd64 platform CI checks. The image is digest-pinned because this required gate also runs for forks on GitHub-hosted infrastructure. The tree has platform-native optional packages, so a macOS run emits darwin variants and fails check:notices. node_modules is cleared inside the container first \u2014 installing over a macOS tree yields the UNION of both platforms, not the linux set \u2014 and the local install is restored afterwards. See the script header.",
-    "notices:linux": "docker run --rm --platform linux/amd64 --user \"$(id -u):$(id -g)\" -e HOME=/tmp -v \"$PWD\":/w -w /w oven/bun:1.3.4@sha256:7608db4aeb44f1fe8169cc8ec7055376b3013557b106407ccf092b00e426407d sh -c 'rm -rf node_modules && bun install --frozen-lockfile >/dev/null 2>&1 && bun scripts/gen-third-party-notices.ts' && bun install --frozen-lockfile >/dev/null",
-    "//check:notices:linux": "The gate as CI runs it, from any platform. Plain check:notices compares against THIS machine's install, so on a Mac it reports the darwin natives as drift and can never pass \u2014 use this before opening a PR. Same container and same node_modules handling as notices:linux.",
-    "check:notices:linux": "docker run --rm --platform linux/amd64 --user \"$(id -u):$(id -g)\" -e HOME=/tmp -v \"$PWD\":/w -w /w oven/bun:1.3.4@sha256:7608db4aeb44f1fe8169cc8ec7055376b3013557b106407ccf092b00e426407d sh -c 'rm -rf node_modules && bun install --frozen-lockfile >/dev/null 2>&1 && bun scripts/gen-third-party-notices.ts --check' && bun install --frozen-lockfile >/dev/null"
+    "//notices:linux": "Regenerates the committed notices on the linux/amd64 platform CI checks. Commit dependency changes before running it; the helper intentionally snapshots HEAD. The image is digest-pinned because this required gate also runs for forks on GitHub-hosted infrastructure. The isolated Docker volume ensures neither the root nor workspace node_modules trees are mixed with or rewritten by the Linux install. See the script header.",
+    "notices:linux": "bash scripts/run-linux-notices.sh",
+    "//check:notices:linux": "The gate as CI runs it, from any platform. Plain check:notices compares against THIS machine's install, so on a Mac it reports the darwin natives as drift and can never pass \u2014 use this before opening a PR. Same isolated container workspace as notices:linux.",
+    "check:notices:linux": "bash scripts/run-linux-notices.sh --check"
   }
 }

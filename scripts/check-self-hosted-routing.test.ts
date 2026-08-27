@@ -39,7 +39,38 @@ function injectIntoGates(line: string): string[] {
   );
 }
 
+function replaceJobRunsOn(
+  source: string,
+  jobId: string,
+  runsOn: string,
+): string {
+  const marker = `  ${jobId}:\n`;
+  const start = source.indexOf(marker);
+  if (start === -1) throw new Error(`missing job ${jobId}`);
+  const bodyStart = start + marker.length;
+  const nextJob = source.slice(bodyStart).search(/^  [A-Za-z0-9_-]+:\n/m);
+  const end = nextJob === -1 ? source.length : bodyStart + nextJob;
+  const block = source.slice(start, end);
+  const mutated = block.replace(/^    runs-on: .*$/m, `    runs-on: ${runsOn}`);
+  if (mutated === block) throw new Error(`missing runs-on for job ${jobId}`);
+  return source.slice(0, start) + mutated + source.slice(end);
+}
+
 describe("self-hosted routing negative fixtures", () => {
+  test.each([
+    [".github/workflows/api-e2e.yml", "api-e2e"],
+    [".github/workflows/package-compiler.yml", "pack"],
+    [".github/workflows/package-compiler.yml", "publish"],
+  ])("keeps %s#%s on GitHub-hosted infrastructure", (path, jobId) => {
+    const problems = auditMutation(path, (source) =>
+      replaceJobRunsOn(source, jobId, "osf-pr"),
+    );
+    expect(problems).toContain(
+      `${path}#${jobId} must remain on ubuntu-latest`,
+    );
+    expect(problems).toContain(`${path}#${jobId} must never reference osf-pr`);
+  });
+
   test("rejects an unlisted workflow regardless of YAML indentation", () => {
     const workflows = {
       ...baseline,

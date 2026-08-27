@@ -40,6 +40,9 @@ const SECRET_REFERENCE = /\bsecrets\b/i;
  * publish: hosted plus the fail-closed main/v* publication condition.
  */
 const JOB_POLICY = {
+  ".github/workflows/api-e2e.yml": {
+    "api-e2e": "hosted",
+  },
   ".github/workflows/backend-agent.yml": {
     "backend-agent": "hosted",
   },
@@ -63,6 +66,10 @@ const JOB_POLICY = {
   },
   ".github/workflows/e2e-cluster.yml": {
     e2e: "hosted",
+  },
+  ".github/workflows/package-compiler.yml": {
+    pack: "hosted",
+    publish: "hosted",
   },
   ".github/workflows/web-e2e.yml": {
     "browser-e2e": "routed",

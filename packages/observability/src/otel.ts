@@ -28,9 +28,22 @@ function state() {
 }
 
 const REDACTED_QUERY_PARAMS = [
-  "query", "variables", "extensions", "code", "state", "token",
-  "access_token", "refresh_token", "id_token", "session_state", "key", "secret",
-  "sig", "Signature", "AWSAccessKeyId", "X-Goog-Signature",
+  "query",
+  "variables",
+  "extensions",
+  "code",
+  "state",
+  "token",
+  "access_token",
+  "refresh_token",
+  "id_token",
+  "session_state",
+  "key",
+  "secret",
+  "sig",
+  "Signature",
+  "AWSAccessKeyId",
+  "X-Goog-Signature",
 ];
 
 /** Overwrite transport attributes that may carry IDs, addresses, or secrets. */
@@ -50,6 +63,7 @@ export function applyBoundedHttpSpanAttributes(
     "client.address",
     "net.peer.ip",
     "net.peer.name",
+    "net.host.ip",
     "network.peer.address",
     "network.local.address",
     "server.address",
@@ -58,6 +72,7 @@ export function applyBoundedHttpSpanAttributes(
     span.setAttribute(attribute, "[REDACTED]");
   }
   span.setAttribute("net.peer.port", 0);
+  span.setAttribute("net.host.port", 0);
   span.setAttribute("client.port", 0);
   span.setAttribute("network.peer.port", 0);
   span.setAttribute("network.local.port", 0);
@@ -79,15 +94,22 @@ export function bootstrapOpenTelemetry(
   let traceExporter = options.traceExporter;
   if (!traceExporter && options.tracesEndpoint) {
     const endpoint = new URL(options.tracesEndpoint);
-    if (endpoint.protocol !== "https:" && endpoint.hostname !== "localhost" && endpoint.hostname !== "127.0.0.1") {
-      throw new Error("The OTLP traces endpoint must use HTTPS outside localhost.");
+    if (
+      endpoint.protocol !== "https:" &&
+      endpoint.hostname !== "localhost" &&
+      endpoint.hostname !== "127.0.0.1"
+    ) {
+      throw new Error(
+        "The OTLP traces endpoint must use HTTPS outside localhost.",
+      );
     }
     traceExporter = new OTLPTraceExporter({
       url: endpoint.toString(),
       ...(options.headers ? { headers: { ...options.headers } } : {}),
     });
   }
-  if (!traceExporter) throw new Error("Tracing requires an endpoint or exporter.");
+  if (!traceExporter)
+    throw new Error("Tracing requires an endpoint or exporter.");
   lifecycle.sdk = new NodeSDK({
     // The default host/process detectors export stable host IDs, usernames,
     // executable paths and command arguments. Hosts opt into extra resource
@@ -104,6 +126,8 @@ export function bootstrapOpenTelemetry(
       new HttpInstrumentation({
         redactedQueryParams: REDACTED_QUERY_PARAMS,
         requestHook: applyBoundedHttpSpanAttributes,
+        responseHook: (span, response) =>
+          applyBoundedHttpSpanAttributes(span, response as IncomingMessage),
       }),
       new FastifyInstrumentation(),
     ],

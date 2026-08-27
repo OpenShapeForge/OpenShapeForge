@@ -10,7 +10,9 @@ import { generatePersistedOperationArtifacts } from "./persisted-operations.js";
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true })));
+  await Promise.all(
+    roots.splice(0).map((root) => rm(root, { recursive: true })),
+  );
 });
 
 describe("persisted operation artifacts", () => {
@@ -63,7 +65,9 @@ describe("persisted operation artifacts", () => {
       "PluginWebThing",
       "RenameThing",
     ]);
-    const canonical = print(parse("query HealthProbe { health { role status } }"));
+    const canonical = print(
+      parse("query HealthProbe { health { role status } }"),
+    );
     const hash = createHash("sha256").update(canonical).digest("hex");
     expect(manifest.operations[hash]).toBe(canonical);
     expect(JSON.stringify(manifest.operations)).not.toContain("enabled");
@@ -79,20 +83,53 @@ describe("persisted operation artifacts", () => {
       join(sourceDir, "dynamic.ts"),
       `executeGraphqlRequest({ query: buildQuery(runtimeValue) });`,
     );
-    await expect(generatePersistedOperationArtifacts({
-      repoRoot,
-      generatedWebSources: new Map(),
-      pageConfigs: [],
-    })).rejects.toThrow(/profile: "integration"/);
+    await expect(
+      generatePersistedOperationArtifacts({
+        repoRoot,
+        generatedWebSources: new Map(),
+        pageConfigs: [],
+      }),
+    ).rejects.toThrow(/profile: "integration"/);
 
     await writeFile(
       join(sourceDir, "dynamic.ts"),
       `executeGraphqlRequest({ query: buildQuery(runtimeValue), profile: "integration" });`,
     );
-    await expect(generatePersistedOperationArtifacts({
+    await expect(
+      generatePersistedOperationArtifacts({
+        repoRoot,
+        generatedWebSources: new Map(),
+        pageConfigs: [],
+      }),
+    ).resolves.toHaveLength(2);
+  });
+
+  test("resolves shadowed bindings in their lexical scope", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "osf-persisted-"));
+    roots.push(repoRoot);
+    const sourceDir = join(repoRoot, "apps/web/src");
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(
+      join(sourceDir, "scoped.ts"),
+      `
+      function one() {
+        const query = "query ScopedOne { health { status } }";
+        return executeGraphqlRequest({ query });
+      }
+      function two() {
+        const query = "query ScopedTwo { health { role } }";
+        return executeGraphqlRequest({ query });
+      }
+    `,
+    );
+    const [artifact] = await generatePersistedOperationArtifacts({
       repoRoot,
       generatedWebSources: new Map(),
       pageConfigs: [],
-    })).resolves.toHaveLength(2);
+    });
+    expect(JSON.parse(artifact!.contents).operationNames).toEqual([
+      "ScopedOne",
+      "ScopedTwo",
+    ]);
   });
 });

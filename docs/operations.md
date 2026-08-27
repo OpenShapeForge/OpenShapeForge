@@ -51,11 +51,14 @@ choice visible in their values rather than hiding it in the shared package.
 
 - `/api/health` is process liveness and does not contact dependencies.
 - `/api/ready` checks the database, generated-schema checksum, every immutable
-  versioned-migration ledger checksum, absence of database-ahead migrations,
-  and runtime module initialization. A
+  versioned-migration ledger checksum and required migration presence, plus
+  runtime module initialization. Database-ahead rows are reported by the
+  verifier but do not fail readiness, so additive rolling deploys keep their
+  old pods serving. A
   one-second cache and single-flight execution bound probe bursts. It returns
   503 until every dependency is ready and exposes only fixed names/statuses.
-- `/api/metrics` is Prometheus text using one registry per process. GraphQL
+- `/api/metrics` requires a valid signed internal context and returns 401 to
+  anonymous callers. Prometheus text uses one registry per process. GraphQL
   labels are limited to operation type, build-known operation names, fixed
   phase, and expected/unexpected classification. Resolver, path, raw URL,
   tenant, user, variables, headers, and arbitrary operation-name labels are

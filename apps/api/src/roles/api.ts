@@ -22,7 +22,10 @@ import Fastify from "fastify";
 import { readApiLimits } from "../config/limits.js";
 import { readGraphqlCorsPolicy } from "../config/graphql-cors.js";
 import { assertProductionEnv } from "../config/production-guard.js";
-import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js";
+import {
+  createDatabaseRuntime,
+  type DatabaseRuntime,
+} from "../db/connection.js";
 import {
   createGraphqlYoga,
   type PersistedOperationManifest,
@@ -40,7 +43,11 @@ import { registerApiKeyRestRoutes } from "../auth/api-key/rest-routes.js";
 import { readApiKeyProvisioningConfig } from "../auth/api-key/runtime-config.js";
 import { resolveSessionContext } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
-import { initRuntimeModules, loadRuntimeModules, type ModuleRegistry } from "../modules/registry.js";
+import {
+  initRuntimeModules,
+  loadRuntimeModules,
+  type ModuleRegistry,
+} from "../modules/registry.js";
 import {
   classifyRequest,
   createRateLimitMetrics,
@@ -61,13 +68,14 @@ declare module "fastify" {
 }
 
 /**
- * Only constant-time liveness endpoints are exempt. Readiness and metrics use
- * the ordinary bounded anonymous budget; readiness also coalesces dependency
- * work in the observability adapter.
+ * Health and readiness probes must never be throttled: Kubernetes treats any
+ * non-2xx readiness response as a failed pod. Metrics stays rate limited and
+ * additionally requires a signed internal context below.
  */
 const RATE_LIMIT_EXEMPT_PATHS = new Set([
   "/api/health",
   "/api/graphql/health",
+  "/api/ready",
 ]);
 
 function isRateLimitExempt(url: string): boolean {
@@ -85,35 +93,38 @@ function bodyFromFastify(method: string, body: unknown): BodyInit | undefined {
   }
   if (body instanceof Uint8Array) {
     const copy = new Uint8Array(body);
-    return new Blob([copy.buffer.slice(copy.byteOffset, copy.byteOffset + copy.byteLength)]);
+    return new Blob([
+      copy.buffer.slice(copy.byteOffset, copy.byteOffset + copy.byteLength),
+    ]);
   }
   return JSON.stringify(body);
 }
 
-export function createApiApp(
-  options: {
-    cors: GraphqlCorsPolicy;
-    databaseUrl?: string;
-    /**
-     * Runtime modules resolved by the caller. Kept a parameter rather than
-     * loaded here because resolution is async and this factory is sync — and
-     * tests that only need the core surface should not have to resolve
-     * anything. `startApiRole` does the loading for the real process.
-     */
-    modules?: ModuleRegistry;
-    metricsRegistry?: Registry;
-    reportUnexpectedError?: (report: SanitizedErrorReport) => void;
-    /** Controlled host override used to prove rolling manifest compatibility. */
-    persistedOperations?: PersistedOperationManifest;
-    /** Focused route tests may replace external dependencies with controlled checks. */
-    readinessChecks?: readonly ReadinessCheck[];
-    /** Override only for controlled tests that need immediate readiness transitions. */
-    readinessCacheMs?: number;
-    /** Capture the real structured logger in focused privacy regressions. */
-    logStream?: { write(message: string): void };
-  },
-) {
-  const modules: ModuleRegistry = options.modules ?? { loaded: [], failures: [] };
+export function createApiApp(options: {
+  cors: GraphqlCorsPolicy;
+  databaseUrl?: string;
+  /**
+   * Runtime modules resolved by the caller. Kept a parameter rather than
+   * loaded here because resolution is async and this factory is sync — and
+   * tests that only need the core surface should not have to resolve
+   * anything. `startApiRole` does the loading for the real process.
+   */
+  modules?: ModuleRegistry;
+  metricsRegistry?: Registry;
+  reportUnexpectedError?: (report: SanitizedErrorReport) => void;
+  /** Controlled host override used to prove rolling manifest compatibility. */
+  persistedOperations?: PersistedOperationManifest;
+  /** Focused route tests may replace external dependencies with controlled checks. */
+  readinessChecks?: readonly ReadinessCheck[];
+  /** Override only for controlled tests that need immediate readiness transitions. */
+  readinessCacheMs?: number;
+  /** Capture the real structured logger in focused privacy regressions. */
+  logStream?: { write(message: string): void };
+}) {
+  const modules: ModuleRegistry = options.modules ?? {
+    loaded: [],
+    failures: [],
+  };
   const limits = readApiLimits();
 
   // Default level stays "info"; LOG_LEVEL=debug surfaces the drift "ok" line.
@@ -149,10 +160,17 @@ export function createApiApp(
   // what a request can prove locally (see classifyRequest). Health probes are
   // exempt.
   const rateLimitMetrics = createRateLimitMetrics();
-  const contextSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET?.trim() || undefined;
+  const contextSecret =
+    process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET?.trim() || undefined;
   const sharedStore = limits.rateLimitRedisUrl
-    ? createRedisRateLimitStore(limits.rateLimitRedisUrl, rateLimitMetrics, (error) =>
-        app.log.error({ err: error }, "Rate-limit store unavailable; request not counted."),
+    ? createRedisRateLimitStore(
+        limits.rateLimitRedisUrl,
+        rateLimitMetrics,
+        (error) =>
+          app.log.error(
+            { err: error },
+            "Rate-limit store unavailable; request not counted.",
+          ),
       )
     : undefined;
 
@@ -160,7 +178,9 @@ export function createApiApp(
     app.addHook("onClose", async () => {
       await sharedStore.close();
     });
-    app.log.info("Rate limiting uses a shared store: one budget across all replicas.");
+    app.log.info(
+      "Rate limiting uses a shared store: one budget across all replicas.",
+    );
   } else {
     app.log.warn(
       "Rate limiting uses an in-memory store: the budget is enforced PER INSTANCE. " +
@@ -171,7 +191,8 @@ export function createApiApp(
   void app.register(rateLimit, {
     // Per-request budget, so a trusted service-to-service caller does not
     // compete with anonymous traffic for one allowance.
-    max: (request) => limits.rateLimitTiers[classifyRequest(request, contextSecret).tier],
+    max: (request) =>
+      limits.rateLimitTiers[classifyRequest(request, contextSecret).tier],
     keyGenerator: (request) => classifyRequest(request, contextSecret).key,
     timeWindow: limits.rateLimitWindowMs,
     allowList: (request) => isRateLimitExempt(request.url),
@@ -180,10 +201,13 @@ export function createApiApp(
     // uncounted, and createRedisRateLimitStore records it in storeErrors.
     skipOnError: true,
     onExceeding: (request) => {
-      rateLimitMetrics.allowed[classifyRequest(request, contextSecret).tier] += 1;
+      rateLimitMetrics.allowed[classifyRequest(request, contextSecret).tier] +=
+        1;
     },
     onExceeded: (request) => {
-      rateLimitMetrics.throttled[classifyRequest(request, contextSecret).tier] += 1;
+      rateLimitMetrics.throttled[
+        classifyRequest(request, contextSecret).tier
+      ] += 1;
     },
     // 429 with Retry-After (added by the plugin); body carries no limiter internals.
     errorResponseBuilder: () => ({
@@ -245,9 +269,13 @@ export function createApiApp(
         ...(options.persistedOperations
           ? { persistedOperations: options.persistedOperations }
           : {}),
-        ...(options.metricsRegistry ? { metricsRegistry: options.metricsRegistry } : {}),
-        reportUnexpectedError: options.reportUnexpectedError ?? ((report) =>
-          routes.log.error(report, "Unexpected GraphQL execution error.")),
+        ...(options.metricsRegistry
+          ? { metricsRegistry: options.metricsRegistry }
+          : {}),
+        reportUnexpectedError:
+          options.reportUnexpectedError ??
+          ((report) =>
+            routes.log.error(report, "Unexpected GraphQL execution error.")),
       }),
     };
 
@@ -265,13 +293,14 @@ export function createApiApp(
       role: "api",
     }));
 
-    const readinessChecks = options.readinessChecks ?? createApiReadinessChecks(
-      databaseRuntime,
-      initialised,
-    );
+    const readinessChecks =
+      options.readinessChecks ??
+      createApiReadinessChecks(databaseRuntime, initialised);
     registerOperationalRoutes(routes, {
       readinessChecks,
       allowedReadinessErrorCodes: API_READINESS_ERROR_CODES,
+      authorizeMetrics: (request) =>
+        classifyRequest(request, contextSecret).tier === "trusted",
       ...(options.metricsRegistry ? { registry: options.metricsRegistry } : {}),
       ...(options.readinessCacheMs !== undefined
         ? { readinessCacheMs: options.readinessCacheMs }
@@ -283,50 +312,64 @@ export function createApiApp(
       role: "api",
     }));
 
-    for (const url of ["/api/graphql", "/api/graphql/persisted"]) routes.route({
-      url,
-      method: ["GET", "POST", "OPTIONS"],
-      handler: async (request, reply) => {
-        const origin = `${request.protocol}://${request.headers.host ?? "localhost"}`;
-        // `ready` is assigned at the top of this same registration, before any
-        // route can be reached; the check is a type guard, not a race.
-        if (!ready) throw new Error("GraphQL was not initialised before serving.");
-        const yogaUrl = new URL(request.url, origin);
-        const requestHeaders = headersFromFastify(request.headers);
-        // These markers are host-owned. Never let a caller self-select a less
-        // restrictive execution profile by sending the internal header.
-        requestHeaders.delete("x-openshapeforge-persisted-profile");
-        requestHeaders.delete("x-openshapeforge-arbitrary-profile");
-        let verifiedSession: TrustedSessionContext | undefined;
-        if (url.endsWith("/persisted")) {
-          yogaUrl.pathname = "/api/graphql";
-          requestHeaders.set("x-openshapeforge-persisted-profile", "enforced");
-        } else if (process.env.NODE_ENV !== "production") {
-          // Development keeps GraphiQL usable, including its POST requests.
-          requestHeaders.set("x-openshapeforge-arbitrary-profile", "development");
-        } else {
-          verifiedSession = await resolveSessionContext(requestHeaders, dbOptions);
-          if (verifiedSession.credential !== "none" && verifiedSession.tenantId && verifiedSession.userId) {
-            requestHeaders.set("x-openshapeforge-arbitrary-profile", "authenticated");
+    for (const url of ["/api/graphql", "/api/graphql/persisted"])
+      routes.route({
+        url,
+        method: ["GET", "POST", "OPTIONS"],
+        handler: async (request, reply) => {
+          const origin = `${request.protocol}://${request.headers.host ?? "localhost"}`;
+          // `ready` is assigned at the top of this same registration, before any
+          // route can be reached; the check is a type guard, not a race.
+          if (!ready)
+            throw new Error("GraphQL was not initialised before serving.");
+          const yogaUrl = new URL(request.url, origin);
+          const requestHeaders = headersFromFastify(request.headers);
+          // These markers are host-owned. Never let a caller self-select a less
+          // restrictive execution profile by sending the internal header.
+          requestHeaders.delete("x-openshapeforge-persisted-profile");
+          requestHeaders.delete("x-openshapeforge-arbitrary-profile");
+          let verifiedSession: TrustedSessionContext | undefined;
+          if (url.endsWith("/persisted")) {
+            yogaUrl.pathname = "/api/graphql";
+          } else if (process.env.NODE_ENV !== "production") {
+            // Development keeps GraphiQL usable, including its POST requests.
+            requestHeaders.set(
+              "x-openshapeforge-arbitrary-profile",
+              "development",
+            );
+          } else {
+            verifiedSession = await resolveSessionContext(
+              requestHeaders,
+              dbOptions,
+            );
+            if (
+              verifiedSession.credential !== "none" &&
+              verifiedSession.tenantId &&
+              verifiedSession.userId
+            ) {
+              requestHeaders.set(
+                "x-openshapeforge-arbitrary-profile",
+                "authenticated",
+              );
+            }
           }
-        }
-        const response = await ready.yoga.fetch(
-          yogaUrl,
-          {
-            method: request.method,
-            headers: requestHeaders,
-            body: bodyFromFastify(request.method, request.body),
-          },
-          {
-            fastifyRequest: request,
-            fastifyReply: reply,
-            ...(verifiedSession ? { verifiedSession } : {}),
-          },
-        );
+          const response = await ready.yoga.fetch(
+            yogaUrl,
+            {
+              method: request.method,
+              headers: requestHeaders,
+              body: bodyFromFastify(request.method, request.body),
+            },
+            {
+              fastifyRequest: request,
+              fastifyReply: reply,
+              ...(verifiedSession ? { verifiedSession } : {}),
+            },
+          );
 
-        return reply.send(response);
-      },
-    });
+          return reply.send(response);
+        },
+      });
 
     registerGeneratedRestRoutes(routes, dbOptions);
     registerDocumentRestRoutes(routes, dbOptions);
@@ -371,9 +414,12 @@ export async function startApiRole() {
   const host = process.env.HOST ?? "0.0.0.0";
   const app = createApiApp({
     cors: readGraphqlCorsPolicy(),
-    ...(process.env.DATABASE_URL ? { databaseUrl: process.env.DATABASE_URL } : {}),
+    ...(process.env.DATABASE_URL
+      ? { databaseUrl: process.env.DATABASE_URL }
+      : {}),
     modules: await loadRuntimeModules(),
   });
 
   await app.listen({ port, host });
+  return app;
 }

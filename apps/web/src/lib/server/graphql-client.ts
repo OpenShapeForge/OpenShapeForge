@@ -5,9 +5,15 @@ import { cookies } from "next/headers";
 import { getCachedSession } from "@/lib/cached-session";
 import { GRAPHQL_CACHE_VERSION_COOKIE } from "@/lib/graphql-cache-version";
 import { buildGatewayGraphqlUrl } from "@/lib/server/gateway";
-import { executeGraphqlTransport } from "@/lib/server/persisted-operation";
+import {
+  createPersistedOperationEnvelope,
+  executeGraphqlTransport,
+} from "@/lib/server/persisted-operation";
 import { startWebTelemetrySpan } from "@/lib/server/opentelemetry";
-import { applyTraceHeaders, readTraceContext } from "@/lib/server/trace-context";
+import {
+  applyTraceHeaders,
+  readTraceContext,
+} from "@/lib/server/trace-context";
 import { buildGraphqlGatewayRequestContext } from "./graphql-client/context";
 import {
   GraphqlProxyError,
@@ -17,7 +23,19 @@ import {
 } from "./graphql-client/errors";
 
 export { buildGraphqlGatewayRequestContext } from "./graphql-client/context";
-export { GraphqlProxyError, isGraphqlProxyError } from "./graphql-client/errors";
+export {
+  GraphqlProxyError,
+  isGraphqlProxyError,
+} from "./graphql-client/errors";
+
+/** Pick the allowlisted transport from manifest membership, not call-site shape. */
+export function profileForGraphqlQuery(
+  query: string,
+): "persisted" | "integration" {
+  return createPersistedOperationEnvelope(query).locallyPersisted
+    ? "persisted"
+    : "integration";
+}
 
 type GraphqlQueryCacheEntry = {
   expiresAt: number;
@@ -129,7 +147,8 @@ function clearSessionGraphqlQueryCache(sessionKey: string): void {
 
 export async function clearCurrentSessionGraphqlQueryCache(): Promise<void> {
   const session = await getCachedSession();
-  const sessionKey = session?.sessionId ?? session?.sub ?? session?.tenantId ?? null;
+  const sessionKey =
+    session?.sessionId ?? session?.sub ?? session?.tenantId ?? null;
   if (!sessionKey) {
     return;
   }
@@ -242,7 +261,10 @@ export async function executeGraphqlRequest<TData>(input: {
         message,
       };
       span.recordException(error);
-      span.end({ "error.type": "network", "http.response.status_code": responseStatus });
+      span.end({
+        "error.type": "network",
+        "http.response.status_code": responseStatus,
+      });
       throw error;
     }
 
@@ -250,7 +272,10 @@ export async function executeGraphqlRequest<TData>(input: {
 
     if (!response.ok) {
       const error = new GraphqlProxyError(
-        extractPayloadMessage(payload, response.statusText || "GraphQL request failed."),
+        extractPayloadMessage(
+          payload,
+          response.statusText || "GraphQL request failed.",
+        ),
         response.status,
         payload,
       );
@@ -270,18 +295,26 @@ export async function executeGraphqlRequest<TData>(input: {
       throw error;
     }
 
-    if (payload && typeof payload === "object" && Array.isArray((payload as GraphqlPayload<TData>).errors)) {
+    if (
+      payload &&
+      typeof payload === "object" &&
+      Array.isArray((payload as GraphqlPayload<TData>).errors)
+    ) {
       const error = new GraphqlProxyError(
         extractPayloadMessage(payload, "GraphQL request failed."),
         statusFromGraphqlPayload(payload),
         payload,
       );
       span.recordException(error);
-      span.end({ "http.response.status_code": response.status, "graphql.errors": true });
+      span.end({
+        "http.response.status_code": response.status,
+        "graphql.errors": true,
+      });
       throw error;
     }
 
-    const data = ((payload as GraphqlPayload<TData> | null)?.data ?? null) as TData;
+    const data = ((payload as GraphqlPayload<TData> | null)?.data ??
+      null) as TData;
 
     if (queryCacheKey) {
       writeGraphqlQueryCache(queryCacheKey, data);

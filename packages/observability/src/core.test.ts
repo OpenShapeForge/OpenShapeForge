@@ -30,11 +30,15 @@ describe("observability core", () => {
       metricPrefix: "test_host",
       allowedOperationNames: new Set(["HealthProbe"]),
     };
-    expect(createYogaMetricsPlugin(options)).toBe(createYogaMetricsPlugin(options));
-    expect(() => createYogaMetricsPlugin({
-      ...options,
-      metricPrefix: "other_host",
-    })).toThrow(/different Yoga metric policy/);
+    expect(createYogaMetricsPlugin(options)).toBe(
+      createYogaMetricsPlugin(options),
+    );
+    expect(() =>
+      createYogaMetricsPlugin({
+        ...options,
+        metricPrefix: "other_host",
+      }),
+    ).toThrow(/different Yoga metric policy/);
   });
 
   test("keeps registry and Yoga collectors idempotent across module reloads", async () => {
@@ -42,8 +46,9 @@ describe("observability core", () => {
       import(new URL("./registry.ts?reload=one", import.meta.url).href),
       import(new URL("./registry.ts?reload=two", import.meta.url).href),
     ]);
-    expect(registryModules[0].getProcessPrometheusRegistry())
-      .toBe(registryModules[1].getProcessPrometheusRegistry());
+    expect(registryModules[0].getProcessPrometheusRegistry()).toBe(
+      registryModules[1].getProcessPrometheusRegistry(),
+    );
 
     const yogaModules = await Promise.all([
       import(new URL("./yoga.ts?reload=one", import.meta.url).href),
@@ -55,8 +60,9 @@ describe("observability core", () => {
       metricPrefix: "reload_host",
       allowedOperationNames: new Set(["HealthProbe"]),
     };
-    expect(yogaModules[0].createYogaMetricsPlugin(options))
-      .toBe(yogaModules[1].createYogaMetricsPlugin(options));
+    expect(yogaModules[0].createYogaMetricsPlugin(options)).toBe(
+      yogaModules[1].createYogaMetricsPlugin(options),
+    );
   });
 
   test("exports bounded HTTP span attributes without query or OAuth values", () => {
@@ -82,12 +88,15 @@ describe("observability core", () => {
       "network.peer.address": "[REDACTED]",
       "network.peer.port": 0,
     });
-    expect(JSON.stringify(Object.fromEntries(attributes))).not.toContain(secret);
+    expect(JSON.stringify(Object.fromEntries(attributes))).not.toContain(
+      secret,
+    );
   });
 
   test("redacts identifiers from a live instrumented HTTP request", async () => {
     const secret = "span-secret-user-agent-7f3a";
     const script = `
+      process.env.OTEL_SEMCONV_STABILITY_OPT_IN = "http/dup";
       const collected = [];
       const exporter = {
         export(spans, done) {
@@ -154,6 +163,9 @@ describe("observability core", () => {
       expect(attributes["user_agent.original"]).toBe("[REDACTED]");
       expect(attributes["client.address"]).toBe("[REDACTED]");
       expect(attributes["network.peer.address"]).toBe("[REDACTED]");
+      expect(attributes["net.peer.ip"]).toBe("[REDACTED]");
+      expect(attributes["net.host.ip"]).toBe("[REDACTED]");
+      expect(attributes["net.host.port"]).toBe(0);
       expect(attributes["server.address"]).toBe("[REDACTED]");
       expect(attributes["server.port"]).toBe(0);
       expect(attributes["http.request.method_original"]).toBe("[REDACTED]");
@@ -175,11 +187,15 @@ describe("observability core", () => {
       serviceName: "observability-test",
       tracesEndpoint: "http://127.0.0.1:4318/v1/traces",
     });
-    const reloaded = await import(new URL("./otel.ts?reload=lifecycle", import.meta.url).href);
-    expect(reloaded.bootstrapOpenTelemetry({
-      serviceName: "ignored-after-first-start",
-      tracesEndpoint: "http://127.0.0.1:4318/v1/traces",
-    })).toBe(first);
+    const reloaded = await import(
+      new URL("./otel.ts?reload=lifecycle", import.meta.url).href
+    );
+    expect(
+      reloaded.bootstrapOpenTelemetry({
+        serviceName: "ignored-after-first-start",
+        tracesEndpoint: "http://127.0.0.1:4318/v1/traces",
+      }),
+    ).toBe(first);
     await shutdownOpenTelemetry();
   });
 
@@ -193,7 +209,9 @@ describe("observability core", () => {
       category: "graphql.unexpected",
       errorType: "Error",
     });
-    expect(JSON.stringify(report)).not.toMatch(/private|database|token|stack|cause/i);
+    expect(JSON.stringify(report)).not.toMatch(
+      /private|database|token|stack|cause/i,
+    );
   });
 
   test("maps attacker-controlled error names and plausible codes to fixed values", () => {
@@ -205,36 +223,57 @@ describe("observability core", () => {
       category: "graphql.unexpected",
       errorType: "Error",
     });
-    expect(sanitizeError(Object.assign(new TypeError(), { code: "ETIMEDOUT" }), "network"))
-      .toEqual({ category: "network", errorType: "TypeError", errorCode: "ETIMEDOUT" });
+    expect(
+      sanitizeError(
+        Object.assign(new TypeError(), { code: "ETIMEDOUT" }),
+        "network",
+      ),
+    ).toEqual({
+      category: "network",
+      errorType: "TypeError",
+      errorCode: "ETIMEDOUT",
+    });
     const hostCodes = new Set(["VERSIONED_LEDGER_AHEAD"]);
-    expect(sanitizeError(
-      Object.assign(new Error("private migration details"), { code: "VERSIONED_LEDGER_AHEAD" }),
-      "readiness.schema",
-      hostCodes,
-    )).toEqual({
+    expect(
+      sanitizeError(
+        Object.assign(new Error("private migration details"), {
+          code: "VERSIONED_LEDGER_AHEAD",
+        }),
+        "readiness.schema",
+        hostCodes,
+      ),
+    ).toEqual({
       category: "readiness.schema",
       errorType: "Error",
       errorCode: "VERSIONED_LEDGER_AHEAD",
     });
-    expect(sanitizeError(
-      Object.assign(new Error("private"), { code: "ATTACKER_CONTROLLED" }),
-      "readiness.schema",
-      hostCodes,
-    ).errorCode).toBeUndefined();
+    expect(
+      sanitizeError(
+        Object.assign(new Error("private"), { code: "ATTACKER_CONTROLLED" }),
+        "readiness.schema",
+        hostCodes,
+      ).errorCode,
+    ).toBeUndefined();
   });
 
   test("runs every readiness check and exposes only status", async () => {
     const result = await runReadinessChecks([
       { name: "database", check: () => undefined },
-      { name: "schema", check: () => { throw new Error("secret host"); } },
+      {
+        name: "schema",
+        check: () => {
+          throw new Error("secret host");
+        },
+      },
     ]);
     expect(result.ready).toBe(false);
     expect(publicReadinessBody(result)).toEqual({
       status: "not_ready",
       checks: { database: "ready", schema: "not_ready" },
     });
-    expect(JSON.stringify(publicReadinessBody(result))).not.toContain("secret host");
+    expect(JSON.stringify(publicReadinessBody(result))).not.toContain(
+      "secret host",
+    );
   });
 
   test("coalesces concurrent readiness probes and caches the result briefly", async () => {
@@ -243,21 +282,29 @@ describe("observability core", () => {
     registerOperationalRoutes(app, {
       registry: new Registry(),
       readinessCacheMs: 1_000,
-      readinessChecks: [{
-        name: "database",
-        check: async () => {
-          runs += 1;
-          await Promise.resolve();
+      readinessChecks: [
+        {
+          name: "database",
+          check: async () => {
+            runs += 1;
+            await Promise.resolve();
+          },
         },
-      }],
+      ],
     });
     try {
       const responses = await Promise.all(
-        Array.from({ length: 6 }, () => app.inject({ method: "GET", url: "/api/ready" })),
+        Array.from({ length: 6 }, () =>
+          app.inject({ method: "GET", url: "/api/ready" }),
+        ),
       );
-      expect(responses.every((response) => response.statusCode === 200)).toBe(true);
+      expect(responses.every((response) => response.statusCode === 200)).toBe(
+        true,
+      );
       expect(runs).toBe(1);
-      expect((await app.inject({ method: "GET", url: "/api/ready" })).statusCode).toBe(200);
+      expect(
+        (await app.inject({ method: "GET", url: "/api/ready" })).statusCode,
+      ).toBe(200);
       expect(runs).toBe(1);
     } finally {
       await app.close();
@@ -268,10 +315,12 @@ describe("observability core", () => {
 describe("Yoga CORS policy", () => {
   test("accepts explicit disablement and exact allowlists", () => {
     expect(validateCorsPolicy(false)).toBe(false);
-    expect(validateCorsPolicy({
-      origin: ["https://app.example.test"],
-      credentials: true,
-    })).toMatchObject({
+    expect(
+      validateCorsPolicy({
+        origin: ["https://app.example.test"],
+        credentials: true,
+      }),
+    ).toMatchObject({
       origin: ["https://app.example.test"],
       credentials: true,
       allowedHeaders: ["content-type", "authorization"],
@@ -279,23 +328,35 @@ describe("Yoga CORS policy", () => {
   });
 
   test("rejects wildcard, null, lookalike syntax, paths, and duplicates", () => {
-    for (const origin of ["*", "null", "*.example.test", "https://app.example.test/path"]) {
+    for (const origin of [
+      "*",
+      "null",
+      "*.example.test",
+      "https://app.example.test/path",
+    ]) {
       expect(() => validateCorsPolicy({ origin })).toThrow(/exact HTTP/);
     }
-    expect(() => validateCorsPolicy({
-      origin: ["https://app.example.test", "https://app.example.test"],
-    })).toThrow(/duplicates/);
+    expect(() =>
+      validateCorsPolicy({
+        origin: ["https://app.example.test", "https://app.example.test"],
+      }),
+    ).toThrow(/duplicates/);
   });
 
   test("validates every result from a dynamic host policy", async () => {
     const cors = createYogaCorsConfiguration((request) => ({
-      origin: request.headers.get("origin") === "https://app.example.test"
-        ? "https://app.example.test"
-        : "*",
+      origin:
+        request.headers.get("origin") === "https://app.example.test"
+          ? "https://app.example.test"
+          : "*",
     }));
     expect(typeof cors).toBe("function");
-    await expect((cors as (request: Request) => Promise<unknown>)(
-      new Request("https://api.example.test", { headers: { origin: "https://evil.test" } }),
-    )).rejects.toThrow(/exact HTTP/);
+    await expect(
+      (cors as (request: Request) => Promise<unknown>)(
+        new Request("https://api.example.test", {
+          headers: { origin: "https://evil.test" },
+        }),
+      ),
+    ).rejects.toThrow(/exact HTTP/);
   });
 });

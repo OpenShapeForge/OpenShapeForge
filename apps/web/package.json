@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "//deps": "@openshapeforge/auth resolves to dist/ under a bundler (see its package.json), so build it before Next reads it.",
-    "deps": "bun run --cwd ../../packages/auth build && bun run --cwd ../../packages/compiler generate",
+    "deps": "bun run --cwd ../../packages/auth build",
     "dev": "bun run deps && next dev",
     "build": "bun run deps && next build",
     "start": "next start",

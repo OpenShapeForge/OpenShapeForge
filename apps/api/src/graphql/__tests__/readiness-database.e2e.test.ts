@@ -122,9 +122,8 @@ describe("live dependency-aware readiness", () => {
       values (${"9999_readiness_future"}, ${"future-proof"}, ${"readiness-test"})
     `;
     const ahead = await app.inject({ method: "GET", url: "/api/ready" });
-    expect(ahead.statusCode).toBe(503);
+    expect(ahead.statusCode).toBe(200);
     expect(ahead.body).not.toContain("VERSIONED_LEDGER_AHEAD");
-    expect(logLines.join("")).toContain('"errorCode":"VERSIONED_LEDGER_AHEAD"');
     expect(logLines.join("")).not.toContain(databaseName);
     await control`
       delete from platform.schema_migrations where version = ${"9999_readiness_future"}

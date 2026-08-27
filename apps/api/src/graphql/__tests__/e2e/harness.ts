@@ -12,9 +12,17 @@
  * Every spec file calls `registerSuiteLifecycle()` once; the last afterAll to
  * run drains the remaining created rows and persists the capture.
  */
-import { afterAll, beforeAll, describe as bunDescribe, expect, test as bunTest } from "bun:test";
+import {
+  afterAll,
+  beforeAll,
+  describe as bunDescribe,
+  expect,
+  test as bunTest,
+} from "bun:test";
 import { sql } from "kysely";
 import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
+import { parse, print } from "graphql";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
@@ -26,14 +34,17 @@ import {
 import { listEntityEvents } from "../../../platform/entity-events.js";
 import { getGeneratedCrudTables } from "../../generated-crud.js";
 import { createGraphqlYoga } from "../../yoga.js";
+import persistedManifest from "../../../generated/graphql/persisted-operations.json" with { type: "json" };
 export {
   getKeycloakToken,
   getRolelessKeycloakToken,
   keycloakTokenFor,
 } from "./keycloak.js";
 
-process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??= "openshapeforge-local-dev-context-secret";
-process.env.DATABASE_URL ??= "postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev";
+process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??=
+  "openshapeforge-local-dev-context-secret";
+process.env.DATABASE_URL ??=
+  "postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev";
 
 const SECRET = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
 
@@ -65,7 +76,11 @@ type CapturedEventRead = {
   events: unknown[];
 };
 
-export type CreatedRow = { table: GeneratedTable; id: string; identity: Identity };
+export type CreatedRow = {
+  table: GeneratedTable;
+  id: string;
+  identity: Identity;
+};
 
 type Store = {
   seed: string;
@@ -124,11 +139,25 @@ export const E2E_READONLY_ROLES = [
 // readOnly/noRoles reuse tenantA's tenant with fresh users so role denial is
 // isolated from RLS/tenant denial.
 const tenantAId = randomUUID();
-const store: Store = ((globalThis as Record<string, any>).__openshapeforgeE2E ??= {
+const store: Store = ((
+  globalThis as Record<string, any>
+).__openshapeforgeE2E ??= {
   seed: randomUUID().slice(0, 8),
-  tenantA: { tenantId: tenantAId, userId: randomUUID(), roles: [...E2E_READWRITE_ROLES] },
-  tenantB: { tenantId: randomUUID(), userId: randomUUID(), roles: [...E2E_READWRITE_ROLES] },
-  readOnly: { tenantId: tenantAId, userId: randomUUID(), roles: [...E2E_READONLY_ROLES] },
+  tenantA: {
+    tenantId: tenantAId,
+    userId: randomUUID(),
+    roles: [...E2E_READWRITE_ROLES],
+  },
+  tenantB: {
+    tenantId: randomUUID(),
+    userId: randomUUID(),
+    roles: [...E2E_READWRITE_ROLES],
+  },
+  readOnly: {
+    tenantId: tenantAId,
+    userId: randomUUID(),
+    roles: [...E2E_READONLY_ROLES],
+  },
   noRoles: { tenantId: tenantAId, userId: randomUUID(), roles: [] },
   capturedRequests: [],
   capturedEventReads: [],
@@ -183,7 +212,8 @@ function labelledTest(runner: (name: string, fn: TestFn) => void) {
 }
 
 export const test = Object.assign(labelledTest(bunTest), {
-  skipIf: (condition: unknown) => labelledTest(condition ? bunTest.skip : bunTest),
+  skipIf: (condition: unknown) =>
+    labelledTest(condition ? bunTest.skip : bunTest),
 });
 
 // ---------------------------------------------------------------------------
@@ -214,15 +244,32 @@ export async function gql(
   } else if (identity) {
     applyTrustedContextHeaders(headers, identity, { secret: SECRET });
   }
-  if (!remoteUrl) headers.set("x-openshapeforge-arbitrary-profile", "authenticated");
-  const body = JSON.stringify({ query, variables });
-  const request = new Request(`${remoteUrl ?? "http://e2e.internal"}/api/graphql`, {
+  const canonical = print(parse(query));
+  const hash = createHash("sha256").update(canonical).digest("hex");
+  const isPersisted =
+    (persistedManifest.operations as Record<string, string>)[hash] ===
+    canonical;
+  if (!remoteUrl && !isPersisted)
+    headers.set("x-openshapeforge-arbitrary-profile", "authenticated");
+  const body = JSON.stringify(
+    isPersisted
+      ? {
+          variables,
+          extensions: { persistedQuery: { version: 1, sha256Hash: hash } },
+        }
+      : { query, variables },
+  );
+  const path =
+    remoteUrl && isPersisted ? "/api/graphql/persisted" : "/api/graphql";
+  const request = new Request(`${remoteUrl ?? "http://e2e.internal"}${path}`, {
     method: "POST",
     headers,
     body,
   });
   const startedAt = performance.now();
-  const response = remoteUrl ? await fetch(request) : await yogaHandler().fetch(request);
+  const response = remoteUrl
+    ? await fetch(request)
+    : await yogaHandler().fetch(request);
   const parsed = (await response.json()) as GqlResponse;
   store.capturedRequests.push({
     suite: currentLabel?.suite ?? "(outside tests)",
@@ -287,7 +334,11 @@ export async function eventsFor(
 // ---------------------------------------------------------------------------
 
 function persistCapture() {
-  const reportDir = resolve(import.meta.dir, "../../../../../..", ".e2e-report");
+  const reportDir = resolve(
+    import.meta.dir,
+    "../../../../../..",
+    ".e2e-report",
+  );
   mkdirSync(reportDir, { recursive: true });
   writeFileSync(
     join(reportDir, "requests.json"),

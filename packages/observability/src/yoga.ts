@@ -12,14 +12,24 @@ import {
   type YogaMaskedErrorOpts,
 } from "graphql-yoga";
 import type { Registry } from "prom-client";
-import { boundedLabel, sanitizeError, type SanitizedErrorReport } from "./redaction.js";
+import {
+  boundedLabel,
+  sanitizeError,
+  type SanitizedErrorReport,
+} from "./redaction.js";
 import {
   getProcessPrometheusRegistry,
   getProcessYogaMetricsPlugins,
 } from "./registry.js";
 
 const OPERATION_TYPES = new Set(["query", "mutation", "subscription"]);
-const ERROR_PHASES = new Set(["parse", "validate", "context", "execute", "subscribe"]);
+const ERROR_PHASES = new Set([
+  "parse",
+  "validate",
+  "context",
+  "execute",
+  "subscribe",
+]);
 
 export type FixedCorsPolicy = Exclude<CORSOptions, false> & {
   origin: string | string[];
@@ -28,7 +38,9 @@ export type FixedCorsPolicy = Exclude<CORSOptions, false> & {
 export type GraphqlCorsPolicy =
   | false
   | FixedCorsPolicy
-  | ((request: Request) => FixedCorsPolicy | false | Promise<FixedCorsPolicy | false>);
+  | ((
+      request: Request,
+    ) => FixedCorsPolicy | false | Promise<FixedCorsPolicy | false>);
 
 function validOrigin(origin: string): boolean {
   if (origin === "null" || origin.includes("*")) return false;
@@ -45,11 +57,17 @@ function validOrigin(origin: string): boolean {
   }
 }
 
-export function validateCorsPolicy(policy: FixedCorsPolicy | false): CORSOptions {
+export function validateCorsPolicy(
+  policy: FixedCorsPolicy | false,
+): CORSOptions {
   if (policy === false) return false;
-  const origins = Array.isArray(policy.origin) ? policy.origin : [policy.origin];
+  const origins = Array.isArray(policy.origin)
+    ? policy.origin
+    : [policy.origin];
   if (origins.length === 0 || origins.some((origin) => !validOrigin(origin))) {
-    throw new Error("CORS origins must be non-empty exact HTTP(S) origins without wildcards.");
+    throw new Error(
+      "CORS origins must be non-empty exact HTTP(S) origins without wildcards.",
+    );
   }
   if (new Set(origins).size !== origins.length) {
     throw new Error("CORS origins must not contain duplicates.");
@@ -58,7 +76,9 @@ export function validateCorsPolicy(policy: FixedCorsPolicy | false): CORSOptions
     ...policy,
     origin: [...origins],
     methods: [...(policy.methods ?? ["GET", "POST", "OPTIONS"])],
-    allowedHeaders: [...(policy.allowedHeaders ?? ["content-type", "authorization"])],
+    allowedHeaders: [
+      ...(policy.allowedHeaders ?? ["content-type", "authorization"]),
+    ],
     credentials: policy.credentials ?? false,
   };
 }
@@ -77,8 +97,18 @@ export function createYogaCorsConfiguration(policy: GraphqlCorsPolicy) {
     return { ...validated, origin: requestOrigin };
   };
   if (typeof policy !== "function") {
-    validateCorsPolicy(policy);
-    return (request: Request) => forRequest(request, policy);
+    const validated = validateCorsPolicy(policy);
+    return (request: Request) => {
+      if (validated === false) return false;
+      const requestOrigin = request.headers.get("origin");
+      if (!requestOrigin) return validated;
+      const origins = Array.isArray(validated.origin)
+        ? validated.origin
+        : [validated.origin];
+      return origins.includes(requestOrigin)
+        ? { ...validated, origin: requestOrigin }
+        : false;
+    };
   }
   return async (request: Request): Promise<CORSOptions> =>
     forRequest(request, await policy(request));
@@ -93,7 +123,10 @@ type OperationParams = {
 
 type HttpOperationParams = OperationParams & { response: Response };
 
-function operationLabels(params: OperationParams, allowed: ReadonlySet<string>) {
+function operationLabels(
+  params: OperationParams,
+  allowed: ReadonlySet<string>,
+) {
   return {
     operation_name: boundedLabel(
       params.operationName,
@@ -131,7 +164,9 @@ export function createYogaMetricsPlugin(options: YogaMetricsOptions): Plugin {
   const cached = metricsPlugins.get(registry);
   if (cached) {
     if (cached.fingerprint !== fingerprint) {
-      throw new Error("A Prometheus registry cannot be reused with different Yoga metric policy.");
+      throw new Error(
+        "A Prometheus registry cannot be reused with different Yoga metric policy.",
+      );
     }
     return cached.plugin as Plugin;
   }
@@ -142,17 +177,22 @@ export function createYogaMetricsPlugin(options: YogaMetricsOptions): Plugin {
     name: string,
     help: string,
     phases: [TPhase, ...TPhase[]],
-  ) => createHistogram<TPhase, "operation_name" | "operation_type", OperationParams>({
-    registry,
-    histogram: {
-      name,
-      help,
-      labelNames: ["operation_name", "operation_type"] as const,
-      buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
-    },
-    fillLabelsFn: labels,
-    phases,
-  });
+  ) =>
+    createHistogram<
+      TPhase,
+      "operation_name" | "operation_type",
+      OperationParams
+    >({
+      registry,
+      histogram: {
+        name,
+        help,
+        labelNames: ["operation_name", "operation_type"] as const,
+        buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+      },
+      fillLabelsFn: labels,
+      phases,
+    });
   const plugin = usePrometheus({
     registry,
     endpoint: false,
@@ -218,10 +258,12 @@ export function createYogaMetricsPlugin(options: YogaMetricsOptions): Plugin {
           phase: ERROR_PHASES.has(params.errorPhase ?? "")
             ? params.errorPhase!
             : "unknown",
-          classification: params.errorPhase === "parse" || params.errorPhase === "validate" ||
+          classification:
+            params.errorPhase === "parse" ||
+            params.errorPhase === "validate" ||
             isExpectedGraphqlError(params.error)
-            ? "expected"
-            : "unexpected",
+              ? "expected"
+              : "unexpected",
         }),
       }),
       graphql_envelop_request_time_summary: false,
@@ -239,7 +281,11 @@ export function createYogaMetricsPlugin(options: YogaMetricsOptions): Plugin {
         histogram: {
           name: metricName("graphql_http_duration_seconds"),
           help: "GraphQL HTTP request duration in seconds.",
-          labelNames: ["operation_name", "operation_type", "status_code"] as const,
+          labelNames: [
+            "operation_name",
+            "operation_type",
+            "status_code",
+          ] as const,
           buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
         },
         fillLabelsFn: (params) => ({
@@ -270,9 +316,10 @@ export function createMaskedErrorOptions(
         const identity = error && typeof error === "object" ? error : null;
         if (!identity || !reported.has(identity)) {
           if (identity) reported.add(identity);
-          const original = error instanceof GraphQLError && error.originalError
-            ? error.originalError
-            : error;
+          const original =
+            error instanceof GraphQLError && error.originalError
+              ? error.originalError
+              : error;
           options.report(sanitizeError(original, "graphql.unexpected"));
         }
       }

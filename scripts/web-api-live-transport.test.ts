@@ -152,8 +152,8 @@ describe("live web to API rolling persisted-operation contract", () => {
       expect(sent.get("x-openshapeforge-context-signature")).toBeTruthy();
     }
 
-    const limited = await fetch(`${origin}/api/ready`, { headers });
-    expect(limited.status).toBe(429);
+    const readiness = await fetch(`${origin}/api/ready`, { headers });
+    expect(readiness.status).toBe(503);
   });
 
   test("executes a manifest-hit mutation once without a raw retry", async () => {

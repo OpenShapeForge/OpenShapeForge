@@ -2,13 +2,16 @@
 import type { ReadinessCheck } from "@openshapeforge/observability";
 import type { FastifyBaseLogger } from "fastify";
 import { sql } from "kysely";
-import type { DatabaseRuntime, OpenShapeForgeDatabase } from "../db/connection.js";
+import type {
+  DatabaseRuntime,
+  OpenShapeForgeDatabase,
+} from "../db/connection.js";
 import {
   checkGeneratedSchemaDrift,
   type GeneratedSchemaDriftResult,
 } from "../db/schema-drift.js";
 import type { ModuleRegistry } from "../modules/registry.js";
-import { verifyVersionedMigrationLedger } from "../db/migrations/versioned-runner.js";
+import { createVersionedMigrationLedgerVerifier } from "../db/migrations/versioned-runner.js";
 import { versionedMigrations } from "../db/migrations/versioned/index.js";
 
 const DRIFT_CHECK_TIMEOUT_MS = 5_000;
@@ -16,16 +19,22 @@ const DRIFT_CHECK_TIMEOUT_MS = 5_000;
 export const API_READINESS_ERROR_CODES = new Set([
   "GENERATED_SCHEMA_BEHIND",
   "GENERATED_SCHEMA_UNMIGRATED",
-  "VERSIONED_LEDGER_AHEAD",
   "VERSIONED_LEDGER_MISMATCH",
   "VERSIONED_LEDGER_MISSING",
 ]);
 
 function readinessError(code: string): Error {
-  return Object.assign(new Error("A database schema dependency is incompatible."), { code });
+  return Object.assign(
+    new Error("A database schema dependency is incompatible."),
+    { code },
+  );
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error(`${label} timed out after ${ms}ms`)),
@@ -100,18 +109,22 @@ export function createApiReadinessChecks(
   databaseRuntime: DatabaseRuntime | undefined,
   modules: ModuleRegistry,
 ): ReadinessCheck[] {
+  const verifyVersionedLedger =
+    createVersionedMigrationLedgerVerifier(versionedMigrations);
   return [
     {
       name: "database",
       check: async () => {
-        if (!databaseRuntime) throw new Error("Database runtime is not configured.");
+        if (!databaseRuntime)
+          throw new Error("Database runtime is not configured.");
         await sql`select 1`.execute(databaseRuntime.db);
       },
     },
     {
       name: "schema",
       check: async () => {
-        if (!databaseRuntime) throw new Error("Database runtime is not configured.");
+        if (!databaseRuntime)
+          throw new Error("Database runtime is not configured.");
         const drift = await checkGeneratedSchemaDrift(databaseRuntime.db);
         if (drift.status !== "ok") {
           throw readinessError(
@@ -120,17 +133,12 @@ export function createApiReadinessChecks(
               : "GENERATED_SCHEMA_UNMIGRATED",
           );
         }
-        const versioned = await verifyVersionedMigrationLedger(
-          databaseRuntime.db,
-          versionedMigrations,
-        );
+        const versioned = await verifyVersionedLedger(databaseRuntime.db);
         if (!versioned.ready) {
           throw readinessError(
-            versioned.unexpected.length > 0
-              ? "VERSIONED_LEDGER_AHEAD"
-              : versioned.mismatched.length > 0
-                ? "VERSIONED_LEDGER_MISMATCH"
-                : "VERSIONED_LEDGER_MISSING",
+            versioned.mismatched.length > 0
+              ? "VERSIONED_LEDGER_MISMATCH"
+              : "VERSIONED_LEDGER_MISSING",
           );
         }
       },

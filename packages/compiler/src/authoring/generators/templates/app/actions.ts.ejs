@@ -6,7 +6,7 @@
   const typeName = gql.typeName;
   const coreFieldNames = new Set(gql.fields.map(f => f.name));
 -%>
-import { executeGraphqlRequest } from "@/lib/server/graphql-client";
+import { executeGraphqlRequest, profileForGraphqlQuery } from "@/lib/server/graphql-client";
 
 export async function get<%= typeName %>(id: string, options?: { query?: string }) {
 <%
@@ -36,7 +36,7 @@ export async function get<%= typeName %>(id: string, options?: { query?: string 
   const query = options?.query ?? `query Get<%= typeName %>($id: ID!) { <%= gql.queries.single.name %>(id: $id) { <%- detailFields %> } }`;
   const data = await executeGraphqlRequest<{ <%= gql.queries.single.name %>?: Record<string, unknown> | null }>({
     query,
-    profile: options?.query ? "integration" : "persisted",
+    profile: profileForGraphqlQuery(query),
     variables: { id },
   });
   return data?.<%= gql.queries.single.name %> ?? null;
@@ -64,7 +64,7 @@ export async function list<%= gql.queries.list.name.charAt(0).toUpperCase() + gq
     };
   }>({
     query,
-    profile: options?.query ? "integration" : "persisted",
+    profile: profileForGraphqlQuery(query),
     variables: {
       filter: options?.filter,
       sort: options?.sort,

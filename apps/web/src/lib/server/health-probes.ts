@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: BUSL-1.1
 import "server-only";
 import { buildGatewayUrl, getGatewayGraphqlPath } from "@/lib/server/gateway";
+import { applyTrustedContextHeaders } from "@openshapeforge/auth";
+import { executeGraphqlTransport } from "@/lib/server/persisted-operation";
 
 export type CheckName = "keycloak" | "graphql";
-export type CheckResult = { ok: boolean; latencyMs: number | null; error?: string };
+export type CheckResult = {
+  ok: boolean;
+  latencyMs: number | null;
+  error?: string;
+};
 export type HealthBody = {
   status: "healthy" | "degraded" | "unhealthy";
   checks: Record<CheckName, CheckResult>;
@@ -29,7 +35,11 @@ async function probe(
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   const start = performance.now();
   try {
-    const res = await fetch(url, { ...init, signal: ctl.signal, cache: "no-store" });
+    const res = await fetch(url, {
+      ...init,
+      signal: ctl.signal,
+      cache: "no-store",
+    });
     const latencyMs = Math.round(performance.now() - start);
     if (!isOk(res.status)) {
       return { ok: false, latencyMs, error: `HTTP ${res.status}` };
@@ -72,25 +82,46 @@ export async function probeGraphql(): Promise<CheckResult> {
   const timer = setTimeout(() => ctl.abort(), getGraphqlProbeTimeoutMs());
   const start = performance.now();
   try {
-    const res = await fetch(buildGatewayUrl(getGatewayGraphqlPath()).toString(), {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        query: "query HealthProbe { health { status role } }",
-      }),
-      signal: ctl.signal,
-      cache: "no-store",
+    const rawEndpoint = buildGatewayUrl(getGatewayGraphqlPath());
+    const endpoint = new URL(rawEndpoint);
+    endpoint.pathname = `${endpoint.pathname.replace(/\/$/, "")}/persisted`;
+    const query = "query HealthProbe { health { status role } }";
+    const headers = new Headers({ "content-type": "application/json" });
+    applyTrustedContextHeaders(
+      headers,
+      {
+        tenantId: "00000000-0000-4000-8000-000000000001",
+        userId: "00000000-0000-4000-8000-000000000002",
+        roles: [],
+        groups: [],
+      },
+      { secret: process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET },
+    );
+    const attempt = await executeGraphqlTransport({
+      profile: "persisted",
+      persistedEndpoint: endpoint.toString(),
+      rawEndpoint: rawEndpoint.toString(),
+      headers,
+      query,
+      operationName: "HealthProbe",
+      requestCache: "no-store",
+      fetcher: (url, init) => fetch(url, { ...init, signal: ctl.signal }),
     });
+    const res = attempt.response;
     const latencyMs = Math.round(performance.now() - start);
     if (res.status < 200 || res.status >= 300) {
       return { ok: false, latencyMs, error: `HTTP ${res.status}` };
     }
 
-    const payload = await res.json().catch(() => null) as
-      | { data?: { health?: { status?: unknown; role?: unknown } } }
-      | null;
+    const payload = attempt.payload as {
+      data?: { health?: { status?: unknown; role?: unknown } };
+    } | null;
     if (payload?.data?.health?.status !== "ok") {
-      return { ok: false, latencyMs, error: "GraphQL health check did not return ok" };
+      return {
+        ok: false,
+        latencyMs,
+        error: "GraphQL health check did not return ok",
+      };
     }
 
     return { ok: true, latencyMs };
@@ -102,7 +133,9 @@ export async function probeGraphql(): Promise<CheckResult> {
   }
 }
 
-export function rollUp(checks: Record<CheckName, CheckResult>): HealthBody["status"] {
+export function rollUp(
+  checks: Record<CheckName, CheckResult>,
+): HealthBody["status"] {
   if (!checks.keycloak.ok && !checks.graphql.ok) return "unhealthy";
   if (!checks.keycloak.ok || !checks.graphql.ok) return "degraded";
   return "healthy";

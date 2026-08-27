@@ -115,6 +115,81 @@ async function migrationFileChecksum(
   return createHash("sha256").update(contents).digest("hex");
 }
 
+export type VersionedMigrationLedgerStatus = {
+  ready: boolean;
+  missing: string[];
+  mismatched: string[];
+  unexpected: string[];
+};
+
+async function migrationChecksums(migrations: readonly VersionedMigration[]) {
+  if (migrations.length > 0) validateVersionedRegistry(migrations);
+  return new Map(
+    await Promise.all(
+      migrations.map(
+        async (migration) =>
+          [
+            migration.version,
+            {
+              current: await migrationFileChecksum(migration),
+              superseded: new Set(migration.supersededChecksums ?? []),
+            },
+          ] as const,
+      ),
+    ),
+  );
+}
+
+/** Cache immutable registry validation and file hashes; probes only query the ledger. */
+export function createVersionedMigrationLedgerVerifier(
+  migrations: readonly VersionedMigration[],
+) {
+  const checksums = migrationChecksums(migrations);
+  return async (db: Kysely<any>): Promise<VersionedMigrationLedgerStatus> => {
+    const expectedChecksums = await checksums;
+    const ledger = await sql<{ version: string; checksum: string | null }>`
+      select version, checksum from platform.schema_migrations
+    `.execute(db);
+    const recorded = new Map(
+      ledger.rows.map((row) => [row.version, row.checksum]),
+    );
+    const missing: string[] = [];
+    const mismatched: string[] = [];
+    for (const migration of migrations) {
+      const checksum = recorded.get(migration.version);
+      const accepted = expectedChecksums.get(migration.version)!;
+      if (checksum === undefined) missing.push(migration.version);
+      else if (
+        checksum !== accepted.current &&
+        !accepted.superseded.has(checksum ?? "")
+      ) {
+        mismatched.push(migration.version);
+      }
+    }
+    const expected = new Set(migrations.map((migration) => migration.version));
+    const unexpected = ledger.rows
+      .map((row) => row.version)
+      .filter((version) => /^\d{4}_/.test(version))
+      .filter((version) => version !== "0001_generated_platform_schema")
+      .filter((version) => !expected.has(version))
+      .sort();
+    return {
+      ready: missing.length === 0 && mismatched.length === 0,
+      missing,
+      mismatched,
+      unexpected,
+    };
+  };
+}
+
+/** Read-only readiness check for the complete immutable migration registry. */
+export async function verifyVersionedMigrationLedger(
+  db: Kysely<any>,
+  migrations: readonly VersionedMigration[],
+): Promise<VersionedMigrationLedgerStatus> {
+  return createVersionedMigrationLedgerVerifier(migrations)(db);
+}
+
 export async function applyVersionedMigrations(
   db: Kysely<any>,
   migrations: readonly VersionedMigration[],

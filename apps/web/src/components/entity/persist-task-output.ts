@@ -18,7 +18,7 @@ export async function persistTaskOutput(
   output: Record<string, unknown>,
 ): Promise<void> {
   await executeGraphqlRequest<{ updateTask?: { id?: string } | null }>({
-    query: `mutation ($input: UpdateTaskInput!) { updateTask(input: $input) { id } }`,
+    query: `mutation PersistTaskOutput($input: UpdateTaskInput!) { updateTask(input: $input) { id } }`,
     variables: { input: { id, output } },
   });
 }

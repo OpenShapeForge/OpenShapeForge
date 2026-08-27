@@ -98,6 +98,9 @@ async function DetailContent({
   try {
     const data = await executeGraphqlRequest<Record<string, unknown>>({
       query: baseQuery,
+      // queriesByGroup is emitted into the persisted manifest from the same
+      // in-memory page config bundle during this compiler run.
+      profile: "persisted",
       variables: { id },
     });
     entity = (data?.[config.queryName] ?? null) as Record<string, unknown> | null;

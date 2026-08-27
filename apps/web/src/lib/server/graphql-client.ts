@@ -5,8 +5,15 @@ import { cookies } from "next/headers";
 import { getCachedSession } from "@/lib/cached-session";
 import { GRAPHQL_CACHE_VERSION_COOKIE } from "@/lib/graphql-cache-version";
 import { buildGatewayGraphqlUrl } from "@/lib/server/gateway";
+import {
+  createPersistedOperationEnvelope,
+  executeGraphqlTransport,
+} from "@/lib/server/persisted-operation";
 import { startWebTelemetrySpan } from "@/lib/server/opentelemetry";
-import { applyTraceHeaders, readTraceContext } from "@/lib/server/trace-context";
+import {
+  applyTraceHeaders,
+  readTraceContext,
+} from "@/lib/server/trace-context";
 import { buildGraphqlGatewayRequestContext } from "./graphql-client/context";
 import {
   GraphqlProxyError,
@@ -16,7 +23,19 @@ import {
 } from "./graphql-client/errors";
 
 export { buildGraphqlGatewayRequestContext } from "./graphql-client/context";
-export { GraphqlProxyError, isGraphqlProxyError } from "./graphql-client/errors";
+export {
+  GraphqlProxyError,
+  isGraphqlProxyError,
+} from "./graphql-client/errors";
+
+/** Pick the allowlisted transport from manifest membership, not call-site shape. */
+export function profileForGraphqlQuery(
+  query: string,
+): "persisted" | "integration" {
+  return createPersistedOperationEnvelope(query).locallyPersisted
+    ? "persisted"
+    : "integration";
+}
 
 type GraphqlQueryCacheEntry = {
   expiresAt: number;
@@ -128,7 +147,8 @@ function clearSessionGraphqlQueryCache(sessionKey: string): void {
 
 export async function clearCurrentSessionGraphqlQueryCache(): Promise<void> {
   const session = await getCachedSession();
-  const sessionKey = session?.sessionId ?? session?.sub ?? session?.tenantId ?? null;
+  const sessionKey =
+    session?.sessionId ?? session?.sub ?? session?.tenantId ?? null;
   if (!sessionKey) {
     return;
   }
@@ -147,8 +167,19 @@ export async function executeGraphqlRequest<TData>(input: {
    * refresh immediately after a mutation cannot reuse an older definition.
    */
   queryCache?: boolean;
+  /**
+   * Fixed first-party operations use the generated persisted manifest. Only
+   * callers that deliberately build a query at runtime may choose the existing
+   * authenticated integration profile.
+   */
+  profile?: "persisted" | "integration";
 }): Promise<TData> {
-  const endpoint = buildGatewayGraphqlUrl().toString();
+  const gatewayUrl = buildGatewayGraphqlUrl();
+  const profile = input.profile ?? "persisted";
+  if (profile === "persisted") {
+    gatewayUrl.pathname = `${gatewayUrl.pathname.replace(/\/$/, "")}/persisted`;
+  }
+  const endpoint = gatewayUrl.toString();
   const { headers, session } = await buildGraphqlGatewayRequestContext({
     traceHeaders: input.traceHeaders,
   });
@@ -184,6 +215,8 @@ export async function executeGraphqlRequest<TData>(input: {
 
   const requestPromise = (async () => {
     let response: Response;
+    let payload: unknown;
+    let isJsonResponse = false;
     let responseStatus: number | undefined;
     const operation = readGraphqlOperation(input.query);
     const trace = {
@@ -203,16 +236,19 @@ export async function executeGraphqlRequest<TData>(input: {
     applyTraceHeaders(headers, span.traceContext());
     try {
       const requestCache = input.cache ?? "no-store";
-      response = await fetch(endpoint, {
-        method: "POST",
+      const attempt = await executeGraphqlTransport({
+        profile,
+        persistedEndpoint: endpoint,
+        rawEndpoint: buildGatewayGraphqlUrl().toString(),
         headers,
-        body: JSON.stringify({
-          query: input.query,
-          variables: input.variables,
-        }),
-        cache: requestCache,
-        next: requestCache === "no-store" ? undefined : { revalidate: 30 },
+        query: input.query,
+        variables: input.variables,
+        operationName: operation.name,
+        requestCache,
       });
+      response = attempt.response;
+      payload = attempt.payload;
+      isJsonResponse = attempt.isJsonResponse;
       responseStatus = response.status;
     } catch (cause) {
       const message = `GraphQL backend unreachable at ${endpoint}`;
@@ -225,19 +261,21 @@ export async function executeGraphqlRequest<TData>(input: {
         message,
       };
       span.recordException(error);
-      span.end({ "error.type": "network", "http.response.status_code": responseStatus });
+      span.end({
+        "error.type": "network",
+        "http.response.status_code": responseStatus,
+      });
       throw error;
     }
 
     const contentType = response.headers.get("content-type") ?? "";
-    const isJsonResponse = contentType.includes("application/json");
-    const payload = isJsonResponse
-      ? await response.json().catch(() => null)
-      : await response.text().catch(() => null);
 
     if (!response.ok) {
       const error = new GraphqlProxyError(
-        extractPayloadMessage(payload, response.statusText || "GraphQL request failed."),
+        extractPayloadMessage(
+          payload,
+          response.statusText || "GraphQL request failed.",
+        ),
         response.status,
         payload,
       );
@@ -257,18 +295,26 @@ export async function executeGraphqlRequest<TData>(input: {
       throw error;
     }
 
-    if (payload && typeof payload === "object" && Array.isArray((payload as GraphqlPayload<TData>).errors)) {
+    if (
+      payload &&
+      typeof payload === "object" &&
+      Array.isArray((payload as GraphqlPayload<TData>).errors)
+    ) {
       const error = new GraphqlProxyError(
         extractPayloadMessage(payload, "GraphQL request failed."),
         statusFromGraphqlPayload(payload),
         payload,
       );
       span.recordException(error);
-      span.end({ "http.response.status_code": response.status, "graphql.errors": true });
+      span.end({
+        "http.response.status_code": response.status,
+        "graphql.errors": true,
+      });
       throw error;
     }
 
-    const data = ((payload as GraphqlPayload<TData> | null)?.data ?? null) as TData;
+    const data = ((payload as GraphqlPayload<TData> | null)?.data ??
+      null) as TData;
 
     if (queryCacheKey) {
       writeGraphqlQueryCache(queryCacheKey, data);

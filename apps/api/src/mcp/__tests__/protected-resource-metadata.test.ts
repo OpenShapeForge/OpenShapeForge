@@ -17,7 +17,7 @@ import {
 let app: ReturnType<typeof createApiApp>;
 
 beforeAll(async () => {
-  app = createApiApp();
+  app = createApiApp({ cors: false });
   await app.ready();
 });
 

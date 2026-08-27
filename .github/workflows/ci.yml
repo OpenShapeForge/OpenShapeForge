@@ -79,7 +79,7 @@ jobs:
       # source root — so without it the app would be built by the step below
       # with no type gate of its own.
       - name: Typecheck
-        run: bun run typecheck:compiler && bun run typecheck:api && bun run typecheck:web && bun run typecheck:admin && bun run typecheck:examples && bun run typecheck:connectors && bun run typecheck:plugin-web && bun run typecheck:layout
+        run: bun run typecheck:compiler && bun run typecheck:api && bun run typecheck:observability && bun run typecheck:web && bun run typecheck:admin && bun run typecheck:examples && bun run typecheck:connectors && bun run typecheck:plugin-web && bun run typecheck:layout
 
       # The web app's CRUD pages are compiler output, so a compiler change can
       # break the build without touching a single file under apps/web. Building
@@ -101,6 +101,12 @@ jobs:
 
       - name: Compiler unit tests
         run: bun test packages/compiler
+
+      - name: Observability unit tests
+        run: bun run test:observability
+
+      - name: Web GraphQL transport tests
+        run: bun run test:web-transport
 
       # The shipped example plugins carry unit tests that nothing ran until
       # now: `test:compiler` is scoped to packages/compiler and the db/e2e jobs
@@ -133,6 +139,9 @@ jobs:
         run: >-
           cd apps/api && bun test src/config src/roles src/control
           src/graphql/__tests__/introspection.test.ts
+          src/graphql/__tests__/observability-readiness.test.ts
+          src/graphql/__tests__/root-ordering.test.ts
+          src/graphql/__tests__/transport-hardening.test.ts
           src/graphql/generated-authz.test.ts
           src/graphql/__tests__/classified-query-guard.unit.test.ts
           src/graphql/__tests__/classified-nullability.unit.test.ts

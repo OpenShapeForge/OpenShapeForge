@@ -21,7 +21,7 @@ export const getActiveLabelRules = cache(async (entityType: string) => {
       edges?: Array<{ node?: Record<string, unknown> | null }>;
     };
   }>({
-    query: `query ($filter: LabelRuleFilter, $sort: LabelRuleSort, $first: Int) {
+    query: `query ActiveLabelRules($filter: LabelRuleFilter, $sort: LabelRuleSort, $first: Int) {
       labelRules(filter: $filter, sort: $sort, first: $first) {
         edges { node { id label variant expression descriptionTemplate priority } }
       }

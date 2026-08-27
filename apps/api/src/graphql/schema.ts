@@ -7,7 +7,15 @@
  * schema (workflow, messaging, erp workspace, identity, realtime); those
  * domains are intentionally absent here.
  */
-import { GraphQLError, Kind, type ValueNode } from "graphql";
+import {
+  GraphQLError,
+  Kind,
+  parse,
+  print,
+  type FieldDefinitionNode,
+  type ObjectTypeDefinitionNode,
+  type ValueNode,
+} from "graphql";
 import { createSchema } from "graphql-yoga";
 import {
   generatedEntityMutationFields,
@@ -107,22 +115,24 @@ export function buildGraphqlSchema(
     }
 
     type Query {
-      health: Health!
-      entityPageConfigs(entitySlug: String!): EntityPageConfigs
-${currentTenantQueryFields}
-${generatedEntityQueryFields}
-${connectorQueryFields}
-${connectorNamespaceQueryFields}
-${apiKeyQueryFields}
-${moduleGraphql.queryFields}
+${sortRootFieldDefinitions(`
+  """Lightweight API liveness through the GraphQL transport."""
+  health: Health!
+  """Generated presentation configuration for one entity."""
+  entityPageConfigs(entitySlug: String!): EntityPageConfigs
+  ${currentTenantQueryFields}
+`)}
+${sortRootFieldDefinitions(generatedEntityQueryFields)}
+${sortRootFieldDefinitions(`${connectorQueryFields}\n${connectorNamespaceQueryFields}`)}
+${sortRootFieldDefinitions(apiKeyQueryFields)}
+${sortRootFieldDefinitions(moduleGraphql.queryFields)}
     }
 
     type Mutation {
-${generatedEntityMutationFields}
-${connectorMutationFields}
-${connectorNamespaceMutationFields}
-${apiKeyMutationFields}
-${moduleGraphql.mutationFields}
+${sortRootFieldDefinitions(generatedEntityMutationFields)}
+${sortRootFieldDefinitions(`${connectorMutationFields}\n${connectorNamespaceMutationFields}`)}
+${sortRootFieldDefinitions(apiKeyMutationFields)}
+${sortRootFieldDefinitions(moduleGraphql.mutationFields)}
     }
   `,
   resolvers: {
@@ -154,6 +164,19 @@ ${moduleGraphql.mutationFields}
     },
   },
   });
+}
+
+/** Alphabetize fields inside each stable product-owned root group. */
+export function sortRootFieldDefinitions(fields: string): string {
+  if (!fields.trim()) return "";
+  const document = parse(`type Root {\n${fields}\n}`);
+  const root = document.definitions[0] as ObjectTypeDefinitionNode;
+  return [...(root.fields ?? [])]
+    .sort((left, right) => left.name.value < right.name.value
+      ? -1
+      : left.name.value > right.name.value ? 1 : 0)
+    .map((field: FieldDefinitionNode) => print(field))
+    .join("\n");
 }
 
 /**

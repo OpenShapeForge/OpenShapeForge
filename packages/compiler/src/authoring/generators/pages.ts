@@ -2208,11 +2208,11 @@ function collectListSelectionPaths(
 }
 
 function buildDetailQuery(contract: CompiledEntityContract, selection: string): string {
-  return `query ($id: ID!) { ${contract.graphql.queries.single.name}(id: $id) { ${selection} } }`;
+  return `query Get${contract.graphql.typeName}($id: ID!) { ${contract.graphql.queries.single.name}(id: $id) { ${selection} } }`;
 }
 
 function buildListQuery(contract: CompiledEntityContract, selection: string): string {
-  return `query ($filter: ${contract.graphql.typeName}Filter, $sort: ${contract.graphql.typeName}Sort, $first: Int, $after: String) { ${contract.graphql.queries.list.name}(filter: $filter, sort: $sort, first: $first, after: $after) { edges { node { ${selection} } cursor } pageInfo { hasNextPage endCursor } totalCount } }`;
+  return `query List${contract.graphql.typeName}($filter: ${contract.graphql.typeName}Filter, $sort: ${contract.graphql.typeName}Sort, $first: Int, $after: String) { ${contract.graphql.queries.list.name}(filter: $filter, sort: $sort, first: $first, after: $after) { edges { node { ${selection} } cursor } pageInfo { hasNextPage endCursor } totalCount } }`;
 }
 
 function getDefaultDetailGroupId(detail: NonNullable<CompiledViewContext["detail"]>): string {

@@ -49,7 +49,7 @@ describe("token flooding", () => {
   test("rejects a document over the token cap", async () => {
     setEnv("GRAPHQL_MAX_TOKENS", "50");
     setEnv("API_RATE_LIMIT_MAX", "10000");
-    app = createApiApp();
+    app = createApiApp({ cors: false });
 
     const flood = `{ ${Array.from({ length: 200 }, (_, i) => `a${i}: __typename`).join(" ")} }`;
     const result = await graphql(app, flood);
@@ -60,7 +60,7 @@ describe("token flooding", () => {
   test("admits an ordinary query", async () => {
     setEnv("GRAPHQL_MAX_TOKENS", "50");
     setEnv("API_RATE_LIMIT_MAX", "10000");
-    app = createApiApp();
+    app = createApiApp({ cors: false });
 
     const result = await graphql(app, "{ __typename }");
     expect(result.errors ?? []).toEqual([]);
@@ -71,7 +71,7 @@ describe("directive flooding", () => {
   test("rejects a document over the directive cap", async () => {
     setEnv("GRAPHQL_MAX_DIRECTIVES", "5");
     setEnv("API_RATE_LIMIT_MAX", "10000");
-    app = createApiApp();
+    app = createApiApp({ cors: false });
 
     const directives = Array.from({ length: 50 }, () => "@skip(if: false)").join(" ");
     const result = await graphql(app, `{ __typename ${directives} }`);

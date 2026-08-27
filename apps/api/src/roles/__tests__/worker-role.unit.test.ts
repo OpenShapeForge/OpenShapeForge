@@ -175,26 +175,28 @@ describe("startWorkerRole", () => {
     ).rejects.toThrow(/Unknown worker role "typo-worker". Contributed roles: workflow-worker./);
   });
 
-  test("reports the load failure when the module owning the role did not load", async () => {
+  test("reports the bounded load reason without exposing loader details", async () => {
     // "Unknown role" would send an operator hunting a typo. The module failing
     // to load IS the reason, and it is already recorded.
+    const attempted = startWorkerRole("workflow", {
+      databaseUrl,
+      modules: registry(
+        [],
+        [
+          {
+            name: "workflow",
+            specifier: "./private/loader-path.ts",
+            reason: "module_missing",
+            message: "boom private token",
+          },
+        ],
+      ),
+      log: silentLog,
+    });
     await expect(
-      startWorkerRole("workflow", {
-        databaseUrl,
-        modules: registry(
-          [],
-          [
-            {
-              name: "workflow",
-              specifier: "./examples/plugins/workflow/runtime.ts",
-              reason: "module_missing",
-              message: "boom",
-            },
-          ],
-        ),
-        log: silentLog,
-      }),
-    ).rejects.toThrow(/module "workflow" was not loaded \(module_missing — boom\)/);
+      attempted,
+    ).rejects.toThrow(/module was not loaded \(module_missing\)/);
+    await expect(attempted).rejects.not.toThrow(/boom|private|loader-path/);
   });
 
   test("runs init before starting, and stops the worker before closing the pool", async () => {

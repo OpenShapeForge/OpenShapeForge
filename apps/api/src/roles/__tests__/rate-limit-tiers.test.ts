@@ -58,7 +58,7 @@ describe("tiered budgets", () => {
     setEnv("API_RATE_LIMIT_MAX", "2");
     setEnv("API_RATE_LIMIT_MAX_TRUSTED", "6");
     setEnv("API_RATE_LIMIT_REDIS_URL", undefined);
-    app = createApiApp();
+    app = createApiApp({ cors: false });
 
     const headers = trustedHeaders("11111111-1111-1111-1111-111111111111", "u1");
     for (let i = 0; i < 6; i++) {
@@ -76,7 +76,7 @@ describe("tiered budgets", () => {
     setEnv("API_RATE_LIMIT_MAX", "2");
     setEnv("API_RATE_LIMIT_MAX_TRUSTED", "6");
     setEnv("API_RATE_LIMIT_REDIS_URL", undefined);
-    app = createApiApp();
+    app = createApiApp({ cors: false });
 
     const forged = {
       [TRUSTED_CONTEXT_HEADERS.tenantId]: "11111111-1111-1111-1111-111111111111",
@@ -95,7 +95,7 @@ describe("tiered budgets", () => {
     setEnv("API_RATE_LIMIT_MAX", "2");
     setEnv("API_RATE_LIMIT_MAX_TRUSTED", "3");
     setEnv("API_RATE_LIMIT_REDIS_URL", undefined);
-    app = createApiApp();
+    app = createApiApp({ cors: false });
 
     const first = trustedHeaders("11111111-1111-1111-1111-111111111111", "u1");
     const second = trustedHeaders("22222222-2222-2222-2222-222222222222", "u2");
@@ -111,7 +111,7 @@ describe("tiered budgets", () => {
     setEnv("OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET", SECRET);
     setEnv("API_RATE_LIMIT_MAX", "1");
     setEnv("API_RATE_LIMIT_REDIS_URL", undefined);
-    app = createApiApp();
+    app = createApiApp({ cors: false });
 
     await app.inject({ method: "GET", url: GRAPHQL_URL });
     await app.inject({ method: "GET", url: GRAPHQL_URL });
@@ -137,8 +137,8 @@ describe.skipIf(!REDIS_URL)("shared store", () => {
     await client.send("EVAL", ["redis.call('FLUSHDB') return 1", "0"]);
     client.close();
 
-    const first = createApiApp();
-    const second = createApiApp();
+    const first = createApiApp({ cors: false });
+    const second = createApiApp({ cors: false });
     try {
       const statuses: number[] = [];
       for (const instance of [first, second, first, second, first, second]) {

@@ -68,7 +68,7 @@ type EntityPageConfigResult = {
   editFormConfigBases: Record<string, any> | null;
 };
 
-const ENTITY_PAGE_CONFIGS_QUERY = `query ($entitySlug: String!) {
+const ENTITY_PAGE_CONFIGS_QUERY = `query EntityPageConfigs($entitySlug: String!) {
   entityPageConfigs(entitySlug: $entitySlug) {
     listConfigs
     detailConfigs

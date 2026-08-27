@@ -10,13 +10,48 @@
  * that drops the plugin loses the role with it rather than keeping a dangling
  * import here.
  */
-import { startApiRole } from "./roles/api.js";
-import { runWorkerRole } from "./roles/worker.js";
+import {
+  bootstrapOpenTelemetry,
+  shutdownOpenTelemetry,
+} from "@openshapeforge/observability";
+
+function tracesEndpoint(env: NodeJS.ProcessEnv): string | undefined {
+  if (env.OTEL_TRACES_EXPORTER?.trim().toLowerCase() === "none")
+    return undefined;
+  const explicit = env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT?.trim();
+  if (explicit) return explicit;
+  const base = env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim().replace(/\/+$/, "");
+  return base ? `${base}/v1/traces` : undefined;
+}
+
+const otlpTracesEndpoint = tracesEndpoint(process.env);
+bootstrapOpenTelemetry({
+  serviceName: "openshapeforge-api",
+  ...(process.env.OTEL_SERVICE_NAMESPACE?.trim()
+    ? { serviceNamespace: process.env.OTEL_SERVICE_NAMESPACE.trim() }
+    : {}),
+  ...(otlpTracesEndpoint ? { tracesEndpoint: otlpTracesEndpoint } : {}),
+});
 
 const role = process.env.OPENSHAPEFORGE_ROLE?.trim() || "api";
 
 if (role === "api") {
-  await startApiRole();
+  const { startApiRole } = await import("./roles/api.js");
+  const app = await startApiRole();
+  let shuttingDown = false;
+  const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    try {
+      await app.close();
+      await shutdownOpenTelemetry();
+    } finally {
+      process.exitCode = 0;
+    }
+  };
+  process.once("SIGTERM", () => void shutdown());
+  process.once("SIGINT", () => void shutdown());
 } else {
+  const { runWorkerRole } = await import("./roles/worker.js");
   await runWorkerRole(role);
 }

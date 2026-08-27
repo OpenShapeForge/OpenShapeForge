@@ -4,6 +4,14 @@ import { maxAliasesPlugin } from "@escape.tech/graphql-armor-max-aliases";
 import { maxDepthPlugin } from "@escape.tech/graphql-armor-max-depth";
 import { maxDirectivesPlugin } from "@escape.tech/graphql-armor-max-directives";
 import { maxTokensPlugin } from "@escape.tech/graphql-armor-max-tokens";
+import { usePersistedOperations } from "@graphql-yoga/plugin-persisted-operations";
+import {
+  createMaskedErrorOptions,
+  createYogaCorsConfiguration,
+  createYogaMetricsPlugin,
+  type GraphqlCorsPolicy,
+} from "@openshapeforge/observability/yoga";
+import type { Registry, SanitizedErrorReport } from "@openshapeforge/observability";
 import { NoSchemaIntrospectionCustomRule } from "graphql";
 import { createYoga, type Plugin } from "graphql-yoga";
 import { readPositiveIntEnv } from "../config/limits.js";
@@ -11,6 +19,8 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { createGraphqlContext, type GraphqlContext } from "./context.js";
 import type { RuntimeModule } from "../modules/contract.js";
 import { buildGraphqlSchema } from "./schema.js";
+import persistedManifest from "../generated/graphql/persisted-operations.json" with { type: "json" };
+import type { TrustedSessionContext } from "../auth/trusted-context.js";
 
 /**
  * Rejects schema introspection (__schema / __type) during validation.
@@ -29,13 +39,42 @@ const disableIntrospectionPlugin: Plugin = {
 };
 
 export type CreateGraphqlYogaOptions = {
+  cors: GraphqlCorsPolicy;
   db?: OpenShapeForgeDatabase | undefined;
   /**
    * Runtime modules whose GraphQL surfaces join the schema. Resolved at boot by
    * `modules/registry.ts`; omitted by callers that only need the core surface.
    */
   modules?: readonly RuntimeModule[] | undefined;
+  metricsRegistry?: Registry;
+  reportUnexpectedError?: (report: SanitizedErrorReport) => void;
+  /** Host-selected generated manifest; injectable for rolling-deployment contract tests. */
+  persistedOperations?: PersistedOperationManifest;
 };
+
+export type PersistedOperationManifest = {
+  operationNames: string[];
+  operations: Record<string, string>;
+};
+
+const persistedOperations = persistedManifest as PersistedOperationManifest;
+
+export type GraphqlYogaServerContext = Record<string, unknown> & {
+  verifiedSession?: TrustedSessionContext;
+};
+
+const DEFAULT_GRAPHIQL_QUERY = /* GraphQL */ `
+  # OpenShapeForge local development
+  # This health query needs no credentials. For protected operations, add an
+  # Authorization: Bearer <local access token> header in GraphiQL's Headers
+  # panel. Never paste a production token or trusted-context secret here.
+  query OsfHealth {
+    health {
+      status
+      role
+    }
+  }
+`;
 
 /**
  * Conservative production defaults for GraphQL query hardening.
@@ -67,7 +106,8 @@ const DEFAULT_MAX_COST = 5000;
 const DEFAULT_MAX_TOKENS = 1000;
 const DEFAULT_MAX_DIRECTIVES = 50;
 
-export function createGraphqlYoga(options: CreateGraphqlYogaOptions = {}) {
+export function createGraphqlYoga(options: CreateGraphqlYogaOptions) {
+  const operationManifest = options.persistedOperations ?? persistedOperations;
   const maxDepth = readPositiveIntEnv("GRAPHQL_MAX_DEPTH", DEFAULT_MAX_DEPTH);
   const maxAliases = readPositiveIntEnv(
     "GRAPHQL_MAX_ALIASES",
@@ -81,12 +121,37 @@ export function createGraphqlYoga(options: CreateGraphqlYogaOptions = {}) {
   );
   const isProduction = process.env.NODE_ENV === "production";
 
-  return createYoga<Record<string, unknown>, GraphqlContext>({
+  return createYoga<GraphqlYogaServerContext, GraphqlContext>({
     schema: buildGraphqlSchema(options.modules ?? [], { db: options.db }),
     graphqlEndpoint: "/api/graphql",
+    cors: createYogaCorsConfiguration(options.cors),
     landingPage: false,
-    graphiql: !isProduction,
+    graphiql: isProduction ? false : { defaultQuery: DEFAULT_GRAPHIQL_QUERY },
+    // Yoga otherwise logs the original exception after masking it. Central
+    // reporting below deliberately sees only the redacted category/type tuple.
+    logging: {
+      debug: () => undefined,
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+    },
+    maskedErrors: createMaskedErrorOptions({
+      report: options.reportUnexpectedError ?? (() => undefined),
+    }),
     plugins: [
+      usePersistedOperations({
+        getPersistedOperation: (key) => operationManifest.operations[key] ?? null,
+        // Arbitrary documents are a development or authenticated-integration
+        // profile selected by the Fastify host after it verifies identity.
+        allowArbitraryOperations: (request) =>
+          request.headers.get("x-openshapeforge-arbitrary-profile") === "development" ||
+          request.headers.get("x-openshapeforge-arbitrary-profile") === "authenticated",
+      }),
+      createYogaMetricsPlugin({
+        metricPrefix: "openshapeforge",
+        allowedOperationNames: new Set(operationManifest.operationNames),
+        ...(options.metricsRegistry ? { registry: options.metricsRegistry } : {}),
+      }),
       // Cheapest first: token and directive counts reject a flooding document
       // before depth/alias/cost analysis walks it.
       maxTokensPlugin({ n: maxTokens }),
@@ -96,6 +161,9 @@ export function createGraphqlYoga(options: CreateGraphqlYogaOptions = {}) {
       costLimitPlugin({ maxCost, ignoreIntrospection: true }),
       ...(isProduction ? [disableIntrospectionPlugin] : []),
     ],
-    context: async ({ request }) => createGraphqlContext(request.headers, options),
+    context: async ({ request, verifiedSession }) => createGraphqlContext(
+      request.headers,
+      { ...options, resolvedSession: verifiedSession },
+    ),
   });
 }

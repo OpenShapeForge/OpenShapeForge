@@ -147,6 +147,9 @@ jobs:
           OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER: http://localhost:8181/realms/openshapeforge
           OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE: erp-provider
           OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET: openshapeforge-local-dev-context-secret
+          OPENSHAPEFORGE_GRAPHQL_CORS_MODE: allowlist
+          OPENSHAPEFORGE_GRAPHQL_CORS_ORIGINS: http://localhost:3000
+          OPENSHAPEFORGE_GRAPHQL_CORS_CREDENTIALS: "false"
         run: |
           bun run --cwd apps/api start > /tmp/api.log 2>&1 &
           for i in $(seq 1 60); do

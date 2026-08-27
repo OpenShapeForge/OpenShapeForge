@@ -127,12 +127,14 @@ repo bundling this package needs to do the same.
 
 ## Current limitations
 
-- **The base platform schema path is hard-coded.**
+- **The base platform schema follows the packaged default.**
   `loadActivePlatformCompile` reads
-  `<repoRoot>/packages/compiler/config/platform-schema.yaml` — the *host*
-  root, not the package. A host repo must provide that file at that exact
-  path (defining at least `platform.schema_migrations` and
-  `platform.entity_events`, since the API runtime and migrator assume both).
+  `<repoRoot>/packages/compiler/config/platform-schema.yaml` when the host
+  provides it, and otherwise falls back to the copy packaged with the
+  compiler — the same fallback applies to the implicit base authoring layer.
+  A host that overrides the file must keep defining at least
+  `platform.schema_migrations` and `platform.entity_events`, since the API
+  runtime and migrator assume both.
 - **Bun is required** — the CLI and plugin/package resolution use Bun APIs;
   there is no Node fallback.
 - **Generated CRUD policy is entity-authored.** The common `crud.operations`

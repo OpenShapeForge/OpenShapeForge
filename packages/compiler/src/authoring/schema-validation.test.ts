@@ -103,6 +103,12 @@ describe("the schema registry", () => {
     ajv.addSchema(fieldV2Schema);
     const canonical = ajv.getSchema(fieldDefinitionSchema.$id)!;
     const compatibility = ajv.getSchema(fieldV2Schema.$id)!;
+    const compatibilityDefinition = ajv.getSchema(
+      `${fieldV2Schema.$id}#/$defs/fieldV2`,
+    )!;
+    const compatibilityProperties = ajv.getSchema(
+      `${fieldV2Schema.$id}#/$defs/fieldV2Properties`,
+    )!;
     const recursiveDefinition = {
       key: "address",
       valueType: "object",
@@ -119,8 +125,16 @@ describe("the schema registry", () => {
 
     expect(canonical(recursiveDefinition)).toBe(true);
     expect(compatibility(recursiveDefinition)).toBe(true);
+    expect(compatibilityDefinition(recursiveDefinition)).toBe(true);
+    expect(compatibilityProperties(recursiveDefinition)).toBe(true);
     expect(canonical({ valueType: "string" })).toBe(false);
     expect(compatibility({ valueType: "string" })).toBe(false);
+    expect(compatibilityDefinition({ valueType: "string" })).toBe(false);
+    expect(compatibilityProperties({ valueType: "string" })).toBe(false);
+
+    for (const definition of Object.keys(fieldV2Schema.$defs)) {
+      expect(ajv.getSchema(`${fieldV2Schema.$id}#/$defs/${definition}`)).toBeDefined();
+    }
   });
 
   it("refuses a kind that is in neither list, rather than skipping it", () => {

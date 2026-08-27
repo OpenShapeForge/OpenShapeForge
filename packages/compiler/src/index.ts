@@ -39,6 +39,7 @@ export type {
   FieldDefinitionRelationship,
   FieldDefinitionRuntimeMetadata,
   FieldDefinitionSemanticType,
+  FieldDefinitionSemanticTypeKind,
   FieldDefinitionSuggestions,
   FieldDefinitionValidation,
   FieldDefinitionValueType,

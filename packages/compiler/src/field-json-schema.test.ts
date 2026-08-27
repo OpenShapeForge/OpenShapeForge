@@ -3,6 +3,16 @@ import { describe, expect, it } from "bun:test";
 import Ajv2020 from "ajv/dist/2020.js";
 import type { CompiledField } from "./authoring/types.js";
 import { compiledFieldSchema, compiledObjectSchema } from "./field-json-schema.js";
+import type {
+  FieldDefinition,
+  FieldDefinitionSemanticTypeKind,
+} from "./index.js";
+
+const packageRootFieldDefinition = {
+  key: "definition",
+  valueType: "object",
+} satisfies FieldDefinition;
+const packageRootSemanticTypeKind: FieldDefinitionSemanticTypeKind = "object";
 
 function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): CompiledField {
   const { key, ...rest } = overrides;
@@ -18,6 +28,11 @@ function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): 
 }
 
 describe("compiled field JSON Schema projection", () => {
+  it("exports the complete canonical contract from the package root", () => {
+    expect(packageRootFieldDefinition.key).toBe("definition");
+    expect(packageRootSemanticTypeKind).toBe("object");
+  });
+
   it("projects descriptions, validation, defaults, and reference-data enums", () => {
     const schema = compiledFieldSchema(
       field({

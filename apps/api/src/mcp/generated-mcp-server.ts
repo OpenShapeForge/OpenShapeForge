@@ -31,6 +31,7 @@
  * they live in the shared CRUD core (#164), which every call below goes
  * through, so this transport inherits them by construction.
  */
+import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -852,7 +853,7 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
     ],
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const name = request.params.name;
 
     // Connector operations dispatch outside CRUD — own input schema, own
@@ -942,6 +943,7 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
           elicit,
           sourceRow,
           values: modelArguments,
+          relatedRequestId: extra.requestId,
         });
       }
       return await invokeTool(match, entity, table, db, session, callArguments);
@@ -1029,35 +1031,109 @@ export function registerGeneratedMcpServer(
       void reply.status(status).send(body);
     });
 
+    // Stateful sessions, keyed by the SDK-issued mcp-session-id and bound to
+    // the authenticated identity that initialized them. Statefulness is what
+    // makes server-initiated exchanges possible at all: elicitation sends a
+    // request on the SSE stream of one POST and receives the person's answer
+    // as the NEXT POST, which must reach the same transport. Sessions are
+    // per-process; a multi-replica deployment needs session affinity on this
+    // path.
+    type McpSessionEntry = {
+      transport: StreamableHTTPServerTransport;
+      server: Server;
+      tenantId: string;
+      userId: string;
+      lastSeenMs: number;
+    };
+    const mcpSessions = new Map<string, McpSessionEntry>();
+    const SESSION_IDLE_LIMIT_MS = 30 * 60 * 1000;
+    const sweep = setInterval(() => {
+      const now = Date.now();
+      for (const [id, entry] of mcpSessions) {
+        if (now - entry.lastSeenMs > SESSION_IDLE_LIMIT_MS) {
+          mcpSessions.delete(id);
+          void entry.transport.close();
+          void entry.server.close();
+        }
+      }
+    }, 60 * 1000);
+    sweep.unref();
+
+    const isInitializeBody = (body: unknown): boolean => {
+      const messages = Array.isArray(body) ? body : [body];
+      return messages.some(
+        (message) =>
+          message !== null &&
+          typeof message === "object" &&
+          (message as { method?: unknown }).method === "initialize",
+      );
+    };
+
     instance.route({
       url: MCP_MOUNT_PATH,
       method: ["GET", "POST", "DELETE"],
       handler: async (request, reply) => {
         const { db, session } = await requireMcpSession(request);
 
-        // Stateless: a fresh server and transport per request. The alternative
-        // — persisting sessions — would need affinity across replicas, and
-        // this transport carries no server-initiated state worth keeping.
+        const sessionHeader = request.headers["mcp-session-id"];
+        const sessionId = Array.isArray(sessionHeader) ? sessionHeader[0] : sessionHeader;
+
+        if (sessionId) {
+          const existing = mcpSessions.get(sessionId);
+          if (!existing) {
+            // Per spec: an unknown session id answers 404 so the client
+            // reinitializes, rather than being silently handled statelessly.
+            throw new HttpError(404, "SESSION_NOT_FOUND", "Unknown MCP session; reinitialize.");
+          }
+          // The session is a credential: it was initialized by one identity
+          // and stays bound to it.
+          if (existing.tenantId !== session.tenantId || existing.userId !== session.userId) {
+            throw new HttpError(403, "FORBIDDEN", "MCP session belongs to another identity.");
+          }
+          existing.lastSeenMs = Date.now();
+          reply.hijack();
+          await existing.transport.handleRequest(request.raw, reply.raw, request.body);
+          return;
+        }
+
+        if (request.method === "POST" && isInitializeBody(request.body)) {
+          const server = buildServer(db, session);
+          const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+            onsessioninitialized: (id) => {
+              mcpSessions.set(id, {
+                transport,
+                server,
+                tenantId: session.tenantId as string,
+                userId: session.userId as string,
+                lastSeenMs: Date.now(),
+              });
+            },
+          });
+          transport.onclose = () => {
+            if (transport.sessionId) mcpSessions.delete(transport.sessionId);
+          };
+          reply.hijack();
+          // The SDK declares Transport's optional callbacks as required-when-present,
+          // which collides with this repo's exactOptionalPropertyTypes. The cast is
+          // to the SDK's own Transport shape and changes no behaviour.
+          await server.connect(transport as unknown as Parameters<Server["connect"]>[0]);
+          await transport.handleRequest(request.raw, reply.raw, request.body);
+          return;
+        }
+
+        // Sessionless non-initialize request: the pre-session stateless
+        // single-shot behaviour, kept for probes and legacy callers. No
+        // server-initiated exchange is possible on this path.
         const server = buildServer(db, session);
-        // `sessionIdGenerator` is omitted rather than set to undefined: the SDK
-        // reads it as `=== undefined` to mean stateless, and omitting keeps
-        // exactOptionalPropertyTypes happy.
         const transport = new StreamableHTTPServerTransport({
           enableJsonResponse: true,
         });
-
         reply.raw.on("close", () => {
           void transport.close();
           void server.close();
         });
-
-        // handleRequest writes straight to the raw socket, so Fastify must be
-        // told the reply is taken care of BEFORE anything is written — a
-        // hijack afterwards races with Fastify's own response.
         reply.hijack();
-        // The SDK declares Transport's optional callbacks as required-when-present,
-        // which collides with this repo's exactOptionalPropertyTypes. The cast is
-        // to the SDK's own Transport shape and changes no behaviour.
         await server.connect(transport as unknown as Parameters<Server["connect"]>[0]);
         await transport.handleRequest(request.raw, reply.raw, request.body);
       },

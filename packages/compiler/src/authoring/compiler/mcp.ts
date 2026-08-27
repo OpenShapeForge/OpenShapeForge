@@ -15,8 +15,9 @@
  * Input:  Core entity definition (authored `mcp` block).
  * Output: McpSection | undefined — undefined means "no MCP exposure".
  */
-import type { McpConfig, McpOperationKey, McpSection } from "../types.js";
+import type { CrudSection, McpConfig, McpOperationKey, McpSection } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
+import { limitCrudOperations } from "./crud.js";
 
 export const MCP_OPERATION_KEYS: readonly McpOperationKey[] = [
   "list",
@@ -45,6 +46,7 @@ export function deriveToolPrefix(entityName: string): string {
 
 export function buildMcp(
   coreEntity: LoadedArtifacts["coreEntity"],
+  crud?: CrudSection,
 ): McpSection | undefined {
   const authored = coreEntity.mcp;
   if (authored === undefined || authored === false) return undefined;
@@ -61,9 +63,12 @@ export function buildMcp(
     );
   }
 
-  const operations = Object.fromEntries(
+  const requestedOperations = Object.fromEntries(
     MCP_OPERATION_KEYS.map((key) => [key, config.operations?.[key] !== false]),
   ) as Record<McpOperationKey, boolean>;
+  const operations = crud
+    ? limitCrudOperations(requestedOperations, crud)
+    : requestedOperations;
 
   return {
     toolPrefix,

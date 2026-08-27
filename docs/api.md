@@ -13,6 +13,8 @@ Endpoints (`src/roles/api.ts`):
 | `POST/GET /api/graphql` | GraphQL (GraphiQL enabled unless `NODE_ENV=production`) |
 | `/api/rest/v1/<basePath>[/:id]` | Generated REST (entities that opt in via the `rest:` block) |
 | `GET /api/rest/openapi.json` | Generated OpenAPI 3.1 spec for the REST surface |
+| `POST /api/documents` | Atomically create a document and its first immutable version |
+| `POST /api/documents/:documentId/versions` | Atomically append a version and advance `currentVersion` |
 | `GET /api/health`, `/api/ready`, `/api/graphql/health` | liveness/readiness |
 
 On startup (`onReady`) the API compares the database's applied
@@ -22,15 +24,19 @@ generated-schema checksum with the bundled manifest — see
 ## The generic CRUD engine
 
 `src/graphql/generated-entity-schema.ts` builds the SDL and resolvers from
-every manifest table with `generatedCrud: true`, not `domainInternal`, a
-primary key, and a `source.graphql` block. Per entity `Thing` it emits:
+every manifest table with `generatedCrudEligible: true`, not `domainInternal`, a
+primary key, and a `source.graphql` block. The entity's common
+`source.crud.operations` policy decides which root queries and mutations are
+actually emitted and is enforced again inside the shared CRUD service before
+SQL. Per entity `Thing` it can emit:
 
 - `type Thing` — one field per column (snake_case → camelCase via
   `sourceField`), plus relationship fields and `<rel>Aggregate:
   AggregateResult!` (`{ count }`).
 - `ThingConnection` / `ThingEdge` / `PageInfo`, `ThingFilter`, `ThingSort`,
   `CreateThingInput`, `UpdateThingInput`.
-- Queries `thing(id: ID!)` and `things(filter, sort, first, after)`.
+- Queries `thing(id: ID!)` and `things(filter, sort, first, after)` when `get`
+  and `list` are enabled.
 - Mutations `createThing(input)`, `updateThing(input)` (input carries `id`),
   `deleteThing(id): Boolean!`.
 
@@ -83,6 +89,8 @@ resolvers — same auth (`resolveSessionContext`), same tenant scoping and RLS
 session, same role enforcement and field-level classification (see
 [below](#authentication--authorization)), same filter/sort/cursor semantics,
 same camelCase field names. Disabled operations simply have no route (404).
+The transport-specific `rest.operations` flags are intersected with the common
+`crud.operations` policy, so REST can narrow but never widen entity exposure.
 
 REST-specific semantics:
 
@@ -102,7 +110,8 @@ REST-specific semantics:
 - **Errors** — `{ "error": { "code", "message" } }`; the CRUD layer's
   GraphQL error codes map to statuses in `src/rest/http-error.ts`
   (`BAD_USER_INPUT` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403,
-  `GENERATED_CRUD_NOT_ENABLED` 404, `DATABASE_NOT_CONFIGURED` 503; anything
+  `GENERATED_CRUD_NOT_ENABLED` / `GENERATED_CRUD_OPERATION_NOT_ENABLED` 404,
+  `DATABASE_NOT_CONFIGURED` 503; anything
   unexpected is a redacted 500).
 - **OpenAPI** — `bun run generate` also emits
   `apps/api/src/generated/rest/openapi.json` (always, empty `paths` when no
@@ -119,6 +128,39 @@ It differs from REST in two ways that matter for authorization: `tools/list` is
 resolved per session, so a caller is never shown a tool it lacks the roles for,
 and classified fields are withheld from the advertised schemas as well as
 redacted from responses. See [mcp.md](mcp.md).
+
+## Document version commands
+
+`Document` is the stable metadata container. Binary and version facts
+(`fileName`, `mimeType`, `storageLocation`, `versionLabel`, `checksum`) exist
+only on `DocumentVersion`. A version always has a `documentId`; the database
+enforces tenant-consistent ownership, unique `(tenant, document, versionLabel)`
+and a `currentVersion` pointer to that same document.
+
+`currentVersionId` is server-managed: generated update inputs and workflow
+forms do not expose it, and a database guard rejects direct application-role
+changes. Optional `caseFileId`, `caseId`, `relationId`, and version `accountId`
+references must also resolve inside the authenticated tenant.
+
+Generated GraphQL, REST and MCP expose `DocumentVersion` read-only. The
+restricted application database role cannot insert, update or delete its rows
+directly, even if a broad grant is accidentally restored: a database trigger
+refuses the write. Mutations use two narrowly scoped commands instead:
+
+Generated `Document` create is disabled as well, so a new container cannot be
+created without its first version; existing metadata remains updateable.
+
+- `POST /api/documents` accepts `{ document, version }`, creates the container
+  and first version, and sets `currentVersion` in one transaction.
+- `POST /api/documents/:documentId/versions` accepts `{ version }`, locks the
+  container, inserts the immutable version, and advances `currentVersion` in
+  one transaction. The lock serializes concurrent appends.
+
+Both require an authenticated tenant/user session with
+`CaseFile.All.ReadWrite`. Success is `201` with
+`{ documentId, documentVersionId }`. A duplicate version label is `409`; bad
+references or values are `400`; an invisible document is `404`. A failure while
+creating the first version rolls back the document too.
 
 ## The tenant control surface
 
@@ -383,7 +425,7 @@ manifest instead (`db/migrations/worker-role.ts`):
 | --- | --- |
 | `workerAccess` | the queue a worker claims across tenants |
 | `workerDml: true` | everything reached inside one tenant's session — run tables, node catalog, trigger registry |
-| `generatedCrud` | the business entities, because a generated `entity.<slug>.<action>` node exists for every one of them |
+| `generatedCrudEligible` | the business entities, because one or more generated `entity.<slug>.<action>` nodes may exist for them |
 
 `workerDml` is the second declaration, a boolean rather than a role name: the
 grant is made to the single worker LOGIN role, and it is legal on a **global**
@@ -479,7 +521,7 @@ no entity events. Details:
   tokens carry the normalized names from the generated realm, trusted-context
   callers typically send the authored names; both match. Comparison is exact
   and case-sensitive.
-- A generatedCrud table without role metadata (stale artifacts predating the
+- A generated-CRUD-eligible table without role metadata (stale artifacts predating the
   bridge) is **denied** with a distinct "no role metadata" message.
 - Error messages name only the entity and operation, never the allowed role
   list (no role enumeration for authenticated probes).

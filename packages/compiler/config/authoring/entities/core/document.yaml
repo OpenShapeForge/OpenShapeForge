@@ -3,7 +3,7 @@ kind: coreEntity
 module: core
 entity: Document
 title: Document
-description: A governed document record (metadata plus optional file) linked to a case file, optionally a case, and optionally a relation.
+description: A governed document container linked to a case file, optionally a case, and optionally a relation; version and artifact facts live on DocumentVersion.
 language: en
 displayTemplate: "{{title}}"
 filterField: title
@@ -13,6 +13,15 @@ labels:
 domains:
   - cases
   - records
+indexes:
+  - name: documents_tenant_identity_uidx
+    fields:
+      - tenantId
+      - id
+    unique: true
+crud:
+  operations:
+    create: false
 retention:
   mode: policyRef
   policy: records-archive-7y
@@ -189,100 +198,6 @@ fields:
     persisted:
       column: author
       storageClass: core
-  - key: fileName
-    valueType: string
-    required: false
-    readOnly: true
-    label:
-      en: File name
-      nl: Bestandsnaam
-    description:
-      en: Original file name of the stored binary, when applicable.
-      nl: Oorspronkelijke bestandsnaam van het opgeslagen bestand, indien van toepassing.
-    help:
-      en: Set automatically when uploading a file; useful for users and exports.
-      nl: Wordt automatisch gezet bij upload; handig voor gebruikers en exports.
-    validation:
-      maxLength: 255
-    persisted:
-      column: file_name
-      storageClass: core
-  - key: mimeType
-    valueType: string
-    required: false
-    readOnly: true
-    label:
-      en: MIME type
-      nl: MIME-type
-    description:
-      en: Technical MIME type of the stored file (e.g. application/pdf).
-      nl: Technisch MIME-type van het bestand (bijv. application/pdf).
-    help:
-      en: Derived from the upload or storage layer; used for preview and validation rules.
-      nl: Afgeleid van upload of opslag; gebruikt voor preview en validatieregels.
-    validation:
-      maxLength: 150
-    persisted:
-      column: mime_type
-      storageClass: core
-  - key: storageLocation
-    valueType: string
-    required: false
-    label:
-      en: File
-      nl: Bestand
-    description:
-      en: Storage pointer or key for the uploaded binary (object store, blob id, or path token).
-      nl: Opslagpointer of sleutel voor het binaire bestand (objectstore, blob-id of pad-token).
-    help:
-      en: Upload the file here; the platform fills file name, MIME type, and checksum as needed.
-      nl: Upload het bestand hier; het platform vult zo nodig bestandsnaam, MIME-type en checksum.
-    validation:
-      maxLength: 1000
-    persisted:
-      column: storage_location
-      storageClass: core
-    render:
-      component: FileUpload
-      props:
-        fileNameField: fileName
-        mimeTypeField: mimeType
-        checksumField: checksum
-  - key: versionLabel
-    valueType: string
-    required: false
-    label:
-      en: Version label
-      nl: Versielabel
-    description:
-      en: Human-readable label for this version within the version chain.
-      nl: Menselijk leesbaar label voor deze versie binnen de versiereeks.
-    help:
-      en: Examples include “1.0”, “Final”, or “2024-03 concept B”.
-      nl: Bijvoorbeeld “1.0”, “Definitief” of “2024-03 concept B”.
-    validation:
-      maxLength: 50
-    persisted:
-      column: version_label
-      storageClass: core
-  - key: checksum
-    valueType: string
-    required: false
-    readOnly: true
-    label:
-      en: Checksum
-      nl: Checksum
-    description:
-      en: Cryptographic hash of the stored file for integrity verification.
-      nl: Cryptografische hash van het bestand voor integriteitscontrole.
-    help:
-      en: Generated on upload; used to detect tampering or accidental corruption.
-      nl: Gegenereerd bij upload; gebruikt om wijziging of corruptie te detecteren.
-    validation:
-      maxLength: 128
-    persisted:
-      column: checksum
-      storageClass: core
   - key: isExternal
     valueType: boolean
     required: true
@@ -353,6 +268,22 @@ fields:
     render:
       component: DateTimePicker
       props: {}
+  - key: currentVersionId
+    valueType: string
+    required: false
+    readOnly: true
+    immutable: true
+    label:
+      en: Current version ID
+      nl: Huidige versie-ID
+    description:
+      en: Server-managed pointer to the latest version created through the document version command.
+      nl: Door de server beheerde verwijzing naar de nieuwste versie die via het documentversiecommando is gemaakt.
+    validation:
+      format: uuid
+    persisted:
+      column: current_version_id
+      storageClass: core
 relationships:
   - key: caseFile
     kind: belongsTo
@@ -392,7 +323,7 @@ relationships:
 workflow:
   nodes:
     actions:
-      create: true
+      create: false
       getOne: true
       list: true
       update: true

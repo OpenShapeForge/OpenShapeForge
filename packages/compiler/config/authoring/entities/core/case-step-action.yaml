@@ -13,6 +13,9 @@ labels:
 domains:
   - cases
   - workflow
+# Runtime scheduler rows are created and advanced by case/workflow services.
+# Generic transports and workflow entity nodes must never mutate them.
+crud: false
 authorization:
   roles:
     read:

@@ -114,6 +114,14 @@ workflow:                    # opt-in to entity workflow nodes (consumed by
   nodes:                     # the workflow plugin; see plugins.md)
     actions: { create: true, getOne: true, list: true, update: true, delete: true }
 
+crud:                       # common upper bound for every generated surface
+  operations:              # absent crud: keeps the historical all-true default
+    list: true
+    get: true
+    create: false          # read-only example
+    update: false
+    delete: false
+
 rest: true                   # opt-in generated REST exposure (see below)
 ```
 
@@ -153,6 +161,40 @@ Notes on what the compiler does with this:
   Keycloak-normalized (Dutch → English) forms so bearer tokens and
   trusted-context callers both match. See
   [api.md](api.md#authentication--authorization).
+
+### `crud:` — common generated-operation policy
+
+This field is part of compiled entity contract version 2. Consumers that
+validate compiled contracts must upgrade before accepting version 2. The
+version bump makes this wire-contract change detectable; it is not by itself
+a runtime barrier for plugin code that does not validate supported contract
+versions. Generated manifests therefore also encode partial policies with
+`generatedCrudEligible: true` and the legacy `generatedCrud: false`, so an old
+runtime hides the entity instead of exposing full CRUD.
+
+`crud` is the transport-independent upper bound for GraphQL, REST, MCP and
+generated workflow nodes. Existing entities that
+omit it keep all five operations enabled. `crud: false` disables every generic
+operation; the object form can make an entity read-only or expose a smaller
+set. `rest.operations`, `mcp.operations` and `workflow.nodes.actions` may
+further narrow the common policy but cannot widen it.
+
+Declare `crud` only on a core entity, a standalone `contexts/*/full` entity, or
+an `entityPatch`. A `contexts/*/partial` profile extends fields on an existing
+resource and is rejected if it declares its own CRUD policy.
+
+The stock generated entity pages are emitted only when all five operations are
+enabled, because those pages assume the complete list/detail/edit surface.
+Entities with a partial policy use a purpose-built UI.
+
+Per-operation exposure is a prerequisite for immutable, versioned resources:
+it removes generic mutation entry points, but remains defense in depth and does
+not replace database-level immutability for published records.
+
+Because this is a security policy, authoring layers are monotonic: an
+`entityPatch` may turn an operation from `true` to `false`, but a later layer
+cannot restore an operation disabled by an earlier layer. Change the owning
+layer when broader exposure is intended.
 
 ### `rest:` — generated REST exposure
 
@@ -352,7 +394,6 @@ verbatim into generated TypeScript, GraphQL, SQL, route strings and MCP tool
 names; a shape schema documents a shape, and both layers must fail closed
 independently.
 
-To keep a generated table **out of the CRUD surface**, its slug must be in
-`generatedCrudDeniedEntitySlugs` (`packages/compiler/src/active-manifest.ts`);
-such tables are marked `domainInternal` and get no GraphQL surface (used for
-secret-bearing or runtime-scheduler tables).
+To keep an authored entity **out of every generated CRUD surface**, set
+`crud: false` on that entity. Secret-bearing and runtime-scheduler entities in
+the base catalog use this declaration; no compiled slug denylist is involved.

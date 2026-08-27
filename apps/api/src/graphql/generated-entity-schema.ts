@@ -1,13 +1,23 @@
 // SPDX-License-Identifier: BUSL-1.1
+/**
+ * Generated entity SDL and resolvers.
+ *
+ * Authored descriptions are intentionally present in the schema used by local
+ * GraphiQL and other development/schema tooling. Production currently blocks
+ * introspection in yoga.ts, so deployed anonymous clients cannot retrieve
+ * them; keeping one schema in every environment avoids runtime schema drift.
+ */
 import {
   GraphQLError,
   Kind,
   type GraphQLResolveInfo,
   type SelectionSetNode,
 } from "graphql";
+import graphqlDocumentation from "../generated/graphql/documentation.json" with { type: "json" };
 import {
   getGeneratedCrudTables,
   getGeneratedEntity,
+  isGeneratedCrudOperationEnabled,
   createGeneratedEntity,
   deleteGeneratedEntity,
   isWritableColumn,
@@ -26,10 +36,93 @@ type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
 type GraphqlMetadata = NonNullable<NonNullable<GeneratedTable["source"]>["graphql"]>;
 
+export type GraphqlEntityDocumentation = {
+  typeName: string;
+  description?: string;
+  fields: Array<{
+    name: string;
+    description?: string;
+    substringFilterDescription?: string;
+  }>;
+};
+
+export function createGraphqlDocumentationIndex(
+  catalog: unknown,
+): ReadonlyMap<string, GraphqlEntityDocumentation> {
+  if (!catalog || typeof catalog !== "object" ||
+      !Array.isArray((catalog as { entities?: unknown }).entities)) {
+    throw new Error("Generated GraphQL documentation must contain an entities array.");
+  }
+  const entities = (catalog as { entities: unknown[] }).entities;
+  for (const entity of entities) {
+    const candidate = entity as Partial<GraphqlEntityDocumentation> | null;
+    if (!candidate || typeof candidate !== "object" ||
+        typeof candidate.typeName !== "string" ||
+        (candidate.description !== undefined && typeof candidate.description !== "string") ||
+        !Array.isArray(candidate.fields) ||
+        candidate.fields.some((field) =>
+          !field || typeof field !== "object" ||
+          typeof field.name !== "string" ||
+          (field.description !== undefined && typeof field.description !== "string") ||
+          (field.substringFilterDescription !== undefined &&
+            typeof field.substringFilterDescription !== "string")
+        )) {
+      throw new Error("Generated GraphQL documentation contains an invalid entity entry.");
+    }
+  }
+  return new Map(
+    (entities as GraphqlEntityDocumentation[]).map((entity) => [entity.typeName, entity]),
+  );
+}
+
 const tables = getGeneratedCrudTables().filter((table) => table.source?.graphql);
 const tablesByGraphqlType = new Map(
   tables.map((table) => [table.source!.graphql!.typeName, table]),
 );
+const documentationByGraphqlType = createGraphqlDocumentationIndex(
+  graphqlDocumentation,
+);
+
+type CrudOperation = "list" | "get" | "create" | "update" | "delete";
+
+function operationEnabled(table: GeneratedTable, operation: CrudOperation): boolean {
+  return isGeneratedCrudOperationEnabled(table, operation);
+}
+
+export function renderGeneratedQueryFields(table: GeneratedTable): string[] {
+  const graphql = assertGraphqlMetadata(table);
+  return [
+    ...(operationEnabled(table, "get")
+      ? [`      ${graphql.singleQueryName}(id: ID!): ${graphql.typeName}`]
+      : []),
+    ...(operationEnabled(table, "list")
+      ? [`      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${graphql.typeName}Connection!`]
+      : []),
+  ];
+}
+
+export function renderGeneratedMutationFields(table: GeneratedTable): string[] {
+  const graphql = assertGraphqlMetadata(table);
+  return [
+    ...(operationEnabled(table, "create")
+      ? [`      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${graphql.typeName}`]
+      : []),
+    ...(operationEnabled(table, "update")
+      ? [`      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${graphql.typeName}`]
+      : []),
+    ...(operationEnabled(table, "delete")
+      ? [`      ${graphql.deleteMutationName}(id: ID!): Boolean!`]
+      : []),
+  ];
+}
+
+function relationshipReadEnabled(
+  relationship: GeneratedCrudRelationship,
+  target: GeneratedTable | undefined,
+): boolean {
+  if (!target) return false;
+  return operationEnabled(target, relationship.resolve === "belongsTo" ? "get" : "list");
+}
 
 function assertGraphqlMetadata(table: GeneratedTable): GraphqlMetadata {
   const graphql = table.source?.graphql;
@@ -94,23 +187,62 @@ function relationFieldType(relationship: GeneratedCrudRelationship) {
     : relationship.target;
 }
 
+function renderDescription(description: string | undefined, indent: string): string {
+  if (!description) return "";
+  let safe = "";
+  for (let index = 0; index < description.length; index += 1) {
+    const code = description.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = description.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        safe += description.slice(index, index + 2);
+        index += 1;
+      } else {
+        safe += "\ufffd";
+      }
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      safe += "\ufffd";
+    } else {
+      safe += description.charAt(index);
+    }
+  }
+  return `${indent}${JSON.stringify(safe)}\n`;
+}
+
+function appendDescription(
+  description: string | undefined,
+  addition: string,
+): string {
+  return description ? `${description} ${addition}` : addition;
+}
+
 /**
  * Exported for tests: the shipped manifest declares no classified column, so
  * the nullability rule above (#168) has nothing to act on in
  * `generatedEntityTypeDefs` and asserting against it would be vacuous. Calling
  * this with a synthetic table exercises the real rendering path.
  */
-export function renderTypeDefinition(table: GeneratedTable) {
+export function renderTypeDefinition(
+  table: GeneratedTable,
+  documentationIndex: ReadonlyMap<string, GraphqlEntityDocumentation> =
+    documentationByGraphqlType,
+) {
   const graphql = assertGraphqlMetadata(table);
+  const documentation = documentationIndex.get(graphql.typeName);
+  const fieldDocumentation = new Map(
+    (documentation?.fields ?? []).map((field) => [field.name, field]),
+  );
+  const filterFieldNames = new Set(table.columns.map(fieldNameForColumn));
   const columnFields = table.columns
     .map((column) => {
       const field = fieldNameForColumn(column);
-      return `      ${field}: ${graphqlScalarForColumn(column)}${nonNullSuffix(column)}`;
+      return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
+        `      ${field}: ${graphqlScalarForColumn(column)}${nonNullSuffix(column)}`;
     });
   const relationshipFields = (graphql.relationships ?? [])
     .filter((relationship) =>
       isValidGraphqlName(relationship.name) &&
-      tablesByGraphqlType.has(relationship.target)
+      relationshipReadEnabled(relationship, tablesByGraphqlType.get(relationship.target))
     )
     .flatMap((relationship) => [
       `      ${relationship.name}: ${relationFieldType(relationship)}`,
@@ -129,16 +261,23 @@ export function renderTypeDefinition(table: GeneratedTable) {
   const createInputBody = creatableColumns.length === 0
     ? "      _empty: String"
     : creatableColumns
-        .map((column) => `      ${fieldNameForColumn(column)}: ${graphqlScalarForColumn(column)}`)
+        .map((column) => {
+          const field = fieldNameForColumn(column);
+          return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
+            `      ${field}: ${graphqlScalarForColumn(column)}`;
+        })
         .join("\n");
   const updateInputBody = [
     "      id: ID!",
-    ...updatableColumns.map(
-      (column) => `      ${fieldNameForColumn(column)}: ${graphqlScalarForColumn(column)}`,
-    ),
+    ...updatableColumns.map((column) => {
+      const field = fieldNameForColumn(column);
+      return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
+        `      ${field}: ${graphqlScalarForColumn(column)}`;
+    }),
   ].join("\n");
 
   return `
+${renderDescription(documentation?.description, "    ")}
     type ${graphql.typeName} {
 ${[...columnFields, ...relationshipFields].join("\n")}
     }
@@ -156,10 +295,42 @@ ${[...columnFields, ...relationshipFields].join("\n")}
 
     input ${graphql.typeName}Filter {
 ${table.columns
-  .map((column) => {
+  .flatMap((column) => {
     const field = fieldNameForColumn(column);
     const scalar = graphqlScalarForColumn(column);
-    return `      ${field}: ${scalar}\n      ${field}In: [${scalar}!]`;
+    const fieldDocumentationEntry = fieldDocumentation.get(field);
+    const directDescription = column.type === "text"
+      ? fieldDocumentationEntry?.substringFilterDescription ??
+        fieldDocumentationEntry?.description
+      : fieldDocumentationEntry?.description;
+    const definitions: string[] = [];
+    // The CRUD layer reserves a trailing `In` for exact-any filters, so a
+    // real field with that suffix has no unambiguous direct filter spelling.
+    if (!field.endsWith("In")) {
+      definitions.push(
+        `${renderDescription(
+          appendDescription(
+            directDescription,
+            column.type === "text"
+              ? "Matches a case-insensitive substring."
+              : "Matches exactly.",
+          ),
+          "      ",
+        )}      ${field}: ${scalar}`,
+      );
+    }
+    // A real `<field>In` column wins the name. Suppress the generated alias
+    // so one authored x/xIn pair cannot make the entire schema invalid.
+    if (!filterFieldNames.has(`${field}In`)) {
+      definitions.push(`${renderDescription(
+        appendDescription(
+          fieldDocumentationEntry?.description,
+          "Matches exactly against any supplied value.",
+        ),
+        "      ",
+      )}      ${field}In: [${scalar}!]`);
+    }
+    return definitions;
   })
   .join("\n")}
     }
@@ -189,28 +360,61 @@ export const generatedEntityTypeDefs = /* GraphQL */ `
     count: Int!
   }
 
-${tables.map(renderTypeDefinition).join("\n")}
+${tables.map((table) => renderTypeDefinition(table)).join("\n")}
 `;
 
+export function renderQueryFields(
+  table: GeneratedTable,
+): string {
+  const graphql = assertGraphqlMetadata(table);
+  return [
+    ...(operationEnabled(table, "get")
+      ? [`${renderDescription(
+          `Fetches one ${graphql.typeName} record by id.`,
+          "      ",
+        )}      ${graphql.singleQueryName}(id: ID!): ${graphql.typeName}`]
+      : []),
+    ...(operationEnabled(table, "list")
+      ? [`${renderDescription(
+          `Returns a page of ${graphql.typeName} records.`,
+          "      ",
+        )}      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${graphql.typeName}Connection!`]
+      : []),
+  ].join("\n");
+}
+
 export const generatedEntityQueryFields = tables
-  .map((table) => {
-    const graphql = assertGraphqlMetadata(table);
-    return [
-      `      ${graphql.singleQueryName}(id: ID!): ${graphql.typeName}`,
-      `      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${graphql.typeName}Connection!`,
-    ].join("\n");
-  })
+  .map((table) => renderQueryFields(table))
   .join("\n");
 
+export function renderMutationFields(
+  table: GeneratedTable,
+): string {
+  const graphql = assertGraphqlMetadata(table);
+  return [
+    ...(operationEnabled(table, "create")
+      ? [`${renderDescription(
+          `Creates a ${graphql.typeName} record.`,
+          "      ",
+        )}      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${graphql.typeName}`]
+      : []),
+    ...(operationEnabled(table, "update")
+      ? [`${renderDescription(
+          `Partially updates a ${graphql.typeName} record.`,
+          "      ",
+        )}      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${graphql.typeName}`]
+      : []),
+    ...(operationEnabled(table, "delete")
+      ? [`${renderDescription(
+          `Deletes a ${graphql.typeName} record by id.`,
+          "      ",
+        )}      ${graphql.deleteMutationName}(id: ID!): Boolean!`]
+      : []),
+  ].join("\n");
+}
+
 export const generatedEntityMutationFields = tables
-  .map((table) => {
-    const graphql = assertGraphqlMetadata(table);
-    return [
-      `      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${graphql.typeName}`,
-      `      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${graphql.typeName}`,
-      `      ${graphql.deleteMutationName}(id: ID!): Boolean!`,
-    ].join("\n");
-  })
+  .map((table) => renderMutationFields(table))
   .join("\n");
 
 function requireGeneratedDb(context: GraphqlContext) {
@@ -291,7 +495,7 @@ const queryResolvers = Object.fromEntries(
     const graphql = assertGraphqlMetadata(table);
     const authorization = table.source?.authorization;
     return [
-      [
+      ...(operationEnabled(table, "get") ? [[
         graphql.singleQueryName,
         async (_parent: unknown, args: { id: string }, context: GraphqlContext) => {
           const db = requireGeneratedDb(context);
@@ -301,8 +505,8 @@ const queryResolvers = Object.fromEntries(
             id: args.id,
           });
         },
-      ],
-      [
+      ]] : []),
+      ...(operationEnabled(table, "list") ? [[
         graphql.listQueryName,
         async (
           _parent: unknown,
@@ -329,7 +533,7 @@ const queryResolvers = Object.fromEntries(
           });
           return toConnection(result.rows, result.nextCursor, result.totalCount);
         },
-      ],
+      ]] : []),
     ];
   }),
 );
@@ -339,7 +543,7 @@ const mutationResolvers = Object.fromEntries(
     const graphql = assertGraphqlMetadata(table);
     const authorization = table.source?.authorization;
     return [
-      [
+      ...(operationEnabled(table, "create") ? [[
         graphql.createMutationName,
         async (_parent: unknown, args: { input: Record<string, unknown> }, context: GraphqlContext) => {
           const db = requireGeneratedDb(context);
@@ -349,8 +553,8 @@ const mutationResolvers = Object.fromEntries(
             values: args.input,
           });
         },
-      ],
-      [
+      ]] : []),
+      ...(operationEnabled(table, "update") ? [[
         graphql.updateMutationName,
         async (_parent: unknown, args: { input: Record<string, unknown> & { id: string } }, context: GraphqlContext) => {
           const db = requireGeneratedDb(context);
@@ -361,8 +565,8 @@ const mutationResolvers = Object.fromEntries(
             values: args.input,
           });
         },
-      ],
-      [
+      ]] : []),
+      ...(operationEnabled(table, "delete") ? [[
         graphql.deleteMutationName,
         async (_parent: unknown, args: { id: string }, context: GraphqlContext) => {
           const db = requireGeneratedDb(context);
@@ -372,7 +576,7 @@ const mutationResolvers = Object.fromEntries(
             id: args.id,
           });
         },
-      ],
+      ]] : []),
     ];
   }),
 );
@@ -389,7 +593,7 @@ const objectResolvers = Object.fromEntries(
     const relationships = Object.fromEntries(
       (graphql.relationships ?? []).flatMap((relationship) => {
         const targetTable = tablesByGraphqlType.get(relationship.target);
-        if (!targetTable) {
+        if (!targetTable || !relationshipReadEnabled(relationship, targetTable)) {
           return [];
         }
         const targetAuthorization = targetTable.source?.authorization;

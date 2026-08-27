@@ -10,13 +10,14 @@
     "entity",
     "storage",
     "model",
+    "crud",
     "graphql",
     "views",
     "canonical",
     "profiles"
   ],
   "properties": {
-    "contractVersion": { "type": "integer", "const": 1 },
+    "contractVersion": { "type": "integer", "const": 2 },
     "kind": { "type": "string", "const": "compiledEntityContract" },
     "entity": {
       "type": "object",
@@ -88,6 +89,25 @@
         }
       }
     },
+    "crud": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operations"],
+      "properties": {
+        "operations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["list", "get", "create", "update", "delete"],
+          "properties": {
+            "list": { "type": "boolean" },
+            "get": { "type": "boolean" },
+            "create": { "type": "boolean" },
+            "update": { "type": "boolean" },
+            "delete": { "type": "boolean" }
+          }
+        }
+      }
+    },
     "graphql": {
       "type": "object",
       "additionalProperties": false,
@@ -148,6 +168,7 @@
                     "column": { "type": "string" },
                     "mappedFrom": { "type": "string" },
                     "label": { "$ref": "core-entity.schema.json#/$defs/localizedText" },
+                    "description": { "type": "string" },
                     "semanticType": { "type": "string" },
                     "render": { "$ref": "#/$defs/compiledViewRender" },
                     "displayRender": { "$ref": "#/$defs/compiledViewRender" },

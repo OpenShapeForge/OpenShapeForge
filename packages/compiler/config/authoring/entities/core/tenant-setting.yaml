@@ -12,6 +12,9 @@ labels:
   nl: Tenantinstelling
 domains:
   - core
+# Tenant settings may contain provider keys and other secret values. They are
+# managed only by targeted settings APIs, never by generated CRUD.
+crud: false
 authorization:
   roles:
     read:

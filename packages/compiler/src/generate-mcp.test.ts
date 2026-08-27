@@ -27,7 +27,7 @@ const contract = (
   } = {},
 ): CompiledEntityContract =>
   ({
-    contractVersion: 1,
+    contractVersion: 2,
     kind: "compiledEntityContract",
     entity: {
       id: `core.${overrides.name ?? "Widget"}`,
@@ -44,6 +44,7 @@ const contract = (
       fields: overrides.fields ?? [field({ key: "name" })],
       relationships: overrides.relationships ?? [],
     },
+    crud: { operations: { list: true, get: true, create: true, update: true, delete: true } },
     graphql: {} as never,
     mcp: overrides.mcp ?? {
       toolPrefix: "widget",

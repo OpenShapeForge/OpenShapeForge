@@ -22,6 +22,7 @@ import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
 import { registerConnectorOAuthRoutes } from "../connectors/oauth-routes.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import { registerControlRestRoutes } from "../control/rest-routes.js";
+import { registerDocumentRestRoutes } from "../documents/rest-routes.js";
 import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
 import { registerProtectedResourceMetadata } from "../mcp/protected-resource-metadata.js";
 import { registerApiKeyRestRoutes } from "../auth/api-key/rest-routes.js";
@@ -324,6 +325,7 @@ export function createApiApp(
     });
 
     registerGeneratedRestRoutes(routes, dbOptions);
+    registerDocumentRestRoutes(routes, dbOptions);
     registerConnectorRestRoutes(routes, {
       ...dbOptions,
       config: readConnectorRuntimeConfig(),

@@ -62,12 +62,21 @@ function fieldNameForColumn(column: Column): string {
   return column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase());
 }
 
-function classifiedColumnForField(
+function classifiedColumnForFilterField(
   columns: readonly Column[],
   field: string,
 ): Column | undefined {
   const filterField = field.endsWith("In") ? field.slice(0, -2) : field;
   return columns.find((column) => fieldNameForColumn(column) === filterField);
+}
+
+function classifiedColumnForSortField(
+  columns: readonly Column[],
+  field: string,
+): Column | undefined {
+  // Sort names are always direct field names; unlike filter keys, a trailing
+  // `In` has no alias meaning and must never be stripped.
+  return columns.find((column) => fieldNameForColumn(column) === field);
 }
 
 /**
@@ -139,11 +148,15 @@ export function assertClassifiedQueryFieldsAllowed(
   if (canReadClassifiedColumns(authorization, session)) return;
 
   const requestedFields = [
-    ...Object.keys(filter ?? {}),
-    ...(sort?.field ? [sort.field] : []),
+    ...Object.keys(filter ?? {}).map((field) => ({
+      field,
+      column: classifiedColumnForFilterField(columns, field),
+    })),
+    ...(sort?.field
+      ? [{ field: sort.field, column: classifiedColumnForSortField(columns, sort.field) }]
+      : []),
   ];
   const classifiedField = requestedFields
-    .map((field) => ({ field, column: classifiedColumnForField(columns, field) }))
     .find(({ column }) => column?.classification);
 
   if (!classifiedField?.column) return;

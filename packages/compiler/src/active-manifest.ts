@@ -40,14 +40,6 @@ export function resolveActiveAuthoringDir(repoRoot: string): string {
 }
 
 const replacedBaseTableKeys = new Set<string>();
-export const generatedCrudDeniedEntitySlugs = new Set([
-  // Tenant settings can hold provider keys and other secret values. Keep the
-  // table generated and tenant-scoped, but never expose it through generated CRUD.
-  "tenant-setting",
-  // Runtime scheduler table. Case-step actions are created and advanced only
-  // by workspace/workflow APIs, never by generated CRUD or workflow nodes.
-  "case-step-action",
-]);
 
 function tableKey(table: Pick<TableDefinition, "schema" | "name">) {
   return `${table.schema}.${table.name}`;
@@ -144,13 +136,8 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
           contextEntityAllowlist: contextEntitySpecs,
           schemaByModule: { core: "erp" },
           relationshipRegister: baseManifest.relationshipRegister ?? [],
-          generatedCrudAllowlist: authoringEntitySlugs.filter(
-            (slug) => !generatedCrudDeniedEntitySlugs.has(slug),
-          ),
-          contextEntityGeneratedCrudAllowlist: contextEntitySpecs.filter(
-            (spec) => !generatedCrudDeniedEntitySlugs.has(spec.name),
-          ),
-          domainInternalEntities: [...generatedCrudDeniedEntitySlugs],
+          generatedCrudAllowlist: authoringEntitySlugs,
+          contextEntityGeneratedCrudAllowlist: contextEntitySpecs,
           onCandidate: (candidate) => entities.push(candidate),
         },
       );

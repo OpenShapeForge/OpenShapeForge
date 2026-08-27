@@ -32,6 +32,10 @@ not generated-CRUD enabled fails the build, exactly as `rest:` does — MCP tool
 delegate to the CRUD layer, so the authoring intent would otherwise evaporate
 silently.
 
+The common entity `crud.operations` policy is the upper bound. MCP operation
+flags may hide additional tools but cannot restore an operation disabled by
+that policy; the shared CRUD service enforces the same decision at invocation.
+
 ## Endpoint
 
 `POST /api/mcp` — Streamable HTTP transport, stateless (no session

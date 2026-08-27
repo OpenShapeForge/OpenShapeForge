@@ -17,8 +17,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-//When plugins become external we need to have this in packages same for other direct files
-import { generatedCrudDeniedEntitySlugs } from "../../../../packages/compiler/src/active-manifest.js";
 import {
   generateWorkflowEntityNodeArtifacts,
   getWorkflowCoreEntityGraphqlRegistry,
@@ -250,7 +248,10 @@ function enrichEntityIdSemanticType(definition: unknown): unknown {
  * the YAML catalog is the single source of truth for every semantic type
  * the runtime sees.
  */
-function loadCategorizedSemanticTypes(authoringDir: string): CategorizedSemanticTypes {
+function loadCategorizedSemanticTypes(
+  authoringDir: string,
+  readableEntitySlugs: ReadonlySet<string>,
+): CategorizedSemanticTypes {
   const core: Record<string, unknown> = {};
   const context: Record<string, unknown> = {};
   const entityIds: Record<string, unknown> = {};
@@ -262,7 +263,7 @@ function loadCategorizedSemanticTypes(authoringDir: string): CategorizedSemantic
   ) => {
     const def = definition as { kind?: string; entity?: string } | undefined;
     if (def?.kind === "entityId") {
-      if (def.entity && generatedCrudDeniedEntitySlugs.has(toKebabCase(def.entity))) {
+      if (def.entity && !readableEntitySlugs.has(toKebabCase(def.entity))) {
         return;
       }
       entityIds[key] = enrichEntityIdSemanticType(definition);
@@ -648,9 +649,12 @@ function buildLabelAutocompleteSource(contractImportPath: string): string {
 
 export function generateWorkflowContractArtifacts(authoringDir: string): Map<string, string> {
   const files = new Map<string, string>();
-  const categorizedSemanticTypes = loadCategorizedSemanticTypes(authoringDir);
-  const semanticTypeLookupManifest = buildSemanticTypeLookupManifest(categorizedSemanticTypes);
   const coreEntityGraphqlRegistry = getWorkflowCoreEntityGraphqlRegistry(authoringDir);
+  const categorizedSemanticTypes = loadCategorizedSemanticTypes(
+    authoringDir,
+    new Set(Object.keys(coreEntityGraphqlRegistry)),
+  );
+  const semanticTypeLookupManifest = buildSemanticTypeLookupManifest(categorizedSemanticTypes);
 
   const fieldContractSource = buildNodeFieldContractSource();
   const componentDefaultsSource = buildFieldComponentDefaultsSource(authoringDir);

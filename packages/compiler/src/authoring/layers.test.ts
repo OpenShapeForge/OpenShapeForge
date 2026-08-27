@@ -126,6 +126,54 @@ describe("resolveAuthoringLayers", () => {
     ]);
   });
 
+  test("entity patches may narrow generated CRUD operations", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", baseEntity);
+    writeYaml(root, "overlay/entities/core/widget.yaml", {
+      kind: "entityPatch",
+      crud: { operations: { create: false, update: false, delete: false } },
+    });
+    configureLayers(root, ["base", "overlay"]);
+
+    const resolved = resolveAuthoringLayers(root);
+    const merged = YAML.parse(
+      readFileSync(join(resolved, "entities/core/widget.yaml"), "utf8"),
+    );
+    expect(merged.crud.operations).toEqual({ create: false, update: false, delete: false });
+  });
+
+  test("later entity patches cannot widen an earlier CRUD restriction", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", {
+      ...baseEntity,
+      crud: { operations: { update: false, delete: false } },
+    });
+    writeYaml(root, "overlay/entities/core/widget.yaml", {
+      kind: "entityPatch",
+      crud: { operations: { update: true } },
+    });
+    configureLayers(root, ["base", "overlay"]);
+
+    expect(() => resolveAuthoringLayers(root)).toThrow(
+      /widens crud\.operations \(update\).*may only narrow/,
+    );
+  });
+
+  test("removing a CRUD restriction from a later layer is rejected", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", {
+      ...baseEntity,
+      crud: false,
+    });
+    writeYaml(root, "overlay/entities/core/widget.yaml", {
+      kind: "entityPatch",
+      crud: null,
+    });
+    configureLayers(root, ["base", "overlay"]);
+
+    expect(() => resolveAuthoringLayers(root)).toThrow(/widens crud\.operations/);
+  });
+
   test("overlays can add new entities and files", () => {
     const root = makeRepo();
     writeYaml(root, "base/entities/core/widget.yaml", baseEntity);

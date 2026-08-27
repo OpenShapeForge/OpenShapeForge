@@ -104,8 +104,9 @@ Two shape details worth knowing when consuming the manifest in a plugin:
   *serialized* `manifest.json` uses a qualified `name` (`"erp.relations"`)
   with separate `schema`/`table` fields. Render qualified names yourself:
   `` `${table.schema}.${table.name}` ``.
-- CRUD-eligible tables are those with `generatedCrud` and a
-  `source.graphql` block; filter on that (as both shipped examples do).
+- CRUD-eligible tables are selected with `isGeneratedCrudEligible(table)` and
+  a `source.graphql` block. The helper understands both the current
+  `generatedCrudEligible` marker and legacy manifests.
 - A contributed table may declare **`workerAccess: "<role>"`** to let a
   background worker reach it across tenants without `app.bypass_rls`. It
   requires `tenantScoped: true`, widens rather than narrows, and belongs only
@@ -118,7 +119,7 @@ Two shape details worth knowing when consuming the manifest in a plugin:
   PostgreSQL role, and that role gets an enumerated grant rather than the app
   role's whole-schema sweep — so a table nobody declares is a table a worker
   gets `permission denied` on. Legal on a global table, unlike `workerAccess`,
-  and implied by it. `generatedCrud` tables need no declaration: a generated
+  and implied by it. Generated-CRUD-eligible tables need no declaration: a generated
   entity node exists for each, so the sweep derives them.
 
 Schemas are covered automatically: `applyAppRoleGrants` derives the schema
@@ -268,10 +269,10 @@ no Ingress and no probes, because a worker serves no traffic. See
 (~50 lines). It has no platform tables and no authoring layer:
 
 - `ownedPaths: { files: ["docs/entities.generated.md"] }`
-- `generate({ manifest })` filters `generatedCrud` tables with
+- `generate({ manifest })` filters CRUD-eligible tables with
   `source.graphql`, sorts them, and emits one markdown file per run: entity
   heading (`TypeName (\`schema.table\`)`), the authored English label +
-  provenance path, the five GraphQL operation names, and a column table.
+  provenance path, the enabled GraphQL operation names, and a column table.
 
 The output, `docs/entities.generated.md`, is the always-current entity
 reference for this repo (gitignored; recreate with `bun run generate`).

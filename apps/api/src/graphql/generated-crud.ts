@@ -17,11 +17,15 @@ type GeneratedCrudTable = {
   table: string;
   tenantScoped: boolean;
   domainInternal: boolean;
+  generatedCrudEligible?: boolean;
   generatedCrud: boolean;
   primaryKey: string | null;
   columns: GeneratedCrudColumn[];
   source?: {
     authoringEntityName?: string;
+    crud?: {
+      operations: Record<GeneratedCrudExposureOperation, boolean>;
+    };
     graphql?: {
       typeName: string;
       singleQueryName: string;
@@ -83,6 +87,7 @@ type GeneratedCrudTable = {
 };
 
 export type GeneratedCrudOperation = "read" | "create" | "update" | "delete";
+export type GeneratedCrudExposureOperation = "list" | "get" | "create" | "update" | "delete";
 
 export type GeneratedCrudAuthorization = {
   roles: Record<GeneratedCrudOperation, string[]>;
@@ -152,9 +157,26 @@ export type CountedEntityConnection = GeneratedEntityConnection & {
   totalCount: number;
 };
 
+export function isGeneratedCrudTableEligible(table: GeneratedCrudTable): boolean {
+  if (table.domainInternal) return false;
+  return table.generatedCrudEligible === undefined
+    ? table.generatedCrud === true
+    : table.generatedCrudEligible === true;
+}
+
+export function isGeneratedCrudOperationEnabled(
+  table: GeneratedCrudTable,
+  operation: GeneratedCrudExposureOperation,
+): boolean {
+  if (table.source?.crud !== undefined) {
+    return table.source.crud.operations?.[operation] === true;
+  }
+  return table.generatedCrud === true;
+}
+
 const generatedCrudTables = new Map(
   (manifest.tables as GeneratedCrudTable[])
-    .filter((table) => table.generatedCrud && !table.domainInternal && table.primaryKey)
+    .filter((table) => isGeneratedCrudTableEligible(table) && table.primaryKey)
     .map((table) => [table.name, table]),
 );
 
@@ -173,6 +195,14 @@ const entityRoleSets = new Map<string, Partial<Record<GeneratedCrudOperation, Re
   ]),
 );
 
+const AUTHORIZATION_OPERATION: Record<GeneratedCrudExposureOperation, GeneratedCrudOperation> = {
+  list: "read",
+  get: "read",
+  create: "create",
+  update: "update",
+  delete: "delete",
+};
+
 /**
  * Fail-closed entity-level role gate, shared by every generated CRUD entry
  * point and therefore by both the GraphQL resolvers and the REST routes.
@@ -182,16 +212,23 @@ const entityRoleSets = new Map<string, Partial<Record<GeneratedCrudOperation, Re
  */
 function requireEntityOperation(
   table: GeneratedCrudTable,
-  operation: GeneratedCrudOperation,
+  operation: GeneratedCrudExposureOperation,
   session: DbSessionInput,
 ): void {
-  const allowed = entityRoleSets.get(table.name)?.[operation];
+  if (!isGeneratedCrudOperationEnabled(table, operation)) {
+    throw new GraphQLError(
+      `Generated CRUD operation ${operation} is not enabled for ${table.source?.authoringEntityName ?? table.name}.`,
+      { extensions: { code: "GENERATED_CRUD_OPERATION_NOT_ENABLED", status: 404 } },
+    );
+  }
+  const authorizationOperation = AUTHORIZATION_OPERATION[operation];
+  const allowed = entityRoleSets.get(table.name)?.[authorizationOperation];
   if (!allowed || allowed.size === 0) {
     // A generatedCrud table without role metadata means the manifest predates
     // the authorization bridge (stale artifacts) — deny with distinct wording
     // so operators recognize the regeneration bug instead of a policy denial.
     throw new GraphQLError(
-      `Entity ${table.name} has no role metadata for ${operation}; access denied. ` +
+      `Entity ${table.name} has no role metadata for ${authorizationOperation}; access denied. ` +
         `Regenerate artifacts with \`bun run generate\`.`,
       { extensions: { code: "FORBIDDEN", status: 403 } },
     );
@@ -262,7 +299,11 @@ function assertClassifiedQueryAllowed(
 }
 
 export function isGeneratedCrudTableReadable(name: string) {
-  return generatedCrudTables.has(name);
+  const table = generatedCrudTables.get(name);
+  return table !== undefined && (
+    isGeneratedCrudOperationEnabled(table, "list") ||
+    isGeneratedCrudOperationEnabled(table, "get")
+  );
 }
 
 export function getGeneratedCrudTables() {
@@ -282,7 +323,7 @@ function generatedCrudError(message: string, code: string) {
  */
 function readGeneratedCrudTable(
   name: string,
-  operation: GeneratedCrudOperation,
+  operation: GeneratedCrudExposureOperation,
   session: DbSessionInput,
 ) {
   const table = generatedCrudTables.get(name);
@@ -562,7 +603,7 @@ export async function listGeneratedEntities(
   session: DbSessionInput,
   input: ListPageInput & { table: string },
 ): Promise<GeneratedEntityConnection> {
-  const table = readGeneratedCrudTable(input.table, "read", session);
+  const table = readGeneratedCrudTable(input.table, "list", session);
   // Before any SQL runs: filtering or sorting by a column this session may not
   // read turns the result set (and totalCount) into an oracle for the value
   // redaction withholds.
@@ -578,7 +619,7 @@ export async function getGeneratedEntity(
     id: string;
   },
 ): Promise<GeneratedEntityRow | null> {
-  const table = readGeneratedCrudTable(input.table, "read", session);
+  const table = readGeneratedCrudTable(input.table, "get", session);
   const row = await fetchGeneratedEntityRow(db, session, table, input.id);
   return row === null
     ? null
@@ -831,7 +872,11 @@ export async function listGeneratedEntityRelation(
   // bypassing readGeneratedCrudTable — gate the target's read roles here,
   // before the degenerate empty-connection early-returns. The parent needs
   // no check: its row was only obtainable through a read-gated query.
-  requireEntityOperation(input.targetTable, "read", session);
+  requireEntityOperation(
+    input.targetTable,
+    input.relationship.resolve === "belongsTo" ? "get" : "list",
+    session,
+  );
   // An empty connection still answers a requested count — with 0, not null.
   const emptyCount = input.includeTotalCount ? 0 : null;
   const relationship = input.relationship;

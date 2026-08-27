@@ -5,15 +5,21 @@
  */
 import { expect } from "bun:test";
 import { describe, registerSuiteLifecycle, test } from "./e2e/harness.js";
-import { tables } from "./e2e/entity-factory.js";
+import { eligibleTables, partialPolicyTables, tables } from "./e2e/entity-factory.js";
 
 registerSuiteLifecycle();
 
 describe("coverage", () => {
-  test("every generatedCrud entity in the manifest is exercised", () => {
-    const covered = tables.map((table) => table.source!.graphql!.typeName).sort();
+  test("every generated-CRUD-eligible entity belongs to a full or partial policy set", () => {
+    const covered = [...tables, ...partialPolicyTables]
+      .map((table) => table.source!.graphql!.typeName)
+      .sort();
+    const eligible = eligibleTables
+      .map((table) => table.source!.graphql!.typeName)
+      .sort();
     expect(covered.length).toBeGreaterThanOrEqual(2);
     expect(new Set(covered).size).toBe(covered.length);
+    expect(covered).toEqual(eligible);
   });
 
   /**

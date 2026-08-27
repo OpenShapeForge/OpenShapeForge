@@ -11,6 +11,9 @@ export const compilerOwnedGeneratedRoots = [
   // emitted by `packages/compiler/src/generate-openapi.ts` and statically
   // imported by the API's REST route registration.
   "apps/api/src/generated/rest",
+  // GraphQL entity and field descriptions projected from the same compiled
+  // contracts without coupling documentation-only edits to the DB manifest.
+  "apps/api/src/generated/graphql",
   // MCP tool catalog for entities that opt into generated MCP exposure —
   // emitted by `packages/compiler/src/generate-mcp.ts` and statically imported
   // by the API's MCP server registration.

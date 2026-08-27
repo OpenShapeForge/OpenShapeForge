@@ -3,7 +3,7 @@ kind: coreEntity
 module: core
 entity: DocumentVersion
 title: Document Version
-description: A versioned binary or logical revision of a document.
+description: An immutable binary or logical revision that is owned by exactly one document.
 language: en
 displayTemplate: "{{versionLabel}}"
 filterField: versionLabel
@@ -13,6 +13,26 @@ labels:
 domains:
   - cases
   - records
+indexes:
+  - name: document_versions_tenant_document_label_uidx
+    fields:
+      - tenantId
+      - documentId
+      - versionLabel
+    unique: true
+  - name: document_versions_tenant_document_identity_uidx
+    fields:
+      - tenantId
+      - documentId
+      - id
+    unique: true
+crud:
+  operations:
+    create: false
+    update: false
+    delete: false
+rest: true
+mcp: true
 authorization:
   roles:
     read:
@@ -144,6 +164,23 @@ fields:
       props:
         rows: 4
         maxLength: 4000
+  - key: documentId
+    valueType: string
+    required: true
+    readOnly: true
+    immutable: true
+    label:
+      en: Document ID
+      nl: Document-ID
+    description:
+      en: Immutable identifier of the document that owns this version.
+      nl: Onveranderlijke identifier van het document waartoe deze versie behoort.
+    semanticType: documentId
+    validation:
+      format: uuid
+    persisted:
+      column: document_id
+      storageClass: core
 relationships:
   - key: document
     kind: belongsTo
@@ -162,8 +199,8 @@ relationships:
 workflow:
   nodes:
     actions:
-      create: true
+      create: false
       getOne: true
       list: true
-      update: true
-      delete: true
+      update: false
+      delete: false

@@ -13,6 +13,7 @@
  * tables through the actual rendering path rather than asserting vacuously.
  */
 import { describe, expect, test } from "bun:test";
+import { buildSchema } from "graphql";
 import { getGeneratedCrudTables, isWritableColumn } from "../generated-crud.js";
 import {
   generatedEntityTypeDefs,
@@ -54,7 +55,7 @@ function inputFields(sdl: string, name: string): string[] {
   return block[1]!
     .split("\n")
     .map((line) => line.trim())
-    .filter(Boolean)
+    .filter((line) => line.includes(":"))
     .map((line) => line.split(":")[0]!.trim());
 }
 
@@ -148,5 +149,57 @@ describe("renderTypeDefinition", () => {
     expect(inputFields(sdl, "CreateWidgetInput")).toEqual(["title", "note"]);
     // `id` is the update mutation's target, not a writable field.
     expect(inputFields(sdl, "UpdateWidgetInput")).toEqual(["id", "title", "note"]);
+  });
+
+  test("keeps filter names unique for real fields ending in In", () => {
+    const sdl = renderTypeDefinition(
+      tableWith([
+        column({ name: "id", primaryKey: true, type: "uuid" }),
+        column({ name: "status", sourceField: "status" }),
+        column({ name: "status_in", sourceField: "statusIn" }),
+        column({ name: "is_opted_in", sourceField: "isOptedIn", type: "boolean" }),
+      ]),
+    );
+
+    expect(inputFields(sdl, "WidgetFilter")).toEqual([
+      "id",
+      "idIn",
+      "status",
+      "statusInIn",
+      "isOptedInIn",
+    ]);
+    expect(() => buildSchema(`
+      scalar JSON
+      type PageInfo { hasNextPage: Boolean, endCursor: String }
+      type AggregateResult { count: Int! }
+      ${sdl}
+    `)).not.toThrow();
+  });
+
+  test("replaces a lone surrogate before rendering an SDL description", () => {
+    const documentation = new Map([
+      [
+        "Widget",
+        {
+          typeName: "Widget",
+          description: "Truncated emoji \ud83d remains readable.",
+          fields: [],
+        },
+      ],
+    ]);
+    const sdl = renderTypeDefinition(
+      tableWith([column({ name: "id", primaryKey: true, type: "uuid" })]),
+      documentation,
+    );
+    const schema = buildSchema(`
+      scalar JSON
+      type PageInfo { hasNextPage: Boolean, endCursor: String }
+      type AggregateResult { count: Int! }
+      ${sdl}
+    `);
+
+    expect(schema.getType("Widget")?.description).toBe(
+      "Truncated emoji \ufffd remains readable.",
+    );
   });
 });

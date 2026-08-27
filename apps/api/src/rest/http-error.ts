@@ -26,6 +26,7 @@ const STATUS_BY_CODE: Record<string, number> = {
   UNAUTHENTICATED: 401,
   FORBIDDEN: 403,
   GENERATED_CRUD_NOT_ENABLED: 404,
+  GENERATED_CRUD_OPERATION_NOT_ENABLED: 404,
   DATABASE_NOT_CONFIGURED: 503,
   // Connector invocation and execution. These carry their own code and a
   // message that is already safe to surface; without an entry here they fall

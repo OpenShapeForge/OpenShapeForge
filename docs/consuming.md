@@ -135,10 +135,12 @@ repo bundling this package needs to do the same.
   `platform.entity_events`, since the API runtime and migrator assume both).
 - **Bun is required** — the CLI and plugin/package resolution use Bun APIs;
   there is no Node fallback.
-- **The generated-CRUD denylist is compiled in.**
-  `generatedCrudDeniedEntitySlugs` (`tenant-setting`, `case-step-action`)
-  lives in `packages/compiler/src/active-manifest.ts` and is not
-  configurable from the host config.
+- **Generated CRUD policy is entity-authored.** The common `crud.operations`
+  block is the upper bound for GraphQL, REST, MCP and workflow. Stock generated
+  entity pages require the full five-operation policy; partial policies use a
+  purpose-built UI.
+  External layers/packages can narrow that policy with `entityPatch`; the
+  layer resolver rejects attempts to re-enable an operation disabled earlier.
 - **The `core` module maps to the `erp` schema** via a default
   (`schemaByModule: { core: "erp" }`) that host repos cannot override
   through configuration; other module names fall back to their snake_cased

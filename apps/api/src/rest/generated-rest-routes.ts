@@ -100,8 +100,60 @@ function assertWritableBody(
  * scalar type before they reach the CRUD filter layer so `?isActive=true`
  * and `?position=2` behave like their typed GraphQL filter equivalents.
  */
+function isCalendarDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const parsed = match ? new Date(`${value}T00:00:00.000Z`) : undefined;
+  return Boolean(
+    match && parsed &&
+    parsed.getUTCFullYear() === Number(match[1]) &&
+    parsed.getUTCMonth() + 1 === Number(match[2]) &&
+    parsed.getUTCDate() === Number(match[3]),
+  );
+}
+
 function coerceFilterValue(column: GeneratedColumn, raw: string): unknown {
   switch (column.type) {
+    case "uuid": {
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)) {
+        return raw;
+      }
+      throw new HttpError(
+        400,
+        "BAD_USER_INPUT",
+        `Filter field ${fieldNameForColumn(column)} expects a UUID.`,
+      );
+    }
+    case "date": {
+      if (isCalendarDate(raw)) {
+        return raw;
+      }
+      throw new HttpError(
+        400,
+        "BAD_USER_INPUT",
+        `Filter field ${fieldNameForColumn(column)} expects a date in YYYY-MM-DD format.`,
+      );
+    }
+    case "timestamptz": {
+      const rfc3339 = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/;
+      const match = rfc3339.exec(raw);
+      if (
+        match &&
+        isCalendarDate(match[1]!) &&
+        Number(match[2]) <= 23 &&
+        Number(match[3]) <= 59 &&
+        Number(match[4]) <= 59 &&
+        Number(match[5] ?? 0) <= 23 &&
+        Number(match[6] ?? 0) <= 59 &&
+        Number.isFinite(Date.parse(raw))
+      ) {
+        return raw;
+      }
+      throw new HttpError(
+        400,
+        "BAD_USER_INPUT",
+        `Filter field ${fieldNameForColumn(column)} expects an RFC 3339 date-time.`,
+      );
+    }
     case "boolean": {
       if (raw === "true") return true;
       if (raw === "false") return false;

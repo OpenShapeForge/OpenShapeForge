@@ -48,6 +48,9 @@ const table = (columns: AnyRecord[] = []) =>
     name: "erp.payment_details",
     columns,
     source: {
+      crud: {
+        operations: { list: true, get: true, create: true, update: true, delete: true },
+      },
       authorization: {
         roles: {
           read: [READ, WRITE],
@@ -344,6 +347,19 @@ describe("sessionMayInvoke", () => {
     for (const operation of ["list", "get", "create", "update", "delete"] as const) {
       expect(sessionMayInvoke(table(), operation, session(WRITE))).toBe(true);
     }
+  });
+
+  it("withholds an operation disabled by the common CRUD policy despite a matching role", () => {
+    const readOnly = table() as AnyRecord;
+    ((readOnly.source as AnyRecord).crud as AnyRecord).operations = {
+      list: true,
+      get: true,
+      create: false,
+      update: false,
+      delete: false,
+    };
+    expect(sessionMayInvoke(readOnly as never, "list", session(WRITE))).toBe(true);
+    expect(sessionMayInvoke(readOnly as never, "update", session(WRITE))).toBe(false);
   });
 
   it("fails closed for a roleless session, an unknown table, and absent metadata", () => {

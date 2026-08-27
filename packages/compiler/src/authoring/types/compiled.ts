@@ -218,6 +218,16 @@ export interface McpSection {
     titleField?: string;
     descriptionField: string;
     inputFieldsField: string;
+    execution?: {
+      bindingsField: string;
+      operationRef: string;
+      operationEntity: string;
+      providerRef: string;
+      providerEntity: string;
+      connectionEntity: string;
+      connectionProviderRef: string;
+      connectionValuesField: string;
+    };
   };
 }
 

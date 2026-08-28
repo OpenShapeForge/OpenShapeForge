@@ -1,0 +1,109 @@
+// SPDX-License-Identifier: BUSL-1.1
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
+import { SQL } from "bun";
+import { sql } from "kysely";
+import { createDatabaseRuntime } from "../connection.js";
+import { runMigrationChain } from "../migration-chain.js";
+import { versionedMigrations } from "../migrations/versioned/index.js";
+import { verifyVersionedMigrationLedger } from "../migrations/versioned-runner.js";
+
+const ADMIN_URL =
+  process.env.SCRATCH_ADMIN_DATABASE_URL ??
+  "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
+const databaseName = `versioned_readiness_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+const databaseUrl = new URL(ADMIN_URL);
+databaseUrl.pathname = `/${databaseName}`;
+const admin = new SQL(ADMIN_URL, { max: 1 });
+
+beforeAll(async () => {
+  if (
+    !/^[a-z0-9_]+$/.test(databaseName) ||
+    new URL(ADMIN_URL).pathname === "/openshapeforge_dev"
+  ) {
+    throw new Error("Refusing an unsafe readiness scratch database target.");
+  }
+  await admin.unsafe(`create database "${databaseName}"`);
+});
+
+afterAll(async () => {
+  await admin.unsafe(`drop database if exists "${databaseName}" with (force)`);
+  await admin.close();
+});
+
+describe("versioned migration readiness", () => {
+  test("detects missing, checksum-drifted, and database-ahead ledger entries", async () => {
+    const runtime = createDatabaseRuntime({
+      databaseUrl: databaseUrl.toString(),
+    });
+    try {
+      await runtime.db.connection().execute((db) => runMigrationChain(db));
+      expect(
+        await verifyVersionedMigrationLedger(runtime.db, versionedMigrations),
+      ).toEqual({ ready: true, missing: [], mismatched: [], unexpected: [] });
+      const originalRows = await sql<{ version: string; checksum: string }>`
+        select version, checksum from platform.schema_migrations
+        where version in (${versionedMigrations[0]!.version}, ${versionedMigrations[1]!.version})
+      `.execute(runtime.db);
+      const originalChecksums = new Map(
+        originalRows.rows.map((row) => [row.version, row.checksum]),
+      );
+
+      const reconciledVersion = versionedMigrations[0]!.version;
+      await sql`
+        update platform.schema_migrations set checksum = ${"accepted-old-checksum"}
+        where version = ${reconciledVersion}
+      `.execute(runtime.db);
+      expect(
+        await verifyVersionedMigrationLedger(runtime.db, [
+          {
+            ...versionedMigrations[0]!,
+            supersededChecksums: ["accepted-old-checksum"],
+          },
+          ...versionedMigrations.slice(1),
+        ]),
+      ).toEqual({ ready: true, missing: [], mismatched: [], unexpected: [] });
+
+      const missing = reconciledVersion;
+      const mismatched = versionedMigrations[1]!.version;
+      await sql`delete from platform.schema_migrations where version = ${missing}`.execute(
+        runtime.db,
+      );
+      await sql`
+        update platform.schema_migrations set checksum = ${"stale-readiness"}
+        where version = ${mismatched}
+      `.execute(runtime.db);
+
+      expect(
+        await verifyVersionedMigrationLedger(runtime.db, versionedMigrations),
+      ).toEqual({
+        ready: false,
+        missing: [missing],
+        mismatched: [mismatched],
+        unexpected: [],
+      });
+
+      await sql`
+        insert into platform.schema_migrations (version, checksum, applied_by)
+        values (${missing}, ${originalChecksums.get(missing)!}, ${"readiness-test"})
+      `.execute(runtime.db);
+      await sql`
+        update platform.schema_migrations set checksum = ${originalChecksums.get(mismatched)!}
+        where version = ${mismatched}
+      `.execute(runtime.db);
+
+      await sql`
+        insert into platform.schema_migrations (version, checksum, applied_by)
+        values (${"9999_future-incompatible"}, ${"future-checksum"}, ${"future-test"})
+      `.execute(runtime.db);
+      const ahead = await verifyVersionedMigrationLedger(
+        runtime.db,
+        versionedMigrations,
+      );
+      expect(ahead.ready).toBe(true);
+      expect(ahead.unexpected).toEqual(["9999_future-incompatible"]);
+    } finally {
+      await runtime.close();
+    }
+  }, 90_000);
+});

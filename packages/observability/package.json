@@ -1,0 +1,49 @@
+{
+  "name": "@openshapeforge/observability",
+  "version": "0.1.0",
+  "private": true,
+  "license": "BUSL-1.1",
+  "type": "module",
+  "description": "Framework-neutral telemetry, metrics, redaction, and readiness primitives with thin Yoga and Fastify adapters.",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./fastify": {
+      "types": "./src/fastify.ts",
+      "default": "./src/fastify.ts"
+    },
+    "./yoga": {
+      "types": "./src/yoga.ts",
+      "default": "./src/yoga.ts"
+    }
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@graphql-yoga/plugin-prometheus": "^6.16.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
+    "@opentelemetry/instrumentation-fastify": "^0.57.0",
+    "@opentelemetry/instrumentation-http": "^0.221.0",
+    "@opentelemetry/resources": "^2.10.0",
+    "@opentelemetry/sdk-node": "^0.221.0",
+    "@opentelemetry/sdk-trace-base": "^2.10.0",
+    "prom-client": "^15.1.3"
+  },
+  "peerDependencies": {
+    "fastify": "^5.0.0",
+    "graphql": "^16.0.0",
+    "graphql-yoga": "^5.22.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.5",
+    "fastify": "^5.8.2",
+    "graphql": "^16.13.2",
+    "graphql-yoga": "^5.22.0",
+    "typescript": "^5.9.0"
+  }
+}

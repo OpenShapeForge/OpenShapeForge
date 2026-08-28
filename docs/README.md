@@ -14,6 +14,7 @@ journal, and manifest-derived e2e + load tests. Start with
 | [plugins.md](plugins.md) | The `CompilerPlugin` contract, `ownedPaths`, determinism rules, and both shipped examples (entity-docs, workflow) |
 | [connectors.md](connectors.md) | Connector contracts, licensing and entitlement, configuration and secrets, the execution trust model |
 | [api.md](api.md) | The generic CRUD engine, multi-tenancy + RLS, auth (Keycloak bearer / trusted-context HMAC), the entity-event journal, env + local stack |
+| [operations.md](operations.md) | CORS ownership, persisted web operations, metrics/error privacy, readiness, OpenTelemetry, and GraphiQL |
 | [mcp.md](mcp.md) | The generated MCP server: opting in, the tool catalog built from field definitions, per-session tool listing, classification handling |
 | [testing.md](testing.md) | Proof gates, the manifest-derived e2e suite, HTML reports, the k6 perf suite |
 | [migrations.md](migrations.md) | Roll-forward additive migrator, versioned bespoke migrations, drift signals, caveats |

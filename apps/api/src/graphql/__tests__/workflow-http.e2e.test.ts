@@ -173,7 +173,7 @@ async function startSuite(): Promise<Suite> {
     await migrationRuntime.close();
   }
 
-  const app = createApiApp({ databaseUrl, modules });
+  const app = createApiApp({ cors: false, databaseUrl, modules });
   // Port 0: the operating system picks a free one, so two suites running side
   // by side cannot collide on a hardcoded port.
   const baseUrl = await app.listen({ port: 0, host: "127.0.0.1" });

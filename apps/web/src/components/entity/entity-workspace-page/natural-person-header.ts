@@ -2,7 +2,7 @@
 import { readDisplayValue, readRecordArray } from "./record-display";
 
 export const naturalPersonWorkspaceHeaderQuery = `
-  query ($id: ID!) {
+  query NaturalPersonWorkspaceHeader($id: ID!) {
     naturalPerson(id: $id) {
       id
       firstName

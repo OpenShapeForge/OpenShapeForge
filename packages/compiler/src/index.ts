@@ -205,7 +205,7 @@ export async function collectAllArtifacts(
       },
     ],
     referentiedata: await generateCoreReferentiedataArtifacts(repoRoot, referentiedata),
-    ui: webPresent ? await generateAuthoringUiArtifacts(authoringDir) : [],
+    ui: webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot) : [],
     keycloak: generateAuthoringKeycloakArtifacts(authoringDir),
     plugins: [],
   };

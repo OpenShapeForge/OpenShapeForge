@@ -10,9 +10,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { FastifyInstance } from "fastify";
 import { createApiApp } from "../api.js";
+import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 
 const RATE_LIMIT_MAX_ENV = "API_RATE_LIMIT_MAX";
 const originalMax = process.env[RATE_LIMIT_MAX_ENV];
+const originalContextSecret =
+  process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
 let app: FastifyInstance | undefined;
 
 afterEach(async () => {
@@ -20,25 +23,38 @@ afterEach(async () => {
   app = undefined;
   if (originalMax === undefined) delete process.env[RATE_LIMIT_MAX_ENV];
   else process.env[RATE_LIMIT_MAX_ENV] = originalMax;
+  if (originalContextSecret === undefined)
+    delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+  else
+    process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = originalContextSecret;
 });
 
 describe("API rate limiting", () => {
   test("throttles a non-exempt route with 429 + Retry-After once the budget is spent", async () => {
     process.env[RATE_LIMIT_MAX_ENV] = "3";
-    app = createApiApp();
+    app = createApiApp({ cors: false });
 
     // The first `max` requests are admitted (whatever the handler returns);
     // the very next one is rejected by the limiter.
     for (let i = 0; i < 3; i++) {
-      const res = await app.inject({ method: "GET", url: "/api/graphql?query=%7B__typename%7D" });
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/graphql?query=%7B__typename%7D",
+      });
       expect(res.statusCode).not.toBe(429);
     }
 
-    const limited = await app.inject({ method: "GET", url: "/api/graphql?query=%7B__typename%7D" });
+    const limited = await app.inject({
+      method: "GET",
+      url: "/api/graphql?query=%7B__typename%7D",
+    });
     expect(limited.statusCode).toBe(429);
     expect(limited.headers["retry-after"]).toBeDefined();
     // Body carries a generic message, not limiter internals.
-    expect(limited.json()).toMatchObject({ statusCode: 429, error: "Too Many Requests" });
+    expect(limited.json()).toMatchObject({
+      statusCode: 429,
+      error: "Too Many Requests",
+    });
   });
 
   // The REST routes and the MCP server each install an encapsulated error
@@ -64,7 +80,7 @@ describe("API rate limiting", () => {
   ] as const) {
     test(`${transport} reports a throttled request as 429, not a redacted 500`, async () => {
       process.env[RATE_LIMIT_MAX_ENV] = "2";
-      app = createApiApp();
+      app = createApiApp({ cors: false });
 
       let limited: Awaited<ReturnType<FastifyInstance["inject"]>> | undefined;
       for (let i = 0; i < 6 && !limited; i++) {
@@ -80,17 +96,50 @@ describe("API rate limiting", () => {
     });
   }
 
-  test("liveness/readiness probes are never throttled", async () => {
+  test("keeps liveness and readiness probes exempt", async () => {
     process.env[RATE_LIMIT_MAX_ENV] = "1";
-    app = createApiApp();
+    app = createApiApp({
+      cors: false,
+      readinessChecks: [{ name: "controlled", check: () => undefined }],
+    });
 
     for (let i = 0; i < 5; i++) {
       const res = await app.inject({ method: "GET", url: "/api/health" });
       expect(res.statusCode).toBe(200);
     }
-    for (let i = 0; i < 5; i++) {
-      const res = await app.inject({ method: "GET", url: "/api/ready" });
-      expect(res.statusCode).toBe(200);
-    }
+    expect(
+      (await app.inject({ method: "GET", url: "/api/ready" })).statusCode,
+    ).toBe(200);
+    expect(
+      (await app.inject({ method: "GET", url: "/api/ready" })).statusCode,
+    ).toBe(200);
+  });
+
+  test("keeps metrics private to a signed internal caller", async () => {
+    const secret = "metrics-route-test-secret";
+    process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = secret;
+    app = createApiApp({ cors: false });
+    expect(
+      (await app.inject({ method: "GET", url: "/api/metrics" })).statusCode,
+    ).toBe(401);
+
+    const headers = new Headers();
+    applyTrustedContextHeaders(
+      headers,
+      {
+        tenantId: "11111111-1111-4111-8111-111111111111",
+        userId: "22222222-2222-4222-8222-222222222222",
+        roles: [],
+        groups: [],
+      },
+      { secret },
+    );
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/metrics",
+      headers: Object.fromEntries(headers),
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toContain("text/plain");
   });
 });

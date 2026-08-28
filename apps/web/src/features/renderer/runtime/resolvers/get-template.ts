@@ -17,7 +17,7 @@ export async function getTemplate(
   const data = await executeGraphqlRequest<{
     template?: Record<string, unknown> | null;
   }>({
-    query: `query ($id: ID!) { template(id: $id) { id name parameters } }`,
+    query: `query TemplateParameters($id: ID!) { template(id: $id) { id name parameters } }`,
     variables: { id },
   });
   return data?.template ?? null;

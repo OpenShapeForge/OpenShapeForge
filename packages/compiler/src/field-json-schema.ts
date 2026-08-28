@@ -30,6 +30,7 @@ export type SchemaSourceField = {
   valueType?: string;
   cardinality?: unknown;
   required?: boolean;
+  defaultValue?: unknown;
   validation?: {
     minLength?: unknown;
     maxLength?: unknown;
@@ -147,7 +148,10 @@ export function objectSchemaFrom(
   const required: string[] = [];
   for (const field of fields) {
     properties[field.key] = schemaForField(field);
-    if (options.requireRequired && field.required) {
+    // A field with a default is satisfiable without the caller supplying it,
+    // so advertising it as required would over-claim — and a validator
+    // enforcing the advertised schema would then reject valid calls.
+    if (options.requireRequired && field.required && field.defaultValue === undefined) {
       required.push(field.key);
     }
   }

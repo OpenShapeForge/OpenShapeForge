@@ -75,6 +75,8 @@ import {
 } from "./elicitation.js";
 import { executeBinding, orderedBindings, resolveTemplate } from "./declarative-execution.js";
 import { discoverProviderSchema } from "./discovery.js";
+import { Ajv, type ValidateFunction } from "ajv";
+import addFormats from "ajv-formats";
 import {
   exchangeCodeForTokens,
   mintAuthorization,
@@ -521,6 +523,38 @@ async function runtimeRowByFilter(
   const result = await listGeneratedEntitiesForTable(db, session, table, { limit: 1, filter });
   const row = result.rows[0];
   return row ? serializeRow(table, row) : null;
+}
+
+// The advertised JSON Schema IS the contract: what tools/list promises,
+// tools/call enforces. Without this, enum/pattern/length constraints are
+// decoration and `status: "banana"` persists with a 200.
+const ajv = new Ajv({ allErrors: true, strict: false, coerceTypes: false });
+// ajv-formats is CJS; under NodeNext the default import is typed as the
+// module namespace rather than the callable it is at runtime.
+(addFormats as unknown as (instance: Ajv) => unknown)(ajv);
+const compiledValidators = new WeakMap<object, ValidateFunction>();
+
+function assertSchemaValid(
+  schema: Record<string, unknown>,
+  value: unknown,
+  what: string,
+): void {
+  const cached = compiledValidators.get(schema);
+  const checker: ValidateFunction = cached ?? ajv.compile(schema);
+  if (!cached) compiledValidators.set(schema, checker);
+  if (!checker(value)) {
+    const details = (checker.errors ?? [])
+      .slice(0, 5)
+      .map((error) => {
+        const offender =
+          typeof error.params?.additionalProperty === "string"
+            ? ` ("${error.params.additionalProperty}")`
+            : "";
+        return `${error.instancePath || what} ${error.message ?? "invalid"}${offender}`;
+      })
+      .join("; ");
+    throw new HttpError(400, "BAD_USER_INPUT", `Invalid ${what}: ${details}`);
+  }
 }
 
 /**
@@ -1338,15 +1372,7 @@ function buildServer(
           }
           try {
             const args = (request.params.arguments ?? {}) as Record<string, unknown>;
-            assertDeclaredProperties(derived.inputSchema, args, "argument");
-            const requiredInputs = Array.isArray(derived.inputSchema.required)
-              ? (derived.inputSchema.required as string[])
-              : [];
-            for (const key of requiredInputs) {
-              if (args[key] === undefined || args[key] === null || args[key] === "") {
-                throw new HttpError(400, "VALIDATION", `Input "${key}" is required.`);
-              }
-            }
+            assertSchemaValid(derived.inputSchema, args, "arguments");
 
             const serviceRow = await runtimeRowByFilter(db, session, tables, derived.table, {
               id: derived.rowId,
@@ -1590,6 +1616,17 @@ function buildServer(
               }
             : {}),
         });
+      }
+      {
+        // Validate what the MODEL sent against the advertised schema — before
+        // elicited values join, since those are server-set and outside it.
+        const modelSent = (request.params.arguments ?? {}) as Record<string, unknown>;
+        const elicitField = entity?.elicitOnCreate?.into;
+        const toValidate =
+          match.operation === "create" && elicitField
+            ? Object.fromEntries(Object.entries(modelSent).filter(([key]) => key !== elicitField))
+            : modelSent;
+        assertSchemaValid(match.inputSchema, toValidate, "arguments");
       }
       const outcome = await invokeTool(match, entity, table, db, session, callArguments);
       // A successful mutation on a table whose rows project as tools changes

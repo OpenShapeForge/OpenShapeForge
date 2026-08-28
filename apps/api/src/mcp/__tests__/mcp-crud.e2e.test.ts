@@ -129,12 +129,27 @@ async function callTool(
   return rpc(identity, "tools/call", { name, arguments: args });
 }
 
-/** Sample create arguments: required scalars plus real rows for required FKs. */
+/** Enum values advertised by a tool's schema, keyed by property name. */
+function schemaEnums(toolName: string): Map<string, unknown[]> {
+  const tool = catalog.tools.find((entry) => entry.name === toolName);
+  const properties = (tool?.inputSchema as { properties?: Record<string, { enum?: unknown[] }> })
+    ?.properties;
+  const enums = new Map<string, unknown[]>();
+  for (const [key, schema] of Object.entries(properties ?? {})) {
+    if (Array.isArray(schema.enum) && schema.enum.length > 0) enums.set(key, schema.enum);
+  }
+  return enums;
+}
+
+/** Sample create arguments: required scalars plus real rows for required FKs.
+ * Values respect the tool schema — the server now enforces what it
+ * advertises, so an enum field gets an allowed value, not a marker string. */
 async function buildCreateArgs(
   table: (typeof mcpTables)[number],
   identity: Identity,
 ): Promise<Record<string, unknown>> {
   const fkTargets = foreignKeyTargets(table);
+  const enums = schemaEnums(`${table.source!.mcp!.toolPrefix}_create`);
   const args: Record<string, unknown> = {};
   for (const column of table.columns) {
     if (!column.required || column.primaryKey) continue;
@@ -144,7 +159,8 @@ async function buildCreateArgs(
       args[fieldName(column)] = await createRow(tablesByName.get(target)!, identity);
       continue;
     }
-    args[fieldName(column)] = sampleValue(column, seed);
+    const allowed = enums.get(fieldName(column));
+    args[fieldName(column)] = allowed ? allowed[0] : sampleValue(column, seed);
   }
   return args;
 }

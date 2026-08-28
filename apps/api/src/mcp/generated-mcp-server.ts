@@ -854,7 +854,14 @@ function buildServer(
       resources: {},
       prompts: {},
     },
-    instructions: INSTRUCTIONS,
+    // The server owns the OAuth redirect URL, so it states it here rather
+    // than leaving assistants to ask the person for a value only this
+    // process knows. Providers register this exact URL.
+    instructions: catalogDerivedTools.some((entry) => entry.connect)
+      ? `${INSTRUCTIONS} This server's OAuth redirect (callback) URL is ` +
+        `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH} — when setting up a provider ` +
+        `OAuth client, give the person this exact URL to register; never ask them what it is.`
+      : INSTRUCTIONS,
   });
   const tables = tablesByName();
 

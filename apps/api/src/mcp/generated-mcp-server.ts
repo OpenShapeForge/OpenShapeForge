@@ -245,6 +245,18 @@ function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
  * elicits configuration, the target field's encrypted values leave the server
  * only as the `__set__` sentinel.
  */
+/**
+ * Whether a provider's connections are per-employee. Explicit
+ * auth.connectionScope wins; absent, personal sign-in implies "user" and
+ * everything else "tenant".
+ */
+function connectionScopeOf(auth: Record<string, unknown> | null | undefined): "user" | "tenant" {
+  if (auth?.connectionScope === "user" || auth?.connectionScope === "tenant") {
+    return auth.connectionScope;
+  }
+  return auth?.profile === "oauth2AuthorizationCode" ? "user" : "tenant";
+}
+
 let oauthProviderTablesCache: Set<string> | undefined;
 function oauthProviderTables(): Set<string> {
   oauthProviderTablesCache ??= new Set(
@@ -1160,9 +1172,10 @@ function buildServer(
           throw new HttpError(
             400,
             "NOT_CONNECTABLE",
-            "This definition's provider does not support personal sign-in.",
+            "This definition's provider does not support sign-in connections.",
           );
         }
+        const scope_ = connectionScopeOf(auth);
         const authorizationUrl = auth.authorizationUrl;
         const tokenUrl = auth.tokenUrl;
         if (typeof authorizationUrl !== "string" || typeof tokenUrl !== "string") {
@@ -1189,15 +1202,21 @@ function buildServer(
           execution.connectionTable,
           { [execution.connectionProviderRef]: providerRowId },
         );
-        const personal = connectionRows.find((row) => row.ownerUserId === session.userId);
-        const personalValues = (personal?.[execution.connectionValuesField] ?? null) as
+        const existingForScope =
+          scope_ === "user"
+            ? connectionRows.find((row) => row.ownerUserId === session.userId)
+            : connectionRows.find((row) => !row.ownerUserId);
+        const existingValues = (existingForScope?.[execution.connectionValuesField] ?? null) as
           | Record<string, unknown>
           | null;
-        if (personal && personalValues?.accessToken) {
+        if (existingForScope && existingValues?.accessToken) {
           return ok({
             connected: true,
             provider: String(providerRow.name ?? providerRowId),
-            message: "Your personal connection already exists. Just call the tool.",
+            message:
+              scope_ === "user"
+                ? "Your personal connection already exists. Just call the tool."
+                : "The tenant connection is already signed in. Just call the tool.",
           });
         }
         const tenantConnection = connectionRows.find((row) => !row.ownerUserId);
@@ -1243,6 +1262,7 @@ function buildServer(
           scopes,
           redirectUri: `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`,
           providerName: String(providerRow.name ?? providerRowId),
+          connectionScope: scope_,
           authorizationUrl: resolvedAuthorizationUrl,
         });
         return ok({
@@ -1380,7 +1400,10 @@ function buildServer(
               let connectionValues: unknown;
               let secretScope = elicitScope;
 
-              if (providerAuth?.profile === "oauth2AuthorizationCode") {
+              if (
+                providerAuth?.profile === "oauth2AuthorizationCode" &&
+                connectionScopeOf(providerAuth) === "user"
+              ) {
                 // Personal mode: execution resolves ONLY the caller's own
                 // connection — another employee's tokens are unreachable by
                 // construction, and their absence is a clear next step.
@@ -1488,6 +1511,25 @@ function buildServer(
                   );
                 }
                 connectionValues = tenantConnection[execution.connectionValuesField];
+                if (providerAuth?.profile === "oauth2AuthorizationCode") {
+                  // Tenant-scoped sign-in: one consent covers the tenant; the
+                  // tokens live on the tenant connection and execute as bearer.
+                  const tenantValues = (connectionValues ?? null) as Record<string, unknown> | null;
+                  if (!tenantValues?.accessToken) {
+                    throw new HttpError(
+                      403,
+                      "CONNECTION_REQUIRED",
+                      `This provider needs a one-time sign-in for the whole tenant. ` +
+                        `An administrator calls ${entry?.connect?.name ?? "the connect tool"} ` +
+                        `with {"tool":"${name}"} and approves at the provider.`,
+                    );
+                  }
+                  secretScope = `${execution.connectionTable}:personal`;
+                  providerForExecution = {
+                    ...providerRow,
+                    auth: { scheme: "bearer", tokenFrom: "accessToken" },
+                  };
+                }
               }
 
               const outputs = await executeBinding({
@@ -1752,24 +1794,34 @@ export function registerGeneratedMcpServer(
           groups: [],
           scope: "self",
         };
-        const existing = (
+        const rows = (
           await listGeneratedEntitiesForTable(db, writeSession, table, {
             limit: 50,
             filter: { [pending.connectionProviderRef]: pending.providerRowId },
           })
-        ).rows
-          .map((row) => serializeRow(table, row))
-          .find((row) => row.ownerUserId === pending.userId);
+        ).rows.map((row) => serializeRow(table, row));
+        const personalScope = pending.connectionScope === "user";
+        const existing = personalScope
+          ? rows.find((row) => row.ownerUserId === pending.userId)
+          : rows.find((row) => !row.ownerUserId);
         if (existing) {
+          const currentValues = (existing[pending.connectionValuesField] ?? {}) as Record<
+            string,
+            unknown
+          >;
           await updateGeneratedEntityForTable(db, writeSession, table, String(existing.id), {
-            [pending.connectionValuesField]: values,
+            // Tenant rows keep their configuration (client credentials,
+            // subdomain); the sign-in only adds/replaces the tokens.
+            [pending.connectionValuesField]: personalScope
+              ? values
+              : { ...currentValues, ...values },
           });
         } else {
           await createGeneratedEntityForTable(db, writeSession, table, {
             key: `personal-${pending.userId.replace(/[^a-z0-9-]/g, "").slice(0, 20)}`,
             name: `Personal ${pending.providerName} connection`,
             [pending.connectionProviderRef]: pending.providerRowId,
-            ownerUserId: pending.userId,
+            ...(personalScope ? { ownerUserId: pending.userId } : {}),
             [pending.connectionValuesField]: values,
           });
         }

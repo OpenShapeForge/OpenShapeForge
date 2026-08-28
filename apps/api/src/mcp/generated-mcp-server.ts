@@ -237,15 +237,38 @@ function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
  * elicits configuration, the target field's encrypted values leave the server
  * only as the `__set__` sentinel.
  */
+let oauthProviderTablesCache: Set<string> | undefined;
+function oauthProviderTables(): Set<string> {
+  oauthProviderTablesCache ??= new Set(
+    (catalog.derivedTools ?? [])
+      .filter((entry) => entry.execution)
+      .map((entry) => entry.execution!.providerTable),
+  );
+  return oauthProviderTablesCache;
+}
+
 function serializeRowForEntity(
   entity: CatalogEntity | undefined,
   table: GeneratedTable,
   row: Record<string, unknown>,
 ) {
   const serialized = serializeRow(table, row);
-  return entity?.elicitOnCreate
+  const redacted = entity?.elicitOnCreate
     ? redactElicitedValues(serialized, entity.elicitOnCreate.into)
     : serialized;
+  // A provider declaring personal sign-in needs its OAuth client registered
+  // with THIS server's redirect URL — a fact only this process knows, so it
+  // rides along on the row instead of being asked of anyone.
+  const auth = redacted.auth as Record<string, unknown> | null | undefined;
+  if (
+    oauthProviderTables().has(table.name) &&
+    auth &&
+    typeof auth === "object" &&
+    auth.profile === "oauth2AuthorizationCode"
+  ) {
+    redacted.oauthRedirectUrl = `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`;
+  }
+  return redacted;
 }
 
 function entityForTable(table: string): CatalogEntity | undefined {
@@ -1482,12 +1505,20 @@ function buildServer(
             // collector, mirroring the tool-listing principle.
           }
         }
+        const sourceAuth = sourceRow?.auth as Record<string, unknown> | null | undefined;
         callArguments = await collectElicitedValues({
           server,
           elicit,
           sourceRow,
           values: modelArguments,
           relatedRequestId: extra.requestId,
+          ...(sourceAuth?.profile === "oauth2AuthorizationCode"
+            ? {
+                messagePrefix:
+                  `Before entering these values, register this exact redirect URL on the ` +
+                  `provider's OAuth client: ${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`,
+              }
+            : {}),
         });
       }
       const outcome = await invokeTool(match, entity, table, db, session, callArguments);

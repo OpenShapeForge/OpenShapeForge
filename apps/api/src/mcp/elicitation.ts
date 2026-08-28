@@ -226,6 +226,8 @@ export async function collectElicitedValues(input: {
    * SSE response stream of the call itself.
    */
   relatedRequestId: string | number;
+  /** Server-known context shown above the form, e.g. the redirect URL to register first. */
+  messagePrefix?: string;
 }): Promise<Record<string, unknown>> {
   const { server, elicit, sourceRow, values, relatedRequestId } = input;
   if (!sourceRow) {
@@ -259,7 +261,7 @@ export async function collectElicitedValues(input: {
   const secretKeys = elicitable
     .filter(isSecretDefinition)
     .map((definition) => definition.key as string);
-  const message =
+  const composedMessage =
     elicit.message ??
     `Configuration for this ${elicit.sourceEntity}. ` +
       (secretKeys.length > 0
@@ -267,6 +269,9 @@ export async function collectElicitedValues(input: {
         : "") +
       (skipped.length > 0 ? `(Not collected in this form: ${skipped.join(", ")}.)` : "");
 
+  const message = input.messagePrefix
+    ? `${input.messagePrefix}\n\n${composedMessage}`
+    : composedMessage;
   const result = await server.elicitInput(
     {
       message: message.trim(),

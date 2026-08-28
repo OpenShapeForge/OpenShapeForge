@@ -332,12 +332,19 @@ function describeEntityResource(
       entityResourceUri(candidate.entity),
     ]),
   );
-  const fields = visibleFields(entity, tables.get(entity.table), session).filter(
-    (field) => !field.relationship || resourceByEntity.has(field.relationship.entity),
-  );
+  const fields = visibleFields(entity, tables.get(entity.table), session);
   const relationships = entity.relationships.filter((relationship) =>
     resourceByEntity.has(relationship.target),
   );
+  // displayTemplate and filterField reference fields by name; publishing either
+  // to a session whose visibleFields hides that name would hand the caller the
+  // classified field's name and point it at a filter/sort its own tools refuse.
+  const visible = new Set(fields.map((field) => field.key));
+  const templateVisible =
+    !entity.displayTemplate ||
+    [...entity.displayTemplate.matchAll(/{{\s*([\w.]+)\s*}}/g)].every(([, key]) =>
+      visible.has(key!.split(".")[0]!),
+    );
 
   return {
     entity: entity.entity,
@@ -345,19 +352,30 @@ function describeEntityResource(
     title: entity.title,
     description: entity.description,
     domains: entity.domains,
-    ...(entity.displayTemplate ? { displayTemplate: entity.displayTemplate } : {}),
-    ...(entity.filterField ? { filterField: entity.filterField } : {}),
-    fields: fields.map((field) => ({
-      ...field,
-      ...(field.relationship
-        ? {
-            relationship: {
-              ...field.relationship,
-              resourceUri: resourceByEntity.get(field.relationship.entity),
-            },
-          }
-        : {}),
-    })),
+    ...(entity.displayTemplate && templateVisible
+      ? { displayTemplate: entity.displayTemplate }
+      : {}),
+    ...(entity.filterField && visible.has(entity.filterField)
+      ? { filterField: entity.filterField }
+      : {}),
+    // A relationship-bearing field stays readable as a scalar (the row contains
+    // it and the write tools require it); only the relationship edge is gated
+    // on target visibility — the same split GraphQL settled in
+    // generated-entity-schema.ts.
+    fields: fields.map((field) => {
+      const { relationship, ...rest } = field;
+      return {
+        ...rest,
+        ...(relationship && resourceByEntity.has(relationship.entity)
+          ? {
+              relationship: {
+                ...relationship,
+                resourceUri: resourceByEntity.get(relationship.entity),
+              },
+            }
+          : {}),
+      };
+    }),
     relationships: relationships.map((relationship) => ({
       ...relationship,
       resourceUri: resourceByEntity.get(relationship.target),

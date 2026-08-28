@@ -100,6 +100,8 @@ describe("entity schema resource classification", () => {
   const resourceEntity = {
     ...(entity(["iban"]) as AnyRecord),
     domains: ["finance"],
+    displayTemplate: "{{iban}}",
+    filterField: "iban",
     fields: [
       {
         key: "accountHolder",
@@ -130,6 +132,11 @@ describe("entity schema resource classification", () => {
     const described = describeEntityResource(entry, [entry], tables, session(READ)) as any;
     expect(described.fields.map((field: AnyRecord) => field.key)).toEqual(["accountHolder"]);
     expect(described).not.toHaveProperty("jsonSchema");
+    // The classified field's NAME must not reach this caller through the
+    // presentation hints either, and the advertised filter must be one the
+    // caller's own tools accept.
+    expect(described).not.toHaveProperty("displayTemplate");
+    expect(described).not.toHaveProperty("filterField");
   });
 
   it("shows the same compiled field to a caller permitted to read it", () => {
@@ -140,6 +147,8 @@ describe("entity schema resource classification", () => {
     ]);
     expect(described.fields[1].classification).toBe("pii");
     expect(described).not.toHaveProperty("jsonSchema");
+    expect(described.displayTemplate).toBe("{{iban}}");
+    expect(described.filterField).toBe("iban");
   });
 });
 
@@ -188,7 +197,7 @@ describe("entity schema resource relationships", () => {
   const relationEntry = { entity: relation, tools: [] } as never;
   const tables = new Map([["erp.payment_details", table()]]) as never;
 
-  it("omits relationship fields and metadata whose target is not session-visible", () => {
+  it("keeps the scalar field but strips relationship metadata whose target is not session-visible", () => {
     const described = describeEntityResource(
       entry,
       [entry, relationEntry],
@@ -196,10 +205,17 @@ describe("entity schema resource relationships", () => {
       session(READ),
     ) as any;
 
-    expect(described.fields.map((field: AnyRecord) => field.key)).toEqual(["relationId"]);
+    // The row contains accountId and the write tools require it, so the field
+    // itself stays readable; only the edge to the hidden target disappears —
+    // the split GraphQL settled in generated-entity-schema.ts.
+    expect(described.fields.map((field: AnyRecord) => field.key)).toEqual([
+      "relationId",
+      "accountId",
+    ]);
     expect(described.fields[0].relationship.resourceUri).toBe(
       "osf://schema/entities/relation",
     );
+    expect(described.fields[1]).not.toHaveProperty("relationship");
     expect(described.relationships).toEqual([
       {
         key: "relation",

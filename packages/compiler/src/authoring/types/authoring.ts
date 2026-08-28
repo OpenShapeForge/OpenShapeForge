@@ -382,6 +382,13 @@ export interface McpDiscoveryConfig {
   description?: string;
 }
 
+export interface McpTestConfig {
+  /** Tool name, e.g. `test_connection`; same alphabet as other tool names. */
+  name: string;
+  /** Override the composed tool description. */
+  description?: string;
+}
+
 export interface McpGuideConfig {
   /** Tool name, e.g. `setup_provider_guide`. */
   name: string;
@@ -443,6 +450,15 @@ export interface McpConfig {
    * secrets never travel through model context or tool arguments.
    */
   elicitOnCreate?: McpElicitOnCreateConfig;
+  /**
+   * Opt-in verification tool for rows whose values were elicited: given a row
+   * id, the runtime checks the stored values against the source row's
+   * definitions and auth contract, and — when the source declares a `probe`
+   * request — exercises them against the provider. Requires `elicitOnCreate`
+   * (the wiring to the source row comes from it); visibility follows the
+   * entity's read role.
+   */
+  test?: McpTestConfig;
 }
 
 export interface CoreEntity {

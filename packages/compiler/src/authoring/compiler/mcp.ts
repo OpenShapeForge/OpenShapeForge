@@ -15,7 +15,7 @@
  * Input:  Core entity definition (authored `mcp` block).
  * Output: McpSection | undefined — undefined means "no MCP exposure".
  */
-import type { CrudSection, McpConfig, McpDerivedToolsConfig, McpDiscoveryConfig, McpElicitOnCreateConfig, McpGuideConfig, McpOperationConfig, McpOperationKey, McpResourceConfig, McpSection } from "../types.js";
+import type { CrudSection, McpConfig, McpDerivedToolsConfig, McpDiscoveryConfig, McpElicitOnCreateConfig, McpGuideConfig, McpOperationConfig, McpOperationKey, McpResourceConfig, McpSection, McpTestConfig } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
 import { limitCrudOperations } from "./crud.js";
 
@@ -255,6 +255,23 @@ export function buildMcp(
     discovery = config.discovery;
   }
 
+  let test: McpTestConfig | undefined;
+  if (config.test) {
+    if (!MCP_TOOL_PREFIX_PATTERN.test(config.test.name ?? "")) {
+      throw new Error(
+        `Unsafe mcp test name ${JSON.stringify(config.test.name)} on entity ` +
+          `"${coreEntity.entity}" — must match ${MCP_TOOL_PREFIX_PATTERN}.`,
+      );
+    }
+    if (!elicitOnCreate) {
+      throw new Error(
+        `mcp test on entity "${coreEntity.entity}" requires an elicitOnCreate block — ` +
+          `the test verifies the elicited values against the source row it names.`,
+      );
+    }
+    test = config.test;
+  }
+
   return {
     toolPrefix,
     tools: style,
@@ -264,6 +281,7 @@ export function buildMcp(
     ...(derivedTools ? { derivedTools } : {}),
     ...(elicitOnCreate ? { elicitOnCreate } : {}),
     ...(discovery ? { discovery } : {}),
+    ...(test ? { test } : {}),
     ...(guide ? { guide } : {}),
   };
 }

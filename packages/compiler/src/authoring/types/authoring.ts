@@ -382,6 +382,17 @@ export interface McpDiscoveryConfig {
   description?: string;
 }
 
+export interface McpGuideConfig {
+  /** Tool name, e.g. `setup_provider_guide`. */
+  name: string;
+  /** Tool description; say WHEN to call it (e.g. "call this first when ..."). */
+  description: string;
+  /** Roles whose sessions see the guide. */
+  roles: string[];
+  /** The playbook itself, returned verbatim as the tool result. */
+  content: string;
+}
+
 export interface McpConfig {
   /** Defaults to true when the `mcp` block is present. */
   enabled?: boolean;
@@ -412,6 +423,12 @@ export interface McpConfig {
    * the entity's read role.
    */
   discovery?: McpDiscoveryConfig;
+  /**
+   * Opt-in authored playbook, projected as a zero-argument tool returning
+   * the content verbatim. This is how a product pins a fixed process for
+   * assistants — choreography that field schemas alone cannot carry.
+   */
+  guide?: McpGuideConfig;
   /**
    * Opt-in runtime projection of this entity's ROWS as MCP tools: each stored
    * record becomes one tool, named from keyField and typed from the canonical

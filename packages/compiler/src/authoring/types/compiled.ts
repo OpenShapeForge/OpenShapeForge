@@ -203,6 +203,8 @@ export interface McpSection {
     description?: string;
     templateDescription?: string;
   };
+  /** Authored playbook tool, validated at compile. */
+  guide?: { name: string; description: string; roles: string[]; content: string };
   /** Authored schema-discovery tool, validated at compile. */
   discovery?: { name: string; description?: string };
   /** Authored create-time elicitation config, validated at compile. */

@@ -329,6 +329,24 @@
                 "delete": { "$ref": "#/$defs/mcpOperation" }
               }
             },
+            "guide": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "description", "roles", "content"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*$"
+                },
+                "description": { "type": "string" },
+                "roles": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "minItems": 1
+                },
+                "content": { "type": "string" }
+              }
+            },
             "discovery": {
               "type": "object",
               "additionalProperties": false,

@@ -174,6 +174,13 @@ type CatalogResource = {
   table: string;
 };
 
+type CatalogGuideTool = {
+  name: string;
+  description: string;
+  roles: string[];
+  content: string;
+};
+
 type CatalogDiscoveryTool = {
   name: string;
   description: string;
@@ -189,6 +196,7 @@ type Catalog = {
   resources?: CatalogResource[];
   derivedTools?: DerivedToolsCatalogEntry[];
   discoveryTools?: CatalogDiscoveryTool[];
+  guideTools?: CatalogGuideTool[];
 };
 const catalog = rawCatalog as unknown as Catalog;
 
@@ -367,6 +375,12 @@ function resourcesForSession(
 
 const catalogDerivedTools: DerivedToolsCatalogEntry[] = catalog.derivedTools ?? [];
 const catalogDiscoveryTools: CatalogDiscoveryTool[] = catalog.discoveryTools ?? [];
+const catalogGuideTools: CatalogGuideTool[] = catalog.guideTools ?? [];
+
+function guideToolsForSession(session: DbSessionInput): CatalogGuideTool[] {
+  const granted = new Set(session.roles ?? []);
+  return catalogGuideTools.filter((tool) => tool.roles.some((role) => granted.has(role)));
+}
 
 /** Discovery follows the entity's read role, like the resource surface. */
 function discoveryToolsForSession(
@@ -1000,6 +1014,12 @@ function buildServer(
           },
           annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
         })),
+      ...guideToolsForSession(session).map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+      })),
       ...discoveryToolsForSession(session, tables).map((tool) => ({
         name: tool.name,
         description: tool.description,
@@ -1238,6 +1258,14 @@ function buildServer(
       } catch (error) {
         return failed(error);
       }
+    }
+
+    const guideTool = catalogGuideTools.find((tool) => tool.name === name);
+    if (guideTool) {
+      if (!guideToolsForSession(session).includes(guideTool)) {
+        return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
+      }
+      return { content: [{ type: "text", text: guideTool.content }] };
     }
 
     const discoveryTool = catalogDiscoveryTools.find((tool) => tool.name === name);

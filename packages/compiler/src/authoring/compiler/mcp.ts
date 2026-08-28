@@ -15,7 +15,7 @@
  * Input:  Core entity definition (authored `mcp` block).
  * Output: McpSection | undefined — undefined means "no MCP exposure".
  */
-import type { CrudSection, McpConfig, McpDerivedToolsConfig, McpDiscoveryConfig, McpElicitOnCreateConfig, McpOperationConfig, McpOperationKey, McpResourceConfig, McpSection } from "../types.js";
+import type { CrudSection, McpConfig, McpDerivedToolsConfig, McpDiscoveryConfig, McpElicitOnCreateConfig, McpGuideConfig, McpOperationConfig, McpOperationKey, McpResourceConfig, McpSection } from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
 import { limitCrudOperations } from "./crud.js";
 
@@ -222,6 +222,28 @@ export function buildMcp(
     elicitOnCreate = authored;
   }
 
+  let guide: McpGuideConfig | undefined;
+  if (config.guide) {
+    const authored = config.guide;
+    if (!MCP_TOOL_PREFIX_PATTERN.test(authored.name ?? "")) {
+      throw new Error(
+        `Unsafe mcp guide name ${JSON.stringify(authored.name)} on entity ` +
+          `"${coreEntity.entity}" — must match ${MCP_TOOL_PREFIX_PATTERN}.`,
+      );
+    }
+    if (!authored.description || !authored.content?.trim()) {
+      throw new Error(
+        `mcp guide on entity "${coreEntity.entity}" needs a description and non-empty content.`,
+      );
+    }
+    if (!Array.isArray(authored.roles) || authored.roles.length === 0) {
+      throw new Error(
+        `mcp guide on entity "${coreEntity.entity}" needs a non-empty roles list.`,
+      );
+    }
+    guide = authored;
+  }
+
   let discovery: McpDiscoveryConfig | undefined;
   if (config.discovery) {
     if (!MCP_TOOL_PREFIX_PATTERN.test(config.discovery.name ?? "")) {
@@ -242,5 +264,6 @@ export function buildMcp(
     ...(derivedTools ? { derivedTools } : {}),
     ...(elicitOnCreate ? { elicitOnCreate } : {}),
     ...(discovery ? { discovery } : {}),
+    ...(guide ? { guide } : {}),
   };
 }

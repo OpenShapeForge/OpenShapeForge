@@ -188,8 +188,11 @@ function pluginAuthoringDir(repoRoot: string, spec: string): string | null {
 
 /**
  * Resolves a layer entry to an absolute directory: repo-relative or absolute
- * paths first, then a bare package specifier whose package root contains an
- * `authoring/` directory (so contexts can ship as workspace packages).
+ * paths first; then, for a `packages/compiler/...` entry a host repo does not
+ * mirror, the copy packaged with the compiler (which is how the implicit base
+ * layer works outside this monorepo); then a bare package specifier whose
+ * package root contains an `authoring/` directory (so contexts can ship as
+ * workspace packages).
  */
 function resolveLayerDir(repoRoot: string, layer: string): string {
   const asPath = isAbsolute(layer) ? layer : resolve(repoRoot, layer);

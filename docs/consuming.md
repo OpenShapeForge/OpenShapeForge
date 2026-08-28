@@ -132,9 +132,12 @@ repo bundling this package needs to do the same.
   `<repoRoot>/packages/compiler/config/platform-schema.yaml` when the host
   provides it, and otherwise falls back to the copy packaged with the
   compiler — the same fallback applies to the implicit base authoring layer.
-  A host that overrides the file must keep defining at least
-  `platform.schema_migrations` and `platform.entity_events`, since the API
-  runtime and migrator assume both.
+  Both overrides are all-or-nothing: a host copy of the base authoring
+  directory REPLACES the packaged tree entirely rather than merging into it
+  (extend the base through an extra layer instead — see
+  [layers.md](layers.md)). A host that overrides the platform schema must
+  keep defining at least `platform.schema_migrations` and
+  `platform.entity_events`, since the API runtime and migrator assume both.
 - **Bun is required** — the CLI and plugin/package resolution use Bun APIs;
   there is no Node fallback.
 - **Generated CRUD policy is entity-authored.** The common `crud.operations`

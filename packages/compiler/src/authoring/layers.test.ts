@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import YAML from "yaml";
 import {
   authoringLayerDirs,
@@ -472,6 +472,14 @@ describe("authoringLayerDirs", () => {
     writeFileSync(join(root, dir, "index.ts"), "export default {};\n", "utf8");
     if (options.authoring) mkdirSync(join(root, dir, "authoring"), { recursive: true });
   }
+
+  test("a packages/compiler layer missing from the host root resolves to the packaged copy", () => {
+    const root = makeRepo();
+    writeConfig(root, { layers: ["packages/compiler/config/authoring"] });
+    expect(authoringLayerDirs(root)).toEqual([
+      resolve(import.meta.dir, "../../config/authoring"),
+    ]);
+  });
 
   test("returns the configured layers followed by each plugin's authoring directory", () => {
     const root = makeRepo();

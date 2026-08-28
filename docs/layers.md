@@ -23,7 +23,9 @@ plugins:
   directory: repo-relative/absolute path first, else a bare package specifier
   whose package root contains an `authoring/` directory.
 - If the file is missing entirely, the default single layer
-  `packages/compiler/config/authoring` is used.
+  `packages/compiler/config/authoring` is used — resolved against the host
+  repo first, and otherwise against the copy packaged with the compiler, so
+  a host repo without config mirroring still gets the base layer.
 - `plugins` registers compiler plugins ([plugins.md](plugins.md)). A plugin
   that ships its own `authoring/` directory contributes it as an extra layer
   **appended after all configured layers**, in plugin registration order.

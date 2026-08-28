@@ -1,22 +1,52 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 /** Root of the installed @openshapeforge/compiler package; src/ sits directly under it. */
 const packageRoot = resolve(import.meta.dir, "..");
 
 const IN_REPO_PREFIX = "packages/compiler/";
 
+const announcedFallbacks = new Set<string>();
+
 /**
  * The packaged copy of a `packages/compiler/...` file, or null when the path
- * is not compiler config or the package ships no such file.
+ * is not compiler config or the package ships no such file. Using the packaged
+ * copy is announced once per path: a host that MEANT to override but misplaced
+ * its copy would otherwise silently compile against the upstream default and
+ * find out at migrate time (the same reasoning that makes
+ * authoring.config.local.yaml loud in layers.ts).
  */
 export function packagedConfigFallback(repoRelativePath: string): string | null {
   if (!repoRelativePath.startsWith(IN_REPO_PREFIX)) {
     return null;
   }
   const packagedPath = join(packageRoot, repoRelativePath.slice(IN_REPO_PREFIX.length));
-  return existsSync(packagedPath) ? packagedPath : null;
+  if (!existsSync(packagedPath)) {
+    return null;
+  }
+  if (!announcedFallbacks.has(repoRelativePath)) {
+    announcedFallbacks.add(repoRelativePath);
+    console.info(
+      `[compiler] ${repoRelativePath} is not present in this repo; using the copy packaged with @openshapeforge/compiler.`,
+    );
+  }
+  return packagedPath;
+}
+
+/**
+ * The repo-canonical spelling of an absolute path: a path inside the installed
+ * compiler package maps back to its `packages/compiler/...` name, so emitted
+ * provenance (e.g. manifest `source.path`) never encodes the host's install
+ * layout — node_modules paths, versioned isolated-linker paths, or a linked
+ * checkout's machine-specific location.
+ */
+export function canonicalRepoRelativePath(repoRoot: string, absolutePath: string): string {
+  const withinPackage = relative(packageRoot, absolutePath);
+  if (withinPackage && !withinPackage.startsWith("..") && !isAbsolute(withinPackage)) {
+    return join("packages/compiler", withinPackage);
+  }
+  return relative(repoRoot, absolutePath);
 }
 
 /**

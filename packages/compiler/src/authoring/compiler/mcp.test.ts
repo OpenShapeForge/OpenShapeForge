@@ -225,4 +225,46 @@ describe("buildMcp", () => {
       ),
     ).toThrow(/Unsafe mcp test name/);
   });
+
+  it("passes dryRun through with execution and refuses it without", () => {
+    const derivedTools = {
+      roles: ["viewer"],
+      keyField: "value",
+      descriptionField: "value",
+      inputFieldsField: "value",
+      execution: {
+        bindingsField: "value",
+        operationRef: "a",
+        operationEntity: "B",
+        providerRef: "c",
+        providerEntity: "D",
+        connectionEntity: "E",
+        connectionProviderRef: "f",
+        connectionValuesField: "g",
+      },
+      dryRun: { name: "dry_run_widget", roles: ["author"] },
+    };
+    expect(buildMcp(entityWithMcp({ derivedTools }))?.derivedTools?.dryRun).toEqual({
+      name: "dry_run_widget",
+      roles: ["author"],
+    });
+    const { execution: _execution, ...withoutExecution } = derivedTools;
+    expect(() => buildMcp(entityWithMcp({ derivedTools: withoutExecution }))).toThrow(
+      /requires an execution block/,
+    );
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          derivedTools: { ...derivedTools, dryRun: { name: "dry_run_widget", roles: [] } },
+        }),
+      ),
+    ).toThrow(/non-empty roles list/);
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          derivedTools: { ...derivedTools, dryRun: { name: "Bad Name", roles: ["author"] } },
+        }),
+      ),
+    ).toThrow(/Unsafe mcp derivedTools.dryRun name/);
+  });
 });

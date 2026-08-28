@@ -178,6 +178,25 @@ export function buildMcp(
         );
       }
     }
+    if (authored.dryRun) {
+      if (!MCP_TOOL_PREFIX_PATTERN.test(authored.dryRun.name ?? "")) {
+        throw new Error(
+          `Unsafe mcp derivedTools.dryRun name ${JSON.stringify(authored.dryRun.name)} on ` +
+            `entity "${coreEntity.entity}" — must match ${MCP_TOOL_PREFIX_PATTERN}.`,
+        );
+      }
+      if (!Array.isArray(authored.dryRun.roles) || authored.dryRun.roles.length === 0) {
+        throw new Error(
+          `mcp derivedTools.dryRun on entity "${coreEntity.entity}" needs a non-empty roles list.`,
+        );
+      }
+      if (!authored.execution) {
+        throw new Error(
+          `mcp derivedTools.dryRun on entity "${coreEntity.entity}" requires an execution ` +
+            `block — it composes the requests that block describes.`,
+        );
+      }
+    }
     if (authored.execution) {
       const execution = authored.execution;
       if (!fieldKeys.has(execution.bindingsField)) {

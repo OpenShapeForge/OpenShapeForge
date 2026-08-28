@@ -404,6 +404,7 @@ export type McpDerivedToolsDefinition = {
   execution?: McpDerivedExecutionDefinition;
   visibleWhen?: { field: string; equals: string };
   connect?: { name: string; description: string };
+  dryRun?: { name: string; description: string; roles: string[] };
 };
 
 export type McpGuideToolDefinition = {
@@ -665,6 +666,20 @@ export function buildMcpCatalog(
               },
             }
           : {}),
+        ...(mcp.derivedTools.dryRun
+          ? {
+              dryRun: {
+                name: mcp.derivedTools.dryRun.name,
+                description:
+                  mcp.derivedTools.dryRun.description ??
+                  `Compose the exact provider request(s) one ${entityLabel(contract)} tool ` +
+                    `call would make — method, URL, headers with placeholder credentials, ` +
+                    `body — without sending anything. Works on drafts, so a definition can ` +
+                    `be verified before it is published.`,
+                roles: [...mcp.derivedTools.dryRun.roles],
+              },
+            }
+          : {}),
         ...(execution
           ? {
               execution: {
@@ -719,13 +734,15 @@ export function buildMcpCatalog(
   // dispatches on the name.
   const seenNames = new Map<string, McpToolDefinition>();
   for (const entry of derivedTools) {
-    if (!entry.connect) continue;
-    seenNames.set(entry.connect.name, {
-      name: entry.connect.name,
-      operation: "get",
-      entity: entry.entity,
-      table: entry.table,
-    } as McpToolDefinition);
+    for (const authored of [entry.connect, entry.dryRun]) {
+      if (!authored) continue;
+      seenNames.set(authored.name, {
+        name: authored.name,
+        operation: "get",
+        entity: entry.entity,
+        table: entry.table,
+      } as McpToolDefinition);
+    }
   }
   for (const guide of guideTools) {
     seenNames.set(guide.name, {

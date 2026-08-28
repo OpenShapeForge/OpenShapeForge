@@ -32,6 +32,8 @@ export type DerivedToolsCatalogEntry = {
   /** Publication gate: only rows where row[field] === equals project. */
   visibleWhen?: { field: string; equals: string };
   connect?: { name: string; description: string };
+  /** Composition preview for definition authors; roles are its own audience. */
+  dryRun?: { name: string; description: string; roles: string[] };
 };
 
 export type DerivedTool = {

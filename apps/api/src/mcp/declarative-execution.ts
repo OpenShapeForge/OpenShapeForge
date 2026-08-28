@@ -340,8 +340,56 @@ export async function acquireAuthHeaders(input: {
   return buildAuthHeaders(input.auth, input.plain, input.secret);
 }
 
-export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRecord> {
+/**
+ * Placeholder auth headers for composition WITHOUT credentials: the header
+ * names and shapes are real, the values describe where the value would come
+ * from. Secrets are never decrypted on this path.
+ */
+export function describeAuthHeaders(auth: unknown): Record<string, string> {
+  if (!auth || typeof auth !== "object") return {};
+  const config = auth as AuthConfig;
+  switch (config.scheme) {
+    case "basic":
+      return { authorization: "Basic <credentials from the connection>" };
+    case "bearer":
+      return {
+        authorization: `Bearer <value of "${String(config.tokenFrom ?? "?")}" from the connection>`,
+      };
+    case "header": {
+      const name = typeof config.headerName === "string" ? config.headerName.trim() : "";
+      if (!/^[A-Za-z][A-Za-z0-9-]*$/.test(name)) return {};
+      return {
+        [name.toLowerCase()]: `<value of "${String(config.tokenFrom ?? "?")}" from the connection>`,
+      };
+    }
+    case "oauth2ClientCredentials":
+      return {
+        authorization: `Bearer <token from ${String(config.tokenUrl ?? "the token endpoint")}>`,
+      };
+    default:
+      return {};
+  }
+}
+
+export type ComposedRequest = {
+  method: string;
+  url: URL;
+  headers: Record<string, string>;
+  body?: string;
+};
+
+/**
+ * Compose the provider request for ONE binding — everything up to but not
+ * including the network call. Mode "acquire" resolves real credentials
+ * (including the client-credentials token round-trip); mode "describe" never
+ * touches a secret and substitutes placeholder auth headers, which is what
+ * makes a dry run safe to show.
+ */
+export async function composeBindingRequest(
+  input: ExecuteBindingInput & { mode?: "acquire" | "describe" },
+): Promise<ComposedRequest> {
   const { binding, operationRow, providerRow, serviceInputs } = input;
+  const mode = input.mode ?? "acquire";
   const keyring = input.keyring ?? keyringFromEnv(process.env[KEYRING_ENV]);
   const fetchImpl = input.fetchImpl ?? fetch;
 
@@ -355,6 +403,10 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
   }
 
   const { plain, secret } = splitConnectionValues(input.connectionValues, (stored, field) => {
+    // Composition-only mode never decrypts: the placeholder is unused because
+    // auth headers are described rather than built, and secrets can reach no
+    // other request position by construction.
+    if (mode === "describe") return "<secret>";
     if (!keyring) {
       throw new HttpError(
         500,
@@ -444,13 +496,15 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
     : [];
   const headers: Record<string, string> = {
     accept: "application/json",
-    ...(await acquireAuthHeaders({
-      auth: providerRow.auth,
-      plain,
-      secret,
-      egress,
-      fetchImpl,
-    })),
+    ...(mode === "describe"
+      ? describeAuthHeaders(providerRow.auth)
+      : await acquireAuthHeaders({
+          auth: providerRow.auth,
+          plain,
+          secret,
+          egress,
+          fetchImpl,
+        })),
   };
   let body: string | undefined;
   if (isGraphql) {
@@ -487,6 +541,15 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
       body = JSON.stringify({ ...remaining, ...mappedBody });
     }
   }
+
+  return { method, url, headers, ...(body !== undefined ? { body } : {}) };
+}
+
+export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRecord> {
+  const { binding, operationRow, providerRow } = input;
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const { method, url, headers, body } = await composeBindingRequest(input);
+  const isGraphql = providerRow.transport === "graphql";
 
   const response = await fetchImpl(url, {
     method,

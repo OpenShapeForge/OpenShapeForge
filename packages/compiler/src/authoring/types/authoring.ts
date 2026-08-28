@@ -318,6 +318,19 @@ export interface McpDerivedConnectConfig {
   description?: string;
 }
 
+export interface McpDerivedDryRunConfig {
+  /** Tool name for the composition preview, e.g. `dry_run_service`. */
+  name: string;
+  /** Override the composed tool description. */
+  description?: string;
+  /**
+   * Roles offered the dry run — typically the definition AUTHORS, not the
+   * derived tools' audience: the composed requests expose provider URLs and
+   * header shapes that are authoring detail.
+   */
+  roles: string[];
+}
+
 export interface McpDerivedToolsConfig {
   /**
    * Roles whose sessions are offered the derived tools. Deliberately separate
@@ -355,6 +368,15 @@ export interface McpDerivedToolsConfig {
    * authorization URL (PKCE) for the CALLER to open. Requires `execution`.
    */
   connect?: McpDerivedConnectConfig;
+  /**
+   * Opt-in composition preview tool: given a derived tool's name and
+   * arguments, the runtime composes the exact provider request(s) the call
+   * would make — method, URL, headers with placeholder credentials, body —
+   * WITHOUT sending them, and works on rows the visibility gate still hides,
+   * so authors verify a definition before publishing it. Requires
+   * `execution`.
+   */
+  dryRun?: McpDerivedDryRunConfig;
 }
 
 export interface McpElicitOnCreateConfig {

@@ -7,6 +7,8 @@
  */
 import { describe, expect, it } from "bun:test";
 import {
+  composeBindingRequest,
+  describeAuthHeaders,
   acquireAuthHeaders,
   applyMapping,
   buildAuthHeaders,
@@ -300,5 +302,79 @@ describe("cursor pagination", () => {
     });
     expect(outputs.nextCursor).toBe("cur-2");
     expect(outputs.items).toEqual([1]);
+  });
+});
+
+describe("composeBindingRequest (describe mode)", () => {
+  const providerRow = {
+    transport: "rest",
+    baseUrlTemplate: "https://{subdomain}.example.com",
+    egressHosts: ["*.example.com"],
+    auth: { scheme: "basic", usernameTemplate: "{email}/token", passwordFrom: "apiToken" },
+  };
+  const operationRow = {
+    key: "create-thing",
+    operation: { method: "POST", pathTemplate: "/api/things" },
+  };
+
+  it("composes the full request with placeholder auth and never decrypts", async () => {
+    const composed = await composeBindingRequest({
+      binding: { order: 1 },
+      operationRow,
+      providerRow,
+      connectionValues: {
+        subdomain: "acme",
+        email: "a@b.c",
+        apiToken: { ciphertext: "should-never-be-read", keyId: "k" },
+      },
+      serviceInputs: { title: "Hello" },
+      secretScope: "unused",
+      mode: "describe",
+    });
+    expect(composed.method).toBe("POST");
+    expect(composed.url.toString()).toBe("https://acme.example.com/api/things");
+    expect(composed.headers.authorization).toBe("Basic <credentials from the connection>");
+    expect(JSON.parse(composed.body!)).toEqual({ title: "Hello" });
+    expect(JSON.stringify(composed)).not.toContain("should-never-be-read");
+  });
+
+  it("keeps egress and template rules enforced during composition", async () => {
+    await expect(
+      composeBindingRequest({
+        binding: {},
+        operationRow,
+        providerRow: { ...providerRow, egressHosts: [] },
+        connectionValues: { subdomain: "acme" },
+        serviceInputs: {},
+        secretScope: "unused",
+        mode: "describe",
+      }),
+    ).rejects.toThrow(/egress allow-list/);
+    await expect(
+      composeBindingRequest({
+        binding: {},
+        operationRow,
+        providerRow,
+        connectionValues: {},
+        serviceInputs: {},
+        secretScope: "unused",
+        mode: "describe",
+      }),
+    ).rejects.toThrow(/\{subdomain\}/);
+  });
+});
+
+describe("describeAuthHeaders", () => {
+  it("describes each scheme without values", () => {
+    expect(describeAuthHeaders({ scheme: "bearer", tokenFrom: "apiToken" })).toEqual({
+      authorization: 'Bearer <value of "apiToken" from the connection>',
+    });
+    expect(describeAuthHeaders({ scheme: "header", headerName: "X-Key", tokenFrom: "k" })).toEqual({
+      "x-key": '<value of "k" from the connection>',
+    });
+    expect(
+      describeAuthHeaders({ scheme: "oauth2ClientCredentials", tokenUrl: "https://t/token" }),
+    ).toEqual({ authorization: "Bearer <token from https://t/token>" });
+    expect(describeAuthHeaders(undefined)).toEqual({});
   });
 });

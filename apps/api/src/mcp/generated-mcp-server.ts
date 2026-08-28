@@ -1396,7 +1396,23 @@ function buildServer(
                     );
                   }
                 }
-                connectionValues = values;
+                // The personal connection holds only tokens; tenant-owned
+                // NON-secret configuration (subdomain and friends) still
+                // resolves base-URL and path templates, so merge the tenant
+                // connection's plain half underneath the personal values.
+                const tenantConnectionForPlain = connectionRows.find((row) => !row.ownerUserId);
+                const tenantPlainForExecution = Object.fromEntries(
+                  Object.entries(
+                    (tenantConnectionForPlain?.[execution.connectionValuesField] ?? {}) as Record<
+                      string,
+                      unknown
+                    >,
+                  ).filter(
+                    ([, value]) =>
+                      value !== null && typeof value !== "object" && value !== undefined,
+                  ),
+                );
+                connectionValues = { ...tenantPlainForExecution, ...values };
                 secretScope = personalScope;
                 providerForExecution = {
                   ...providerRow,

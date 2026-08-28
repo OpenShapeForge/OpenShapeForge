@@ -381,6 +381,27 @@
                 "titleField": { "type": "string" },
                 "descriptionField": { "type": "string" },
                 "inputFieldsField": { "type": "string" },
+                "visibleWhen": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["field", "equals"],
+                  "properties": {
+                    "field": { "type": "string" },
+                    "equals": { "type": "string" }
+                  }
+                },
+                "connect": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name"],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_]*$"
+                    },
+                    "description": { "type": "string" }
+                  }
+                },
                 "execution": {
                   "type": "object",
                   "additionalProperties": false,

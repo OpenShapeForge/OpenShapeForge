@@ -230,6 +230,8 @@ export interface McpSection {
       connectionProviderRef: string;
       connectionValuesField: string;
     };
+    visibleWhen?: { field: string; equals: string };
+    connect?: { name: string; description?: string };
   };
 }
 

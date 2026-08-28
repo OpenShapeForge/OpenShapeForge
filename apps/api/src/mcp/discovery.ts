@@ -10,6 +10,7 @@
  * this slice — public schema documents cover the common case; discovery
  * through a connection's credentials is a later step.
  */
+import { parse as parseYaml } from "yaml";
 import { HttpError } from "../rest/http-error.js";
 import { hostAllowed } from "../connectors/executor.js";
 
@@ -145,11 +146,12 @@ export async function discoverProviderSchema(
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new HttpError(
-      502,
-      "DISCOVERY_FAILED",
-      "Schema document is not valid JSON. (YAML documents are not supported in this slice.)",
-    );
+    // Real providers routinely publish their OpenAPI documents as YAML.
+    try {
+      parsed = parseYaml(text);
+    } catch {
+      throw new HttpError(502, "DISCOVERY_FAILED", "Schema document is neither JSON nor YAML.");
+    }
   }
 
   if (mode === "openapi") {

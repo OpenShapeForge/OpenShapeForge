@@ -74,6 +74,7 @@ import {
   type ElicitOnCreateEntry,
 } from "./elicitation.js";
 import { executeBinding, orderedBindings, resolveTemplate } from "./declarative-execution.js";
+import { validateVisibleDefinition } from "./publication-validation.js";
 import { discoverProviderSchema } from "./discovery.js";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
@@ -827,10 +828,61 @@ function assertWritableValues(
   }
 }
 
+/**
+ * Guard a create/update that would make a derived-tool definition VISIBLE
+ * (`visibleWhen` satisfied on the resulting row): the execution chain and its
+ * connections are validated first, so the audience never receives a tool
+ * whose first call is a guaranteed misconfiguration failure. Writes that
+ * leave the row invisible — drafts, and un-publishing — pass untouched.
+ */
+async function assertPublishableWrite(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+  table: GeneratedTable,
+  values: Record<string, unknown>,
+  rowId?: string,
+): Promise<void> {
+  const entry = catalogDerivedTools.find(
+    (candidate) => candidate.table === table.name && candidate.visibleWhen && candidate.execution,
+  );
+  if (!entry) return;
+  const gate = entry.visibleWhen!;
+
+  let resulting = values;
+  if (rowId !== undefined) {
+    const current = await getGeneratedEntity(db, session, { table: table.name, id: rowId });
+    if (!current) return; // the update itself will answer NOT_FOUND
+    resulting = { ...serializeRow(table, current), ...values };
+  }
+  if (resulting[gate.field] !== gate.equals) return;
+
+  // Static surface a derived name may never shadow: every advertised
+  // non-derived tool name, whichever feature contributed it.
+  const reservedNames = new Set<string>([
+    ...catalog.tools.map((tool) => tool.name),
+    ...catalogDerivedTools.flatMap((candidate) =>
+      candidate.connect ? [candidate.connect.name] : [],
+    ),
+    ...catalogGuideTools.map((tool) => tool.name),
+    ...catalogDiscoveryTools.map((tool) => tool.name),
+  ]);
+  await validateVisibleDefinition({
+    entry,
+    row: resulting,
+    rowId,
+    reservedNames,
+    providerDefinitionsField: entityForTable(entry.execution!.connectionTable)?.elicitOnCreate
+      ?.definitionsField,
+    readRows: (rowTable, filter) => runtimeRowsByFilter(db, session, tables, rowTable, filter),
+  });
+}
+
 async function invokeTool(
   tool: CatalogTool,
   entity: CatalogEntity | undefined,
   table: GeneratedTable,
+  tables: Map<string, GeneratedTable>,
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   rawArgs: unknown,
@@ -887,6 +939,7 @@ async function invokeTool(
         : values;
       assertDeclaredProperties(tool.inputSchema, modelValues, "field");
       assertWritableValues(modelValues, entity, table, session);
+      await assertPublishableWrite(db, session, tables, table, values);
       const row = await createGeneratedEntity(db, session, {
         table: table.name,
         values,
@@ -904,6 +957,7 @@ async function invokeTool(
         "field",
       );
       assertWritableValues(values, entity, table, session);
+      await assertPublishableWrite(db, session, tables, table, values, id);
       const row = await updateGeneratedEntity(db, session, {
         table: table.name,
         id,
@@ -1628,7 +1682,7 @@ function buildServer(
             : modelSent;
         assertSchemaValid(match.inputSchema, toValidate, "arguments");
       }
-      const outcome = await invokeTool(match, entity, table, db, session, callArguments);
+      const outcome = await invokeTool(match, entity, table, tables, db, session, callArguments);
       // A successful mutation on a table whose rows project as tools changes
       // other sessions' tool lists — tell them, so they re-list instead of
       // discovering the change on their next reconnect.

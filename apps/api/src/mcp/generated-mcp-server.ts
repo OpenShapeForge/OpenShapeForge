@@ -73,7 +73,7 @@ import {
   redactElicitedValues,
   type ElicitOnCreateEntry,
 } from "./elicitation.js";
-import { executeBinding, orderedBindings } from "./declarative-execution.js";
+import { executeBinding, orderedBindings, resolveTemplate } from "./declarative-execution.js";
 import { discoverProviderSchema } from "./discovery.js";
 import {
   exchangeCodeForTokens,
@@ -1160,6 +1160,22 @@ function buildServer(
           secretScope,
         );
 
+        // Provider OAuth endpoints are routinely per-tenant
+        // (https://{subdomain}.provider.com/...): placeholders resolve from
+        // the tenant connection's NON-secret values, like base URLs do.
+        const tenantPlainValues = Object.fromEntries(
+          Object.entries(
+            (tenantConnection?.[execution.connectionValuesField] ?? {}) as Record<string, unknown>,
+          ).filter(([, value]) => value !== null && typeof value !== "object")
+            .map(([key, value]) => [key, String(value)]),
+        );
+        const resolvedAuthorizationUrl = resolveTemplate(
+          authorizationUrl,
+          tenantPlainValues,
+          "auth.authorizationUrl",
+        );
+        const resolvedTokenUrl = resolveTemplate(tokenUrl, tenantPlainValues, "auth.tokenUrl");
+
         const handoff = mintAuthorization({
           tenantId: session.tenantId as string,
           userId: session.userId as string,
@@ -1168,7 +1184,7 @@ function buildServer(
           connectionTable: execution.connectionTable,
           connectionProviderRef: execution.connectionProviderRef,
           connectionValuesField: execution.connectionValuesField,
-          tokenUrl,
+          tokenUrl: resolvedTokenUrl,
           clientId: credentials.clientId,
           clientSecret: credentials.clientSecret,
           egress: Array.isArray(providerRow.egressHosts)
@@ -1177,7 +1193,7 @@ function buildServer(
           scopes,
           redirectUri: `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`,
           providerName: String(providerRow.name ?? providerRowId),
-          authorizationUrl,
+          authorizationUrl: resolvedAuthorizationUrl,
         });
         return ok({
           action: "authorize",
@@ -1344,8 +1360,17 @@ function buildServer(
                   if (!keyring || typeof providerAuth.tokenUrl !== "string") {
                     throw new HttpError(400, "PROVIDER_MISCONFIGURED", "Token refresh is not configured.");
                   }
+                  const tenantPlain = Object.fromEntries(
+                    Object.entries(
+                      (tenantConnection?.[execution.connectionValuesField] ?? {}) as Record<
+                        string,
+                        unknown
+                      >,
+                    ).filter(([, value]) => value !== null && typeof value !== "object")
+                      .map(([key, value]) => [key, String(value)]),
+                  );
                   const refreshed = await refreshTokens({
-                    tokenUrl: providerAuth.tokenUrl,
+                    tokenUrl: resolveTemplate(providerAuth.tokenUrl, tenantPlain, "auth.tokenUrl"),
                     clientId: credentials.clientId,
                     clientSecret: credentials.clientSecret,
                     refreshToken: decryptSecret(

@@ -18,7 +18,11 @@
  * Determinism: pure function of the compiled contracts; no timestamps,
  * entities sorted by tool prefix, fields in authored order.
  */
-import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
+import type {
+  CompiledEntityContract,
+  CompiledField,
+  CompiledRelationship,
+} from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import {
   compiledFieldSchema,
@@ -311,10 +315,25 @@ export type McpEntityCatalogEntry = {
     key: string;
     label?: string;
     description?: string;
+    valueType: CompiledField["valueType"];
+    cardinality: CompiledField["cardinality"];
     required: boolean;
     readOnly: boolean;
+    immutable: boolean;
     schema: JsonObject;
     classification?: string;
+    relationship?: {
+      kind: NonNullable<CompiledField["relationship"]>["kind"];
+      entity: string;
+    };
+  }[];
+  relationships: {
+    key: string;
+    kind: CompiledRelationship["kind"];
+    target: string;
+    foreignKey?: string;
+    via?: string;
+    label?: string;
   }[];
 };
 
@@ -378,12 +397,34 @@ export function buildMcpCatalog(
           key: field.key,
           ...(label ? { label } : {}),
           ...(description ? { description } : {}),
+          valueType: field.valueType,
+          cardinality: field.cardinality,
           required: field.required === true,
           readOnly: field.readOnly === true,
+          immutable: field.immutable === true,
           schema: compiledFieldSchema(field, referentiedata, MCP_FIELD_SCHEMA_OPTIONS),
           ...(field.classification?.sensitivity
             ? { classification: field.classification.sensitivity }
             : {}),
+          ...(field.relationship
+            ? {
+                relationship: {
+                  kind: field.relationship.kind,
+                  entity: field.relationship.entity,
+                },
+              }
+            : {}),
+        };
+      }),
+      relationships: contract.model.relationships.map((relationship) => {
+        const label = localizedText(relationship.label);
+        return {
+          key: relationship.key,
+          kind: relationship.kind,
+          target: relationship.target,
+          ...(relationship.foreignKey ? { foreignKey: relationship.foreignKey } : {}),
+          ...(relationship.via ? { via: relationship.via } : {}),
+          ...(label ? { label } : {}),
         };
       }),
     });

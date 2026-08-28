@@ -51,6 +51,7 @@ import {
 } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import YAML from "yaml";
+import { packagedConfigFallback } from "../packaged-config.js";
 
 export type AuthoringConfig = {
   layers: string[];
@@ -187,13 +188,25 @@ function pluginAuthoringDir(repoRoot: string, spec: string): string | null {
 
 /**
  * Resolves a layer entry to an absolute directory: repo-relative or absolute
- * paths first, then a bare package specifier whose package root contains an
- * `authoring/` directory (so contexts can ship as workspace packages).
+ * paths first; then, for a `packages/compiler/...` entry a host repo does not
+ * mirror, the copy packaged with the compiler (which is how the implicit base
+ * layer works outside this monorepo); then a bare package specifier whose
+ * package root contains an `authoring/` directory (so contexts can ship as
+ * workspace packages).
  */
 function resolveLayerDir(repoRoot: string, layer: string): string {
   const asPath = isAbsolute(layer) ? layer : resolve(repoRoot, layer);
   if (existsSync(asPath)) {
     return asPath;
+  }
+  // A host repo that consumes the compiler as a package rarely mirrors the
+  // compiler's own config tree; a `packages/compiler/...` layer (notably the
+  // implicit base layer) falls back to the copy packaged with the compiler.
+  if (!isAbsolute(layer)) {
+    const packaged = packagedConfigFallback(layer);
+    if (packaged) {
+      return packaged;
+    }
   }
   try {
     const packageJson = Bun.resolveSync(`${layer}/package.json`, repoRoot);

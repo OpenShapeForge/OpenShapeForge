@@ -11,6 +11,7 @@ import { buildConnector } from "./authoring/compiler/connector.js";
 import { listConnectorFiles, loadConnector } from "./authoring/connector-loader.js";
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
 import { loadManifest } from "./load-manifest.js";
+import { canonicalRepoRelativePath, resolvePackagedConfigPath } from "./packaged-config.js";
 import {
   loadCompilerPluginEntries,
   mergePluginPlatformTables,
@@ -118,7 +119,7 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
       const pluginEntries = await loadCompilerPluginEntries(repoRoot);
       const plugins = pluginEntries.map((entry) => entry.plugin);
       const baseManifest = await loadManifest(
-        join(repoRoot, "packages/compiler/config/platform-schema.yaml"),
+        resolvePackagedConfigPath(repoRoot, "packages/compiler/config/platform-schema.yaml"),
       );
       const authoringDir = resolveActiveAuthoringDir(repoRoot);
       const webPresent = existsSync(join(repoRoot, "apps/web"));
@@ -131,7 +132,7 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
         authoringDir,
         {
           mode: "promote",
-          sourcePathPrefix: relative(repoRoot, authoringDir),
+          sourcePathPrefix: canonicalRepoRelativePath(repoRoot, authoringDir),
           entityAllowlist: authoringEntitySlugs,
           contextEntityAllowlist: contextEntitySpecs,
           schemaByModule: { core: "erp" },
@@ -145,7 +146,7 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
       return {
         manifest: mergePromotedTables(baseManifest, promotedManifest),
         entities,
-        connectors: compileActiveConnectors(authoringDir, relative(repoRoot, authoringDir)),
+        connectors: compileActiveConnectors(authoringDir, canonicalRepoRelativePath(repoRoot, authoringDir)),
         plugins,
         pluginEntries,
       };

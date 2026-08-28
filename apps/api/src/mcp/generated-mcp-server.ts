@@ -74,6 +74,15 @@ import {
   type ElicitOnCreateEntry,
 } from "./elicitation.js";
 import {
+  consumeConfiguration,
+  mintConfiguration,
+  parseSubmission,
+  peekConfiguration,
+  renderConfigurationForm,
+  renderMessagePage,
+  storeSubmission,
+} from "./configuration-handoff.js";
+import {
   composeBindingRequest,
   executeBinding,
   orderedBindings,
@@ -476,6 +485,23 @@ async function derivedToolsForSession(
  * behalf; withDbSession still scopes every read to the caller's tenant.
  */
 export const ENTITY_OAUTH_CALLBACK_PATH = "/api/entity-oauth/callback";
+export const ENTITY_CONFIGURATION_PATH = "/api/entity-configuration";
+
+/**
+ * Whether a failed elicitation should fall back to the browser handoff.
+ * Unsupported clients, auto-answering clients (declared the capability, then
+ * "declined" in machine time), dismissed forms and timed-out forms all land
+ * here; a person who genuinely declined simply never opens the link and its
+ * token expires. Every other failure (missing source row, keyring problems)
+ * stays an error.
+ */
+function elicitationFallback(error: unknown): boolean {
+  if (error instanceof HttpError) {
+    return error.code === "ELICITATION_UNSUPPORTED" || error.code === "ELICITATION_DECLINED";
+  }
+  const message = error instanceof Error ? error.message : "";
+  return /timed?\s*out|timeout/i.test(message);
+}
 
 function elicitedKeyring() {
   return keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
@@ -1952,20 +1978,48 @@ function buildServer(
           }
         }
         const sourceAuth = sourceRow?.auth as Record<string, unknown> | null | undefined;
-        callArguments = await collectElicitedValues({
-          server,
-          elicit,
-          sourceRow,
-          values: modelArguments,
-          relatedRequestId: extra.requestId,
-          ...(sourceAuth?.profile === "oauth2AuthorizationCode"
-            ? {
-                messagePrefix:
-                  `Before entering these values, register this exact redirect URL on the ` +
-                  `provider's OAuth client: ${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`,
-              }
-            : {}),
-        });
+        const messagePrefix =
+          sourceAuth?.profile === "oauth2AuthorizationCode"
+            ? `Before entering these values, register this exact redirect URL on the ` +
+              `provider's OAuth client: ${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`
+            : undefined;
+        try {
+          callArguments = await collectElicitedValues({
+            server,
+            elicit,
+            sourceRow,
+            values: modelArguments,
+            relatedRequestId: extra.requestId,
+            ...(messagePrefix ? { messagePrefix } : {}),
+          });
+        } catch (error) {
+          if (!elicitationFallback(error) || !sourceRow) throw error;
+          // The in-band form did not happen — hand the person a browser URL
+          // to the same form instead of dead-ending the setup.
+          const definitions = Array.isArray(sourceRow[elicit.definitionsField])
+            ? (sourceRow[elicit.definitionsField] as Record<string, unknown>[])
+            : [];
+          const minted = mintConfiguration({
+            tenantId: session.tenantId as string,
+            userId: session.userId as string,
+            table: table.name,
+            elicit,
+            modelValues: modelArguments,
+            definitions,
+            displayName: String(sourceRow.name ?? entity?.entity ?? "this record"),
+            messagePrefix,
+          });
+          return ok({
+            action: "configure",
+            url: `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${minted.token}`,
+            expiresInSeconds: minted.expiresInSeconds,
+            instructions:
+              "The secure form could not be completed in this client. Ask the person to " +
+              "open this url in their browser — the same form is served there, and the " +
+              "values go directly to the runtime, never through this chat. Once they have " +
+              "saved it, continue: the record will exist.",
+          });
+        }
       }
       {
         // Validate what the MODEL sent against the advertised schema — before
@@ -2222,6 +2276,91 @@ export function registerGeneratedMcpServer(
           .status(500)
           .type("text/html")
           .send(html("Storing the connection failed. Start again from your chat."));
+      }
+    });
+
+    // The configuration handoff pages. Unauthenticated by necessity, like
+    // the OAuth callback: the person arrives by browser, and the single-use
+    // token IS the authorization — it was minted for exactly this tenant,
+    // user and pending create. Values travel only in the POST body.
+    instance.addContentTypeParser(
+      "application/x-www-form-urlencoded",
+      { parseAs: "string" },
+      (_request, body, done) => done(null, body),
+    );
+    instance.get(`${ENTITY_CONFIGURATION_PATH}/:token`, async (request, reply) => {
+      const pending = peekConfiguration((request.params as { token?: string }).token);
+      if (!pending) {
+        return reply
+          .status(404)
+          .type("text/html")
+          .send(
+            renderMessagePage(
+              "This configuration link is invalid or expired. Ask your assistant to start again.",
+            ),
+          );
+      }
+      return reply
+        .type("text/html")
+        .send(
+          renderConfigurationForm(pending, `${ENTITY_CONFIGURATION_PATH}/${pending.token}`),
+        );
+    });
+    instance.post(`${ENTITY_CONFIGURATION_PATH}/:token`, async (request, reply) => {
+      const pending = peekConfiguration((request.params as { token?: string }).token);
+      if (!pending) {
+        return reply
+          .status(404)
+          .type("text/html")
+          .send(
+            renderMessagePage(
+              "This configuration link is invalid or expired. Ask your assistant to start again.",
+            ),
+          );
+      }
+      const body = typeof request.body === "string" ? request.body : "";
+      const { content, errors } = parseSubmission(pending, body);
+      if (Object.keys(errors).length > 0) {
+        return reply
+          .status(400)
+          .type("text/html")
+          .send(
+            renderConfigurationForm(
+              pending,
+              `${ENTITY_CONFIGURATION_PATH}/${pending.token}`,
+              errors,
+            ),
+          );
+      }
+      try {
+        const db = options.db;
+        if (!db) throw new HttpError(503, "DATABASE_NOT_CONFIGURED", "Database is not configured.");
+        const tableDef = tablesByName().get(pending.table);
+        if (!tableDef) throw new HttpError(500, "INTERNAL", "Table is missing from the manifest.");
+        const writeSession: DbSessionInput = {
+          tenantId: pending.tenantId,
+          userId: pending.userId,
+          roles: [],
+          groups: [],
+          scope: "self",
+        };
+        const values = storeSubmission(pending, content);
+        await createGeneratedEntityForTable(db, writeSession, tableDef, values);
+        consumeConfiguration(pending.token);
+        return reply
+          .type("text/html")
+          .send(renderMessagePage("Saved. You can close this window and return to your chat."));
+      } catch (error) {
+        request.log.error({ err: error }, "Configuration handoff submission failed.");
+        const { body: errorBody } = toHttpError(error);
+        return reply
+          .status(400)
+          .type("text/html")
+          .send(
+            renderMessagePage(
+              `Saving failed: ${errorBody.error.message} Return to your chat and try again.`,
+            ),
+          );
       }
     });
 

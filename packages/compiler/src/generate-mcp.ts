@@ -387,6 +387,13 @@ export type McpDerivedToolsDefinition = {
   connect?: { name: string; description: string };
 };
 
+export type McpGuideToolDefinition = {
+  name: string;
+  description: string;
+  roles: string[];
+  content: string;
+};
+
 export type McpDiscoveryToolDefinition = {
   name: string;
   description: string;
@@ -402,6 +409,7 @@ export type McpCatalog = {
   resources: McpResourceDefinition[];
   derivedTools: McpDerivedToolsDefinition[];
   discoveryTools: McpDiscoveryToolDefinition[];
+  guideTools: McpGuideToolDefinition[];
 };
 
 export type McpCatalogInput = {
@@ -479,6 +487,7 @@ export function buildMcpCatalog(
   const resources: McpResourceDefinition[] = [];
   const derivedTools: McpDerivedToolsDefinition[] = [];
   const discoveryTools: McpDiscoveryToolDefinition[] = [];
+  const guideTools: McpGuideToolDefinition[] = [];
 
   for (const input of opted) {
     const { contract } = input;
@@ -545,6 +554,15 @@ export function buildMcpCatalog(
           `Read one ${entityLabel(contract)} by its identifier.`,
         entity: contract.entity.name,
         table: input.table,
+      });
+    }
+
+    if (mcp.guide) {
+      guideTools.push({
+        name: mcp.guide.name,
+        description: mcp.guide.description,
+        roles: [...mcp.guide.roles],
+        content: mcp.guide.content,
       });
     }
 
@@ -646,6 +664,14 @@ export function buildMcpCatalog(
       table: entry.table,
     } as McpToolDefinition);
   }
+  for (const guide of guideTools) {
+    seenNames.set(guide.name, {
+      name: guide.name,
+      operation: "get",
+      entity: "guide",
+      table: "guide",
+    } as McpToolDefinition);
+  }
   for (const discovery of discoveryTools) {
     seenNames.set(discovery.name, {
       name: discovery.name,
@@ -690,6 +716,7 @@ export function buildMcpCatalog(
     resources,
     derivedTools,
     discoveryTools,
+    guideTools,
   };
 }
 

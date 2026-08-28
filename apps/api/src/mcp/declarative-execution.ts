@@ -275,6 +275,20 @@ export function applyMapping(values: JsonRecord, mapping: unknown): JsonRecord {
   return mapped;
 }
 
+/** Set a value at a dot path, creating intermediate objects. */
+export function setPath(target: JsonRecord, path: string, value: unknown): void {
+  const segments = path.split(".");
+  let current = target;
+  for (const segment of segments.slice(0, -1)) {
+    const next = current[segment];
+    if (next === null || typeof next !== "object" || Array.isArray(next)) {
+      current[segment] = {};
+    }
+    current = current[segment] as JsonRecord;
+  }
+  current[segments[segments.length - 1]!] = value;
+}
+
 /** Dot-path extraction, e.g. `data.tickets`; empty/absent path is identity. */
 export function extractPath(value: unknown, path: unknown): unknown {
   if (typeof path !== "string" || path.length === 0) return value;
@@ -415,6 +429,19 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
   const remaining = Object.fromEntries(
     Object.entries(operationInputs).filter(([key]) => !usedInPath.has(key)),
   );
+
+  // Canonical request mapping: inputs may be renamed into query parameters
+  // and placed at dot paths inside the JSON body — provider APIs rarely
+  // accept a flat echo of the input contract. Unmapped inputs keep the
+  // default placement (query for reads, top-level body for writes).
+  const requestMapping = (operationRow.requestMapping ?? {}) as JsonRecord;
+  const mappedBody: JsonRecord = {};
+  const queryRenames = Array.isArray(requestMapping.queryParams)
+    ? (requestMapping.queryParams as { field?: unknown; param?: unknown }[])
+    : [];
+  const bodyPaths = Array.isArray(requestMapping.bodyPaths)
+    ? (requestMapping.bodyPaths as { field?: unknown; path?: unknown }[])
+    : [];
   const headers: Record<string, string> = {
     accept: "application/json",
     ...(await acquireAuthHeaders({
@@ -429,13 +456,36 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
   if (isGraphql) {
     headers["content-type"] = "application/json";
     body = JSON.stringify({ query: operation.graphqlOperation, variables: remaining });
-  } else if (method === "GET" || method === "DELETE") {
-    for (const [key, value] of Object.entries(remaining)) {
-      if (value !== null && typeof value !== "object") url.searchParams.set(key, String(value));
-    }
   } else {
-    headers["content-type"] = "application/json";
-    body = JSON.stringify(remaining);
+    for (const entry of queryRenames) {
+      if (typeof entry.field !== "string" || typeof entry.param !== "string") continue;
+      const value = remaining[entry.field];
+      if (value !== undefined && value !== null && typeof value !== "object") {
+        url.searchParams.set(entry.param, String(value));
+      }
+      delete remaining[entry.field];
+    }
+    for (const entry of bodyPaths) {
+      if (typeof entry.field !== "string" || typeof entry.path !== "string") continue;
+      const value = remaining[entry.field];
+      if (value !== undefined) setPath(mappedBody, entry.path, value);
+      delete remaining[entry.field];
+    }
+    if (method === "GET" || method === "DELETE") {
+      for (const [key, value] of Object.entries(remaining)) {
+        if (value !== null && typeof value !== "object") url.searchParams.set(key, String(value));
+      }
+      if (Object.keys(mappedBody).length > 0) {
+        throw new HttpError(
+          400,
+          "OPERATION_MISCONFIGURED",
+          "requestMapping.bodyPaths cannot apply to a GET or DELETE operation.",
+        );
+      }
+    } else {
+      headers["content-type"] = "application/json";
+      body = JSON.stringify({ ...remaining, ...mappedBody });
+    }
   }
 
   const response = await fetchImpl(url, {

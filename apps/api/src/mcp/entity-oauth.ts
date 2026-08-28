@@ -59,6 +59,8 @@ export type PendingAuthorization = {
   redirectUri: string;
   /** Human name for the completion page. */
   providerName: string;
+  /** "user": tokens land on the caller's personal row; "tenant": on the tenant row. */
+  connectionScope: "user" | "tenant";
   expiresAtMs: number;
 };
 

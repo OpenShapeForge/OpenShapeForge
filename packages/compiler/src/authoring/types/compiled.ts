@@ -207,6 +207,8 @@ export interface McpSection {
   guide?: { name: string; description: string; roles: string[]; content: string };
   /** Authored schema-discovery tool, validated at compile. */
   discovery?: { name: string; description?: string };
+  /** Authored elicited-values verification tool, validated at compile. */
+  test?: { name: string; description?: string };
   /** Authored create-time elicitation config, validated at compile. */
   elicitOnCreate?: {
     sourceField: string;

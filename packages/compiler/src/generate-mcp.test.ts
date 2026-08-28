@@ -646,3 +646,51 @@ describe("elicitOnCreate catalog", () => {
     ).toThrow(/has no field "missing"/);
   });
 });
+
+describe("test tool catalog", () => {
+  it("emits testTools with a composed default description", () => {
+    const mcp = {
+      toolPrefix: "widget",
+      tools: "dedicated" as const,
+      operations: { list: false, get: true, create: false, update: false, delete: false },
+      elicitOnCreate: {
+        sourceField: "adapterId",
+        sourceEntity: "Widget",
+        definitionsField: "name",
+        into: "name",
+      },
+      test: { name: "test_widget" },
+    };
+    const catalog = buildMcpCatalog(
+      [input(contract({ mcp, fields: [field({ key: "adapterId" }), field({ key: "name" })] }))],
+      "test",
+    );
+    expect(catalog.testTools).toEqual([
+      {
+        name: "test_widget",
+        description: expect.stringContaining("Verify one Widget"),
+        entity: "Widget",
+        table: "erp.widgets",
+      },
+    ]);
+    expect(buildMcpCatalog([input(contract())], "test").testTools).toEqual([]);
+  });
+
+  it("refuses a test name colliding with a dedicated tool", () => {
+    const mcp = {
+      toolPrefix: "widget",
+      tools: "dedicated" as const,
+      operations: { list: false, get: true, create: false, update: false, delete: false },
+      elicitOnCreate: {
+        sourceField: "name",
+        sourceEntity: "Widget",
+        definitionsField: "name",
+        into: "name",
+      },
+      test: { name: "widget_get" },
+    };
+    expect(() =>
+      buildMcpCatalog([input(contract({ mcp, fields: [field({ key: "name" })] }))], "test"),
+    ).toThrow(/Duplicate MCP tool name "widget_get"/);
+  });
+});

@@ -75,6 +75,7 @@ import {
 } from "./elicitation.js";
 import { executeBinding, orderedBindings, resolveTemplate } from "./declarative-execution.js";
 import { validateVisibleDefinition } from "./publication-validation.js";
+import { testElicitedRow } from "./connection-test.js";
 import { discoverProviderSchema } from "./discovery.js";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
@@ -191,6 +192,13 @@ type CatalogDiscoveryTool = {
   table: string;
 };
 
+type CatalogTestTool = {
+  name: string;
+  description: string;
+  entity: string;
+  table: string;
+};
+
 type Catalog = {
   generatedBy: string;
   source: string;
@@ -199,6 +207,7 @@ type Catalog = {
   resources?: CatalogResource[];
   derivedTools?: DerivedToolsCatalogEntry[];
   discoveryTools?: CatalogDiscoveryTool[];
+  testTools?: CatalogTestTool[];
   guideTools?: CatalogGuideTool[];
 };
 const catalog = rawCatalog as unknown as Catalog;
@@ -390,6 +399,7 @@ function resourcesForSession(
 
 const catalogDerivedTools: DerivedToolsCatalogEntry[] = catalog.derivedTools ?? [];
 const catalogDiscoveryTools: CatalogDiscoveryTool[] = catalog.discoveryTools ?? [];
+const catalogTestTools: CatalogTestTool[] = catalog.testTools ?? [];
 const catalogGuideTools: CatalogGuideTool[] = catalog.guideTools ?? [];
 
 function guideToolsForSession(session: DbSessionInput): CatalogGuideTool[] {
@@ -403,6 +413,16 @@ function discoveryToolsForSession(
   tables: Map<string, GeneratedTable>,
 ): CatalogDiscoveryTool[] {
   return catalogDiscoveryTools.filter((tool) =>
+    sessionMayInvoke(tables.get(tool.table), "get", session),
+  );
+}
+
+/** A test reads the row and exercises it; visibility follows the read role. */
+function testToolsForSession(
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+): CatalogTestTool[] {
+  return catalogTestTools.filter((tool) =>
     sessionMayInvoke(tables.get(tool.table), "get", session),
   );
 }
@@ -866,6 +886,7 @@ async function assertPublishableWrite(
     ),
     ...catalogGuideTools.map((tool) => tool.name),
     ...catalogDiscoveryTools.map((tool) => tool.name),
+    ...catalogTestTools.map((tool) => tool.name),
   ]);
   await validateVisibleDefinition({
     entry,
@@ -1137,6 +1158,25 @@ function buildServer(
         },
         annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
       })),
+      ...testToolsForSession(session, tables).map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        inputSchema: {
+          type: "object",
+          properties: {
+            id: {
+              type: "string",
+              format: "uuid",
+              description: `Identifier of the ${tool.entity} to verify.`,
+            },
+          },
+          required: ["id"],
+          additionalProperties: false,
+        },
+        // Read-only from the deployment's perspective: the probe is a
+        // provider read the definition itself declares harmless.
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+      })),
       // Derived tools: definition rows projected per session and per tenant.
       ...(await derivedToolsForSession(db, session, tables)).map((tool) => ({
         name: tool.name,
@@ -1390,6 +1430,68 @@ function buildServer(
         const row = await getGeneratedEntity(db, session, { table: table.name, id });
         if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
         return ok(await discoverProviderSchema(serializeRow(table, row)));
+      } catch (error) {
+        return failed(error);
+      }
+    }
+
+    const testTool = catalogTestTools.find((tool) => tool.name === name);
+    if (testTool) {
+      const table = tables.get(testTool.table);
+      if (!table || !sessionMayInvoke(table, "get", session)) {
+        return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
+      }
+      try {
+        const id = (request.params.arguments as Record<string, unknown> | undefined)?.id;
+        if (typeof id !== "string") {
+          throw new HttpError(400, "VALIDATION", 'Argument "id" is required.');
+        }
+        const row = await getGeneratedEntity(db, session, { table: table.name, id });
+        if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
+        const serialized = serializeRow(table, row);
+        const elicit = entityForTable(testTool.table)?.elicitOnCreate;
+        if (!elicit) {
+          throw new HttpError(
+            400,
+            "NOT_TESTABLE",
+            `${testTool.entity} declares no elicited configuration to verify.`,
+          );
+        }
+        const sourceId = serialized[elicit.sourceField];
+        const sourceRow =
+          typeof sourceId === "string"
+            ? await runtimeRowByFilter(db, session, tables, elicit.sourceTable, { id: sourceId })
+            : null;
+        if (!sourceRow) {
+          throw new HttpError(
+            400,
+            "SOURCE_MISSING",
+            `The ${elicit.sourceEntity} this ${testTool.entity} configures does not exist.`,
+          );
+        }
+        // A personal row holds only tokens; URL templates resolve from the
+        // tenant sibling's plain configuration, as they do at execution.
+        let fallbackPlainValues: Record<string, string> | undefined;
+        if (serialized.ownerUserId) {
+          const siblings = await runtimeRowsByFilter(db, session, tables, testTool.table, {
+            [elicit.sourceField]: sourceId,
+          });
+          const tenantSibling = siblings.find((sibling) => !sibling.ownerUserId);
+          fallbackPlainValues = Object.fromEntries(
+            Object.entries((tenantSibling?.[elicit.into] ?? {}) as Record<string, unknown>)
+              .filter(([, value]) => value !== null && value !== undefined && typeof value !== "object")
+              .map(([key, value]) => [key, String(value)]),
+          );
+        }
+        return ok(
+          await testElicitedRow({
+            row: serialized,
+            sourceRow,
+            elicit,
+            table: testTool.table,
+            fallbackPlainValues,
+          }),
+        );
       } catch (error) {
         return failed(error);
       }

@@ -420,6 +420,13 @@ export type McpDiscoveryToolDefinition = {
   table: string;
 };
 
+export type McpTestToolDefinition = {
+  name: string;
+  description: string;
+  entity: string;
+  table: string;
+};
+
 export type McpCatalog = {
   generatedBy: string;
   source: string;
@@ -428,6 +435,7 @@ export type McpCatalog = {
   resources: McpResourceDefinition[];
   derivedTools: McpDerivedToolsDefinition[];
   discoveryTools: McpDiscoveryToolDefinition[];
+  testTools: McpTestToolDefinition[];
   guideTools: McpGuideToolDefinition[];
 };
 
@@ -506,6 +514,7 @@ export function buildMcpCatalog(
   const resources: McpResourceDefinition[] = [];
   const derivedTools: McpDerivedToolsDefinition[] = [];
   const discoveryTools: McpDiscoveryToolDefinition[] = [];
+  const testTools: McpTestToolDefinition[] = [];
   const guideTools: McpGuideToolDefinition[] = [];
 
   for (const input of opted) {
@@ -618,6 +627,19 @@ export function buildMcpCatalog(
       });
     }
 
+    if (mcp.test) {
+      testTools.push({
+        name: mcp.test.name,
+        description:
+          mcp.test.description ??
+          `Verify one ${entityLabel(contract)} by its identifier: checks its stored values ` +
+            `and credentials, and exercises them against the provider when a probe request ` +
+            `is declared. Reports what was and was not verified.`,
+        entity: contract.entity.name,
+        table: input.table,
+      });
+    }
+
     if (mcp.derivedTools) {
       const execution = mcp.derivedTools.execution;
       derivedTools.push({
@@ -721,6 +743,14 @@ export function buildMcpCatalog(
       table: discovery.table,
     } as McpToolDefinition);
   }
+  for (const test of testTools) {
+    seenNames.set(test.name, {
+      name: test.name,
+      operation: "get",
+      entity: test.entity,
+      table: test.table,
+    } as McpToolDefinition);
+  }
   for (const tool of tools) {
     if (tool.name.startsWith("osf_")) continue;
     const existing = seenNames.get(tool.name);
@@ -757,6 +787,7 @@ export function buildMcpCatalog(
     resources,
     derivedTools,
     discoveryTools,
+    testTools,
     guideTools,
   };
 }

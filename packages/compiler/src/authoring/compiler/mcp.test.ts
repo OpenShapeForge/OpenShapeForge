@@ -194,4 +194,35 @@ describe("buildMcp", () => {
       );
     }
   });
+
+  it("passes a test tool through when elicitOnCreate is present", () => {
+    const elicitOnCreate = {
+      sourceField: "value",
+      sourceEntity: "Widget",
+      definitionsField: "configFields",
+      into: "value",
+    };
+    expect(
+      buildMcp(entityWithMcp({ elicitOnCreate, test: { name: "test_connection" } }))?.test,
+    ).toEqual({ name: "test_connection" });
+  });
+
+  it("rejects a test tool without elicitOnCreate, and unsafe test names", () => {
+    expect(() => buildMcp(entityWithMcp({ test: { name: "test_connection" } }))).toThrow(
+      /requires an elicitOnCreate block/,
+    );
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          elicitOnCreate: {
+            sourceField: "value",
+            sourceEntity: "Widget",
+            definitionsField: "x",
+            into: "value",
+          },
+          test: { name: "Bad Name" },
+        }),
+      ),
+    ).toThrow(/Unsafe mcp test name/);
+  });
 });

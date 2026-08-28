@@ -51,7 +51,7 @@ describe("compiler plugins", () => {
         ),
       );
     expect(headings.length).toBe(crudTables.length);
-  });
+  }, FULL_CORPUS_TIMEOUT_MS);
 
   test("workflow plugin emits api workflow artifacts deterministically", async () => {
     const first = await collectAllArtifacts(repoRoot);

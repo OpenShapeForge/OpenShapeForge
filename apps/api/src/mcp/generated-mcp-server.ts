@@ -52,6 +52,7 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
   createGeneratedEntity,
+  createGeneratedEntityForTable,
   deleteGeneratedEntity,
   getGeneratedEntity,
   getGeneratedCrudTables,
@@ -59,6 +60,7 @@ import {
   listGeneratedEntities,
   listGeneratedEntitiesForTable,
   updateGeneratedEntity,
+  updateGeneratedEntityForTable,
 } from "../graphql/generated-crud.js";
 import {
   derivedToolsFromRows,
@@ -73,6 +75,13 @@ import {
 } from "./elicitation.js";
 import { executeBinding, orderedBindings } from "./declarative-execution.js";
 import { discoverProviderSchema } from "./discovery.js";
+import {
+  exchangeCodeForTokens,
+  mintAuthorization,
+  redeemState,
+} from "./entity-oauth.js";
+import { decryptSecret, keyringFromEnv, type StoredSecret } from "../connectors/secrets.js";
+import { refreshTokens } from "./entity-oauth.js";
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
@@ -389,6 +398,68 @@ async function derivedToolsForSession(
  * entities' CRUD roles, yet the runtime executes their rows on the caller's
  * behalf; withDbSession still scopes every read to the caller's tenant.
  */
+export const ENTITY_OAUTH_CALLBACK_PATH = "/api/entity-oauth/callback";
+
+function elicitedKeyring() {
+  return keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
+}
+
+function callbackOrigin(): string {
+  const configured = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN?.trim().replace(/\/$/, "");
+  if (configured) return configured;
+  return `http://127.0.0.1:${process.env.PORT ?? "3001"}`;
+}
+
+function looksLikeStoredSecret(value: unknown): value is StoredSecret {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as StoredSecret).ciphertext === "string" &&
+    typeof (value as StoredSecret).keyId === "string"
+  );
+}
+
+/**
+ * The tenant-level connection's OAuth client credentials, decrypted. The
+ * secret goes only into token-endpoint calls, never anywhere else.
+ */
+function readClientCredentials(
+  tenantConnection: Record<string, unknown> | undefined,
+  valuesField: string,
+  secretScope: string,
+): { clientId: string; clientSecret: string } {
+  const values = (tenantConnection?.[valuesField] ?? {}) as Record<string, unknown>;
+  const clientId = values.clientId;
+  const rawSecret = values.clientSecret;
+  const keyring = elicitedKeyring();
+  if (typeof clientId !== "string" || !looksLikeStoredSecret(rawSecret) || !keyring) {
+    throw new HttpError(
+      400,
+      "CONNECTION_MISSING",
+      "An administrator must first create the provider connection holding the OAuth " +
+        "client credentials (clientId and a confidential clientSecret).",
+    );
+  }
+  return {
+    clientId,
+    clientSecret: decryptSecret(keyring, secretScope, "clientSecret", rawSecret),
+  };
+}
+
+async function runtimeRowsByFilter(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+  tableName: string,
+  filter: Record<string, unknown>,
+  limit = 50,
+): Promise<Record<string, unknown>[]> {
+  const table = tables.get(tableName);
+  if (!table) return [];
+  const result = await listGeneratedEntitiesForTable(db, session, table, { limit, filter });
+  return result.rows.map((row) => serializeRow(table, row));
+}
+
 async function runtimeRowByFilter(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
@@ -881,6 +952,24 @@ function buildServer(
       ...toolsForSession(session, tables).map(({ tool, entity }) =>
         describeTool(tool, entity, tables.get(tool.table), session),
       ),
+      ...catalogDerivedTools
+        .filter((entry) => entry.connect && sessionInAudience(entry, session.roles))
+        .map((entry) => ({
+          name: entry.connect!.name,
+          description: entry.connect!.description,
+          inputSchema: {
+            type: "object",
+            properties: {
+              tool: {
+                type: "string",
+                description: "Name of the tool to create your personal connection for.",
+              },
+            },
+            required: ["tool"],
+            additionalProperties: false,
+          },
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+        })),
       ...discoveryToolsForSession(session, tables).map((tool) => ({
         name: tool.name,
         description: tool.description,
@@ -947,6 +1036,159 @@ function buildServer(
           request.params.arguments ?? {},
         );
         return ok(result);
+      } catch (error) {
+        return failed(error);
+      }
+    }
+
+    const connectEntry = catalogDerivedTools.find((entry) => entry.connect?.name === name);
+    if (connectEntry) {
+      if (!sessionInAudience(connectEntry, session.roles) || !connectEntry.execution) {
+        return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
+      }
+      try {
+        const execution = connectEntry.execution;
+        const toolArg = (request.params.arguments as Record<string, unknown> | undefined)?.tool;
+        if (typeof toolArg !== "string" || toolArg.length === 0) {
+          throw new HttpError(400, "VALIDATION", 'Argument "tool" is required.');
+        }
+        // Only a PROJECTED row can start a connection: projection already
+        // enforces publication and audience, so an unpublished or invisible
+        // definition answers exactly like a nonexistent one.
+        const target = (await derivedToolsForSession(db, session, tables)).find(
+          (tool) => tool.name === toolArg && tool.table === connectEntry.table,
+        );
+        if (!target) {
+          throw new HttpError(404, "NOT_FOUND", `No connectable tool "${toolArg}".`);
+        }
+        const definitionRow = await runtimeRowByFilter(db, session, tables, target.table, {
+          id: target.rowId,
+        });
+        if (!definitionRow) throw new HttpError(404, "NOT_FOUND", `No connectable tool "${toolArg}".`);
+
+        // Provider and scopes derive from the exact chain; the caller chooses
+        // nothing. Exactly one distinct provider is supported per connection.
+        const providerIds = new Set<string>();
+        const requiredScopes = new Set<string>();
+        for (const binding of orderedBindings(definitionRow, execution.bindingsField)) {
+          const operationId = binding[execution.operationRef];
+          const operationRow =
+            typeof operationId === "string"
+              ? await runtimeRowByFilter(db, session, tables, execution.operationTable, {
+                  id: operationId,
+                })
+              : null;
+          if (!operationRow) {
+            throw new HttpError(
+              400,
+              "SERVICE_MISCONFIGURED",
+              `A binding references a missing ${execution.operationEntity}.`,
+            );
+          }
+          if (typeof operationRow[execution.providerRef] === "string") {
+            providerIds.add(operationRow[execution.providerRef] as string);
+          }
+          if (Array.isArray(operationRow.requiredScopes)) {
+            for (const scope of operationRow.requiredScopes as unknown[]) {
+              if (typeof scope === "string") requiredScopes.add(scope);
+            }
+          }
+        }
+        if (providerIds.size !== 1) {
+          throw new HttpError(
+            400,
+            "NOT_CONNECTABLE",
+            "Personal connections support exactly one provider per definition.",
+          );
+        }
+        const providerRowId = [...providerIds][0]!;
+        const providerRow = await runtimeRowByFilter(db, session, tables, execution.providerTable, {
+          id: providerRowId,
+        });
+        const auth = (providerRow?.auth ?? null) as Record<string, unknown> | null;
+        if (!providerRow || auth?.profile !== "oauth2AuthorizationCode") {
+          throw new HttpError(
+            400,
+            "NOT_CONNECTABLE",
+            "This definition's provider does not support personal sign-in.",
+          );
+        }
+        const authorizationUrl = auth.authorizationUrl;
+        const tokenUrl = auth.tokenUrl;
+        if (typeof authorizationUrl !== "string" || typeof tokenUrl !== "string") {
+          throw new HttpError(
+            400,
+            "PROVIDER_MISCONFIGURED",
+            "The provider declares no authorization and token endpoints.",
+          );
+        }
+        const adapterScopes = Array.isArray(auth.scopes)
+          ? (auth.scopes as unknown[]).filter((scope): scope is string => typeof scope === "string")
+          : [];
+        const scopes =
+          requiredScopes.size > 0
+            ? [...requiredScopes].filter(
+                (scope) => adapterScopes.length === 0 || adapterScopes.includes(scope),
+              )
+            : adapterScopes;
+
+        const connectionRows = await runtimeRowsByFilter(
+          db,
+          session,
+          tables,
+          execution.connectionTable,
+          { [execution.connectionProviderRef]: providerRowId },
+        );
+        const personal = connectionRows.find((row) => row.ownerUserId === session.userId);
+        const personalValues = (personal?.[execution.connectionValuesField] ?? null) as
+          | Record<string, unknown>
+          | null;
+        if (personal && personalValues?.accessToken) {
+          return ok({
+            connected: true,
+            provider: String(providerRow.name ?? providerRowId),
+            message: "Your personal connection already exists. Just call the tool.",
+          });
+        }
+        const tenantConnection = connectionRows.find((row) => !row.ownerUserId);
+        const secretScope =
+          entityForTable(execution.connectionTable)?.elicitOnCreate?.sourceTable ??
+          execution.providerTable;
+        const credentials = readClientCredentials(
+          tenantConnection,
+          execution.connectionValuesField,
+          secretScope,
+        );
+
+        const handoff = mintAuthorization({
+          tenantId: session.tenantId as string,
+          userId: session.userId as string,
+          providerTable: execution.providerTable,
+          providerRowId,
+          connectionTable: execution.connectionTable,
+          connectionProviderRef: execution.connectionProviderRef,
+          connectionValuesField: execution.connectionValuesField,
+          tokenUrl,
+          clientId: credentials.clientId,
+          clientSecret: credentials.clientSecret,
+          egress: Array.isArray(providerRow.egressHosts)
+            ? (providerRow.egressHosts as string[])
+            : [],
+          scopes,
+          redirectUri: `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`,
+          providerName: String(providerRow.name ?? providerRowId),
+          authorizationUrl,
+        });
+        return ok({
+          action: "authorize",
+          provider: String(providerRow.name ?? providerRowId),
+          scopes,
+          authorizationUrl: handoff.authorizationUrl,
+          expiresInSeconds: handoff.expiresInSeconds,
+          instructions:
+            "Ask the person to open authorizationUrl in their browser and approve access. " +
+            "Once the provider confirms, call the tool again — no further setup is needed.",
+        });
       } catch (error) {
         return failed(error);
       }
@@ -1049,29 +1291,113 @@ function buildServer(
                   `The ${execution.operationEntity} references a missing ${execution.providerEntity}.`,
                 );
               }
-              const connectionRow = await runtimeRowByFilter(
+              const connectionRows = await runtimeRowsByFilter(
                 db,
                 session,
                 tables,
                 execution.connectionTable,
                 { [execution.connectionProviderRef]: providerId },
               );
-              if (!connectionRow) {
-                throw new HttpError(
-                  400,
-                  "CONNECTION_MISSING",
-                  `No ${execution.connectionEntity} is configured for this ` +
-                    `${execution.providerEntity}; an administrator must create one first.`,
+              const providerAuth = (providerRow.auth ?? null) as Record<string, unknown> | null;
+              const elicitScope =
+                entityForTable(execution.connectionTable)?.elicitOnCreate?.sourceTable ??
+                execution.providerTable;
+              let providerForExecution = providerRow;
+              let connectionValues: unknown;
+              let secretScope = elicitScope;
+
+              if (providerAuth?.profile === "oauth2AuthorizationCode") {
+                // Personal mode: execution resolves ONLY the caller's own
+                // connection — another employee's tokens are unreachable by
+                // construction, and their absence is a clear next step.
+                const personal = connectionRows.find(
+                  (row) => row.ownerUserId === session.userId,
                 );
+                const personalScope = `${execution.connectionTable}:personal`;
+                let values = (personal?.[execution.connectionValuesField] ?? null) as
+                  | Record<string, unknown>
+                  | null;
+                if (!personal || !values?.accessToken) {
+                  throw new HttpError(
+                    403,
+                    "CONNECTION_REQUIRED",
+                    `This tool needs your personal ${String(providerRow.name ?? "provider")} ` +
+                      `connection. Call ${entry?.connect?.name ?? "the connect tool"} with ` +
+                      `{"tool":"${name}"} to start it.`,
+                  );
+                }
+                const expiresAtRaw = values.accessTokenExpiresAt;
+                const expiresAtMs =
+                  typeof expiresAtRaw === "string" ? Date.parse(expiresAtRaw) : Number.NaN;
+                if (
+                  Number.isFinite(expiresAtMs) &&
+                  expiresAtMs < Date.now() + 60_000 &&
+                  looksLikeStoredSecret(values.refreshToken)
+                ) {
+                  const keyring = elicitedKeyring();
+                  const tenantConnection = connectionRows.find((row) => !row.ownerUserId);
+                  const credentials = readClientCredentials(
+                    tenantConnection,
+                    execution.connectionValuesField,
+                    elicitScope,
+                  );
+                  if (!keyring || typeof providerAuth.tokenUrl !== "string") {
+                    throw new HttpError(400, "PROVIDER_MISCONFIGURED", "Token refresh is not configured.");
+                  }
+                  const refreshed = await refreshTokens({
+                    tokenUrl: providerAuth.tokenUrl,
+                    clientId: credentials.clientId,
+                    clientSecret: credentials.clientSecret,
+                    refreshToken: decryptSecret(
+                      keyring,
+                      personalScope,
+                      "refreshToken",
+                      values.refreshToken as StoredSecret,
+                    ),
+                    egress: Array.isArray(providerRow.egressHosts)
+                      ? (providerRow.egressHosts as string[])
+                      : [],
+                    connectionTable: execution.connectionTable,
+                  });
+                  values = { ...values, ...refreshed.values };
+                  const connectionTableDef = tables.get(execution.connectionTable);
+                  if (connectionTableDef) {
+                    await updateGeneratedEntityForTable(
+                      db,
+                      session,
+                      connectionTableDef,
+                      String(personal.id),
+                      { [execution.connectionValuesField]: values },
+                    );
+                  }
+                }
+                connectionValues = values;
+                secretScope = personalScope;
+                providerForExecution = {
+                  ...providerRow,
+                  auth: { scheme: "bearer", tokenFrom: "accessToken" },
+                };
+              } else {
+                const tenantConnection =
+                  connectionRows.find((row) => !row.ownerUserId) ?? connectionRows[0];
+                if (!tenantConnection) {
+                  throw new HttpError(
+                    400,
+                    "CONNECTION_MISSING",
+                    `No ${execution.connectionEntity} is configured for this ` +
+                      `${execution.providerEntity}; an administrator must create one first.`,
+                  );
+                }
+                connectionValues = tenantConnection[execution.connectionValuesField];
               }
+
               const outputs = await executeBinding({
                 binding,
                 operationRow,
-                providerRow,
-                connectionValues: connectionRow[execution.connectionValuesField],
+                providerRow: providerForExecution,
+                connectionValues,
                 serviceInputs: { ...args, ...accumulated },
-                secretScope: entityForTable(execution.connectionTable)?.elicitOnCreate
-                  ?.sourceTable ?? execution.providerTable,
+                secretScope,
               });
               Object.assign(accumulated, outputs);
             }
@@ -1275,6 +1601,83 @@ export function registerGeneratedMcpServer(
           (message as { method?: unknown }).method === "initialize",
       );
     };
+
+    // The OAuth return leg. Unauthenticated by necessity — it is a cross-site
+    // browser navigation. It trusts nothing in its query beyond looking up
+    // the single-use state minted by the connect tool; tenant, user, token
+    // endpoint and credentials all come from that pending record.
+    const html = (message: string) =>
+      `<!doctype html><meta charset="utf-8"><title>Connection</title>` +
+      `<body style="font-family:system-ui;margin:4rem auto;max-width:28rem">` +
+      `<p>${message}</p></body>`;
+    instance.get(ENTITY_OAUTH_CALLBACK_PATH, async (request, reply) => {
+      const query = (request.query ?? {}) as Record<string, unknown>;
+      const pending = redeemState(query.state);
+      if (!pending) {
+        return reply
+          .status(400)
+          .type("text/html")
+          .send(html("This sign-in link is invalid or expired. Start again from your chat."));
+      }
+      if (typeof query.error === "string" && query.error) {
+        return reply
+          .status(400)
+          .type("text/html")
+          .send(html("The provider refused the sign-in. Nothing was stored."));
+      }
+      if (typeof query.code !== "string" || query.code.length === 0) {
+        return reply
+          .status(400)
+          .type("text/html")
+          .send(html("The provider sent no authorization code. Nothing was stored."));
+      }
+      try {
+        const { values } = await exchangeCodeForTokens(pending, query.code);
+        const db = options.db;
+        if (!db) throw new Error("Database is not configured.");
+        const tables = tablesByName();
+        const table = tables.get(pending.connectionTable);
+        if (!table) throw new Error("Connection table is missing from the manifest.");
+        const writeSession: DbSessionInput = {
+          tenantId: pending.tenantId,
+          userId: pending.userId,
+          roles: [],
+          groups: [],
+          scope: "self",
+        };
+        const existing = (
+          await listGeneratedEntitiesForTable(db, writeSession, table, {
+            limit: 50,
+            filter: { [pending.connectionProviderRef]: pending.providerRowId },
+          })
+        ).rows
+          .map((row) => serializeRow(table, row))
+          .find((row) => row.ownerUserId === pending.userId);
+        if (existing) {
+          await updateGeneratedEntityForTable(db, writeSession, table, String(existing.id), {
+            [pending.connectionValuesField]: values,
+          });
+        } else {
+          await createGeneratedEntityForTable(db, writeSession, table, {
+            key: `personal-${pending.userId.replace(/[^a-z0-9-]/g, "").slice(0, 20)}`,
+            name: `Personal ${pending.providerName} connection`,
+            [pending.connectionProviderRef]: pending.providerRowId,
+            ownerUserId: pending.userId,
+            [pending.connectionValuesField]: values,
+          });
+        }
+        return reply
+          .status(200)
+          .type("text/html")
+          .send(html("Connected. You can close this window and return to your chat."));
+      } catch (error) {
+        request.log.error({ err: error }, "Personal connection callback failed.");
+        return reply
+          .status(500)
+          .type("text/html")
+          .send(html("Storing the connection failed. Start again from your chat."));
+      }
+    });
 
     instance.route({
       url: MCP_MOUNT_PATH,

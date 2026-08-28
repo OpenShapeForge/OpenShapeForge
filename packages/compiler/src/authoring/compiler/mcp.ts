@@ -156,6 +156,28 @@ export function buildMcp(
         );
       }
     }
+    if (authored.visibleWhen) {
+      if (!fieldKeys.has(authored.visibleWhen.field) || !authored.visibleWhen.equals) {
+        throw new Error(
+          `mcp derivedTools.visibleWhen on entity "${coreEntity.entity}" must name an ` +
+            `authored field and a non-empty value.`,
+        );
+      }
+    }
+    if (authored.connect) {
+      if (!MCP_TOOL_PREFIX_PATTERN.test(authored.connect.name ?? "")) {
+        throw new Error(
+          `Unsafe mcp derivedTools.connect name ${JSON.stringify(authored.connect.name)} on ` +
+            `entity "${coreEntity.entity}" — must match ${MCP_TOOL_PREFIX_PATTERN}.`,
+        );
+      }
+      if (!authored.execution) {
+        throw new Error(
+          `mcp derivedTools.connect on entity "${coreEntity.entity}" requires an execution ` +
+            `block — the handoff derives its provider chain from it.`,
+        );
+      }
+    }
     if (authored.execution) {
       const execution = authored.execution;
       if (!fieldKeys.has(execution.bindingsField)) {

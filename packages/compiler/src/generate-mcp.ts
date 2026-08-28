@@ -402,6 +402,8 @@ export type McpDerivedToolsDefinition = {
   descriptionField: string;
   inputFieldsField: string;
   execution?: McpDerivedExecutionDefinition;
+  visibleWhen?: { field: string; equals: string };
+  connect?: { name: string; description: string };
 };
 
 export type McpDiscoveryToolDefinition = {
@@ -608,6 +610,21 @@ export function buildMcpCatalog(
         ...(mcp.derivedTools.titleField ? { titleField: mcp.derivedTools.titleField } : {}),
         descriptionField: mcp.derivedTools.descriptionField,
         inputFieldsField: mcp.derivedTools.inputFieldsField,
+        ...(mcp.derivedTools.visibleWhen
+          ? { visibleWhen: { ...mcp.derivedTools.visibleWhen } }
+          : {}),
+        ...(mcp.derivedTools.connect
+          ? {
+              connect: {
+                name: mcp.derivedTools.connect.name,
+                description:
+                  mcp.derivedTools.connect.description ??
+                  `Start a personal provider connection for one ${entityLabel(contract)}: ` +
+                    `validates the definition chain and returns an authorization URL for the ` +
+                    `caller to open in a browser.`,
+              },
+            }
+          : {}),
         ...(execution
           ? {
               execution: {
@@ -661,6 +678,15 @@ export function buildMcpCatalog(
   // by the prefix derivation — fail closed on any collision, since the runtime
   // dispatches on the name.
   const seenNames = new Map<string, McpToolDefinition>();
+  for (const entry of derivedTools) {
+    if (!entry.connect) continue;
+    seenNames.set(entry.connect.name, {
+      name: entry.connect.name,
+      operation: "get",
+      entity: entry.entity,
+      table: entry.table,
+    } as McpToolDefinition);
+  }
   for (const discovery of discoveryTools) {
     seenNames.set(discovery.name, {
       name: discovery.name,

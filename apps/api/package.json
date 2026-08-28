@@ -32,7 +32,8 @@
     "kysely": "^0.29.4",
     "kysely-postgres-js": "3.0.0",
     "postgres": "^3.4.0",
-    "swagger-ui-dist": "^5.32.11"
+    "swagger-ui-dist": "^5.32.11",
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@openshapeforge/connector-afas-profit": "workspace:*",

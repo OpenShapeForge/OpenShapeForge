@@ -731,6 +731,36 @@ function normalizeWritableValues(
   return values;
 }
 
+/**
+ * Role-ungated create for RUNTIME surfaces (not callers), mirroring
+ * listGeneratedEntitiesForTable: tenant scoping still applies via
+ * withDbSession, but the entity-role gate is absent — the OAuth callback
+ * writes the personal connection row on behalf of a person who holds none
+ * of the entity's CRUD roles. Every caller-facing path must keep going
+ * through createGeneratedEntity.
+ */
+export async function createGeneratedEntityForTable(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  rawValues: Record<string, unknown>,
+): Promise<GeneratedEntityRow> {
+  const values = normalizeWritableValues(table, rawValues, "create");
+  return insertGeneratedRow(db, session, table, values);
+}
+
+/** Role-ungated update counterpart; same contract as the create above. */
+export async function updateGeneratedEntityForTable(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  id: string,
+  rawValues: Record<string, unknown>,
+): Promise<GeneratedEntityRow | null> {
+  const values = normalizeWritableValues(table, rawValues, "update");
+  return applyGeneratedRowUpdate(db, session, table, id, values);
+}
+
 export async function createGeneratedEntity(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
@@ -741,7 +771,15 @@ export async function createGeneratedEntity(
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
   const values = normalizeWritableValues(table, input.values, "create");
+  return insertGeneratedRow(db, session, table, values);
+}
 
+function insertGeneratedRow(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  values: ReturnType<typeof normalizeWritableValues>,
+): Promise<GeneratedEntityRow> {
   return withDbSession(db, session, async (trx, dbSession) => {
     const columns = [...values.keys()];
     const sqlValues = [...values.values()];
@@ -782,6 +820,16 @@ export async function updateGeneratedEntity(
 ): Promise<GeneratedEntityRow | null> {
   const table = readGeneratedCrudTable(input.table, "update", session);
   const values = normalizeWritableValues(table, input.values, "update");
+  return applyGeneratedRowUpdate(db, session, table, input.id, values);
+}
+
+function applyGeneratedRowUpdate(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  id: string,
+  values: ReturnType<typeof normalizeWritableValues>,
+): Promise<GeneratedEntityRow | null> {
   const updatedAt = table.columns.find((column) => column.name === "updated_at");
   const assignments = [...values.entries()].map(([column, value]) =>
     sql`${sql.id(column.name)} = ${value}`,
@@ -793,7 +841,7 @@ export async function updateGeneratedEntity(
   if (assignments.length === 0) {
     // Already authorized as an update above; an empty-body update must not
     // additionally require the read role, so fetch without re-gating.
-    return fetchGeneratedEntityRow(db, session, table, input.id);
+    return fetchGeneratedEntityRow(db, session, table, id);
   }
 
   return withDbSession(db, session, async (trx) => {
@@ -802,7 +850,7 @@ export async function updateGeneratedEntity(
     const result = await sql<{ row: GeneratedEntityRow }>`
       update ${sql.id(table.schema, table.table)}
       set ${sql.join(assignments)}
-      where ${sql.id(table.primaryKey!)}::text = ${input.id}
+      where ${sql.id(table.primaryKey!)}::text = ${id}
         ${tenantWhere}
       returning to_jsonb(${sql.id(table.table)}.*) as row
     `.execute(trx);

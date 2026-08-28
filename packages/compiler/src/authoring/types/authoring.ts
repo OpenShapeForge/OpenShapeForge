@@ -304,6 +304,20 @@ export interface McpResourceConfig {
   templateDescription?: string;
 }
 
+export interface McpDerivedVisibilityConfig {
+  /** Row field that gates projection. */
+  field: string;
+  /** Value the field must equal for the row to project as a tool. */
+  equals: string;
+}
+
+export interface McpDerivedConnectConfig {
+  /** Tool name for the personal-connection handoff, e.g. `connect_service`. */
+  name: string;
+  /** Override the composed tool description. */
+  description?: string;
+}
+
 export interface McpDerivedToolsConfig {
   /**
    * Roles whose sessions are offered the derived tools. Deliberately separate
@@ -330,6 +344,17 @@ export interface McpDerivedToolsConfig {
    * Absent, a derived tool call answers 501.
    */
   execution?: McpDerivedExecutionConfig;
+  /**
+   * Only rows matching this predicate project as tools — the publication
+   * gate: a draft definition is invisible to its audience until published.
+   */
+  visibleWhen?: McpDerivedVisibilityConfig;
+  /**
+   * Opt-in personal-connection handoff tool: given one projected row, the
+   * runtime validates the row's execution chain and returns a provider
+   * authorization URL (PKCE) for the CALLER to open. Requires `execution`.
+   */
+  connect?: McpDerivedConnectConfig;
 }
 
 export interface McpElicitOnCreateConfig {

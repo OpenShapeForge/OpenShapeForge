@@ -29,6 +29,9 @@ export type DerivedToolsCatalogEntry = {
   descriptionField: string;
   inputFieldsField: string;
   execution?: ExecutionCatalogEntry;
+  /** Publication gate: only rows where row[field] === equals project. */
+  visibleWhen?: { field: string; equals: string };
+  connect?: { name: string; description: string };
 };
 
 export type DerivedTool = {
@@ -184,6 +187,11 @@ export function derivedToolsFromRows(
   const tools: DerivedTool[] = [];
   const seen = new Set<string>(reservedNames);
   for (const row of rows) {
+    // The publication gate: an unpublished definition is not merely hidden —
+    // it does not exist as a tool, for any audience member.
+    if (entry.visibleWhen && row[entry.visibleWhen.field] !== entry.visibleWhen.equals) {
+      continue;
+    }
     const name = deriveToolName(row[entry.keyField]);
     if (!name || seen.has(name)) continue;
     seen.add(name);

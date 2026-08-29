@@ -80,6 +80,23 @@ web-shard gates deactivate with it.
 Run it with `bun run dev:web` (`build:web` to build). Both first build
 `packages/auth` — see the note below.
 
+### Production auth startup contract
+
+The web and admin standalone launchers validate their authentication boundary
+before opening a listener. Remote production deployments require HTTPS for the
+browser-facing origin and any configured Keycloak issuer URL, `rediss:` for the
+session store, Secure host-only cookies, and non-development secrets. Plaintext
+Redis or an HTTP internal issuer is deliberately **not** accepted merely because a
+service mesh may encrypt traffic elsewhere: the application cannot verify that
+infrastructure contract. Terminate TLS at endpoints the application connects
+to. A future plaintext exception would need its own explicit, reviewable trust
+contract; there is no generic production escape hatch.
+
+The sole relaxed mode is an explicit local production preview. It requires
+`OPENSHAPEFORGE_LOCAL_PRODUCTION_PREVIEW=true` and loopback-only listener,
+issuer, application-origin, and Redis hosts. It cannot be used on a remote
+interface.
+
 **`@openshapeforge/auth` resolves to `dist/` under a bundler.** Its relative
 imports carry NodeNext `.js` specifiers, which TypeScript and Bun map back
 onto the `.ts` sources but Turbopack resolves literally and fails on. The

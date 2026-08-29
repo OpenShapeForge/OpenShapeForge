@@ -38,3 +38,9 @@ export type {
   BearerVerifier,
   BearerVerifierOptions,
 } from "./bearer.js";
+
+export { validateProductionAuthEnvironment } from "./production-env.js";
+export type {
+  AuthEnvironment,
+  ProductionAuthEnvironmentPolicy,
+} from "./production-env.js";

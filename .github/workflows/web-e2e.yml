@@ -188,6 +188,8 @@ jobs:
       - name: Start the web app
         env:
           PORT: "3000"
+          HOSTNAME: 127.0.0.1
+          OPENSHAPEFORGE_LOCAL_PRODUCTION_PREVIEW: "true"
           AUTH_SECRET: openshapeforge-local-dev-auth-secret
           AUTH_KEYCLOAK_ID: openshapeforge-gateway
           AUTH_KEYCLOAK_SECRET: dev-secret

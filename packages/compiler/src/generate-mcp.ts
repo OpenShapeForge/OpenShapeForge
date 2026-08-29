@@ -393,6 +393,10 @@ export type McpGuideToolDefinition = {
   description: string;
   roles: string[];
   content: string;
+  entity: string;
+  /** Physical table of the guide's own entity, for the create gate. */
+  table: string;
+  requireBeforeCreate?: boolean;
 };
 
 export type McpDiscoveryToolDefinition = {
@@ -573,6 +577,9 @@ export function buildMcpCatalog(
         description: mcp.guide.description,
         roles: [...mcp.guide.roles],
         content: mcp.guide.content,
+        entity: contract.entity.name,
+        table: input.table,
+        ...(mcp.guide.requireBeforeCreate ? { requireBeforeCreate: true } : {}),
       });
     }
 

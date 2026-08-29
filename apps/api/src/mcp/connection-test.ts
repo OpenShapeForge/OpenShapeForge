@@ -32,8 +32,12 @@ import {
 } from "../connectors/secrets.js";
 import {
   acquireAuthHeaders,
+  definitionFieldKeys,
+  providerUrlTemplates,
   resolveTemplate,
+  secretFieldKeys,
   splitConnectionValues,
+  templatePlaceholders,
 } from "./declarative-execution.js";
 import { requiredAuthValueKeys } from "./publication-validation.js";
 import type { ElicitOnCreateEntry } from "./elicitation.js";
@@ -47,7 +51,7 @@ const PROBE_TIMEOUT_MS = 15_000;
 const TOKEN_FIELDS = new Set(["accessToken", "refreshToken"]);
 
 export type ConnectionTestCheck = {
-  check: "required-values" | "credentials" | "probe";
+  check: "required-values" | "url-templates" | "credentials" | "probe";
   outcome: "passed" | "failed" | "skipped";
   detail: string;
 };
@@ -132,7 +136,41 @@ export async function testElicitedRow(input: TestElicitedRowInput): Promise<Conn
         },
   );
 
-  // 2 + 3 share the resolved credentials, so a decryption or resolution
+  // 2. URL templates — purely definitional, so it runs for every auth
+  // flavour, including sign-in providers whose credential and probe checks
+  // are structurally skipped before consent. A secret-classified field behind
+  // a URL placeholder can never resolve; catching it here means the refusal
+  // arrives when the connection is saved, not when the first person signs in.
+  const secretClassified = secretFieldKeys(sourceRow[elicit.definitionsField]);
+  const urlTemplates = providerUrlTemplates(sourceRow);
+  const offendingPlaceholders = urlTemplates.flatMap(({ context, template }) =>
+    templatePlaceholders(template)
+      .filter((key) => secretClassified.has(key))
+      .map((key) => `"{${key}}" in ${context}`),
+  );
+  checks.push(
+    offendingPlaceholders.length === 0
+      ? {
+          check: "url-templates",
+          outcome: urlTemplates.length === 0 ? "skipped" : "passed",
+          detail:
+            urlTemplates.length === 0
+              ? "No URL templates are declared."
+              : "No URL placeholder references a secret-classified field.",
+        }
+      : {
+          check: "url-templates",
+          outcome: "failed",
+          detail:
+            `${offendingPlaceholders.join(", ")} reference secret-classified fields, and ` +
+            `secret values only ever resolve into request authentication — never into URLs. ` +
+            `If a value is not truly a secret (tenant subdomains, hostnames and regions are ` +
+            `not), change that field's classification to internal on the ` +
+            `${elicit.sourceEntity}; its stored value then works as-is.`,
+        },
+  );
+
+  // 3 + 4 share the resolved credentials, so a decryption or resolution
   // failure fails the credentials check and skips the probe.
   let plain: Record<string, string> = {};
   let headers: Record<string, string> | undefined;
@@ -147,19 +185,31 @@ export async function testElicitedRow(input: TestElicitedRowInput): Promise<Conn
         : undefined
       : auth;
   try {
-    const split = splitConnectionValues(values, (stored: StoredSecret, field: string) => {
-      if (!keyring) {
-        throw new HttpError(
-          500,
-          "SECRET_KEYRING_MISSING",
-          `A stored secret needs the keyring; set ${KEYRING_ENV}.`,
-        );
-      }
-      // Token fields were encrypted by the sign-in callback under the
-      // personal scope; elicited fields under the source table scope.
-      const scope = TOKEN_FIELDS.has(field) ? `${input.table}:personal` : elicit.sourceTable;
-      return decryptSecret(keyring, scope, field, stored);
-    });
+    // Encrypted values whose field is NOT classified secret may resolve into
+    // URL positions — encryption at rest is storage hygiene, the
+    // classification is the policy.
+    const urlSafeKeys = new Set(
+      [...definitionFieldKeys(sourceRow[elicit.definitionsField])].filter(
+        (key) => !secretClassified.has(key) && !TOKEN_FIELDS.has(key),
+      ),
+    );
+    const split = splitConnectionValues(
+      values,
+      (stored: StoredSecret, field: string) => {
+        if (!keyring) {
+          throw new HttpError(
+            500,
+            "SECRET_KEYRING_MISSING",
+            `A stored secret needs the keyring; set ${KEYRING_ENV}.`,
+          );
+        }
+        // Token fields were encrypted by the sign-in callback under the
+        // personal scope; elicited fields under the source table scope.
+        const scope = TOKEN_FIELDS.has(field) ? `${input.table}:personal` : elicit.sourceTable;
+        return decryptSecret(keyring, scope, field, stored);
+      },
+      urlSafeKeys,
+    );
     plain = { ...(input.fallbackPlainValues ?? {}), ...split.plain };
     if (effectiveAuth === undefined) {
       checks.push({
@@ -194,7 +244,7 @@ export async function testElicitedRow(input: TestElicitedRowInput): Promise<Conn
     });
   }
 
-  // 3. Probe — only with resolved credentials and a declared probe request.
+  // 4. Probe — only with resolved credentials and a declared probe request.
   const probe = (sourceRow.probe ?? null) as JsonRecord | null;
   const pathTemplate = typeof probe?.pathTemplate === "string" ? probe.pathTemplate : "";
   if (!probe || !pathTemplate.startsWith("/")) {
@@ -218,8 +268,9 @@ export async function testElicitedRow(input: TestElicitedRowInput): Promise<Conn
         typeof sourceRow.baseUrlTemplate === "string" ? sourceRow.baseUrlTemplate : "",
         plain,
         "source baseUrlTemplate",
+        secretClassified,
       );
-      const path = resolveTemplate(pathTemplate, plain, "probe pathTemplate");
+      const path = resolveTemplate(pathTemplate, plain, "probe pathTemplate", secretClassified);
       const url = new URL(baseUrl.replace(/\/$/, "") + path);
       if (url.protocol !== "https:" && url.protocol !== "http:") {
         throw new HttpError(400, "EGRESS_DENIED", "Only http(s) probes are supported.");

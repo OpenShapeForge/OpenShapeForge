@@ -86,10 +86,15 @@ import {
 } from "./configuration-handoff.js";
 import {
   composeBindingRequest,
+  definitionFieldKeys,
   executeBinding,
   mergeOutputs,
   orderedBindings,
+  providerUrlTemplates,
   resolveTemplate,
+  secretFieldKeys,
+  secretUrlPlaceholderError,
+  templatePlaceholders,
 } from "./declarative-execution.js";
 import { validateVisibleDefinition } from "./publication-validation.js";
 import { failedCheckSummary, testElicitedRow } from "./connection-test.js";
@@ -623,6 +628,43 @@ function readClientCredentials(
         : decryptSecret(keyring, secretScope, "clientId", rawClientId),
     clientSecret: decryptSecret(keyring, secretScope, "clientSecret", rawSecret),
   };
+}
+
+/**
+ * The URL-resolvable half of a connection's stored values: plain values, plus
+ * encrypted values whose FIELD the provider definitions do not classify as
+ * secret. Encryption at rest is storage hygiene; the classification is the
+ * policy — so reclassifying a field (a subdomain mistaken for a secret) frees
+ * its stored value immediately, without anyone re-entering it. Keys that stay
+ * barred are returned so template errors can explain the classification cause.
+ */
+function urlSafeConnectionValues(
+  row: Record<string, unknown> | undefined,
+  valuesField: string,
+  definitions: unknown,
+  secretScope: string,
+): { plain: Record<string, string>; secretKeys: Set<string> } {
+  const values = (row?.[valuesField] ?? {}) as Record<string, unknown>;
+  const secretClassified = secretFieldKeys(definitions);
+  const defined = definitionFieldKeys(definitions);
+  const keyring = elicitedKeyring();
+  const plain: Record<string, string> = {};
+  const barred = new Set<string>();
+  for (const [key, value] of Object.entries(values)) {
+    if (value === null || value === undefined) continue;
+    if (looksLikeStoredSecret(value)) {
+      // Only fields the definitions declare can be URL-safe; anything else
+      // encrypted (runtime-issued tokens) is secret by construction.
+      if (!defined.has(key) || secretClassified.has(key) || !keyring) {
+        barred.add(key);
+        continue;
+      }
+      plain[key] = decryptSecret(keyring, secretScope, key, value);
+    } else if (typeof value !== "object") {
+      plain[key] = String(value);
+    }
+  }
+  return { plain, secretKeys: barred };
 }
 
 async function runtimeRowsByFilter(
@@ -1617,19 +1659,30 @@ function buildServer(
 
         // Provider OAuth endpoints are routinely per-tenant
         // (https://{subdomain}.provider.com/...): placeholders resolve from
-        // the tenant connection's NON-secret values, like base URLs do.
-        const tenantPlainValues = Object.fromEntries(
-          Object.entries(
-            (tenantConnection?.[execution.connectionValuesField] ?? {}) as Record<string, unknown>,
-          ).filter(([, value]) => value !== null && typeof value !== "object")
-            .map(([key, value]) => [key, String(value)]),
+        // the tenant connection's NON-secret values, like base URLs do —
+        // including encrypted-at-rest values whose field is not classified
+        // secret. A placeholder that reaches for a secret-classified field
+        // fails with the classification named, not as a data-entry gap.
+        const tenantUrlValues = urlSafeConnectionValues(
+          tenantConnection,
+          execution.connectionValuesField,
+          providerRow[
+            entityForTable(execution.connectionTable)?.elicitOnCreate?.definitionsField ?? ""
+          ],
+          secretScope,
         );
         const resolvedAuthorizationUrl = resolveTemplate(
           authorizationUrl,
-          tenantPlainValues,
+          tenantUrlValues.plain,
           "auth.authorizationUrl",
+          tenantUrlValues.secretKeys,
         );
-        const resolvedTokenUrl = resolveTemplate(tokenUrl, tenantPlainValues, "auth.tokenUrl");
+        const resolvedTokenUrl = resolveTemplate(
+          tokenUrl,
+          tenantUrlValues.plain,
+          "auth.tokenUrl",
+          tenantUrlValues.secretKeys,
+        );
 
         const handoff = mintAuthorization({
           tenantId: session.tenantId as string,
@@ -1880,16 +1933,16 @@ function buildServer(
                 `${execution.providerEntity}; values it would provide are unresolved.`,
             );
           }
-          // Only the tenant row's PLAIN values feed composition: URL templates
-          // resolve from them, and placeholder auth needs no secrets at all.
-          const connectionValues = Object.fromEntries(
-            Object.entries(
-              (tenantConnection?.[execution.connectionValuesField] ?? {}) as Record<
-                string,
-                unknown
-              >,
-            ).filter(([, value]) => value !== null && typeof value !== "object"),
-          );
+          // Composition resolves URL templates from the tenant row's URL-safe
+          // values — plain ones plus encrypted ones whose field is not
+          // classified secret; placeholder auth needs no secrets at all.
+          const dryRunElicit = entityForTable(execution.connectionTable)?.elicitOnCreate;
+          const connectionValues = urlSafeConnectionValues(
+            tenantConnection,
+            execution.connectionValuesField,
+            providerRow[dryRunElicit?.definitionsField ?? ""],
+            dryRunElicit?.sourceTable ?? execution.providerTable,
+          ).plain;
           const providerAuth = (providerRow.auth ?? null) as Record<string, unknown> | null;
           let providerForCompose = providerRow;
           if (providerAuth?.profile === "oauth2AuthorizationCode") {
@@ -1911,6 +1964,7 @@ function buildServer(
               connectionValues,
               serviceInputs: toolArguments,
               secretScope: execution.connectionTable,
+              providerDefinitions: providerRow[dryRunElicit?.definitionsField ?? ""],
               mode: "describe",
             });
             requests.push({
@@ -2165,17 +2219,22 @@ function buildServer(
                   if (!keyring || typeof providerAuth.tokenUrl !== "string") {
                     throw new HttpError(400, "PROVIDER_MISCONFIGURED", "Token refresh is not configured.");
                   }
-                  const tenantPlain = Object.fromEntries(
-                    Object.entries(
-                      (tenantConnection?.[execution.connectionValuesField] ?? {}) as Record<
-                        string,
-                        unknown
-                      >,
-                    ).filter(([, value]) => value !== null && typeof value !== "object")
-                      .map(([key, value]) => [key, String(value)]),
+                  const tenantUrlValues = urlSafeConnectionValues(
+                    tenantConnection,
+                    execution.connectionValuesField,
+                    providerRow[
+                      entityForTable(execution.connectionTable)?.elicitOnCreate
+                        ?.definitionsField ?? ""
+                    ],
+                    elicitScope,
                   );
                   const refreshed = await refreshTokens({
-                    tokenUrl: resolveTemplate(providerAuth.tokenUrl, tenantPlain, "auth.tokenUrl"),
+                    tokenUrl: resolveTemplate(
+                      providerAuth.tokenUrl,
+                      tenantUrlValues.plain,
+                      "auth.tokenUrl",
+                      tenantUrlValues.secretKeys,
+                    ),
                     clientId: credentials.clientId,
                     clientSecret: credentials.clientSecret,
                     refreshToken: decryptSecret(
@@ -2204,20 +2263,21 @@ function buildServer(
                 // The personal connection holds only tokens; tenant-owned
                 // NON-secret configuration (subdomain and friends) still
                 // resolves base-URL and path templates, so merge the tenant
-                // connection's plain half underneath the personal values.
+                // connection's URL-safe half underneath the personal values.
+                // Resolving it HERE keeps the AAD scopes straight: tenant
+                // fields decrypt under the elicitation scope, while the merged
+                // row executes under the personal scope.
                 const tenantConnectionForPlain = connectionRows.find((row) => !row.ownerUserId);
-                const tenantPlainForExecution = Object.fromEntries(
-                  Object.entries(
-                    (tenantConnectionForPlain?.[execution.connectionValuesField] ?? {}) as Record<
-                      string,
-                      unknown
-                    >,
-                  ).filter(
-                    ([, value]) =>
-                      value !== null && typeof value !== "object" && value !== undefined,
-                  ),
+                const tenantUrlSafe = urlSafeConnectionValues(
+                  tenantConnectionForPlain,
+                  execution.connectionValuesField,
+                  providerRow[
+                    entityForTable(execution.connectionTable)?.elicitOnCreate
+                      ?.definitionsField ?? ""
+                  ],
+                  elicitScope,
                 );
-                connectionValues = { ...tenantPlainForExecution, ...values };
+                connectionValues = { ...tenantUrlSafe.plain, ...values };
                 secretScope = personalScope;
                 providerForExecution = {
                   ...providerRow,
@@ -2248,6 +2308,29 @@ function buildServer(
                         `with {"tool":"${name}"} and approves at the provider.`,
                     );
                   }
+                  // The row mixes AAD scopes: elicited fields were encrypted
+                  // under the elicitation scope, tokens under the personal
+                  // scope. Resolve the elicited URL-safe half here and keep
+                  // only the token fields for the personal-scope execution —
+                  // bearer execution never needs the OAuth client secrets.
+                  const definitions =
+                    providerRow[
+                      entityForTable(execution.connectionTable)?.elicitOnCreate
+                        ?.definitionsField ?? ""
+                    ];
+                  const tenantUrlSafe = urlSafeConnectionValues(
+                    tenantConnection,
+                    execution.connectionValuesField,
+                    definitions,
+                    elicitScope,
+                  );
+                  const elicitedKeys = definitionFieldKeys(definitions);
+                  connectionValues = {
+                    ...tenantUrlSafe.plain,
+                    ...Object.fromEntries(
+                      Object.entries(tenantValues).filter(([key]) => !elicitedKeys.has(key)),
+                    ),
+                  };
                   secretScope = `${execution.connectionTable}:personal`;
                   providerForExecution = {
                     ...providerRow,
@@ -2263,6 +2346,11 @@ function buildServer(
                 connectionValues,
                 serviceInputs: { ...args, ...accumulated },
                 secretScope,
+                providerDefinitions:
+                  providerRow[
+                    entityForTable(execution.connectionTable)?.elicitOnCreate
+                      ?.definitionsField ?? ""
+                  ],
               });
               mergeOutputs(accumulated, outputs);
               } catch (error) {
@@ -2330,6 +2418,26 @@ function buildServer(
           } catch {
             // Unauthorized and missing get the same NOT_FOUND from the
             // collector, mirroring the tool-listing principle.
+          }
+        }
+        // Definitional fail-fast: a URL template reaching for a
+        // secret-classified field can never resolve, so refuse BEFORE the
+        // person is asked to fill a secure form for a connection that cannot
+        // work. The error names the misclassified field and the fix.
+        if (sourceRow) {
+          const secretClassified = secretFieldKeys(sourceRow[elicit.definitionsField]);
+          for (const { context, template } of providerUrlTemplates(sourceRow)) {
+            for (const key of templatePlaceholders(template)) {
+              if (secretClassified.has(key)) {
+                throw new HttpError(
+                  400,
+                  "SECRET_IN_URL_TEMPLATE",
+                  `${secretUrlPlaceholderError(key, context).message} Fix the ` +
+                    `${elicit.sourceEntity} definition first — nothing has been asked ` +
+                    `of the person yet.`,
+                );
+              }
+            }
           }
         }
         const sourceAuth = sourceRow?.auth as Record<string, unknown> | null | undefined;

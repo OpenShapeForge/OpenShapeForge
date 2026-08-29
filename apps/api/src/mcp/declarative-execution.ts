@@ -69,17 +69,22 @@ function looksLikeStoredSecret(value: unknown): value is StoredSecret {
 /**
  * Connection values split by sensitivity. Secrets stay in their own bag so a
  * template resolver can be handed ONLY the plain half for URL positions.
+ * `urlSafeKeys` names encrypted fields whose CLASSIFICATION is not secret —
+ * those decrypt into the plain half, because encryption at rest is storage
+ * hygiene while the classification is the policy.
  */
 export function splitConnectionValues(
   values: unknown,
   decrypt: (secret: StoredSecret, field: string) => string,
+  urlSafeKeys?: ReadonlySet<string>,
 ): { plain: Record<string, string>; secret: Record<string, string> } {
   const plain: Record<string, string> = {};
   const secret: Record<string, string> = {};
   if (values && typeof values === "object" && !Array.isArray(values)) {
     for (const [key, value] of Object.entries(values as JsonRecord)) {
       if (looksLikeStoredSecret(value)) {
-        secret[key] = decrypt(value, key);
+        const target = urlSafeKeys?.has(key) ? plain : secret;
+        target[key] = decrypt(value, key);
       } else if (value !== null && value !== undefined && typeof value !== "object") {
         plain[key] = String(value);
       }
@@ -91,18 +96,103 @@ export function splitConnectionValues(
 const PLACEHOLDER = /\{([a-zA-Z][a-zA-Z0-9]*)\}/g;
 
 /**
+ * Sensitivities whose values are stored encrypted at rest AND barred from URL
+ * positions. Storage and policy are deliberately separate: a value encrypted
+ * at rest whose field is NOT classified here may still resolve into URLs (the
+ * runtime decrypts it), so reclassifying a field frees its stored value
+ * without anyone re-entering it.
+ */
+export const SECRET_SENSITIVITY = new Set(["confidential", "pii", "bsn"]);
+
+type FieldDefinition = { key?: unknown; classification?: { sensitivity?: unknown } };
+
+/** Field keys the given definitions classify as secret (see SECRET_SENSITIVITY). */
+export function secretFieldKeys(definitions: unknown): Set<string> {
+  const keys = new Set<string>();
+  if (!Array.isArray(definitions)) return keys;
+  for (const definition of definitions as FieldDefinition[]) {
+    const sensitivity = definition?.classification?.sensitivity;
+    if (
+      typeof definition?.key === "string" &&
+      typeof sensitivity === "string" &&
+      SECRET_SENSITIVITY.has(sensitivity)
+    ) {
+      keys.add(definition.key);
+    }
+  }
+  return keys;
+}
+
+/** All field keys the given definitions declare. */
+export function definitionFieldKeys(definitions: unknown): Set<string> {
+  const keys = new Set<string>();
+  if (!Array.isArray(definitions)) return keys;
+  for (const definition of definitions as FieldDefinition[]) {
+    if (typeof definition?.key === "string") keys.add(definition.key);
+  }
+  return keys;
+}
+
+/** The `{placeholder}` keys one template string references. */
+export function templatePlaceholders(template: unknown): string[] {
+  if (typeof template !== "string") return [];
+  return [...template.matchAll(PLACEHOLDER)].map((match) => match[1] as string);
+}
+
+/**
+ * Every canonical URL-position template a provider row declares, with the
+ * context name errors use. These are the positions secret values must never
+ * reach.
+ */
+export function providerUrlTemplates(
+  providerRow: JsonRecord,
+): Array<{ context: string; template: string }> {
+  const auth = (providerRow.auth ?? null) as JsonRecord | null;
+  const probe = (providerRow.probe ?? null) as JsonRecord | null;
+  return [
+    { context: "baseUrlTemplate", template: providerRow.baseUrlTemplate },
+    { context: "probe pathTemplate", template: probe?.pathTemplate },
+    { context: "auth.authorizationUrl", template: auth?.authorizationUrl },
+    { context: "auth.tokenUrl", template: auth?.tokenUrl },
+  ].filter((entry): entry is { context: string; template: string } =>
+    typeof entry.template === "string" && entry.template.length > 0,
+  );
+}
+
+/**
+ * The refusal for a URL template that reaches for a secret-classified field —
+ * readable and self-healing, because the correct fix (reclassify a value that
+ * was never truly a secret) is one the caller can apply directly.
+ */
+export function secretUrlPlaceholderError(key: string, context: string): HttpError {
+  return new HttpError(
+    400,
+    "SECRET_IN_URL_TEMPLATE",
+    `The "{${key}}" placeholder in ${context} references a field classified as a secret, ` +
+      `and secret values only ever resolve into request authentication — never into URLs. ` +
+      `If the value is not truly a secret (tenant subdomains, hostnames and regions are not), ` +
+      `change that field's classification to internal; its stored value then works as-is, ` +
+      `nothing needs re-entering.`,
+  );
+}
+
+/**
  * Resolve `{key}` placeholders from the given sources, failing closed on an
  * unknown key: a template reaching for a value that does not exist must never
- * silently produce a malformed URL or credential.
+ * silently produce a malformed URL or credential. When the missing key is in
+ * `secretKeys`, the error explains the classification cause instead of
+ * reading like a data-entry gap.
  */
 export function resolveTemplate(
   template: string,
   sources: Record<string, string>,
   context: string,
+  secretKeys?: ReadonlySet<string>,
 ): string {
   return template.replace(PLACEHOLDER, (_match, key: string) => {
     const value = sources[key];
     if (value === undefined) {
+      if (secretKeys?.has(key)) throw secretUrlPlaceholderError(key, context);
       throw new HttpError(
         400,
         "TEMPLATE_UNRESOLVED",
@@ -315,6 +405,12 @@ export type ExecuteBindingInput = {
   fetchImpl?: typeof fetch;
   /** AAD scope the values were encrypted under (the elicitation source table). */
   secretScope: string;
+  /**
+   * The provider's configuration field definitions. Their classifications
+   * decide which encrypted values may resolve into URL positions; without
+   * them, every encrypted value is treated as secret.
+   */
+  providerDefinitions?: unknown;
 };
 
 /**
@@ -407,20 +503,29 @@ export async function composeBindingRequest(
     );
   }
 
-  const { plain, secret } = splitConnectionValues(input.connectionValues, (stored, field) => {
-    // Composition-only mode never decrypts: the placeholder is unused because
-    // auth headers are described rather than built, and secrets can reach no
-    // other request position by construction.
-    if (mode === "describe") return "<secret>";
-    if (!keyring) {
-      throw new HttpError(
-        500,
-        "SECRET_KEYRING_MISSING",
-        `A stored secret needs the keyring; set ${KEYRING_ENV}.`,
-      );
-    }
-    return decryptSecret(keyring, input.secretScope, field, stored);
-  });
+  const secretKeys = secretFieldKeys(input.providerDefinitions);
+  const urlSafeKeys = new Set(
+    [...definitionFieldKeys(input.providerDefinitions)].filter((key) => !secretKeys.has(key)),
+  );
+  const { plain, secret } = splitConnectionValues(
+    input.connectionValues,
+    (stored, field) => {
+      // Composition-only mode never decrypts a SECRET: auth headers are
+      // described rather than built. Encrypted fields whose classification is
+      // not secret still decrypt — URL positions need their real values, and
+      // the policy says they are safe to show.
+      if (mode === "describe" && !urlSafeKeys.has(field)) return "<secret>";
+      if (!keyring) {
+        throw new HttpError(
+          500,
+          "SECRET_KEYRING_MISSING",
+          `A stored secret needs the keyring; set ${KEYRING_ENV}.`,
+        );
+      }
+      return decryptSecret(keyring, input.secretScope, field, stored);
+    },
+    urlSafeKeys,
+  );
 
   const operationInputs = applyMapping(serviceInputs, binding.inputMapping);
   const operation = (operationRow.operation ?? {}) as JsonRecord;
@@ -457,11 +562,13 @@ export async function composeBindingRequest(
     typeof providerRow.baseUrlTemplate === "string" ? providerRow.baseUrlTemplate : "",
     plain,
     "provider baseUrlTemplate",
+    secretKeys,
   );
   const usedInPath = new Set<string>();
   const path = (isGraphql && pathTemplate === "" ? "" : pathTemplate).replace(PLACEHOLDER, (_match, key: string) => {
     const value = urlSources[key];
     if (value === undefined) {
+      if (secretKeys.has(key)) throw secretUrlPlaceholderError(key, "operation pathTemplate");
       throw new HttpError(400, "TEMPLATE_UNRESOLVED", `Path placeholder "{${key}}" has no value.`);
     }
     usedInPath.add(key);

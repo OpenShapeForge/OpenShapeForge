@@ -21,6 +21,7 @@ import { generateArtifacts } from "./generate.js";
 import { renderConnectorCatalog } from "./generate-connectors.js";
 import { MODULE_REGISTRY_PATH, renderModuleRegistry } from "./generate-modules.js";
 import { renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
+import { applyEnumConstraints } from "./enum-constraints.js";
 import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
 import type { CompiledEntityInfo } from "./plugins.js";
 import type { CompiledField } from "./authoring/types.js";
@@ -149,7 +150,7 @@ function assertReferentieGroepsResolve(
 export async function collectAllArtifacts(
   repoRoot: string = defaultRepoRoot,
 ): Promise<ArtifactCollection> {
-  const { manifest, entities, connectors, plugins, pluginEntries } =
+  const { manifest: compiledManifest, entities, connectors, plugins, pluginEntries } =
     await loadActivePlatformCompile(repoRoot);
   const authoringDir = resolveActiveAuthoringDir(repoRoot);
   // Web UI artifacts (CRUD pages, entity manifests, actions, workflow
@@ -162,6 +163,7 @@ export async function collectAllArtifacts(
   // artifacts are written only after every generator has produced its contents.
   const referentiedata = await loadCoreReferentiedataSnapshot(repoRoot);
   assertReferentieGroepsResolve(entities, referentiedata);
+  const manifest = applyEnumConstraints(compiledManifest, entities, referentiedata);
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, { source: activeManifestSource }),
     mcp: [

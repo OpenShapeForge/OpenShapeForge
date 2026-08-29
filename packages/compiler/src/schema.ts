@@ -196,6 +196,13 @@ export type RetentionDefinition = {
  */
 export type ColumnSensitivity = "confidential" | "pii" | "bsn";
 
+/** Recursive enum-only value shape carried to the shared CRUD writer. */
+export type EnumConstraintDefinition = {
+  values?: string[];
+  properties?: Record<string, EnumConstraintDefinition>;
+  items?: EnumConstraintDefinition;
+};
+
 export type ColumnDefinition = {
   name: string;
   type: ScalarType;
@@ -221,6 +228,8 @@ export type ColumnDefinition = {
    * keep byte-identical output.
    */
   immutable?: true;
+  /** Authored enum constraints enforced on writes by every generated transport. */
+  enumConstraint?: EnumConstraintDefinition;
 };
 
 export type LocalizedTextManifest = {

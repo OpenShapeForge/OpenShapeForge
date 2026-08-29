@@ -63,6 +63,11 @@ export function foreignKeyTargets(table: GeneratedTable): Map<string, string> {
 }
 
 export function sampleValue(column: Column, marker: string): unknown {
+  const directEnum = column.enumConstraint?.values?.[0];
+  if (directEnum !== undefined) return directEnum;
+  const itemEnum = column.enumConstraint?.items?.values?.[0];
+  if (itemEnum !== undefined) return [itemEnum];
+
   switch (column.type) {
     case "text":
       return `e2e-${marker}-${fieldName(column)}`;

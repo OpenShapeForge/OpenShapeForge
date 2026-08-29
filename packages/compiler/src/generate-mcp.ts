@@ -3,17 +3,14 @@
  * MCP tool-catalog generator for entities that opt into generated MCP exposure
  * (`mcp:` block in the entity YAML → `TableDefinition.source.mcp`).
  *
- * This is the one generator fed by the compiled CONTRACTS rather than the
- * manifest, and deliberately so. `manifest.json` carries storage columns —
- * name, type, required, classification — which is everything the SQL layer
- * needs and almost nothing a language model needs. The authored labels,
- * descriptions, validation bounds, and enumerations that make a tool schema
- * usable live on `CompiledEntityContract.model.fields`, so that is the input.
+ * This generator is fed by compiled CONTRACTS rather than the manifest because
+ * model-facing labels, descriptions and validation bounds live there. Enum
+ * values are also copied into the storage manifest as a shared write invariant,
+ * using the same resolver this generator calls.
  *
- * Emitting a separate artifact (rather than fattening the manifest) also keeps
- * the manifest checksum stable: it drives migrations and drift detection, and
- * must not move because a field's help text changed. `rest/openapi.json` is
- * the same pattern.
+ * The separate artifact keeps human-facing metadata out of the manifest
+ * checksum: help text does not move the database contract, while changing an
+ * enum deliberately does. `rest/openapi.json` is the same pattern.
  *
  * Determinism: pure function of the compiled contracts; no timestamps,
  * entities sorted by tool prefix, fields in authored order.
@@ -21,6 +18,7 @@
 import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
 import type { LocalizedText } from "./authoring/types/common.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
+import { resolveFieldEnum } from "./enum-constraints.js";
 import {
   applyCollectionShape,
   constraintsForField,
@@ -82,58 +80,6 @@ function describeField(field: CompiledField): string | undefined {
 }
 
 /**
- * Resolve a field's closed vocabulary, if it has one.
- *
- * Two authoring spellings reach the same place. `options:` is the documented
- * one. But entities in the wild put the group under `render.props.referentieGroep`
- * (the shape the UI select component consumes), and the shared
- * resolveFieldOptions() does not look there. Reading the render fallback HERE
- * rather than fixing the shared resolver keeps this generator additive:
- * changing resolveFieldOptions would move CompiledField.options into the
- * GraphQL profile types and the web form generators, producing byte-diffs in
- * host repos for no benefit to them.
- */
-function resolveEnum(
-  field: CompiledField,
-  referentiedata: CoreReferentiedataSnapshot,
-): { values: string[]; labels: Map<string, string> } | undefined {
-  const options = field.options;
-  const renderGroep = field.render?.props?.referentieGroep;
-
-  if (options?.type === "static" && options.items && options.items.length > 0) {
-    return {
-      values: options.items.map((item) => item.value),
-      labels: new Map(
-        options.items.flatMap((item) => {
-          const label = text(item.label);
-          return label ? [[item.value, label] as const] : [];
-        }),
-      ),
-    };
-  }
-
-  const groep =
-    options?.type === "referentiedata" && options.referentieGroep
-      ? options.referentieGroep
-      : typeof renderGroep === "string"
-        ? renderGroep
-        : undefined;
-  if (!groep) return undefined;
-
-  const items = referentiedata[groep] ?? [];
-  if (items.length === 0) return undefined;
-  return {
-    values: items.map((item) => item.value),
-    labels: new Map(
-      items.flatMap((item) => {
-        const label = text(item.label);
-        return label ? [[item.value, label] as const] : [];
-      }),
-    ),
-  };
-}
-
-/**
  * The authored field → JSON Schema mapping. This is the whole point of the
  * artifact: every constraint the author already wrote becomes a constraint the
  * model is told about up front, instead of one it discovers through a 400.
@@ -148,7 +94,7 @@ function schemaForField(
 ): JsonObject {
   const scalar: JsonObject = constraintsForField(field);
 
-  const enumeration = resolveEnum(field, referentiedata);
+  const enumeration = resolveFieldEnum(field, referentiedata);
   if (enumeration) {
     scalar.enum = enumeration.values;
   }

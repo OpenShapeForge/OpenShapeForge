@@ -1558,7 +1558,10 @@ function buildServer(
                 "fresh approval replaces the stored sign-in in place. "
               : "") +
             "Ask the person to open authorizationUrl in their browser and approve access. " +
-            "Once the provider confirms, call the tool again — no further setup is needed.",
+            "Then wait by checking, not by asking: call this tool again every ten seconds " +
+            "or so (sleep between checks if you can) — it answers connected once the " +
+            "sign-in lands. Only if nothing has landed after about three minutes, ask the " +
+            "person to tell you when they are done.",
         });
       } catch (error) {
         return failed(error);
@@ -2152,7 +2155,10 @@ function buildServer(
                 : "The secure form could not be completed in this client. ") +
               "Give the person this url to open in their browser — the same form is " +
               "served there, and the values go directly to the runtime, never through " +
-              "this chat. Once they have saved it, continue: the record will exist.",
+              "this chat. Then wait by checking, not by asking: poll resumeWith every " +
+              "ten seconds or so — the record exists once they have saved. Only if " +
+              "nothing has appeared after about three minutes, ask the person to tell " +
+              "you when they are done.",
           });
         }
       }

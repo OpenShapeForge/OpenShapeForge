@@ -38,7 +38,10 @@ import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import { registerControlRestRoutes } from "../control/rest-routes.js";
 import { registerDocumentRestRoutes } from "../documents/rest-routes.js";
 import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
-import { registerProtectedResourceMetadata } from "../mcp/protected-resource-metadata.js";
+import {
+  registerAuthorizationServerMetadataAliases,
+  registerProtectedResourceMetadata,
+} from "../mcp/protected-resource-metadata.js";
 import { registerApiKeyRestRoutes } from "../auth/api-key/rest-routes.js";
 import { readApiKeyProvisioningConfig } from "../auth/api-key/runtime-config.js";
 import { resolveSessionContext } from "../auth/identity.js";
@@ -416,6 +419,7 @@ export function createApiApp(options: {
     });
     registerGeneratedMcpServer(routes, dbOptions);
     registerProtectedResourceMetadata(routes);
+    registerAuthorizationServerMetadataAliases(routes);
     registerApiKeyRestRoutes(routes, {
       ...dbOptions,
       config: readApiKeyProvisioningConfig(),

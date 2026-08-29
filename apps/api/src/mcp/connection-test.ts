@@ -89,6 +89,14 @@ export type TestElicitedRowInput = {
   fetchImpl?: typeof fetch;
 };
 
+/** One line per failed check, for refusals that must explain themselves. */
+export function failedCheckSummary(report: ConnectionTestReport): string {
+  return report.checks
+    .filter((check) => check.outcome === "failed")
+    .map((check) => `${check.check}: ${check.detail}`)
+    .join(" ");
+}
+
 export async function testElicitedRow(input: TestElicitedRowInput): Promise<ConnectionTestReport> {
   const { row, sourceRow, elicit } = input;
   const keyring = input.keyring ?? keyringFromEnv(process.env[KEYRING_ENV]);

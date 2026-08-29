@@ -277,11 +277,12 @@ export async function collectElicitedValues(input: {
       message: message.trim(),
       requestedSchema: schema as never,
     },
-    // A person answers this form, often after fetching values from a
-    // password manager or a provider portal. The SDK's default 60-second
-    // request timeout is machine-scale and cancels the form under them;
-    // give them ten minutes.
-    { relatedRequestId, timeout: 10 * 60 * 1000 },
+    // A person answers this form, often after a detour through a provider
+    // portal to register an OAuth client or fetch values from a password
+    // manager. The SDK's default 60-second request timeout is machine-scale
+    // and cancels the form under them — and ten minutes proved too short for
+    // the portal detour in live testing. Give them thirty.
+    { relatedRequestId, timeout: 30 * 60 * 1000 },
   );
   if (result.action !== "accept") {
     throw new HttpError(

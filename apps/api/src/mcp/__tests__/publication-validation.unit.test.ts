@@ -248,6 +248,15 @@ describe("requiredAuthValueKeys", () => {
       "clientId",
       "clientSecret",
     ]);
+    // Sign-in tokens are issued by the runtime AFTER consent: scheme-derived
+    // keys must not be demanded of the tenant connection.
+    expect(
+      requiredAuthValueKeys({
+        profile: "oauth2AuthorizationCode",
+        scheme: "bearer",
+        tokenFrom: "access_token",
+      }).sort(),
+    ).toEqual(["clientId", "clientSecret"]);
     expect(requiredAuthValueKeys(undefined)).toEqual([]);
   });
 });

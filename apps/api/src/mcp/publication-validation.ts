@@ -55,6 +55,14 @@ function hasValue(values: JsonRecord, key: string): boolean {
 export function requiredAuthValueKeys(auth: unknown): string[] {
   if (!auth || typeof auth !== "object") return [];
   const config = auth as JsonRecord;
+  // Personal sign-in: the tenant connection holds only the OAuth client that
+  // later mints each person's tokens. Scheme-derived keys (bearer/header
+  // token fields) are issued by the runtime AFTER consent, so requiring them
+  // here would demand a value no person could have — found live as
+  // "Missing required values: access_token" on a correct setup.
+  if (config.profile === "oauth2AuthorizationCode") {
+    return ["clientId", "clientSecret"];
+  }
   const keys = new Set<string>();
   switch (config.scheme) {
     case "basic":
@@ -73,12 +81,6 @@ export function requiredAuthValueKeys(auth: unknown): string[] {
       break;
     default:
       break;
-  }
-  // Personal sign-in: the tenant connection must hold the OAuth client that
-  // later mints each person's tokens. The key names mirror the connect flow.
-  if (config.profile === "oauth2AuthorizationCode") {
-    keys.add("clientId");
-    keys.add("clientSecret");
   }
   return [...keys];
 }

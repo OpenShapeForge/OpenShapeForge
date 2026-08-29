@@ -35,7 +35,11 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
-const STATE_TTL_MS = 10 * 60 * 1000;
+// The person behind this link may first be routed through the provider's own
+// login (password manager, second factor) before the consent screen; ten
+// minutes proved too short for that in live testing, matching what the
+// elicitation and configuration-handoff windows already learned.
+const STATE_TTL_MS = 30 * 60 * 1000;
 const TOKEN_TIMEOUT_MS = 15_000;
 const KEYRING_ENV = "OPENSHAPEFORGE_ELICITED_SECRET_KEYS";
 

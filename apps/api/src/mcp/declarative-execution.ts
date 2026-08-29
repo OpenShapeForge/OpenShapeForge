@@ -289,11 +289,16 @@ export function setPath(target: JsonRecord, path: string, value: unknown): void 
   current[segments[segments.length - 1]!] = value;
 }
 
-/** Dot-path extraction, e.g. `data.tickets`; empty/absent path is identity. */
+/**
+ * Dot-path extraction, e.g. `data.tickets`; empty/absent path is identity.
+ * `$` is identity too, and a `$.` prefix is stripped — authors reach for
+ * JSONPath spellings, and refusing them silently lost whole result sets.
+ */
 export function extractPath(value: unknown, path: unknown): unknown {
-  if (typeof path !== "string" || path.length === 0) return value;
+  if (typeof path !== "string" || path.length === 0 || path === "$") return value;
+  const trimmed = path.startsWith("$.") ? path.slice(2) : path;
   let current: unknown = value;
-  for (const segment of path.split(".")) {
+  for (const segment of trimmed.split(".")) {
     if (current === null || typeof current !== "object") return undefined;
     current = (current as JsonRecord)[segment];
   }
@@ -593,6 +598,25 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
       if (typeof entry.field !== "string") continue;
       operationOutputs[entry.field] = extractPath(extracted, entry.path);
     }
+    // A mapping that matches NOTHING while the provider answered with data
+    // is a definition mistake, not an empty result — an empty success here
+    // silently loses the whole response (seen live: a calendar's events
+    // vanished into {}). Name what was looked for and what was there.
+    const anyResolved = Object.values(operationOutputs).some((value) => value !== undefined);
+    const sourceKeys = Array.isArray(extracted)
+      ? extracted.length > 0
+        ? [`a collection of ${extracted.length} items — use path "$" to pass it through`]
+        : []
+      : Object.keys(extracted);
+    if (!anyResolved && sourceKeys.length > 0) {
+      throw new HttpError(
+        502,
+        "SERVICE_MISCONFIGURED",
+        `The response mapping produced no outputs: none of its field paths ` +
+          `(${fieldPaths.map((entry) => String(entry.path)).join(", ")}) exist in the ` +
+          `provider response, which holds ${sourceKeys.join(", ")}.`,
+      );
+    }
   } else {
     operationOutputs =
       extracted !== null && typeof extracted === "object" && !Array.isArray(extracted)
@@ -601,6 +625,19 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
   }
 
   const mapped = applyMapping(operationOutputs, binding.outputMapping);
+  if (
+    Array.isArray(binding.outputMapping) &&
+    (binding.outputMapping as unknown[]).length > 0 &&
+    Object.keys(mapped).length === 0 &&
+    Object.keys(operationOutputs).some((key) => operationOutputs[key] !== undefined)
+  ) {
+    throw new HttpError(
+      502,
+      "SERVICE_MISCONFIGURED",
+      `The binding's output mapping matched nothing; the operation produced: ` +
+        `${Object.keys(operationOutputs).join(", ")}.`,
+    );
+  }
 
   // Cursor pagination surfaces as data: the next-page cursor (when the
   // operation declares where it lives) rides along as `nextCursor`, and the

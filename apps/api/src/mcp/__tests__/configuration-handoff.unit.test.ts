@@ -139,3 +139,19 @@ describe("renderConfigurationForm", () => {
     expect(renderMessagePage("done & <safe>")).toContain("done &amp; &lt;safe&gt;");
   });
 });
+
+describe("retry rendering after a rejected verification", () => {
+  it("shows the banner, prefills non-secrets, never echoes secrets", () => {
+    const token = mint();
+    const pending = peekConfiguration(token)!;
+    const html = renderConfigurationForm(pending, "/x", {}, {
+      errorBanner: "Zendesk refused these values — probe: answered 401.",
+      prefill: { subdomain: "acme-typo", clientSecret: "s3cret" },
+    });
+    expect(html).toContain("Zendesk refused these values");
+    expect(html).toContain("Nothing was saved");
+    expect(html).toContain('name="subdomain"');
+    expect(html).toContain('value="acme-typo"');
+    expect(html).not.toContain("s3cret");
+  });
+});

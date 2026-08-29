@@ -204,6 +204,12 @@ export function renderConfigurationForm(
   pending: PendingConfiguration,
   actionPath: string,
   errors: Record<string, string> = {},
+  options: {
+    /** Verification failure shown above the form after a rejected submit. */
+    errorBanner?: string;
+    /** Non-secret values to prefill on a retry; secrets are never echoed. */
+    prefill?: Record<string, unknown>;
+  } = {},
 ): string {
   const { elicitable, skipped } = elicitationSchemaFromDefinitions(pending.definitions);
   const rows = (elicitable as StoredFieldDefinition[])
@@ -230,14 +236,20 @@ export function renderConfigurationForm(
       } else if (valueType === "boolean") {
         control = `<input type="checkbox" name="${key}">`;
       } else {
-        const type = isSecretDefinition(definition as never)
+        const secret = isSecretDefinition(definition as never);
+        const type = secret
           ? "password"
           : valueType === "integer" || valueType === "number"
             ? "number"
             : "text";
         const step = valueType === "number" ? ` step="any"` : "";
+        const prefillValue = !secret && options.prefill?.[key];
+        const valueAttribute =
+          prefillValue !== undefined && prefillValue !== null && prefillValue !== false
+            ? ` value="${escapeHtml(String(prefillValue))}"`
+            : "";
         control =
-          `<input type="${type}" name="${key}"${step}${required ? " required" : ""} ` +
+          `<input type="${type}" name="${key}"${step}${valueAttribute}${required ? " required" : ""} ` +
           `autocomplete="off" style="width:100%;padding:.5rem;box-sizing:border-box">`;
       }
 
@@ -252,6 +264,10 @@ export function renderConfigurationForm(
     })
     .join("");
 
+  const banner = options.errorBanner
+    ? `<p style="background:#fde8e8;border:1px solid #d08c8c;padding:.75rem;border-radius:6px">` +
+      `${escapeHtml(options.errorBanner)} Nothing was saved; correct the values and save again.</p>`
+    : "";
   const prefix = pending.messagePrefix
     ? `<p style="background:#fff6d8;border:1px solid #e0c869;padding:.75rem;border-radius:6px">${escapeHtml(pending.messagePrefix)}</p>`
     : "";
@@ -266,6 +282,7 @@ export function renderConfigurationForm(
     `<h2 style="font-size:1.2rem">Configuration for ${escapeHtml(pending.displayName)}</h2>` +
     `<p><small>Entered here, these values go directly to the runtime — never through any ` +
     `chat or model. Secret values are stored encrypted and never shown back.</small></p>` +
+    banner +
     prefix +
     `<form method="post" action="${escapeHtml(actionPath)}">${rows}` +
     `<button type="submit" style="padding:.5rem 1.5rem">Save</button></form>` +

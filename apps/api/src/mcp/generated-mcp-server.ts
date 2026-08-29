@@ -91,7 +91,7 @@ import {
   resolveTemplate,
 } from "./declarative-execution.js";
 import { validateVisibleDefinition } from "./publication-validation.js";
-import { testElicitedRow } from "./connection-test.js";
+import { failedCheckSummary, testElicitedRow } from "./connection-test.js";
 import { discoverProviderSchema } from "./discovery.js";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
@@ -2297,6 +2297,31 @@ function buildServer(
               "you when they are done.",
           });
         }
+        // Verify the accepted values against the provider BEFORE anything is
+        // stored — the same three checks test_connection runs later, so a
+        // wrong subdomain or refused credential fails HERE, not on the first
+        // real call. What is honestly unverifiable (no probe declared,
+        // sign-in credentials before consent) reports skipped and saves.
+        const storedValues = (callArguments as Record<string, unknown> | undefined)?.[
+          elicit.into
+        ];
+        if (sourceRow && storedValues && typeof storedValues === "object") {
+          const report = await testElicitedRow({
+            row: { [elicit.into]: storedValues },
+            sourceRow,
+            elicit,
+            table: table.name,
+          });
+          if (!report.ok) {
+            throw new HttpError(
+              400,
+              "CONNECTION_REJECTED",
+              `Nothing was created — the entered configuration failed verification ` +
+                `against ${report.source}: ${failedCheckSummary(report)} ` +
+                `Run the create again so the person can correct the values.`,
+            );
+          }
+        }
       }
       {
         // Validate what the MODEL sent against the advertised schema — before
@@ -2622,6 +2647,46 @@ export function registerGeneratedMcpServer(
           scope: "self",
         };
         const values = storeSubmission(pending, content);
+        // Verify against the provider BEFORE the row exists: the person is
+        // right here at the form, so a wrong subdomain or refused credential
+        // comes back as a correctable banner instead of a stored dud they
+        // discover a step later. Unverifiable contracts (no probe, sign-in
+        // clients before consent) report skipped and save.
+        const sourceRowId = pending.modelValues[pending.elicit.sourceField];
+        const sourceTable = tablesByName().get(pending.elicit.sourceTable);
+        if (typeof sourceRowId === "string" && sourceTable) {
+          const sourceResult = await listGeneratedEntitiesForTable(db, writeSession, sourceTable, {
+            limit: 1,
+            filter: { id: sourceRowId },
+          });
+          const sourceRow = sourceResult.rows[0]
+            ? serializeRow(sourceTable, sourceResult.rows[0])
+            : null;
+          if (sourceRow) {
+            const report = await testElicitedRow({
+              row: { [pending.elicit.into]: values[pending.elicit.into] },
+              sourceRow,
+              elicit: pending.elicit,
+              table: pending.table,
+            });
+            if (!report.ok) {
+              return reply
+                .status(400)
+                .type("text/html")
+                .send(
+                  renderConfigurationForm(
+                    pending,
+                    `${ENTITY_CONFIGURATION_PATH}/${pending.token}`,
+                    {},
+                    {
+                      errorBanner: `${report.source} refused these values — ${failedCheckSummary(report)}`,
+                      prefill: content,
+                    },
+                  ),
+                );
+            }
+          }
+        }
         await createGeneratedEntityForTable(db, writeSession, tableDef, values);
         consumeConfiguration(pending.token);
         return reply

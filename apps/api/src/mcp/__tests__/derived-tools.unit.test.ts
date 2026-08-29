@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import {
+  applyPersonalNotes,
   deriveToolName,
   derivedToolsFromRows,
   inputSchemaFromStoredFields,
@@ -119,5 +120,42 @@ describe("derivedToolsFromRows", () => {
       rowId: "a",
     });
     expect((tools[0]?.inputSchema.properties as Record<string, unknown>).query).toBeDefined();
+  });
+});
+
+describe("applyPersonalNotes", () => {
+  const entry = {
+    personalization: {
+      entity: "Preference",
+      table: "erp.preferences",
+      serviceRef: "serviceId",
+      instructionField: "instruction",
+      set: { name: "set_my_preferences", description: "d" },
+    },
+  };
+  const tools = [
+    { name: "plan_meeting", description: "Plan a meeting.", inputSchema: {}, entity: "Service", table: "erp.services", rowId: "svc-1" },
+    { name: "find_notes", description: "Find notes.", inputSchema: {}, entity: "Service", table: "erp.services", rowId: "svc-2" },
+  ];
+
+  it("appends general then specific notes under a precedence label, untouched otherwise", () => {
+    const personalized = applyPersonalNotes(tools, entry, [
+      { serviceId: null, instruction: "Only within working hours." },
+      { serviceId: "svc-1", instruction: "Focus blocks stay private." },
+      { serviceId: "svc-1", instruction: "   " },
+    ]);
+    expect(personalized[0]!.description).toBe(
+      "Plan a meeting.\n\nPersonal notes from this user (everything above always takes " +
+        "precedence): Only within working hours. Focus blocks stay private.",
+    );
+    expect(personalized[1]!.description).toContain("Only within working hours.");
+    expect(personalized[1]!.description).not.toContain("Focus blocks");
+    // Original description always survives verbatim at the front.
+    expect(personalized[0]!.description.startsWith("Plan a meeting.")).toBe(true);
+  });
+
+  it("passes through untouched without personalization or rows", () => {
+    expect(applyPersonalNotes(tools, {}, [{ instruction: "x" }])).toBe(tools);
+    expect(applyPersonalNotes(tools, entry, [])).toBe(tools);
   });
 });

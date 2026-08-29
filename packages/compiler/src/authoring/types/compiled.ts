@@ -243,6 +243,12 @@ export interface McpSection {
     visibleWhen?: { field: string; equals: string };
     connect?: { name: string; description?: string };
     dryRun?: { name: string; description?: string; roles: string[] };
+    personalization?: {
+      entity: string;
+      serviceRef: string;
+      instructionField: string;
+      set: { name: string; description?: string };
+    };
   };
 }
 

@@ -34,6 +34,14 @@ export type DerivedToolsCatalogEntry = {
   connect?: { name: string; description: string };
   /** Composition preview for definition authors; roles are its own audience. */
   dryRun?: { name: string; description: string; roles: string[] };
+  /** Per-person standing instructions merged into projected descriptions. */
+  personalization?: {
+    entity: string;
+    table: string;
+    serviceRef: string;
+    instructionField: string;
+    set: { name: string; description: string };
+  };
 };
 
 export type DerivedTool = {
@@ -174,6 +182,40 @@ export function sessionInAudience(
 ): boolean {
   const granted = new Set(sessionRoles ?? []);
   return entry.roles.some((role) => granted.has(role));
+}
+
+/**
+ * Append one person's standing instructions to their projected tool
+ * descriptions. The authored description always comes first and untouched;
+ * the personal layer hangs underneath with an explicit precedence label, so
+ * a person can extend how a tool serves THEM but never rewrite what the
+ * organization defined. A row whose serviceRef is empty applies to every
+ * tool of the projection; a specific row follows the general one.
+ */
+export function applyPersonalNotes(
+  tools: DerivedTool[],
+  entry: Pick<DerivedToolsCatalogEntry, "personalization">,
+  preferenceRows: readonly Record<string, unknown>[],
+): DerivedTool[] {
+  const personalization = entry.personalization;
+  if (!personalization || preferenceRows.length === 0) return tools;
+  const instructionOf = (row: Record<string, unknown>): string => {
+    const value = row[personalization.instructionField];
+    return typeof value === "string" ? value.trim() : "";
+  };
+  const general = preferenceRows.filter((row) => !row[personalization.serviceRef]);
+  return tools.map((tool) => {
+    const notes = [...general, ...preferenceRows.filter((row) => row[personalization.serviceRef] === tool.rowId)]
+      .map(instructionOf)
+      .filter((instruction) => instruction.length > 0);
+    if (notes.length === 0) return tool;
+    return {
+      ...tool,
+      description:
+        `${tool.description}\n\nPersonal notes from this user (everything above always ` +
+        `takes precedence): ${notes.join(" ")}`,
+    };
+  });
 }
 
 /**

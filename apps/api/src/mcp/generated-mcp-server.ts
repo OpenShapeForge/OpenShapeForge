@@ -1320,7 +1320,8 @@ function buildServer(
         // hold the defining row's KEY rather than the derived name, so the
         // input is normalized through the same derivation.
         const wantedName = deriveToolName(toolArg) ?? toolArg;
-        const target = (await derivedToolsForSession(db, session, tables)).find(
+        const projectedTools = await derivedToolsForSession(db, session, tables);
+        const target = projectedTools.find(
           (tool) => tool.name === wantedName && tool.table === connectEntry.table,
         );
         if (!target) {
@@ -1331,10 +1332,9 @@ function buildServer(
         });
         if (!definitionRow) throw new HttpError(404, "NOT_FOUND", `No connectable tool "${toolArg}".`);
 
-        // Provider and scopes derive from the exact chain; the caller chooses
-        // nothing. Exactly one distinct provider is supported per connection.
+        // The provider derives from the target's exact chain; the caller
+        // chooses nothing. Exactly one distinct provider per connection.
         const providerIds = new Set<string>();
-        const requiredScopes = new Set<string>();
         for (const binding of orderedBindings(definitionRow, execution.bindingsField)) {
           const operationId = binding[execution.operationRef];
           const operationRow =
@@ -1353,11 +1353,6 @@ function buildServer(
           if (typeof operationRow[execution.providerRef] === "string") {
             providerIds.add(operationRow[execution.providerRef] as string);
           }
-          if (Array.isArray(operationRow.requiredScopes)) {
-            for (const scope of operationRow.requiredScopes as unknown[]) {
-              if (typeof scope === "string") requiredScopes.add(scope);
-            }
-          }
         }
         if (providerIds.size !== 1) {
           throw new HttpError(
@@ -1367,6 +1362,52 @@ function buildServer(
           );
         }
         const providerRowId = [...providerIds][0]!;
+
+        // Scopes derive from the UNION of every projected definition on this
+        // provider, not the entry-point tool alone: the person signs in once
+        // per provider, and a consent shaped by one read tool would mint a
+        // token every write tool answers 403 with — leaving over-broadening
+        // that read tool as the only "fix" (seen live). A sibling row whose
+        // chain does not resolve is skipped: publication validation guards
+        // new rows, and a broken legacy row must not block sign-in.
+        const requiredScopes = new Set<string>();
+        for (const projected of projectedTools) {
+          if (projected.table !== connectEntry.table) continue;
+          const row =
+            projected.rowId === target.rowId
+              ? definitionRow
+              : await runtimeRowByFilter(db, session, tables, projected.table, {
+                  id: projected.rowId,
+                });
+          if (!row) continue;
+          try {
+            const rowProviders = new Set<string>();
+            const rowScopes: string[] = [];
+            for (const binding of orderedBindings(row, execution.bindingsField)) {
+              const operationId = binding[execution.operationRef];
+              const operationRow =
+                typeof operationId === "string"
+                  ? await runtimeRowByFilter(db, session, tables, execution.operationTable, {
+                      id: operationId,
+                    })
+                  : null;
+              if (!operationRow) throw new Error("unresolved binding");
+              if (typeof operationRow[execution.providerRef] === "string") {
+                rowProviders.add(operationRow[execution.providerRef] as string);
+              }
+              if (Array.isArray(operationRow.requiredScopes)) {
+                for (const scope of operationRow.requiredScopes as unknown[]) {
+                  if (typeof scope === "string") rowScopes.push(scope);
+                }
+              }
+            }
+            if (rowProviders.size === 1 && rowProviders.has(providerRowId)) {
+              for (const scope of rowScopes) requiredScopes.add(scope);
+            }
+          } catch {
+            // A malformed sibling definition cannot block this sign-in.
+          }
+        }
         const providerRow = await runtimeRowByFilter(db, session, tables, execution.providerTable, {
           id: providerRowId,
         });

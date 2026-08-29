@@ -39,7 +39,7 @@
     "check:ts-nocheck": "bun scripts/check-ts-nocheck-baseline.mjs",
     "check:notices": "bun scripts/gen-third-party-notices.ts --check",
     "check:license": "bun scripts/check-license-headers.mjs",
-    "check:keycloak-lockstep": "bun scripts/check-keycloak-lockstep.mjs",
+    "check:keycloak-lockstep": "bun scripts/check-keycloak-lockstep.mjs && bun test scripts/check-keycloak-lockstep.test.ts",
     "check:required-checks": "bun scripts/check-required-checks.mjs",
     "check:self-hosted-routing": "bun scripts/check-self-hosted-routing.mjs && bun test scripts/check-self-hosted-routing.test.ts scripts/self-hosted-pre-job-policy.test.ts",
     "license:headers": "bun scripts/add-license-headers.mjs",

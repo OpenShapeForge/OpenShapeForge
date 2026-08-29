@@ -34,6 +34,7 @@ export const authSecret =
     ?? "dev-admin-auth-secret-change-in-production";
 
 export const keycloakLogoutUrl = `${issuer}/protocol/openid-connect/logout`;
+export const keycloakServerLogoutUrl = `${issuerInternal}/protocol/openid-connect/logout`;
 
 export const strictSameSite = "strict" as const;
 export const oauthFlowSameSite = "lax" as const;
@@ -51,6 +52,15 @@ export const oauthFlowSameSite = "lax" as const;
 const COOKIE_PREFIX = "openshapeforge-admin";
 
 export const cookieName = (suffix: string) => `${COOKIE_PREFIX}.${suffix}`;
+
+export const authCookieNames = {
+  sessionToken: cookieName("session-token"),
+  callbackUrl: cookieName("callback-url"),
+  csrfToken: cookieName("csrf-token"),
+  pkceCodeVerifier: cookieName("pkce.code_verifier"),
+  state: cookieName("state"),
+  nonce: cookieName("nonce"),
+} as const;
 
 export const providers = [
   Keycloak({

@@ -102,6 +102,18 @@ jobs:
       - name: Compiler unit tests
         run: bun test packages/compiler
 
+      # Logout orchestration is framework-neutral in packages/auth; Redis
+      # fencing and refresh/hydration adapters remain app-specific.
+      - name: Session logout unit tests
+        run: >-
+          bun test packages/auth/src/logout.test.ts
+          packages/auth/src/logout-client.test.ts
+          apps/web/src/lib/auth/auth/token-refresh-lock.test.ts
+          apps/web/src/lib/auth/auth/session-hydration.test.ts
+          apps/web/src/lib/auth/redis-fencing.test.ts
+          apps/admin/src/lib/auth/auth/token-refresh-lock.test.ts
+          apps/admin/src/lib/auth/auth/session-hydration.test.ts
+
       # The shipped example plugins carry unit tests that nothing ran until
       # now: `test:compiler` is scoped to packages/compiler and the db/e2e jobs
       # only reach plugin code through the API. A test that never executes is

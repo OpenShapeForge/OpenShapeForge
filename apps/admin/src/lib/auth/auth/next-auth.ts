@@ -7,12 +7,11 @@ import type { StoredSession } from "../redis";
 import {
   decodeJwtExp,
   hasPlatformOperatorRole,
-  mergeUserProfileIntoStoredSession,
   resolveInitialRoles,
 } from "./claims";
 import {
+  authCookieNames,
   authSecret,
-  cookieName,
   oauthFlowSameSite,
   providers,
   strictSameSite,
@@ -21,10 +20,11 @@ import {
   ACCESS_TOKEN_REFRESH_BUFFER_S,
   refreshSessionInRedis,
 } from "./token-refresh";
+import { hydrateStoredSessionProfile } from "./session-hydration";
 
 const secureCookies = process.env.AUTH_COOKIE_SECURE === "true";
 
-const { handlers, signIn, signOut, auth: nextAuth } = NextAuth({
+const { handlers, signIn, auth: nextAuth } = NextAuth({
   trustHost: true,
   secret: authSecret,
   providers,
@@ -142,6 +142,9 @@ const { handlers, signIn, signOut, auth: nextAuth } = NextAuth({
 
     async session({ session, token }) {
       if (token.error === "RefreshTokenError") {
+        if (typeof token.sessionId === "string") {
+          session.sessionId = token.sessionId;
+        }
         session.error = "RefreshTokenError";
         return session;
       }
@@ -159,22 +162,10 @@ const { handlers, signIn, signOut, auth: nextAuth } = NextAuth({
         return session;
       }
 
-      const hydratedUserProfile = parseUserProfile({
-        sub: stored.sub,
-        stored,
-        idTokenClaims: readJwtClaims(stored.idToken),
-        accessTokenClaims: readJwtClaims(stored.accessToken),
-      });
-      const hydratedStored = mergeUserProfileIntoStoredSession(stored, hydratedUserProfile);
-      if (
-        hydratedStored.name !== stored.name ||
-        hydratedStored.givenName !== stored.givenName ||
-        hydratedStored.familyName !== stored.familyName ||
-        hydratedStored.preferredUsername !== stored.preferredUsername ||
-        hydratedStored.email !== stored.email
-      ) {
-        await setSession(sessionId, hydratedStored);
-        stored = hydratedStored;
+      stored = await hydrateStoredSessionProfile(sessionId, stored);
+      if (!stored || stored.error === "RefreshTokenError") {
+        session.error = "RefreshTokenError";
+        return session;
       }
 
       const roles = stored.roles ?? [];
@@ -206,7 +197,7 @@ const { handlers, signIn, signOut, auth: nextAuth } = NextAuth({
   // why sharing apps/web's names on localhost would break both apps.
   cookies: {
     sessionToken: {
-      name: cookieName("session-token"),
+      name: authCookieNames.sessionToken,
       options: {
         httpOnly: true,
         sameSite: strictSameSite,
@@ -216,7 +207,7 @@ const { handlers, signIn, signOut, auth: nextAuth } = NextAuth({
       },
     },
     callbackUrl: {
-      name: cookieName("callback-url"),
+      name: authCookieNames.callbackUrl,
       options: {
         httpOnly: true,
         sameSite: strictSameSite,
@@ -225,7 +216,7 @@ const { handlers, signIn, signOut, auth: nextAuth } = NextAuth({
       },
     },
     csrfToken: {
-      name: cookieName("csrf-token"),
+      name: authCookieNames.csrfToken,
       options: {
         httpOnly: true,
         sameSite: strictSameSite,
@@ -234,7 +225,7 @@ const { handlers, signIn, signOut, auth: nextAuth } = NextAuth({
       },
     },
     pkceCodeVerifier: {
-      name: cookieName("pkce.code_verifier"),
+      name: authCookieNames.pkceCodeVerifier,
       options: {
         httpOnly: true,
         sameSite: oauthFlowSameSite,
@@ -243,7 +234,7 @@ const { handlers, signIn, signOut, auth: nextAuth } = NextAuth({
       },
     },
     state: {
-      name: cookieName("state"),
+      name: authCookieNames.state,
       options: {
         httpOnly: true,
         sameSite: oauthFlowSameSite,
@@ -252,7 +243,7 @@ const { handlers, signIn, signOut, auth: nextAuth } = NextAuth({
       },
     },
     nonce: {
-      name: cookieName("nonce"),
+      name: authCookieNames.nonce,
       options: {
         httpOnly: true,
         sameSite: oauthFlowSameSite,
@@ -298,4 +289,4 @@ export async function auth() {
   }
 }
 
-export { handlers, signIn, signOut };
+export { handlers, signIn };

@@ -118,6 +118,6 @@ export const config = {
   matcher: [
     // Run on all paths except Next.js internals, static file extensions,
     // and the NextAuth API routes (which handle their own auth flow).
-    "/((?!api/auth|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|js|css)$).*)",
+    "/((?!api/auth|api/logout|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|js|css)$).*)",
   ],
 };

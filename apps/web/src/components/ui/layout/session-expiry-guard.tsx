@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
+import { requestLogout, type LogoutReason } from "@openshapeforge/auth";
 import { Button } from "@openshapeforge/ui/button";
 import {
   Dialog,
@@ -28,6 +29,7 @@ const COPY = {
     logout: "Log out",
     continue: "Continue",
     refreshing: "Refreshing...",
+    logoutFailed: "Logout could not be completed. Please try again.",
   },
   nl: {
     title: "Sessie verloopt binnenkort",
@@ -36,16 +38,9 @@ const COPY = {
     logout: "Uitloggen",
     continue: "Doorgaan",
     refreshing: "Bezig...",
+    logoutFailed: "Uitloggen is niet gelukt. Probeer het opnieuw.",
   },
 } as const;
-
-function buildLogoutUrl(reason?: "session_expired") {
-  const logoutUrl = new URL("/api/logout", globalThis.location.origin);
-  if (reason) {
-    logoutUrl.searchParams.set("reason", reason);
-  }
-  return logoutUrl.toString();
-}
 
 export function SessionExpiryGuard({ lang }: { lang: string }) {
   const session = useAppSession();
@@ -54,6 +49,7 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
   const [showDialog, setShowDialog] = useState(false);
   const [countdown, setCountdown] = useState(AUTO_REDIRECT_AFTER_S);
   const [refreshing, setRefreshing] = useState(false);
+  const [logoutFailed, setLogoutFailed] = useState(false);
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const redirectingRef = useRef(false);
@@ -76,14 +72,21 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
     }
   }, []);
 
-  const logout = useCallback((reason?: "session_expired") => {
+  const logout = useCallback(async (reason?: LogoutReason) => {
     if (redirectingRef.current) {
       return;
     }
 
     redirectingRef.current = true;
+    setLogoutFailed(false);
     clearTimers();
-    globalThis.location.assign(buildLogoutUrl(reason));
+    if (!await requestLogout(reason, {
+      retryOnceOnServiceUnavailable: reason === "session_expired",
+    })) {
+      redirectingRef.current = false;
+      setLogoutFailed(true);
+      setShowDialog(true);
+    }
   }, [clearTimers]);
 
   const syncSessionExpiry = useCallback((expiresAt: number) => {
@@ -92,8 +95,7 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
     const secondsUntilWarning = secondsUntilExpiry - WARNING_BEFORE_EXPIRY_S;
 
     if (secondsUntilExpiry <= 0) {
-      setSession?.(null);
-      logout("session_expired");
+      void logout("session_expired");
       return;
     }
 
@@ -115,7 +117,7 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
     warningTimerRef.current = setTimeout(() => {
       syncSessionExpiry(expiresAt);
     }, secondsUntilWarning * 1000);
-  }, [clearTimers, logout, setSession]);
+  }, [clearTimers, logout]);
 
   const handleContinue = useCallback(async () => {
     setRefreshing(true);
@@ -123,8 +125,7 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
     try {
       const response = await fetch("/api/auth/session", { cache: "no-store" });
       if (!response.ok) {
-        setSession?.(null);
-        logout("session_expired");
+        void logout("session_expired");
         return;
       }
 
@@ -133,8 +134,7 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
         refreshedSession?.error === "RefreshTokenError"
         || !refreshedSession?.accessToken
       ) {
-        setSession?.(null);
-        logout("session_expired");
+        void logout("session_expired");
         return;
       }
 
@@ -166,17 +166,14 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
             return;
           }
 
-          setSession?.(null);
-          logout("session_expired");
+          void logout("session_expired");
         }, RETRY_WARNING_DELAY_MS);
         return;
       }
 
-      setSession?.(null);
-      logout("session_expired");
+      void logout("session_expired");
     } catch {
-      setSession?.(null);
-      logout("session_expired");
+      void logout("session_expired");
     } finally {
       if (!redirectingRef.current) {
         setRefreshing(false);
@@ -190,10 +187,9 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
 
   useEffect(() => {
     if (session?.error === "RefreshTokenError") {
-      setSession?.(null);
-      logout("session_expired");
+      void logout("session_expired");
     }
-  }, [logout, session?.error, setSession]);
+  }, [logout, session?.error]);
 
   useEffect(() => {
     if (!monitorExpiry) {
@@ -259,9 +255,8 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
       return;
     }
 
-    setSession?.(null);
-    logout("session_expired");
-  }, [countdown, logout, setSession, showDialog]);
+    void logout("session_expired");
+  }, [countdown, logout, showDialog]);
 
   if (!showDialog) {
     return null;
@@ -281,10 +276,15 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
             {copy.description}{" "}
             <span className="font-semibold tabular-nums">{countdown}</span>{" "}
             {copy.suffix}
+            {logoutFailed ? (
+              <span className="mt-2 block text-destructive" role="alert">
+                {copy.logoutFailed}
+              </span>
+            ) : null}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={() => logout()}>
+          <Button variant="outline" onClick={() => void logout()}>
             {copy.logout}
           </Button>
           <Button onClick={handleContinue} disabled={refreshing}>

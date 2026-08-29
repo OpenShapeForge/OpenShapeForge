@@ -2,7 +2,6 @@
 export {
   auth,
   signIn,
-  signOut,
   handlers,
   keycloakLogoutUrl,
   deleteSession,

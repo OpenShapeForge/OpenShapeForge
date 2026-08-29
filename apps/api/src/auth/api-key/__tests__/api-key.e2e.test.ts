@@ -17,6 +17,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomBytes, randomUUID } from "node:crypto";
+import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 
 const KEYCLOAK_URL = process.env.E2E_KEYCLOAK_URL ?? "http://localhost:8181";
 const REALM = process.env.E2E_KEYCLOAK_REALM ?? "openshapeforge";
@@ -49,7 +50,10 @@ process.env.OPENSHAPEFORGE_KEYCLOAK_BASE_URL = KEYCLOAK_URL;
 process.env.OPENSHAPEFORGE_KEYCLOAK_REALM = REALM;
 process.env.OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_ID = ADMIN_CLIENT;
 process.env.OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_SECRET = ADMIN_SECRET;
-process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??= "openshapeforge-local-dev-context-secret";
+const INTERNAL_CONTEXT_SECRET =
+  process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??
+  "openshapeforge-local-dev-context-secret";
+process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = INTERNAL_CONTEXT_SECRET;
 process.env.DATABASE_URL = DATABASE_URL;
 
 const { createApiApp } = await import("../../../roles/api.js");
@@ -347,6 +351,66 @@ async function createKey(
   return { status: response.statusCode, body: parsed };
 }
 
+function managementHeaders(roles: readonly string[] = []): Record<string, string> {
+  const headers = new Headers({ "content-type": "application/json" });
+  applyTrustedContextHeaders(
+    headers,
+    {
+      tenantId: TENANT_ACME,
+      userId: randomUUID(),
+      roles: [MANAGE_ROLE, ...roles],
+    },
+    { secret: INTERNAL_CONTEXT_SECRET },
+  );
+  return Object.fromEntries(headers.entries());
+}
+
+async function issueAdditionalKey(
+  integrationId: string,
+  body: Record<string, unknown>,
+  callerRoles: readonly string[] = [],
+) {
+  return app!.inject({
+    method: "POST",
+    url: `/api/api-keys/${integrationId}/keys`,
+    headers: managementHeaders(callerRoles),
+    payload: JSON.stringify(body),
+  });
+}
+
+async function overwriteStoredRoleSubset(keyId: string, value: unknown): Promise<void> {
+  const runtime = createDatabaseRuntime({ databaseUrl: DATABASE_URL });
+  try {
+    const result = await sql<{ id: string }>`
+      update platform.api_keys
+         set role_subset = ${JSON.stringify(value)}::jsonb
+       where id = ${keyId}
+      returning id
+    `.execute(runtime.db);
+    expect(result.rows[0]?.id).toBe(keyId);
+  } finally {
+    await runtime.close();
+  }
+}
+
+async function overwriteStoredGrantedRoles(
+  integrationId: string,
+  value: unknown,
+): Promise<void> {
+  const runtime = createDatabaseRuntime({ databaseUrl: DATABASE_URL });
+  try {
+    const result = await sql<{ id: string }>`
+      update platform.api_key_integrations
+         set granted_roles = ${JSON.stringify(value)}::jsonb
+       where id = ${integrationId}
+      returning id
+    `.execute(runtime.db);
+    expect(result.rows[0]?.id).toBe(integrationId);
+  } finally {
+    await runtime.close();
+  }
+}
+
 /** The roles a credential actually resolves to, read back through GraphQL. */
 async function rolesViaGraphql(credential: string): Promise<string[] | undefined> {
   const response = await app!.inject({
@@ -528,6 +592,185 @@ describe.skipIf(!ready)("API keys end to end", () => {
     });
     expect(refused.statusCode).toBe(403);
     expect(JSON.parse(refused.body).error.message).toContain("Totally.Made.Up");
+  }, 30_000);
+
+  test("an omitted rotation subset checks every role on the existing integration", async () => {
+    const created = await createKey({
+      displayName: `e2e omitted ceiling ${randomUUID().slice(0, 8)}`,
+      roles: [WRITE_ROLE],
+    });
+    const { integrationId } = created.body as CreateResponse;
+
+    const refused = await issueAdditionalKey(integrationId, { displayName: "omitted" });
+    expect(refused.statusCode).toBe(403);
+    expect(JSON.parse(refused.body).error.message).toContain(WRITE_ROLE);
+  }, 30_000);
+
+  test("an explicit null rotation subset checks every role on the existing integration", async () => {
+    const created = await createKey({
+      displayName: `e2e null ceiling ${randomUUID().slice(0, 8)}`,
+      roles: [WRITE_ROLE],
+    });
+    const { integrationId } = created.body as CreateResponse;
+
+    const refused = await issueAdditionalKey(integrationId, {
+      displayName: "explicit null",
+      roleSubset: null,
+    });
+    expect(refused.statusCode).toBe(403);
+    expect(JSON.parse(refused.body).error.message).toContain(WRITE_ROLE);
+  }, 30_000);
+
+  test("an omitted rotation persists the checked roles against later realm drift", async () => {
+    const created = await createKey({
+      displayName: `e2e drift ceiling ${randomUUID().slice(0, 8)}`,
+      roles: [WRITE_ROLE],
+    });
+    const { integrationId } = created.body as CreateResponse;
+
+    const issued = await issueAdditionalKey(
+      integrationId,
+      { displayName: "drift bounded" },
+      [WRITE_ROLE],
+    );
+    expect(issued.statusCode).toBe(201);
+    const issuedKeyId = JSON.parse(issued.body).keyId as string;
+
+    const listed = await app!.inject({
+      method: "GET",
+      url: "/api/api-keys",
+      headers: managementHeaders(),
+    });
+    expect(listed.statusCode).toBe(200);
+    const issuedKey = (JSON.parse(listed.body).keys as Array<{
+      id: string;
+      roleSubset: string[] | null;
+    }>).find((key) => key.id === issuedKeyId);
+    expect(issuedKey?.roleSubset).toEqual([WRITE_ROLE]);
+  }, 30_000);
+
+  test("malformed stored integration roles reject issuance without returning a key", async () => {
+    const created = await createKey({
+      displayName: `e2e malformed grant ${randomUUID().slice(0, 8)}`,
+      roles: [WRITE_ROLE],
+    });
+    const { integrationId } = created.body as CreateResponse;
+    await overwriteStoredGrantedRoles(integrationId, { unexpected: true });
+
+    const refused = await issueAdditionalKey(
+      integrationId,
+      { displayName: "must not exist" },
+      [WRITE_ROLE],
+    );
+    expect(refused.statusCode).toBe(409);
+    const error = JSON.parse(refused.body).error as {
+      code: string;
+      message: string;
+    };
+    expect(error.code).toBe("API_KEY_ROLE_POLICY_INVALID");
+    expect(error.message).toContain("no API key was issued");
+    expect(refused.body).not.toContain("token");
+  }, 30_000);
+
+  test("an empty rotation subset issues a key that authorizes no roles", async () => {
+    const created = await createKey({
+      displayName: `e2e empty subset ${randomUUID().slice(0, 8)}`,
+      roles: [WRITE_ROLE],
+    });
+    const { integrationId } = created.body as CreateResponse;
+
+    const issued = await issueAdditionalKey(integrationId, {
+      displayName: "empty subset",
+      roleSubset: [],
+    });
+    expect(issued.statusCode).toBe(201);
+
+    const denied = await app!.inject({
+      method: "POST",
+      url: "/api/graphql",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${JSON.parse(issued.body).token as string}`,
+      },
+      payload: JSON.stringify({ query: "{ relations(first: 1) { totalCount } }" }),
+    });
+    expect(JSON.parse(denied.body).errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
+  }, 30_000);
+
+  test("a malformed requested subset fails closed to no roles", async () => {
+    const created = await createKey({
+      displayName: `e2e malformed request ${randomUUID().slice(0, 8)}`,
+      roles: [WRITE_ROLE],
+    });
+    const { integrationId } = created.body as CreateResponse;
+
+    const issued = await issueAdditionalKey(integrationId, {
+      displayName: "malformed request",
+      roleSubset: { unexpected: true },
+    });
+    expect(issued.statusCode).toBe(201);
+
+    const denied = await app!.inject({
+      method: "POST",
+      url: "/api/graphql",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${JSON.parse(issued.body).token as string}`,
+      },
+      payload: JSON.stringify({ query: "{ relations(first: 1) { totalCount } }" }),
+    });
+    expect(JSON.parse(denied.body).errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
+  }, 30_000);
+
+  test("a caller that lost a role may still issue a valid narrowing subset", async () => {
+    const created = await createKey({
+      displayName: `e2e valid narrowing ${randomUUID().slice(0, 8)}`,
+      roles: [WRITE_ROLE, READ_ROLE],
+    });
+    const { integrationId } = created.body as CreateResponse;
+
+    const issued = await issueAdditionalKey(
+      integrationId,
+      { displayName: "read only", roleSubset: [READ_ROLE] },
+      [READ_ROLE],
+    );
+    expect(issued.statusCode).toBe(201);
+    const token = JSON.parse(issued.body).token as string;
+
+    const read = await app!.inject({
+      method: "POST",
+      url: "/api/graphql",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      payload: JSON.stringify({ query: "{ relations(first: 1) { totalCount } }" }),
+    });
+    expect(JSON.parse(read.body).errors ?? []).toEqual([]);
+
+    const write = await app!.inject({
+      method: "POST",
+      url: "/api/graphql",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      payload: JSON.stringify({
+        query: "mutation { createRelation(input: { displayName: \"narrowed\" }) { id } }",
+      }),
+    });
+    expect(JSON.parse(write.body).errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
+  }, 30_000);
+
+  test("a malformed stored subset authorizes no roles", async () => {
+    const created = await createKey({
+      displayName: `e2e malformed stored ${randomUUID().slice(0, 8)}`,
+      roles: [WRITE_ROLE],
+    });
+    const { keyId, token } = created.body as CreateResponse;
+    await overwriteStoredRoleSubset(keyId, { unexpected: true });
+
+    const denied = await app!.inject({
+      method: "POST",
+      url: "/api/graphql",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+      payload: JSON.stringify({ query: "{ relations(first: 1) { totalCount } }" }),
+    });
+    expect(JSON.parse(denied.body).errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
   }, 30_000);
 
   test("keys with different permissions get different access from the same tenant", async () => {

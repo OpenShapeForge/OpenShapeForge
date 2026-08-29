@@ -32,6 +32,7 @@ import {
   type ApiKeyServiceDeps,
   type ProvisioningSession,
 } from "./service.js";
+import { ApiKeyRolePolicyError } from "./role-subset.js";
 
 export const apiKeyTypeDefs = /* GraphQL */ `
   """
@@ -116,6 +117,11 @@ function toGraphqlError(error: unknown): GraphQLError {
   if (error instanceof ApiKeyProvisioningError) {
     return new GraphQLError(error.message, {
       extensions: { code: "API_KEY_PROVISIONING_FAILED", status: 502 },
+    });
+  }
+  if (error instanceof ApiKeyRolePolicyError) {
+    return new GraphQLError(error.message, {
+      extensions: { code: error.code, status: error.status },
     });
   }
   throw error;

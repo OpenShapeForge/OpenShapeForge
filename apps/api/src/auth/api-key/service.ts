@@ -30,6 +30,11 @@ import {
 import { invalidateIntegrationToken } from "./exchange.js";
 import { mintApiKey } from "./format.js";
 import { KeycloakAdmin } from "./keycloak-admin.js";
+import {
+  normalizeRequestedRoleSubset,
+  parseStoredRoleSubset,
+  resolveIssuedKeyRolePolicy,
+} from "./role-subset.js";
 
 export type ProvisioningSession = CeilingSession & {
   tenantId: string;
@@ -103,6 +108,7 @@ export async function createIntegration(
   now: Date = new Date(),
 ): Promise<CreatedApiKey> {
   assertMayGrantRoles(session, input.roles);
+  const roleSubset = normalizeRequestedRoleSubset(input.roleSubset);
 
   const displayName = input.displayName.trim();
   if (displayName === "") {
@@ -178,7 +184,7 @@ export async function createIntegration(
       lookupId: minted.lookupId,
       secretHash: minted.secretHash,
       displayName,
-      roleSubset: input.roleSubset ?? null,
+      roleSubset,
       expiresAt,
       createdBy: session.userId,
       now,
@@ -200,9 +206,9 @@ export type IssueKeyInput = {
  * primitive. Two keys live at once, the old one is revoked after the external
  * party has cut over.
  *
- * The ceiling applies to the SUBSET, not just to creation: a subset is only
- * meaningful as a narrowing of roles the caller could have granted anyway, and
- * checking it here is what keeps `update`-shaped paths from being the weak one.
+ * The ceiling applies to the FULL effective set, not just an explicitly supplied
+ * subset. Omitted and null subsets inherit all roles declared on the existing
+ * integration; an empty subset deliberately grants none.
  */
 export async function issueKey(
   deps: ApiKeyServiceDeps,
@@ -210,7 +216,10 @@ export async function issueKey(
   input: IssueKeyInput,
   now: Date = new Date(),
 ): Promise<CreatedApiKey> {
-  assertMayGrantRoles(session, input.roleSubset ?? []);
+  // Refuse API-key sessions and callers without the management role before
+  // looking up tenant data. The complete role check follows once the existing
+  // integration's role set is known.
+  assertMayManageApiKeys(session);
 
   const minted = mintApiKey();
   const keyId = randomUUID();
@@ -222,16 +231,24 @@ export async function issueKey(
   await withSession(deps, session, async (trx) => {
     // RLS already confines this to the caller's tenant; the explicit predicate
     // is the same defense-in-depth the generated engine applies.
-    const found = await sql<{ id: string }>`
-      select id from platform.api_key_integrations
+    const found = await sql<{ id: string; granted_roles: unknown }>`
+      select id, granted_roles from platform.api_key_integrations
        where id = ${input.integrationId}
          and tenant_id = ${session.tenantId}
          and status = 'active'
        limit 1
+       for update
     `.execute(trx);
-    if (!found.rows[0]) {
+    const integration = found.rows[0];
+    if (!integration) {
       throw new ApiKeyNotFoundError("No such active integration.");
     }
+
+    const rolePolicy = resolveIssuedKeyRolePolicy(
+      integration.granted_roles,
+      input.roleSubset,
+    );
+    assertMayGrantRoles(session, rolePolicy.rolesForCeiling);
 
     await insertKeyRow(trx, {
       keyId,
@@ -240,7 +257,7 @@ export async function issueKey(
       lookupId: minted.lookupId,
       secretHash: minted.secretHash,
       displayName: input.displayName.trim(),
-      roleSubset: input.roleSubset ?? null,
+      roleSubset: rolePolicy.roleSubset,
       expiresAt,
       createdBy: session.userId,
       now,
@@ -282,13 +299,16 @@ export async function listKeys(
       integration_name: string;
       display_name: string;
       role_subset: unknown;
+      role_subset_is_null: boolean;
       created_at: Date;
       expires_at: Date | null;
       revoked_at: Date | null;
       last_used_at: Date | null;
     }>`
       select k.id, k.integration_id, i.display_name as integration_name,
-             k.display_name, k.role_subset, k.created_at, k.expires_at,
+             k.display_name, k.role_subset,
+             k.role_subset is null as role_subset_is_null,
+             k.created_at, k.expires_at,
              k.revoked_at, k.last_used_at
         from platform.api_keys k
         join platform.api_key_integrations i on i.id = k.integration_id
@@ -301,7 +321,7 @@ export async function listKeys(
       integrationId: row.integration_id,
       integrationName: row.integration_name,
       displayName: row.display_name,
-      roleSubset: Array.isArray(row.role_subset) ? (row.role_subset as string[]) : null,
+      roleSubset: parseStoredRoleSubset(row.role_subset, row.role_subset_is_null),
       createdAt: row.created_at,
       expiresAt: row.expires_at,
       revokedAt: row.revoked_at,

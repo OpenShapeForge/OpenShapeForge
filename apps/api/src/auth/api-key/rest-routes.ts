@@ -25,6 +25,10 @@ import {
   type ApiKeyServiceDeps,
   type ProvisioningSession,
 } from "./service.js";
+import {
+  ApiKeyRolePolicyError,
+  normalizeRequestedRoleSubset,
+} from "./role-subset.js";
 
 export const API_KEY_MOUNT = "/api/api-keys";
 
@@ -45,6 +49,9 @@ function handleError(reply: FastifyReply, error: unknown) {
     return sendError(reply, error.status, error.code, error.message);
   }
   if (error instanceof ApiKeyProvisioningError) {
+    return sendError(reply, error.status, error.code, error.message);
+  }
+  if (error instanceof ApiKeyRolePolicyError) {
     return sendError(reply, error.status, error.code, error.message);
   }
   // Anything else is ours, not the caller's. Do not describe it.
@@ -136,7 +143,9 @@ export function registerApiKeyRestRoutes(
           displayName: typeof body.displayName === "string" ? body.displayName : "",
           roles: asStringArray(body.roles),
           ...(expiresInDays === undefined ? {} : { expiresInDays }),
-          ...(body.roleSubset === undefined ? {} : { roleSubset: asStringArray(body.roleSubset) }),
+          ...(body.roleSubset === undefined
+            ? {}
+            : { roleSubset: normalizeRequestedRoleSubset(body.roleSubset) }),
         });
         // 201 with the token in the body, once. Never logged, never in a URL.
         return reply.status(201).send(created);
@@ -154,7 +163,9 @@ export function registerApiKeyRestRoutes(
           integrationId,
           displayName: typeof body.displayName === "string" ? body.displayName : "rotated",
           ...(expiresInDays === undefined ? {} : { expiresInDays }),
-          ...(body.roleSubset === undefined ? {} : { roleSubset: asStringArray(body.roleSubset) }),
+          ...(body.roleSubset === undefined
+            ? {}
+            : { roleSubset: normalizeRequestedRoleSubset(body.roleSubset) }),
         });
         return reply.status(201).send(created);
       } catch (error) {

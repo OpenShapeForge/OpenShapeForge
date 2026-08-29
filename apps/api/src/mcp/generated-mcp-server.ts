@@ -63,6 +63,7 @@ import {
   updateGeneratedEntityForTable,
 } from "../graphql/generated-crud.js";
 import {
+  deriveToolName,
   derivedToolsFromRows,
   sessionInAudience,
   type DerivedTool,
@@ -495,12 +496,14 @@ export const ENTITY_CONFIGURATION_PATH = "/api/entity-configuration";
  * token expires. Every other failure (missing source row, keyring problems)
  * stays an error.
  */
-function elicitationFallback(error: unknown): boolean {
+function elicitationFallback(error: unknown): "unsupported" | "declined" | "timeout" | null {
   if (error instanceof HttpError) {
-    return error.code === "ELICITATION_UNSUPPORTED" || error.code === "ELICITATION_DECLINED";
+    if (error.code === "ELICITATION_UNSUPPORTED") return "unsupported";
+    if (error.code === "ELICITATION_DECLINED") return "declined";
+    return null;
   }
   const message = error instanceof Error ? error.message : "";
-  return /timed?\s*out|timeout/i.test(message);
+  return /timed?\s*out|timeout/i.test(message) ? "timeout" : null;
 }
 
 function elicitedKeyring() {
@@ -532,10 +535,15 @@ function readClientCredentials(
   secretScope: string,
 ): { clientId: string; clientSecret: string } {
   const values = (tenantConnection?.[valuesField] ?? {}) as Record<string, unknown>;
-  const clientId = values.clientId;
+  const rawClientId = values.clientId;
   const rawSecret = values.clientSecret;
   const keyring = elicitedKeyring();
-  if (typeof clientId !== "string" || !looksLikeStoredSecret(rawSecret) || !keyring) {
+  // Classifying the client id confidential is a legitimate authoring choice,
+  // so an encrypted clientId is as present as a plain one — found live: a
+  // connection that passed every validation dead-ended at sign-in because
+  // this reader treated the encrypted form as missing.
+  const clientIdReadable = typeof rawClientId === "string" || looksLikeStoredSecret(rawClientId);
+  if (!clientIdReadable || !looksLikeStoredSecret(rawSecret) || !keyring) {
     throw new HttpError(
       400,
       "CONNECTION_MISSING",
@@ -544,7 +552,10 @@ function readClientCredentials(
     );
   }
   return {
-    clientId,
+    clientId:
+      typeof rawClientId === "string"
+        ? rawClientId
+        : decryptSecret(keyring, secretScope, "clientId", rawClientId),
     clientSecret: decryptSecret(keyring, secretScope, "clientSecret", rawSecret),
   };
 }
@@ -1304,9 +1315,12 @@ function buildServer(
         }
         // Only a PROJECTED row can start a connection: projection already
         // enforces publication and audience, so an unpublished or invisible
-        // definition answers exactly like a nonexistent one.
+        // definition answers exactly like a nonexistent one. Callers often
+        // hold the defining row's KEY rather than the derived name, so the
+        // input is normalized through the same derivation.
+        const wantedName = deriveToolName(toolArg) ?? toolArg;
         const target = (await derivedToolsForSession(db, session, tables)).find(
-          (tool) => tool.name === toolArg && tool.table === connectEntry.table,
+          (tool) => tool.name === wantedName && tool.table === connectEntry.table,
         );
         if (!target) {
           throw new HttpError(404, "NOT_FOUND", `No connectable tool "${toolArg}".`);
@@ -1499,11 +1513,13 @@ function buildServer(
           })
         ).rows.map((row) => serializeRow(table, row));
         const { visibleWhen: _gate, ...ungated } = dryRunEntry;
+        // Accept the defining row's key as well as the derived tool name.
+        const wantedName = deriveToolName(toolArg) ?? toolArg;
         const target = derivedToolsFromRows(
           ungated,
           rows,
           new Set(catalog.tools.map((tool) => tool.name)),
-        ).find((tool) => tool.name === toolArg);
+        ).find((tool) => tool.name === wantedName);
         const definitionRow = target
           ? rows.find((row) => String(row.id ?? "") === target.rowId)
           : undefined;
@@ -1993,7 +2009,8 @@ function buildServer(
             ...(messagePrefix ? { messagePrefix } : {}),
           });
         } catch (error) {
-          if (!elicitationFallback(error) || !sourceRow) throw error;
+          const reason = elicitationFallback(error);
+          if (!reason || !sourceRow) throw error;
           // The in-band form did not happen — hand the person a browser URL
           // to the same form instead of dead-ending the setup.
           const definitions = Array.isArray(sourceRow[elicit.definitionsField])
@@ -2014,10 +2031,13 @@ function buildServer(
             url: `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${minted.token}`,
             expiresInSeconds: minted.expiresInSeconds,
             instructions:
-              "The secure form could not be completed in this client. Ask the person to " +
-              "open this url in their browser — the same form is served there, and the " +
-              "values go directly to the runtime, never through this chat. Once they have " +
-              "saved it, continue: the record will exist.",
+              (reason === "timeout"
+                ? "The secure form expired before it was completed — anything typed into " +
+                  "it was NOT saved. "
+                : "The secure form could not be completed in this client. ") +
+              "Give the person this url to open in their browser — the same form is " +
+              "served there, and the values go directly to the runtime, never through " +
+              "this chat. Once they have saved it, continue: the record will exist.",
           });
         }
       }

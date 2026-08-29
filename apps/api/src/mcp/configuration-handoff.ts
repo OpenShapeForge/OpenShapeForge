@@ -34,7 +34,10 @@ import type { SecretKeyring } from "../connectors/secrets.js";
 
 type JsonRecord = Record<string, unknown>;
 
-const TOKEN_TTL_MS = 10 * 60 * 1000;
+// Long enough for the person's detour through a provider portal (registering
+// an OAuth client, fetching values from a password manager) — ten minutes
+// proved too short for that in live testing.
+const TOKEN_TTL_MS = 30 * 60 * 1000;
 
 type StoredFieldDefinition = {
   key?: unknown;

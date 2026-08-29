@@ -10,11 +10,25 @@ import { mergePluginPlatformTables } from "./plugins.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 
 const repoRoot = resolve(import.meta.dir, "../../..");
+type ArtifactCollection = Awaited<ReturnType<typeof collectAllArtifacts>>;
+
+// Two full-corpus runs are required for the byte-for-byte comparison. The
+// shared setup avoids repeating them per assertion and gives larger supported
+// authoring corpora a deliberate budget instead of Bun's implicit five seconds.
+const FULL_CORPUS_DETERMINISM_TIMEOUT_MS = 15_000;
 
 describe("compiler plugins", () => {
+  let deterministicRuns: Promise<[ArtifactCollection, ArtifactCollection]> | undefined;
+  const getDeterministicRuns = () => {
+    deterministicRuns ??= (async () => [
+      await collectAllArtifacts(repoRoot),
+      await collectAllArtifacts(repoRoot),
+    ])();
+    return deterministicRuns;
+  };
+
   test("collectAllArtifacts runs configured plugins deterministically", async () => {
-    const first = await collectAllArtifacts(repoRoot);
-    const second = await collectAllArtifacts(repoRoot);
+    const [first, second] = await getDeterministicRuns();
 
     const docs = first.groups.plugins.find((entry) => entry.name === "entity-docs");
     expect(docs).toBeTruthy();
@@ -27,7 +41,7 @@ describe("compiler plugins", () => {
     expect(second.all.map((a) => [a.path, a.contents])).toEqual(
       first.all.map((a) => [a.path, a.contents]),
     );
-  });
+  }, FULL_CORPUS_DETERMINISM_TIMEOUT_MS);
 
   test("plugin context exposes compiled entity contracts", async () => {
     const { groups } = await collectAllArtifacts(repoRoot);
@@ -46,8 +60,7 @@ describe("compiler plugins", () => {
   });
 
   test("workflow plugin emits api workflow artifacts deterministically", async () => {
-    const first = await collectAllArtifacts(repoRoot);
-    const second = await collectAllArtifacts(repoRoot);
+    const [first, second] = await getDeterministicRuns();
 
     const workflow = first.groups.plugins.find((entry) => entry.name === "workflow");
     expect(workflow).toBeTruthy();
@@ -90,7 +103,7 @@ describe("compiler plugins", () => {
 
     // Its generated root is gated by the shared stale/orphan checks.
     expect(first.ownedPaths.roots).toContain("apps/api/src/generated/workflow");
-  });
+  }, FULL_CORPUS_DETERMINISM_TIMEOUT_MS);
 
   test("workflow plugin contributes the platform workflow catalog tables", async () => {
     const manifest = await loadActivePlatformManifest(repoRoot);

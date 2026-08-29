@@ -378,3 +378,69 @@ describe("describeAuthHeaders", () => {
     expect(describeAuthHeaders(undefined)).toEqual({});
   });
 });
+
+describe("mapping honesty", () => {
+  it("treats $ and $.-prefixed paths as identity and stripped", () => {
+    expect(extractPath([1, 2], "$")).toEqual([1, 2]);
+    expect(extractPath({ data: { items: [3] } }, "$.data.items")).toEqual([3]);
+  });
+
+  it("fails loud when a declared mapping matches nothing in a non-empty response", async () => {
+    const base = {
+      binding: { order: 1, outputMapping: [{ from: "events", to: "events" }] },
+      providerRow: { transport: "rest", baseUrlTemplate: "https://api.example.com", egressHosts: ["api.example.com"] },
+      connectionValues: {},
+      serviceInputs: {},
+      secretScope: "unused",
+    };
+    const fetchWith = (body: unknown) =>
+      (async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch;
+
+    // fieldPaths that miss everything in an object response
+    await expect(
+      executeBinding({
+        ...base,
+        operationRow: {
+          key: "events",
+          operation: { method: "GET", pathTemplate: "/events" },
+          responseMapping: { rootPath: "items", fieldPaths: [{ field: "events", path: "nope" }] },
+        },
+        fetchImpl: fetchWith({ items: [{ id: 1 }] }),
+      }),
+    ).rejects.toThrow(/produced no outputs/);
+
+    // identity path over the extracted collection works end to end
+    const outputs = await executeBinding({
+      ...base,
+      operationRow: {
+        key: "events",
+        operation: { method: "GET", pathTemplate: "/events" },
+        responseMapping: { rootPath: "items", fieldPaths: [{ field: "events", path: "$" }] },
+      },
+      fetchImpl: fetchWith({ items: [{ id: 1 }, { id: 2 }] }),
+    });
+    expect(outputs.events).toEqual([{ id: 1 }, { id: 2 }]);
+
+    // an outputMapping that matches nothing the operation produced
+    await expect(
+      executeBinding({
+        ...base,
+        binding: { order: 1, outputMapping: [{ from: "absent", to: "absent" }] },
+        operationRow: { key: "events", operation: { method: "GET", pathTemplate: "/events" } },
+        fetchImpl: fetchWith({ anything: true }),
+      }),
+    ).rejects.toThrow(/output mapping matched nothing/);
+
+    // a genuinely empty result stays an empty success, not an error
+    const empty = await executeBinding({
+      ...base,
+      operationRow: {
+        key: "events",
+        operation: { method: "GET", pathTemplate: "/events" },
+        responseMapping: { rootPath: "items", fieldPaths: [{ field: "events", path: "$" }] },
+      },
+      fetchImpl: fetchWith({ items: [] }),
+    });
+    expect(empty.events).toEqual([]);
+  });
+});

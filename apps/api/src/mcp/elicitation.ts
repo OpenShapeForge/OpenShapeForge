@@ -32,6 +32,9 @@ import {
   type SecretKeyring,
   type StoredSecret,
 } from "../connectors/secrets.js";
+// One policy, one source: the same set decides what is encrypted at rest
+// (here) and what is barred from URL positions (declarative-execution).
+import { SECRET_SENSITIVITY } from "./declarative-execution.js";
 
 export type ElicitOnCreateEntry = {
   sourceField: string;
@@ -53,8 +56,6 @@ type StoredFieldDefinition = {
   options?: { items?: { value?: unknown }[] };
   classification?: { sensitivity?: unknown };
 };
-
-const RESTRICTING_SENSITIVITY = new Set(["confidential", "pii", "bsn"]);
 
 function localized(value: unknown): string | undefined {
   if (typeof value === "string") return value;
@@ -78,7 +79,7 @@ const ELICITABLE_TYPES: Record<string, string> = {
 
 export function isSecretDefinition(definition: StoredFieldDefinition): boolean {
   const sensitivity = definition.classification?.sensitivity;
-  return typeof sensitivity === "string" && RESTRICTING_SENSITIVITY.has(sensitivity);
+  return typeof sensitivity === "string" && SECRET_SENSITIVITY.has(sensitivity);
 }
 
 /**

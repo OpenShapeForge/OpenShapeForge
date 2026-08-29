@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Unit coverage for elicited-row verification: the honest three-check report
- * (required values, credential resolution, declared probe), including the
- * egress gate on probes, per-field secret scoping, and the skipped outcomes
- * that keep "shaped correctly" distinct from "works".
+ * Unit coverage for elicited-row verification: the honest four-check report
+ * (required values, URL templates vs classifications, credential resolution,
+ * declared probe), including the egress gate on probes, per-field secret
+ * scoping, and the skipped outcomes that keep "shaped correctly" distinct
+ * from "works".
  */
 import { describe, expect, it } from "bun:test";
 import { testElicitedRow } from "../connection-test.js";
@@ -74,8 +75,67 @@ describe("testElicitedRow", () => {
       fetchImpl: refusingFetch,
     });
     expect(report.ok).toBe(true);
-    expect(report.checks.map((check) => check.outcome)).toEqual(["passed", "passed", "skipped"]);
+    expect(report.checks.map((check) => check.outcome)).toEqual([
+      "passed",
+      "passed",
+      "passed",
+      "skipped",
+    ]);
     expect(JSON.stringify(report)).not.toContain("tok-1");
+  });
+
+  it("fails url-templates when a URL placeholder references a secret-classified field", async () => {
+    const source = {
+      ...SOURCE,
+      definitions: [
+        { key: "subdomain", required: true, classification: { sensitivity: "confidential" } },
+        { key: "email", required: true },
+        { key: "apiToken", required: true, classification: { sensitivity: "confidential" } },
+      ],
+    };
+    const report = await testElicitedRow({
+      row: {
+        id: "c1",
+        values: values({
+          subdomain: encryptSecret(KEYRING, ELICIT.sourceTable, "subdomain", "acme"),
+        }),
+      },
+      sourceRow: source,
+      elicit: ELICIT,
+      table: TABLE,
+      keyring: KEYRING,
+      fetchImpl: refusingFetch,
+    });
+    expect(report.ok).toBe(false);
+    const urlCheck = report.checks.find((check) => check.check === "url-templates");
+    expect(urlCheck?.outcome).toBe("failed");
+    expect(urlCheck?.detail).toContain('"{subdomain}" in baseUrlTemplate');
+    expect(urlCheck?.detail).toContain("classification to internal");
+    // The secret-classified apiToken sits in auth, not a URL — no complaint.
+    expect(urlCheck?.detail).not.toContain("apiToken");
+  });
+
+  it("resolves encrypted values into URLs once their field is reclassified non-secret", async () => {
+    // The repair path: a subdomain first saved encrypted (misclassified as
+    // confidential), then reclassified internal on the source — the stored
+    // ciphertext must work as-is, without re-entering the value.
+    const report = await testElicitedRow({
+      row: {
+        id: "c1",
+        values: values({
+          subdomain: encryptSecret(KEYRING, ELICIT.sourceTable, "subdomain", "acme"),
+        }),
+      },
+      sourceRow: SOURCE,
+      elicit: ELICIT,
+      table: TABLE,
+      keyring: KEYRING,
+      fetchImpl: refusingFetch,
+    });
+    expect(report.ok).toBe(true);
+    expect(
+      report.checks.find((check) => check.check === "url-templates")?.outcome,
+    ).toBe("passed");
   });
 
   it("sends a declared probe with resolved auth and judges the status", async () => {

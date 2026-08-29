@@ -158,6 +158,29 @@ export async function validateVisibleDefinition(
       problems.push(`${position} is not an object.`);
       continue;
     }
+    // A `when` selector must name a DECLARED input field: a typo would make
+    // the condition unevaluatable, and an unevaluatable condition always
+    // runs the binding — for a write intent that silently fans the change
+    // out to every provider. Fail loudly at publish instead.
+    const when = binding.when as JsonRecord | null | undefined;
+    if (when !== undefined && when !== null) {
+      const whenField = typeof when === "object" ? when.field : undefined;
+      const declaredInputs = new Set(
+        (Array.isArray(row[entry.inputFieldsField]) ? (row[entry.inputFieldsField] as JsonRecord[]) : [])
+          .map((field) => field?.key)
+          .filter((key): key is string => typeof key === "string"),
+      );
+      if (typeof whenField !== "string" || !declaredInputs.has(whenField)) {
+        problems.push(
+          `${position}: when.field ${JSON.stringify(whenField)} is not a declared input ` +
+            `field, so the condition could never match a call and the binding would ` +
+            `always run. Declare the selector input (e.g. provider) on the definition.`,
+        );
+      }
+      if (typeof (when as JsonRecord).equals !== "string" || (when as JsonRecord).equals === "") {
+        problems.push(`${position}: when.equals must be a non-empty string.`);
+      }
+    }
     const operationId = binding[execution.operationRef];
     if (typeof operationId !== "string" || operationId.length === 0) {
       problems.push(`${position} names no ${execution.operationEntity} (${execution.operationRef}).`);

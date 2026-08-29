@@ -85,6 +85,7 @@ import {
   storeSubmission,
 } from "./configuration-handoff.js";
 import {
+  bindingSelected,
   composeBindingRequest,
   definitionFieldKeys,
   executeBinding,
@@ -1883,6 +1884,18 @@ function buildServer(
         const requests: Record<string, unknown>[] = [];
         const bindings = orderedBindings(definitionRow, execution.bindingsField);
         for (const [index, binding] of bindings.entries()) {
+          // Selection is part of what a dry run verifies: show WHICH bindings
+          // the given arguments route to, and say why the others sit out.
+          if (!bindingSelected(binding, toolArguments as Record<string, unknown>)) {
+            const when = binding.when as Record<string, unknown>;
+            requests.push({
+              order: index + 1,
+              skipped:
+                `Not selected by this call: it runs only when ` +
+                `${String(when?.field)} is ${JSON.stringify(when?.equals)} or omitted.`,
+            });
+            continue;
+          }
           const notes: string[] = [];
           if (index > 0) {
             notes.push(
@@ -2134,6 +2147,10 @@ function buildServer(
             const accumulated: Record<string, unknown> = {};
             const unavailable: { binding: number; reason: string }[] = [];
             for (const binding of orderedBindings(serviceRow, execution.bindingsField)) {
+              // A binding the call's selector input does not choose is not
+              // part of this call at all — deliberate routing, not an
+              // outage, so it does not surface in `unavailable`.
+              if (!bindingSelected(binding, args as Record<string, unknown>)) continue;
               try {
               const operationId = binding[execution.operationRef];
               const operationRow =

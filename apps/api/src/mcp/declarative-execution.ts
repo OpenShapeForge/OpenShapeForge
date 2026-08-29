@@ -177,6 +177,27 @@ export function secretUrlPlaceholderError(key: string, context: string): HttpErr
 }
 
 /**
+ * Whether a call selects this binding. A binding may declare
+ * `when: { field, equals }` against ONE service input: it runs when that
+ * input equals the value OR was not provided (an omitted selector means
+ * "all sources" — the combined read), and is skipped silently when the call
+ * names a different value. This is what routes one canonical intent
+ * (tasks, mail) to exactly one of several providers through a plain
+ * `provider` input instead of per-provider employee tools. Write intents
+ * should declare the selector input as required, so a change can never fan
+ * out to every provider at once.
+ */
+export function bindingSelected(binding: JsonRecord, args: JsonRecord): boolean {
+  const when = binding.when as JsonRecord | null | undefined;
+  if (!when || typeof when !== "object") return true;
+  const field = typeof when.field === "string" ? when.field : "";
+  if (!field) return true;
+  const value = args[field];
+  if (value === undefined || value === null || value === "") return true;
+  return String(value) === String(when.equals);
+}
+
+/**
  * Resolve `{key}` placeholders from the given sources, failing closed on an
  * unknown key: a template reaching for a value that does not exist must never
  * silently produce a malformed URL or credential. When the missing key is in

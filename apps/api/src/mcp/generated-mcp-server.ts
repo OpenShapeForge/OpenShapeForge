@@ -87,6 +87,7 @@ import {
 import {
   composeBindingRequest,
   executeBinding,
+  mergeOutputs,
   orderedBindings,
   resolveTemplate,
 } from "./declarative-execution.js";
@@ -477,6 +478,48 @@ async function derivedToolsForSession(
     });
     const rows = result.rows.map((row) => serializeRow(table, row));
     let entryTools = derivedToolsFromRows(entry, rows, reserved);
+    // Honest annotations, derived from the chain instead of assumed: a tool
+    // whose every bound operation is a query is read-only, and hosts treat
+    // read-only tools with less approval friction. A chain that does not
+    // resolve keeps the cautious default.
+    if (entry.execution && entryTools.length > 0) {
+      const operationTable = tables.get(entry.execution.operationTable);
+      if (operationTable) {
+        const operationRows = await listGeneratedEntitiesForTable(db, session, operationTable, {
+          limit: DERIVED_TOOLS_ROW_LIMIT,
+        });
+        const operationTraits = new Map<string, { mutation: boolean; destructive: boolean }>();
+        for (const raw of operationRows.rows) {
+          const row = serializeRow(operationTable, raw);
+          const operation = (row.operation ?? {}) as Record<string, unknown>;
+          operationTraits.set(String(row.id), {
+            mutation: row.kind === "mutation",
+            destructive:
+              typeof operation.method === "string" && operation.method.toUpperCase() === "DELETE",
+          });
+        }
+        const rowById = new Map(rows.map((row) => [String(row.id), row]));
+        entryTools = entryTools.map((tool) => {
+          const bindingsRaw = rowById.get(tool.rowId)?.[entry.execution!.bindingsField];
+          const bindings = Array.isArray(bindingsRaw)
+            ? (bindingsRaw as Record<string, unknown>[])
+            : [];
+          let mutation = false;
+          let destructive = false;
+          let resolved = bindings.length > 0;
+          for (const binding of bindings) {
+            const traits = operationTraits.get(String(binding?.[entry.execution!.operationRef] ?? ""));
+            if (!traits) {
+              resolved = false;
+              continue;
+            }
+            mutation ||= traits.mutation;
+            destructive ||= traits.destructive;
+          }
+          return { ...tool, readOnly: resolved && !mutation, destructive };
+        });
+      }
+    }
     // The caller's stored standing instructions ride along on THEIR view of
     // the tools — appended under the authored description, never over it.
     if (entry.personalization && entryTools.length > 0) {
@@ -1318,7 +1361,11 @@ function buildServer(
         ...(tool.title ? { title: tool.title } : {}),
         description: tool.description,
         inputSchema: tool.inputSchema,
-        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+        annotations: {
+          readOnlyHint: tool.readOnly === true,
+          destructiveHint: tool.destructive === true,
+          idempotentHint: tool.readOnly === true,
+        },
       })),
       // Connector operations join the SAME catalog, filtered by the same
       // session, so a caller sees one tool list rather than two surfaces with
@@ -1417,14 +1464,43 @@ function buildServer(
             providerIds.add(operationRow[execution.providerRef] as string);
           }
         }
-        if (providerIds.size !== 1) {
+        if (providerIds.size === 0) {
+          throw new HttpError(400, "NOT_CONNECTABLE", "This definition names no provider.");
+        }
+        // A canonical definition may span providers; the person connects
+        // them ONE AT A TIME through this same tool — each pass mints the
+        // consent for the first provider still missing a usable sign-in,
+        // and a call with everything in place answers connected. Providers
+        // on shared tenant credentials need no personal sign-in and are
+        // skipped.
+        const signInProviders: {
+          id: string;
+          row: Record<string, unknown>;
+          auth: Record<string, unknown>;
+        }[] = [];
+        for (const candidateId of providerIds) {
+          const candidateRow = await runtimeRowByFilter(
+            db,
+            session,
+            tables,
+            execution.providerTable,
+            { id: candidateId },
+          );
+          const candidateAuth = (candidateRow?.auth ?? null) as Record<string, unknown> | null;
+          if (candidateRow && candidateAuth?.profile === "oauth2AuthorizationCode") {
+            signInProviders.push({ id: candidateId, row: candidateRow, auth: candidateAuth });
+          }
+        }
+        if (signInProviders.length === 0) {
           throw new HttpError(
             400,
             "NOT_CONNECTABLE",
-            "Personal connections support exactly one provider per definition.",
+            "This definition's provider does not support sign-in connections.",
           );
         }
-        const providerRowId = [...providerIds][0]!;
+        const connectedProviders: string[] = [];
+        for (const [providerIndex, signIn] of signInProviders.entries()) {
+        const providerRowId = signIn.id;
 
         // Scopes derive from the UNION of every projected definition on this
         // provider, not the entry-point tool alone: the person signs in once
@@ -1471,17 +1547,8 @@ function buildServer(
             // A malformed sibling definition cannot block this sign-in.
           }
         }
-        const providerRow = await runtimeRowByFilter(db, session, tables, execution.providerTable, {
-          id: providerRowId,
-        });
-        const auth = (providerRow?.auth ?? null) as Record<string, unknown> | null;
-        if (!providerRow || auth?.profile !== "oauth2AuthorizationCode") {
-          throw new HttpError(
-            400,
-            "NOT_CONNECTABLE",
-            "This definition's provider does not support sign-in connections.",
-          );
-        }
+        const providerRow = signIn.row;
+        const auth = signIn.auth;
         const scope_ = connectionScopeOf(auth);
         const authorizationUrl = auth.authorizationUrl;
         const tokenUrl = auth.tokenUrl;
@@ -1534,14 +1601,8 @@ function buildServer(
         // below, whose callback replaces the stored tokens in place.
         const hasExistingTokens = Boolean(existingForScope && existingValues?.accessToken);
         if (hasExistingTokens && scopesCovered(scopes, existingValues?.grantedScopes)) {
-          return ok({
-            connected: true,
-            provider: String(providerRow.name ?? providerRowId),
-            message:
-              scope_ === "user"
-                ? "Your personal connection already exists. Just call the tool."
-                : "The tenant connection is already signed in. Just call the tool.",
-          });
+          connectedProviders.push(String(providerRow.name ?? providerRowId));
+          continue;
         }
         const reconsent = hasExistingTokens;
         const tenantConnection = connectionRows.find((row) => !row.ownerUserId);
@@ -1593,6 +1654,9 @@ function buildServer(
         return ok({
           action: "authorize",
           provider: String(providerRow.name ?? providerRowId),
+          ...(signInProviders.length > 1
+            ? { providerProgress: `${providerIndex + 1} of ${signInProviders.length}` }
+            : {}),
           scopes,
           authorizationUrl: handoff.authorizationUrl,
           expiresInSeconds: handoff.expiresInSeconds,
@@ -1601,11 +1665,24 @@ function buildServer(
               ? "The required permissions changed since this connection was approved; a " +
                 "fresh approval replaces the stored sign-in in place. "
               : "") +
+            (signInProviders.length > 1
+              ? "This definition spans multiple providers; each is connected in turn. "
+              : "") +
             "Ask the person to open authorizationUrl in their browser and approve access. " +
             "Then wait by checking, not by asking: call this tool again every ten seconds " +
-            "or so (sleep between checks if you can) — it answers connected once the " +
-            "sign-in lands. Only if nothing has landed after about three minutes, ask the " +
-            "person to tell you when they are done.",
+            "or so (sleep between checks if you can) — it continues with the next provider " +
+            "or answers connected once every sign-in has landed. Only if nothing has " +
+            "landed after about three minutes, ask the person to tell you when they are " +
+            "done.",
+        });
+        }
+        return ok({
+          connected: true,
+          providers: connectedProviders,
+          message:
+            connectedProviders.length > 1
+              ? "All providers for this tool are signed in. Just call the tool."
+              : "Your personal connection already exists. Just call the tool.",
         });
       } catch (error) {
         return failed(error);
@@ -1995,9 +2072,15 @@ function buildServer(
             if (!serviceRow) throw new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`);
 
             // Later bindings see earlier outputs alongside the caller's
-            // inputs, which is what makes read→act chains expressible.
+            // inputs, which is what makes read→act chains expressible. A
+            // binding marked optional may fail without failing the call —
+            // that is what lets one canonical service span providers and
+            // still answer when one of them is down or not yet connected —
+            // and every skipped one is reported honestly in `unavailable`.
             const accumulated: Record<string, unknown> = {};
+            const unavailable: { binding: number; reason: string }[] = [];
             for (const binding of orderedBindings(serviceRow, execution.bindingsField)) {
+              try {
               const operationId = binding[execution.operationRef];
               const operationRow =
                 typeof operationId === "string"
@@ -2181,9 +2264,18 @@ function buildServer(
                 serviceInputs: { ...args, ...accumulated },
                 secretScope,
               });
-              Object.assign(accumulated, outputs);
+              mergeOutputs(accumulated, outputs);
+              } catch (error) {
+                if (binding.optional !== true) throw error;
+                unavailable.push({
+                  binding: Number(binding.order ?? 0),
+                  reason: toHttpError(error).body.error.message,
+                });
+              }
             }
-            return ok(accumulated);
+            return ok(
+              unavailable.length > 0 ? { ...accumulated, unavailable } : accumulated,
+            );
           } catch (error) {
             return failed(error);
           }

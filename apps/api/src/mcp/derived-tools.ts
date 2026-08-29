@@ -53,6 +53,10 @@ export type DerivedTool = {
   table: string;
   /** Row id, so a call handler can resolve the defining record. */
   rowId: string;
+  /** True when every bound operation is a query — derived, never assumed. */
+  readOnly?: boolean;
+  /** True when any bound operation deletes provider data. */
+  destructive?: boolean;
 };
 
 // Same alphabet the compiler enforces for static tool names.

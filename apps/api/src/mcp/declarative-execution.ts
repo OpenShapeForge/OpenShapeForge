@@ -651,6 +651,24 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
   return mapped;
 }
 
+/**
+ * Merge one binding's outputs into the accumulated result. Two ARRAYS under
+ * the same key concatenate — that is what lets one canonical service (my
+ * tasks, my mail) bind the same-shaped read from several providers and
+ * answer with the union. Anything else overwrites, preserving read→act
+ * chains where a later step deliberately replaces an earlier value.
+ */
+export function mergeOutputs(accumulated: JsonRecord, outputs: JsonRecord): void {
+  for (const [key, value] of Object.entries(outputs)) {
+    const existing = accumulated[key];
+    if (Array.isArray(existing) && Array.isArray(value)) {
+      accumulated[key] = [...existing, ...value];
+    } else {
+      accumulated[key] = value;
+    }
+  }
+}
+
 /** Bindings in authored order; a malformed entry fails closed by index. */
 export function orderedBindings(row: JsonRecord, bindingsField: string): JsonRecord[] {
   const raw = row[bindingsField];

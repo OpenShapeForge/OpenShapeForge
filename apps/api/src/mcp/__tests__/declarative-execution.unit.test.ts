@@ -13,6 +13,7 @@ import {
   applyMapping,
   buildAuthHeaders,
   executeBinding,
+  mergeOutputs,
   extractPath,
   orderedBindings,
   resolveTemplate,
@@ -442,5 +443,16 @@ describe("mapping honesty", () => {
       fetchImpl: fetchWith({ items: [] }),
     });
     expect(empty.events).toEqual([]);
+  });
+});
+
+describe("mergeOutputs", () => {
+  it("concatenates arrays under the same key and overwrites everything else", () => {
+    const accumulated: Record<string, unknown> = { tasks: [1, 2], cursor: "a", count: 2 };
+    mergeOutputs(accumulated, { tasks: [3], cursor: "b", extra: true });
+    expect(accumulated).toEqual({ tasks: [1, 2, 3], cursor: "b", count: 2, extra: true });
+    // A non-array meeting an array still overwrites - chains stay expressible.
+    mergeOutputs(accumulated, { tasks: "done" });
+    expect(accumulated.tasks).toBe("done");
   });
 });

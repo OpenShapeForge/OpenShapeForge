@@ -1259,7 +1259,7 @@ function buildServer(
         const templated = readable.find((resource) => uri.startsWith(`${resource.uri}/`));
         const id = templated ? uri.slice(templated.uri.length + 1) : "";
         const table = templated ? tables.get(templated.table) : undefined;
-        if (!table || id.length === 0 || id.includes("/")) {
+        if (!templated || !table || id.length === 0 || id.includes("/")) {
           throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
         }
         const row = await getGeneratedEntity(db, session, { table: table.name, id });

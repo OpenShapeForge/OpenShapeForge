@@ -120,6 +120,18 @@ export function mintAuthorization(
   };
 }
 
+/**
+ * Whether a connection's granted scopes cover the currently required set.
+ * A row without recorded grants (created before grants were stored) is
+ * assumed covering — forcing every legacy connection through a surprise
+ * re-consent would be worse than trusting it until a call proves otherwise.
+ */
+export function scopesCovered(required: readonly string[], granted: unknown): boolean {
+  if (!Array.isArray(granted)) return true;
+  const have = new Set(granted.filter((scope): scope is string => typeof scope === "string"));
+  return required.every((scope) => have.has(scope));
+}
+
 /** Single use: reading a state consumes it, valid or not. */
 export function redeemState(state: unknown): PendingAuthorization | null {
   sweep();
@@ -184,6 +196,7 @@ export async function exchangeCodeForTokens(
     access_token?: unknown;
     refresh_token?: unknown;
     expires_in?: unknown;
+    scope?: unknown;
   };
   try {
     payload = JSON.parse(text) as typeof payload;
@@ -196,6 +209,15 @@ export async function exchangeCodeForTokens(
 
   const scope = `${pending.connectionTable}:personal`;
   const values: JsonRecord = {
+    // Which scopes the provider actually granted: the token response's
+    // `scope` when present, else the requested set. The connect flow
+    // compares this against a definition's CURRENT requirements, so a scope
+    // change after consent triggers a fresh approval instead of silently
+    // reusing a token that can no longer satisfy the tool.
+    grantedScopes:
+      typeof payload.scope === "string"
+        ? payload.scope.split(" ").filter(Boolean)
+        : [...pending.scopes],
     accessToken: encryptSecret(keyring, scope, "accessToken", payload.access_token),
     ...(typeof payload.refresh_token === "string"
       ? { refreshToken: encryptSecret(keyring, scope, "refreshToken", payload.refresh_token) }

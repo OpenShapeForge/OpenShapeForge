@@ -98,6 +98,7 @@ import {
   exchangeCodeForTokens,
   mintAuthorization,
   redeemState,
+  scopesCovered,
 } from "./entity-oauth.js";
 import { decryptSecret, keyringFromEnv, type StoredSecret } from "../connectors/secrets.js";
 import { refreshTokens } from "./entity-oauth.js";
@@ -1396,6 +1397,17 @@ function buildServer(
                 (scope) => adapterScopes.length === 0 || adapterScopes.includes(scope),
               )
             : adapterScopes;
+        // An empty intersection is a definition mismatch, not a scopeless
+        // provider: authorizing with no scopes would mint a token the tool
+        // cannot use (seen live as a provider "invalid scope" page).
+        if (requiredScopes.size > 0 && scopes.length === 0) {
+          throw new HttpError(
+            400,
+            "SCOPES_NOT_ALLOWED",
+            `This definition requires scopes the ${execution.providerEntity} does not allow: ` +
+              `${[...requiredScopes].join(", ")}. Add them to its allowed scopes first.`,
+          );
+        }
 
         const connectionRows = await runtimeRowsByFilter(
           db,
@@ -1411,7 +1423,13 @@ function buildServer(
         const existingValues = (existingForScope?.[execution.connectionValuesField] ?? null) as
           | Record<string, unknown>
           | null;
-        if (existingForScope && existingValues?.accessToken) {
+        // An existing sign-in only satisfies the request while its granted
+        // scopes still cover the definition's CURRENT requirements. When a
+        // scope evolved after consent, silently reusing the old token
+        // guarantees a provider 403 — the fix is a fresh approval, minted
+        // below, whose callback replaces the stored tokens in place.
+        const hasExistingTokens = Boolean(existingForScope && existingValues?.accessToken);
+        if (hasExistingTokens && scopesCovered(scopes, existingValues?.grantedScopes)) {
           return ok({
             connected: true,
             provider: String(providerRow.name ?? providerRowId),
@@ -1421,6 +1439,7 @@ function buildServer(
                 : "The tenant connection is already signed in. Just call the tool.",
           });
         }
+        const reconsent = hasExistingTokens;
         const tenantConnection = connectionRows.find((row) => !row.ownerUserId);
         const secretScope =
           entityForTable(execution.connectionTable)?.elicitOnCreate?.sourceTable ??
@@ -1474,6 +1493,10 @@ function buildServer(
           authorizationUrl: handoff.authorizationUrl,
           expiresInSeconds: handoff.expiresInSeconds,
           instructions:
+            (reconsent
+              ? "The required permissions changed since this connection was approved; a " +
+                "fresh approval replaces the stored sign-in in place. "
+              : "") +
             "Ask the person to open authorizationUrl in their browser and approve access. " +
             "Once the provider confirms, call the tool again — no further setup is needed.",
         });

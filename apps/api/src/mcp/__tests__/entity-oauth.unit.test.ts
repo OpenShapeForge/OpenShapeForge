@@ -12,6 +12,7 @@ import {
   exchangeCodeForTokens,
   mintAuthorization,
   redeemState,
+  scopesCovered,
 } from "../entity-oauth.js";
 import { decryptSecret, keyringFromEnv, type StoredSecret } from "../../connectors/secrets.js";
 
@@ -71,7 +72,7 @@ describe("exchangeCodeForTokens", () => {
     const calls: string[] = [];
     const impl = (async (_input: string | URL | Request, init?: RequestInit) => {
       calls.push(String(init?.body ?? ""));
-      return Response.json({ access_token: "at-1", refresh_token: "rt-1", expires_in: 3600 });
+      return Response.json({ access_token: "at-1", refresh_token: "rt-1", expires_in: 3600, scope: "tickets:read read" });
     }) as typeof fetch;
 
     const { values } = await exchangeCodeForTokens(pending, "code-1", impl, KEYRING);
@@ -85,6 +86,8 @@ describe("exchangeCodeForTokens", () => {
       decryptSecret(KEYRING, "erp.connections:personal", "refreshToken", values.refreshToken as StoredSecret),
     ).toBe("rt-1");
     expect(typeof values.accessTokenExpiresAt).toBe("string");
+    // The provider's answer wins over the requested set.
+    expect(values.grantedScopes).toEqual(["tickets:read", "read"]);
   });
 
   it("fails closed on an out-of-egress token endpoint and a missing keyring", async () => {
@@ -103,5 +106,16 @@ describe("exchangeCodeForTokens", () => {
     await expect(exchangeCodeForTokens(pending2, "c", fetch, undefined)).rejects.toThrow(
       /ELICITED_SECRET_KEYS/,
     );
+  });
+});
+
+describe("scopesCovered", () => {
+  it("covers when every required scope was granted; legacy rows pass", () => {
+    expect(scopesCovered(["read"], ["read", "tickets:write"])).toBe(true);
+    expect(scopesCovered(["read"], ["tickets:read"])).toBe(false);
+    expect(scopesCovered([], ["anything"])).toBe(true);
+    // Rows from before grants were stored carry no list: assumed covering.
+    expect(scopesCovered(["read"], undefined)).toBe(true);
+    expect(scopesCovered(["read"], "read")).toBe(true);
   });
 });

@@ -197,6 +197,28 @@ export function buildMcp(
         );
       }
     }
+    if (authored.personalization) {
+      const personalization = authored.personalization;
+      if (!MCP_TOOL_PREFIX_PATTERN.test(personalization.set?.name ?? "")) {
+        throw new Error(
+          `Unsafe mcp derivedTools.personalization.set name ` +
+            `${JSON.stringify(personalization.set?.name)} on entity "${coreEntity.entity}" ` +
+            `— must match ${MCP_TOOL_PREFIX_PATTERN}.`,
+        );
+      }
+      for (const [option, value] of [
+        ["entity", personalization.entity],
+        ["serviceRef", personalization.serviceRef],
+        ["instructionField", personalization.instructionField],
+      ] as const) {
+        if (typeof value !== "string" || value.length === 0) {
+          throw new Error(
+            `mcp derivedTools.personalization ${option} on entity "${coreEntity.entity}" ` +
+              `must be a non-empty string.`,
+          );
+        }
+      }
+    }
     if (authored.execution) {
       const execution = authored.execution;
       if (!fieldKeys.has(execution.bindingsField)) {

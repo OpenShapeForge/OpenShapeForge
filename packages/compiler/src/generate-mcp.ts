@@ -405,6 +405,14 @@ export type McpDerivedToolsDefinition = {
   visibleWhen?: { field: string; equals: string };
   connect?: { name: string; description: string };
   dryRun?: { name: string; description: string; roles: string[] };
+  personalization?: {
+    entity: string;
+    /** Physical table of the preference entity, resolved at catalog build. */
+    table: string;
+    serviceRef: string;
+    instructionField: string;
+    set: { name: string; description: string };
+  };
 };
 
 export type McpGuideToolDefinition = {
@@ -673,6 +681,29 @@ export function buildMcpCatalog(
               },
             }
           : {}),
+        ...(mcp.derivedTools.personalization
+          ? {
+              personalization: {
+                entity: mcp.derivedTools.personalization.entity,
+                table: resolveEntityTable(
+                  inputs,
+                  mcp.derivedTools.personalization.entity,
+                  contract.entity.name,
+                  "derivedTools.personalization.entity",
+                ),
+                serviceRef: mcp.derivedTools.personalization.serviceRef,
+                instructionField: mcp.derivedTools.personalization.instructionField,
+                set: {
+                  name: mcp.derivedTools.personalization.set.name,
+                  description:
+                    mcp.derivedTools.personalization.set.description ??
+                    `Store YOUR standing instruction for one ${entityLabel(contract)} tool ` +
+                      `(or for all of them): from then on, every assistant you use sees it ` +
+                      `alongside the tool. An empty instruction clears it.`,
+                },
+              },
+            }
+          : {}),
         ...(mcp.derivedTools.dryRun
           ? {
               dryRun: {
@@ -741,7 +772,7 @@ export function buildMcpCatalog(
   // dispatches on the name.
   const seenNames = new Map<string, McpToolDefinition>();
   for (const entry of derivedTools) {
-    for (const authored of [entry.connect, entry.dryRun]) {
+    for (const authored of [entry.connect, entry.dryRun, entry.personalization?.set]) {
       if (!authored) continue;
       seenNames.set(authored.name, {
         name: authored.name,

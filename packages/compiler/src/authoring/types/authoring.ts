@@ -318,6 +318,20 @@ export interface McpDerivedConnectConfig {
   description?: string;
 }
 
+export interface McpDerivedPersonalizationConfig {
+  /** Entity whose rows hold one person's instruction for a derived tool. */
+  entity: string;
+  /**
+   * Field on the preference row referencing the defining row's id; an empty
+   * value means the instruction applies to every tool of this projection.
+   */
+  serviceRef: string;
+  /** Field holding the person's instruction text. */
+  instructionField: string;
+  /** The audience-facing tool that stores the caller's own instruction. */
+  set: { name: string; description?: string };
+}
+
 export interface McpDerivedDryRunConfig {
   /** Tool name for the composition preview, e.g. `dry_run_service`. */
   name: string;
@@ -377,6 +391,15 @@ export interface McpDerivedToolsConfig {
    * `execution`.
    */
   dryRun?: McpDerivedDryRunConfig;
+  /**
+   * Opt-in per-person instructions: each audience member may store one
+   * instruction per derived tool (or one for all of them), which the
+   * projection appends to that tool's description FOR THAT PERSON — under
+   * the authored description, labelled as subordinate to it. This is how a
+   * person's standing preferences reach every client they use, without a
+   * new runtime concept on the assistant's side.
+   */
+  personalization?: McpDerivedPersonalizationConfig;
 }
 
 export interface McpElicitOnCreateConfig {

@@ -64,6 +64,9 @@ try {
             ...(result.versionedReconciled.length === 0
               ? {}
               : { versionedReconciled: result.versionedReconciled }),
+            ...(result.pluginMigrationsApplied.length === 0
+              ? {}
+              : { pluginMigrationsApplied: result.pluginMigrationsApplied }),
             ...(modules.failures.length === 0
               ? {}
               : {

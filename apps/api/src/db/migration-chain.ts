@@ -20,6 +20,8 @@
  *      generated step so a bespoke migration can eliminate non-additive drift
  *      before the roll-forward evaluates it.
  *   4. generated roll-forward — manifest-driven schema apply/diff.
+ *   4b. plugin invariants     — immutable compiler-plugin constraints,
+ *      functions, triggers, and other DDL, after contributed tables exist.
  *   5. app role grants        — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically,
  *      re-apply the `app` schema USAGE/EXECUTE grants that step 0 had to skip
@@ -54,6 +56,11 @@ import {
   type GeneratedSchemaMigrationResult,
 } from "./migrations/generated-schema.js";
 import {
+  applyGeneratedPluginMigrations,
+  loadGeneratedPluginMigrations,
+  type GeneratedPluginMigration,
+} from "./migrations/generated-plugin-migrations.js";
+import {
   applyEntityPageConfigsSeed,
   type EntityPageConfigsSeedResult,
 } from "./migrations/entity-page-configs-seed.js";
@@ -63,6 +70,8 @@ import type { CatalogSeedResult } from "./migrations/catalog-seed.js";
 export type MigrationChainOptions = {
   /** Override the versioned-migration registry (used by tests). */
   versioned?: readonly VersionedMigration[];
+  /** Override compiler-plugin invariant DDL (used by tests). */
+  pluginMigrations?: readonly GeneratedPluginMigration[];
   appliedBy?: string;
   /**
    * Seed steps contributed by runtime modules, applied in registration order
@@ -77,6 +86,8 @@ export type MigrationChainResult = GeneratedSchemaMigrationResult & {
   versionedApplied: string[];
   /** Applied versions whose ledger checksum was reconciled to the current file. */
   versionedReconciled: string[];
+  /** Compiler-plugin invariant migrations applied during this run. */
+  pluginMigrationsApplied: string[];
   /** Outcome of the entity page-config catalog seed. */
   pageConfigs: EntityPageConfigsSeedResult;
   /** Outcome of each module-contributed seed, keyed by its reporting name. */
@@ -96,6 +107,11 @@ export async function runMigrationChain(
     options.versioned ?? versionedMigrations,
   );
   const generated = await applyGeneratedSchemaMigration(db, options.appliedBy);
+  const pluginMigrations = await applyGeneratedPluginMigrations(
+    db,
+    options.pluginMigrations ?? (await loadGeneratedPluginMigrations()),
+    options.appliedBy,
+  );
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
   // The worker role's grants are enumerated from the manifest rather than
@@ -112,6 +128,7 @@ export async function runMigrationChain(
     ...generated,
     versionedApplied: versioned.applied,
     versionedReconciled: versioned.reconciled,
+    pluginMigrationsApplied: pluginMigrations.applied,
     pageConfigs,
     moduleSeeds,
   };

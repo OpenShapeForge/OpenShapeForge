@@ -28,6 +28,10 @@ export const compilerOwnedGeneratedRoots = [
   // API's boot-time module registry. Always emitted (empty list when no plugin
   // has one) so the runtime import is unconditional.
   "apps/api/src/generated/modules",
+  // Optional immutable DDL contributed by compiler plugins. The registry is
+  // absent when no plugin uses this contract and must not linger after the
+  // final contribution is removed.
+  "apps/api/src/generated/plugin-migrations",
   // Seed for platform.entity_page_configs, applied by `db:migrate`. Emitted by
   // the web-gated UI generator (no apps/web -> no page configs -> no rows), but
   // owned API-side because apps/api owns the table.

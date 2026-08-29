@@ -636,6 +636,8 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
       ? { workerDml: true }
       : {}),
     ...(table.retention === undefined ? {} : { retention: table.retention }),
+    ...(table.pluginOwner === undefined ? {} : { pluginOwner: table.pluginOwner }),
+    ...(table.constraints === undefined ? {} : { constraints: table.constraints }),
     ...(table.source === undefined ? {} : { source: table.source }),
   }));
   const generatedEntities = tables

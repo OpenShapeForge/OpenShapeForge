@@ -78,6 +78,8 @@ the packaged bin, byte-for-byte.
 
 All artifact paths are repo-root-relative and fixed:
 `apps/api/src/generated/db/{schema.sql,types.ts,manifest.json}`,
+the optional `apps/api/src/generated/plugin-migrations/registry.json` when a
+plugin contributes constraints or invariant DDL,
 `packages/compiler/config/referentiedata/core-by-groep.json`,
 `keycloak/<realm>-realm.json` (one per `authorization.yaml` /
 `authorization.<realm>.yaml` in the resolved authoring tree), plus whatever
@@ -167,6 +169,12 @@ repo bundling this package needs to do the same.
   honored, and there is no cross-entity data-subject erasure primitive. See
   [retention.md](retention.md); building the enforcement job and the erasure
   primitive are tracked as follow-up issues.
+- **A host that does not use the reference API migrator must consume the
+  plugin migration registry itself.** Apply its ordered SQL after generated
+  tables exist, transactionally record the exact checksums under the emitted
+  plugin/version identities, and fail on changed or removed applied entries.
+  The reference implementation is
+  `apps/api/src/db/migrations/generated-plugin-migrations.ts`.
 - The host repo owns everything downstream of the artifacts: the API
   runtime, migrations, compose stack, and test harnesses in this repo are
   reference implementations, not part of the compiler package.

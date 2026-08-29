@@ -163,6 +163,8 @@ contributePlatformTables: () => [{
         columns: ["tenant_id", "id"],
       },
       onDelete: "CASCADE",
+      deferrable: true,
+      initiallyDeferred: true,
     },
   ],
 }],

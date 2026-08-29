@@ -93,6 +93,37 @@ describe("plugin schema migrations", () => {
     ).toThrow(/unknown table cpq\.missing/);
   });
 
+  test("renders deferred compound foreign keys explicitly", () => {
+    const result = registry([
+      table("requests", {
+        constraints: [
+          {
+            version: "0001_request-key",
+            name: "requests_id_key",
+            kind: "unique",
+            columns: ["id"],
+          },
+        ],
+      }),
+      table("lines", {
+        constraints: [
+          {
+            version: "0002_request-fk",
+            name: "lines_request_fk",
+            kind: "foreignKey",
+            columns: ["id"],
+            references: { schema: "cpq", table: "requests", columns: ["id"] },
+            deferrable: true,
+            initiallyDeferred: true,
+          },
+        ],
+      }),
+    ]);
+    expect(result.migrations[1]!.sql).toContain(
+      'REFERENCES "cpq"."requests" ("id") DEFERRABLE INITIALLY DEFERRED',
+    );
+  });
+
   test("rejects duplicate versions across constraints and raw DDL", () => {
     expect(() =>
       registry(

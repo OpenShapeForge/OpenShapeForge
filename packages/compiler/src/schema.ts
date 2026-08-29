@@ -58,6 +58,10 @@ export type TableConstraintDefinition = {
       columns: string[];
       references: { schema: string; table: string; columns: string[] };
       onDelete?: "CASCADE" | "RESTRICT" | "SET NULL";
+      /** PostgreSQL deferred constraint checking (defaults to immediate/non-deferrable). */
+      deferrable?: boolean;
+      /** Requires `deferrable: true`; emits `INITIALLY DEFERRED`. */
+      initiallyDeferred?: boolean;
     }
   | { kind: "check"; expression: string }
 );

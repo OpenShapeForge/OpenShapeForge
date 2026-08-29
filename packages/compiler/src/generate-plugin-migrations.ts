@@ -144,8 +144,16 @@ function renderConstraintSql(
       `Foreign key ${table.schema}.${table.name}.${constraint.name} has unsupported ON DELETE action "${constraint.onDelete}".`,
     );
   }
+  if (constraint.initiallyDeferred && !constraint.deferrable) {
+    throw new Error(
+      `Foreign key ${table.schema}.${table.name}.${constraint.name} is initially deferred but not deferrable.`,
+    );
+  }
   const onDelete = constraint.onDelete ? ` ON DELETE ${constraint.onDelete}` : "";
-  return `${prefix}FOREIGN KEY ${columns} REFERENCES ${referenced}${onDelete};\n`;
+  const deferred = constraint.deferrable
+    ? ` DEFERRABLE${constraint.initiallyDeferred ? " INITIALLY DEFERRED" : ""}`
+    : "";
+  return `${prefix}FOREIGN KEY ${columns} REFERENCES ${referenced}${onDelete}${deferred};\n`;
 }
 
 function assertForeignKeyTargets(manifest: PlatformSchemaManifest): void {

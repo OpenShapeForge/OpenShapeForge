@@ -241,6 +241,7 @@ export interface McpSection {
       connectionValuesField: string;
     };
     visibleWhen?: { field: string; equals: string };
+    visibleToRolesField?: string;
     connect?: { name: string; description?: string };
     dryRun?: { name: string; description?: string; roles: string[] };
     personalization?: {

@@ -31,6 +31,12 @@ export type DerivedToolsCatalogEntry = {
   execution?: ExecutionCatalogEntry;
   /** Publication gate: only rows where row[field] === equals project. */
   visibleWhen?: { field: string; equals: string };
+  /**
+   * Per-row audience restriction: when the named field holds a non-empty
+   * role list, only sessions holding one of those roles see or call the
+   * row's tool (an administrative service stays invisible to employees).
+   */
+  visibleToRolesField?: string;
   connect?: { name: string; description: string };
   /** Composition preview for definition authors; roles are its own audience. */
   dryRun?: { name: string; description: string; roles: string[] };
@@ -231,6 +237,7 @@ export function derivedToolsFromRows(
   entry: DerivedToolsCatalogEntry,
   rows: Record<string, unknown>[],
   reservedNames: ReadonlySet<string>,
+  sessionRoles?: readonly string[],
 ): DerivedTool[] {
   const tools: DerivedTool[] = [];
   const seen = new Set<string>(reservedNames);
@@ -239,6 +246,19 @@ export function derivedToolsFromRows(
     // it does not exist as a tool, for any audience member.
     if (entry.visibleWhen && row[entry.visibleWhen.field] !== entry.visibleWhen.equals) {
       continue;
+    }
+    // The role gate: a row restricted to specific roles does not exist for
+    // sessions holding none of them. Callers that omit sessionRoles (author
+    // tooling like dry runs) see everything by design.
+    if (entry.visibleToRolesField && sessionRoles) {
+      const restricted = row[entry.visibleToRolesField];
+      if (
+        Array.isArray(restricted) &&
+        restricted.length > 0 &&
+        !restricted.some((role) => typeof role === "string" && sessionRoles.includes(role))
+      ) {
+        continue;
+      }
     }
     const name = deriveToolName(row[entry.keyField]);
     if (!name || seen.has(name)) continue;

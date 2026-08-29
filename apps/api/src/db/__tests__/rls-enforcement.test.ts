@@ -26,7 +26,7 @@ import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
-import { APP_ROLE } from "../migrations/app-role.js";
+import { APP_ROLE, repairAppRoleAttributes } from "../migrations/app-role.js";
 
 /**
  * Privileged admin URL (superuser) used to create/drop the scratch database
@@ -95,6 +95,46 @@ async function withDb<T>(
 }
 
 describe("RLS enforcement against the restricted app role", () => {
+  test(
+    "app-role repair helper restores drifted login and RLS attributes",
+    async () => {
+      const roleName = `osf_app_role_repair_${randomUUID().replaceAll("-", "")}`;
+      if (!/^[a-z0-9_]+$/.test(roleName)) {
+        throw new Error(`unsafe throwaway role name: ${roleName}`);
+      }
+
+      await withDb(ADMIN_URL, async (db) => {
+        await db.transaction().execute(async (trx) => {
+          await sql`create role ${sql.ref(roleName)} nologin superuser bypassrls`.execute(trx);
+          try {
+            await repairAppRoleAttributes(trx, roleName);
+            const attributes = await sql<{
+              rolcanlogin: boolean;
+              rolsuper: boolean;
+              rolbypassrls: boolean;
+            }>`
+              select rolcanlogin, rolsuper, rolbypassrls
+              from pg_roles where rolname = ${roleName}
+            `.execute(trx);
+            expect(attributes.rows[0]).toEqual({
+              rolcanlogin: true,
+              rolsuper: false,
+              rolbypassrls: false,
+            });
+          } finally {
+            await sql`drop role if exists ${sql.ref(roleName)}`.execute(trx);
+          }
+        });
+
+        const remaining = await sql<{ exists: boolean }>`
+          select exists(select 1 from pg_roles where rolname = ${roleName}) as exists
+        `.execute(db);
+        expect(remaining.rows[0]?.exists).toBe(false);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
   test(
     "openshapeforge_app is non-superuser and RLS blocks cross-tenant reads",
     async () => {

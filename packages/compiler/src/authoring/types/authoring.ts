@@ -420,6 +420,13 @@ export interface McpGuideConfig {
   roles: string[];
   /** The playbook itself, returned verbatim as the tool result. */
   content: string;
+  /**
+   * Enforce the "call this first" that descriptions alone cannot: a stateful
+   * session that has not called this guide is refused CREATE operations on
+   * the guide's own entity, with the guide named as the next step. Exists
+   * because agents carrying cached local procedures skip voluntary guidance.
+   */
+  requireBeforeCreate?: boolean;
 }
 
 export interface McpConfig {

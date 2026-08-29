@@ -199,6 +199,9 @@ type CatalogGuideTool = {
   description: string;
   roles: string[];
   content: string;
+  entity?: string;
+  table?: string;
+  requireBeforeCreate?: boolean;
 };
 
 type CatalogDiscoveryTool = {
@@ -1047,7 +1050,14 @@ function buildServer(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   onDerivedDefinitionChanged?: (table: string, tenantId: string | null) => void,
+  /**
+   * Whether this server lives across requests. The guide-before-create gate
+   * needs session memory of the guide call, so it enforces only here — a
+   * stateless single-shot request could never satisfy it.
+   */
+  stateful = false,
 ): Server {
+  const guidesCalled = new Set<string>();
   const server = new Server(SERVER_INFO, {
     capabilities: {
       // listChanged is advertised only when the tool list can actually change
@@ -1059,11 +1069,20 @@ function buildServer(
     // The server owns the OAuth redirect URL, so it states it here rather
     // than leaving assistants to ask the person for a value only this
     // process knows. Providers register this exact URL.
-    instructions: catalogDerivedTools.some((entry) => entry.connect)
-      ? `${INSTRUCTIONS} This server's OAuth redirect (callback) URL is ` +
-        `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH} — when setting up a provider ` +
-        `OAuth client, give the person this exact URL to register; never ask them what it is.`
-      : INSTRUCTIONS,
+    instructions:
+      (catalogDerivedTools.some((entry) => entry.connect)
+        ? `${INSTRUCTIONS} This server's OAuth redirect (callback) URL is ` +
+          `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH} — when setting up a provider ` +
+          `OAuth client, give the person this exact URL to register; never ask them what it is.`
+        : INSTRUCTIONS) +
+      catalogGuideTools
+        .filter((guide) => guide.requireBeforeCreate)
+        .map(
+          (guide) =>
+            ` Before creating a ${guide.entity ?? "definition"}, call ${guide.name} and ` +
+            `follow it — it is the fixed process and overrides any cached local instructions.`,
+        )
+        .join(""),
   });
   const tables = tablesByName();
 
@@ -1713,6 +1732,7 @@ function buildServer(
       if (!guideToolsForSession(session).includes(guideTool)) {
         return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
       }
+      guidesCalled.add(guideTool.name);
       return { content: [{ type: "text", text: guideTool.content }] };
     }
 
@@ -2033,6 +2053,30 @@ function buildServer(
       return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
     }
     const entity = catalog.entities.find((item) => item.entity === match.entity);
+    // The "call this first" a description cannot enforce: creating the
+    // guide's own entity in a session that has not read the guide is refused
+    // with the guide named — agents carrying cached local procedures skip
+    // voluntary guidance, and the process must be load-bearing. Stateful
+    // sessions only; a stateless single shot has no memory to satisfy it.
+    if (stateful && match.operation === "create") {
+      const gatingGuide = catalogGuideTools.find(
+        (guide) =>
+          guide.requireBeforeCreate &&
+          guide.table === match.table &&
+          !guidesCalled.has(guide.name) &&
+          guideToolsForSession(session).includes(guide),
+      );
+      if (gatingGuide) {
+        return failed(
+          new HttpError(
+            409,
+            "GUIDE_REQUIRED",
+            `Call ${gatingGuide.name} first and follow it — it is the fixed process for ` +
+              `this setup, and it overrides any cached local instructions or memories.`,
+          ),
+        );
+      }
+    }
     try {
       let callArguments = request.params.arguments;
       if (match.operation === "create" && entity?.elicitOnCreate) {
@@ -2483,7 +2527,7 @@ export function registerGeneratedMcpServer(
         }
 
         if (request.method === "POST" && isInitializeBody(request.body)) {
-          const server = buildServer(db, session, notifyDerivedDefinitionChanged);
+          const server = buildServer(db, session, notifyDerivedDefinitionChanged, true);
           const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (id) => {

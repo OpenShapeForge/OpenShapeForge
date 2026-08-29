@@ -164,6 +164,12 @@ export function buildMcp(
         );
       }
     }
+    if (authored.visibleToRolesField !== undefined && !fieldKeys.has(authored.visibleToRolesField)) {
+      throw new Error(
+        `mcp derivedTools.visibleToRolesField ${JSON.stringify(authored.visibleToRolesField)} ` +
+          `on entity "${coreEntity.entity}" does not name an authored field.`,
+      );
+    }
     if (authored.connect) {
       if (!MCP_TOOL_PREFIX_PATTERN.test(authored.connect.name ?? "")) {
         throw new Error(

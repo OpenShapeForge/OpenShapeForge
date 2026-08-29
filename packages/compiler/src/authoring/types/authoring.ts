@@ -377,6 +377,13 @@ export interface McpDerivedToolsConfig {
    */
   visibleWhen?: McpDerivedVisibilityConfig;
   /**
+   * Opt-in per-row audience restriction: names an authored field holding a
+   * role list. A row whose list is non-empty projects (and answers) only
+   * for sessions holding one of those roles — how an administrative
+   * definition stays invisible to the wider audience.
+   */
+  visibleToRolesField?: string;
+  /**
    * Opt-in personal-connection handoff tool: given one projected row, the
    * runtime validates the row's execution chain and returns a provider
    * authorization URL (PKCE) for the CALLER to open. Requires `execution`.

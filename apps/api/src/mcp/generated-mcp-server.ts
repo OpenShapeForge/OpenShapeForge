@@ -483,7 +483,7 @@ async function derivedToolsForSession(
       limit: DERIVED_TOOLS_ROW_LIMIT,
     });
     const rows = result.rows.map((row) => serializeRow(table, row));
-    let entryTools = derivedToolsFromRows(entry, rows, reserved);
+    let entryTools = derivedToolsFromRows(entry, rows, reserved, session.roles ?? []);
     // Honest annotations, derived from the chain instead of assumed: a tool
     // whose every bound operation is a query is read-only, and hosts treat
     // read-only tools with less approval friction. A chain that does not

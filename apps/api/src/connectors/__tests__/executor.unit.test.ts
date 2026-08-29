@@ -8,6 +8,7 @@ import {
   hostAllowed,
   invokeOperation,
   type ConnectorContext,
+  type HostResolver,
   type ConnectorPackage,
 } from "../executor.js";
 import type { ConnectorContract, ConnectorOperationContract } from "../catalog.js";
@@ -83,6 +84,10 @@ const boundary = new ConnectorContractBoundary({
   checksum: "checksum-v1",
   operations: [{ key: OPERATION.key, schemas: OPERATION.schemas }],
 });
+
+const publicResolver: HostResolver = async () => [
+  { address: "93.184.216.34", family: 4 },
+];
 
 function packageReturning(
   handler: (context: ConnectorContext, input: unknown) => Promise<unknown>,
@@ -240,6 +245,7 @@ describe("egress allowlist", () => {
         reached = String(target);
         return new Response("{}");
       },
+      publicResolver,
     );
     await bound("https://api.example.com/objects");
     expect(reached).toBe("https://api.example.com/objects");
@@ -336,6 +342,29 @@ describe("invocation", () => {
       // The caller was told how long it may wait; a late answer is still late.
       expect((error as ConnectorExecutionError).code).toBe("CONNECTOR_TIMEOUT");
     }
+  });
+
+  it("aborts promptly while hostname resolution is still pending", async () => {
+    let transported = false;
+    const waitingOnDns = packageReturning(async (context) => {
+      await context.fetch("https://api.example.com/objects");
+      return [];
+    });
+    const neverResolves: HostResolver = () => new Promise(() => {});
+
+    try {
+      await invoke(waitingOnDns, {
+        resolveHost: neverResolves,
+        fetchImpl: async () => {
+          transported = true;
+          return Response.json({});
+        },
+      });
+      throw new Error("expected a timeout");
+    } catch (error) {
+      expect((error as ConnectorExecutionError).code).toBe("CONNECTOR_TIMEOUT");
+    }
+    expect(transported).toBe(false);
   });
 });
 

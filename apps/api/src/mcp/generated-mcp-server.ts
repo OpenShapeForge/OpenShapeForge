@@ -2026,10 +2026,17 @@ function buildServer(
             displayName: String(sourceRow.name ?? entity?.entity ?? "this record"),
             messagePrefix,
           });
+          const listToolName = catalog.tools.find(
+            (candidate) => candidate.table === match.table && candidate.operation === "list",
+          )?.name;
           return ok({
             action: "configure",
+            status: "awaiting_person",
             url: `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${minted.token}`,
             expiresInSeconds: minted.expiresInSeconds,
+            // Machine-readable continuation: the record exists once the
+            // person saved the form; this is how to observe that.
+            ...(listToolName ? { resumeWith: listToolName } : {}),
             instructions:
               (reason === "timeout"
                 ? "The secure form expired before it was completed — anything typed into " +

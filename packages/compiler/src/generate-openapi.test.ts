@@ -246,12 +246,14 @@ describe("rich generated REST OpenAPI", () => {
     expect(update.required).toBeUndefined();
     expect(update.properties.externalId).toBeUndefined();
     expect(update.properties.displayName?.default).toBeUndefined();
+    expect(
+      (create.properties.metadata as { required?: string[] }).required,
+    ).toBeUndefined();
     expect(create.properties.metadata).toMatchObject({
       type: "object",
-      required: ["source"],
       additionalProperties: false,
       properties: {
-        source: { type: "string", title: "Source" },
+        source: { type: "string", title: "Source", default: "api" },
         notes: { type: "string", title: "Notes" },
       },
     });

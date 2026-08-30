@@ -31,6 +31,18 @@ describe("compiler plugins", () => {
     ]);
     expect(docs!.artifacts[0]!.contents).toContain("## Relation (`erp.relations`)");
     expect(first.ownedPaths.files).toContain("docs/entities.generated.md");
+    // Existing plugins use neither invariant contract. They emit no registry
+    // and gain no owner metadata, preserving the pre-contract manifest bytes.
+    expect(first.groups.pluginMigrations).toEqual([]);
+    const manifest = JSON.parse(
+      first.groups.db.find((artifact) => artifact.path.endsWith("manifest.json"))!
+        .contents,
+    ) as PlatformSchemaManifest;
+    expect(
+      manifest.tables.some(
+        (table) => table.pluginOwner !== undefined || table.constraints !== undefined,
+      ),
+    ).toBe(false);
 
     expect(second.all.map((a) => [a.path, a.contents])).toEqual(
       first.all.map((a) => [a.path, a.contents]),
@@ -150,5 +162,58 @@ describe("compiler plugins", () => {
         { repoRoot, authoringDir: "", webPresent: false },
       ),
     ).toThrow(/already exists/);
+  });
+
+  test("marks ownership only when a plugin table uses versioned constraints", () => {
+    const legacy = {
+      version: 1,
+      tables: [],
+    } as PlatformSchemaManifest;
+    mergePluginPlatformTables(
+      legacy,
+      [
+        {
+          name: "demo",
+          contributePlatformTables: () => [
+            {
+              schema: "demo",
+              name: "plain",
+              tenantScoped: false,
+              columns: [],
+            },
+          ],
+        },
+      ],
+      { repoRoot, authoringDir: "", webPresent: false },
+    );
+    expect(legacy.tables[0]!.pluginOwner).toBeUndefined();
+
+    const invariant = { version: 1, tables: [] } as PlatformSchemaManifest;
+    mergePluginPlatformTables(
+      invariant,
+      [
+        {
+          name: "demo",
+          contributePlatformTables: () => [
+            {
+              schema: "demo",
+              name: "locked",
+              tenantScoped: false,
+              columns: [{ name: "id", type: "uuid", required: true }],
+              constraints: [
+                {
+                  version: "0001_locked-key",
+                  name: "locked_pkey",
+                  kind: "primaryKey",
+                  columns: ["id"],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      { repoRoot, authoringDir: "", webPresent: false },
+    );
+    expect(invariant.tables[0]!.pluginOwner).toBe("demo");
   });
 });

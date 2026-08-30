@@ -54,6 +54,7 @@ const groupPairs = [
   ["GraphQL", first.groups.graphql, second.groups.graphql],
   ["MCP", first.groups.mcp, second.groups.mcp],
   ["connectors", first.groups.connectors, second.groups.connectors],
+  ["plugin migrations", first.groups.pluginMigrations, second.groups.pluginMigrations],
   ["referentiedata", first.groups.referentiedata, second.groups.referentiedata],
   ["authoring UI", first.groups.ui, second.groups.ui],
   ["Keycloak", first.groups.keycloak, second.groups.keycloak],

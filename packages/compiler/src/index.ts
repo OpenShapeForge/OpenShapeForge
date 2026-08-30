@@ -20,6 +20,11 @@ import {
 import { generateArtifacts } from "./generate.js";
 import { renderConnectorCatalog } from "./generate-connectors.js";
 import { renderGraphqlDocumentationCatalog } from "./generate-graphql.js";
+import {
+  collectPluginMigrationRegistry,
+  PLUGIN_MIGRATION_REGISTRY_PATH,
+  renderPluginMigrationRegistry,
+} from "./generate-plugin-migrations.js";
 import { MODULE_REGISTRY_PATH, renderModuleRegistry } from "./generate-modules.js";
 import { renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
@@ -35,6 +40,7 @@ export type ArtifactCollection = {
     mcp: GeneratedArtifact[];
     connectors: GeneratedArtifact[];
     modules: GeneratedArtifact[];
+    pluginMigrations: GeneratedArtifact[];
     referentiedata: GeneratedArtifact[];
     ui: GeneratedArtifact[];
     keycloak: GeneratedArtifact[];
@@ -164,6 +170,11 @@ export async function collectAllArtifacts(
   // artifacts are written only after every generator has produced its contents.
   const referentiedata = await loadCoreReferentiedataSnapshot(repoRoot);
   assertReferentieGroepsResolve(entities, referentiedata);
+  const pluginMigrationRegistry = collectPluginMigrationRegistry(manifest, plugins, {
+    repoRoot,
+    authoringDir,
+    webPresent,
+  });
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, {
       source: activeManifestSource,
@@ -204,6 +215,17 @@ export async function collectAllArtifacts(
         contents: renderModuleRegistry(repoRoot, pluginEntries),
       },
     ],
+    // Omitted when no plugin contributes invariant DDL, preserving existing
+    // host output byte-for-byte. The API treats an absent registry as empty.
+    pluginMigrations:
+      pluginMigrationRegistry.migrations.length === 0
+        ? []
+        : [
+            {
+              path: PLUGIN_MIGRATION_REGISTRY_PATH,
+              contents: renderPluginMigrationRegistry(pluginMigrationRegistry),
+            },
+          ],
     referentiedata: await generateCoreReferentiedataArtifacts(repoRoot, referentiedata),
     ui: webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot) : [],
     keycloak: generateAuthoringKeycloakArtifacts(authoringDir),
@@ -223,6 +245,7 @@ export async function collectAllArtifacts(
     ...groups.mcp,
     ...groups.connectors,
     ...groups.modules,
+    ...groups.pluginMigrations,
     ...groups.referentiedata,
     ...groups.ui,
     ...groups.keycloak,

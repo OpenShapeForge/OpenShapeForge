@@ -13,6 +13,7 @@ import {
 import type { ModuleRegistry } from "../modules/registry.js";
 import { createVersionedMigrationLedgerVerifier } from "../db/migrations/versioned-runner.js";
 import { versionedMigrations } from "../db/migrations/versioned/index.js";
+import { createPluginMigrationLedgerVerifier } from "../db/migrations/generated-plugin-migrations.js";
 
 const DRIFT_CHECK_TIMEOUT_MS = 5_000;
 
@@ -21,6 +22,8 @@ export const API_READINESS_ERROR_CODES = new Set([
   "GENERATED_SCHEMA_UNMIGRATED",
   "VERSIONED_LEDGER_MISMATCH",
   "VERSIONED_LEDGER_MISSING",
+  "PLUGIN_MIGRATION_LEDGER_MISMATCH",
+  "PLUGIN_MIGRATION_LEDGER_MISSING",
 ]);
 
 function readinessError(code: string): Error {
@@ -111,6 +114,7 @@ export function createApiReadinessChecks(
 ): ReadinessCheck[] {
   const verifyVersionedLedger =
     createVersionedMigrationLedgerVerifier(versionedMigrations);
+  const verifyPluginLedger = createPluginMigrationLedgerVerifier();
   return [
     {
       name: "database",
@@ -139,6 +143,14 @@ export function createApiReadinessChecks(
             versioned.mismatched.length > 0
               ? "VERSIONED_LEDGER_MISMATCH"
               : "VERSIONED_LEDGER_MISSING",
+          );
+        }
+        const pluginMigrations = await verifyPluginLedger(databaseRuntime.db);
+        if (!pluginMigrations.ready) {
+          throw readinessError(
+            pluginMigrations.mismatched.length > 0
+              ? "PLUGIN_MIGRATION_LEDGER_MISMATCH"
+              : "PLUGIN_MIGRATION_LEDGER_MISSING",
           );
         }
       },

@@ -23,6 +23,7 @@ apps/api/src/generated/graphql/
 apps/api/src/generated/mcp/
 apps/api/src/generated/modules/
 apps/api/src/generated/page-configs/
+apps/api/src/generated/plugin-migrations/
 apps/api/src/generated/rest/
 apps/api/src/generated/workflow/
 apps/api/src/generated/workflow-domain-nodes/

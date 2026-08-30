@@ -36,6 +36,37 @@ export type IndexDefinition = {
 };
 
 /**
+ * A table-level invariant contributed by a compiler plugin.
+ *
+ * Each constraint is a versioned schema change rather than inline `CREATE
+ * TABLE` text. The generated runtime applies it after every contributed table
+ * exists and records the SQL checksum in `platform.schema_migrations`. Editing
+ * an applied definition therefore fails loudly; evolve it with a new plugin
+ * schema migration instead.
+ */
+export type TableConstraintDefinition = {
+  /** Plugin-local immutable migration version, e.g. `0001_request-pkey`. */
+  version: string;
+  /** Explicit PostgreSQL constraint name. */
+  name: string;
+} & (
+  | { kind: "primaryKey"; columns: string[] }
+  | { kind: "unique"; columns: string[] }
+  | {
+      kind: "foreignKey";
+      /** Columns on the contributed table, in constraint order. */
+      columns: string[];
+      references: { schema: string; table: string; columns: string[] };
+      onDelete?: "CASCADE" | "RESTRICT" | "SET NULL";
+      /** PostgreSQL deferred constraint checking (defaults to immediate/non-deferrable). */
+      deferrable?: boolean;
+      /** Requires `deferrable: true`; emits `INITIALLY DEFERRED`. */
+      initiallyDeferred?: boolean;
+    }
+  | { kind: "check"; expression: string }
+);
+
+/**
  * Multi-axis row-level access policy.
  *
  * Generates a single policy with OR-combined predicates over three axes:
@@ -376,6 +407,10 @@ export type TableDefinition = {
   generatedCrud?: boolean;
   columns: ColumnDefinition[];
   indexes?: IndexDefinition[];
+  /** Compound and named invariants owned by a compiler plugin. */
+  constraints?: TableConstraintDefinition[];
+  /** Set by the compiler when a plugin contributes versioned constraints. */
+  pluginOwner?: string;
   retention?: RetentionDefinition;
   source?: TableSourceDefinition;
   /**

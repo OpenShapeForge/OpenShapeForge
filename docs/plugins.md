@@ -28,6 +28,11 @@ export type CompilerPlugin = {
   /** Extra platform tables merged into the base manifest BEFORE authoring
    *  entities are promoted. Colliding with an existing schema.table errors. */
   contributePlatformTables?(context: PluginBaseContext): TableDefinition[];
+  /** Immutable PostgreSQL DDL for functions, triggers, and other invariants
+   *  that are not representable as table constraints. */
+  schemaMigrations?:
+    | { version: string; sql: string }[]
+    | ((context: PluginBaseContext) => { version: string; sql: string }[]);
   /** Emit artifacts; paths are repo-root-relative like all compiler output. */
   generate?(
     context: PluginGenerateContext,
@@ -128,6 +133,70 @@ USAGE and DML grants for the restricted runtime role on the next
 `bun run db:migrate` without a bespoke migration. The **worker** role is the
 deliberate exception: `applyWorkerRoleGrants` enumerates tables rather than
 sweeping schemas, so a plugin's table reaches a worker only by saying so.
+
+### Database invariants
+
+A contributed table can declare versioned, explicitly named `constraints` for
+compound primary keys, compound unique constraints, compound foreign keys, and
+checks. The compiler validates key and foreign-key columns before it
+emits SQL:
+
+```ts
+contributePlatformTables: () => [{
+  schema: "cpq",
+  name: "request_lines",
+  tenantScoped: true,
+  columns: [/* ... */],
+  constraints: [
+    {
+      version: "0001_request-line-key",
+      name: "request_lines_request_position_key",
+      kind: "unique",
+      columns: ["request_id", "position"],
+    },
+    {
+      version: "0002_request-line-request-fk",
+      name: "request_lines_request_fk",
+      kind: "foreignKey",
+      columns: ["tenant_id", "request_id"],
+      references: {
+        schema: "cpq",
+        table: "requests",
+        columns: ["tenant_id", "id"],
+      },
+      onDelete: "CASCADE",
+      deferrable: true,
+      initiallyDeferred: true,
+    },
+  ],
+}],
+```
+
+Functions, triggers, and other PostgreSQL invariants use the deliberately
+narrow `schemaMigrations` contract. Every contribution has a plugin-local
+`NNNN_kebab-name` version and SQL body. Constraints and SQL migrations share
+that namespace, so their order is explicit and duplicate versions fail the
+compile. Use a later version when a function must exist before its trigger or
+a unique key before a foreign key. Across plugins, migrations apply by plugin
+name and then version; the compiler rejects a structured foreign key when its
+target key would therefore be installed later. Use the context callback form
+when invariant DDL must be gated by the same host capabilities as contributed
+tables.
+
+When at least one contribution exists, the compiler emits
+`apps/api/src/generated/plugin-migrations/registry.json`. The registry is
+deterministically sorted and covered by the compiler's stale, orphan, and
+double-generation gates. With no contributions the file is absent, preserving
+the existing generated output byte-for-byte.
+
+`db:migrate` applies the registry after the generated tables and before the
+grant sweep. Each migration and its ledger write run in one transaction under
+`plugin:<plugin>:<version>` in `platform.schema_migrations`. The ledger stores
+the exact SQL checksum. A rerun skips an identical entry; changing its SQL or
+checksum fails migration and readiness. Ledger entries absent from an older
+registry are reported as unexpected but tolerated so an image rollback remains
+serviceable. Applied contributions are still immutable: retain old entries in
+forward builds and add a new version for an additive roll-forward.
 
 ### `ownedPaths` and the gates
 

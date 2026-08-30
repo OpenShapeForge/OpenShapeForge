@@ -2,7 +2,8 @@
 /**
  * Immutable DDL emitted by compiler plugins. The optional generated registry
  * is read at runtime because repositories without plugin schema contributions
- * intentionally have no file to import.
+ * intentionally have no file to import. Mutation functions require a
+ * connection-bound Kysely instance because they manage explicit transactions.
  */
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -31,7 +32,6 @@ export type PluginMigrationLedgerStatus = {
 
 export type PluginMigrationsResult = {
   applied: string[];
-  skipped: string[];
 };
 
 const registryPath = resolve(
@@ -53,7 +53,7 @@ function validateRegistry(value: unknown): GeneratedPluginMigration[] {
     throw new Error("Generated plugin migration registry has an unsupported shape.");
   }
   const seen = new Set<string>();
-  let previous = "";
+  let previous: Pick<GeneratedPluginMigration, "plugin" | "version"> | undefined;
   for (const migration of registry.migrations) {
     if (
       !migration ||
@@ -66,7 +66,13 @@ function validateRegistry(value: unknown): GeneratedPluginMigration[] {
       throw new Error("Generated plugin migration registry contains an invalid entry.");
     }
     const identity = pluginMigrationLedgerVersion(migration);
-    if (identity.localeCompare(previous) <= 0 || seen.has(identity)) {
+    if (
+      (previous !== undefined &&
+        (migration.plugin.localeCompare(previous.plugin) < 0 ||
+          (migration.plugin === previous.plugin &&
+            migration.version.localeCompare(previous.version) <= 0))) ||
+      seen.has(identity)
+    ) {
       throw new Error(
         `Generated plugin migration registry is not strictly ordered at ${identity}.`,
       );
@@ -78,7 +84,7 @@ function validateRegistry(value: unknown): GeneratedPluginMigration[] {
       );
     }
     seen.add(identity);
-    previous = identity;
+    previous = migration;
   }
   return registry.migrations;
 }
@@ -95,7 +101,16 @@ export async function loadGeneratedPluginMigrations(
     }
     throw error;
   }
-  return validateRegistry(JSON.parse(contents));
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contents);
+  } catch (error) {
+    throw new Error(
+      `Generated plugin migration registry ${path} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  return validateRegistry(parsed);
 }
 
 async function readPluginLedger(db: Kysely<any>) {
@@ -126,10 +141,7 @@ export async function verifyPluginMigrationLedger(
     .filter((identity) => !expected.has(identity))
     .sort();
   return {
-    ready:
-      missing.length === 0 &&
-      mismatched.length === 0 &&
-      unexpected.length === 0,
+    ready: missing.length === 0 && mismatched.length === 0,
     missing,
     mismatched,
     unexpected,
@@ -137,11 +149,11 @@ export async function verifyPluginMigrationLedger(
 }
 
 export function createPluginMigrationLedgerVerifier(
-  migrations: Promise<readonly GeneratedPluginMigration[]> =
-    loadGeneratedPluginMigrations(),
+  loadMigrations: () => Promise<readonly GeneratedPluginMigration[]> =
+    loadGeneratedPluginMigrations,
 ) {
   return async (db: Kysely<any>) =>
-    verifyPluginMigrationLedger(db, await migrations);
+    verifyPluginMigrationLedger(db, await loadMigrations());
 }
 
 export async function applyGeneratedPluginMigrations(
@@ -151,11 +163,6 @@ export async function applyGeneratedPluginMigrations(
 ): Promise<PluginMigrationsResult> {
   await ensureSchemaMigrationsTable(db);
   const status = await verifyPluginMigrationLedger(db, migrations);
-  if (status.unexpected.length > 0) {
-    throw new Error(
-      `Applied plugin schema migration(s) disappeared from the generated registry: ${status.unexpected.join(", ")}. Restore the contribution; applied migrations are immutable.`,
-    );
-  }
   if (status.mismatched.length > 0) {
     throw new Error(
       `Applied plugin schema migration checksum mismatch: ${status.mismatched.join(", ")}. Restore the applied SQL and add a new migration instead.`,
@@ -164,11 +171,9 @@ export async function applyGeneratedPluginMigrations(
 
   const missing = new Set(status.missing);
   const applied: string[] = [];
-  const skipped: string[] = [];
   for (const migration of migrations) {
     const identity = pluginMigrationLedgerVersion(migration);
     if (!missing.has(identity)) {
-      skipped.push(identity);
       continue;
     }
     await sql`begin`.execute(db);
@@ -188,5 +193,5 @@ export async function applyGeneratedPluginMigrations(
     }
     applied.push(identity);
   }
-  return { applied, skipped };
+  return { applied };
 }

@@ -53,7 +53,7 @@ function migration(
 
 describe("generated plugin schema migrations", () => {
   test(
-    "applies after generated tables, reruns idempotently, and refuses edits or removal",
+    "applies after generated tables, refuses edits, and tolerates rollback extras",
     async () => {
       const ddl = `
 CREATE FUNCTION platform.cpq_mark_tenant() RETURNS trigger
@@ -120,16 +120,15 @@ FOR EACH ROW EXECUTE FUNCTION platform.cpq_mark_tenant();
           ).rejects.toThrow(/checksum mismatch/);
 
           const removed = await verifyPluginMigrationLedger(runtime.db, []);
-          expect(removed.ready).toBe(false);
+          expect(removed.ready).toBe(true);
           expect(removed.unexpected).toEqual([
             "plugin:cpq:0001_tenant-trigger",
             "plugin:cpq:0002_tenant-check",
           ]);
-          await expect(
-            runtime.db.connection().execute((db) =>
-              runMigrationChain(db, { pluginMigrations: [] }),
-            ),
-          ).rejects.toThrow(/disappeared from the generated registry/);
+          const rolledBack = await runtime.db.connection().execute((db) =>
+            runMigrationChain(db, { pluginMigrations: [] }),
+          );
+          expect(rolledBack.pluginMigrationsApplied).toEqual([]);
         } finally {
           await runtime.close();
         }

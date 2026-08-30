@@ -170,7 +170,11 @@ export async function collectAllArtifacts(
   // artifacts are written only after every generator has produced its contents.
   const referentiedata = await loadCoreReferentiedataSnapshot(repoRoot);
   assertReferentieGroepsResolve(entities, referentiedata);
-  const pluginMigrationRegistry = collectPluginMigrationRegistry(manifest, plugins);
+  const pluginMigrationRegistry = collectPluginMigrationRegistry(manifest, plugins, {
+    repoRoot,
+    authoringDir,
+    webPresent,
+  });
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, {
       source: activeManifestSource,

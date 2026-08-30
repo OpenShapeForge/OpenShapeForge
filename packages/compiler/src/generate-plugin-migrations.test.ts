@@ -166,5 +166,131 @@ describe("plugin schema migrations", () => {
         }),
       ]),
     ).toThrow(/Use schemaMigrations for free-form SQL/);
+
+    expect(() =>
+      registry([
+        table("requests", {
+          constraints: [
+            {
+              version: "0001_request-check",
+              name: "requests_id_check",
+              kind: "check",
+              expression: "id IS NOT NULL), ADD COLUMN backdoor text CHECK (true",
+            },
+          ],
+        }),
+      ]),
+    ).toThrow(/closes the compiler-owned CHECK expression/);
+
+    expect(() =>
+      registry([
+        table("requests", {
+          constraints: [
+            {
+              version: "0001_request-check",
+              name: "requests_id_check",
+              kind: "check",
+              expression: "id::text <> ')'",
+            },
+          ],
+        }),
+      ]),
+    ).not.toThrow();
+  });
+
+  test("rejects schema-wide backing-index collisions and multiple primary keys", () => {
+    expect(() =>
+      registry([
+        table("a", {
+          constraints: [
+            { version: "0001_a-key", name: "shared_key", kind: "unique", columns: ["id"] },
+          ],
+        }),
+        table("b", {
+          constraints: [
+            { version: "0002_b-key", name: "shared_key", kind: "unique", columns: ["id"] },
+          ],
+        }),
+      ]),
+    ).toThrow(/backing index.*collides/);
+
+    expect(() =>
+      registry([
+        table("requests", {
+          columns: [{ ...idColumn, primaryKey: true }],
+          constraints: [
+            { version: "0001_other-pk", name: "requests_other_pk", kind: "primaryKey", columns: ["id"] },
+          ],
+        }),
+      ]),
+    ).toThrow(/multiple primary keys/);
+  });
+
+  test("rejects a foreign key ordered before its cross-plugin target key", () => {
+    expect(() =>
+      registry(
+        [
+          table("child", {
+            pluginOwner: "aaa",
+            constraints: [
+              {
+                version: "0001_parent-fk",
+                name: "child_parent_fk",
+                kind: "foreignKey",
+                columns: ["id"],
+                references: { schema: "cpq", table: "parent", columns: ["id"] },
+              },
+            ],
+          }),
+          table("parent", {
+            pluginOwner: "zzz",
+            constraints: [
+              { version: "0001_parent-key", name: "parent_id_key", kind: "unique", columns: ["id"] },
+            ],
+          }),
+        ],
+        [{ name: "aaa" }, { name: "zzz" }],
+      ),
+    ).toThrow(/ordered before target key/);
+  });
+
+  test("gates raw schema migrations on the shared plugin context", () => {
+    const plugin: CompilerPlugin = {
+      name: "cpq",
+      schemaMigrations: (context) =>
+        context.webPresent
+          ? [{ version: "0001_web-trigger", sql: "SELECT 1;" }]
+          : [],
+    };
+    const manifest: PlatformSchemaManifest = { version: 1, tables: [] };
+    const baseContext = { repoRoot: "/repo", authoringDir: "/repo/authoring" };
+    expect(
+      collectPluginMigrationRegistry(manifest, [plugin], {
+        ...baseContext,
+        webPresent: false,
+      }).migrations,
+    ).toEqual([]);
+    expect(
+      collectPluginMigrationRegistry(manifest, [plugin], {
+        ...baseContext,
+        webPresent: true,
+      }).migrations.map((migration) => migration.version),
+    ).toEqual(["0001_web-trigger"]);
+  });
+
+  test("sorts prefixed plugin names tuple-wise for the API loader", () => {
+    const result = registry(
+      [],
+      ["cpq", "cpq-extra"].map((name) => ({
+        name,
+        schemaMigrations: [
+          { version: "0001_install-trigger", sql: `SELECT '${name}';` },
+        ],
+      })),
+    );
+    expect(result.migrations.map(({ plugin, version }) => [plugin, version])).toEqual([
+      ["cpq", "0001_install-trigger"],
+      ["cpq-extra", "0001_install-trigger"],
+    ]);
   });
 });

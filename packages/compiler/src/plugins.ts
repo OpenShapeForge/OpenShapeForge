@@ -62,7 +62,9 @@ export type CompilerPlugin = {
    * functions and triggers. Applied after generated tables and checksum-locked
    * in the shared migration ledger.
    */
-  schemaMigrations?: PluginSchemaMigration[];
+  schemaMigrations?:
+    | PluginSchemaMigration[]
+    | ((context: PluginBaseContext) => PluginSchemaMigration[]);
   /** Emit artifacts; paths are repo-root-relative like all compiler output. */
   generate?(
     context: PluginGenerateContext,

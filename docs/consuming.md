@@ -172,7 +172,9 @@ repo bundling this package needs to do the same.
 - **A host that does not use the reference API migrator must consume the
   plugin migration registry itself.** Apply its ordered SQL after generated
   tables exist, transactionally record the exact checksums under the emitted
-  plugin/version identities, and fail on changed or removed applied entries.
+  plugin/version identities, fail on changed applied entries, and report but
+  tolerate ledger entries absent from an older registry so image rollback
+  remains possible.
   The reference implementation is
   `apps/api/src/db/migrations/generated-plugin-migrations.ts`.
 - The host repo owns everything downstream of the artifacts: the API

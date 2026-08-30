@@ -34,7 +34,7 @@
  *      sweep. Each is a no-op when its seed was not emitted.
  *
  * `db` must be a connection-bound Kysely instance (obtained via
- * runtime.db.connection().execute) — steps 3 and 4 use explicit
+ * runtime.db.connection().execute) — steps 3, 4, and 4b use explicit
  * BEGIN/COMMIT transactions on that single connection.
  *
  * NOTE: the whole chain runs as the PRIVILEGED migrate role

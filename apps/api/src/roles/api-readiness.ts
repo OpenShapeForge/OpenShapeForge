@@ -24,7 +24,6 @@ export const API_READINESS_ERROR_CODES = new Set([
   "VERSIONED_LEDGER_MISSING",
   "PLUGIN_MIGRATION_LEDGER_MISMATCH",
   "PLUGIN_MIGRATION_LEDGER_MISSING",
-  "PLUGIN_MIGRATION_LEDGER_UNEXPECTED",
 ]);
 
 function readinessError(code: string): Error {
@@ -151,9 +150,7 @@ export function createApiReadinessChecks(
           throw readinessError(
             pluginMigrations.mismatched.length > 0
               ? "PLUGIN_MIGRATION_LEDGER_MISMATCH"
-              : pluginMigrations.unexpected.length > 0
-                ? "PLUGIN_MIGRATION_LEDGER_UNEXPECTED"
-                : "PLUGIN_MIGRATION_LEDGER_MISSING",
+              : "PLUGIN_MIGRATION_LEDGER_MISSING",
           );
         }
       },

@@ -136,8 +136,14 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
     if (!projection.enabled) nonEmpty(projection.reason, `${where} disabled projection reason`);
   }
   if (operation.idempotency.mode === "idempotency-key" &&
-      !(operation.idempotency.header ?? "").trim()) {
-    throw new Error(`${where} idempotency-key mode must name its header.`);
+      (!(operation.idempotency.header ?? "").trim() || !(operation.idempotency.inputField ?? "").trim())) {
+    throw new Error(`${where} idempotency-key mode must name its header and canonical input field.`);
+  }
+  if (operation.idempotency.mode === "idempotency-key") {
+    const field = operation.idempotency.inputField!;
+    if (!(field in inputProperties) || !inputRequired.has(field)) {
+      throw new Error(`${where} idempotency input field "${field}" must be a required inputSchema property.`);
+    }
   }
 }
 
@@ -334,15 +340,22 @@ export function operationOpenApiPaths(operations: readonly CompiledPluginOperati
       ? [{
           name: operation.idempotency.header!,
           in: "header",
-          required: false,
+          required: true,
           description: operation.idempotency.description,
           schema: { type: "string", minLength: 1 },
         }]
       : [];
+    const idempotencyInputField = operation.idempotency.mode === "idempotency-key"
+      ? operation.idempotency.inputField
+      : undefined;
     const bodyProperties = Object.fromEntries(
-      Object.entries(inputProperties ?? {}).filter(([name]) => !pathNames.has(name)),
+      Object.entries(inputProperties ?? {}).filter(([name]) =>
+        !pathNames.has(name) && name !== idempotencyInputField
+      ),
     );
-    const bodyRequired = [...required].filter((name) => !pathNames.has(name));
+    const bodyRequired = [...required].filter((name) =>
+      !pathNames.has(name) && name !== idempotencyInputField
+    );
     const bodySchema = {
       ...operation.inputSchema,
       properties: bodyProperties,

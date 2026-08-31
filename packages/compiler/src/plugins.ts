@@ -95,6 +95,8 @@ export type PluginOperationContract = {
   idempotency: {
     mode: "none" | "intrinsic" | "idempotency-key";
     header?: string;
+    /** Canonical input property populated from the REST header and supplied directly by other transports. */
+    inputField?: string;
     description?: string;
   };
   transports: {

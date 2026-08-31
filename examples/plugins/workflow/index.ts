@@ -924,11 +924,11 @@ const plugin: CompilerPlugin = {
     {
       key: "workflow.instance.webhook-start",
       title: "Start a workflow from a webhook",
-      description: "Starts one published workflow definition for the authenticated tenant. REST redeliveries may use Idempotency-Key.",
+      description: "Starts one published workflow definition for the authenticated tenant with a replay-safe idempotency key.",
       handler: "startWebhook",
       inputSchema: {
         type: "object",
-        required: ["definitionId"],
+        required: ["definitionId", "idempotencyKey"],
         properties: {
           definitionId: { type: "string", format: "uuid" },
           context: { type: "object" },
@@ -956,7 +956,7 @@ const plugin: CompilerPlugin = {
       ],
       auth: { mode: "session", roles: ["directie", "workflow-admin", "workflow-operator"] },
       tenancy: { mode: "required", description: "Tenant comes from the verified OSF session." },
-      idempotency: { mode: "idempotency-key", header: "Idempotency-Key", description: "A sender reuses the key for redelivery of the same event." },
+      idempotency: { mode: "idempotency-key", header: "Idempotency-Key", inputField: "idempotencyKey", description: "A sender reuses the key for redelivery of the same event." },
       transports: {
         rest: { method: "POST", path: "/api/workflow/triggers/webhook/:definitionId", response: { status: 202, kind: "json" } },
         mcp: { enabled: true, name: "workflow_start_webhook" },

@@ -30,7 +30,7 @@ export type OperationContract = {
     | { mode: "session"; roles: string[]; scopes?: string[] }
     | { mode: "custom"; scheme: string; description: string; securityScheme: Record<string, unknown> };
   tenancy: { mode: "required" | "derived" | "none"; description?: string };
-  idempotency: { mode: "none" | "intrinsic" | "idempotency-key"; header?: string; description?: string };
+  idempotency: { mode: "none" | "intrinsic" | "idempotency-key"; header?: string; inputField?: string; description?: string };
   transports: {
     rest: { method: string; path: string; response: { status?: number; kind: "json" | "binary" | "stream"; contentType?: string } };
     mcp: { enabled: boolean; name?: string; reason?: string };
@@ -128,7 +128,7 @@ export async function invokeOperation(
   return result;
 }
 
-function requestInput(
+export function operationRestInput(
   request: FastifyRequest,
   operation: OperationContract,
 ): Record<string, unknown> {
@@ -165,7 +165,16 @@ function requestInput(
   if (!readsInputFromQuery && Object.keys(query).length > 0) {
     throw new HttpError(400, "BAD_USER_INPUT", "This operation accepts input through path parameters and its request body, not query parameters.");
   }
-  return readsInputFromQuery ? { ...query, ...params } : { ...body, ...params };
+  const input = readsInputFromQuery ? { ...query, ...params } : { ...body, ...params };
+  if (operation.idempotency.mode === "idempotency-key") {
+    const field = operation.idempotency.inputField!;
+    if (field in input) {
+      throw new HttpError(400, "BAD_USER_INPUT", `Idempotency input "${field}" must only be supplied through the ${operation.idempotency.header} header on REST.`);
+    }
+    const header = request.headers[operation.idempotency.header!.toLowerCase()];
+    if (typeof header === "string") input[field] = header;
+  }
+  return input;
 }
 
 export function registerOperationRestRoutes(
@@ -183,7 +192,7 @@ export function registerOperationRestRoutes(
           const session = entry.operation.auth.mode === "custom"
             ? undefined
             : await resolveSessionContext(headersFromFastify(request.headers), { db: context.db });
-          const result = await invokeOperation(entry, requestInput(request, entry.operation), {
+          const result = await invokeOperation(entry, operationRestInput(request, entry.operation), {
             ...context,
             transport: "rest",
             ...(session ? { session } : {}),

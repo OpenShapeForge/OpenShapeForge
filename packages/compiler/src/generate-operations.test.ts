@@ -18,8 +18,11 @@ const operation: PluginOperationContract = {
   handler: "publishQuote",
   inputSchema: {
     type: "object",
-    required: ["quoteId"],
-    properties: { quoteId: { type: "string", format: "uuid" } },
+    required: ["quoteId", "idempotencyKey"],
+    properties: {
+      quoteId: { type: "string", format: "uuid" },
+      idempotencyKey: { type: "string", minLength: 1 },
+    },
     additionalProperties: false,
   },
   outputSchema: {
@@ -31,7 +34,7 @@ const operation: PluginOperationContract = {
   errors: [{ status: 409, code: "CONFLICT", description: "Quote is not publishable" }],
   auth: { mode: "session", roles: ["seller"], scopes: ["quotes:write"] },
   tenancy: { mode: "required" },
-  idempotency: { mode: "idempotency-key", header: "Idempotency-Key" },
+  idempotency: { mode: "idempotency-key", header: "Idempotency-Key", inputField: "idempotencyKey" },
   transports: {
     rest: { method: "POST", path: "/api/demo/quotes/:quoteId/publish", response: { status: 202, kind: "json" } },
     mcp: { enabled: true, name: "demo_publish_quote" },
@@ -55,6 +58,13 @@ describe("first-class plugin operations", () => {
       in: "path",
       required: true,
     });
+    expect(paths["/api/demo/quotes/{quoteId}/publish"]!.post.parameters[1]).toMatchObject({
+      name: "Idempotency-Key",
+      in: "header",
+      required: true,
+    });
+    expect(paths["/api/demo/quotes/{quoteId}/publish"]!.post.requestBody.content["application/json"].schema.properties)
+      .not.toHaveProperty("idempotencyKey");
   });
 
   test("refuses duplicate routes and dishonest binary projections", () => {

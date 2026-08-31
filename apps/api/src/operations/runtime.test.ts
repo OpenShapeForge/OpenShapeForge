@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import type { RuntimeModule } from "../modules/contract.js";
-import { bindOperationHandlers, invokeOperation, requireOperationAuthorization } from "./runtime.js";
+import { bindOperationHandlers, invokeOperation, operationRestInput, requireOperationAuthorization, type OperationContract } from "./runtime.js";
 
 const session = {
   tenantId: "tenant-a",
@@ -31,6 +31,7 @@ describe("canonical operation runtime", () => {
     await expect(invokeOperation(bound, {}, { transport: "graphql", session })).rejects.toMatchObject({ status: 400 });
     const result = await invokeOperation(bound, {
       definitionId: "22222222-2222-4222-8222-222222222222",
+      idempotencyKey: "webhook-1",
     }, { transport: "graphql", session });
     expect(result.value).toMatchObject({ status: "accepted" });
   });
@@ -62,6 +63,7 @@ describe("canonical operation runtime", () => {
     }]).get("workflow.instance.webhook-start")!;
     await expect(invokeOperation(bound, {
       definitionId: "22222222-2222-4222-8222-222222222222",
+      idempotencyKey: "webhook-2",
     }, { transport: "rest", session })).rejects.toMatchObject({ status: 500 });
   });
 
@@ -71,4 +73,36 @@ describe("canonical operation runtime", () => {
       operationHandlers: { startWebhook: () => ({ value: {} }), hidden: () => ({ value: {} }) },
     }])).toThrow(/absent from its compiler contract: hidden/);
   });
+});
+
+test("REST maps a required idempotency header into canonical input only", () => {
+  const operation = {
+    inputSchema: {
+      type: "object",
+      required: ["quoteId", "idempotencyKey"],
+      properties: { quoteId: { type: "string" }, idempotencyKey: { type: "string" } },
+      additionalProperties: false,
+    },
+    idempotency: {
+      mode: "idempotency-key",
+      header: "Idempotency-Key",
+      inputField: "idempotencyKey",
+    },
+    transports: { rest: { method: "POST", path: "/api/demo/quotes/:quoteId" } },
+  } as unknown as OperationContract;
+  const request = {
+    body: {},
+    query: {},
+    params: { quoteId: "quote-1" },
+    headers: { "idempotency-key": "replay-1" },
+  } as never;
+  expect(operationRestInput(request, operation)).toEqual({ quoteId: "quote-1", idempotencyKey: "replay-1" });
+  const bodyRequest = {
+    body: { idempotencyKey: "body-value" },
+    query: {},
+    params: { quoteId: "quote-1" },
+    headers: { "idempotency-key": "replay-1" },
+  } as never;
+  expect(() => operationRestInput(bodyRequest, operation))
+    .toThrow(/must only be supplied through/);
 });

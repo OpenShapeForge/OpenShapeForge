@@ -25,11 +25,18 @@ import {
   PLUGIN_MIGRATION_REGISTRY_PATH,
   renderPluginMigrationRegistry,
 } from "./generate-plugin-migrations.js";
-import { MODULE_REGISTRY_PATH, renderModuleRegistry } from "./generate-modules.js";
-import { renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
+import { buildModuleRegistry, MODULE_REGISTRY_PATH, renderModuleRegistry } from "./generate-modules.js";
+import { MAX_DEDICATED_TOOLS, renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
+import {
+  auditOperationSurfaceCollisions,
+  assertOperationRuntimeModules,
+  collectPluginOperations,
+  renderOperationCatalog,
+} from "./generate-operations.js";
 import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
 import type { CompiledEntityInfo } from "./plugins.js";
 import type { CompiledField } from "./authoring/types.js";
+import { renderEmptyApiPersistedOperationArtifact } from "./persisted-operations.js";
 
 const defaultRepoRoot = resolve(import.meta.dir, "../../..");
 
@@ -41,6 +48,7 @@ export type ArtifactCollection = {
     connectors: GeneratedArtifact[];
     modules: GeneratedArtifact[];
     pluginMigrations: GeneratedArtifact[];
+    operations: GeneratedArtifact[];
     referentiedata: GeneratedArtifact[];
     ui: GeneratedArtifact[];
     keycloak: GeneratedArtifact[];
@@ -175,10 +183,18 @@ export async function collectAllArtifacts(
     authoringDir,
     webPresent,
   });
+  const operations = collectPluginOperations(plugins, {
+    repoRoot,
+    authoringDir,
+    webPresent,
+  });
+  const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries);
+  assertOperationRuntimeModules(operations, moduleRegistry.modules.map((module) => module.name));
+  auditOperationSurfaceCollisions(operations, manifest, connectors, MAX_DEDICATED_TOOLS);
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, {
       source: activeManifestSource,
-      openApi: { entities, referentiedata },
+      openApi: { entities, referentiedata, operations },
     }),
     graphql: [
       {
@@ -187,8 +203,10 @@ export async function collectAllArtifacts(
           entities.map((entity) => entity.contract),
           activeManifestSource,
           referentiedata,
+          operations,
         ),
       },
+      ...(!webPresent ? [renderEmptyApiPersistedOperationArtifact()] : []),
     ],
     mcp: [
       {
@@ -197,6 +215,19 @@ export async function collectAllArtifacts(
           mcpCatalogInputs(entities, manifest),
           activeManifestSource,
           referentiedata,
+          operations,
+        ),
+      },
+    ],
+    operations: [
+      {
+        path: "apps/api/src/generated/operations/catalog.json",
+        contents: renderOperationCatalog(operations),
+      },
+      {
+        path: "apps/api/src/generated/operations/client-metadata.json",
+        contents: renderOperationCatalog(
+          operations.filter((operation) => operation.transports.typescript.enabled),
         ),
       },
     ],
@@ -212,7 +243,7 @@ export async function collectAllArtifacts(
     modules: [
       {
         path: MODULE_REGISTRY_PATH,
-        contents: renderModuleRegistry(repoRoot, pluginEntries),
+        contents: renderModuleRegistry(moduleRegistry),
       },
     ],
     // Omitted when no plugin contributes invariant DDL, preserving existing
@@ -243,6 +274,7 @@ export async function collectAllArtifacts(
     ...groups.db,
     ...groups.graphql,
     ...groups.mcp,
+    ...groups.operations,
     ...groups.connectors,
     ...groups.modules,
     ...groups.pluginMigrations,

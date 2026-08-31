@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
 import { print, parse } from "graphql";
-import { generatePersistedOperationArtifacts } from "./persisted-operations.js";
+import {
+  generatePersistedOperationArtifacts,
+  renderEmptyApiPersistedOperationArtifact,
+} from "./persisted-operations.js";
 
 const roots: string[] = [];
 
@@ -16,6 +19,16 @@ afterEach(async () => {
 });
 
 describe("persisted operation artifacts", () => {
+  test("emits a deterministic empty API catalog for a headless host", () => {
+    const artifact = renderEmptyApiPersistedOperationArtifact();
+    expect(artifact.path).toBe("apps/api/src/generated/graphql/persisted-operations.json");
+    expect(JSON.parse(artifact.contents)).toMatchObject({
+      version: 1,
+      operationNames: [],
+      operations: {},
+    });
+  });
+
   test("collects checked-in, generated, conditional, and config operations deterministically", async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), "osf-persisted-"));
     roots.push(repoRoot);

@@ -88,6 +88,13 @@ is expected to gitignore these and gate them with its own copies of the
 check scripts (or by invoking `collectAllArtifacts(repoRoot)` — the same
 in-memory entry point `scripts/check-generated-artifacts.mjs` uses here).
 
+Plugins that declare canonical operations additionally emit
+`apps/api/src/generated/operations/{catalog.json,client-metadata.json}`. The
+same declarations are merged into REST OpenAPI, MCP tools, and GraphQL
+documentation. A host runtime must use the matching runtime module and bind all
+declared handlers; serving a stale compiler half with a different runtime half
+is a startup/readiness failure, not a partial compatibility mode.
+
 ## The web app
 
 Web UI artifact generation is keyed on one thing: an **`apps/web` directory

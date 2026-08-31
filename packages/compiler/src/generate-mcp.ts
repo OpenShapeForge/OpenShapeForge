@@ -24,6 +24,7 @@ import type {
   CompiledRelationship,
 } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
+import type { CompiledPluginOperation } from "./generate-operations.js";
 import {
   compiledFieldSchema,
   compiledObjectSchema,
@@ -342,6 +343,17 @@ export type McpCatalog = {
   source: string;
   entities: McpEntityCatalogEntry[];
   tools: McpToolDefinition[];
+  operationTools: {
+    key: string;
+    plugin: string;
+    name: string;
+    title: string;
+    description: string;
+    inputSchema: Record<string, unknown>;
+    outputSchema: Record<string, unknown>;
+    auth: CompiledPluginOperation["auth"];
+    annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean };
+  }[];
 };
 
 export type McpCatalogInput = {
@@ -363,6 +375,7 @@ export function buildMcpCatalog(
   inputs: McpCatalogInput[],
   source: string,
   referentiedata: CoreReferentiedataSnapshot = {},
+  operations: readonly CompiledPluginOperation[] = [],
 ): McpCatalog {
   const opted = inputs
     .filter((input) => input.contract.mcp !== undefined)
@@ -433,7 +446,24 @@ export function buildMcpCatalog(
   }
 
   const dedicatedCount = tools.filter((tool) => !tool.name.startsWith("osf_")).length;
-  if (dedicatedCount > MAX_DEDICATED_TOOLS) {
+  const operationTools = operations
+    .filter((operation) => operation.transports.mcp.enabled)
+    .map((operation) => ({
+      key: operation.key,
+      plugin: operation.plugin,
+      name: operation.transports.mcp.enabled ? operation.transports.mcp.name : "",
+      title: operation.title,
+      description: operation.description,
+      inputSchema: operation.inputSchema,
+      outputSchema: operation.outputSchema,
+      auth: operation.auth,
+      annotations: {
+        readOnlyHint: operation.transports.rest.method === "GET",
+        destructiveHint: operation.transports.rest.method === "DELETE",
+        idempotentHint: operation.idempotency.mode !== "none",
+      },
+    }));
+  if (dedicatedCount + operationTools.length > MAX_DEDICATED_TOOLS) {
     const offenders = opted
       .filter((input) => input.contract.mcp!.tools === "dedicated")
       .map((input) => input.slug)
@@ -451,6 +481,7 @@ export function buildMcpCatalog(
     source,
     entities,
     tools,
+    operationTools,
   };
 }
 
@@ -458,6 +489,7 @@ export function renderMcpCatalog(
   inputs: McpCatalogInput[],
   source: string,
   referentiedata: CoreReferentiedataSnapshot = {},
+  operations: readonly CompiledPluginOperation[] = [],
 ): string {
-  return `${JSON.stringify(buildMcpCatalog(inputs, source, referentiedata), null, 2)}\n`;
+  return `${JSON.stringify(buildMcpCatalog(inputs, source, referentiedata, operations), null, 2)}\n`;
 }

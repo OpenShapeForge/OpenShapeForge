@@ -72,6 +72,9 @@ import {
   connectorRegistry,
 } from "../connectors/dispatch.js";
 import { invokeConnectorOperation } from "../connectors/runtime.js";
+import type { RuntimeModule } from "../modules/contract.js";
+import type { TrustedSessionContext } from "../auth/trusted-context.js";
+import { bindOperationHandlers, invokeOperation } from "../operations/runtime.js";
 
 export const MCP_MOUNT_PATH = "/api/mcp";
 
@@ -142,6 +145,17 @@ type Catalog = {
   generatedBy: string;
   source: string;
   tools: CatalogTool[];
+  operationTools: {
+    key: string;
+    plugin: string;
+    name: string;
+    title: string;
+    description: string;
+    inputSchema: Record<string, unknown>;
+    outputSchema: Record<string, unknown>;
+    auth: { mode: "public" } | { mode: "session"; roles: string[]; scopes?: string[] };
+    annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean };
+  }[];
   entities: CatalogEntity[];
 };
 const catalog = rawCatalog as unknown as Catalog;
@@ -611,12 +625,25 @@ async function invokeTool(
   }
 }
 
-function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Server {
+function operationMayInvoke(tool: Catalog["operationTools"][number], session: TrustedSessionContext): boolean {
+  if (tool.auth.mode === "public") return true;
+  const roles = new Set(session.roles);
+  const scopes = new Set(session.oauthScopes ?? []);
+  return tool.auth.roles.some((role) => roles.has(role)) &&
+    (tool.auth.scopes ?? []).every((scope) => scopes.has(scope));
+}
+
+function buildServer(
+  db: OpenShapeForgeDatabase,
+  session: TrustedSessionContext,
+  modules: readonly RuntimeModule[] | undefined,
+): Server {
   const server = new Server(SERVER_INFO, {
     capabilities: { tools: {}, resources: {}, prompts: {} },
     instructions: INSTRUCTIONS,
   });
   const tables = tablesByName();
+  const operations = modules === undefined ? new Map() : bindOperationHandlers(modules);
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const entries = entitiesForSession(session, tables);
@@ -687,11 +714,37 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
         inputSchema: tool.inputSchema,
         annotations: { title: tool.title, ...tool.annotations },
       })),
+      ...catalog.operationTools
+        .filter((tool) => operations.has(tool.key) && operationMayInvoke(tool, session))
+        .map((tool) => ({
+          name: tool.name,
+          title: tool.title,
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+          annotations: { title: tool.title, ...tool.annotations },
+        })),
     ],
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
+
+    const operationTool = catalog.operationTools.find((tool) => tool.name === name);
+    if (operationTool) {
+      if (!operations.has(operationTool.key) || !operationMayInvoke(operationTool, session)) {
+        return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
+      }
+      try {
+        const result = await invokeOperation(
+          operations.get(operationTool.key)!,
+          request.params.arguments ?? {},
+          { db, session, transport: "mcp" },
+        );
+        return ok(result.value);
+      } catch (error) {
+        return failed(error);
+      }
+    }
 
     // Connector operations dispatch outside CRUD — own input schema, own
     // executor — so they are resolved before the entity table lookup. An
@@ -742,17 +795,17 @@ function buildServer(db: OpenShapeForgeDatabase, session: DbSessionInput): Serve
 
 export function registerGeneratedMcpServer(
   app: FastifyInstance,
-  options: { db?: OpenShapeForgeDatabase | undefined } = {},
+  options: { db?: OpenShapeForgeDatabase | undefined; modules?: readonly RuntimeModule[] } = {},
 ): void {
   // The transport exists when EITHER surface has something to advertise; a
   // deployment with connectors but no MCP-exposed entity still needs it.
-  if (catalog.tools.length === 0 && listConnectorContracts().length === 0) {
+  if (catalog.tools.length === 0 && catalog.operationTools.length === 0 && listConnectorContracts().length === 0) {
     return;
   }
 
   async function requireMcpSession(request: FastifyRequest): Promise<{
     db: OpenShapeForgeDatabase;
-    session: DbSessionInput;
+    session: TrustedSessionContext;
   }> {
     const resolved = await resolveSessionContext(headersFromFastify(request.headers), { db: options.db });
     if (!resolved.tenantId || !resolved.userId) {
@@ -771,13 +824,7 @@ export function registerGeneratedMcpServer(
     }
     return {
       db: options.db,
-      session: {
-        tenantId: resolved.tenantId,
-        userId: resolved.userId,
-        roles: [...resolved.roles],
-        groups: [...resolved.groups],
-        scope: resolved.scope,
-      },
+      session: resolved,
     };
   }
 
@@ -825,7 +872,7 @@ export function registerGeneratedMcpServer(
         // Stateless: a fresh server and transport per request. The alternative
         // — persisting sessions — would need affinity across replicas, and
         // this transport carries no server-initiated state worth keeping.
-        const server = buildServer(db, session);
+        const server = buildServer(db, session, options.modules);
         // `sessionIdGenerator` is omitted rather than set to undefined: the SDK
         // reads it as `=== undefined` to mean stateless, and omitting keeps
         // exactOptionalPropertyTypes happy.

@@ -81,6 +81,21 @@ describe("createGraphqlContext threads resolved.scope (F5)", () => {
     // Sanity: the signed identity actually verified (not EMPTY_IDENTITY).
     expect(context.session.tenantId).not.toBeNull();
   });
+
+  test("preserves verified OAuth scopes for operation authorization", async () => {
+    const context = await createGraphqlContext(new Headers(), {
+      resolvedSession: {
+        tenantId: randomUUID(),
+        userId: randomUUID(),
+        roles: ["workflow-admin"],
+        oauthScopes: ["workflow:write"],
+        groups: [],
+        scope: "tenant",
+        credential: "bearer",
+      },
+    });
+    expect(context.session.oauthScopes).toEqual(["workflow:write"]);
+  });
 });
 
 // ── Part 2: withDbSession sets app.scope GUC (real scratch DB) ──

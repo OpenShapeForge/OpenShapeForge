@@ -37,6 +37,7 @@ export type ApiKeyResolverDeps = {
     tenantId: string | null;
     userId: string | null;
     roles: string[];
+    scopes?: string[];
     groups: string[];
   }>;
   resolveScope: (roles: readonly string[], groups: readonly string[]) => SessionScope;
@@ -131,6 +132,7 @@ export async function resolveApiKeySession(
     tenantId: identity.tenantId,
     userId: identity.userId,
     roles,
+    oauthScopes: identity.scopes ?? [],
     groups: identity.groups,
     scope: deps.resolveScope(roles, identity.groups),
     credential: "api-key",

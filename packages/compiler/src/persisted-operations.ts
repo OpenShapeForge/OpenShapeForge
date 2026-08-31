@@ -289,3 +289,11 @@ export async function generatePersistedOperationArtifacts(input: {
     { path: "apps/web/src/generated/persisted-operations.json", contents },
   ];
 }
+
+/** API-only hosts still need the runtime's unconditional persisted-operation import. */
+export function renderEmptyApiPersistedOperationArtifact(): GeneratedArtifact {
+  return {
+    path: "apps/api/src/generated/graphql/persisted-operations.json",
+    contents: manifestContents(new Set()),
+  };
+}

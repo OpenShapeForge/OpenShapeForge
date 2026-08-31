@@ -10,6 +10,7 @@
  */
 import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
+import type { CompiledPluginOperation } from "./generate-operations.js";
 import {
   compiledFieldSchema,
   describeCompiledField,
@@ -159,9 +160,29 @@ export function renderGraphqlDocumentationCatalog(
   contracts: readonly CompiledEntityContract[],
   source: string,
   referentiedata: CoreReferentiedataSnapshot = {},
+  operations: readonly CompiledPluginOperation[] = [],
 ): string {
   return `${JSON.stringify(
-    buildGraphqlDocumentationCatalog(contracts, source, referentiedata),
+    {
+      ...buildGraphqlDocumentationCatalog(contracts, source, referentiedata),
+      ...(operations.some((operation) => operation.transports.graphql.enabled)
+        ? {
+            operations: operations
+              .filter((operation) => operation.transports.graphql.enabled)
+              .map((operation) => ({
+                key: operation.key,
+                plugin: operation.plugin,
+                title: operation.title,
+                description: operation.description,
+                field: operation.transports.graphql.enabled ? operation.transports.graphql.field : "",
+                kind: operation.transports.graphql.enabled ? operation.transports.graphql.kind : "query",
+                inputSchema: operation.inputSchema,
+                outputSchema: operation.outputSchema,
+                auth: operation.auth,
+              })),
+          }
+        : {}),
+    },
     null,
     2,
   )}\n`;

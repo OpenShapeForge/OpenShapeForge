@@ -49,8 +49,81 @@ export type PluginSchemaMigration = {
   sql: string;
 };
 
+export type JsonSchema = Record<string, unknown>;
+
+export type PluginOperationError = {
+  status: number;
+  code: string;
+  description: string;
+  schema?: JsonSchema;
+};
+
+export type PluginOperationAuth =
+  | { mode: "public" }
+  | { mode: "session"; roles: string[]; scopes?: string[] }
+  | {
+      mode: "custom";
+      /** OpenAPI components.securitySchemes key. */
+      scheme: string;
+      description: string;
+      securityScheme:
+        | { type: "apiKey"; in: "header" | "query" | "cookie"; name: string }
+        | { type: "http"; scheme: string; bearerFormat?: string };
+    };
+
+export type DisabledOperationProjection = {
+  enabled: false;
+  /** Why this canonical operation cannot be represented honestly on the transport. */
+  reason: string;
+};
+
+export type PluginOperationContract = {
+  /** Stable, globally unique key. Prefix with the plugin name, e.g. `workflow.instance.start`. */
+  key: string;
+  title: string;
+  description: string;
+  /** Key in the runtime module's `operationHandlers` map. */
+  handler: string;
+  inputSchema: JsonSchema;
+  outputSchema: JsonSchema;
+  errors: PluginOperationError[];
+  auth: PluginOperationAuth;
+  tenancy: {
+    mode: "required" | "derived" | "none";
+    description?: string;
+  };
+  idempotency: {
+    mode: "none" | "intrinsic" | "idempotency-key";
+    header?: string;
+    description?: string;
+  };
+  transports: {
+    rest: {
+      method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+      path: string;
+      response: {
+        /** Successful REST status; defaults to 200 when omitted. */
+        status?: number;
+        kind: "json" | "binary" | "stream";
+        contentType?: string;
+      };
+    };
+    mcp:
+      | { enabled: true; name: string }
+      | DisabledOperationProjection;
+    graphql:
+      | { enabled: true; kind: "query" | "mutation"; field: string }
+      | DisabledOperationProjection;
+    typescript: { enabled: true; functionName: string } | DisabledOperationProjection;
+  };
+};
+
 export type CompilerPlugin = {
   name: string;
+  /** Canonical command/query contracts projected into every supported transport. */
+  operations?:
+    | PluginOperationContract[]
+    | ((context: PluginBaseContext) => PluginOperationContract[]);
   /**
    * Extra platform tables merged into the base manifest before authoring
    * entities are promoted (e.g. a workflow plugin's catalog/instance tables).

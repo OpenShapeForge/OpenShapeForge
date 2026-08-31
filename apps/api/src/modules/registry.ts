@@ -7,12 +7,11 @@
  * job, for the reason `connectors/loader.ts` gives — output that depended on
  * node_modules would break the determinism gates.
  *
- * Loading is fail-soft, and deliberately so: a module that throws on import, or
- * that loads as something other than a `RuntimeModule`, is recorded as a
- * failure and skipped. One broken plugin must not take the API down, exactly as
- * one broken connector must not. The cost is that its surfaces are silently
- * absent, so every failure is logged once with its reason at startup rather
- * than discovered when a query 404s.
+ * Loading is fail-soft for ordinary module contributions: a module that throws
+ * on import, or that loads as something other than a `RuntimeModule`, is
+ * recorded as a failure and skipped. Canonical operations are the exception:
+ * the API boot path cross-checks their compiler contract against the surviving
+ * modules and fails closed rather than silently deleting a generated surface.
  *
  * The name check is not ceremony. The registry entry carries the plugin's
  * compiler-side name, and the loaded module carries its own; if they disagree,

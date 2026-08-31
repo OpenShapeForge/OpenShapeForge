@@ -62,6 +62,11 @@ import {
   createApiReadinessChecks,
   enforceGeneratedSchemaFreshness,
 } from "./api-readiness.js";
+import {
+  bindOperationHandlers,
+  listOperationContracts,
+  registerOperationRestRoutes,
+} from "../operations/runtime.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -293,6 +298,13 @@ export function createApiApp(options: {
   // plugin loads) would silently escape the limiter.
   void app.register(async (routes) => {
     const initialised = await initRuntimeModules(modules, dbOptions);
+    const operationPlugins = new Set(listOperationContracts().map((operation) => operation.plugin));
+    const operationModulesConfigured = modules.loaded.some((module) => operationPlugins.has(module.name)) ||
+      modules.failures.some((failure) => operationPlugins.has(failure.name));
+    // Ordinary runtime modules remain fail-soft. A canonical operation is a
+    // stronger promise: every generated transport points at its handler, so a
+    // load/init failure must stop boot instead of silently deleting the API.
+    if (operationModulesConfigured) bindOperationHandlers(initialised.loaded);
     ready = {
       yoga: createGraphqlYoga({
         ...dbOptions,
@@ -417,7 +429,10 @@ export function createApiApp(options: {
       publicOrigin: process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN,
       appOrigin: process.env.OPENSHAPEFORGE_APP_ORIGIN,
     });
-    registerGeneratedMcpServer(routes, dbOptions);
+    registerGeneratedMcpServer(routes, {
+      ...dbOptions,
+      ...(operationModulesConfigured ? { modules: initialised.loaded } : {}),
+    });
     registerProtectedResourceMetadata(routes);
     registerAuthorizationServerMetadataAliases(routes);
     registerApiKeyRestRoutes(routes, {
@@ -431,6 +446,9 @@ export function createApiApp(options: {
 
     for (const module of initialised.loaded) {
       module.restRoutes?.(routes, dbOptions);
+    }
+    if (operationModulesConfigured) {
+      registerOperationRestRoutes(routes, initialised.loaded, dbOptions);
     }
   });
 

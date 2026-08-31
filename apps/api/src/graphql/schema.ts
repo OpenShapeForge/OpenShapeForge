@@ -48,6 +48,7 @@ import { readApiKeyProvisioningConfig } from "../auth/api-key/runtime-config.js"
 import type { GraphqlContext } from "./context.js";
 import type { ModuleRuntimeContext, RuntimeModule } from "../modules/contract.js";
 import { composeModuleGraphql, declaredFieldNames } from "../modules/graphql-composition.js";
+import { operationGraphqlContribution } from "../operations/runtime.js";
 
 // The connector catalog types are static — identical across deployments — so a
 // connector this deployment is not licensed for is a row with
@@ -76,7 +77,8 @@ export function buildGraphqlSchema(
   modules: readonly RuntimeModule[] = [],
   context: ModuleRuntimeContext = {},
 ) {
-  const moduleGraphql = composeModuleGraphql(modules, context, {
+  const operationModule = operationGraphqlContribution(modules, context);
+  const moduleGraphql = composeModuleGraphql(operationModule ? [...modules, operationModule] : modules, context, {
     query: coreQueryFieldNames,
     mutation: coreMutationFieldNames,
   });

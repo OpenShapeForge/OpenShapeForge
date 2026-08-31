@@ -11,6 +11,8 @@ export type GraphqlSessionContext = {
   tenantId: string | null;
   userId: string | null;
   roles: string[];
+  /** OAuth scopes from a verified bearer or API-key identity. */
+  oauthScopes?: string[];
   /**
    * Keycloak group paths from the trusted-context bundle. Empty array when
    * the caller did not propagate group claims (e.g. legacy callers, bearer
@@ -54,6 +56,7 @@ export async function createGraphqlContext(
     tenantId: resolved.tenantId,
     userId: resolved.userId,
     roles: [...resolved.roles],
+    oauthScopes: [...(resolved.oauthScopes ?? [])],
     groups: [...resolved.groups],
     scope: resolved.scope,
     credential: resolved.credential,

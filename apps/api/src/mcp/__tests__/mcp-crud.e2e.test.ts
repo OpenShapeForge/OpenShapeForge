@@ -9,8 +9,10 @@
  * are exercised against the same data and RLS session plumbing.
  */
 import { afterAll, expect } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { createApiApp } from "../../roles/api.js";
+import { loadRuntimeModules } from "../../modules/registry.js";
 import { MCP_MOUNT_PATH } from "../generated-mcp-server.js";
 import catalog from "../../generated/mcp/tools.json" with { type: "json" };
 import {
@@ -41,11 +43,13 @@ registerSuiteLifecycle();
 const SECRET = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ?? null;
 
 let app: ReturnType<typeof createApiApp> | null = null;
+const runtimeModules = await loadRuntimeModules();
+expect(runtimeModules.failures).toEqual([]);
 function getApp() {
   app ??= createApiApp(
     process.env.DATABASE_URL
-      ? { cors: false, databaseUrl: process.env.DATABASE_URL }
-      : { cors: false },
+      ? { cors: false, databaseUrl: process.env.DATABASE_URL, modules: runtimeModules }
+      : { cors: false, modules: runtimeModules },
   );
   return app;
 }
@@ -121,6 +125,11 @@ function resourcePayload(body: any): any {
 }
 
 const mcpTables = tables.filter((table) => table.source?.mcp);
+const workflowOperator: Identity = {
+  tenantId: tenantA.tenantId,
+  userId: randomUUID(),
+  roles: ["workflow-admin"],
+};
 
 async function callTool(
   identity: Identity | null,
@@ -177,6 +186,21 @@ describe("generated MCP server", () => {
     expect(status).toBe(200);
     const names = (body.result.tools as { name: string }[]).map((tool) => tool.name);
     expect(names).toEqual(catalog.tools.map((tool) => tool.name));
+  });
+
+  test("binds, authorizes and dispatches a canonical operation tool", async () => {
+    const listed = await rpc(workflowOperator, "tools/list");
+    expect(listed.status).toBe(200);
+    const tools = listed.body.result.tools as { name: string; inputSchema: unknown }[];
+    expect(tools).toContainEqual(expect.objectContaining({
+      name: "workflow_start_webhook",
+      inputSchema: expect.objectContaining({ type: "object" }),
+    }));
+
+    const called = await callTool(workflowOperator, "workflow_start_webhook", {
+      definitionId: randomUUID(),
+    });
+    expect(toolError(called.body)).toMatch(/NOT_FOUND/);
   });
 
   test("carries the authored field schema into the tool input schema", async () => {

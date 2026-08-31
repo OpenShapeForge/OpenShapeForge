@@ -20,10 +20,9 @@
  * (versioning, validate-on-publish, the edit lock, refusing to delete a
  * definition with runs) lives above the columns rather than in them.
  *
- * `restRoutes` mounts the inbound webhook trigger. The host calls it inside the
- * same child plugin the core routes use, so a contributed route sits behind the
- * rate limiter without asking — which matters most for the one route here,
- * since it is the only workflow surface an outside caller reaches directly.
+ * `operationHandlers` binds the inbound webhook's canonical compiler contract.
+ * The host projects it through the same rate-limited REST child plugin and the
+ * generated MCP and GraphQL surfaces, without a second transport-specific route.
  *
  * It also contributes the `workflow-worker` role — the process that drains the
  * control-command queue. That is contributed rather than hardcoded in
@@ -49,7 +48,7 @@ import { hydrateNodeCatalog } from "./runtime/node-catalog-store.js";
 import { registerAllWorkflowNodeBridges } from "./runtime/node-bridges.js";
 import { startWorkflowScheduleWorker } from "./runtime/schedule-worker.js";
 import { startWorkflowTimerWaitWorker } from "./runtime/timer-waits.js";
-import { registerWorkflowWebhookRoutes } from "./runtime/webhook-routes.js";
+import { handleWorkflowWebhookOperation } from "./runtime/webhook-routes.js";
 import { WORKFLOW_WORKER_ROLE } from "./worker-role.js";
 
 const plugin: RuntimeModule = {
@@ -86,9 +85,8 @@ const plugin: RuntimeModule = {
    * `POST /api/workflow/triggers/webhook/:definitionId` — the one workflow
    * surface reached from outside rather than through GraphQL.
    *
-   * It is not anonymous: the handler resolves a session from the request
-   * headers and refuses without a verified tenant and user, then the start
-   * command applies the same writer-role check every other start path does. So
+   * It is not anonymous: the shared operation runtime resolves and authorizes
+   * the session, then the start command applies the same writer-role check. So
    * "webhook" here means an authenticated caller poking a definition, not an
    * arbitrary third party — there is no payload signature to verify because
    * there is no shared secret with a sender.
@@ -97,8 +95,8 @@ const plugin: RuntimeModule = {
    * the handler answers 503 rather than throwing, which is why it is passed
    * straight through instead of being guarded here.
    */
-  restRoutes(routes, context) {
-    registerWorkflowWebhookRoutes(routes, context);
+  operationHandlers: {
+    startWebhook: handleWorkflowWebhookOperation,
   },
 
   /**

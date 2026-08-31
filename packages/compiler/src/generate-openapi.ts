@@ -34,6 +34,10 @@ import type {
   TableDefinition,
 } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
+import {
+  operationOpenApiPaths,
+  type CompiledPluginOperation,
+} from "./generate-operations.js";
 
 const REST_MOUNT = "/api/rest/v1";
 const FIELD_DEFINITION_COMPONENT = "OpenShapeForgeFieldDefinition";
@@ -55,6 +59,7 @@ export type OpenApiEntityInput = {
 export type OpenApiSpecOptions = {
   entities?: OpenApiEntityInput[];
   referentiedata?: CoreReferentiedataSnapshot;
+  operations?: CompiledPluginOperation[];
 };
 
 function fieldNameForColumn(
@@ -625,6 +630,30 @@ export function renderOpenApiSpec(
     }
   }
 
+  const operationPaths = operationOpenApiPaths(options.operations ?? []) as JsonObject;
+  for (const [path, rawMethods] of Object.entries(operationPaths)) {
+    const methods = rawMethods as JsonObject;
+    const existing = (paths[path] ?? {}) as JsonObject;
+    for (const method of Object.keys(methods)) {
+      if (method in existing) {
+        throw new Error(`Plugin operation collides with generated REST route ${method.toUpperCase()} ${path}.`);
+      }
+    }
+    paths[path] = { ...existing, ...methods };
+  }
+
+  const customSecuritySchemes = Object.fromEntries(
+    (options.operations ?? [])
+      .filter((operation) => operation.auth.mode === "custom")
+      .map((operation) => {
+        const auth = operation.auth as Extract<typeof operation.auth, { mode: "custom" }>;
+        return [auth.scheme, {
+          description: auth.description,
+          ...auth.securityScheme,
+        }];
+      }),
+  );
+
   const spec = {
     openapi: "3.1.0",
     info: {
@@ -636,6 +665,7 @@ export function renderOpenApiSpec(
     components: {
       securitySchemes: {
         bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
+        ...customSecuritySchemes,
       },
       schemas,
     },

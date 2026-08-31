@@ -26,13 +26,13 @@
     "@openshapeforge/observability": "workspace:*",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
-    "fastify": "^5.8.2",
+    "fastify": "^5.12.1",
     "graphql": "^16.13.2",
     "graphql-yoga": "^5.22.0",
-    "kysely": "^0.29.4",
+    "kysely": "^0.29.5",
     "kysely-postgres-js": "3.0.0",
     "postgres": "^3.4.0",
-    "swagger-ui-dist": "^5.32.11"
+    "swagger-ui-dist": "^5.32.14"
   },
   "devDependencies": {
     "@openshapeforge/connector-afas-profit": "workspace:*",
@@ -40,7 +40,7 @@
     "@openshapeforge/connector-exact-online": "workspace:*",
     "@openshapeforge/connector-example-object-store": "workspace:*",
     "@openshapeforge/connector-twinfield": "workspace:*",
-    "@types/bun": "^1.3.5",
+    "@types/bun": "^1.4.0",
     "typescript": "^5.9.0"
   }
 }

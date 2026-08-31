@@ -199,6 +199,7 @@ describe("generated MCP server", () => {
 
     const called = await callTool(workflowOperator, "workflow_start_webhook", {
       definitionId: randomUUID(),
+      idempotencyKey: randomUUID(),
     });
     expect(toolError(called.body)).toMatch(/NOT_FOUND/);
   });

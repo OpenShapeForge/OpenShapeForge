@@ -607,6 +607,7 @@ async function postWebhook(
   ): Promise<{ status: number; body: any }> {
     const headers: Record<string, string> = {
       "content-type": "application/json",
+      "idempotency-key": randomUUID(),
       ...extraHeaders,
     };
     if (bearer) headers.authorization = `Bearer ${bearer}`;
@@ -634,7 +635,7 @@ async function postWebhook(
         method: "tools/call",
         params: {
           name: "workflow_start_webhook",
-          arguments: { definitionId, context: { source: "mcp round trip" } },
+          arguments: { definitionId, context: { source: "mcp round trip" }, idempotencyKey: randomUUID() },
         },
       }),
     });
@@ -690,7 +691,7 @@ async function postWebhook(
     async () => {
       const definitionId = await publishTriggerable(writerToken!);
       const data = await expectData(writerToken!, START_WEBHOOK_OPERATION, {
-        input: { definitionId, context: { source: "graphql round trip" } },
+        input: { definitionId, context: { source: "graphql round trip" }, idempotencyKey: randomUUID() },
       });
       expect(data.workflowStartWebhook).toMatchObject({
         status: "accepted",

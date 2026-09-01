@@ -7,11 +7,15 @@
  * pointing at nothing.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import Fastify from "fastify";
 import { createApiApp } from "../../roles/api.js";
 import { MCP_MOUNT_PATH } from "../generated-mcp-server.js";
 import {
+  AUTHORIZATION_SERVER_METADATA_PREFIXES,
   PROTECTED_RESOURCE_METADATA_PATH,
   buildProtectedResourceMetadata,
+  registerAuthorizationServerMetadataAliases,
+  resetIssuerMetadataCache,
 } from "../protected-resource-metadata.js";
 
 let app: ReturnType<typeof createApiApp>;
@@ -84,6 +88,77 @@ describe("protected resource metadata", () => {
     expect(buildProtectedResourceMetadata(request, undefined).resource).toBe(
       "https://mcp.example.com/api/mcp",
     );
+  });
+});
+
+describe("RFC 8414 path-inserted authorization server metadata", () => {
+  // A standards-compliant client can resolve the issuer via the INSERTED
+  // spelling (/.well-known/…/auth/realms/example), which Keycloak does not
+  // serve and which routes to this app. These aliases mirror its document.
+  const issuerEnv = "OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER";
+  const previousIssuer = process.env[issuerEnv];
+
+  afterAll(() => {
+    if (previousIssuer === undefined) delete process.env[issuerEnv];
+    else process.env[issuerEnv] = previousIssuer;
+  });
+
+  test("answers 404 when no issuer is configured — nothing to mirror", async () => {
+    delete process.env[issuerEnv];
+    resetIssuerMetadataCache();
+    const response = await app.inject({
+      method: "GET",
+      url: "/.well-known/oauth-authorization-server/auth/realms/example",
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  test("mirrors the issuer's document for its exact path, on both spellings", async () => {
+    process.env[issuerEnv] = "https://idp.example.com/auth/realms/example";
+    resetIssuerMetadataCache();
+    // A bare instance: the real app registers the aliases itself, and a second
+    // registration of the same wildcard would collide.
+    const mirrored = Fastify();
+    registerAuthorizationServerMetadataAliases(mirrored, async () => ({
+      ok: true,
+      text: async () =>
+        JSON.stringify({ issuer: "https://idp.example.com/auth/realms/example" }),
+    }));
+    await mirrored.ready();
+    try {
+      for (const prefix of AUTHORIZATION_SERVER_METADATA_PREFIXES) {
+        const response = await mirrored.inject({
+          method: "GET",
+          url: `${prefix}/auth/realms/example`,
+        });
+        expect(response.statusCode).toBe(200);
+        expect(JSON.parse(response.body).issuer).toBe(
+          "https://idp.example.com/auth/realms/example",
+        );
+      }
+    } finally {
+      await mirrored.close();
+    }
+  });
+
+  test("refuses any other path — a mirror of one document, not an open relay", async () => {
+    process.env[issuerEnv] = "https://idp.example.com/auth/realms/example";
+    resetIssuerMetadataCache();
+    const mirrored = Fastify();
+    registerAuthorizationServerMetadataAliases(mirrored, async () => ({
+      ok: true,
+      text: async () => "{}",
+    }));
+    await mirrored.ready();
+    try {
+      const response = await mirrored.inject({
+        method: "GET",
+        url: "/.well-known/oauth-authorization-server/auth/realms/other",
+      });
+      expect(response.statusCode).toBe(404);
+    } finally {
+      await mirrored.close();
+    }
   });
 });
 

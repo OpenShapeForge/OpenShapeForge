@@ -22,11 +22,80 @@
 import { describe, expect, it } from "bun:test";
 import {
   __assertWritableValuesForTests as assertWritableValues,
+  __clientSupportsMcpAppForTests as clientSupportsMcpApp,
+  __configurationAppResultForTests as configurationAppResult,
   __describeEntityResourceForTests as describeEntityResource,
   __describeToolForTests as describeTool,
   __sessionMayInvokeForTests as sessionMayInvoke,
   __withholdClassifiedForTests as withholdClassified,
 } from "../generated-mcp-server.js";
+
+describe("MCP App capability negotiation", () => {
+  it("uses the app only when the official extension advertises its MIME type", () => {
+    expect(
+      clientSupportsMcpApp({
+        extensions: {
+          "io.modelcontextprotocol/ui": {
+            mimeTypes: ["text/html;profile=mcp-app"],
+          },
+        },
+      }),
+    ).toBe(true);
+    expect(clientSupportsMcpApp({ extensions: {} })).toBe(false);
+    expect(
+      clientSupportsMcpApp({
+        extensions: {
+          "io.modelcontextprotocol/ui": { mimeTypes: ["text/html"] },
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it("links elicited create tools to the fixed private app resource", () => {
+    const described = describeTool(
+      tool(CREATE_SCHEMA),
+      {
+        ...(entity([]) as AnyRecord),
+        elicitOnCreate: {
+          sourceTable: "erp.providers",
+          sourceField: "providerId",
+          definitionsField: "fields",
+          into: "configurationValues",
+        },
+      } as never,
+      table(),
+      session(WRITE),
+    ) as AnyRecord;
+    expect(described._meta).toEqual({
+      ui: { resourceUri: "ui://openshapeforge/configuration" },
+    });
+  });
+
+  it("keeps the bearer handoff URL out of model-visible content", () => {
+    const previous = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+    process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = "https://api.example.test";
+    try {
+      const result = configurationAppResult(
+        { status: "awaiting_person" },
+        "private-token",
+        "Provider",
+      );
+      expect(result.content[0]?.text).not.toContain("private-token");
+      expect(JSON.stringify(result._meta)).toContain("private-token");
+      expect(result._meta).toEqual({
+        configurationUrl:
+          "https://api.example.test/api/entity-configuration/private-token",
+        displayName: "Provider",
+      });
+    } finally {
+      if (previous === undefined) {
+        delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+      } else {
+        process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = previous;
+      }
+    }
+  });
+});
 
 type AnyRecord = Record<string, unknown>;
 

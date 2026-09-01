@@ -23,6 +23,7 @@ import type {
   CompiledField,
   CompiledRelationship,
 } from "./authoring/types.js";
+import { pluralize } from "./authoring/compiler/helpers.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import {
   compiledFieldSchema,
@@ -55,7 +56,12 @@ const READ_OPERATIONS = new Set(["list", "get"]);
  * maintained by the database. Mirrors writableColumnMap in the API's CRUD
  * layer and isWritableColumn in the OpenAPI generator.
  */
-const SERVER_MANAGED_FIELDS = new Set(["id", "tenantId", "createdAt", "updatedAt"]);
+const SERVER_MANAGED_FIELDS = new Set([
+  "id",
+  "tenantId",
+  "createdAt",
+  "updatedAt",
+]);
 
 /**
  * Fields a caller may write, mirroring the CRUD layer's writability rule so the
@@ -87,7 +93,10 @@ function writableFields(
 
 function sortableFieldKeys(fields: CompiledField[]): string[] {
   return fields
-    .filter((field) => field.cardinality !== "collection" && field.valueType !== "object")
+    .filter(
+      (field) =>
+        field.cardinality !== "collection" && field.valueType !== "object",
+    )
     .map((field) => field.key);
 }
 
@@ -97,7 +106,9 @@ function classifiedFieldKeys(fields: CompiledField[]): string[] {
     .filter((field) => {
       const sensitivity = field.classification?.sensitivity;
       return (
-        sensitivity === "confidential" || sensitivity === "pii" || sensitivity === "bsn"
+        sensitivity === "confidential" ||
+        sensitivity === "pii" ||
+        sensitivity === "bsn"
       );
     })
     .map((field) => field.key);
@@ -122,22 +133,45 @@ function annotationsFor(operation: McpToolDefinition["operation"]) {
   switch (operation) {
     case "list":
     case "get":
-      return { readOnlyHint: true, destructiveHint: false, idempotentHint: true };
+      return {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+      };
     case "create":
-      return { readOnlyHint: false, destructiveHint: false, idempotentHint: false };
+      return {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      };
     case "update":
-      return { readOnlyHint: false, destructiveHint: false, idempotentHint: true };
+      return {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      };
     case "delete":
-      return { readOnlyHint: false, destructiveHint: true, idempotentHint: true };
+      return {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+      };
   }
 }
 
 function entityLabel(contract: CompiledEntityContract): string {
-  return localizedText(contract.entity.labels) ?? contract.entity.title ?? contract.entity.name;
+  return (
+    localizedText(contract.entity.labels) ??
+    contract.entity.title ??
+    contract.entity.name
+  );
 }
 
 function entityDescription(contract: CompiledEntityContract): string {
-  return localizedText(contract.entity.description) ?? `The ${entityLabel(contract)} entity.`;
+  return (
+    localizedText(contract.entity.description) ??
+    `The ${entityLabel(contract)} entity.`
+  );
 }
 
 function buildToolsForEntity(
@@ -149,8 +183,14 @@ function buildToolsForEntity(
   if (!mcp) return [];
 
   const fields = contract.model.fields;
-  const creatable = writableFields(fields, "create");
-  const updatable = writableFields(fields, "update");
+  // The elicited target field never appears in the create schema: its values
+  // come from the person at the client via elicitation, not from the model.
+  const creatable = writableFields(fields, "create").filter(
+    (field) => field.key !== mcp.elicitOnCreate?.into,
+  );
+  const updatable = writableFields(fields, "update").filter(
+    (field) => field.key !== mcp.elicitOnCreate?.into,
+  );
   const label = entityLabel(contract);
   const description = entityDescription(contract);
   const sortable = sortableFieldKeys(fields);
@@ -160,20 +200,39 @@ function buildToolsForEntity(
   const idSchema: JsonObject = {
     type: "object",
     properties: {
-      id: { type: "string", format: "uuid", description: `Identifier of the ${label}.` },
+      id: {
+        type: "string",
+        format: "uuid",
+        description: `Identifier of the ${label}.`,
+      },
     },
     required: ["id"],
     additionalProperties: false,
   };
 
   const named = (operation: McpToolDefinition["operation"]) =>
-    mcp.tools === "dedicated" ? `${mcp.toolPrefix}_${operation}` : `osf_${operation}`;
+    mcp.tools === "dedicated"
+      ? (mcp.toolOverrides?.[operation]?.name ??
+        `${mcp.toolPrefix}_${operation}`)
+      : `osf_${operation}`;
+
+  // Authored description wins outright: an author writing one is correcting
+  // the composed default, so nothing is appended to it.
+  const described = (
+    operation: McpToolDefinition["operation"],
+    fallback: string,
+  ) => mcp.toolOverrides?.[operation]?.description ?? fallback;
 
   if (mcp.operations.list) {
     const filterProperties: JsonObject = {};
     for (const field of fields) {
-      if (field.cardinality === "collection" || field.valueType === "object") continue;
-      const schema = compiledFieldSchema(field, referentiedata, MCP_FIELD_SCHEMA_OPTIONS);
+      if (field.cardinality === "collection" || field.valueType === "object")
+        continue;
+      const schema = compiledFieldSchema(
+        field,
+        referentiedata,
+        MCP_FIELD_SCHEMA_OPTIONS,
+      );
       // Filters are always optional and never defaulted — a default here would
       // silently narrow a caller's result set.
       delete schema.default;
@@ -185,10 +244,14 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: `List ${label}`,
-      description:
+      description: described(
+        "list",
         `${description} Returns a page of records. Text filters match on substring; ` +
-        `other types match exactly.` +
-        (filterField ? ` Free-text search is usually best against "${filterField}".` : ""),
+          `other types match exactly.` +
+          (filterField
+            ? ` Free-text search is usually best against "${filterField}".`
+            : ""),
+      ),
       inputSchema: {
         type: "object",
         properties: {
@@ -196,7 +259,8 @@ function buildToolsForEntity(
             type: "object",
             properties: filterProperties,
             additionalProperties: false,
-            description: "Field equality/substring filters. Omit for no filtering.",
+            description:
+              "Field equality/substring filters. Omit for no filtering.",
           },
           sortField: {
             type: "string",
@@ -228,7 +292,10 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: `Get ${label}`,
-      description: `${description} Fetches a single record by id.`,
+      description: described(
+        "get",
+        `${description} Fetches a single record by id.`,
+      ),
       inputSchema: idSchema,
       annotations: annotationsFor("get"),
     });
@@ -241,9 +308,10 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: `Create ${label}`,
-      description: `${description} Creates a new record.`,
+      description: described("create", `${description} Creates a new record.`),
       inputSchema: compiledObjectSchema(creatable, referentiedata, {
         requireRequired: true,
+        defaultsAreMaterialized: true,
         ...MCP_FIELD_SCHEMA_OPTIONS,
       }),
       annotations: annotationsFor("create"),
@@ -264,11 +332,18 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: `Update ${label}`,
-      description: `${description} Partially updates a record; omitted fields are left unchanged.`,
+      description: described(
+        "update",
+        `${description} Partially updates a record; omitted fields are left unchanged.`,
+      ),
       inputSchema: {
         type: "object",
         properties: {
-          id: { type: "string", format: "uuid", description: `Identifier of the ${label}.` },
+          id: {
+            type: "string",
+            format: "uuid",
+            description: `Identifier of the ${label}.`,
+          },
           values: patch,
         },
         required: ["id", "values"],
@@ -285,7 +360,10 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: `Delete ${label}`,
-      description: `${description} Permanently deletes a record by id.`,
+      description: described(
+        "delete",
+        `${description} Permanently deletes a record by id.`,
+      ),
       inputSchema: idSchema,
       annotations: annotationsFor("delete"),
     });
@@ -311,6 +389,7 @@ export type McpEntityCatalogEntry = {
    * read them, so the schema itself is not an enumeration oracle.
    */
   classifiedFields: string[];
+  elicitOnCreate?: McpElicitOnCreateDefinition;
   fields: {
     key: string;
     label?: string;
@@ -337,11 +416,103 @@ export type McpEntityCatalogEntry = {
   }[];
 };
 
+export type McpResourceDefinition = {
+  /** Direct catalogue resource URI, exactly as authored. */
+  uri: string;
+  name: string;
+  description: string;
+  /** Single-record template, derived as `<uri>/{id}`. */
+  templateUri: string;
+  templateName: string;
+  templateDescription: string;
+  entity: string;
+  table: string;
+};
+
+export type McpElicitOnCreateDefinition = {
+  sourceField: string;
+  sourceEntity: string;
+  /** Physical table of the source entity, resolved at catalog build. */
+  sourceTable: string;
+  definitionsField: string;
+  into: string;
+  message?: string;
+};
+
+export type McpDerivedExecutionDefinition = {
+  bindingsField: string;
+  operationRef: string;
+  operationEntity: string;
+  /** Physical table of the operation entity, resolved at catalog build. */
+  operationTable: string;
+  providerRef: string;
+  providerEntity: string;
+  providerTable: string;
+  connectionEntity: string;
+  connectionTable: string;
+  connectionProviderRef: string;
+  connectionValuesField: string;
+};
+
+export type McpDerivedToolsDefinition = {
+  entity: string;
+  table: string;
+  roles: string[];
+  keyField: string;
+  titleField?: string;
+  descriptionField: string;
+  inputFieldsField: string;
+  execution?: McpDerivedExecutionDefinition;
+  visibleWhen?: { field: string; equals: string };
+  /** Field holding a per-row role list restricting who sees the tool. */
+  visibleToRolesField?: string;
+  connect?: { name: string; description: string; roles: string[] };
+  dryRun?: { name: string; description: string; roles: string[] };
+  personalization?: {
+    entity: string;
+    /** Physical table of the preference entity, resolved at catalog build. */
+    table: string;
+    serviceRef: string;
+    instructionField: string;
+    set: { name: string; description: string };
+  };
+};
+
+export type McpGuideToolDefinition = {
+  name: string;
+  description: string;
+  roles: string[];
+  content: string;
+  entity: string;
+  /** Physical table of the guide's own entity, for the create gate. */
+  table: string;
+  requireBeforeCreate?: boolean;
+};
+
+export type McpDiscoveryToolDefinition = {
+  name: string;
+  description: string;
+  entity: string;
+  table: string;
+};
+
+export type McpTestToolDefinition = {
+  name: string;
+  description: string;
+  entity: string;
+  table: string;
+};
+
 export type McpCatalog = {
   generatedBy: string;
   source: string;
   entities: McpEntityCatalogEntry[];
   tools: McpToolDefinition[];
+  resources: McpResourceDefinition[];
+  derivedTools: McpDerivedToolsDefinition[];
+  discoveryTools: McpDiscoveryToolDefinition[];
+  testTools: McpTestToolDefinition[];
+  guideTools: McpGuideToolDefinition[];
 };
 
 export type McpCatalogInput = {
@@ -359,6 +530,56 @@ export type McpCatalogInput = {
  */
 export const MAX_DEDICATED_TOOLS = 60;
 
+/**
+ * Resolve the elicitation source entity to its physical table, failing closed
+ * at build time: a dangling source would otherwise surface as a runtime miss
+ * on the first create call.
+ */
+function resolveSourceTable(
+  inputs: McpCatalogInput[],
+  elicit: { sourceEntity: string; definitionsField: string },
+  owningEntity: string,
+): string {
+  const source = inputs.find(
+    (input) => input.contract.entity.name === elicit.sourceEntity,
+  );
+  if (!source) {
+    throw new Error(
+      `mcp elicitOnCreate on entity "${owningEntity}" names source entity ` +
+        `"${elicit.sourceEntity}", which is not part of this catalog.`,
+    );
+  }
+  const hasField = source.contract.model.fields.some(
+    (field) => field.key === elicit.definitionsField,
+  );
+  if (!hasField) {
+    throw new Error(
+      `mcp elicitOnCreate on entity "${owningEntity}": source entity ` +
+        `"${elicit.sourceEntity}" has no field "${elicit.definitionsField}".`,
+    );
+  }
+  return source.table;
+}
+
+/** Resolve an entity name to its physical table, failing closed at build. */
+function resolveEntityTable(
+  inputs: McpCatalogInput[],
+  entityName: string,
+  owningEntity: string,
+  option: string,
+): string {
+  const found = inputs.find(
+    (input) => input.contract.entity.name === entityName,
+  );
+  if (!found) {
+    throw new Error(
+      `mcp ${option} on entity "${owningEntity}" names entity "${entityName}", ` +
+        `which is not part of this catalog.`,
+    );
+  }
+  return found.table;
+}
+
 export function buildMcpCatalog(
   inputs: McpCatalogInput[],
   source: string,
@@ -366,10 +587,17 @@ export function buildMcpCatalog(
 ): McpCatalog {
   const opted = inputs
     .filter((input) => input.contract.mcp !== undefined)
-    .sort((a, b) => a.contract.mcp!.toolPrefix.localeCompare(b.contract.mcp!.toolPrefix));
+    .sort((a, b) =>
+      a.contract.mcp!.toolPrefix.localeCompare(b.contract.mcp!.toolPrefix),
+    );
 
   const entities: McpEntityCatalogEntry[] = [];
   const tools: McpToolDefinition[] = [];
+  const resources: McpResourceDefinition[] = [];
+  const derivedTools: McpDerivedToolsDefinition[] = [];
+  const discoveryTools: McpDiscoveryToolDefinition[] = [];
+  const testTools: McpTestToolDefinition[] = [];
+  const guideTools: McpGuideToolDefinition[] = [];
 
   for (const input of opted) {
     const { contract } = input;
@@ -388,8 +616,28 @@ export function buildMcpCatalog(
       ...(contract.entity.displayTemplate
         ? { displayTemplate: contract.entity.displayTemplate }
         : {}),
-      ...(contract.entity.filterField ? { filterField: contract.entity.filterField } : {}),
+      ...(contract.entity.filterField
+        ? { filterField: contract.entity.filterField }
+        : {}),
       classifiedFields: classifiedFieldKeys(fields),
+      ...(mcp.elicitOnCreate
+        ? {
+            elicitOnCreate: {
+              sourceField: mcp.elicitOnCreate.sourceField,
+              sourceEntity: mcp.elicitOnCreate.sourceEntity,
+              sourceTable: resolveSourceTable(
+                inputs,
+                mcp.elicitOnCreate,
+                contract.entity.name,
+              ),
+              definitionsField: mcp.elicitOnCreate.definitionsField,
+              into: mcp.elicitOnCreate.into,
+              ...(mcp.elicitOnCreate.message
+                ? { message: mcp.elicitOnCreate.message }
+                : {}),
+            },
+          }
+        : {}),
       fields: fields.map((field) => {
         const label = localizedText(field.label);
         const description = describeMcpField(field);
@@ -402,7 +650,11 @@ export function buildMcpCatalog(
           required: field.required === true,
           readOnly: field.readOnly === true,
           immutable: field.immutable === true,
-          schema: compiledFieldSchema(field, referentiedata, MCP_FIELD_SCHEMA_OPTIONS),
+          schema: compiledFieldSchema(
+            field,
+            referentiedata,
+            MCP_FIELD_SCHEMA_OPTIONS,
+          ),
           ...(field.classification?.sensitivity
             ? { classification: field.classification.sensitivity }
             : {}),
@@ -422,7 +674,9 @@ export function buildMcpCatalog(
           key: relationship.key,
           kind: relationship.kind,
           target: relationship.target,
-          ...(relationship.foreignKey ? { foreignKey: relationship.foreignKey } : {}),
+          ...(relationship.foreignKey
+            ? { foreignKey: relationship.foreignKey }
+            : {}),
           ...(relationship.via ? { via: relationship.via } : {}),
           ...(label ? { label } : {}),
         };
@@ -430,9 +684,240 @@ export function buildMcpCatalog(
     });
 
     tools.push(...buildToolsForEntity(contract, input.table, referentiedata));
+
+    if (mcp.resource) {
+      const pluralLabel = pluralize(entityLabel(contract));
+      resources.push({
+        uri: mcp.resource.uri,
+        name: mcp.resource.name ?? pluralLabel,
+        description:
+          mcp.resource.description ??
+          `Read the ${pluralLabel} currently available to the caller.`,
+        templateUri: `${mcp.resource.uri}/{id}`,
+        templateName: `Specific ${entityLabel(contract)}`,
+        templateDescription:
+          mcp.resource.templateDescription ??
+          `Read one ${entityLabel(contract)} by its identifier.`,
+        entity: contract.entity.name,
+        table: input.table,
+      });
+    }
+
+    if (mcp.guide) {
+      guideTools.push({
+        name: mcp.guide.name,
+        description: mcp.guide.description,
+        roles: [...mcp.guide.roles],
+        content: mcp.guide.content,
+        entity: contract.entity.name,
+        table: input.table,
+        ...(mcp.guide.requireBeforeCreate ? { requireBeforeCreate: true } : {}),
+      });
+    }
+
+    if (mcp.discovery) {
+      discoveryTools.push({
+        name: mcp.discovery.name,
+        description:
+          mcp.discovery.description ??
+          `Fetch and summarize the declared API schema of one ${entityLabel(contract)} by its identifier.`,
+        entity: contract.entity.name,
+        table: input.table,
+      });
+    }
+
+    if (mcp.test) {
+      testTools.push({
+        name: mcp.test.name,
+        description:
+          mcp.test.description ??
+          `Verify one ${entityLabel(contract)} by its identifier: checks its stored values ` +
+            `and credentials, and exercises them against the provider when a probe request ` +
+            `is declared. Reports what was and was not verified.`,
+        entity: contract.entity.name,
+        table: input.table,
+      });
+    }
+
+    if (mcp.derivedTools) {
+      const execution = mcp.derivedTools.execution;
+      derivedTools.push({
+        entity: contract.entity.name,
+        table: input.table,
+        roles: [...mcp.derivedTools.roles],
+        keyField: mcp.derivedTools.keyField,
+        ...(mcp.derivedTools.titleField
+          ? { titleField: mcp.derivedTools.titleField }
+          : {}),
+        descriptionField: mcp.derivedTools.descriptionField,
+        inputFieldsField: mcp.derivedTools.inputFieldsField,
+        ...(mcp.derivedTools.visibleWhen
+          ? { visibleWhen: { ...mcp.derivedTools.visibleWhen } }
+          : {}),
+        ...(mcp.derivedTools.visibleToRolesField
+          ? { visibleToRolesField: mcp.derivedTools.visibleToRolesField }
+          : {}),
+        ...(mcp.derivedTools.connect
+          ? {
+              connect: {
+                name: mcp.derivedTools.connect.name,
+                roles: [...mcp.derivedTools.connect.roles],
+                description:
+                  mcp.derivedTools.connect.description ??
+                  `Start a provider connection for one ${entityLabel(contract)}: ` +
+                    `validates the definition chain and returns an authorization URL for the ` +
+                    `caller to open in a browser.`,
+              },
+            }
+          : {}),
+        ...(mcp.derivedTools.personalization
+          ? {
+              personalization: {
+                entity: mcp.derivedTools.personalization.entity,
+                table: resolveEntityTable(
+                  inputs,
+                  mcp.derivedTools.personalization.entity,
+                  contract.entity.name,
+                  "derivedTools.personalization.entity",
+                ),
+                serviceRef: mcp.derivedTools.personalization.serviceRef,
+                instructionField:
+                  mcp.derivedTools.personalization.instructionField,
+                set: {
+                  name: mcp.derivedTools.personalization.set.name,
+                  description:
+                    mcp.derivedTools.personalization.set.description ??
+                    `Store YOUR standing instruction for one ${entityLabel(contract)} tool ` +
+                      `(or for all of them): from then on, every assistant you use sees it ` +
+                      `alongside the tool. An empty instruction clears it.`,
+                },
+              },
+            }
+          : {}),
+        ...(mcp.derivedTools.dryRun
+          ? {
+              dryRun: {
+                name: mcp.derivedTools.dryRun.name,
+                description:
+                  mcp.derivedTools.dryRun.description ??
+                  `Compose the exact provider request(s) one ${entityLabel(contract)} tool ` +
+                    `call would make — method, URL, headers with placeholder credentials, ` +
+                    `body — without sending anything. Works on drafts, so a definition can ` +
+                    `be verified before it is published.`,
+                roles: [...mcp.derivedTools.dryRun.roles],
+              },
+            }
+          : {}),
+        ...(execution
+          ? {
+              execution: {
+                bindingsField: execution.bindingsField,
+                operationRef: execution.operationRef,
+                operationEntity: execution.operationEntity,
+                operationTable: resolveEntityTable(
+                  inputs,
+                  execution.operationEntity,
+                  contract.entity.name,
+                  "derivedTools.execution.operationEntity",
+                ),
+                providerRef: execution.providerRef,
+                providerEntity: execution.providerEntity,
+                providerTable: resolveEntityTable(
+                  inputs,
+                  execution.providerEntity,
+                  contract.entity.name,
+                  "derivedTools.execution.providerEntity",
+                ),
+                connectionEntity: execution.connectionEntity,
+                connectionTable: resolveEntityTable(
+                  inputs,
+                  execution.connectionEntity,
+                  contract.entity.name,
+                  "derivedTools.execution.connectionEntity",
+                ),
+                connectionProviderRef: execution.connectionProviderRef,
+                connectionValuesField: execution.connectionValuesField,
+              },
+            }
+          : {}),
+      });
+    }
   }
 
-  const dedicatedCount = tools.filter((tool) => !tool.name.startsWith("osf_")).length;
+  const seenResourceUris = new Map<string, McpResourceDefinition>();
+  for (const resource of resources) {
+    const existing = seenResourceUris.get(resource.uri);
+    if (existing) {
+      throw new Error(
+        `Duplicate MCP resource uri "${resource.uri}": authored on both ` +
+          `${existing.entity} and ${resource.entity}. Every entity resource needs its ` +
+          `own uri because the runtime dispatches reads on it.`,
+      );
+    }
+    seenResourceUris.set(resource.uri, resource);
+  }
+
+  // With authored name overrides in play, uniqueness is no longer guaranteed
+  // by the prefix derivation — fail closed on any collision, since the runtime
+  // dispatches on the name.
+  const seenNames = new Map<string, McpToolDefinition>();
+  const reserveName = (
+    name: string,
+    entity: string,
+    operation: string,
+    table: string,
+  ): void => {
+    const existing = seenNames.get(name);
+    if (existing) {
+      throw new Error(
+        `Duplicate MCP tool name "${name}": emitted for both ` +
+          `${existing.entity}.${existing.operation} and ${entity}.${operation}. ` +
+          `Adjust the authored mcp name override or toolPrefix so every tool name is unique.`,
+      );
+    }
+    seenNames.set(name, {
+      name,
+      operation: "get",
+      entity,
+      table,
+    } as McpToolDefinition);
+  };
+  for (const entry of derivedTools) {
+    for (const authored of [
+      entry.connect,
+      entry.dryRun,
+      entry.personalization?.set,
+    ]) {
+      if (!authored) continue;
+      reserveName(authored.name, entry.entity, "derived", entry.table);
+    }
+  }
+  for (const guide of guideTools) {
+    reserveName(guide.name, guide.entity, "guide", guide.table);
+  }
+  for (const discovery of discoveryTools) {
+    reserveName(discovery.name, discovery.entity, "discovery", discovery.table);
+  }
+  for (const test of testTools) {
+    reserveName(test.name, test.entity, "test", test.table);
+  }
+  for (const tool of tools) {
+    if (tool.name.startsWith("osf_")) continue;
+    const existing = seenNames.get(tool.name);
+    if (existing) {
+      throw new Error(
+        `Duplicate MCP tool name "${tool.name}": emitted for both ` +
+          `${existing.entity}.${existing.operation} and ${tool.entity}.${tool.operation}. ` +
+          `Adjust the authored mcp name override or toolPrefix so every dedicated tool ` +
+          `name is unique.`,
+      );
+    }
+    seenNames.set(tool.name, tool);
+  }
+
+  const dedicatedCount = tools.filter(
+    (tool) => !tool.name.startsWith("osf_"),
+  ).length;
   if (dedicatedCount > MAX_DEDICATED_TOOLS) {
     const offenders = opted
       .filter((input) => input.contract.mcp!.tools === "dedicated")
@@ -451,6 +936,11 @@ export function buildMcpCatalog(
     source,
     entities,
     tools,
+    resources,
+    derivedTools,
+    discoveryTools,
+    testTools,
+    guideTools,
   };
 }
 

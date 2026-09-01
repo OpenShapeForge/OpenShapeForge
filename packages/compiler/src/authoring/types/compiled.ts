@@ -63,7 +63,14 @@ export interface CompiledRender {
 
 export interface CompiledField {
   key: string;
-  valueType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
+  valueType:
+    | "string"
+    | "integer"
+    | "number"
+    | "boolean"
+    | "date"
+    | "datetime"
+    | "object";
   cardinality: "single" | "collection";
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
@@ -186,6 +193,73 @@ export interface McpSection {
    */
   tools: McpToolStyle;
   operations: Record<McpOperationKey, boolean>;
+  /**
+   * Authored per-operation tool name/description overrides (`dedicated`
+   * style only). generate-mcp.ts consumes these when it emits the catalog;
+   * an absent entry means the compiler-composed default applies.
+   */
+  toolOverrides?: Partial<
+    Record<McpOperationKey, { name?: string; description?: string }>
+  >;
+  /**
+   * Authored MCP resource exposure, validated but not defaulted — the
+   * catalog generator resolves the name/description fallbacks because it
+   * owns the label helpers.
+   */
+  resource?: {
+    uri: string;
+    name?: string;
+    description?: string;
+    templateDescription?: string;
+  };
+  /** Authored playbook tool, validated at compile. */
+  guide?: {
+    name: string;
+    description: string;
+    roles: string[];
+    content: string;
+    requireBeforeCreate?: boolean;
+  };
+  /** Authored schema-discovery tool, validated at compile. */
+  discovery?: { name: string; description?: string };
+  /** Authored elicited-values verification tool, validated at compile. */
+  test?: { name: string; description?: string };
+  /** Authored create-time elicitation config, validated at compile. */
+  elicitOnCreate?: {
+    sourceField: string;
+    sourceEntity: string;
+    definitionsField: string;
+    into: string;
+    message?: string;
+  };
+  /** Authored row-to-tool projection config, validated at compile. */
+  derivedTools?: {
+    roles: string[];
+    keyField: string;
+    titleField?: string;
+    descriptionField: string;
+    inputFieldsField: string;
+    execution?: {
+      bindingsField: string;
+      operationRef: string;
+      operationEntity: string;
+      providerRef: string;
+      providerEntity: string;
+      connectionEntity: string;
+      connectionProviderRef: string;
+      connectionValuesField: string;
+    };
+    visibleWhen?: { field: string; equals: string };
+    visibleToRolesField?: string;
+    connect?: { name: string; description?: string; roles: string[] };
+    dryRun?: { name: string; description?: string; roles: string[] };
+    personalization?: {
+      entity: string;
+      serviceRef: string;
+      instructionField: string;
+      set: { name: string; description?: string };
+    };
+  };
 }
 
 export interface RestSection {
@@ -262,7 +336,12 @@ export interface CompiledDetailView {
   kind?: "page";
   type?: "detail";
   render?: CompiledViewRender;
-  header: { render: CompiledViewRender; title: string; subtitle?: string; badges?: { render: CompiledViewRender; items: string[] } };
+  header: {
+    render: CompiledViewRender;
+    title: string;
+    subtitle?: string;
+    badges?: { render: CompiledViewRender; items: string[] };
+  };
   actions?: CompiledViewAction[];
   groups: { render: CompiledViewRender; items: CompiledViewGroup[] };
 }

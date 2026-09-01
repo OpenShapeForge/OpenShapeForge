@@ -30,6 +30,7 @@ export type SchemaSourceField = {
   valueType?: string;
   cardinality?: unknown;
   required?: boolean;
+  defaultValue?: unknown;
   validation?: {
     minLength?: unknown;
     maxLength?: unknown;
@@ -42,15 +43,21 @@ export type SchemaSourceField = {
 };
 
 /** Unwrap `x` or `{ value: x }` — validation rules carry either. */
-export function ruleValue(rule: unknown): number | string | boolean | undefined {
+export function ruleValue(
+  rule: unknown,
+): number | string | boolean | undefined {
   if (rule === undefined || rule === null) return undefined;
   if (typeof rule === "object" && "value" in (rule as JsonObject)) {
     const inner = (rule as { value: unknown }).value;
-    return typeof inner === "number" || typeof inner === "string" || typeof inner === "boolean"
+    return typeof inner === "number" ||
+      typeof inner === "string" ||
+      typeof inner === "boolean"
       ? inner
       : undefined;
   }
-  return typeof rule === "number" || typeof rule === "string" || typeof rule === "boolean"
+  return typeof rule === "number" ||
+    typeof rule === "string" ||
+    typeof rule === "boolean"
     ? rule
     : undefined;
 }
@@ -141,13 +148,20 @@ export function applyCollectionShape(
 export function objectSchemaFrom(
   fields: SchemaSourceField[],
   schemaForField: (field: SchemaSourceField) => JsonObject,
-  options: { requireRequired: boolean },
+  options: { requireRequired: boolean; defaultsAreMaterialized?: boolean },
 ): JsonObject {
   const properties: JsonObject = {};
   const required: string[] = [];
   for (const field of fields) {
     properties[field.key] = schemaForField(field);
-    if (options.requireRequired && field.required) {
+    // A default makes a required field omittable only on transports that
+    // actually materialize it. Connector contract validators deliberately do
+    // not, so their callers keep the stricter boundary.
+    if (
+      options.requireRequired &&
+      field.required &&
+      (!options.defaultsAreMaterialized || field.defaultValue === undefined)
+    ) {
       required.push(field.key);
     }
   }
@@ -159,7 +173,9 @@ export function objectSchemaFrom(
   };
 }
 
-export function localizedText(value: LocalizedText | string | undefined): string | undefined {
+export function localizedText(
+  value: LocalizedText | string | undefined,
+): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value === "string") return value.trim() || undefined;
   return (value.en ?? value.nl ?? value.fr)?.trim() || undefined;
@@ -205,7 +221,9 @@ export function describeCompiledField(
   return parts.length > 0 ? parts.join(" ") : undefined;
 }
 
-export type CompiledFieldDescription = (field: CompiledField) => string | undefined;
+export type CompiledFieldDescription = (
+  field: CompiledField,
+) => string | undefined;
 
 export type CompiledFieldSchemaOptions = {
   describeField?: CompiledFieldDescription;
@@ -213,6 +231,8 @@ export type CompiledFieldSchemaOptions = {
   includeDefault?: boolean;
   /** Whether required children are structural inside nested object values. */
   requireNestedRequired?: boolean;
+  /** Whether this transport applies defaults when the caller omits a value. */
+  defaultsAreMaterialized?: boolean;
 };
 
 export type CompiledFieldEnumeration = {
@@ -270,7 +290,11 @@ function compiledValueSchema(
   referentiedata: CoreReferentiedataSnapshot,
   options: CompiledFieldSchemaOptions,
 ): JsonObject {
-  if (field.valueType === "object" && field.children && field.children.length > 0) {
+  if (
+    field.valueType === "object" &&
+    field.children &&
+    field.children.length > 0
+  ) {
     return compiledObjectSchema(field.children, referentiedata, {
       ...options,
       requireRequired: options.requireNestedRequired ?? true,
@@ -336,7 +360,12 @@ export function compiledFieldSchema(
     return valueSchema;
   }
 
-  const { title, description, default: defaultValue, ...outerItemSchema } = valueSchema;
+  const {
+    title,
+    description,
+    default: defaultValue,
+    ...outerItemSchema
+  } = valueSchema;
   let items: JsonObject = field.item
     ? {
         allOf: [
@@ -369,7 +398,8 @@ export function compiledObjectSchema(
 ): JsonObject {
   return objectSchemaFrom(
     fields,
-    (field) => compiledFieldSchema(field as CompiledField, referentiedata, options),
+    (field) =>
+      compiledFieldSchema(field as CompiledField, referentiedata, options),
     options,
   );
 }

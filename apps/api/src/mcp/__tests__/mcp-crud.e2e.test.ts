@@ -58,10 +58,11 @@ afterAll(async () => {
 let nextRpcId = 1;
 
 /**
- * One JSON-RPC call over the Streamable HTTP transport. The server runs
- * stateless, so no initialize handshake is needed between calls — each request
- * is self-contained. `Accept` must list both content types the transport can
- * answer with, or it rejects the request before dispatch.
+ * One JSON-RPC call over the Streamable HTTP transport. This helper uses the
+ * sessionless compatibility path, so each request is self-contained; real
+ * elicitation and MCP Apps clients initialize a stateful session. `Accept`
+ * must list both content types the transport can answer with, or the request is
+ * rejected before dispatch.
  */
 async function rpc(
   identity: Identity | null,
@@ -129,12 +130,27 @@ async function callTool(
   return rpc(identity, "tools/call", { name, arguments: args });
 }
 
-/** Sample create arguments: required scalars plus real rows for required FKs. */
+/** Enum values advertised by a tool's schema, keyed by property name. */
+function schemaEnums(toolName: string): Map<string, unknown[]> {
+  const tool = catalog.tools.find((entry) => entry.name === toolName);
+  const properties = (tool?.inputSchema as { properties?: Record<string, { enum?: unknown[] }> })
+    ?.properties;
+  const enums = new Map<string, unknown[]>();
+  for (const [key, schema] of Object.entries(properties ?? {})) {
+    if (Array.isArray(schema.enum) && schema.enum.length > 0) enums.set(key, schema.enum);
+  }
+  return enums;
+}
+
+/** Sample create arguments: required scalars plus real rows for required FKs.
+ * Values respect the tool schema — the server now enforces what it
+ * advertises, so an enum field gets an allowed value, not a marker string. */
 async function buildCreateArgs(
   table: (typeof mcpTables)[number],
   identity: Identity,
 ): Promise<Record<string, unknown>> {
   const fkTargets = foreignKeyTargets(table);
+  const enums = schemaEnums(`${table.source!.mcp!.toolPrefix}_create`);
   const args: Record<string, unknown> = {};
   for (const column of table.columns) {
     if (!column.required || column.primaryKey) continue;
@@ -144,7 +160,8 @@ async function buildCreateArgs(
       args[fieldName(column)] = await createRow(tablesByName.get(target)!, identity);
       continue;
     }
-    args[fieldName(column)] = sampleValue(column, seed);
+    const allowed = enums.get(fieldName(column));
+    args[fieldName(column)] = allowed ? allowed[0] : sampleValue(column, seed);
   }
   return args;
 }
@@ -269,10 +286,11 @@ describe("generated MCP server", () => {
     expect(denied.body.error.code).toBe(-32602);
   });
 
-  test("answers empty optional MCP catalogs without protocol errors", async () => {
+  test("answers optional MCP catalogs without protocol errors", async () => {
     expect((await rpc(tenantA, "prompts/list")).body.result.prompts).toEqual([]);
     expect(
-      (await rpc(tenantA, "resources/templates/list")).body.result.resourceTemplates,
+      (await rpc(tenantA, "resources/templates/list")).body.result
+        .resourceTemplates,
     ).toEqual([]);
   });
 

@@ -112,3 +112,94 @@ export function registerProtectedResourceMetadata(app: FastifyInstance): void {
     },
   );
 }
+
+/**
+ * RFC 8414 spells authorization-server metadata URLs by INSERTING the
+ * well-known segment between host and issuer path:
+ *
+ *   https://host/.well-known/oauth-authorization-server/auth/realms/example
+ *
+ * Keycloak only serves the OIDC-style APPENDED form
+ * (`<issuer>/.well-known/openid-configuration`), and because everything under
+ * `/.well-known/` routes to this app rather than to Keycloak, a spec-following
+ * client that tries the inserted form gets a bare 404 and reports the whole
+ * server as unreachable. Standards-compliant clients may try exactly these
+ * two spellings before giving up.
+ */
+export const AUTHORIZATION_SERVER_METADATA_PREFIXES = [
+  "/.well-known/oauth-authorization-server",
+  "/.well-known/openid-configuration",
+] as const;
+
+type IssuerMetadataFetcher = (url: string) => Promise<{ ok: boolean; text(): Promise<string> }>;
+
+let cachedIssuerMetadata: { body: string; expiresAt: number } | null = null;
+const ISSUER_METADATA_TTL_MS = 60 * 60 * 1000;
+
+/** Test seam: drop the memoised upstream document. */
+export function resetIssuerMetadataCache(): void {
+  cachedIssuerMetadata = null;
+}
+
+/**
+ * The upstream copy of the issuer's discovery document is fetched over the
+ * same in-cluster base the JWKS already comes from — the pod may not be able
+ * to reach its own public hostname, and the verifier's JWKS URI is proof that
+ * this base is reachable. Keycloak still writes public URLs into the document
+ * (endpoint URLs come from its hostname configuration, not from the request),
+ * which is exactly what the calling client needs. Falls back to the issuer
+ * itself when no JWKS URI is configured.
+ */
+function issuerMetadataUpstreamUrl(issuer: string): string {
+  const jwksUri = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI?.trim();
+  const jwksSuffix = "/protocol/openid-connect/certs";
+  const base =
+    jwksUri?.endsWith(jwksSuffix) === true
+      ? jwksUri.slice(0, jwksUri.length - jwksSuffix.length)
+      : issuer;
+  return `${base}/.well-known/openid-configuration`;
+}
+
+/**
+ * Serve the RFC 8414 path-inserted spellings for the configured issuer, by
+ * returning Keycloak's own document. A proxy for two static documents, not
+ * for traffic: tokens, registration and MCP requests still go direct.
+ *
+ * The wildcard suffix must be exactly the configured issuer's path — this is
+ * a mirror of one known document, not an open relay for arbitrary upstreams.
+ */
+export function registerAuthorizationServerMetadataAliases(
+  app: FastifyInstance,
+  fetchMetadata: IssuerMetadataFetcher = fetch,
+): void {
+  for (const prefix of AUTHORIZATION_SERVER_METADATA_PREFIXES) {
+    app.get(`${prefix}/*`, async (request: FastifyRequest, reply: FastifyReply) => {
+      const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER?.trim();
+      if (!issuer) {
+        return reply.code(404).send({ error: "authorization server metadata not configured" });
+      }
+      const suffix = `/${(request.params as { "*": string })["*"]}`;
+      if (suffix !== new URL(issuer).pathname) {
+        return reply.code(404).send({ error: "unknown issuer path" });
+      }
+
+      if (!cachedIssuerMetadata || cachedIssuerMetadata.expiresAt < Date.now()) {
+        const upstream = await fetchMetadata(issuerMetadataUpstreamUrl(issuer)).catch(() => null);
+        if (!upstream?.ok) {
+          return reply
+            .code(502)
+            .send({ error: `authorization server metadata unavailable from ${issuer}` });
+        }
+        cachedIssuerMetadata = {
+          body: await upstream.text(),
+          expiresAt: Date.now() + ISSUER_METADATA_TTL_MS,
+        };
+      }
+
+      return reply
+        .header("cache-control", "public, max-age=3600")
+        .header("content-type", "application/json")
+        .send(cachedIssuerMetadata.body);
+    });
+  }
+}

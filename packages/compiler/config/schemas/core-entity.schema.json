@@ -46,10 +46,7 @@
     },
     "language": {
       "type": "string",
-      "enum": [
-        "en",
-        "nl"
-      ]
+      "enum": ["en", "nl"]
     },
     "labels": {
       "$ref": "#/$defs/localizedText"
@@ -322,11 +319,201 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "list": { "type": "boolean" },
-                "get": { "type": "boolean" },
-                "create": { "type": "boolean" },
-                "update": { "type": "boolean" },
-                "delete": { "type": "boolean" }
+                "list": { "$ref": "#/$defs/mcpOperation" },
+                "get": { "$ref": "#/$defs/mcpOperation" },
+                "create": { "$ref": "#/$defs/mcpOperation" },
+                "update": { "$ref": "#/$defs/mcpOperation" },
+                "delete": { "$ref": "#/$defs/mcpOperation" }
+              }
+            },
+            "guide": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "description", "roles", "content"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*$"
+                },
+                "description": { "type": "string" },
+                "roles": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "minItems": 1
+                },
+                "content": { "type": "string" },
+                "requireBeforeCreate": { "type": "boolean" }
+              }
+            },
+            "discovery": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*$"
+                },
+                "description": { "type": "string" }
+              }
+            },
+            "test": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*$"
+                },
+                "description": { "type": "string" }
+              }
+            },
+            "resource": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["uri"],
+              "properties": {
+                "uri": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9+.-]*://[A-Za-z0-9][A-Za-z0-9/_-]*[A-Za-z0-9]$"
+                },
+                "name": { "type": "string" },
+                "description": { "type": "string" },
+                "templateDescription": { "type": "string" }
+              }
+            },
+            "elicitOnCreate": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sourceField",
+                "sourceEntity",
+                "definitionsField",
+                "into"
+              ],
+              "properties": {
+                "sourceField": { "type": "string" },
+                "sourceEntity": { "type": "string" },
+                "definitionsField": { "type": "string" },
+                "into": { "type": "string" },
+                "message": { "type": "string" }
+              }
+            },
+            "derivedTools": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "roles",
+                "keyField",
+                "descriptionField",
+                "inputFieldsField"
+              ],
+              "properties": {
+                "roles": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "minItems": 1
+                },
+                "keyField": { "type": "string" },
+                "titleField": { "type": "string" },
+                "descriptionField": { "type": "string" },
+                "inputFieldsField": { "type": "string" },
+                "visibleToRolesField": { "type": "string" },
+                "visibleWhen": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["field", "equals"],
+                  "properties": {
+                    "field": { "type": "string" },
+                    "equals": { "type": "string" }
+                  }
+                },
+                "connect": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "roles"],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_]*$"
+                    },
+                    "description": { "type": "string" },
+                    "roles": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "minItems": 1
+                    }
+                  }
+                },
+                "dryRun": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "roles"],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_]*$"
+                    },
+                    "description": { "type": "string" },
+                    "roles": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "minItems": 1
+                    }
+                  }
+                },
+                "personalization": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "entity",
+                    "serviceRef",
+                    "instructionField",
+                    "set"
+                  ],
+                  "properties": {
+                    "entity": { "type": "string" },
+                    "serviceRef": { "type": "string" },
+                    "instructionField": { "type": "string" },
+                    "set": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["name"],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_]*$"
+                        },
+                        "description": { "type": "string" }
+                      }
+                    }
+                  }
+                },
+                "execution": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "bindingsField",
+                    "operationRef",
+                    "operationEntity",
+                    "providerRef",
+                    "providerEntity",
+                    "connectionEntity",
+                    "connectionProviderRef",
+                    "connectionValuesField"
+                  ],
+                  "properties": {
+                    "bindingsField": { "type": "string" },
+                    "operationRef": { "type": "string" },
+                    "operationEntity": { "type": "string" },
+                    "providerRef": { "type": "string" },
+                    "providerEntity": { "type": "string" },
+                    "connectionEntity": { "type": "string" },
+                    "connectionProviderRef": { "type": "string" },
+                    "connectionValuesField": { "type": "string" }
+                  }
+                }
               }
             }
           }
@@ -361,6 +548,24 @@
     }
   },
   "$defs": {
+    "mcpOperation": {
+      "description": "Per-operation MCP flag. The object form additionally overrides the generated tool name and/or description for that operation (dedicated style only).",
+      "oneOf": [
+        { "type": "boolean" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "name": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$"
+            },
+            "description": { "type": "string" }
+          }
+        }
+      ]
+    },
     "crudOperations": {
       "type": "object",
       "additionalProperties": false,
@@ -376,11 +581,7 @@
       "type": "object",
       "minProperties": 1,
       "propertyNames": {
-        "enum": [
-          "en",
-          "nl",
-          "fr"
-        ]
+        "enum": ["en", "nl", "fr"]
       },
       "additionalProperties": {
         "type": "string"
@@ -505,7 +706,15 @@
           "properties": {
             "action": {
               "type": "string",
-              "enum": ["keep", "archive", "delete", "anonymize", "mask", "review", "cryptoDelete"]
+              "enum": [
+                "keep",
+                "archive",
+                "delete",
+                "anonymize",
+                "mask",
+                "review",
+                "cryptoDelete"
+              ]
             },
             "review": {
               "oneOf": [
@@ -631,10 +840,7 @@
     "field": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "key",
-        "type"
-      ],
+      "required": ["key", "type"],
       "properties": {
         "key": {
           "$ref": "#/$defs/fieldKey"
@@ -698,13 +904,7 @@
           "properties": {
             "sensitivity": {
               "type": "string",
-              "enum": [
-                "public",
-                "internal",
-                "confidential",
-                "pii",
-                "bsn"
-              ]
+              "enum": ["public", "internal", "confidential", "pii", "bsn"]
             },
             "category": {
               "type": "string"
@@ -753,18 +953,13 @@
         },
         "visibility": {
           "type": "object",
-          "required": [
-            "conditions"
-          ],
+          "required": ["conditions"],
           "properties": {
             "conditions": {
               "type": "array",
               "items": {
                 "type": "object",
-                "required": [
-                  "field",
-                  "operator"
-                ],
+                "required": ["field", "operator"],
                 "properties": {
                   "field": {
                     "type": "string"
@@ -790,19 +985,13 @@
             },
             "logic": {
               "type": "string",
-              "enum": [
-                "and",
-                "or"
-              ]
+              "enum": ["and", "or"]
             }
           }
         },
         "computed": {
           "type": "object",
-          "required": [
-            "expression",
-            "dependencies"
-          ],
+          "required": ["expression", "dependencies"],
           "properties": {
             "expression": {
               "type": "string"
@@ -837,26 +1026,17 @@
         },
         "options": {
           "type": "object",
-          "required": [
-            "type"
-          ],
+          "required": ["type"],
           "properties": {
             "type": {
               "type": "string",
-              "enum": [
-                "static",
-                "referentiedata",
-                "remote"
-              ]
+              "enum": ["static", "referentiedata", "remote"]
             },
             "items": {
               "type": "array",
               "items": {
                 "type": "object",
-                "required": [
-                  "value",
-                  "label"
-                ],
+                "required": ["value", "label"],
                 "properties": {
                   "value": {
                     "type": "string"
@@ -946,16 +1126,11 @@
         "reference": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "kind",
-            "group"
-          ],
+          "required": ["kind", "group"],
           "properties": {
             "kind": {
               "type": "string",
-              "enum": [
-                "referentiedata"
-              ]
+              "enum": ["referentiedata"]
             },
             "group": {
               "type": "string"
@@ -971,10 +1146,7 @@
             },
             "storageClass": {
               "type": "string",
-              "enum": [
-                "core",
-                "profile"
-              ]
+              "enum": ["core", "profile"]
             }
           }
         },
@@ -985,9 +1157,7 @@
         "render": {
           "type": "object",
           "description": "Override the default UI component for this field. If omitted, the component catalog default for the field type is used.",
-          "required": [
-            "component"
-          ],
+          "required": ["component"],
           "properties": {
             "component": {
               "type": "string",
@@ -1047,7 +1217,10 @@
         "type": "object",
         "properties": {
           "kind": { "type": "string", "enum": ["page", "embedded"] },
-          "type": { "type": "string", "enum": ["list", "detail", "form", "summary", "cards"] },
+          "type": {
+            "type": "string",
+            "enum": ["list", "detail", "form", "summary", "cards"]
+          },
           "itemAction": { "type": "object" }
         },
         "additionalProperties": true
@@ -1056,22 +1229,14 @@
     "relationship": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "key",
-        "kind",
-        "target"
-      ],
+      "required": ["key", "kind", "target"],
       "properties": {
         "key": {
           "$ref": "#/$defs/fieldKey"
         },
         "kind": {
           "type": "string",
-          "enum": [
-            "belongsTo",
-            "hasMany",
-            "manyToMany"
-          ]
+          "enum": ["belongsTo", "hasMany", "manyToMany"]
         },
         "target": {
           "type": "string",
@@ -1092,9 +1257,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": [
-          "handler"
-        ],
+        "required": ["handler"],
         "properties": {
           "handler": {
             "type": "string"

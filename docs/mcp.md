@@ -4,8 +4,8 @@ OpenShapeForge serves the same generated CRUD core over three transports:
 GraphQL, REST, and **MCP** (Model Context Protocol) — the last for language
 models and agents.
 
-MCP is not REST with different framing. Its consumer *reads the schema to
-decide what to do*, which makes the authored field definition the product
+MCP is not REST with different framing. Its consumer _reads the schema to
+decide what to do_, which makes the authored field definition the product
 rather than decoration. Where the OpenAPI generator collapses a field to a bare
 scalar, the MCP tool catalog carries the labels, validation bounds,
 enumerations, and AI hints the author already wrote.
@@ -15,16 +15,16 @@ enumerations, and AI hints the author already wrote.
 Per entity, in the entity YAML — the same fail-closed shape as `rest:`:
 
 ```yaml
-mcp: true                 # every operation, prefix derived from the entity name
+mcp: true # every operation, prefix derived from the entity name
 ```
 
 ```yaml
 mcp:
   enabled: true
-  toolPrefix: contact     # default: entity name in snake_case
-  tools: dedicated        # or `generic` — see "Tool surface"
+  toolPrefix: contact # default: entity name in snake_case
+  tools: dedicated # or `generic` — see "Tool surface"
   operations:
-    delete: false         # each flag defaults to true
+    delete: false # each flag defaults to true
 ```
 
 Absent or `false` means no tools at all. An `mcp:` block on an entity that is
@@ -38,11 +38,23 @@ that policy; the shared CRUD service enforces the same decision at invocation.
 
 ## Endpoint
 
-`POST /api/mcp` — Streamable HTTP transport, stateless (no session
-persistence, so no affinity is needed across replicas). Authentication is the
+`POST /api/mcp` — Streamable HTTP transport with short-lived stateful sessions
+for server-initiated elicitation. The Helm chart therefore enables ClientIP
+session affinity by default so successive requests reach the replica holding
+the MCP transport session. Browser OAuth and configuration handoffs are stored
+encrypted in the database and can resume on any replica. Authentication is the
 same bearer token, customer-provisioned API key, or signed trusted-context
 headers every other transport takes; an unauthenticated request is `401` before
 any dispatch.
+
+For ordinary configuration data, the runtime preserves this UX order:
+in-client elicitation, then an MCP App when the client advertises
+`io.modelcontextprotocol/ui`, then the signed-in KERN web form. The private app
+receives its single-use handoff only in tool-result metadata. The external
+fallback is the stable `${OPENSHAPEFORGE_WEB_ORIGIN}/configuration` URL and
+resolves the pending form after normal Keycloak login, so a bearer handoff URL
+never enters model context. Secret and confidential values post directly to the
+runtime and are encrypted at rest with `OPENSHAPEFORGE_ELICITED_SECRET_KEYS`.
 
 ### Discovery
 
@@ -132,21 +144,21 @@ The catalog is generated from the compiled contracts (`model.fields`), not the
 runtime manifest — the manifest carries storage columns, which is everything
 SQL needs and almost nothing a model needs.
 
-| Authored | Becomes |
-| --- | --- |
-| `valueType`, `cardinality` | JSON Schema `type`; `array` + `items` for collections |
-| `cardinality.{min,max}`, `validation.minItems` | `minItems` / `maxItems` |
-| `validation.minLength` / `maxLength` | `minLength` / `maxLength` |
-| `validation.min` / `max` | `minimum` / `maximum` |
-| `validation.pattern`, `.format` | `pattern`, `format` |
-| `required` | the parent schema's `required[]` |
-| `defaultValue` | `default` |
-| `options` (static or `referentiedata`) | `enum`, with value→label pairs in the description |
-| `label`, `description`, `help`, `unit` | a composed parameter `description` |
-| `hints.aiInstructions` | appended to that description |
-| `relationship` | a pointer to the target entity's tools |
-| `sortable` scalars | the `sortField` enum on the list tool |
-| `classification` | withheld fields and redaction (below) — never the schema |
+| Authored                                       | Becomes                                                  |
+| ---------------------------------------------- | -------------------------------------------------------- |
+| `valueType`, `cardinality`                     | JSON Schema `type`; `array` + `items` for collections    |
+| `cardinality.{min,max}`, `validation.minItems` | `minItems` / `maxItems`                                  |
+| `validation.minLength` / `maxLength`           | `minLength` / `maxLength`                                |
+| `validation.min` / `max`                       | `minimum` / `maximum`                                    |
+| `validation.pattern`, `.format`                | `pattern`, `format`                                      |
+| `required`                                     | the parent schema's `required[]`                         |
+| `defaultValue`                                 | `default`                                                |
+| `options` (static or `referentiedata`)         | `enum`, with value→label pairs in the description        |
+| `label`, `description`, `help`, `unit`         | a composed parameter `description`                       |
+| `hints.aiInstructions`                         | appended to that description                             |
+| `relationship`                                 | a pointer to the target entity's tools                   |
+| `sortable` scalars                             | the `sortField` enum on the list tool                    |
+| `classification`                               | withheld fields and redaction (below) — never the schema |
 
 Computed and server-managed fields (`id`, `tenantId`, `createdAt`,
 `updatedAt`) are **omitted** from write schemas rather than marked: the CRUD

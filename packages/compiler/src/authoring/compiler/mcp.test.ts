@@ -65,11 +65,206 @@ describe("buildMcp", () => {
     });
   });
 
+  it("object-form operations carry enabled plus name/description overrides", () => {
+    const section = buildMcp(
+      entityWithMcp({
+        operations: {
+          list: false,
+          get: { name: "read_contact_detail", description: "Read one contact detail." },
+          update: { name: "edit_contact_detail" },
+          delete: { enabled: false },
+        },
+      }),
+    );
+    expect(section?.operations).toEqual({
+      list: false,
+      get: true,
+      create: true,
+      update: true,
+      delete: false,
+    });
+    expect(section?.toolOverrides).toEqual({
+      get: { name: "read_contact_detail", description: "Read one contact detail." },
+      update: { name: "edit_contact_detail" },
+    });
+  });
+
+  it("omits toolOverrides when object-form operations only toggle enabled", () => {
+    const section = buildMcp(entityWithMcp({ operations: { delete: { enabled: false } } }));
+    expect(section?.toolOverrides).toBeUndefined();
+  });
+
+  it("rejects name/description overrides on the generic tool style", () => {
+    expect(() =>
+      buildMcp(
+        entityWithMcp({ tools: "generic", operations: { get: { name: "read_contact" } } }),
+      ),
+    ).toThrow(/generic tool style/);
+  });
+
+  it("rejects an override name that could break out of a tool-name position", () => {
+    for (const hostile of ["a-b", "Upper", "with space", "{id}", "1leading"]) {
+      expect(() =>
+        buildMcp(entityWithMcp({ operations: { get: { name: hostile } } })),
+      ).toThrow(/Unsafe mcp tool name/);
+    }
+  });
+
+  it("carries a validated resource block through to the section", () => {
+    const resource = {
+      uri: "app://things",
+      name: "Things",
+      description: "Read the things.",
+    };
+    expect(buildMcp(entityWithMcp({ resource }))?.resource).toEqual(resource);
+    expect(buildMcp(entityWithMcp(true))?.resource).toBeUndefined();
+  });
+
+  it("rejects a resource uri that could break out of a listing position", () => {
+    for (const hostile of [
+      "things",
+      "app://things/",
+      "app://things/{id}",
+      "app://",
+      "App://things",
+      "app://thi ngs",
+    ]) {
+      expect(() => buildMcp(entityWithMcp({ resource: { uri: hostile } }))).toThrow(
+        /Unsafe mcp resource uri/,
+      );
+    }
+  });
+
+  it("carries a validated derivedTools block through to the section", () => {
+    const derivedTools = {
+      roles: ["viewer"],
+      keyField: "value",
+      descriptionField: "value",
+      inputFieldsField: "value",
+    };
+    expect(buildMcp(entityWithMcp({ derivedTools }))?.derivedTools).toEqual(derivedTools);
+  });
+
+  it("rejects derivedTools with an empty audience or unknown fields", () => {
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          derivedTools: { roles: [], keyField: "value", descriptionField: "value", inputFieldsField: "value" },
+        }),
+      ),
+    ).toThrow(/non-empty roles list/);
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          derivedTools: { roles: ["viewer"], keyField: "missing", descriptionField: "value", inputFieldsField: "value" },
+        }),
+      ),
+    ).toThrow(/does not name an authored field/);
+  });
+
+  it("carries a validated elicitOnCreate block through to the section", () => {
+    const elicitOnCreate = {
+      sourceField: "value",
+      sourceEntity: "Widget",
+      definitionsField: "configFields",
+      into: "value",
+    };
+    expect(buildMcp(entityWithMcp({ elicitOnCreate }))?.elicitOnCreate).toEqual(elicitOnCreate);
+  });
+
+  it("rejects elicitOnCreate naming unknown local fields", () => {
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          elicitOnCreate: {
+            sourceField: "missing",
+            sourceEntity: "Widget",
+            definitionsField: "x",
+            into: "value",
+          },
+        }),
+      ),
+    ).toThrow(/does not name an authored field/);
+  });
+
   it("rejects a toolPrefix that could break out of a tool-name position", () => {
     for (const hostile of ["a-b", "Upper", "with space", "quote\"y", "{id}", "1leading"]) {
       expect(() => buildMcp(entityWithMcp({ toolPrefix: hostile }))).toThrow(
         /Unsafe mcp toolPrefix/,
       );
     }
+  });
+
+  it("passes a test tool through when elicitOnCreate is present", () => {
+    const elicitOnCreate = {
+      sourceField: "value",
+      sourceEntity: "Widget",
+      definitionsField: "configFields",
+      into: "value",
+    };
+    expect(
+      buildMcp(entityWithMcp({ elicitOnCreate, test: { name: "test_connection" } }))?.test,
+    ).toEqual({ name: "test_connection" });
+  });
+
+  it("rejects a test tool without elicitOnCreate, and unsafe test names", () => {
+    expect(() => buildMcp(entityWithMcp({ test: { name: "test_connection" } }))).toThrow(
+      /requires an elicitOnCreate block/,
+    );
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          elicitOnCreate: {
+            sourceField: "value",
+            sourceEntity: "Widget",
+            definitionsField: "x",
+            into: "value",
+          },
+          test: { name: "Bad Name" },
+        }),
+      ),
+    ).toThrow(/Unsafe mcp test name/);
+  });
+
+  it("passes dryRun through with execution and refuses it without", () => {
+    const derivedTools = {
+      roles: ["viewer"],
+      keyField: "value",
+      descriptionField: "value",
+      inputFieldsField: "value",
+      execution: {
+        bindingsField: "value",
+        operationRef: "a",
+        operationEntity: "B",
+        providerRef: "c",
+        providerEntity: "D",
+        connectionEntity: "E",
+        connectionProviderRef: "f",
+        connectionValuesField: "g",
+      },
+      dryRun: { name: "dry_run_widget", roles: ["author"] },
+    };
+    expect(buildMcp(entityWithMcp({ derivedTools }))?.derivedTools?.dryRun).toEqual({
+      name: "dry_run_widget",
+      roles: ["author"],
+    });
+    const { execution: _execution, ...withoutExecution } = derivedTools;
+    expect(() => buildMcp(entityWithMcp({ derivedTools: withoutExecution }))).toThrow(
+      /requires an execution block/,
+    );
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          derivedTools: { ...derivedTools, dryRun: { name: "dry_run_widget", roles: [] } },
+        }),
+      ),
+    ).toThrow(/non-empty roles list/);
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          derivedTools: { ...derivedTools, dryRun: { name: "Bad Name", roles: ["author"] } },
+        }),
+      ),
+    ).toThrow(/Unsafe mcp derivedTools.dryRun name/);
   });
 });

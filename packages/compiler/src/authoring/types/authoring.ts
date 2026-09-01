@@ -24,7 +24,14 @@ import type { Relationship, UIDefinition } from "./views.js";
 
 export interface Field {
   key: string;
-  valueType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
+  valueType:
+    | "string"
+    | "integer"
+    | "number"
+    | "boolean"
+    | "date"
+    | "datetime"
+    | "object";
   cardinality?: FieldCardinality;
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
@@ -136,7 +143,10 @@ export interface ComponentDefinition {
 export interface ComponentCatalog {
   schemaVersion: number;
   kind: "componentCatalog";
-  defaults: Record<string, { label?: LocalizedText; component: string; readOnly?: boolean }>;
+  defaults: Record<
+    string,
+    { label?: LocalizedText; component: string; readOnly?: boolean }
+  >;
   viewDefaults: Record<string, { component: string }>;
   components: Record<string, ComponentDefinition>;
 }
@@ -152,7 +162,14 @@ export interface SemanticTypeDefinition {
   kind?: "scalar" | "entityId" | "entity" | "object";
   label: LocalizedText;
   pluralLabel?: LocalizedText;
-  valueType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
+  valueType:
+    | "string"
+    | "integer"
+    | "number"
+    | "boolean"
+    | "date"
+    | "datetime"
+    | "object";
   cardinality?: FieldCardinality;
   validation?: FieldValidation;
   options?: FieldOptions;
@@ -268,6 +285,199 @@ export type McpOperationKey = RestOperationKey;
  */
 export type McpToolStyle = "dedicated" | "generic";
 
+export interface McpOperationConfig {
+  /** Defaults to true. */
+  enabled?: boolean;
+  /**
+   * Override the complete generated tool name for this operation, replacing
+   * the `<toolPrefix>_<operation>` default (`dedicated` style only — the
+   * shared `osf_*` tools cannot be renamed per entity). Emitted verbatim into
+   * tool names, so the compiler restricts it to `^[a-z][a-z0-9_]*$` and
+   * fails closed on a duplicate across the catalog.
+   */
+  name?: string;
+  /**
+   * Override the generated tool description for this operation (`dedicated`
+   * style only). Use for short, operational, entity-specific guidance; the
+   * compiler-composed default is used when absent.
+   */
+  description?: string;
+}
+
+export interface McpResourceConfig {
+  /**
+   * Absolute URI of the entity's MCP catalogue resource, e.g.
+   * `app://things`. The single-record resource template is derived from it
+   * as `<uri>/{id}`. Restricted to `scheme://path` with safe characters,
+   * because it is emitted verbatim into the MCP resource listing that the
+   * runtime dispatches on.
+   */
+  uri: string;
+  /** Human-readable resource name; defaults to the entity's plural label. */
+  name?: string;
+  /** Resource description; defaults to a composed one naming the entity. */
+  description?: string;
+  /** Description of the derived single-record template. */
+  templateDescription?: string;
+}
+
+export interface McpDerivedVisibilityConfig {
+  /** Row field that gates projection. */
+  field: string;
+  /** Value the field must equal for the row to project as a tool. */
+  equals: string;
+}
+
+export interface McpDerivedConnectConfig {
+  /** Tool name for the provider-connection handoff, e.g. `connect_service`. */
+  name: string;
+  /** Override the composed tool description. */
+  description?: string;
+  /** Roles allowed to create or replace a shared tenant connection. */
+  roles: string[];
+}
+
+export interface McpDerivedPersonalizationConfig {
+  /** Entity whose rows hold one person's instruction for a derived tool. */
+  entity: string;
+  /**
+   * Field on the preference row referencing the defining row's id; an empty
+   * value means the instruction applies to every tool of this projection.
+   */
+  serviceRef: string;
+  /** Field holding the person's instruction text. */
+  instructionField: string;
+  /** The audience-facing tool that stores the caller's own instruction. */
+  set: { name: string; description?: string };
+}
+
+export interface McpDerivedDryRunConfig {
+  /** Tool name for the composition preview, e.g. `dry_run_service`. */
+  name: string;
+  /** Override the composed tool description. */
+  description?: string;
+  /**
+   * Roles offered the dry run — typically the definition AUTHORS, not the
+   * derived tools' audience: the composed requests expose provider URLs and
+   * header shapes that are authoring detail.
+   */
+  roles: string[];
+}
+
+export interface McpDerivedToolsConfig {
+  /**
+   * Roles whose sessions are offered the derived tools. Deliberately separate
+   * from the entity's CRUD roles: the audience of the derived tools is
+   * usually NOT the audience allowed to manage the defining rows.
+   */
+  roles: string[];
+  /** Field whose value names the derived tool (sanitized to snake_case). */
+  keyField: string;
+  /** Field whose value becomes the derived tool's title. */
+  titleField?: string;
+  /** Field whose value becomes the derived tool's description. */
+  descriptionField: string;
+  /**
+   * Field holding the collection of canonical FieldDefinition objects that
+   * the runtime translates into the derived tool's input JSON Schema.
+   */
+  inputFieldsField: string;
+  /**
+   * Opt-in declarative execution: calling a derived tool runs its bindings
+   * against the referenced operation/provider/connection rows, whose fields
+   * follow the canonical OSF integration vocabulary (transport, method,
+   * pathTemplate, baseUrlTemplate, auth, egressHosts, responseMapping, …).
+   * Absent, a derived tool call answers 501.
+   */
+  execution?: McpDerivedExecutionConfig;
+  /**
+   * Only rows matching this predicate project as tools — the publication
+   * gate: a draft definition is invisible to its audience until published.
+   */
+  visibleWhen?: McpDerivedVisibilityConfig;
+  /**
+   * Opt-in per-row audience restriction: names an authored field holding a
+   * role list. A row whose list is non-empty projects (and answers) only
+   * for sessions holding one of those roles — how an administrative
+   * definition stays invisible to the wider audience.
+   */
+  visibleToRolesField?: string;
+  /**
+   * Opt-in personal-connection handoff tool: given one projected row, the
+   * runtime validates the row's execution chain and returns a provider
+   * authorization URL (PKCE) for the CALLER to open. Requires `execution`.
+   */
+  connect?: McpDerivedConnectConfig;
+  /**
+   * Opt-in composition preview tool: given a derived tool's name and
+   * arguments, the runtime composes the exact provider request(s) the call
+   * would make — method, URL, headers with placeholder credentials, body —
+   * WITHOUT sending them, and works on rows the visibility gate still hides,
+   * so authors verify a definition before publishing it. Requires
+   * `execution`.
+   */
+  dryRun?: McpDerivedDryRunConfig;
+  /**
+   * Opt-in per-person instructions: each audience member may store one
+   * instruction per derived tool (or one for all of them), which the
+   * projection appends to that tool's description FOR THAT PERSON — under
+   * the authored description, labelled as subordinate to it. This is how a
+   * person's standing preferences reach every client they use, without a
+   * new runtime concept on the assistant's side.
+   */
+  personalization?: McpDerivedPersonalizationConfig;
+}
+
+export interface McpElicitOnCreateConfig {
+  /** Local field whose value references the source row (e.g. a relation id). */
+  sourceField: string;
+  /** Entity whose row carries the field definitions to elicit. */
+  sourceEntity: string;
+  /** Field on the source row holding the FieldDefinition collection. */
+  definitionsField: string;
+  /**
+   * Local field the elicited values are stored into. Excluded from the
+   * create tool's input schema: these values come from the person at the
+   * client, never from the model, and anything the model passes anyway is
+   * discarded before the elicited values are stored.
+   */
+  into: string;
+  /** Optional custom prompt shown above the elicitation form. */
+  message?: string;
+}
+
+export interface McpDiscoveryConfig {
+  /** Tool name, e.g. `discover_provider`; same alphabet as other tool names. */
+  name: string;
+  /** Override the composed tool description. */
+  description?: string;
+}
+
+export interface McpTestConfig {
+  /** Tool name, e.g. `test_connection`; same alphabet as other tool names. */
+  name: string;
+  /** Override the composed tool description. */
+  description?: string;
+}
+
+export interface McpGuideConfig {
+  /** Tool name, e.g. `setup_provider_guide`. */
+  name: string;
+  /** Tool description; say WHEN to call it (e.g. "call this first when ..."). */
+  description: string;
+  /** Roles whose sessions see the guide. */
+  roles: string[];
+  /** The playbook itself, returned verbatim as the tool result. */
+  content: string;
+  /**
+   * Enforce the "call this first" that descriptions alone cannot: a stateful
+   * session that has not called this guide is refused CREATE operations on
+   * the guide's own entity, with the guide named as the next step. Exists
+   * because agents carrying cached local procedures skip voluntary guidance.
+   */
+  requireBeforeCreate?: boolean;
+}
+
 export interface McpConfig {
   /** Defaults to true when the `mcp` block is present. */
   enabled?: boolean;
@@ -279,8 +489,54 @@ export interface McpConfig {
   toolPrefix?: string;
   /** Defaults to `dedicated`. */
   tools?: McpToolStyle;
-  /** Per-operation flags; each defaults to true when MCP is enabled. */
-  operations?: Partial<Record<McpOperationKey, boolean>>;
+  /**
+   * Per-operation flags; each defaults to true when MCP is enabled. The
+   * object form additionally overrides the generated tool name and/or
+   * description for that operation.
+   */
+  operations?: Partial<Record<McpOperationKey, boolean | McpOperationConfig>>;
+  /**
+   * Opt-in MCP resource exposure: a direct catalogue resource at `uri` plus
+   * a derived `<uri>/{id}` template for one record. Reads are authorized like
+   * the entity's read operations.
+   */
+  resource?: McpResourceConfig;
+  /**
+   * Opt-in schema discovery tool: given a row id, the runtime fetches the
+   * row's declared schema document (canonical fields `discovery`, `schemaUrl`,
+   * `egressHosts`) and returns a compact operation summary. Visibility follows
+   * the entity's read role.
+   */
+  discovery?: McpDiscoveryConfig;
+  /**
+   * Opt-in authored playbook, projected as a zero-argument tool returning
+   * the content verbatim. This is how a product pins a fixed process for
+   * assistants — choreography that field schemas alone cannot carry.
+   */
+  guide?: McpGuideConfig;
+  /**
+   * Opt-in runtime projection of this entity's ROWS as MCP tools: each stored
+   * record becomes one tool, named from keyField and typed from the canonical
+   * FieldDefinition collection in inputFieldsField. This is how a deployment's
+   * own admins author new tools as data instead of code.
+   */
+  derivedTools?: McpDerivedToolsConfig;
+  /**
+   * Opt-in MCP elicitation on the create operation: the runtime collects the
+   * values for the source row's field definitions directly from the person at
+   * the client via a standard elicitation form, so tenant configuration and
+   * secrets never travel through model context or tool arguments.
+   */
+  elicitOnCreate?: McpElicitOnCreateConfig;
+  /**
+   * Opt-in verification tool for rows whose values were elicited: given a row
+   * id, the runtime checks the stored values against the source row's
+   * definitions and auth contract, and — when the source declares a `probe`
+   * request — exercises them against the provider. Requires `elicitOnCreate`
+   * (the wiring to the source row comes from it); visibility follows the
+   * entity's read role.
+   */
+  test?: McpTestConfig;
 }
 
 export interface CoreEntity {
@@ -364,34 +620,58 @@ export interface CoreEntity {
     nodes?: {
       actions?: {
         create?:
-        | boolean
-        | { enabled?: boolean; readableFields?: string[]; writableFields?: string[] };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            };
         getOne?:
-        | boolean
-        | { enabled?: boolean; readableFields?: string[]; writableFields?: string[] };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            };
         list?:
-        | boolean
-        | {
-          enabled?: boolean;
-          readableFields?: string[];
-          writableFields?: string[];
-          defaultSort?: {
-            field: string;
-            direction: "asc" | "desc";
-          };
-        };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+              defaultSort?: {
+                field: string;
+                direction: "asc" | "desc";
+              };
+            };
         update?:
-        | boolean
-        | { enabled?: boolean; readableFields?: string[]; writableFields?: string[] };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            };
         delete?:
-        | boolean
-        | { enabled?: boolean; readableFields?: string[]; writableFields?: string[] };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            };
         wait?:
-        | boolean
-        | { enabled?: boolean; readableFields?: string[]; writableFields?: string[] };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            };
         awaitAction?:
-        | boolean
-        | { enabled?: boolean; readableFields?: string[]; writableFields?: string[] };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            };
       };
     };
   };
@@ -440,15 +720,23 @@ export interface EntityProfile {
   crud?: boolean | CrudConfig;
   workflow?: {
     nodes?: {
-      actions?: Partial<Record<
-        "create" | "getOne" | "list" | "update" | "delete" | "wait" | "awaitAction",
-        | boolean
-        | {
-          enabled?: boolean;
-          readableFields?: string[];
-          writableFields?: string[];
-        }
-      >>;
+      actions?: Partial<
+        Record<
+          | "create"
+          | "getOne"
+          | "list"
+          | "update"
+          | "delete"
+          | "wait"
+          | "awaitAction",
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            }
+        >
+      >;
     };
   };
   storage?: {

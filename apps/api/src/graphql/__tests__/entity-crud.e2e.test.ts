@@ -123,6 +123,30 @@ for (const table of tables) {
         expect(data[graphql.listQueryName].edges[0].node.id).toBe(id);
       });
 
+      if (sortColumn.query?.searchable !== false) {
+        test(`filter and search treat wildcard characters literally on ${filterField}`, async () => {
+          const token = `e2e-like-${randomUUID().slice(0, 8)}`;
+          const literal = `${token}%_mark`;
+          const decoy = `${token}xxmark`;
+          const literalId = await createRow(table, tenantA, { [filterField]: literal });
+          await createRow(table, tenantA, { [filterField]: decoy });
+          const query = `query($filter: ${typeName}Filter, $search: String) {
+            ${graphql.listQueryName}(filter: $filter, search: $search, first: 5) {
+              totalCount edges { node { id } }
+            }
+          }`;
+
+          for (const variables of [
+            { filter: { [filterField]: literal } },
+            { search: literal },
+          ]) {
+            const data = await expectData(tenantA, query, variables);
+            expect(data[graphql.listQueryName].totalCount).toBe(1);
+            expect(data[graphql.listQueryName].edges[0].node.id).toBe(literalId);
+          }
+        });
+      }
+
       const field = fieldName(sortColumn);
       test(`sort by ${field} asc/desc`, async () => {
         const low = await createRow(table, tenantA, { [field]: `aaa-${seed}` });

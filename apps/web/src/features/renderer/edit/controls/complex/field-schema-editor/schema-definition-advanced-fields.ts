@@ -48,10 +48,36 @@ export function buildAdvancedFieldSchemaFields(): FieldSchemaDefinitionFieldDraf
       label: { nl: "Weergaveveld", en: "Display field" },
     },
     {
+      key: "schemaSearchable",
+      valueType: "boolean",
+      dataPath: "field.searchable",
+      label: { nl: "Doorzoekbaar", en: "Searchable" },
+      description: {
+        nl: "Neem dit veld op in vrije-tekstzoekopdrachten; autorisatie wordt per verzoek toegepast.",
+        en: "Include this field in free-text search; authorization is applied per request.",
+      },
+      render: { component: "Switch" },
+    },
+    {
+      key: "schemaFilterable",
+      valueType: "boolean",
+      dataPath: "field.filterable",
+      label: { nl: "Filterbaar", en: "Filterable" },
+      description: {
+        nl: "Sta toe dat dit veld in een gestructureerd filter wordt genoemd.",
+        en: "Allow this field to be named in a structured filter.",
+      },
+      render: { component: "Switch" },
+    },
+    {
       key: "schemaSortable",
       valueType: "boolean",
       dataPath: "field.sortable",
       label: { nl: "Sorteerbaar", en: "Sortable" },
+      description: {
+        nl: "Sta toe dat dit veld als sorteersleutel wordt gebruikt.",
+        en: "Allow this field to be used as a sort key.",
+      },
       render: { component: "Switch" },
     },
     {

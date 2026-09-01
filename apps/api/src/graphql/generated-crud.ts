@@ -8,6 +8,7 @@ import { appendScopedEntityEventInTransaction } from "../platform/entity-events.
 import {
   assertClassifiedQueryFieldsAllowed,
   canReadClassifiedColumns,
+  hasEffectiveFilterValue,
   redactRow,
 } from "./generated-authz.js";
 
@@ -112,6 +113,11 @@ export type GeneratedCrudColumn = {
    * does, so all three transports inherit it from one authored fact.
    */
   immutable?: boolean;
+  query?: {
+    searchable: boolean;
+    filterable: boolean;
+    sortable: boolean;
+  };
 };
 
 export type GeneratedCrudRelationship = {
@@ -147,10 +153,62 @@ type ListPageInput = {
   limit?: number | null;
   cursor?: string | null;
   filter?: Record<string, unknown> | null;
+  search?: string | null;
   sort?: { field?: string | null; direction?: string | null } | null;
   /** Run the count pass. Off by default: see GeneratedEntityConnection.totalCount. */
   includeTotalCount?: boolean;
 };
+
+function columnQueryCapability(
+  column: GeneratedCrudColumn,
+  capability: "searchable" | "filterable" | "sortable",
+): boolean {
+  if (column.query) return column.query[capability];
+  if (capability === "searchable") return column.type === "text";
+  return column.type !== "jsonb";
+}
+
+function assertQueryCapabilitiesAllowed(
+  table: GeneratedCrudTable,
+  input: Pick<ListPageInput, "filter" | "search" | "sort">,
+  session: DbSessionInput,
+): void {
+  const fields = fieldColumnMap(table);
+  for (const [key, value] of Object.entries(input.filter ?? {})) {
+    if (!hasEffectiveFilterValue(value)) continue;
+    const fieldName = key.endsWith("In") ? key.slice(0, -2) : key;
+    const column = fields.get(fieldName);
+    if (column && !columnQueryCapability(column, "filterable")) {
+      throw generatedCrudError(
+        `Field ${fieldName} is not filterable for ${table.name}.`,
+        "BAD_USER_INPUT",
+      );
+    }
+  }
+  if (input.sort?.field) {
+    const column = fields.get(input.sort.field);
+    if (column && !columnQueryCapability(column, "sortable")) {
+      throw generatedCrudError(
+        `Field ${input.sort.field} is not sortable for ${table.name}.`,
+        "BAD_USER_INPUT",
+      );
+    }
+  }
+  if (
+    input.search &&
+    !table.columns.some(
+      (column) =>
+        columnQueryCapability(column, "searchable") &&
+        (!column.classification ||
+          canReadClassifiedColumns(table.source?.authorization, session)),
+    )
+  ) {
+    throw generatedCrudError(
+      `Generated CRUD table ${table.name} has no searchable fields.`,
+      "BAD_USER_INPUT",
+    );
+  }
+}
 
 /** A connection whose caller opted into the count, so it is never null. */
 export type CountedEntityConnection = GeneratedEntityConnection & {
@@ -450,10 +508,21 @@ function normalizeSortDirection(value: unknown): "asc" | "desc" {
   return typeof value === "string" && value.toLowerCase() === "desc" ? "desc" : "asc";
 }
 
+/** `%` and `_` from callers are text, not PostgreSQL LIKE operators. */
+export function substringLikePattern(value: string): string {
+  const escaped = value
+    .replaceAll("\\", "\\\\")
+    .replaceAll("%", "\\%")
+    .replaceAll("_", "\\_");
+  return `%${escaped}%`;
+}
+
 function buildFilterConditions(
   table: GeneratedCrudTable,
   filter?: Record<string, unknown> | null,
   fixedWhere: Array<{ column: string; value: unknown }> = [],
+  search?: string | null,
+  canReadClassified = false,
 ) {
   const fields = fieldColumnMap(table);
   const columns = tableColumnMap(table);
@@ -468,7 +537,7 @@ function buildFilterConditions(
   });
 
   for (const [key, value] of Object.entries(filter ?? {})) {
-    if (value == null || value === "") {
+    if (!hasEffectiveFilterValue(value)) {
       continue;
     }
 
@@ -491,11 +560,32 @@ function buildFilterConditions(
     }
 
     if (column.type === "text" && typeof value === "string") {
-      conditions.push(sql`${sql.id("row_source", column.name)} ilike ${`%${value}%`}`);
+      conditions.push(
+        sql`${sql.id("row_source", column.name)} ilike ${substringLikePattern(value)} escape ${"\\"}`,
+      );
       continue;
     }
 
     conditions.push(sql`${sql.id("row_source", column.name)} = ${value}`);
+  }
+
+  if (search) {
+    const searchable = table.columns.filter(
+      (column) =>
+        columnQueryCapability(column, "searchable") &&
+        (!column.classification || canReadClassified),
+    );
+    if (searchable.length > 0) {
+      conditions.push(sql`(${sql.join(
+        searchable.map(
+          (column) =>
+            column.type === "text"
+              ? sql`${sql.id("row_source", column.name)} ilike ${substringLikePattern(search)} escape ${"\\"}`
+              : sql`${sql.id("row_source", column.name)}::text ilike ${substringLikePattern(search)} escape ${"\\"}`,
+        ),
+        sql` or `,
+      )})`);
+    }
   }
 
   return conditions.length === 0
@@ -556,7 +646,13 @@ export async function listGeneratedEntitiesForTable(
   const limit = normalizeLimit(input.limit);
   const offset = decodeOffsetCursor(input.cursor);
   const fixedWhere = [...tenantFixedWhere(table, session), ...(input.fixedWhere ?? [])];
-  const where = buildFilterConditions(table, input.filter, fixedWhere);
+  const where = buildFilterConditions(
+    table,
+    input.filter,
+    fixedWhere,
+    input.search,
+    canReadClassifiedColumns(table.source?.authorization, session),
+  );
   const orderBy = buildSortExpression(table, input.sort);
 
   return withDbSession(db, session, async (trx) => {
@@ -611,6 +707,7 @@ export async function listGeneratedEntities(
   input: ListPageInput & { table: string },
 ): Promise<GeneratedEntityConnection> {
   const table = readGeneratedCrudTable(input.table, "list", session);
+  assertQueryCapabilitiesAllowed(table, input, session);
   // Before any SQL runs: filtering or sorting by a column this session may not
   // read turns the result set (and totalCount) into an oracle for the value
   // redaction withholds.

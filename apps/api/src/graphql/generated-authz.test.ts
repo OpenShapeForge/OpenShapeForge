@@ -188,5 +188,23 @@ describe("field-level data protection (#96/#101)", () => {
         ),
       ).not.toThrow();
     });
+
+    it("ignores empty classified filters because they add no predicate", () => {
+      for (const filter of [
+        { emailAddress: null },
+        { emailAddress: "" },
+        { emailAddressIn: [] },
+      ]) {
+        expect(() =>
+          assertClassifiedQueryFieldsAllowed(
+            queryColumns,
+            authorization,
+            readOnly,
+            "ContactDetail",
+            filter,
+          ),
+        ).not.toThrow();
+      }
+    });
   });
 });

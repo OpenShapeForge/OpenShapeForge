@@ -73,6 +73,8 @@ export interface CompiledField {
     | "object";
   cardinality: "single" | "collection";
   variables?: "none" | "whole" | "template" | "both";
+  searchable?: boolean;
+  filterable?: boolean;
   sortable?: boolean;
   required: boolean;
   /** Presentation only — picks the display component over the input one. */

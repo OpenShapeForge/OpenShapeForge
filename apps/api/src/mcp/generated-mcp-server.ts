@@ -185,6 +185,11 @@ type CatalogField = {
   required: boolean;
   readOnly: boolean;
   immutable: boolean;
+  query: {
+    searchable: boolean;
+    filterable: boolean;
+    sortable: boolean;
+  };
   schema: Record<string, unknown>;
   classification?: string;
   relationship?: { kind: string; entity: string };
@@ -439,6 +444,16 @@ function withholdClassified(
     if (nested && typeof nested === "object" && !Array.isArray(nested)) {
       projected[wrapper] = pruneObjectLevel(nested as Record<string, unknown>);
     }
+  }
+  const sortField = projected.sortField;
+  if (sortField && typeof sortField === "object" && !Array.isArray(sortField)) {
+    const sortSchema = { ...(sortField as Record<string, unknown>) };
+    if (Array.isArray(sortSchema.enum)) {
+      sortSchema.enum = sortSchema.enum.filter(
+        (name) => !withheld.has(name as string),
+      );
+    }
+    projected.sortField = sortSchema;
   }
   root.properties = projected;
   return root;
@@ -1317,6 +1332,7 @@ async function invokeTool(
         table: table.name,
         ...(typeof args.first === "number" ? { limit: args.first } : {}),
         ...(typeof args.after === "string" ? { cursor: args.after } : {}),
+        ...(typeof args.search === "string" ? { search: args.search } : {}),
         ...(filter ? { filter } : {}),
         ...(sort ? { sort } : {}),
         includeTotalCount: true,

@@ -394,7 +394,6 @@ describe("rich generated REST OpenAPI", () => {
         "id",
         "displayName",
         "relationType",
-        "metadata",
         "externalId",
         "first",
         "status",
@@ -407,11 +406,28 @@ describe("rich generated REST OpenAPI", () => {
       ],
       default: "id",
     });
+    expect(byName.get("search")?.schema).toEqual({ type: "string" });
     expect(byName.get("sortDirection")?.schema).toEqual({
       type: "string",
       enum: ["asc", "desc"],
       default: "asc",
     });
+  });
+
+  it("omits explicit filter and sort opt-outs from the REST contract", () => {
+    const narrowed = structuredClone(manifest);
+    const displayName = narrowed.tables[0]!.columns.find(
+      (column) => column.sourceField === "displayName",
+    )!;
+    displayName.query = { searchable: false, filterable: false, sortable: false };
+    const generated = JSON.parse(
+      renderOpenApiSpec(narrowed, "fixture", { entities: [{ contract }] }),
+    ) as ReturnType<typeof spec>;
+    const parameters = generated.paths["/api/rest/v1/relations"]?.get?.parameters ?? [];
+    const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
+
+    expect(byName.has("displayName")).toBe(false);
+    expect(byName.get("sortField")?.schema.enum).not.toContain("displayName");
   });
 
   it("projects scalar field semantics into direct and explicit IN filters", () => {

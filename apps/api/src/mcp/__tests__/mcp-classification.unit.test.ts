@@ -390,12 +390,14 @@ describe("withholdClassified", () => {
             status: { type: "string" },
           },
         },
+        sortField: { type: "string", enum: ["iban", "status"] },
       },
     };
 
     const result = withholdClassified(listSchema, ["iban"]);
     const filter = (result.properties as AnyRecord).filter as AnyRecord;
     expect(Object.keys(filter.properties as AnyRecord)).toEqual(["status"]);
+    expect(((result.properties as AnyRecord).sortField as AnyRecord).enum).toEqual(["status"]);
   });
 
   it("removes every classified field when more than one is listed", () => {

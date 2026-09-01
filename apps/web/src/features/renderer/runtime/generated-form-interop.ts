@@ -68,6 +68,8 @@ function mapField(field: GeneratedFormFieldConfig): Field {
     valueType: normalizeValueType(field.valueType),
     cardinality: field.cardinality ?? "single",
     variables: field.variables,
+    searchable: field.searchable,
+    filterable: field.filterable,
     sortable: field.sortable,
     required: field.required,
     readOnly: field.readOnly,

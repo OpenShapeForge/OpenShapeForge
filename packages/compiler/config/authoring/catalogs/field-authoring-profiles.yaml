@@ -16,7 +16,9 @@ profiles:
       description: true
       type: combined
       cardinality: false
-      sortable: false
+      searchable: true
+      filterable: true
+      sortable: true
       shape: true
       options: true
       render: false

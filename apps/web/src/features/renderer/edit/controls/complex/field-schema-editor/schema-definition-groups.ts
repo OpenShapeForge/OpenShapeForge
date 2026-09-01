@@ -14,6 +14,8 @@ export function buildFieldSchemaGroups(
   const showDescriptionControls = isProfileControlEnabled(profile, "description");
   const showTypeControl = isProfileControlEnabled(profile, "type");
   const showCardinalityControl = isProfileControlEnabled(profile, "cardinality");
+  const showSearchableControl = isProfileControlEnabled(profile, "searchable");
+  const showFilterableControl = isProfileControlEnabled(profile, "filterable");
   const showSortableControl = isProfileControlEnabled(profile, "sortable");
   const showOptionsControl = isProfileControlEnabled(profile, "options") && !rules?.lockOptions;
   const showRenderControl = isProfileControlEnabled(profile, "render");
@@ -33,6 +35,8 @@ export function buildFieldSchemaGroups(
       ...(showLabelControls ? ["schemaLabel"] : []),
       ...(showTypeControl ? ["schemaType"] : []),
       ...(showCardinalityControl ? ["schemaCardinality"] : []),
+      ...(showSearchableControl ? ["schemaSearchable"] : []),
+      ...(showFilterableControl ? ["schemaFilterable"] : []),
       ...(showSortableControl ? ["schemaSortable"] : []),
     ],
   };

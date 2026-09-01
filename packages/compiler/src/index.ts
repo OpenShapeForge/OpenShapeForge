@@ -54,6 +54,10 @@ export type {
   FieldDefinitionWorkflowInspector,
   FieldV2,
 } from "./authoring/types.js";
+export {
+  fieldQueryCapabilities,
+  type FieldQueryCapabilities,
+} from "./query-capabilities.js";
 
 const defaultRepoRoot = resolve(import.meta.dir, "../../..");
 

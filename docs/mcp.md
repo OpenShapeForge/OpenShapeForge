@@ -158,6 +158,8 @@ SQL needs and almost nothing a model needs.
 | `hints.aiInstructions`                         | appended to that description                             |
 | `relationship`                                 | a pointer to the target entity's tools                   |
 | `sortable` scalars                             | the `sortField` enum on the list tool                    |
+| `searchable` scalar strings                    | the `search` argument and its free-text search corpus    |
+| `filterable` scalars                           | properties of the structured `filter` object             |
 | `classification`                               | withheld fields and redaction (below) — never the schema |
 
 Computed and server-managed fields (`id`, `tenantId`, `createdAt`,

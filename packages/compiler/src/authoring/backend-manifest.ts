@@ -32,6 +32,7 @@ import type {
 import { isGeneratedCrudEligible } from "../schema.js";
 import type { CompiledAuthorization, CompiledField } from "./types/compiled.js";
 import { normalizeKeycloakRoleName } from "./role-names.js";
+import { fieldQueryCapabilities } from "../query-capabilities.js";
 
 /**
  * Bridges the compiled per-operation role lists into the manifest as the
@@ -968,7 +969,6 @@ export function compileAuthoringBackendManifest(
     // Field keys authored `immutable: true`, stamped onto their backing column
     // so the transports can refuse them on update (#177).
     const immutableFields = collectImmutableFieldKeys(candidate.contract.model.fields);
-
     for (const storageColumn of candidate.contract.storage.columns) {
       const field = candidate.fieldsByKey.get(storageColumn.field);
       const primaryKey = storageColumn.column === "id";
@@ -981,6 +981,17 @@ export function compileAuthoringBackendManifest(
         sourceField: storageColumn.field,
         ...(sensitivity ? { classification: sensitivity } : {}),
         ...(immutableFields.has(storageColumn.field) ? { immutable: true as const } : {}),
+        ...(field
+          ? {
+              query: fieldQueryCapabilities({
+                valueType: field.valueType,
+                cardinality: isCollectionField(field) ? "collection" : "single",
+                ...(field.searchable === undefined ? {} : { searchable: field.searchable }),
+                ...(field.filterable === undefined ? {} : { filterable: field.filterable }),
+                ...(field.sortable === undefined ? {} : { sortable: field.sortable }),
+              }),
+            }
+          : {}),
       };
       const defaultValue = defaultSql(field, column);
       if (defaultValue !== undefined) {
@@ -1168,6 +1179,7 @@ function comparableColumn(column: ColumnDefinition): Partial<ColumnDefinition> {
     ...(column.default === undefined ? {} : { default: column.default }),
     ...(column.generated === undefined ? {} : { generated: column.generated }),
     ...(column.references === undefined ? {} : { references: column.references }),
+    ...(column.query === undefined ? {} : { query: column.query }),
   };
 }
 

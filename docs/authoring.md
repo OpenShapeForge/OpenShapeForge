@@ -125,6 +125,31 @@ crud:                       # common upper bound for every generated surface
 rest: true                   # opt-in generated REST exposure (see below)
 ```
 
+### Query capabilities and authorization
+
+Entity fields can independently opt into or out of list-query behavior:
+
+```yaml
+- key: email
+  valueType: string
+  searchable: true
+  filterable: true
+  sortable: false
+```
+
+`searchable` adds a scalar text field to free-text search, `filterable` allows
+it in structured filters, and `sortable` allows it as an explicit sort key.
+These flags describe technical capability, not permission. At request time the
+runtime intersects them with the fields readable by the actor; a classified
+field that is redacted for that actor is also excluded from search and rejected
+as a filter or sort key.
+
+For backward compatibility, an absent flag preserves the legacy behavior:
+single scalar fields remain filterable and sortable, and single string fields
+are searchable. Set a flag to `false` to opt out. Object and collection shapes
+cannot opt in to these scalar query capabilities. `filterField` remains the
+preferred display/typeahead field and does not replace the capability set.
+
 Notes on what the compiler does with this:
 
 - **Only `persisted` fields produce columns.** A field without a `persisted`

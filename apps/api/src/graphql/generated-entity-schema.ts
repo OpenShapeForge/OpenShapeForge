@@ -89,6 +89,24 @@ function operationEnabled(table: GeneratedTable, operation: CrudOperation): bool
   return isGeneratedCrudOperationEnabled(table, operation);
 }
 
+function columnQueryCapability(
+  column: GeneratedTable["columns"][number],
+  capability: "searchable" | "filterable" | "sortable",
+): boolean {
+  if (column.query) return column.query[capability];
+  if (capability === "searchable") return column.type === "text";
+  return column.type !== "jsonb";
+}
+
+function listArguments(table: GeneratedTable, typeName: string): string {
+  const search = table.columns.some((column) =>
+    columnQueryCapability(column, "searchable"),
+  )
+    ? ", search: String"
+    : "";
+  return `filter: ${typeName}Filter${search}, sort: ${typeName}Sort, first: Int, after: String`;
+}
+
 export function renderGeneratedQueryFields(table: GeneratedTable): string[] {
   const graphql = assertGraphqlMetadata(table);
   return [
@@ -96,7 +114,7 @@ export function renderGeneratedQueryFields(table: GeneratedTable): string[] {
       ? [`      ${graphql.singleQueryName}(id: ID!): ${graphql.typeName}`]
       : []),
     ...(operationEnabled(table, "list")
-      ? [`      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${graphql.typeName}Connection!`]
+      ? [`      ${graphql.listQueryName}(${listArguments(table, graphql.typeName)}): ${graphql.typeName}Connection!`]
       : []),
   ];
 }
@@ -232,7 +250,10 @@ export function renderTypeDefinition(
   const fieldDocumentation = new Map(
     (documentation?.fields ?? []).map((field) => [field.name, field]),
   );
-  const filterFieldNames = new Set(table.columns.map(fieldNameForColumn));
+  const filterableColumns = table.columns.filter((column) =>
+    columnQueryCapability(column, "filterable"),
+  );
+  const filterFieldNames = new Set(filterableColumns.map(fieldNameForColumn));
   const columnFields = table.columns
     .map((column) => {
       const field = fieldNameForColumn(column);
@@ -294,7 +315,7 @@ ${[...columnFields, ...relationshipFields].join("\n")}
     }
 
     input ${graphql.typeName}Filter {
-${table.columns
+${filterableColumns
   .flatMap((column) => {
     const field = fieldNameForColumn(column);
     const scalar = graphqlScalarForColumn(column);
@@ -335,8 +356,17 @@ ${table.columns
   .join("\n")}
     }
 
+${(() => {
+  const sortableFields = table.columns
+    .filter((column) => columnQueryCapability(column, "sortable"))
+    .map(fieldNameForColumn);
+  return sortableFields.length > 0
+    ? `    enum ${graphql.typeName}SortField {\n${sortableFields.map((field) => `      ${field}`).join("\n")}\n    }`
+    : "";
+})()}
+
     input ${graphql.typeName}Sort {
-      field: String
+      field: ${table.columns.some((column) => columnQueryCapability(column, "sortable")) ? `${graphql.typeName}SortField` : "String"}
       direction: String
     }
 
@@ -378,7 +408,7 @@ export function renderQueryFields(
       ? [`${renderDescription(
           `Returns a page of ${graphql.typeName} records.`,
           "      ",
-        )}      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${graphql.typeName}Connection!`]
+        )}      ${graphql.listQueryName}(${listArguments(table, graphql.typeName)}): ${graphql.typeName}Connection!`]
       : []),
   ].join("\n");
 }
@@ -512,6 +542,7 @@ const queryResolvers = Object.fromEntries(
           _parent: unknown,
           args: {
             filter?: Record<string, unknown> | null;
+            search?: string | null;
             sort?: { field?: string | null; direction?: string | null } | null;
             first?: number | null;
             after?: string | null;
@@ -526,6 +557,7 @@ const queryResolvers = Object.fromEntries(
             ...(args.first === undefined ? {} : { limit: args.first }),
             ...(args.after === undefined ? {} : { cursor: args.after }),
             ...(args.filter === undefined ? {} : { filter: args.filter }),
+            ...(args.search === undefined ? {} : { search: args.search }),
             ...(args.sort === undefined ? {} : { sort: args.sort }),
             // The count is the expensive half of a list read (#17). Ask for it
             // only when the client selected the field it feeds.

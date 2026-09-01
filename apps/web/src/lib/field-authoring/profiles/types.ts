@@ -41,6 +41,8 @@ export type FieldAuthoringProfileControls = {
   description?: boolean;
   type?: "combined" | boolean;
   cardinality?: boolean;
+  searchable?: boolean;
+  filterable?: boolean;
   sortable?: boolean;
   shape?: boolean;
   options?: boolean;

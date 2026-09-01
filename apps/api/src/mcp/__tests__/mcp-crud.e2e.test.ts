@@ -378,19 +378,28 @@ describe("generated MCP server", () => {
       const textColumn = table.columns.find(
         (column) =>
           column.type === "text" &&
+          (column.query?.searchable ?? true) &&
           !column.primaryKey &&
           !["tenant_id", "created_at", "updated_at"].includes(column.name),
       );
       if (textColumn) {
+        const updatedValue = `updated-${seed}`;
         const updated = toolPayload(
           (
             await callTool(tenantA, `${prefix}_update`, {
               id: row.id,
-              values: { [fieldName(textColumn)]: `updated-${seed}` },
+              values: { [fieldName(textColumn)]: updatedValue },
             })
           ).body,
         );
-        expect(updated[fieldName(textColumn)]).toBe(`updated-${seed}`);
+        expect(updated[fieldName(textColumn)]).toBe(updatedValue);
+
+        const searchResult = await callTool(tenantA, `${prefix}_list`, {
+          search: updatedValue,
+        });
+        expect(toolError(searchResult.body)).toBeUndefined();
+        const searched = toolPayload(searchResult.body);
+        expect(searched.items.map((item: { id: string }) => item.id)).toContain(row.id);
       }
 
       const deleted = await callTool(tenantA, `${prefix}_delete`, { id: row.id });

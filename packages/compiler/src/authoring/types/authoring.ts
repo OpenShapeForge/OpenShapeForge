@@ -24,7 +24,14 @@ import type { Relationship, UIDefinition } from "./views.js";
 
 export interface Field {
   key: string;
-  valueType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
+  valueType:
+    | "string"
+    | "integer"
+    | "number"
+    | "boolean"
+    | "date"
+    | "datetime"
+    | "object";
   cardinality?: FieldCardinality;
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
@@ -136,7 +143,10 @@ export interface ComponentDefinition {
 export interface ComponentCatalog {
   schemaVersion: number;
   kind: "componentCatalog";
-  defaults: Record<string, { label?: LocalizedText; component: string; readOnly?: boolean }>;
+  defaults: Record<
+    string,
+    { label?: LocalizedText; component: string; readOnly?: boolean }
+  >;
   viewDefaults: Record<string, { component: string }>;
   components: Record<string, ComponentDefinition>;
 }
@@ -152,7 +162,14 @@ export interface SemanticTypeDefinition {
   kind?: "scalar" | "entityId" | "entity" | "object";
   label: LocalizedText;
   pluralLabel?: LocalizedText;
-  valueType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
+  valueType:
+    | "string"
+    | "integer"
+    | "number"
+    | "boolean"
+    | "date"
+    | "datetime"
+    | "object";
   cardinality?: FieldCardinality;
   validation?: FieldValidation;
   options?: FieldOptions;
@@ -312,10 +329,12 @@ export interface McpDerivedVisibilityConfig {
 }
 
 export interface McpDerivedConnectConfig {
-  /** Tool name for the personal-connection handoff, e.g. `connect_service`. */
+  /** Tool name for the provider-connection handoff, e.g. `connect_service`. */
   name: string;
   /** Override the composed tool description. */
   description?: string;
+  /** Roles allowed to create or replace a shared tenant connection. */
+  roles: string[];
 }
 
 export interface McpDerivedPersonalizationConfig {
@@ -601,34 +620,58 @@ export interface CoreEntity {
     nodes?: {
       actions?: {
         create?:
-        | boolean
-        | { enabled?: boolean; readableFields?: string[]; writableFields?: string[] };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            };
         getOne?:
-        | boolean
-        | { enabled?: boolean; readableFields?: string[]; writableFields?: string[] };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            };
         list?:
-        | boolean
-        | {
-          enabled?: boolean;
-          readableFields?: string[];
-          writableFields?: string[];
-          defaultSort?: {
-            field: string;
-            direction: "asc" | "desc";
-          };
-        };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+              defaultSort?: {
+                field: string;
+                direction: "asc" | "desc";
+              };
+            };
         update?:
-        | boolean
-        | { enabled?: boolean; readableFields?: string[]; writableFields?: string[] };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            };
         delete?:
-        | boolean
-        | { enabled?: boolean; readableFields?: string[]; writableFields?: string[] };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            };
         wait?:
-        | boolean
-        | { enabled?: boolean; readableFields?: string[]; writableFields?: string[] };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            };
         awaitAction?:
-        | boolean
-        | { enabled?: boolean; readableFields?: string[]; writableFields?: string[] };
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            };
       };
     };
   };
@@ -677,15 +720,23 @@ export interface EntityProfile {
   crud?: boolean | CrudConfig;
   workflow?: {
     nodes?: {
-      actions?: Partial<Record<
-        "create" | "getOne" | "list" | "update" | "delete" | "wait" | "awaitAction",
-        | boolean
-        | {
-          enabled?: boolean;
-          readableFields?: string[];
-          writableFields?: string[];
-        }
-      >>;
+      actions?: Partial<
+        Record<
+          | "create"
+          | "getOne"
+          | "list"
+          | "update"
+          | "delete"
+          | "wait"
+          | "awaitAction",
+          | boolean
+          | {
+              enabled?: boolean;
+              readableFields?: string[];
+              writableFields?: string[];
+            }
+        >
+      >;
     };
   };
   storage?: {

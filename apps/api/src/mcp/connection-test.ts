@@ -35,6 +35,7 @@ import {
   definitionFieldKeys,
   providerUrlTemplates,
   resolveTemplate,
+  fetchWithAllowedRedirects,
   secretFieldKeys,
   splitConnectionValues,
   templatePlaceholders,
@@ -66,7 +67,10 @@ export type ConnectionTestReport = {
 function requiredDefinitionKeys(definitions: unknown): string[] {
   if (!Array.isArray(definitions)) return [];
   return (definitions as JsonRecord[])
-    .filter((definition) => definition?.required === true && typeof definition.key === "string")
+    .filter(
+      (definition) =>
+        definition?.required === true && typeof definition.key === "string",
+    )
     .map((definition) => definition.key as string);
 }
 
@@ -101,12 +105,16 @@ export function failedCheckSummary(report: ConnectionTestReport): string {
     .join(" ");
 }
 
-export async function testElicitedRow(input: TestElicitedRowInput): Promise<ConnectionTestReport> {
+export async function testElicitedRow(
+  input: TestElicitedRowInput,
+): Promise<ConnectionTestReport> {
   const { row, sourceRow, elicit } = input;
   const keyring = input.keyring ?? keyringFromEnv(process.env[KEYRING_ENV]);
   const fetchImpl = input.fetchImpl ?? fetch;
   const checks: ConnectionTestCheck[] = [];
-  const sourceName = String(sourceRow.name ?? sourceRow.key ?? elicit.sourceEntity);
+  const sourceName = String(
+    sourceRow.name ?? sourceRow.key ?? elicit.sourceEntity,
+  );
   const values = (row[elicit.into] ?? {}) as JsonRecord;
   const auth = (sourceRow.auth ?? null) as JsonRecord | null;
   const isPersonal = Boolean(row.ownerUserId);
@@ -174,7 +182,9 @@ export async function testElicitedRow(input: TestElicitedRowInput): Promise<Conn
   // failure fails the credentials check and skips the probe.
   let plain: Record<string, string> = {};
   let headers: Record<string, string> | undefined;
-  const egress = Array.isArray(sourceRow.egressHosts) ? (sourceRow.egressHosts as string[]) : [];
+  const egress = Array.isArray(sourceRow.egressHosts)
+    ? (sourceRow.egressHosts as string[])
+    : [];
   const personalTokens = Boolean(values.accessToken);
   // Sign-in providers execute with the runtime-issued bearer token; every
   // other contract executes with the source row's own auth block.
@@ -205,7 +215,9 @@ export async function testElicitedRow(input: TestElicitedRowInput): Promise<Conn
         }
         // Token fields were encrypted by the sign-in callback under the
         // personal scope; elicited fields under the source table scope.
-        const scope = TOKEN_FIELDS.has(field) ? `${input.table}:personal` : elicit.sourceTable;
+        const scope = TOKEN_FIELDS.has(field)
+          ? `${input.table}:personal`
+          : elicit.sourceTable;
         return decryptSecret(keyring, scope, field, stored);
       },
       urlSafeKeys,
@@ -231,7 +243,8 @@ export async function testElicitedRow(input: TestElicitedRowInput): Promise<Conn
         check: "credentials",
         outcome: "passed",
         detail:
-          (effectiveAuth as JsonRecord | null)?.scheme === "oauth2ClientCredentials"
+          (effectiveAuth as JsonRecord | null)?.scheme ===
+          "oauth2ClientCredentials"
             ? "The token endpoint accepted the client credentials and issued a token."
             : "The credentials resolve into request authentication.",
       });
@@ -240,13 +253,17 @@ export async function testElicitedRow(input: TestElicitedRowInput): Promise<Conn
     checks.push({
       check: "credentials",
       outcome: "failed",
-      detail: error instanceof HttpError ? error.message : "Credential resolution failed.",
+      detail:
+        error instanceof HttpError
+          ? error.message
+          : "Credential resolution failed.",
     });
   }
 
   // 4. Probe — only with resolved credentials and a declared probe request.
   const probe = (sourceRow.probe ?? null) as JsonRecord | null;
-  const pathTemplate = typeof probe?.pathTemplate === "string" ? probe.pathTemplate : "";
+  const pathTemplate =
+    typeof probe?.pathTemplate === "string" ? probe.pathTemplate : "";
   if (!probe || !pathTemplate.startsWith("/")) {
     checks.push({
       check: "probe",
@@ -260,20 +277,32 @@ export async function testElicitedRow(input: TestElicitedRowInput): Promise<Conn
     checks.push({
       check: "probe",
       outcome: "skipped",
-      detail: "Skipped because the credentials check did not produce request authentication.",
+      detail:
+        "Skipped because the credentials check did not produce request authentication.",
     });
   } else {
     try {
       const baseUrl = resolveTemplate(
-        typeof sourceRow.baseUrlTemplate === "string" ? sourceRow.baseUrlTemplate : "",
+        typeof sourceRow.baseUrlTemplate === "string"
+          ? sourceRow.baseUrlTemplate
+          : "",
         plain,
         "source baseUrlTemplate",
         secretClassified,
       );
-      const path = resolveTemplate(pathTemplate, plain, "probe pathTemplate", secretClassified);
+      const path = resolveTemplate(
+        pathTemplate,
+        plain,
+        "probe pathTemplate",
+        secretClassified,
+      );
       const url = new URL(baseUrl.replace(/\/$/, "") + path);
       if (url.protocol !== "https:" && url.protocol !== "http:") {
-        throw new HttpError(400, "EGRESS_DENIED", "Only http(s) probes are supported.");
+        throw new HttpError(
+          400,
+          "EGRESS_DENIED",
+          "Only http(s) probes are supported.",
+        );
       }
       if (!hostAllowed(url.hostname, egress)) {
         throw new HttpError(
@@ -282,12 +311,18 @@ export async function testElicitedRow(input: TestElicitedRowInput): Promise<Conn
           `Probe host ${url.hostname} is not in the egress allow-list.`,
         );
       }
-      const method = typeof probe.method === "string" ? probe.method.toUpperCase() : "GET";
-      const response = await fetchImpl(url, {
-        method,
-        headers: { accept: "application/json", ...headers },
-        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-      });
+      const method =
+        typeof probe.method === "string" ? probe.method.toUpperCase() : "GET";
+      const response = await fetchWithAllowedRedirects(
+        url,
+        {
+          method,
+          headers: { accept: "application/json", ...headers },
+          signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        },
+        egress,
+        fetchImpl,
+      );
       checks.push(
         response.ok
           ? {
@@ -309,7 +344,10 @@ export async function testElicitedRow(input: TestElicitedRowInput): Promise<Conn
       checks.push({
         check: "probe",
         outcome: "failed",
-        detail: error instanceof HttpError ? error.message : "The probe request did not complete.",
+        detail:
+          error instanceof HttpError
+            ? error.message
+            : "The probe request did not complete.",
       });
     }
   }

@@ -46,10 +46,7 @@
     },
     "language": {
       "type": "string",
-      "enum": [
-        "en",
-        "nl"
-      ]
+      "enum": ["en", "nl"]
     },
     "labels": {
       "$ref": "#/$defs/localizedText"
@@ -344,10 +341,23 @@
                   "items": { "type": "string" },
                   "minItems": 1
                 },
-                "content": { "type": "string" }
+                "content": { "type": "string" },
+                "requireBeforeCreate": { "type": "boolean" }
               }
             },
             "discovery": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]*$"
+                },
+                "description": { "type": "string" }
+              }
+            },
+            "test": {
               "type": "object",
               "additionalProperties": false,
               "required": ["name"],
@@ -376,7 +386,12 @@
             "elicitOnCreate": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["sourceField", "sourceEntity", "definitionsField", "into"],
+              "required": [
+                "sourceField",
+                "sourceEntity",
+                "definitionsField",
+                "into"
+              ],
               "properties": {
                 "sourceField": { "type": "string" },
                 "sourceEntity": { "type": "string" },
@@ -388,7 +403,12 @@
             "derivedTools": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["roles", "keyField", "descriptionField", "inputFieldsField"],
+              "required": [
+                "roles",
+                "keyField",
+                "descriptionField",
+                "inputFieldsField"
+              ],
               "properties": {
                 "roles": {
                   "type": "array",
@@ -399,6 +419,7 @@
                 "titleField": { "type": "string" },
                 "descriptionField": { "type": "string" },
                 "inputFieldsField": { "type": "string" },
+                "visibleToRolesField": { "type": "string" },
                 "visibleWhen": {
                   "type": "object",
                   "additionalProperties": false,
@@ -411,13 +432,62 @@
                 "connect": {
                   "type": "object",
                   "additionalProperties": false,
-                  "required": ["name"],
+                  "required": ["name", "roles"],
                   "properties": {
                     "name": {
                       "type": "string",
                       "pattern": "^[a-z][a-z0-9_]*$"
                     },
-                    "description": { "type": "string" }
+                    "description": { "type": "string" },
+                    "roles": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "minItems": 1
+                    }
+                  }
+                },
+                "dryRun": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "roles"],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_]*$"
+                    },
+                    "description": { "type": "string" },
+                    "roles": {
+                      "type": "array",
+                      "items": { "type": "string" },
+                      "minItems": 1
+                    }
+                  }
+                },
+                "personalization": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "entity",
+                    "serviceRef",
+                    "instructionField",
+                    "set"
+                  ],
+                  "properties": {
+                    "entity": { "type": "string" },
+                    "serviceRef": { "type": "string" },
+                    "instructionField": { "type": "string" },
+                    "set": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["name"],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9_]*$"
+                        },
+                        "description": { "type": "string" }
+                      }
+                    }
                   }
                 },
                 "execution": {
@@ -511,11 +581,7 @@
       "type": "object",
       "minProperties": 1,
       "propertyNames": {
-        "enum": [
-          "en",
-          "nl",
-          "fr"
-        ]
+        "enum": ["en", "nl", "fr"]
       },
       "additionalProperties": {
         "type": "string"
@@ -640,7 +706,15 @@
           "properties": {
             "action": {
               "type": "string",
-              "enum": ["keep", "archive", "delete", "anonymize", "mask", "review", "cryptoDelete"]
+              "enum": [
+                "keep",
+                "archive",
+                "delete",
+                "anonymize",
+                "mask",
+                "review",
+                "cryptoDelete"
+              ]
             },
             "review": {
               "oneOf": [
@@ -766,10 +840,7 @@
     "field": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "key",
-        "type"
-      ],
+      "required": ["key", "type"],
       "properties": {
         "key": {
           "$ref": "#/$defs/fieldKey"
@@ -833,13 +904,7 @@
           "properties": {
             "sensitivity": {
               "type": "string",
-              "enum": [
-                "public",
-                "internal",
-                "confidential",
-                "pii",
-                "bsn"
-              ]
+              "enum": ["public", "internal", "confidential", "pii", "bsn"]
             },
             "category": {
               "type": "string"
@@ -888,18 +953,13 @@
         },
         "visibility": {
           "type": "object",
-          "required": [
-            "conditions"
-          ],
+          "required": ["conditions"],
           "properties": {
             "conditions": {
               "type": "array",
               "items": {
                 "type": "object",
-                "required": [
-                  "field",
-                  "operator"
-                ],
+                "required": ["field", "operator"],
                 "properties": {
                   "field": {
                     "type": "string"
@@ -925,19 +985,13 @@
             },
             "logic": {
               "type": "string",
-              "enum": [
-                "and",
-                "or"
-              ]
+              "enum": ["and", "or"]
             }
           }
         },
         "computed": {
           "type": "object",
-          "required": [
-            "expression",
-            "dependencies"
-          ],
+          "required": ["expression", "dependencies"],
           "properties": {
             "expression": {
               "type": "string"
@@ -972,26 +1026,17 @@
         },
         "options": {
           "type": "object",
-          "required": [
-            "type"
-          ],
+          "required": ["type"],
           "properties": {
             "type": {
               "type": "string",
-              "enum": [
-                "static",
-                "referentiedata",
-                "remote"
-              ]
+              "enum": ["static", "referentiedata", "remote"]
             },
             "items": {
               "type": "array",
               "items": {
                 "type": "object",
-                "required": [
-                  "value",
-                  "label"
-                ],
+                "required": ["value", "label"],
                 "properties": {
                   "value": {
                     "type": "string"
@@ -1081,16 +1126,11 @@
         "reference": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "kind",
-            "group"
-          ],
+          "required": ["kind", "group"],
           "properties": {
             "kind": {
               "type": "string",
-              "enum": [
-                "referentiedata"
-              ]
+              "enum": ["referentiedata"]
             },
             "group": {
               "type": "string"
@@ -1106,10 +1146,7 @@
             },
             "storageClass": {
               "type": "string",
-              "enum": [
-                "core",
-                "profile"
-              ]
+              "enum": ["core", "profile"]
             }
           }
         },
@@ -1120,9 +1157,7 @@
         "render": {
           "type": "object",
           "description": "Override the default UI component for this field. If omitted, the component catalog default for the field type is used.",
-          "required": [
-            "component"
-          ],
+          "required": ["component"],
           "properties": {
             "component": {
               "type": "string",
@@ -1182,7 +1217,10 @@
         "type": "object",
         "properties": {
           "kind": { "type": "string", "enum": ["page", "embedded"] },
-          "type": { "type": "string", "enum": ["list", "detail", "form", "summary", "cards"] },
+          "type": {
+            "type": "string",
+            "enum": ["list", "detail", "form", "summary", "cards"]
+          },
           "itemAction": { "type": "object" }
         },
         "additionalProperties": true
@@ -1191,22 +1229,14 @@
     "relationship": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "key",
-        "kind",
-        "target"
-      ],
+      "required": ["key", "kind", "target"],
       "properties": {
         "key": {
           "$ref": "#/$defs/fieldKey"
         },
         "kind": {
           "type": "string",
-          "enum": [
-            "belongsTo",
-            "hasMany",
-            "manyToMany"
-          ]
+          "enum": ["belongsTo", "hasMany", "manyToMany"]
         },
         "target": {
           "type": "string",
@@ -1227,9 +1257,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": [
-          "handler"
-        ],
+        "required": ["handler"],
         "properties": {
           "handler": {
             "type": "string"

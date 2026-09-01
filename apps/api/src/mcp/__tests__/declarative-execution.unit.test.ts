@@ -11,33 +11,78 @@ import {
   describeAuthHeaders,
   acquireAuthHeaders,
   applyMapping,
+  bindingSelected,
   buildAuthHeaders,
   executeBinding,
+  fetchWithAllowedRedirects,
   mergeOutputs,
   extractPath,
   orderedBindings,
   resolveTemplate,
+  setPath,
   splitConnectionValues,
 } from "../declarative-execution.js";
 import { encryptSecret, keyringFromEnv } from "../../connectors/secrets.js";
 
-const KEYRING = keyringFromEnv(`test:${Buffer.alloc(32, 9).toString("base64")}`)!;
+const KEYRING = keyringFromEnv(
+  `test:${Buffer.alloc(32, 9).toString("base64")}`,
+)!;
+
+describe("binding selection and mapped paths", () => {
+  it("does not fan an empty selector out and rejects prototype paths", () => {
+    const binding = { when: { field: "provider", equals: "alpha" } };
+    expect(bindingSelected(binding, {})).toBe(true);
+    expect(bindingSelected(binding, { provider: "" })).toBe(false);
+    expect(bindingSelected(binding, { provider: "alpha" })).toBe(true);
+    expect(() => setPath({}, "a.__proto__.polluted", "yes")).toThrow(
+      /unsafe segment/,
+    );
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+});
+
+describe("redirect egress", () => {
+  it("rechecks the allow-list before following every redirect", async () => {
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request) => {
+      requested.push(String(input));
+      return new Response(null, {
+        status: 302,
+        headers: { location: "https://blocked.example/internal" },
+      });
+    }) as typeof fetch;
+
+    await expect(
+      fetchWithAllowedRedirects(
+        "https://allowed.example/start",
+        { method: "GET" },
+        ["allowed.example"],
+        fetchImpl,
+      ),
+    ).rejects.toThrow(/outside the egress allow-list/);
+    expect(requested).toEqual(["https://allowed.example/start"]);
+  });
+});
 
 describe("resolveTemplate", () => {
   it("substitutes known keys and fails closed on unknown ones", () => {
-    expect(resolveTemplate("https://{sub}.example.com", { sub: "acme" }, "t")).toBe(
-      "https://acme.example.com",
-    );
-    expect(() => resolveTemplate("https://{missing}.example.com", {}, "t")).toThrow(
-      /"\{missing\}"/,
-    );
+    expect(
+      resolveTemplate("https://{sub}.example.com", { sub: "acme" }, "t"),
+    ).toBe("https://acme.example.com");
+    expect(() =>
+      resolveTemplate("https://{missing}.example.com", {}, "t"),
+    ).toThrow(/"\{missing\}"/);
   });
 });
 
 describe("buildAuthHeaders", () => {
   it("builds basic auth from a template username and secret password", () => {
     const headers = buildAuthHeaders(
-      { scheme: "basic", usernameTemplate: "{email}/token", passwordFrom: "apiToken" },
+      {
+        scheme: "basic",
+        usernameTemplate: "{email}/token",
+        passwordFrom: "apiToken",
+      },
       { email: "agent@example.com" },
       { apiToken: "tok-1" },
     );
@@ -47,14 +92,24 @@ describe("buildAuthHeaders", () => {
   });
 
   it("supports bearer and named-header schemes, refuses hostile header names", () => {
-    expect(buildAuthHeaders({ scheme: "bearer", tokenFrom: "t" }, {}, { t: "x" })).toEqual({
+    expect(
+      buildAuthHeaders({ scheme: "bearer", tokenFrom: "t" }, {}, { t: "x" }),
+    ).toEqual({
       authorization: "Bearer x",
     });
     expect(
-      buildAuthHeaders({ scheme: "header", headerName: "X-Api-Key", tokenFrom: "t" }, {}, { t: "x" }),
+      buildAuthHeaders(
+        { scheme: "header", headerName: "X-Api-Key", tokenFrom: "t" },
+        {},
+        { t: "x" },
+      ),
     ).toEqual({ "x-api-key": "x" });
     expect(() =>
-      buildAuthHeaders({ scheme: "header", headerName: "Bad\r\nHeader", tokenFrom: "t" }, {}, { t: "x" }),
+      buildAuthHeaders(
+        { scheme: "header", headerName: "Bad\r\nHeader", tokenFrom: "t" },
+        {},
+        { t: "x" },
+      ),
     ).toThrow(/not a valid header name/);
   });
 
@@ -68,23 +123,35 @@ describe("buildAuthHeaders", () => {
 
 describe("mapping helpers", () => {
   it("applies from/to mappings and passes through when absent", () => {
-    expect(applyMapping({ a: 1, b: 2 }, [{ from: "a", to: "x" }])).toEqual({ x: 1 });
+    expect(applyMapping({ a: 1, b: 2 }, [{ from: "a", to: "x" }])).toEqual({
+      x: 1,
+    });
     expect(applyMapping({ a: 1 }, undefined)).toEqual({ a: 1 });
   });
 
   it("extracts dot paths", () => {
-    expect(extractPath({ data: { tickets: [1] } }, "data.tickets")).toEqual([1]);
+    expect(extractPath({ data: { tickets: [1] } }, "data.tickets")).toEqual([
+      1,
+    ]);
     expect(extractPath({ a: 1 }, "a.b")).toBeUndefined();
     expect(extractPath({ a: 1 }, undefined)).toEqual({ a: 1 });
   });
 
   it("orders bindings and refuses an empty set", () => {
     expect(
-      orderedBindings({ bindings: [{ order: 2, id: "b" }, { order: 1, id: "a" }] }, "bindings").map(
-        (binding) => binding.id,
-      ),
+      orderedBindings(
+        {
+          bindings: [
+            { order: 2, id: "b" },
+            { order: 1, id: "a" },
+          ],
+        },
+        "bindings",
+      ).map((binding) => binding.id),
     ).toEqual(["a", "b"]);
-    expect(() => orderedBindings({ bindings: [] }, "bindings")).toThrow(/no bindings/);
+    expect(() => orderedBindings({ bindings: [] }, "bindings")).toThrow(
+      /no bindings/,
+    );
   });
 });
 
@@ -100,14 +167,20 @@ describe("executeBinding", () => {
     apiToken: encryptSecret(KEYRING, "erp.providers", "apiToken", "tok-9"),
   };
 
-  const fetchSpy = (): { calls: { url: string; init: RequestInit }[]; impl: typeof fetch } => {
+  const fetchSpy = (): {
+    calls: { url: string; init: RequestInit }[];
+    impl: typeof fetch;
+  } => {
     const calls: { url: string; init: RequestInit }[] = [];
     const impl = (async (input: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: String(input), init: init ?? {} });
-      return new Response(JSON.stringify({ data: { ticket: { number: 42 } } }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ data: { ticket: { number: 42 } } }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      );
     }) as typeof fetch;
     return { calls, impl };
   };
@@ -135,7 +208,9 @@ describe("executeBinding", () => {
       secretScope: "erp.providers",
     });
     expect(outputs).toEqual({ ticketNumber: 42 });
-    expect(spy.calls[0]?.url).toBe("https://acme.example.com/api/search?q=printer");
+    expect(spy.calls[0]?.url).toBe(
+      "https://acme.example.com/api/search?q=printer",
+    );
     const headers = spy.calls[0]?.init.headers as Record<string, string>;
     expect(headers.authorization).toBe("Bearer tok-9");
   });
@@ -162,21 +237,30 @@ describe("executeBinding", () => {
     await expect(
       executeBinding({
         binding: {},
-        operationRow: { operation: { method: "GET", pathTemplate: "/x/{apiToken}" } },
+        operationRow: {
+          operation: { method: "GET", pathTemplate: "/x/{apiToken}" },
+        },
         providerRow,
+        providerDefinitions: [
+          {
+            key: "apiToken",
+            classification: { sensitivity: "confidential" },
+          },
+        ],
         connectionValues,
         serviceInputs: {},
         keyring: KEYRING,
         fetchImpl: spy.impl,
         secretScope: "erp.providers",
       }),
-    ).rejects.toThrow(/"\{apiToken\}"/);
+    ).rejects.toThrow(/classified as a secret/);
     expect(spy.calls).toEqual([]);
   });
 
   it("splits connection values by sensitivity", () => {
-    const { plain, secret } = splitConnectionValues(connectionValues, (stored, field) =>
-      field === "apiToken" ? "tok-9" : "",
+    const { plain, secret } = splitConnectionValues(
+      connectionValues,
+      (stored, field) => (field === "apiToken" ? "tok-9" : ""),
     );
     expect(plain).toEqual({ subdomain: "acme" });
     expect(secret).toEqual({ apiToken: "tok-9" });
@@ -214,7 +298,10 @@ describe("oauth2ClientCredentials", () => {
   it("refuses a token endpoint outside the egress allow-list", async () => {
     await expect(
       acquireAuthHeaders({
-        auth: { scheme: "oauth2ClientCredentials", tokenUrl: "https://evil.example.net/token" },
+        auth: {
+          scheme: "oauth2ClientCredentials",
+          tokenUrl: "https://evil.example.net/token",
+        },
         plain: { clientId: "id" },
         secret: { clientSecret: "sec" },
         egress: ["auth.example.com"],
@@ -225,7 +312,9 @@ describe("oauth2ClientCredentials", () => {
 });
 
 describe("graphql transport", () => {
-  const KEYRING2 = keyringFromEnv(`test:${Buffer.alloc(32, 5).toString("base64")}`)!;
+  const KEYRING2 = keyringFromEnv(
+    `test:${Buffer.alloc(32, 5).toString("base64")}`,
+  )!;
 
   it("posts the stored operation with variables and unwraps data", async () => {
     const calls: { url: string; body: string }[] = [];
@@ -236,7 +325,10 @@ describe("graphql transport", () => {
     const outputs = await executeBinding({
       binding: { outputMapping: [{ from: "total", to: "count" }] },
       operationRow: {
-        operation: { graphqlOperation: "query($q:String){tickets(q:$q){total}}", pathTemplate: "/graphql" },
+        operation: {
+          graphqlOperation: "query($q:String){tickets(q:$q){total}}",
+          pathTemplate: "/graphql",
+        },
         responseMapping: { rootPath: "tickets" },
       },
       providerRow: {
@@ -260,7 +352,9 @@ describe("graphql transport", () => {
 
   it("surfaces GraphQL errors as provider errors", async () => {
     const impl = (async () =>
-      Response.json({ errors: [{ message: "boom" }] })) as unknown as typeof fetch;
+      Response.json({
+        errors: [{ message: "boom" }],
+      })) as unknown as typeof fetch;
     await expect(
       executeBinding({
         binding: {},
@@ -283,7 +377,10 @@ describe("graphql transport", () => {
 describe("cursor pagination", () => {
   it("surfaces the next-page cursor from the declared path", async () => {
     const impl = (async () =>
-      Response.json({ data: { items: [1] }, meta: { after: "cur-2" } })) as unknown as typeof fetch;
+      Response.json({
+        data: { items: [1] },
+        meta: { after: "cur-2" },
+      })) as unknown as typeof fetch;
     const outputs = await executeBinding({
       binding: {},
       operationRow: {
@@ -311,7 +408,11 @@ describe("composeBindingRequest (describe mode)", () => {
     transport: "rest",
     baseUrlTemplate: "https://{subdomain}.example.com",
     egressHosts: ["*.example.com"],
-    auth: { scheme: "basic", usernameTemplate: "{email}/token", passwordFrom: "apiToken" },
+    auth: {
+      scheme: "basic",
+      usernameTemplate: "{email}/token",
+      passwordFrom: "apiToken",
+    },
   };
   const operationRow = {
     key: "create-thing",
@@ -334,7 +435,9 @@ describe("composeBindingRequest (describe mode)", () => {
     });
     expect(composed.method).toBe("POST");
     expect(composed.url.toString()).toBe("https://acme.example.com/api/things");
-    expect(composed.headers.authorization).toBe("Basic <credentials from the connection>");
+    expect(composed.headers.authorization).toBe(
+      "Basic <credentials from the connection>",
+    );
     expect(JSON.parse(composed.body!)).toEqual({ title: "Hello" });
     expect(JSON.stringify(composed)).not.toContain("should-never-be-read");
   });
@@ -367,14 +470,25 @@ describe("composeBindingRequest (describe mode)", () => {
 
 describe("describeAuthHeaders", () => {
   it("describes each scheme without values", () => {
-    expect(describeAuthHeaders({ scheme: "bearer", tokenFrom: "apiToken" })).toEqual({
+    expect(
+      describeAuthHeaders({ scheme: "bearer", tokenFrom: "apiToken" }),
+    ).toEqual({
       authorization: 'Bearer <value of "apiToken" from the connection>',
     });
-    expect(describeAuthHeaders({ scheme: "header", headerName: "X-Key", tokenFrom: "k" })).toEqual({
+    expect(
+      describeAuthHeaders({
+        scheme: "header",
+        headerName: "X-Key",
+        tokenFrom: "k",
+      }),
+    ).toEqual({
       "x-key": '<value of "k" from the connection>',
     });
     expect(
-      describeAuthHeaders({ scheme: "oauth2ClientCredentials", tokenUrl: "https://t/token" }),
+      describeAuthHeaders({
+        scheme: "oauth2ClientCredentials",
+        tokenUrl: "https://t/token",
+      }),
     ).toEqual({ authorization: "Bearer <token from https://t/token>" });
     expect(describeAuthHeaders(undefined)).toEqual({});
   });
@@ -389,13 +503,20 @@ describe("mapping honesty", () => {
   it("fails loud when a declared mapping matches nothing in a non-empty response", async () => {
     const base = {
       binding: { order: 1, outputMapping: [{ from: "events", to: "events" }] },
-      providerRow: { transport: "rest", baseUrlTemplate: "https://api.example.com", egressHosts: ["api.example.com"] },
+      providerRow: {
+        transport: "rest",
+        baseUrlTemplate: "https://api.example.com",
+        egressHosts: ["api.example.com"],
+      },
       connectionValues: {},
       serviceInputs: {},
       secretScope: "unused",
     };
     const fetchWith = (body: unknown) =>
-      (async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch;
+      (async () =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+        })) as unknown as typeof fetch;
 
     // fieldPaths that miss everything in an object response
     await expect(
@@ -404,7 +525,10 @@ describe("mapping honesty", () => {
         operationRow: {
           key: "events",
           operation: { method: "GET", pathTemplate: "/events" },
-          responseMapping: { rootPath: "items", fieldPaths: [{ field: "events", path: "nope" }] },
+          responseMapping: {
+            rootPath: "items",
+            fieldPaths: [{ field: "events", path: "nope" }],
+          },
         },
         fetchImpl: fetchWith({ items: [{ id: 1 }] }),
       }),
@@ -416,7 +540,10 @@ describe("mapping honesty", () => {
       operationRow: {
         key: "events",
         operation: { method: "GET", pathTemplate: "/events" },
-        responseMapping: { rootPath: "items", fieldPaths: [{ field: "events", path: "$" }] },
+        responseMapping: {
+          rootPath: "items",
+          fieldPaths: [{ field: "events", path: "$" }],
+        },
       },
       fetchImpl: fetchWith({ items: [{ id: 1 }, { id: 2 }] }),
     });
@@ -426,8 +553,14 @@ describe("mapping honesty", () => {
     await expect(
       executeBinding({
         ...base,
-        binding: { order: 1, outputMapping: [{ from: "absent", to: "absent" }] },
-        operationRow: { key: "events", operation: { method: "GET", pathTemplate: "/events" } },
+        binding: {
+          order: 1,
+          outputMapping: [{ from: "absent", to: "absent" }],
+        },
+        operationRow: {
+          key: "events",
+          operation: { method: "GET", pathTemplate: "/events" },
+        },
         fetchImpl: fetchWith({ anything: true }),
       }),
     ).rejects.toThrow(/output mapping matched nothing/);
@@ -438,7 +571,10 @@ describe("mapping honesty", () => {
       operationRow: {
         key: "events",
         operation: { method: "GET", pathTemplate: "/events" },
-        responseMapping: { rootPath: "items", fieldPaths: [{ field: "events", path: "$" }] },
+        responseMapping: {
+          rootPath: "items",
+          fieldPaths: [{ field: "events", path: "$" }],
+        },
       },
       fetchImpl: fetchWith({ items: [] }),
     });
@@ -448,9 +584,18 @@ describe("mapping honesty", () => {
 
 describe("mergeOutputs", () => {
   it("concatenates arrays under the same key and overwrites everything else", () => {
-    const accumulated: Record<string, unknown> = { tasks: [1, 2], cursor: "a", count: 2 };
+    const accumulated: Record<string, unknown> = {
+      tasks: [1, 2],
+      cursor: "a",
+      count: 2,
+    };
     mergeOutputs(accumulated, { tasks: [3], cursor: "b", extra: true });
-    expect(accumulated).toEqual({ tasks: [1, 2, 3], cursor: "b", count: 2, extra: true });
+    expect(accumulated).toEqual({
+      tasks: [1, 2, 3],
+      cursor: "b",
+      count: 2,
+      extra: true,
+    });
     // A non-array meeting an array still overwrites - chains stay expressible.
     mergeOutputs(accumulated, { tasks: "done" });
     expect(accumulated.tasks).toBe("done");

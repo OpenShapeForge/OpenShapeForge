@@ -194,6 +194,12 @@ service:
   type: ClusterIP
   port: 80
   targetPort: 3001
+  # MCP transport sessions retain short-lived process-local state. Browser
+  # OAuth/configuration handoffs are database-backed and may resume elsewhere.
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 1800
 
 # --- Ingress (optional) ------------------------------------------------------
 # The API carries OIDC bearer tokens and signed internal-context headers, so
@@ -304,6 +310,10 @@ nodeSelector: {}
 tolerations: []
 affinity: {}
 # Extra environment variables (name/value) appended to the API container.
+# Authored MCP browser handoffs need configured, non-derived origins, for
+# example OPENSHAPEFORGE_PUBLIC_ORIGIN=https://api.example.com and
+# OPENSHAPEFORGE_WEB_ORIGIN=https://kern.example.com. Put
+# OPENSHAPEFORGE_ELICITED_SECRET_KEYS in a Secret-backed deployment value.
 extraEnv: []
 
 # --- Worker workload (optional, OFF by default) ------------------------------

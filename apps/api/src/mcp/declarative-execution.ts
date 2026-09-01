@@ -56,6 +56,61 @@ type JsonRecord = Record<string, unknown>;
 
 const KEYRING_ENV = "OPENSHAPEFORGE_ELICITED_SECRET_KEYS";
 const REQUEST_TIMEOUT_MS = 15_000;
+const MAX_REDIRECTS = 5;
+
+/** Follow redirects only while every hop remains inside the authored grant. */
+export async function fetchWithAllowedRedirects(
+  input: string | URL,
+  init: RequestInit,
+  allowlist: readonly string[],
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
+  let url = new URL(input);
+  let requestInit = { ...init };
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    if (
+      (url.protocol !== "https:" && url.protocol !== "http:") ||
+      !hostAllowed(url.hostname, allowlist)
+    ) {
+      throw new HttpError(
+        403,
+        "EGRESS_DENIED",
+        `Redirect host ${url.hostname} is outside the egress allow-list.`,
+      );
+    }
+    const response = await fetchImpl(url, {
+      ...requestInit,
+      redirect: "manual",
+    });
+    if (response.status < 300 || response.status >= 400) return response;
+    const location = response.headers.get("location");
+    if (!location) return response;
+    if (hop === MAX_REDIRECTS) {
+      throw new HttpError(
+        502,
+        "PROVIDER_ERROR",
+        "Provider exceeded the redirect limit.",
+      );
+    }
+    url = new URL(location, url);
+    if (
+      response.status === 303 ||
+      ((response.status === 301 || response.status === 302) &&
+        requestInit.method === "POST")
+    ) {
+      const headers = new Headers(requestInit.headers);
+      headers.delete("content-type");
+      headers.delete("content-length");
+      requestInit = { ...requestInit, method: "GET", headers };
+      delete requestInit.body;
+    }
+  }
+  throw new HttpError(
+    502,
+    "PROVIDER_ERROR",
+    "Provider redirect handling failed.",
+  );
+}
 
 function looksLikeStoredSecret(value: unknown): value is StoredSecret {
   return (
@@ -85,7 +140,11 @@ export function splitConnectionValues(
       if (looksLikeStoredSecret(value)) {
         const target = urlSafeKeys?.has(key) ? plain : secret;
         target[key] = decrypt(value, key);
-      } else if (value !== null && value !== undefined && typeof value !== "object") {
+      } else if (
+        value !== null &&
+        value !== undefined &&
+        typeof value !== "object"
+      ) {
         plain[key] = String(value);
       }
     }
@@ -104,7 +163,10 @@ const PLACEHOLDER = /\{([a-zA-Z][a-zA-Z0-9]*)\}/g;
  */
 export const SECRET_SENSITIVITY = new Set(["confidential", "pii", "bsn"]);
 
-type FieldDefinition = { key?: unknown; classification?: { sensitivity?: unknown } };
+type FieldDefinition = {
+  key?: unknown;
+  classification?: { sensitivity?: unknown };
+};
 
 /** Field keys the given definitions classify as secret (see SECRET_SENSITIVITY). */
 export function secretFieldKeys(definitions: unknown): Set<string> {
@@ -154,8 +216,9 @@ export function providerUrlTemplates(
     { context: "probe pathTemplate", template: probe?.pathTemplate },
     { context: "auth.authorizationUrl", template: auth?.authorizationUrl },
     { context: "auth.tokenUrl", template: auth?.tokenUrl },
-  ].filter((entry): entry is { context: string; template: string } =>
-    typeof entry.template === "string" && entry.template.length > 0,
+  ].filter(
+    (entry): entry is { context: string; template: string } =>
+      typeof entry.template === "string" && entry.template.length > 0,
   );
 }
 
@@ -164,7 +227,10 @@ export function providerUrlTemplates(
  * readable and self-healing, because the correct fix (reclassify a value that
  * was never truly a secret) is one the caller can apply directly.
  */
-export function secretUrlPlaceholderError(key: string, context: string): HttpError {
+export function secretUrlPlaceholderError(
+  key: string,
+  context: string,
+): HttpError {
   return new HttpError(
     400,
     "SECRET_IN_URL_TEMPLATE",
@@ -187,13 +253,17 @@ export function secretUrlPlaceholderError(key: string, context: string): HttpErr
  * should declare the selector input as required, so a change can never fan
  * out to every provider at once.
  */
-export function bindingSelected(binding: JsonRecord, args: JsonRecord): boolean {
+export function bindingSelected(
+  binding: JsonRecord,
+  args: JsonRecord,
+): boolean {
   const when = binding.when as JsonRecord | null | undefined;
   if (!when || typeof when !== "object") return true;
   const field = typeof when.field === "string" ? when.field : "";
   if (!field) return true;
   const value = args[field];
-  if (value === undefined || value === null || value === "") return true;
+  if (value === undefined || value === null) return true;
+  if (value === "") return false;
   return String(value) === String(when.equals);
 }
 
@@ -241,7 +311,10 @@ type AuthConfig = {
  * before expiry, so a burst of tool calls costs one token round-trip. The
  * cache holds bearer tokens only — never the client secret.
  */
-const oauthTokenCache = new Map<string, { token: string; expiresAtMs: number }>();
+const oauthTokenCache = new Map<
+  string,
+  { token: string; expiresAtMs: number }
+>();
 
 async function clientCredentialsToken(input: {
   config: AuthConfig;
@@ -251,11 +324,18 @@ async function clientCredentialsToken(input: {
   fetchImpl: typeof fetch;
 }): Promise<string> {
   const { config } = input;
-  const tokenUrlRaw = typeof config.tokenUrl === "string" ? config.tokenUrl : "";
+  const tokenUrlRaw =
+    typeof config.tokenUrl === "string" ? config.tokenUrl : "";
   const credentialSources = { ...input.plain, ...input.secret };
-  const tokenUrl = new URL(resolveTemplate(tokenUrlRaw, input.plain, "auth.tokenUrl"));
+  const tokenUrl = new URL(
+    resolveTemplate(tokenUrlRaw, input.plain, "auth.tokenUrl"),
+  );
   if (tokenUrl.protocol !== "https:" && tokenUrl.protocol !== "http:") {
-    throw new HttpError(400, "EGRESS_DENIED", "Only http(s) token endpoints are supported.");
+    throw new HttpError(
+      400,
+      "EGRESS_DENIED",
+      "Only http(s) token endpoints are supported.",
+    );
   }
   if (!hostAllowed(tokenUrl.hostname, input.egress)) {
     throw new HttpError(
@@ -264,9 +344,12 @@ async function clientCredentialsToken(input: {
       `Token endpoint host ${tokenUrl.hostname} is not in the provider's egress allow-list.`,
     );
   }
-  const clientIdKey = typeof config.clientIdFrom === "string" ? config.clientIdFrom : "clientId";
+  const clientIdKey =
+    typeof config.clientIdFrom === "string" ? config.clientIdFrom : "clientId";
   const clientSecretKey =
-    typeof config.clientSecretFrom === "string" ? config.clientSecretFrom : "clientSecret";
+    typeof config.clientSecretFrom === "string"
+      ? config.clientSecretFrom
+      : "clientSecret";
   const clientId = credentialSources[clientIdKey];
   const clientSecret = credentialSources[clientSecretKey];
   if (clientId === undefined || clientSecret === undefined) {
@@ -283,19 +366,26 @@ async function clientCredentialsToken(input: {
 
   const form = new URLSearchParams({ grant_type: "client_credentials" });
   const scopes = Array.isArray(config.scopes)
-    ? (config.scopes as unknown[]).filter((scope): scope is string => typeof scope === "string")
+    ? (config.scopes as unknown[]).filter(
+        (scope): scope is string => typeof scope === "string",
+      )
     : [];
   if (scopes.length > 0) form.set("scope", scopes.join(" "));
-  const response = await input.fetchImpl(tokenUrl, {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
-      accept: "application/json",
+  const response = await fetchWithAllowedRedirects(
+    tokenUrl,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+        accept: "application/json",
+      },
+      body: form.toString(),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     },
-    body: form.toString(),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
+    input.egress,
+    input.fetchImpl,
+  );
   const text = await response.text();
   if (!response.ok) {
     throw new HttpError(
@@ -308,12 +398,21 @@ async function clientCredentialsToken(input: {
   try {
     payload = JSON.parse(text) as typeof payload;
   } catch {
-    throw new HttpError(502, "TOKEN_ENDPOINT_ERROR", "Token endpoint response is not JSON.");
+    throw new HttpError(
+      502,
+      "TOKEN_ENDPOINT_ERROR",
+      "Token endpoint response is not JSON.",
+    );
   }
   if (typeof payload.access_token !== "string") {
-    throw new HttpError(502, "TOKEN_ENDPOINT_ERROR", "Token endpoint returned no access_token.");
+    throw new HttpError(
+      502,
+      "TOKEN_ENDPOINT_ERROR",
+      "Token endpoint returned no access_token.",
+    );
   }
-  const expiresInS = typeof payload.expires_in === "number" ? payload.expires_in : 300;
+  const expiresInS =
+    typeof payload.expires_in === "number" ? payload.expires_in : 300;
   oauthTokenCache.set(cacheKey, {
     token: payload.access_token,
     expiresAtMs: Date.now() + Math.max(0, expiresInS - 60) * 1000,
@@ -336,7 +435,11 @@ export function buildAuthHeaders(
   const credentialSources = { ...plain, ...secret };
   const secretByKey = (from: unknown, what: string): string => {
     if (typeof from !== "string" || from.length === 0) {
-      throw new HttpError(400, "AUTH_MISCONFIGURED", `Provider auth ${what} is not configured.`);
+      throw new HttpError(
+        400,
+        "AUTH_MISCONFIGURED",
+        `Provider auth ${what} is not configured.`,
+      );
     }
     const value = credentialSources[from];
     if (value === undefined) {
@@ -353,20 +456,33 @@ export function buildAuthHeaders(
     case "basic": {
       const username =
         typeof config.usernameTemplate === "string"
-          ? resolveTemplate(config.usernameTemplate, credentialSources, "auth.usernameTemplate")
+          ? resolveTemplate(
+              config.usernameTemplate,
+              credentialSources,
+              "auth.usernameTemplate",
+            )
           : secretByKey(config.usernameTemplate, "usernameTemplate");
       const password = secretByKey(config.passwordFrom, "passwordFrom");
       const encoded = Buffer.from(`${username}:${password}`).toString("base64");
       return { authorization: `Basic ${encoded}` };
     }
     case "bearer":
-      return { authorization: `Bearer ${secretByKey(config.tokenFrom, "tokenFrom")}` };
+      return {
+        authorization: `Bearer ${secretByKey(config.tokenFrom, "tokenFrom")}`,
+      };
     case "header": {
-      const name = typeof config.headerName === "string" ? config.headerName.trim() : "";
+      const name =
+        typeof config.headerName === "string" ? config.headerName.trim() : "";
       if (!/^[A-Za-z][A-Za-z0-9-]*$/.test(name)) {
-        throw new HttpError(400, "AUTH_MISCONFIGURED", "Provider auth headerName is not a valid header name.");
+        throw new HttpError(
+          400,
+          "AUTH_MISCONFIGURED",
+          "Provider auth headerName is not a valid header name.",
+        );
       }
-      return { [name.toLowerCase()]: secretByKey(config.tokenFrom, "tokenFrom") };
+      return {
+        [name.toLowerCase()]: secretByKey(config.tokenFrom, "tokenFrom"),
+      };
     }
     default:
       return {};
@@ -380,15 +496,32 @@ export function applyMapping(values: JsonRecord, mapping: unknown): JsonRecord {
   if (!Array.isArray(mapping) || mapping.length === 0) return { ...values };
   const mapped: JsonRecord = {};
   for (const entry of mapping as Mapping) {
-    if (typeof entry?.from !== "string" || typeof entry?.to !== "string") continue;
+    if (typeof entry?.from !== "string" || typeof entry?.to !== "string")
+      continue;
     if (values[entry.from] !== undefined) mapped[entry.to] = values[entry.from];
   }
   return mapped;
 }
 
 /** Set a value at a dot path, creating intermediate objects. */
-export function setPath(target: JsonRecord, path: string, value: unknown): void {
+export function setPath(
+  target: JsonRecord,
+  path: string,
+  value: unknown,
+): void {
   const segments = path.split(".");
+  if (
+    segments.length === 0 ||
+    segments.some(
+      (segment) => segment === "__proto__" || segment === "prototype",
+    )
+  ) {
+    throw new HttpError(
+      400,
+      "BAD_USER_INPUT",
+      "Mapped body paths contain an unsafe segment.",
+    );
+  }
   let current = target;
   for (const segment of segments.slice(0, -1)) {
     const next = current[segment];
@@ -406,7 +539,8 @@ export function setPath(target: JsonRecord, path: string, value: unknown): void 
  * JSONPath spellings, and refusing them silently lost whole result sets.
  */
 export function extractPath(value: unknown, path: unknown): unknown {
-  if (typeof path !== "string" || path.length === 0 || path === "$") return value;
+  if (typeof path !== "string" || path.length === 0 || path === "$")
+    return value;
   const trimmed = path.startsWith("$.") ? path.slice(2) : path;
   let current: unknown = value;
   for (const segment of trimmed.split(".")) {
@@ -448,7 +582,9 @@ export async function acquireAuthHeaders(input: {
   fetchImpl: typeof fetch;
 }): Promise<Record<string, string>> {
   const config =
-    input.auth && typeof input.auth === "object" ? (input.auth as AuthConfig) : undefined;
+    input.auth && typeof input.auth === "object"
+      ? (input.auth as AuthConfig)
+      : undefined;
   if (config?.scheme === "oauth2ClientCredentials") {
     const token = await clientCredentialsToken({
       config,
@@ -478,7 +614,8 @@ export function describeAuthHeaders(auth: unknown): Record<string, string> {
         authorization: `Bearer <value of "${String(config.tokenFrom ?? "?")}" from the connection>`,
       };
     case "header": {
-      const name = typeof config.headerName === "string" ? config.headerName.trim() : "";
+      const name =
+        typeof config.headerName === "string" ? config.headerName.trim() : "";
       if (!/^[A-Za-z][A-Za-z0-9-]*$/.test(name)) return {};
       return {
         [name.toLowerCase()]: `<value of "${String(config.tokenFrom ?? "?")}" from the connection>`,
@@ -526,7 +663,9 @@ export async function composeBindingRequest(
 
   const secretKeys = secretFieldKeys(input.providerDefinitions);
   const urlSafeKeys = new Set(
-    [...definitionFieldKeys(input.providerDefinitions)].filter((key) => !secretKeys.has(key)),
+    [...definitionFieldKeys(input.providerDefinitions)].filter(
+      (key) => !secretKeys.has(key),
+    ),
   );
   const { plain, secret } = splitConnectionValues(
     input.connectionValues,
@@ -558,9 +697,14 @@ export async function composeBindingRequest(
       : "GET";
   // GraphQL posts to the endpoint itself; a pathTemplate is optional there
   // (e.g. "/graphql") and required for REST.
-  const pathTemplate = typeof operation.pathTemplate === "string" ? operation.pathTemplate : "";
+  const pathTemplate =
+    typeof operation.pathTemplate === "string" ? operation.pathTemplate : "";
   if (!isGraphql && !pathTemplate.startsWith("/")) {
-    throw new HttpError(400, "OPERATION_MISCONFIGURED", "Operation pathTemplate must start with /.");
+    throw new HttpError(
+      400,
+      "OPERATION_MISCONFIGURED",
+      "Operation pathTemplate must start with /.",
+    );
   }
   if (isGraphql && typeof operation.graphqlOperation !== "string") {
     throw new HttpError(
@@ -580,25 +724,39 @@ export async function composeBindingRequest(
     ),
   };
   const baseUrl = resolveTemplate(
-    typeof providerRow.baseUrlTemplate === "string" ? providerRow.baseUrlTemplate : "",
+    typeof providerRow.baseUrlTemplate === "string"
+      ? providerRow.baseUrlTemplate
+      : "",
     plain,
     "provider baseUrlTemplate",
     secretKeys,
   );
   const usedInPath = new Set<string>();
-  const path = (isGraphql && pathTemplate === "" ? "" : pathTemplate).replace(PLACEHOLDER, (_match, key: string) => {
-    const value = urlSources[key];
-    if (value === undefined) {
-      if (secretKeys.has(key)) throw secretUrlPlaceholderError(key, "operation pathTemplate");
-      throw new HttpError(400, "TEMPLATE_UNRESOLVED", `Path placeholder "{${key}}" has no value.`);
-    }
-    usedInPath.add(key);
-    return encodeURIComponent(value);
-  });
+  const path = (isGraphql && pathTemplate === "" ? "" : pathTemplate).replace(
+    PLACEHOLDER,
+    (_match, key: string) => {
+      const value = urlSources[key];
+      if (value === undefined) {
+        if (secretKeys.has(key))
+          throw secretUrlPlaceholderError(key, "operation pathTemplate");
+        throw new HttpError(
+          400,
+          "TEMPLATE_UNRESOLVED",
+          `Path placeholder "{${key}}" has no value.`,
+        );
+      }
+      usedInPath.add(key);
+      return encodeURIComponent(value);
+    },
+  );
 
   const url = new URL(baseUrl.replace(/\/$/, "") + path);
   if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new HttpError(400, "EGRESS_DENIED", "Only http(s) providers are executable.");
+    throw new HttpError(
+      400,
+      "EGRESS_DENIED",
+      "Only http(s) providers are executable.",
+    );
   }
   const egress = Array.isArray(providerRow.egressHosts)
     ? (providerRow.egressHosts as string[])
@@ -642,10 +800,14 @@ export async function composeBindingRequest(
   let body: string | undefined;
   if (isGraphql) {
     headers["content-type"] = "application/json";
-    body = JSON.stringify({ query: operation.graphqlOperation, variables: remaining });
+    body = JSON.stringify({
+      query: operation.graphqlOperation,
+      variables: remaining,
+    });
   } else {
     for (const entry of queryRenames) {
-      if (typeof entry.field !== "string" || typeof entry.param !== "string") continue;
+      if (typeof entry.field !== "string" || typeof entry.param !== "string")
+        continue;
       const value = remaining[entry.field];
       if (value !== undefined && value !== null && typeof value !== "object") {
         url.searchParams.set(entry.param, String(value));
@@ -653,14 +815,16 @@ export async function composeBindingRequest(
       delete remaining[entry.field];
     }
     for (const entry of bodyPaths) {
-      if (typeof entry.field !== "string" || typeof entry.path !== "string") continue;
+      if (typeof entry.field !== "string" || typeof entry.path !== "string")
+        continue;
       const value = remaining[entry.field];
       if (value !== undefined) setPath(mappedBody, entry.path, value);
       delete remaining[entry.field];
     }
     if (method === "GET" || method === "DELETE") {
       for (const [key, value] of Object.entries(remaining)) {
-        if (value !== null && typeof value !== "object") url.searchParams.set(key, String(value));
+        if (value !== null && typeof value !== "object")
+          url.searchParams.set(key, String(value));
       }
       if (Object.keys(mappedBody).length > 0) {
         throw new HttpError(
@@ -678,18 +842,28 @@ export async function composeBindingRequest(
   return { method, url, headers, ...(body !== undefined ? { body } : {}) };
 }
 
-export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRecord> {
+export async function executeBinding(
+  input: ExecuteBindingInput,
+): Promise<JsonRecord> {
   const { binding, operationRow, providerRow } = input;
   const fetchImpl = input.fetchImpl ?? fetch;
   const { method, url, headers, body } = await composeBindingRequest(input);
   const isGraphql = providerRow.transport === "graphql";
+  const egress = Array.isArray(providerRow.egressHosts)
+    ? (providerRow.egressHosts as string[])
+    : [];
 
-  const response = await fetchImpl(url, {
-    method,
-    headers,
-    ...(body !== undefined ? { body } : {}),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
+  const response = await fetchWithAllowedRedirects(
+    url,
+    {
+      method,
+      headers,
+      ...(body !== undefined ? { body } : {}),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    },
+    egress,
+    fetchImpl,
+  );
   const text = await response.text();
   if (!response.ok) {
     throw new HttpError(
@@ -703,13 +877,21 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
   try {
     parsed = text ? JSON.parse(text) : null;
   } catch {
-    throw new HttpError(502, "PROVIDER_ERROR", "Provider response is not valid JSON.");
+    throw new HttpError(
+      502,
+      "PROVIDER_ERROR",
+      "Provider response is not valid JSON.",
+    );
   }
 
   if (isGraphql) {
     const errors = (parsed as JsonRecord | null)?.errors;
     if (Array.isArray(errors) && errors.length > 0) {
-      throw new HttpError(502, "PROVIDER_ERROR", "Provider answered with GraphQL errors.");
+      throw new HttpError(
+        502,
+        "PROVIDER_ERROR",
+        "Provider answered with GraphQL errors.",
+      );
     }
     parsed = (parsed as JsonRecord | null)?.data ?? null;
   }
@@ -720,7 +902,11 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
     ? (responseMapping.fieldPaths as { field?: unknown; path?: unknown }[])
     : [];
   let operationOutputs: JsonRecord;
-  if (fieldPaths.length > 0 && extracted !== null && typeof extracted === "object") {
+  if (
+    fieldPaths.length > 0 &&
+    extracted !== null &&
+    typeof extracted === "object"
+  ) {
     operationOutputs = {};
     for (const entry of fieldPaths) {
       if (typeof entry.field !== "string") continue;
@@ -730,10 +916,14 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
     // is a definition mistake, not an empty result — an empty success here
     // silently loses the whole response (seen live: a calendar's events
     // vanished into {}). Name what was looked for and what was there.
-    const anyResolved = Object.values(operationOutputs).some((value) => value !== undefined);
+    const anyResolved = Object.values(operationOutputs).some(
+      (value) => value !== undefined,
+    );
     const sourceKeys = Array.isArray(extracted)
       ? extracted.length > 0
-        ? [`a collection of ${extracted.length} items — use path "$" to pass it through`]
+        ? [
+            `a collection of ${extracted.length} items — use path "$" to pass it through`,
+          ]
         : []
       : Object.keys(extracted);
     if (!anyResolved && sourceKeys.length > 0) {
@@ -747,7 +937,9 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
     }
   } else {
     operationOutputs =
-      extracted !== null && typeof extracted === "object" && !Array.isArray(extracted)
+      extracted !== null &&
+      typeof extracted === "object" &&
+      !Array.isArray(extracted)
         ? (extracted as JsonRecord)
         : { result: extracted };
   }
@@ -757,7 +949,9 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
     Array.isArray(binding.outputMapping) &&
     (binding.outputMapping as unknown[]).length > 0 &&
     Object.keys(mapped).length === 0 &&
-    Object.keys(operationOutputs).some((key) => operationOutputs[key] !== undefined)
+    Object.keys(operationOutputs).some(
+      (key) => operationOutputs[key] !== undefined,
+    )
   ) {
     throw new HttpError(
       502,
@@ -772,7 +966,10 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
   // author feeds it back through a service input mapped onto the page
   // parameter. The engine stays single-request per call.
   const pagination = (operationRow.pagination ?? {}) as JsonRecord;
-  if (pagination.style === "cursor" && typeof pagination.cursorPath === "string") {
+  if (
+    pagination.style === "cursor" &&
+    typeof pagination.cursorPath === "string"
+  ) {
     const cursor = extractPath(parsed, pagination.cursorPath);
     if (cursor !== undefined && cursor !== null) mapped.nextCursor = cursor;
   }
@@ -786,7 +983,10 @@ export async function executeBinding(input: ExecuteBindingInput): Promise<JsonRe
  * answer with the union. Anything else overwrites, preserving read→act
  * chains where a later step deliberately replaces an earlier value.
  */
-export function mergeOutputs(accumulated: JsonRecord, outputs: JsonRecord): void {
+export function mergeOutputs(
+  accumulated: JsonRecord,
+  outputs: JsonRecord,
+): void {
   for (const [key, value] of Object.entries(outputs)) {
     const existing = accumulated[key];
     if (Array.isArray(existing) && Array.isArray(value)) {
@@ -798,15 +998,26 @@ export function mergeOutputs(accumulated: JsonRecord, outputs: JsonRecord): void
 }
 
 /** Bindings in authored order; a malformed entry fails closed by index. */
-export function orderedBindings(row: JsonRecord, bindingsField: string): JsonRecord[] {
+export function orderedBindings(
+  row: JsonRecord,
+  bindingsField: string,
+): JsonRecord[] {
   const raw = row[bindingsField];
   if (!Array.isArray(raw) || raw.length === 0) {
-    throw new HttpError(400, "SERVICE_MISCONFIGURED", "The service defines no bindings.");
+    throw new HttpError(
+      400,
+      "SERVICE_MISCONFIGURED",
+      "The service defines no bindings.",
+    );
   }
   return (raw as JsonRecord[])
     .map((binding, index) => {
       if (!binding || typeof binding !== "object") {
-        throw new HttpError(400, "SERVICE_MISCONFIGURED", `Binding ${index + 1} is malformed.`);
+        throw new HttpError(
+          400,
+          "SERVICE_MISCONFIGURED",
+          `Binding ${index + 1} is malformed.`,
+        );
       }
       return binding;
     })

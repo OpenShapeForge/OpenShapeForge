@@ -12,15 +12,21 @@ import {
   mintConfiguration,
   parseSubmission,
   peekConfiguration,
+  renderConfigurationApp,
   renderConfigurationForm,
   renderMessagePage,
   storeSubmission,
   type PendingConfiguration,
 } from "../configuration-handoff.js";
-import { keyringFromEnv, SECRET_SET_SENTINEL } from "../../connectors/secrets.js";
+import {
+  keyringFromEnv,
+  SECRET_SET_SENTINEL,
+} from "../../connectors/secrets.js";
 import { redactElicitedValues } from "../elicitation.js";
 
-const KEYRING = keyringFromEnv(`test:${Buffer.alloc(32, 5).toString("base64")}`)!;
+const KEYRING = keyringFromEnv(
+  `test:${Buffer.alloc(32, 5).toString("base64")}`,
+)!;
 
 const DEFINITIONS = [
   {
@@ -37,12 +43,22 @@ const DEFINITIONS = [
     label: { en: "OAuth client secret" },
     classification: { sensitivity: "confidential" },
   },
-  { key: "retries", valueType: "integer", required: false, label: { en: "Retries" } },
-  { key: "sandbox", valueType: "boolean", required: false, label: { en: "Sandbox" } },
+  {
+    key: "retries",
+    valueType: "integer",
+    required: false,
+    label: { en: "Retries" },
+  },
+  {
+    key: "sandbox",
+    valueType: "boolean",
+    required: false,
+    label: { en: "Sandbox" },
+  },
 ];
 
-function mint(overrides: Partial<PendingConfiguration> = {}) {
-  const { token } = mintConfiguration({
+async function mint(overrides: Partial<PendingConfiguration> = {}) {
+  const { token } = await mintConfiguration({
     tenantId: "t-1",
     userId: "u-1",
     table: "erp.connections",
@@ -53,7 +69,11 @@ function mint(overrides: Partial<PendingConfiguration> = {}) {
       definitionsField: "configurationFields",
       into: "configurationValues",
     },
-    modelValues: { key: "zendesk-production", name: "Zendesk production", adapterId: "a-1" },
+    modelValues: {
+      key: "zendesk-production",
+      name: "Zendesk production",
+      adapterId: "a-1",
+    },
     definitions: DEFINITIONS,
     displayName: "Zendesk",
     ...overrides,
@@ -62,20 +82,20 @@ function mint(overrides: Partial<PendingConfiguration> = {}) {
 }
 
 describe("token lifecycle", () => {
-  it("peek does not consume; consume does; unknown and empty are null", () => {
-    const token = mint();
-    expect(peekConfiguration(token)?.displayName).toBe("Zendesk");
-    expect(peekConfiguration(token)).not.toBeNull();
-    consumeConfiguration(token);
-    expect(peekConfiguration(token)).toBeNull();
-    expect(peekConfiguration("nope")).toBeNull();
-    expect(peekConfiguration(undefined)).toBeNull();
+  it("peek does not consume; consume does; unknown and empty are null", async () => {
+    const token = await mint();
+    expect((await peekConfiguration(token))?.displayName).toBe("Zendesk");
+    expect(await peekConfiguration(token)).not.toBeNull();
+    await consumeConfiguration(token);
+    expect(await peekConfiguration(token)).toBeNull();
+    expect(await peekConfiguration("nope")).toBeNull();
+    expect(await peekConfiguration(undefined)).toBeNull();
   });
 });
 
 describe("parseSubmission", () => {
-  it("coerces types, flags missing required values, treats checkboxes as presence", () => {
-    const pending = peekConfiguration(mint())!;
+  it("coerces types, flags missing required values, treats checkboxes as presence", async () => {
+    const pending = (await peekConfiguration(await mint()))!;
     const good = parseSubmission(
       pending,
       "subdomain=acme&clientSecret=s3cret&retries=3&sandbox=on",
@@ -97,8 +117,8 @@ describe("parseSubmission", () => {
 });
 
 describe("storeSubmission", () => {
-  it("encrypts secret-classified values and merges the model identity args", () => {
-    const pending = peekConfiguration(mint())!;
+  it("encrypts secret-classified values and merges the model identity args", async () => {
+    const pending = (await peekConfiguration(await mint()))!;
     const values = storeSubmission(
       pending,
       { subdomain: "acme", clientSecret: "s3cret", sandbox: false },
@@ -109,18 +129,34 @@ describe("storeSubmission", () => {
     expect(configuration.subdomain).toBe("acme");
     expect(typeof configuration.clientSecret).toBe("object");
     expect(JSON.stringify(configuration)).not.toContain("s3cret");
-    const redacted = redactElicitedValues({ configurationValues: configuration }, "configurationValues");
-    expect((redacted.configurationValues as Record<string, unknown>).clientSecret).toBe(
-      SECRET_SET_SENTINEL,
+    const redacted = redactElicitedValues(
+      { configurationValues: configuration },
+      "configurationValues",
     );
+    expect(
+      (redacted.configurationValues as Record<string, unknown>).clientSecret,
+    ).toBe(SECRET_SET_SENTINEL);
   });
 });
 
 describe("renderConfigurationForm", () => {
-  it("masks secrets, marks required fields, posts to the token path, escapes content", () => {
-    const token = mint({ displayName: `Zendesk <&> "prod"`, messagePrefix: "Register <this> URL first" });
-    const pending = peekConfiguration(token)!;
-    const html = renderConfigurationForm(pending, `/api/entity-configuration/${token}`);
+  it("bundles the official MCP App without embedding a handoff URL", async () => {
+    const html = await renderConfigurationApp();
+    expect(html).toContain('id="configuration-frame"');
+    expect(html).toContain("ui/initialize");
+    expect(html).not.toContain("/api/entity-configuration/");
+  });
+
+  it("masks secrets, marks required fields, posts to the token path, escapes content", async () => {
+    const token = await mint({
+      displayName: `Zendesk <&> "prod"`,
+      messagePrefix: "Register <this> URL first",
+    });
+    const pending = (await peekConfiguration(token))!;
+    const html = renderConfigurationForm(
+      pending,
+      `/api/entity-configuration/${token}`,
+    );
     expect(html).toContain(`type="password" name="clientSecret"`);
     expect(html).toContain(`type="text" name="subdomain" required`);
     expect(html).toContain(`type="number" name="retries"`);
@@ -131,23 +167,48 @@ describe("renderConfigurationForm", () => {
     expect(html).not.toContain("<this>");
     expect(html).toContain("never through any chat");
 
-    const withErrors = renderConfigurationForm(pending, "/x", { subdomain: "This value is required." });
+    const withErrors = renderConfigurationForm(pending, "/x", {
+      subdomain: "This value is required.",
+    });
     expect(withErrors).toContain("This value is required.");
   });
 
   it("renders a plain message page with escaping", () => {
-    expect(renderMessagePage("done & <safe>")).toContain("done &amp; &lt;safe&gt;");
+    expect(renderMessagePage("done & <safe>")).toContain(
+      "done &amp; &lt;safe&gt;",
+    );
+  });
+
+  it("escapes definition keys before placing them in control names", async () => {
+    const token = await mint({
+      definitions: [
+        {
+          key: `x" autofocus onfocus="alert(1)`,
+          valueType: "string",
+          required: true,
+        },
+      ],
+    });
+    const pending = (await peekConfiguration(token))!;
+    const html = renderConfigurationForm(pending, "/x");
+    expect(html).toContain(`name="x&quot; autofocus onfocus=&quot;alert(1)"`);
+    expect(html).not.toContain(`name="x" autofocus`);
   });
 });
 
 describe("retry rendering after a rejected verification", () => {
-  it("shows the banner, prefills non-secrets, never echoes secrets", () => {
-    const token = mint();
-    const pending = peekConfiguration(token)!;
-    const html = renderConfigurationForm(pending, "/x", {}, {
-      errorBanner: "Zendesk refused these values — probe: answered 401.",
-      prefill: { subdomain: "acme-typo", clientSecret: "s3cret" },
-    });
+  it("shows the banner, prefills non-secrets, never echoes secrets", async () => {
+    const token = await mint();
+    const pending = (await peekConfiguration(token))!;
+    const html = renderConfigurationForm(
+      pending,
+      "/x",
+      {},
+      {
+        errorBanner: "Zendesk refused these values — probe: answered 401.",
+        prefill: { subdomain: "acme-typo", clientSecret: "s3cret" },
+      },
+    );
     expect(html).toContain("Zendesk refused these values");
     expect(html).toContain("Nothing was saved");
     expect(html).toContain('name="subdomain"');

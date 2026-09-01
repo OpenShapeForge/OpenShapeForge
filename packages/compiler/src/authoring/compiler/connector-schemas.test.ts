@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
-import { buildOperationSchemas, connectorFieldSchema } from "./connector-schemas.js";
+import {
+  buildOperationSchemas,
+  connectorFieldSchema,
+} from "./connector-schemas.js";
 import { constraintsForField } from "../../field-json-schema.js";
 import type { FieldV2 } from "../types/field-v2.js";
 
@@ -9,7 +12,11 @@ describe("connector field schemas", () => {
     const field = {
       key: "prefix",
       valueType: "string",
-      validation: { minLength: 1, maxLength: { value: 100 }, pattern: "^[a-z/]+$" },
+      validation: {
+        minLength: 1,
+        maxLength: { value: 100 },
+        pattern: "^[a-z/]+$",
+      },
     } as FieldV2;
 
     expect(connectorFieldSchema(field)).toEqual({
@@ -30,7 +37,9 @@ describe("connector field schemas", () => {
       ["object", { type: "object" }],
     ];
     for (const [valueType, expected] of cases) {
-      expect(connectorFieldSchema({ key: "f", valueType } as FieldV2)).toEqual(expected);
+      expect(connectorFieldSchema({ key: "f", valueType } as FieldV2)).toEqual(
+        expected,
+      );
     }
   });
 
@@ -38,7 +47,10 @@ describe("connector field schemas", () => {
     const field = {
       key: "mode",
       valueType: "string",
-      options: { type: "static", items: [{ value: "fast" }, { value: "safe" }] },
+      options: {
+        type: "static",
+        items: [{ value: "fast" }, { value: "safe" }],
+      },
     } as FieldV2;
     expect(connectorFieldSchema(field).enum).toEqual(["fast", "safe"]);
   });
@@ -90,10 +102,27 @@ describe("operation schemas", () => {
     });
   });
 
+  it("keeps required connector fields required even when they advertise a default", () => {
+    const { input: schema } = buildOperationSchemas(
+      [
+        {
+          key: "region",
+          valueType: "string",
+          required: true,
+          defaultValue: "eu",
+        },
+      ] as FieldV2[],
+      { cardinality: "one", fields: [] },
+    );
+    expect(schema.required).toEqual(["region"]);
+  });
+
   it("wraps a many-cardinality output in an array", () => {
     const { output } = buildOperationSchemas(input, {
       cardinality: "many",
-      fields: [{ key: "key", valueType: "string", required: true }] as FieldV2[],
+      fields: [
+        { key: "key", valueType: "string", required: true },
+      ] as FieldV2[],
     });
     expect(output).toEqual({
       type: "array",
@@ -111,7 +140,10 @@ describe("operation schemas", () => {
       cardinality: "one",
       fields: [{ key: "key", valueType: "string" }] as FieldV2[],
     });
-    expect(output).toMatchObject({ type: "object", additionalProperties: false });
+    expect(output).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+    });
   });
 });
 

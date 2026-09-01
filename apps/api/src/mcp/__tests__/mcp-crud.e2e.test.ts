@@ -58,10 +58,11 @@ afterAll(async () => {
 let nextRpcId = 1;
 
 /**
- * One JSON-RPC call over the Streamable HTTP transport. The server runs
- * stateless, so no initialize handshake is needed between calls — each request
- * is self-contained. `Accept` must list both content types the transport can
- * answer with, or it rejects the request before dispatch.
+ * One JSON-RPC call over the Streamable HTTP transport. This helper uses the
+ * sessionless compatibility path, so each request is self-contained; real
+ * elicitation and MCP Apps clients initialize a stateful session. `Accept`
+ * must list both content types the transport can answer with, or the request is
+ * rejected before dispatch.
  */
 async function rpc(
   identity: Identity | null,
@@ -285,10 +286,11 @@ describe("generated MCP server", () => {
     expect(denied.body.error.code).toBe(-32602);
   });
 
-  test("answers empty optional MCP catalogs without protocol errors", async () => {
+  test("answers optional MCP catalogs without protocol errors", async () => {
     expect((await rpc(tenantA, "prompts/list")).body.result.prompts).toEqual([]);
     expect(
-      (await rpc(tenantA, "resources/templates/list")).body.result.resourceTemplates,
+      (await rpc(tenantA, "resources/templates/list")).body.result
+        .resourceTemplates,
     ).toEqual([]);
   });
 

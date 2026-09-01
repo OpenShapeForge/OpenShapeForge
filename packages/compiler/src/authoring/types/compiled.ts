@@ -63,7 +63,14 @@ export interface CompiledRender {
 
 export interface CompiledField {
   key: string;
-  valueType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
+  valueType:
+    | "string"
+    | "integer"
+    | "number"
+    | "boolean"
+    | "date"
+    | "datetime"
+    | "object";
   cardinality: "single" | "collection";
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
@@ -191,7 +198,9 @@ export interface McpSection {
    * style only). generate-mcp.ts consumes these when it emits the catalog;
    * an absent entry means the compiler-composed default applies.
    */
-  toolOverrides?: Partial<Record<McpOperationKey, { name?: string; description?: string }>>;
+  toolOverrides?: Partial<
+    Record<McpOperationKey, { name?: string; description?: string }>
+  >;
   /**
    * Authored MCP resource exposure, validated but not defaulted — the
    * catalog generator resolves the name/description fallbacks because it
@@ -242,7 +251,7 @@ export interface McpSection {
     };
     visibleWhen?: { field: string; equals: string };
     visibleToRolesField?: string;
-    connect?: { name: string; description?: string };
+    connect?: { name: string; description?: string; roles: string[] };
     dryRun?: { name: string; description?: string; roles: string[] };
     personalization?: {
       entity: string;
@@ -327,7 +336,12 @@ export interface CompiledDetailView {
   kind?: "page";
   type?: "detail";
   render?: CompiledViewRender;
-  header: { render: CompiledViewRender; title: string; subtitle?: string; badges?: { render: CompiledViewRender; items: string[] } };
+  header: {
+    render: CompiledViewRender;
+    title: string;
+    subtitle?: string;
+    badges?: { render: CompiledViewRender; items: string[] };
+  };
   actions?: CompiledViewAction[];
   groups: { render: CompiledViewRender; items: CompiledViewGroup[] };
 }

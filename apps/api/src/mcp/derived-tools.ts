@@ -37,7 +37,7 @@ export type DerivedToolsCatalogEntry = {
    * row's tool (an administrative service stays invisible to employees).
    */
   visibleToRolesField?: string;
-  connect?: { name: string; description: string };
+  connect?: { name: string; description: string; roles: string[] };
   /** Composition preview for definition authors; roles are its own audience. */
   dryRun?: { name: string; description: string; roles: string[] };
   /** Per-person standing instructions merged into projected descriptions. */
@@ -92,7 +92,9 @@ function localized(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
-    const first = record.en ?? Object.values(record).find((entry) => typeof entry === "string");
+    const first =
+      record.en ??
+      Object.values(record).find((entry) => typeof entry === "string");
     if (typeof first === "string") return first;
   }
   return undefined;
@@ -108,14 +110,19 @@ const VALUE_TYPE_TO_SCHEMA: Record<string, Record<string, unknown>> = {
   object: { type: "object" },
 };
 
-function scalarSchema(definition: StoredFieldDefinition): Record<string, unknown> {
-  const valueType = typeof definition.valueType === "string" ? definition.valueType : "string";
+function scalarSchema(
+  definition: StoredFieldDefinition,
+): Record<string, unknown> {
+  const valueType =
+    typeof definition.valueType === "string" ? definition.valueType : "string";
   const schema: Record<string, unknown> = {
     ...(VALUE_TYPE_TO_SCHEMA[valueType] ?? { type: "string" }),
   };
 
   if (valueType === "object" && Array.isArray(definition.children)) {
-    const nested = objectSchemaFrom(definition.children as StoredFieldDefinition[]);
+    const nested = objectSchemaFrom(
+      definition.children as StoredFieldDefinition[],
+    );
     Object.assign(schema, nested);
   }
 
@@ -130,7 +137,8 @@ function scalarSchema(definition: StoredFieldDefinition): Record<string, unknown
       ["format", "format"],
     ] as const) {
       const value = (validation as Record<string, unknown>)[rule];
-      if (typeof value === "number" || typeof value === "string") schema[target] = value;
+      if (typeof value === "number" || typeof value === "string")
+        schema[target] = value;
     }
   }
 
@@ -149,7 +157,9 @@ function scalarSchema(definition: StoredFieldDefinition): Record<string, unknown
   return schema;
 }
 
-function fieldSchema(definition: StoredFieldDefinition): Record<string, unknown> {
+function fieldSchema(
+  definition: StoredFieldDefinition,
+): Record<string, unknown> {
   const schema =
     definition.cardinality === "collection"
       ? {
@@ -163,11 +173,14 @@ function fieldSchema(definition: StoredFieldDefinition): Record<string, unknown>
   return schema;
 }
 
-function objectSchemaFrom(definitions: StoredFieldDefinition[]): Record<string, unknown> {
+function objectSchemaFrom(
+  definitions: StoredFieldDefinition[],
+): Record<string, unknown> {
   const properties: Record<string, unknown> = {};
   const required: string[] = [];
   for (const definition of definitions) {
-    if (typeof definition?.key !== "string" || definition.key.length === 0) continue;
+    if (typeof definition?.key !== "string" || definition.key.length === 0)
+      continue;
     properties[definition.key] = fieldSchema(definition);
     if (definition.required === true) required.push(definition.key);
   }
@@ -180,8 +193,12 @@ function objectSchemaFrom(definitions: StoredFieldDefinition[]): Record<string, 
 }
 
 /** Translate a stored FieldDefinition collection into an input JSON Schema. */
-export function inputSchemaFromStoredFields(value: unknown): Record<string, unknown> {
-  const definitions = Array.isArray(value) ? (value as StoredFieldDefinition[]) : [];
+export function inputSchemaFromStoredFields(
+  value: unknown,
+): Record<string, unknown> {
+  const definitions = Array.isArray(value)
+    ? (value as StoredFieldDefinition[])
+    : [];
   return objectSchemaFrom(definitions);
 }
 
@@ -213,9 +230,16 @@ export function applyPersonalNotes(
     const value = row[personalization.instructionField];
     return typeof value === "string" ? value.trim() : "";
   };
-  const general = preferenceRows.filter((row) => !row[personalization.serviceRef]);
+  const general = preferenceRows.filter(
+    (row) => !row[personalization.serviceRef],
+  );
   return tools.map((tool) => {
-    const notes = [...general, ...preferenceRows.filter((row) => row[personalization.serviceRef] === tool.rowId)]
+    const notes = [
+      ...general,
+      ...preferenceRows.filter(
+        (row) => row[personalization.serviceRef] === tool.rowId,
+      ),
+    ]
       .map(instructionOf)
       .filter((instruction) => instruction.length > 0);
     if (notes.length === 0) return tool;
@@ -244,7 +268,10 @@ export function derivedToolsFromRows(
   for (const row of rows) {
     // The publication gate: an unpublished definition is not merely hidden —
     // it does not exist as a tool, for any audience member.
-    if (entry.visibleWhen && row[entry.visibleWhen.field] !== entry.visibleWhen.equals) {
+    if (
+      entry.visibleWhen &&
+      row[entry.visibleWhen.field] !== entry.visibleWhen.equals
+    ) {
       continue;
     }
     // The role gate: a row restricted to specific roles does not exist for
@@ -255,7 +282,9 @@ export function derivedToolsFromRows(
       if (
         Array.isArray(restricted) &&
         restricted.length > 0 &&
-        !restricted.some((role) => typeof role === "string" && sessionRoles.includes(role))
+        !restricted.some(
+          (role) => typeof role === "string" && sessionRoles.includes(role),
+        )
       ) {
         continue;
       }
@@ -263,7 +292,9 @@ export function derivedToolsFromRows(
     const name = deriveToolName(row[entry.keyField]);
     if (!name || seen.has(name)) continue;
     seen.add(name);
-    const title = entry.titleField ? localized(row[entry.titleField]) : undefined;
+    const title = entry.titleField
+      ? localized(row[entry.titleField])
+      : undefined;
     tools.push({
       name,
       ...(title ? { title } : {}),

@@ -6,6 +6,11 @@ metadata:
     {{- include "openshapeforge-api.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.service.type }}
+  sessionAffinity: {{ .Values.service.sessionAffinity }}
+  {{- with .Values.service.sessionAffinityConfig }}
+  sessionAffinityConfig:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   ports:
     - name: http
       port: {{ .Values.service.port }}

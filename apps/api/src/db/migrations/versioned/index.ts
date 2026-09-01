@@ -14,6 +14,7 @@
  */
 import type { VersionedMigration } from "../versioned-runner.js";
 // migration-registry:imports — `bun run db:migration:new` inserts imports below this line.
+import m0008McpHandoffs from "./0008_mcp-handoffs.js";
 import m0007DocumentVersionAuthority from "./0007_document-version-authority.js";
 import m0006WorkflowNodeCategoryLocalized from "./0006_workflow-node-category-localized.js";
 import m0005OrgUnitKeycloakLink from "./0005_org-unit-keycloak-link.js";
@@ -28,5 +29,6 @@ export const versionedMigrations: VersionedMigration[] = [
   m0005OrgUnitKeycloakLink,
   m0006WorkflowNodeCategoryLocalized,
   m0007DocumentVersionAuthority,
+  m0008McpHandoffs,
   // migration-registry:entries — `bun run db:migration:new` inserts entries above this line.
 ];

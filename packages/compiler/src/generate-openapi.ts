@@ -16,7 +16,10 @@
  * no entity opts in — so the API runtime can statically import it
  * unconditionally. Determinism: no timestamps; entities sorted by base path.
  */
-import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
+import type {
+  CompiledEntityContract,
+  CompiledField,
+} from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import {
   compiledFieldSchema,
@@ -49,10 +52,14 @@ export type OpenApiSpecOptions = {
   referentiedata?: CoreReferentiedataSnapshot;
 };
 
-function fieldNameForColumn(column: TableDefinition["columns"][number]): string {
+function fieldNameForColumn(
+  column: TableDefinition["columns"][number],
+): string {
   return (
     column.sourceField ??
-    column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase())
+    column.name.replace(/_([a-z0-9])/g, (_match, char: string) =>
+      char.toUpperCase(),
+    )
   );
 }
 
@@ -102,7 +109,11 @@ function entitySchemaName(table: TableDefinition): string {
 }
 
 function isRestrictedSensitivity(sensitivity: string | undefined): boolean {
-  return sensitivity === "confidential" || sensitivity === "pii" || sensitivity === "bsn";
+  return (
+    sensitivity === "confidential" ||
+    sensitivity === "pii" ||
+    sensitivity === "bsn"
+  );
 }
 
 function isRestrictedColumn(
@@ -131,6 +142,7 @@ function fieldSchemaForColumn(
   const schema = compiledFieldSchema(compiled, referentiedata, {
     includeDefault: mode === "create",
     requireNestedRequired: true,
+    defaultsAreMaterialized: mode === "create",
   });
   return { fieldName, compiled, schema };
 }
@@ -155,7 +167,8 @@ function columnProperties(
       mode === "storage"
         ? column.required === true || column.primaryKey === true
         : mode === "create"
-          ? compiled?.required ?? column.required === true
+          ? (compiled?.required ?? column.required === true) &&
+            compiled?.defaultValue === undefined
           : false;
     if (isRequired) {
       required.push(fieldName);
@@ -164,12 +177,19 @@ function columnProperties(
   return { properties, required };
 }
 
-function entityLabel(contract: CompiledEntityContract | undefined, fallback: string): string {
+function entityLabel(
+  contract: CompiledEntityContract | undefined,
+  fallback: string,
+): string {
   if (!contract) return fallback;
-  return localizedText(contract.entity.labels) ?? contract.entity.title ?? fallback;
+  return (
+    localizedText(contract.entity.labels) ?? contract.entity.title ?? fallback
+  );
 }
 
-function entityDescription(contract: CompiledEntityContract | undefined): string | undefined {
+function entityDescription(
+  contract: CompiledEntityContract | undefined,
+): string | undefined {
   return localizedText(contract?.entity.description);
 }
 
@@ -205,28 +225,33 @@ function listParameters(
   fieldsByKey: Map<string, CompiledField>,
 ): JsonObject[] {
   const sortableFields = table.columns
-    .filter((column) =>
-      column.name !== "tenant_id" &&
-      !isRestrictedColumn(column) &&
-      !isRestrictedField(fieldsByKey.get(fieldNameForColumn(column)))
+    .filter(
+      (column) =>
+        column.name !== "tenant_id" &&
+        !isRestrictedColumn(column) &&
+        !isRestrictedField(fieldsByKey.get(fieldNameForColumn(column))),
     )
     .map(fieldNameForColumn);
   // Collision detection must include hidden fields too: the runtime resolves
   // a real `xIn` column before it considers the generated alias for `x`.
   const fieldNames = new Set(table.columns.map(fieldNameForColumn));
   const primaryKey = table.columns.find((column) => column.primaryKey === true);
-  const primaryKeyField = primaryKey ? fieldNameForColumn(primaryKey) : undefined;
+  const primaryKeyField = primaryKey
+    ? fieldNameForColumn(primaryKey)
+    : undefined;
   const parameters: JsonObject[] = [
     {
       name: "first",
       in: "query",
-      description: "Number of records to return. When absent it defaults to 50; supplied values are clamped to 1-200.",
+      description:
+        "Number of records to return. When absent it defaults to 50; supplied values are clamped to 1-200.",
       schema: { type: "integer", default: 50 },
     },
     {
       name: "after",
       in: "query",
-      description: "Opaque cursor returned as nextCursor by a previous list response.",
+      description:
+        "Opaque cursor returned as nextCursor by a previous list response.",
       schema: { type: "string" },
     },
     {
@@ -270,7 +295,10 @@ function listParameters(
     // array-filter alias. Such a field therefore cannot be addressed through
     // a direct scalar query parameter; only its unambiguous `<field>In` alias
     // is documented below.
-    if (!RESERVED_LIST_PARAMETER_NAMES.has(fieldName) && !fieldName.endsWith("In")) {
+    if (
+      !RESERVED_LIST_PARAMETER_NAMES.has(fieldName) &&
+      !fieldName.endsWith("In")
+    ) {
       const substringDescription =
         column.type === "text" && authoredDescription && compiled
           ? describeCompiledField(compiled)
@@ -341,13 +369,15 @@ export function renderOpenApiSpec(
 ): string {
   const referentiedata = options.referentiedata ?? {};
   const contractsByEntityName = new Map(
-    (options.entities ?? []).map((entity) => [entity.contract.entity.name, entity.contract]),
+    (options.entities ?? []).map((entity) => [
+      entity.contract.entity.name,
+      entity.contract,
+    ]),
   );
   const restTables = manifest.tables
     .filter(
       (table) =>
-        isGeneratedCrudEligible(table) &&
-        table.source?.rest !== undefined,
+        isGeneratedCrudEligible(table) && table.source?.rest !== undefined,
     )
     .sort((a, b) =>
       a.source!.rest!.basePath.localeCompare(b.source!.rest!.basePath),
@@ -383,7 +413,12 @@ export function renderOpenApiSpec(
     const description = entityDescription(contract);
     tags.push({ name, ...(description ? { description } : {}) });
 
-    const read = columnProperties(table.columns, fieldsByKey, referentiedata, "storage");
+    const read = columnProperties(
+      table.columns,
+      fieldsByKey,
+      referentiedata,
+      "storage",
+    );
     const creatableColumns = table.columns.filter((column) =>
       isWritableColumn(column, "create"),
     );
@@ -415,7 +450,9 @@ export function renderOpenApiSpec(
       description: `Create body for ${label}.`,
       additionalProperties: false,
       properties: creatable.properties,
-      ...(creatable.required.length > 0 ? { required: creatable.required } : {}),
+      ...(creatable.required.length > 0
+        ? { required: creatable.required }
+        : {}),
     };
     schemas[updateSchemaName] = {
       type: "object",

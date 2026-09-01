@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
-import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
+import type {
+  CompiledEntityContract,
+  CompiledField,
+} from "./authoring/types.js";
 import { renderOpenApiSpec } from "./generate-openapi.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 
-function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): CompiledField {
+function field(
+  overrides: Partial<CompiledField> & Pick<CompiledField, "key">,
+): CompiledField {
   const { key, ...rest } = overrides;
   return {
     key,
@@ -66,7 +71,9 @@ const contract = {
         label: { en: "External ID" },
         description: { en: "Identifier in the owning external system." },
         relationship: { kind: "belongsTo", entity: "ExternalSystem" },
-        hints: { aiInstructions: "Resolve this with the external-system list tool." },
+        hints: {
+          aiInstructions: "Resolve this with the external-system list tool.",
+        },
       }),
       field({
         key: "iban",
@@ -87,7 +94,13 @@ const contract = {
   },
   rest: {
     basePath: "relations",
-    operations: { list: true, get: true, create: true, update: true, delete: true },
+    operations: {
+      list: true,
+      get: true,
+      create: true,
+      update: true,
+      delete: true,
+    },
   },
 } as unknown as CompiledEntityContract;
 
@@ -102,10 +115,25 @@ const manifest: PlatformSchemaManifest = {
       columns: [
         { name: "id", type: "uuid", primaryKey: true },
         { name: "tenant_id", type: "uuid", required: true },
-        { name: "display_name", type: "text", required: true, sourceField: "displayName" },
-        { name: "relation_type", type: "text", required: true, sourceField: "relationType" },
+        {
+          name: "display_name",
+          type: "text",
+          required: true,
+          sourceField: "displayName",
+        },
+        {
+          name: "relation_type",
+          type: "text",
+          required: true,
+          sourceField: "relationType",
+        },
         { name: "metadata", type: "jsonb", sourceField: "metadata" },
-        { name: "external_id", type: "text", sourceField: "externalId", immutable: true },
+        {
+          name: "external_id",
+          type: "text",
+          sourceField: "externalId",
+          immutable: true,
+        },
         { name: "iban", type: "text", sourceField: "iban" },
         { name: "business_first", type: "text", sourceField: "first" },
         { name: "status", type: "text", sourceField: "status" },
@@ -124,8 +152,16 @@ const manifest: PlatformSchemaManifest = {
           sourceField: "privateMarker",
           classification: "pii",
         },
-        { name: "sequence_number", type: "bigint", sourceField: "sequenceNumber" },
-        { name: "relation_group_id", type: "uuid", sourceField: "relationGroupId" },
+        {
+          name: "sequence_number",
+          type: "bigint",
+          sourceField: "sequenceNumber",
+        },
+        {
+          name: "relation_group_id",
+          type: "uuid",
+          sourceField: "relationGroupId",
+        },
         { name: "created_at", type: "timestamptz", required: true },
       ],
       source: {
@@ -158,19 +194,25 @@ function spec() {
       referentiedata: {
         RELATIONTYPE: [
           { value: "person", label: { en: "Person", nl: "Persoon" } },
-          { value: "organization", label: { en: "Organization", nl: "Organisatie" } },
+          {
+            value: "organization",
+            label: { en: "Organization", nl: "Organisatie" },
+          },
         ],
       },
     }),
   ) as {
     tags: Array<{ name: string; description?: string }>;
-    paths: Record<string, {
-      parameters?: TestParameter[];
-      get?: TestOperation;
-      post?: TestOperation;
-      patch?: TestOperation;
-      delete?: TestOperation;
-    }>;
+    paths: Record<
+      string,
+      {
+        parameters?: TestParameter[];
+        get?: TestOperation;
+        post?: TestOperation;
+        patch?: TestOperation;
+        delete?: TestOperation;
+      }
+    >;
     components: { schemas: Record<string, Record<string, unknown>> };
   };
 }
@@ -188,14 +230,17 @@ describe("rich generated REST OpenAPI", () => {
       update: false,
       delete: false,
     };
-    const rendered = JSON.parse(renderOpenApiSpec(partial, "fixture", {
-      entities: [{ contract }],
-    })) as { paths: Record<string, Record<string, unknown>> };
-    expect(Object.keys(rendered.paths["/api/rest/v1/relations"]!)).toEqual(["get"]);
-    expect(Object.keys(rendered.paths["/api/rest/v1/relations/{id}"]!)).toEqual([
-      "parameters",
+    const rendered = JSON.parse(
+      renderOpenApiSpec(partial, "fixture", {
+        entities: [{ contract }],
+      }),
+    ) as { paths: Record<string, Record<string, unknown>> };
+    expect(Object.keys(rendered.paths["/api/rest/v1/relations"]!)).toEqual([
       "get",
     ]);
+    expect(Object.keys(rendered.paths["/api/rest/v1/relations/{id}"]!)).toEqual(
+      ["parameters", "get"],
+    );
   });
 
   it("keeps response properties storage-derived while retaining entity documentation", () => {
@@ -210,7 +255,10 @@ describe("rich generated REST OpenAPI", () => {
     expect(relation.properties.relationType).toEqual({ type: "string" });
     expect(relation.properties.metadata).toEqual({});
     expect(relation.properties.iban).toEqual({ type: "string" });
-    expect(relation.properties.relationGroupId).toEqual({ type: "string", format: "uuid" });
+    expect(relation.properties.relationGroupId).toEqual({
+      type: "string",
+      format: "uuid",
+    });
   });
 
   it("models create requiredness, partial PATCH, immutability, and nested JSON", () => {
@@ -224,7 +272,7 @@ describe("rich generated REST OpenAPI", () => {
       properties: Record<string, Record<string, unknown>>;
     };
 
-    expect(create.required).toEqual(["displayName", "relationType"]);
+    expect(create.required).toEqual(["relationType"]);
     expect(create.properties.externalId).toBeDefined();
     expect(create.properties.displayName).toMatchObject({
       type: "string",
@@ -259,11 +307,11 @@ describe("rich generated REST OpenAPI", () => {
     });
     expect(
       (
-        (update.properties.metadata?.properties as Record<
+        update.properties.metadata?.properties as Record<
           string,
           Record<string, unknown>
-        >)?.source
-      )?.default,
+        >
+      )?.source?.default,
     ).toBeUndefined();
   });
 
@@ -272,17 +320,23 @@ describe("rich generated REST OpenAPI", () => {
     expect(generated.tags).toEqual([
       { name: "Relation", description: "Canonical relation aggregate." },
     ]);
-    expect(generated.paths["/api/rest/v1/relations"]?.post?.tags).toEqual(["Relation"]);
+    expect(generated.paths["/api/rest/v1/relations"]?.post?.tags).toEqual([
+      "Relation",
+    ]);
   });
 
   it("documents pagination and sorting with the runtime defaults and supported fields", () => {
-    const parameters = spec().paths["/api/rest/v1/relations"]?.get?.parameters ?? [];
-    const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
+    const parameters =
+      spec().paths["/api/rest/v1/relations"]?.get?.parameters ?? [];
+    const byName = new Map(
+      parameters.map((parameter) => [parameter.name, parameter]),
+    );
 
     expect(byName.get("first")).toEqual({
       name: "first",
       in: "query",
-      description: "Number of records to return. When absent it defaults to 50; supplied values are clamped to 1-200.",
+      description:
+        "Number of records to return. When absent it defaults to 50; supplied values are clamped to 1-200.",
       schema: { type: "integer", default: 50 },
     });
     expect(byName.get("after")?.description).toContain("nextCursor");
@@ -313,11 +367,15 @@ describe("rich generated REST OpenAPI", () => {
   });
 
   it("projects scalar field semantics into direct and explicit IN filters", () => {
-    const parameters = spec().paths["/api/rest/v1/relations"]?.get?.parameters ?? [];
-    const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
+    const parameters =
+      spec().paths["/api/rest/v1/relations"]?.get?.parameters ?? [];
+    const byName = new Map(
+      parameters.map((parameter) => [parameter.name, parameter]),
+    );
 
     expect(byName.get("displayName")).toMatchObject({
-      description: "Human-readable relation name. Matches a case-insensitive substring. Repeat this parameter to instead match exactly against any supplied value.",
+      description:
+        "Human-readable relation name. Matches a case-insensitive substring. Repeat this parameter to instead match exactly against any supplied value.",
       schema: { type: "string" },
     });
     expect(byName.get("displayName")?.schema.default).toBeUndefined();
@@ -326,8 +384,12 @@ describe("rich generated REST OpenAPI", () => {
       items: { type: "string" },
     });
     expect(byName.get("relationType")?.schema).toEqual({ type: "string" });
-    expect(byName.get("relationType")?.description).not.toContain("Allowed values:");
-    expect(byName.get("relationTypeIn")?.description).not.toContain("Allowed values:");
+    expect(byName.get("relationType")?.description).not.toContain(
+      "Allowed values:",
+    );
+    expect(byName.get("relationTypeIn")?.description).not.toContain(
+      "Allowed values:",
+    );
     expect(byName.get("relationTypeIn")).toMatchObject({
       style: "form",
       explode: true,
@@ -352,16 +414,23 @@ describe("rich generated REST OpenAPI", () => {
   });
 
   it("avoids transport and explicit-IN parameter name collisions", () => {
-    const parameters = spec().paths["/api/rest/v1/relations"]?.get?.parameters ?? [];
+    const parameters =
+      spec().paths["/api/rest/v1/relations"]?.get?.parameters ?? [];
     const names = parameters.map((parameter) => parameter.name);
-    const byName = new Map(parameters.map((parameter) => [parameter.name, parameter]));
+    const byName = new Map(
+      parameters.map((parameter) => [parameter.name, parameter]),
+    );
 
     expect(new Set(names).size).toBe(names.length);
     expect(names.filter((name) => name === "first")).toHaveLength(1);
     expect(byName.get("first")?.description).toContain("Number of records");
-    expect(byName.get("firstIn")?.description).toContain("Business sequence value.");
+    expect(byName.get("firstIn")?.description).toContain(
+      "Business sequence value.",
+    );
     expect(byName.has("statusIn")).toBe(false);
-    expect(byName.get("statusInIn")?.description).toContain("Status import marker.");
+    expect(byName.get("statusInIn")?.description).toContain(
+      "Status import marker.",
+    );
     expect(byName.has("isOptedIn")).toBe(false);
     expect(byName.get("isOptedInIn")?.schema).toEqual({
       type: "array",

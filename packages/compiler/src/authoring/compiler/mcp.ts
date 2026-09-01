@@ -15,7 +15,19 @@
  * Input:  Core entity definition (authored `mcp` block).
  * Output: McpSection | undefined — undefined means "no MCP exposure".
  */
-import type { CrudSection, McpConfig, McpDerivedToolsConfig, McpDiscoveryConfig, McpElicitOnCreateConfig, McpGuideConfig, McpOperationConfig, McpOperationKey, McpResourceConfig, McpSection, McpTestConfig } from "../types.js";
+import type {
+  CrudSection,
+  McpConfig,
+  McpDerivedToolsConfig,
+  McpDiscoveryConfig,
+  McpElicitOnCreateConfig,
+  McpGuideConfig,
+  McpOperationConfig,
+  McpOperationKey,
+  McpResourceConfig,
+  McpSection,
+  McpTestConfig,
+} from "../types.js";
 import type { LoadedArtifacts } from "../loader.js";
 import { limitCrudOperations } from "./crud.js";
 
@@ -35,7 +47,8 @@ const MCP_TOOL_PREFIX_PATTERN = /^[a-z][a-z0-9_]*$/;
 // Emitted verbatim into the MCP resource listing; the runtime appends "/{id}"
 // for the template and matches read URIs against both, so the shape is locked
 // down to scheme://path with safe path characters and no trailing slash.
-const MCP_RESOURCE_URI_PATTERN = /^[a-z][a-z0-9+.-]*:\/\/[A-Za-z0-9][A-Za-z0-9\/_-]*[A-Za-z0-9]$/;
+const MCP_RESOURCE_URI_PATTERN =
+  /^[a-z][a-z0-9+.-]*:\/\/[A-Za-z0-9][A-Za-z0-9\/_-]*[A-Za-z0-9]$/;
 
 /**
  * `ContactDetail` → `contact_detail`. Distinct from deriveTableName: a tool
@@ -141,12 +154,16 @@ export function buildMcp(
           `always a configuration mistake.`,
       );
     }
-    const fieldKeys = new Set((coreEntity.fields ?? []).map((field) => field.key));
+    const fieldKeys = new Set(
+      (coreEntity.fields ?? []).map((field) => field.key),
+    );
     for (const [option, fieldKey] of [
       ["keyField", authored.keyField],
       ["descriptionField", authored.descriptionField],
       ["inputFieldsField", authored.inputFieldsField],
-      ...(authored.titleField !== undefined ? [["titleField", authored.titleField]] : []),
+      ...(authored.titleField !== undefined
+        ? [["titleField", authored.titleField]]
+        : []),
     ] as const) {
       if (!fieldKey || !fieldKeys.has(fieldKey)) {
         throw new Error(
@@ -157,14 +174,20 @@ export function buildMcp(
       }
     }
     if (authored.visibleWhen) {
-      if (!fieldKeys.has(authored.visibleWhen.field) || !authored.visibleWhen.equals) {
+      if (
+        !fieldKeys.has(authored.visibleWhen.field) ||
+        !authored.visibleWhen.equals
+      ) {
         throw new Error(
           `mcp derivedTools.visibleWhen on entity "${coreEntity.entity}" must name an ` +
             `authored field and a non-empty value.`,
         );
       }
     }
-    if (authored.visibleToRolesField !== undefined && !fieldKeys.has(authored.visibleToRolesField)) {
+    if (
+      authored.visibleToRolesField !== undefined &&
+      !fieldKeys.has(authored.visibleToRolesField)
+    ) {
       throw new Error(
         `mcp derivedTools.visibleToRolesField ${JSON.stringify(authored.visibleToRolesField)} ` +
           `on entity "${coreEntity.entity}" does not name an authored field.`,
@@ -183,6 +206,15 @@ export function buildMcp(
             `block — the handoff derives its provider chain from it.`,
         );
       }
+      if (
+        !Array.isArray(authored.connect.roles) ||
+        authored.connect.roles.length === 0
+      ) {
+        throw new Error(
+          `mcp derivedTools.connect on entity "${coreEntity.entity}" needs a non-empty roles list ` +
+            `for tenant-scoped connection administration.`,
+        );
+      }
     }
     if (authored.dryRun) {
       if (!MCP_TOOL_PREFIX_PATTERN.test(authored.dryRun.name ?? "")) {
@@ -191,7 +223,10 @@ export function buildMcp(
             `entity "${coreEntity.entity}" — must match ${MCP_TOOL_PREFIX_PATTERN}.`,
         );
       }
-      if (!Array.isArray(authored.dryRun.roles) || authored.dryRun.roles.length === 0) {
+      if (
+        !Array.isArray(authored.dryRun.roles) ||
+        authored.dryRun.roles.length === 0
+      ) {
         throw new Error(
           `mcp derivedTools.dryRun on entity "${coreEntity.entity}" needs a non-empty roles list.`,
         );
@@ -248,7 +283,9 @@ export function buildMcp(
   let elicitOnCreate: McpElicitOnCreateConfig | undefined;
   if (config.elicitOnCreate) {
     const authored = config.elicitOnCreate;
-    const fieldKeys = new Set((coreEntity.fields ?? []).map((field) => field.key));
+    const fieldKeys = new Set(
+      (coreEntity.fields ?? []).map((field) => field.key),
+    );
     for (const [option, fieldKey] of [
       ["sourceField", authored.sourceField],
       ["into", authored.into],

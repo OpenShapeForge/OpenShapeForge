@@ -13,6 +13,7 @@
 import { parse as parseYaml } from "yaml";
 import { HttpError } from "../rest/http-error.js";
 import { hostAllowed } from "../connectors/executor.js";
+import { fetchWithAllowedRedirects } from "./declarative-execution.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -56,7 +57,9 @@ export function summarizeOpenApi(document: unknown): {
         operations.push({
           method: method.toUpperCase(),
           path,
-          ...(typeof details.summary === "string" ? { summary: details.summary } : {}),
+          ...(typeof details.summary === "string"
+            ? { summary: details.summary }
+            : {}),
           ...(typeof details.operationId === "string"
             ? { operationId: details.operationId }
             : {}),
@@ -81,10 +84,14 @@ const INTROSPECTION_QUERY = `
 
 type IntrospectionField = { name?: unknown; description?: unknown };
 
-function fieldSummaries(fields: unknown): { name: string; description?: string }[] {
+function fieldSummaries(
+  fields: unknown,
+): { name: string; description?: string }[] {
   if (!Array.isArray(fields)) return [];
   return (fields as IntrospectionField[])
-    .filter((field): field is { name: string } => typeof field.name === "string")
+    .filter(
+      (field): field is { name: string } => typeof field.name === "string",
+    )
     .slice(0, MAX_OPERATIONS)
     .map((field) => ({
       name: field.name,
@@ -113,13 +120,23 @@ export async function discoverProviderSchema(
   }
   const schemaUrlRaw = typeof row.schemaUrl === "string" ? row.schemaUrl : "";
   if (schemaUrlRaw === "") {
-    throw new HttpError(400, "DISCOVERY_UNAVAILABLE", "This record declares no schemaUrl.");
+    throw new HttpError(
+      400,
+      "DISCOVERY_UNAVAILABLE",
+      "This record declares no schemaUrl.",
+    );
   }
   const schemaUrl = new URL(schemaUrlRaw);
   if (schemaUrl.protocol !== "https:" && schemaUrl.protocol !== "http:") {
-    throw new HttpError(400, "EGRESS_DENIED", "Only http(s) schema documents are supported.");
+    throw new HttpError(
+      400,
+      "EGRESS_DENIED",
+      "Only http(s) schema documents are supported.",
+    );
   }
-  const egress = Array.isArray(row.egressHosts) ? (row.egressHosts as string[]) : [];
+  const egress = Array.isArray(row.egressHosts)
+    ? (row.egressHosts as string[])
+    : [];
   if (!hostAllowed(schemaUrl.hostname, egress)) {
     throw new HttpError(
       403,
@@ -128,19 +145,31 @@ export async function discoverProviderSchema(
     );
   }
 
-  const response = await fetchImpl(schemaUrl, {
-    ...(mode === "graphqlIntrospection"
-      ? {
-          method: "POST",
-          headers: { "content-type": "application/json", accept: "application/json" },
-          body: JSON.stringify({ query: INTROSPECTION_QUERY }),
-        }
-      : { method: "GET", headers: { accept: "application/json" } }),
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
+  const response = await fetchWithAllowedRedirects(
+    schemaUrl,
+    {
+      ...(mode === "graphqlIntrospection"
+        ? {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              accept: "application/json",
+            },
+            body: JSON.stringify({ query: INTROSPECTION_QUERY }),
+          }
+        : { method: "GET", headers: { accept: "application/json" } }),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    },
+    egress,
+    fetchImpl,
+  );
   const text = await response.text();
   if (!response.ok) {
-    throw new HttpError(502, "DISCOVERY_FAILED", `Schema endpoint answered ${response.status}.`);
+    throw new HttpError(
+      502,
+      "DISCOVERY_FAILED",
+      `Schema endpoint answered ${response.status}.`,
+    );
   }
   let parsed: unknown;
   try {
@@ -150,7 +179,11 @@ export async function discoverProviderSchema(
     try {
       parsed = parseYaml(text);
     } catch {
-      throw new HttpError(502, "DISCOVERY_FAILED", "Schema document is neither JSON nor YAML.");
+      throw new HttpError(
+        502,
+        "DISCOVERY_FAILED",
+        "Schema document is neither JSON nor YAML.",
+      );
     }
   }
 
@@ -164,12 +197,15 @@ export async function discoverProviderSchema(
     };
   }
 
-  const schema = ((parsed as JsonRecord).data as JsonRecord | undefined)?.__schema as
-    | JsonRecord
-    | undefined;
+  const schema = ((parsed as JsonRecord).data as JsonRecord | undefined)
+    ?.__schema as JsonRecord | undefined;
   return {
     discovery: "graphqlIntrospection",
-    queries: fieldSummaries((schema?.queryType as JsonRecord | undefined)?.fields),
-    mutations: fieldSummaries((schema?.mutationType as JsonRecord | undefined)?.fields),
+    queries: fieldSummaries(
+      (schema?.queryType as JsonRecord | undefined)?.fields,
+    ),
+    mutations: fieldSummaries(
+      (schema?.mutationType as JsonRecord | undefined)?.fields,
+    ),
   };
 }

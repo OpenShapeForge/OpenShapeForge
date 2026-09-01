@@ -32,6 +32,7 @@
  * through, so this transport inherits them by construction.
  */
 import { randomUUID } from "node:crypto";
+import { sql } from "kysely";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -50,6 +51,7 @@ import { resolveSessionContext } from "../auth/identity.js";
 import { buildAuthenticateChallenge } from "./protected-resource-metadata.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
+import { withDbSession } from "../db/session.js";
 import {
   createGeneratedEntity,
   createGeneratedEntityForTable,
@@ -77,12 +79,17 @@ import {
 } from "./elicitation.js";
 import {
   consumeConfiguration,
+  consumeConfigurationForSession,
+  configurationFormDefinitions,
+  latestConfigurationForSession,
   mintConfiguration,
   parseSubmission,
   peekConfiguration,
   renderConfigurationForm,
+  renderConfigurationApp,
   renderMessagePage,
   storeSubmission,
+  type PendingConfiguration,
 } from "./configuration-handoff.js";
 import {
   bindingSelected,
@@ -108,7 +115,11 @@ import {
   redeemState,
   scopesCovered,
 } from "./entity-oauth.js";
-import { decryptSecret, keyringFromEnv, type StoredSecret } from "../connectors/secrets.js";
+import {
+  decryptSecret,
+  keyringFromEnv,
+  type StoredSecret,
+} from "../connectors/secrets.js";
 import { refreshTokens } from "./entity-oauth.js";
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
@@ -269,13 +280,18 @@ function tablesByName(): Map<string, GeneratedTable> {
 function fieldNameForColumn(column: GeneratedTable["columns"][number]) {
   return (
     column.sourceField ??
-    column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase())
+    column.name.replace(/_([a-z0-9])/g, (_match, char: string) =>
+      char.toUpperCase(),
+    )
   );
 }
 
 function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
   return Object.fromEntries(
-    table.columns.map((column) => [fieldNameForColumn(column), row[column.name]]),
+    table.columns.map((column) => [
+      fieldNameForColumn(column),
+      row[column.name],
+    ]),
   );
 }
 
@@ -289,7 +305,9 @@ function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
  * auth.connectionScope wins; absent, personal sign-in implies "user" and
  * everything else "tenant".
  */
-function connectionScopeOf(auth: Record<string, unknown> | null | undefined): "user" | "tenant" {
+function connectionScopeOf(
+  auth: Record<string, unknown> | null | undefined,
+): "user" | "tenant" {
   if (auth?.connectionScope === "user" || auth?.connectionScope === "tenant") {
     return auth.connectionScope;
   }
@@ -346,8 +364,10 @@ function sessionMayInvoke(
   operation: keyof typeof OPERATION_ROLE,
   session: DbSessionInput,
 ): boolean {
-  if (!table || !isGeneratedCrudOperationEnabled(table, operation)) return false;
-  const required = table?.source?.authorization?.roles?.[OPERATION_ROLE[operation]];
+  if (!table || !isGeneratedCrudOperationEnabled(table, operation))
+    return false;
+  const required =
+    table?.source?.authorization?.roles?.[OPERATION_ROLE[operation]];
   if (!required || required.length === 0) return false;
   const granted = new Set(session.roles ?? []);
   return required.some((role) => granted.has(role));
@@ -366,10 +386,16 @@ function withholdClassified(
   if (classifiedFields.length === 0) return schema;
   const withheld = new Set(classifiedFields);
 
-  const pruneObjectLevel = (node: Record<string, unknown>): Record<string, unknown> => {
+  const pruneObjectLevel = (
+    node: Record<string, unknown>,
+  ): Record<string, unknown> => {
     const properties = node.properties;
     const result = { ...node };
-    if (properties && typeof properties === "object" && !Array.isArray(properties)) {
+    if (
+      properties &&
+      typeof properties === "object" &&
+      !Array.isArray(properties)
+    ) {
       result.properties = Object.fromEntries(
         Object.entries(properties as Record<string, unknown>).filter(
           ([name]) => !withheld.has(name),
@@ -377,14 +403,21 @@ function withholdClassified(
       );
     }
     if (Array.isArray(node.required)) {
-      result.required = node.required.filter((name) => !withheld.has(name as string));
+      result.required = node.required.filter(
+        (name) => !withheld.has(name as string),
+      );
     }
     return result;
   };
 
   const root = pruneObjectLevel(schema);
   const properties = root.properties;
-  if (!properties || typeof properties !== "object" || Array.isArray(properties)) return root;
+  if (
+    !properties ||
+    typeof properties !== "object" ||
+    Array.isArray(properties)
+  )
+    return root;
 
   const projected = { ...(properties as Record<string, unknown>) };
   for (const wrapper of ["filter", "values"]) {
@@ -401,9 +434,13 @@ function toolsForSession(
   session: DbSessionInput,
   tables: Map<string, GeneratedTable>,
 ): { tool: CatalogTool; entity: CatalogEntity | undefined }[] {
-  const entitiesByName = new Map(catalog.entities.map((entity) => [entity.entity, entity]));
+  const entitiesByName = new Map(
+    catalog.entities.map((entity) => [entity.entity, entity]),
+  );
   return catalog.tools
-    .filter((tool) => sessionMayInvoke(tables.get(tool.table), tool.operation, session))
+    .filter((tool) =>
+      sessionMayInvoke(tables.get(tool.table), tool.operation, session),
+    )
     .map((tool) => ({ tool, entity: entitiesByName.get(tool.entity) }));
 }
 
@@ -424,14 +461,18 @@ function resourcesForSession(
   );
 }
 
-const catalogDerivedTools: DerivedToolsCatalogEntry[] = catalog.derivedTools ?? [];
-const catalogDiscoveryTools: CatalogDiscoveryTool[] = catalog.discoveryTools ?? [];
+const catalogDerivedTools: DerivedToolsCatalogEntry[] =
+  catalog.derivedTools ?? [];
+const catalogDiscoveryTools: CatalogDiscoveryTool[] =
+  catalog.discoveryTools ?? [];
 const catalogTestTools: CatalogTestTool[] = catalog.testTools ?? [];
 const catalogGuideTools: CatalogGuideTool[] = catalog.guideTools ?? [];
 
 function guideToolsForSession(session: DbSessionInput): CatalogGuideTool[] {
   const granted = new Set(session.roles ?? []);
-  return catalogGuideTools.filter((tool) => tool.roles.some((role) => granted.has(role)));
+  return catalogGuideTools.filter((tool) =>
+    tool.roles.some((role) => granted.has(role)),
+  );
 }
 
 /** Discovery follows the entity's read role, like the resource surface. */
@@ -483,7 +524,12 @@ async function derivedToolsForSession(
       limit: DERIVED_TOOLS_ROW_LIMIT,
     });
     const rows = result.rows.map((row) => serializeRow(table, row));
-    let entryTools = derivedToolsFromRows(entry, rows, reserved, session.roles ?? []);
+    let entryTools = derivedToolsFromRows(
+      entry,
+      rows,
+      reserved,
+      session.roles ?? [],
+    );
     // Honest annotations, derived from the chain instead of assumed: a tool
     // whose every bound operation is a query is read-only, and hosts treat
     // read-only tools with less approval friction. A chain that does not
@@ -491,22 +537,33 @@ async function derivedToolsForSession(
     if (entry.execution && entryTools.length > 0) {
       const operationTable = tables.get(entry.execution.operationTable);
       if (operationTable) {
-        const operationRows = await listGeneratedEntitiesForTable(db, session, operationTable, {
-          limit: DERIVED_TOOLS_ROW_LIMIT,
-        });
-        const operationTraits = new Map<string, { mutation: boolean; destructive: boolean }>();
+        const operationRows = await listGeneratedEntitiesForTable(
+          db,
+          session,
+          operationTable,
+          {
+            limit: DERIVED_TOOLS_ROW_LIMIT,
+          },
+        );
+        const operationTraits = new Map<
+          string,
+          { mutation: boolean; destructive: boolean }
+        >();
         for (const raw of operationRows.rows) {
           const row = serializeRow(operationTable, raw);
           const operation = (row.operation ?? {}) as Record<string, unknown>;
           operationTraits.set(String(row.id), {
             mutation: row.kind === "mutation",
             destructive:
-              typeof operation.method === "string" && operation.method.toUpperCase() === "DELETE",
+              typeof operation.method === "string" &&
+              operation.method.toUpperCase() === "DELETE",
           });
         }
         const rowById = new Map(rows.map((row) => [String(row.id), row]));
         entryTools = entryTools.map((tool) => {
-          const bindingsRaw = rowById.get(tool.rowId)?.[entry.execution!.bindingsField];
+          const bindingsRaw = rowById.get(tool.rowId)?.[
+            entry.execution!.bindingsField
+          ];
           const bindings = Array.isArray(bindingsRaw)
             ? (bindingsRaw as Record<string, unknown>[])
             : [];
@@ -514,7 +571,9 @@ async function derivedToolsForSession(
           let destructive = false;
           let resolved = bindings.length > 0;
           for (const binding of bindings) {
-            const traits = operationTraits.get(String(binding?.[entry.execution!.operationRef] ?? ""));
+            const traits = operationTraits.get(
+              String(binding?.[entry.execution!.operationRef] ?? ""),
+            );
             if (!traits) {
               resolved = false;
               continue;
@@ -531,10 +590,15 @@ async function derivedToolsForSession(
     if (entry.personalization && entryTools.length > 0) {
       const preferenceTable = tables.get(entry.personalization.table);
       if (preferenceTable) {
-        const mine = await listGeneratedEntitiesForTable(db, session, preferenceTable, {
-          limit: 100,
-          filter: { ownerUserId: session.userId },
-        });
+        const mine = await listGeneratedEntitiesForTable(
+          db,
+          session,
+          preferenceTable,
+          {
+            limit: 100,
+            fixedWhere: [{ column: "owner_user_id", value: session.userId }],
+          },
+        );
         entryTools = applyPersonalNotes(
           entryTools,
           entry,
@@ -558,6 +622,10 @@ async function derivedToolsForSession(
  */
 export const ENTITY_OAUTH_CALLBACK_PATH = "/api/entity-oauth/callback";
 export const ENTITY_CONFIGURATION_PATH = "/api/entity-configuration";
+export const ENTITY_CONFIGURATION_APP_URI =
+  "ui://openshapeforge/configuration";
+const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
+const MCP_APP_EXTENSION_ID = "io.modelcontextprotocol/ui";
 
 /**
  * Whether a failed elicitation should fall back to the browser handoff.
@@ -567,7 +635,9 @@ export const ENTITY_CONFIGURATION_PATH = "/api/entity-configuration";
  * token expires. Every other failure (missing source row, keyring problems)
  * stays an error.
  */
-function elicitationFallback(error: unknown): "unsupported" | "declined" | "timeout" | null {
+function elicitationFallback(
+  error: unknown,
+): "unsupported" | "declined" | "timeout" | null {
   if (error instanceof HttpError) {
     if (error.code === "ELICITATION_UNSUPPORTED") return "unsupported";
     if (error.code === "ELICITATION_DECLINED") return "declined";
@@ -582,10 +652,48 @@ function elicitedKeyring() {
 }
 
 function callbackOrigin(): string {
-  const configured = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN?.trim().replace(/\/$/, "");
+  const configured = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN?.trim().replace(
+    /\/$/,
+    "",
+  );
   if (configured) return configured;
-  return `http://127.0.0.1:${process.env.PORT ?? "3001"}`;
+  throw new HttpError(
+    503,
+    "PUBLIC_ORIGIN_NOT_CONFIGURED",
+    "OPENSHAPEFORGE_PUBLIC_ORIGIN is not configured, so no browser callback URL can be built.",
+  );
 }
+
+function configurationWebUrl(): string {
+  const configured = process.env.OPENSHAPEFORGE_WEB_ORIGIN?.trim().replace(
+    /\/$/,
+    "",
+  );
+  if (configured) return `${configured}/configuration`;
+  throw new HttpError(
+    503,
+    "WEB_ORIGIN_NOT_CONFIGURED",
+    "Set OPENSHAPEFORGE_WEB_ORIGIN before using the external configuration fallback.",
+  );
+}
+
+function clientSupportsMcpApp(capabilities: unknown): boolean {
+  const typed = capabilities as
+    | { extensions?: Record<string, unknown> }
+    | undefined;
+  const ui = typed?.extensions?.[MCP_APP_EXTENSION_ID] as
+    | { mimeTypes?: unknown }
+    | undefined;
+  return (
+    Array.isArray(ui?.mimeTypes) && ui.mimeTypes.includes(MCP_APP_MIME_TYPE)
+  );
+}
+
+function supportsMcpApp(server: Server): boolean {
+  return clientSupportsMcpApp(server.getClientCapabilities());
+}
+
+export const __clientSupportsMcpAppForTests = clientSupportsMcpApp;
 
 function looksLikeStoredSecret(value: unknown): value is StoredSecret {
   return (
@@ -594,6 +702,59 @@ function looksLikeStoredSecret(value: unknown): value is StoredSecret {
     typeof (value as StoredSecret).ciphertext === "string" &&
     typeof (value as StoredSecret).keyId === "string"
   );
+}
+
+function accessTokenNeedsRefresh(values: Record<string, unknown>): boolean {
+  const expiresAt = values.accessTokenExpiresAt;
+  const expiresAtMs =
+    typeof expiresAt === "string" ? Date.parse(expiresAt) : Number.NaN;
+  return Number.isFinite(expiresAtMs) && expiresAtMs < Date.now() + 60_000;
+}
+
+async function refreshConnectionRowLocked(input: {
+  db: OpenShapeForgeDatabase;
+  session: DbSessionInput;
+  table: GeneratedTable;
+  rowId: string;
+  valuesField: string;
+  refresh: (
+    values: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+}): Promise<Record<string, unknown>> {
+  const valuesColumn = input.table.columns.find(
+    (column) =>
+      (column.sourceField ??
+        column.name.replace(/_([a-z0-9])/g, (_match, char: string) =>
+          char.toUpperCase(),
+        )) === input.valuesField,
+  );
+  if (!valuesColumn || !input.table.primaryKey) {
+    throw new HttpError(
+      500,
+      "INTERNAL",
+      "Connection values column is missing from the manifest.",
+    );
+  }
+  return withDbSession(input.db, input.session, async (trx) => {
+    const locked = await sql<{ values: Record<string, unknown> | null }>`
+      select ${sql.id(valuesColumn.name)} as values
+        from ${sql.id(input.table.schema, input.table.table)}
+       where ${sql.id(input.table.primaryKey!)}::text = ${input.rowId}
+       for update
+    `.execute(trx);
+    const current = locked.rows[0]?.values ?? {};
+    if (!accessTokenNeedsRefresh(current)) return current;
+    const merged = { ...current, ...(await input.refresh(current)) };
+    // Persist inside the same transaction that holds the row lock. Re-entering
+    // the generic CRUD helper here would open a nested session/transaction and
+    // release neither waiters nor the lock in the intended order.
+    await sql`
+      update ${sql.id(input.table.schema, input.table.table)}
+         set ${sql.id(valuesColumn.name)} = ${JSON.stringify(merged)}::jsonb
+       where ${sql.id(input.table.primaryKey!)}::text = ${input.rowId}
+    `.execute(trx);
+    return merged;
+  });
 }
 
 /**
@@ -605,7 +766,10 @@ function readClientCredentials(
   valuesField: string,
   secretScope: string,
 ): { clientId: string; clientSecret: string } {
-  const values = (tenantConnection?.[valuesField] ?? {}) as Record<string, unknown>;
+  const values = (tenantConnection?.[valuesField] ?? {}) as Record<
+    string,
+    unknown
+  >;
   const rawClientId = values.clientId;
   const rawSecret = values.clientSecret;
   const keyring = elicitedKeyring();
@@ -613,7 +777,8 @@ function readClientCredentials(
   // so an encrypted clientId is as present as a plain one — found live: a
   // connection that passed every validation dead-ended at sign-in because
   // this reader treated the encrypted form as missing.
-  const clientIdReadable = typeof rawClientId === "string" || looksLikeStoredSecret(rawClientId);
+  const clientIdReadable =
+    typeof rawClientId === "string" || looksLikeStoredSecret(rawClientId);
   if (!clientIdReadable || !looksLikeStoredSecret(rawSecret) || !keyring) {
     throw new HttpError(
       400,
@@ -627,7 +792,12 @@ function readClientCredentials(
       typeof rawClientId === "string"
         ? rawClientId
         : decryptSecret(keyring, secretScope, "clientId", rawClientId),
-    clientSecret: decryptSecret(keyring, secretScope, "clientSecret", rawSecret),
+    clientSecret: decryptSecret(
+      keyring,
+      secretScope,
+      "clientSecret",
+      rawSecret,
+    ),
   };
 }
 
@@ -678,7 +848,10 @@ async function runtimeRowsByFilter(
 ): Promise<Record<string, unknown>[]> {
   const table = tables.get(tableName);
   if (!table) return [];
-  const result = await listGeneratedEntitiesForTable(db, session, table, { limit, filter });
+  const result = await listGeneratedEntitiesForTable(db, session, table, {
+    limit,
+    filter,
+  });
   return result.rows.map((row) => serializeRow(table, row));
 }
 
@@ -691,7 +864,10 @@ async function runtimeRowByFilter(
 ): Promise<Record<string, unknown> | null> {
   const table = tables.get(tableName);
   if (!table) return null;
-  const result = await listGeneratedEntitiesForTable(db, session, table, { limit: 1, filter });
+  const result = await listGeneratedEntitiesForTable(db, session, table, {
+    limit: 1,
+    filter,
+  });
   const row = result.rows[0];
   return row ? serializeRow(table, row) : null;
 }
@@ -703,28 +879,28 @@ const ajv = new Ajv({ allErrors: true, strict: false, coerceTypes: false });
 // ajv-formats is CJS; under NodeNext the default import is typed as the
 // module namespace rather than the callable it is at runtime.
 (addFormats as unknown as (instance: Ajv) => unknown)(ajv);
-const compiledValidators = new WeakMap<object, ValidateFunction>();
-
 function assertSchemaValid(
   schema: Record<string, unknown>,
   value: unknown,
   what: string,
 ): void {
-  const cached = compiledValidators.get(schema);
-  const checker: ValidateFunction = cached ?? ajv.compile(schema);
-  if (!cached) compiledValidators.set(schema, checker);
-  if (!checker(value)) {
-    const details = (checker.errors ?? [])
-      .slice(0, 5)
-      .map((error) => {
-        const offender =
-          typeof error.params?.additionalProperty === "string"
-            ? ` ("${error.params.additionalProperty}")`
-            : "";
-        return `${error.instancePath || what} ${error.message ?? "invalid"}${offender}`;
-      })
-      .join("; ");
-    throw new HttpError(400, "BAD_USER_INPUT", `Invalid ${what}: ${details}`);
+  const checker: ValidateFunction = ajv.compile(schema);
+  try {
+    if (!checker(value)) {
+      const details = (checker.errors ?? [])
+        .slice(0, 5)
+        .map((error) => {
+          const offender =
+            typeof error.params?.additionalProperty === "string"
+              ? ` ("${error.params.additionalProperty}")`
+              : "";
+          return `${error.instancePath || what} ${error.message ?? "invalid"}${offender}`;
+        })
+        .join("; ");
+      throw new HttpError(400, "BAD_USER_INPUT", `Invalid ${what}: ${details}`);
+    }
+  } finally {
+    ajv.removeSchema(schema);
   }
 }
 
@@ -757,6 +933,9 @@ function describeTool(
       title: tool.title,
       ...tool.annotations,
     },
+    ...(tool.operation === "create" && entity?.elicitOnCreate
+      ? { _meta: { ui: { resourceUri: ENTITY_CONFIGURATION_APP_URI } } }
+      : {}),
   };
 }
 
@@ -790,7 +969,8 @@ function visibleFields(
   table: GeneratedTable | undefined,
   session: DbSessionInput,
 ): CatalogField[] {
-  if (canReadClassifiedColumns(table?.source?.authorization, session)) return entity.fields;
+  if (canReadClassifiedColumns(table?.source?.authorization, session))
+    return entity.fields;
   const classified = new Set(entity.classifiedFields);
   return entity.fields.filter((field) => !classified.has(field.key));
 }
@@ -818,8 +998,8 @@ function describeEntityResource(
   const visible = new Set(fields.map((field) => field.key));
   const templateVisible =
     !entity.displayTemplate ||
-    [...entity.displayTemplate.matchAll(/{{\s*([\w.]+)\s*}}/g)].every(([, key]) =>
-      visible.has(key!.split(".")[0]!),
+    [...entity.displayTemplate.matchAll(/{{\s*([\w.]+)\s*}}/g)].every(
+      ([, key]) => visible.has(key!.split(".")[0]!),
     );
 
   return {
@@ -901,11 +1081,31 @@ export const __resourcesForSessionForTests = resourcesForSession;
 type ToolResult = {
   content: { type: "text"; text: string }[];
   isError?: boolean;
+  _meta?: Record<string, unknown>;
 };
 
 function ok(payload: unknown): ToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+  };
 }
+
+function configurationAppResult(
+  payload: unknown,
+  token: string,
+  displayName: string,
+): ToolResult {
+  const configurationUrl = `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${token}`;
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    _meta: {
+      configurationUrl,
+      displayName,
+    },
+  };
+}
+
+export const __configurationAppResultForTests = configurationAppResult;
 
 /**
  * Errors are returned as tool results rather than protocol errors: a model
@@ -926,7 +1126,11 @@ function failed(error: unknown): ToolResult {
 function requireArguments(args: unknown): Record<string, unknown> {
   if (args === undefined || args === null) return {};
   if (typeof args !== "object" || Array.isArray(args)) {
-    throw new HttpError(400, "BAD_USER_INPUT", "Tool arguments must be an object.");
+    throw new HttpError(
+      400,
+      "BAD_USER_INPUT",
+      "Tool arguments must be an object.",
+    );
   }
   return args as Record<string, unknown>;
 }
@@ -968,7 +1172,11 @@ function assertDeclaredProperties(
 function requireId(args: Record<string, unknown>): string {
   const id = args.id;
   if (typeof id !== "string" || id === "") {
-    throw new HttpError(400, "BAD_USER_INPUT", "Tool argument `id` is required.");
+    throw new HttpError(
+      400,
+      "BAD_USER_INPUT",
+      "Tool argument `id` is required.",
+    );
   }
   return id;
 }
@@ -1014,14 +1222,20 @@ async function assertPublishableWrite(
   rowId?: string,
 ): Promise<void> {
   const entry = catalogDerivedTools.find(
-    (candidate) => candidate.table === table.name && candidate.visibleWhen && candidate.execution,
+    (candidate) =>
+      candidate.table === table.name &&
+      candidate.visibleWhen &&
+      candidate.execution,
   );
   if (!entry) return;
   const gate = entry.visibleWhen!;
 
   let resulting = values;
   if (rowId !== undefined) {
-    const current = await getGeneratedEntity(db, session, { table: table.name, id: rowId });
+    const current = await getGeneratedEntity(db, session, {
+      table: table.name,
+      id: rowId,
+    });
     if (!current) return; // the update itself will answer NOT_FOUND
     resulting = { ...serializeRow(table, current), ...values };
   }
@@ -1034,7 +1248,9 @@ async function assertPublishableWrite(
     ...catalogDerivedTools.flatMap((candidate) => [
       ...(candidate.connect ? [candidate.connect.name] : []),
       ...(candidate.dryRun ? [candidate.dryRun.name] : []),
-      ...(candidate.personalization ? [candidate.personalization.set.name] : []),
+      ...(candidate.personalization
+        ? [candidate.personalization.set.name]
+        : []),
     ]),
     ...catalogGuideTools.map((tool) => tool.name),
     ...catalogDiscoveryTools.map((tool) => tool.name),
@@ -1045,9 +1261,10 @@ async function assertPublishableWrite(
     row: resulting,
     rowId,
     reservedNames,
-    providerDefinitionsField: entityForTable(entry.execution!.connectionTable)?.elicitOnCreate
-      ?.definitionsField,
-    readRows: (rowTable, filter) => runtimeRowsByFilter(db, session, tables, rowTable, filter),
+    providerDefinitionsField: entityForTable(entry.execution!.connectionTable)
+      ?.elicitOnCreate?.definitionsField,
+    readRows: (rowTable, filter) =>
+      runtimeRowsByFilter(db, session, tables, rowTable, filter),
   });
 }
 
@@ -1065,14 +1282,19 @@ async function invokeTool(
   switch (tool.operation) {
     case "list": {
       const filter =
-        args.filter && typeof args.filter === "object" && !Array.isArray(args.filter)
+        args.filter &&
+        typeof args.filter === "object" &&
+        !Array.isArray(args.filter)
           ? (args.filter as Record<string, unknown>)
           : undefined;
       const sort =
         args.sortField || args.sortDirection
           ? {
               field: typeof args.sortField === "string" ? args.sortField : null,
-              direction: typeof args.sortDirection === "string" ? args.sortDirection : null,
+              direction:
+                typeof args.sortDirection === "string"
+                  ? args.sortDirection
+                  : null,
             }
           : undefined;
       // Like REST, the MCP list result always publishes totalCount, so the
@@ -1086,7 +1308,9 @@ async function invokeTool(
         includeTotalCount: true,
       });
       return ok({
-        items: result.rows.map((row) => serializeRowForEntity(entity, table, row)),
+        items: result.rows.map((row) =>
+          serializeRowForEntity(entity, table, row),
+        ),
         totalCount: result.totalCount,
         nextCursor: result.nextCursor,
       });
@@ -1108,7 +1332,9 @@ async function invokeTool(
       // and writable checks that guard MODEL-supplied fields.
       const elicitField = entity?.elicitOnCreate?.into;
       const modelValues = elicitField
-        ? Object.fromEntries(Object.entries(values).filter(([key]) => key !== elicitField))
+        ? Object.fromEntries(
+            Object.entries(values).filter(([key]) => key !== elicitField),
+          )
         : values;
       assertDeclaredProperties(tool.inputSchema, modelValues, "field");
       assertWritableValues(modelValues, entity, table, session);
@@ -1125,7 +1351,11 @@ async function invokeTool(
       assertDeclaredProperties(tool.inputSchema, args, "argument");
       const values = requireArguments(args.values);
       assertDeclaredProperties(
-        (tool.inputSchema.properties as Record<string, Record<string, unknown>> | undefined)?.values,
+        (
+          tool.inputSchema.properties as
+            | Record<string, Record<string, unknown>>
+            | undefined
+        )?.values,
         values,
         "field",
       );
@@ -1145,7 +1375,8 @@ async function invokeTool(
         table: table.name,
         id: requireId(args),
       });
-      if (!deleted) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
+      if (!deleted)
+        throw new HttpError(404, "NOT_FOUND", "Resource not found.");
       return ok({ deleted: true });
     }
   }
@@ -1217,20 +1448,51 @@ function buildServer(
           description: resource.description,
           mimeType: JSON_MIME_TYPE,
         })),
+        ...(supportsMcpApp(server)
+          ? [
+              {
+                uri: ENTITY_CONFIGURATION_APP_URI,
+                name: "secure-configuration-app",
+                title: "Secure configuration app",
+                description:
+                  "Client-only UI for values that must not pass through the model.",
+                mimeType: MCP_APP_MIME_TYPE,
+              },
+            ]
+          : []),
       ],
     };
   });
 
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
-    resourceTemplates: resourcesForSession(session, tables).map((resource) => ({
-      uriTemplate: resource.templateUri,
-      name: resource.templateName,
-      description: resource.templateDescription,
-      mimeType: JSON_MIME_TYPE,
-    })),
+    resourceTemplates: [
+      ...resourcesForSession(session, tables).map((resource) => ({
+        uriTemplate: resource.templateUri,
+        name: resource.templateName,
+        description: resource.templateDescription,
+        mimeType: JSON_MIME_TYPE,
+      })),
+    ],
   }));
 
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    if (request.params.uri === ENTITY_CONFIGURATION_APP_URI) {
+      return {
+        contents: [
+          {
+            uri: request.params.uri,
+            mimeType: MCP_APP_MIME_TYPE,
+            text: await renderConfigurationApp(),
+            _meta: {
+              ui: {
+                csp: { resourceDomains: [callbackOrigin()] },
+                prefersBorder: true,
+              },
+            },
+          },
+        ],
+      };
+    }
     const entries = entitiesForSession(session, tables);
     let payload: unknown;
     if (request.params.uri === ENTITY_CATALOG_URI) {
@@ -1239,7 +1501,8 @@ function buildServer(
       const entry = entries.find(
         ({ entity }) => entityResourceUri(entity) === request.params.uri,
       );
-      if (!entry) throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
+      if (!entry)
+        throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
       payload = describeEntityResource(entry, entries, tables, session);
     } else {
       const uri = request.params.uri;
@@ -1247,7 +1510,8 @@ function buildServer(
       const direct = readable.find((resource) => resource.uri === uri);
       if (direct) {
         const table = tables.get(direct.table);
-        if (!table) throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
+        if (!table)
+          throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
         const result = await listGeneratedEntities(db, session, {
           table: table.name,
           limit: RESOURCE_READ_LIMIT,
@@ -1256,15 +1520,25 @@ function buildServer(
           serializeRowForEntity(entityForTable(direct.table), table, row),
         );
       } else {
-        const templated = readable.find((resource) => uri.startsWith(`${resource.uri}/`));
+        const templated = readable.find((resource) =>
+          uri.startsWith(`${resource.uri}/`),
+        );
         const id = templated ? uri.slice(templated.uri.length + 1) : "";
         const table = templated ? tables.get(templated.table) : undefined;
         if (!templated || !table || id.length === 0 || id.includes("/")) {
           throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
         }
-        const row = await getGeneratedEntity(db, session, { table: table.name, id });
-        if (!row) throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
-        payload = serializeRowForEntity(entityForTable(templated.table), table, row);
+        const row = await getGeneratedEntity(db, session, {
+          table: table.name,
+          id,
+        });
+        if (!row)
+          throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
+        payload = serializeRowForEntity(
+          entityForTable(templated.table),
+          table,
+          row,
+        );
       }
     }
     return {
@@ -1278,7 +1552,9 @@ function buildServer(
     };
   });
 
-  server.setRequestHandler(ListPromptsRequestSchema, async () => ({ prompts: [] }));
+  server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+    prompts: [],
+  }));
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
@@ -1286,7 +1562,9 @@ function buildServer(
         describeTool(tool, entity, tables.get(tool.table), session),
       ),
       ...catalogDerivedTools
-        .filter((entry) => entry.connect && sessionInAudience(entry, session.roles))
+        .filter(
+          (entry) => entry.connect && sessionInAudience(entry, session.roles),
+        )
         .map((entry) => ({
           name: entry.connect!.name,
           description: entry.connect!.description,
@@ -1295,16 +1573,24 @@ function buildServer(
             properties: {
               tool: {
                 type: "string",
-                description: "Name of the tool to create your personal connection for.",
+                description:
+                  "Name of the tool to create your personal connection for.",
               },
             },
             required: ["tool"],
             additionalProperties: false,
           },
-          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+          annotations: {
+            readOnlyHint: false,
+            destructiveHint: false,
+            idempotentHint: true,
+          },
         })),
       ...catalogDerivedTools
-        .filter((entry) => entry.personalization && sessionInAudience(entry, session.roles))
+        .filter(
+          (entry) =>
+            entry.personalization && sessionInAudience(entry, session.roles),
+        )
         .map((entry) => ({
           name: entry.personalization!.set.name,
           description: entry.personalization!.set.description,
@@ -1326,14 +1612,20 @@ function buildServer(
             required: ["instruction"],
             additionalProperties: false,
           },
-          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+          annotations: {
+            readOnlyHint: false,
+            destructiveHint: false,
+            idempotentHint: true,
+          },
         })),
       ...catalogDerivedTools
         .filter(
           (entry) =>
             entry.dryRun &&
             entry.execution &&
-            entry.dryRun.roles.some((role) => (session.roles ?? []).includes(role)),
+            entry.dryRun.roles.some((role) =>
+              (session.roles ?? []).includes(role),
+            ),
         )
         .map((entry) => ({
           name: entry.dryRun!.name,
@@ -1348,19 +1640,32 @@ function buildServer(
               },
               arguments: {
                 type: "object",
-                description: "The arguments the composed call would be made with.",
+                description:
+                  "The arguments the composed call would be made with.",
               },
             },
             required: ["tool"],
             additionalProperties: false,
           },
-          annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+          annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+          },
         })),
       ...guideToolsForSession(session).map((tool) => ({
         name: tool.name,
         description: tool.description,
-        inputSchema: { type: "object", properties: {}, additionalProperties: false },
-        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        },
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+        },
       })),
       ...discoveryToolsForSession(session, tables).map((tool) => ({
         name: tool.name,
@@ -1377,7 +1682,11 @@ function buildServer(
           required: ["id"],
           additionalProperties: false,
         },
-        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+        },
       })),
       ...testToolsForSession(session, tables).map((tool) => ({
         name: tool.name,
@@ -1396,7 +1705,11 @@ function buildServer(
         },
         // Read-only from the deployment's perspective: the probe is a
         // provider read the definition itself declares harmless.
-        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+        },
       })),
       // Derived tools: definition rows projected per session and per tenant.
       ...(await derivedToolsForSession(db, session, tables)).map((tool) => ({
@@ -1456,16 +1769,29 @@ function buildServer(
       }
     }
 
-    const connectEntry = catalogDerivedTools.find((entry) => entry.connect?.name === name);
+    const connectEntry = catalogDerivedTools.find(
+      (entry) => entry.connect?.name === name,
+    );
     if (connectEntry) {
-      if (!sessionInAudience(connectEntry, session.roles) || !connectEntry.execution) {
-        return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
+      if (
+        !sessionInAudience(connectEntry, session.roles) ||
+        !connectEntry.execution
+      ) {
+        return failed(
+          new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`),
+        );
       }
       try {
         const execution = connectEntry.execution;
-        const toolArg = (request.params.arguments as Record<string, unknown> | undefined)?.tool;
+        const toolArg = (
+          request.params.arguments as Record<string, unknown> | undefined
+        )?.tool;
         if (typeof toolArg !== "string" || toolArg.length === 0) {
-          throw new HttpError(400, "VALIDATION", 'Argument "tool" is required.');
+          throw new HttpError(
+            400,
+            "VALIDATION",
+            'Argument "tool" is required.',
+          );
         }
         // Only a PROJECTED row can start a connection: projection already
         // enforces publication and audience, so an unpublished or invisible
@@ -1473,28 +1799,57 @@ function buildServer(
         // hold the defining row's KEY rather than the derived name, so the
         // input is normalized through the same derivation.
         const wantedName = deriveToolName(toolArg) ?? toolArg;
-        const projectedTools = await derivedToolsForSession(db, session, tables);
+        const projectedTools = await derivedToolsForSession(
+          db,
+          session,
+          tables,
+        );
         const target = projectedTools.find(
-          (tool) => tool.name === wantedName && tool.table === connectEntry.table,
+          (tool) =>
+            tool.name === wantedName && tool.table === connectEntry.table,
         );
         if (!target) {
-          throw new HttpError(404, "NOT_FOUND", `No connectable tool "${toolArg}".`);
+          throw new HttpError(
+            404,
+            "NOT_FOUND",
+            `No connectable tool "${toolArg}".`,
+          );
         }
-        const definitionRow = await runtimeRowByFilter(db, session, tables, target.table, {
-          id: target.rowId,
-        });
-        if (!definitionRow) throw new HttpError(404, "NOT_FOUND", `No connectable tool "${toolArg}".`);
+        const definitionRow = await runtimeRowByFilter(
+          db,
+          session,
+          tables,
+          target.table,
+          {
+            id: target.rowId,
+          },
+        );
+        if (!definitionRow)
+          throw new HttpError(
+            404,
+            "NOT_FOUND",
+            `No connectable tool "${toolArg}".`,
+          );
 
         // The provider derives from the target's exact chain; the caller
         // chooses nothing. Exactly one distinct provider per connection.
         const providerIds = new Set<string>();
-        for (const binding of orderedBindings(definitionRow, execution.bindingsField)) {
+        for (const binding of orderedBindings(
+          definitionRow,
+          execution.bindingsField,
+        )) {
           const operationId = binding[execution.operationRef];
           const operationRow =
             typeof operationId === "string"
-              ? await runtimeRowByFilter(db, session, tables, execution.operationTable, {
-                  id: operationId,
-                })
+              ? await runtimeRowByFilter(
+                  db,
+                  session,
+                  tables,
+                  execution.operationTable,
+                  {
+                    id: operationId,
+                  },
+                )
               : null;
           if (!operationRow) {
             throw new HttpError(
@@ -1508,7 +1863,11 @@ function buildServer(
           }
         }
         if (providerIds.size === 0) {
-          throw new HttpError(400, "NOT_CONNECTABLE", "This definition names no provider.");
+          throw new HttpError(
+            400,
+            "NOT_CONNECTABLE",
+            "This definition names no provider.",
+          );
         }
         // A canonical definition may span providers; the person connects
         // them ONE AT A TIME through this same tool — each pass mints the
@@ -1529,9 +1888,19 @@ function buildServer(
             execution.providerTable,
             { id: candidateId },
           );
-          const candidateAuth = (candidateRow?.auth ?? null) as Record<string, unknown> | null;
-          if (candidateRow && candidateAuth?.profile === "oauth2AuthorizationCode") {
-            signInProviders.push({ id: candidateId, row: candidateRow, auth: candidateAuth });
+          const candidateAuth = (candidateRow?.auth ?? null) as Record<
+            string,
+            unknown
+          > | null;
+          if (
+            candidateRow &&
+            candidateAuth?.profile === "oauth2AuthorizationCode"
+          ) {
+            signInProviders.push({
+              id: candidateId,
+              row: candidateRow,
+              auth: candidateAuth,
+            });
           }
         }
         if (signInProviders.length === 0) {
@@ -1541,18 +1910,11 @@ function buildServer(
             "This definition's provider does not support sign-in connections.",
           );
         }
-        const connectedProviders: string[] = [];
-        for (const [providerIndex, signIn] of signInProviders.entries()) {
-        const providerRowId = signIn.id;
 
-        // Scopes derive from the UNION of every projected definition on this
-        // provider, not the entry-point tool alone: the person signs in once
-        // per provider, and a consent shaped by one read tool would mint a
-        // token every write tool answers 403 with — leaving over-broadening
-        // that read tool as the only "fix" (seen live). A sibling row whose
-        // chain does not resolve is skipped: publication validation guards
-        // new rows, and a broken legacy row must not block sign-in.
-        const requiredScopes = new Set<string>();
+        // Resolve every projected definition once, then reuse the per-provider
+        // scope union below. Keeping this outside the provider loop avoids a
+        // providers × definitions × bindings query multiplier on connect.
+        const requiredScopesByProvider = new Map<string, Set<string>>();
         for (const projected of projectedTools) {
           if (projected.table !== connectEntry.table) continue;
           const row =
@@ -1565,170 +1927,226 @@ function buildServer(
           try {
             const rowProviders = new Set<string>();
             const rowScopes: string[] = [];
-            for (const binding of orderedBindings(row, execution.bindingsField)) {
+            for (const binding of orderedBindings(
+              row,
+              execution.bindingsField,
+            )) {
               const operationId = binding[execution.operationRef];
               const operationRow =
                 typeof operationId === "string"
-                  ? await runtimeRowByFilter(db, session, tables, execution.operationTable, {
-                      id: operationId,
-                    })
+                  ? await runtimeRowByFilter(
+                      db,
+                      session,
+                      tables,
+                      execution.operationTable,
+                      { id: operationId },
+                    )
                   : null;
               if (!operationRow) throw new Error("unresolved binding");
-              if (typeof operationRow[execution.providerRef] === "string") {
-                rowProviders.add(operationRow[execution.providerRef] as string);
-              }
+              const providerId = operationRow[execution.providerRef];
+              if (typeof providerId === "string") rowProviders.add(providerId);
               if (Array.isArray(operationRow.requiredScopes)) {
                 for (const scope of operationRow.requiredScopes as unknown[]) {
                   if (typeof scope === "string") rowScopes.push(scope);
                 }
               }
             }
-            if (rowProviders.size === 1 && rowProviders.has(providerRowId)) {
-              for (const scope of rowScopes) requiredScopes.add(scope);
-            }
+            if (rowProviders.size !== 1) continue;
+            const [providerId] = rowProviders;
+            if (!providerId) continue;
+            const providerScopes =
+              requiredScopesByProvider.get(providerId) ?? new Set<string>();
+            for (const scope of rowScopes) providerScopes.add(scope);
+            requiredScopesByProvider.set(providerId, providerScopes);
           } catch {
             // A malformed sibling definition cannot block this sign-in.
           }
         }
-        const providerRow = signIn.row;
-        const auth = signIn.auth;
-        const scope_ = connectionScopeOf(auth);
-        const authorizationUrl = auth.authorizationUrl;
-        const tokenUrl = auth.tokenUrl;
-        if (typeof authorizationUrl !== "string" || typeof tokenUrl !== "string") {
-          throw new HttpError(
-            400,
-            "PROVIDER_MISCONFIGURED",
-            "The provider declares no authorization and token endpoints.",
-          );
-        }
-        const adapterScopes = Array.isArray(auth.scopes)
-          ? (auth.scopes as unknown[]).filter((scope): scope is string => typeof scope === "string")
-          : [];
-        const scopes =
-          requiredScopes.size > 0
-            ? [...requiredScopes].filter(
-                (scope) => adapterScopes.length === 0 || adapterScopes.includes(scope),
+
+        const connectedProviders: string[] = [];
+        for (const [providerIndex, signIn] of signInProviders.entries()) {
+          const providerRowId = signIn.id;
+
+          // Scopes derive from the UNION of every projected definition on this
+          // provider, not the entry-point tool alone: the person signs in once
+          // per provider, and a consent shaped by one read tool would mint a
+          // token every write tool answers 403 with — leaving over-broadening
+          // that read tool as the only "fix" (seen live). A sibling row whose
+          // chain does not resolve is skipped: publication validation guards
+          // new rows, and a broken legacy row must not block sign-in.
+          const requiredScopes =
+            requiredScopesByProvider.get(providerRowId) ?? new Set<string>();
+          const providerRow = signIn.row;
+          const auth = signIn.auth;
+          const scope_ = connectionScopeOf(auth);
+          if (
+            scope_ === "tenant" &&
+            !connectEntry.connect!.roles.some((role) =>
+              (session.roles ?? []).includes(role),
+            )
+          ) {
+            throw new HttpError(
+              403,
+              "FORBIDDEN",
+              "This shared tenant connection requires an explicitly delegated organization role.",
+            );
+          }
+          const authorizationUrl = auth.authorizationUrl;
+          const tokenUrl = auth.tokenUrl;
+          if (
+            typeof authorizationUrl !== "string" ||
+            typeof tokenUrl !== "string"
+          ) {
+            throw new HttpError(
+              400,
+              "PROVIDER_MISCONFIGURED",
+              "The provider declares no authorization and token endpoints.",
+            );
+          }
+          const adapterScopes = Array.isArray(auth.scopes)
+            ? (auth.scopes as unknown[]).filter(
+                (scope): scope is string => typeof scope === "string",
               )
-            : adapterScopes;
-        // An empty intersection is a definition mismatch, not a scopeless
-        // provider: authorizing with no scopes would mint a token the tool
-        // cannot use (seen live as a provider "invalid scope" page).
-        if (requiredScopes.size > 0 && scopes.length === 0) {
-          throw new HttpError(
-            400,
-            "SCOPES_NOT_ALLOWED",
-            `This definition requires scopes the ${execution.providerEntity} does not allow: ` +
-              `${[...requiredScopes].join(", ")}. Add them to its allowed scopes first.`,
+            : [];
+          const scopes =
+            requiredScopes.size > 0
+              ? [...requiredScopes].filter(
+                  (scope) =>
+                    adapterScopes.length === 0 || adapterScopes.includes(scope),
+                )
+              : adapterScopes;
+          // An empty intersection is a definition mismatch, not a scopeless
+          // provider: authorizing with no scopes would mint a token the tool
+          // cannot use (seen live as a provider "invalid scope" page).
+          if (requiredScopes.size > 0 && scopes.length === 0) {
+            throw new HttpError(
+              400,
+              "SCOPES_NOT_ALLOWED",
+              `This definition requires scopes the ${execution.providerEntity} does not allow: ` +
+                `${[...requiredScopes].join(", ")}. Add them to its allowed scopes first.`,
+            );
+          }
+
+          const connectionRows = await runtimeRowsByFilter(
+            db,
+            session,
+            tables,
+            execution.connectionTable,
+            { [execution.connectionProviderRef]: providerRowId },
           );
-        }
+          const existingForScope =
+            scope_ === "user"
+              ? connectionRows.find((row) => row.ownerUserId === session.userId)
+              : connectionRows.find((row) => !row.ownerUserId);
+          const existingValues = (existingForScope?.[
+            execution.connectionValuesField
+          ] ?? null) as Record<string, unknown> | null;
+          // An existing sign-in only satisfies the request while its granted
+          // scopes still cover the definition's CURRENT requirements. When a
+          // scope evolved after consent, silently reusing the old token
+          // guarantees a provider 403 — the fix is a fresh approval, minted
+          // below, whose callback replaces the stored tokens in place.
+          const hasExistingTokens = Boolean(
+            existingForScope &&
+            existingValues?.accessToken &&
+            (!accessTokenNeedsRefresh(existingValues) ||
+              looksLikeStoredSecret(existingValues.refreshToken)),
+          );
+          if (
+            hasExistingTokens &&
+            scopesCovered(scopes, existingValues?.grantedScopes)
+          ) {
+            connectedProviders.push(String(providerRow.name ?? providerRowId));
+            continue;
+          }
+          const reconsent = hasExistingTokens;
+          const tenantConnection = connectionRows.find(
+            (row) => !row.ownerUserId,
+          );
+          const secretScope =
+            entityForTable(execution.connectionTable)?.elicitOnCreate
+              ?.sourceTable ?? execution.providerTable;
+          const credentials = readClientCredentials(
+            tenantConnection,
+            execution.connectionValuesField,
+            secretScope,
+          );
 
-        const connectionRows = await runtimeRowsByFilter(
-          db,
-          session,
-          tables,
-          execution.connectionTable,
-          { [execution.connectionProviderRef]: providerRowId },
-        );
-        const existingForScope =
-          scope_ === "user"
-            ? connectionRows.find((row) => row.ownerUserId === session.userId)
-            : connectionRows.find((row) => !row.ownerUserId);
-        const existingValues = (existingForScope?.[execution.connectionValuesField] ?? null) as
-          | Record<string, unknown>
-          | null;
-        // An existing sign-in only satisfies the request while its granted
-        // scopes still cover the definition's CURRENT requirements. When a
-        // scope evolved after consent, silently reusing the old token
-        // guarantees a provider 403 — the fix is a fresh approval, minted
-        // below, whose callback replaces the stored tokens in place.
-        const hasExistingTokens = Boolean(existingForScope && existingValues?.accessToken);
-        if (hasExistingTokens && scopesCovered(scopes, existingValues?.grantedScopes)) {
-          connectedProviders.push(String(providerRow.name ?? providerRowId));
-          continue;
-        }
-        const reconsent = hasExistingTokens;
-        const tenantConnection = connectionRows.find((row) => !row.ownerUserId);
-        const secretScope =
-          entityForTable(execution.connectionTable)?.elicitOnCreate?.sourceTable ??
-          execution.providerTable;
-        const credentials = readClientCredentials(
-          tenantConnection,
-          execution.connectionValuesField,
-          secretScope,
-        );
+          // Provider OAuth endpoints are routinely per-tenant
+          // (https://{subdomain}.provider.com/...): placeholders resolve from
+          // the tenant connection's NON-secret values, like base URLs do —
+          // including encrypted-at-rest values whose field is not classified
+          // secret. A placeholder that reaches for a secret-classified field
+          // fails with the classification named, not as a data-entry gap.
+          const tenantUrlValues = urlSafeConnectionValues(
+            tenantConnection,
+            execution.connectionValuesField,
+            providerRow[
+              entityForTable(execution.connectionTable)?.elicitOnCreate
+                ?.definitionsField ?? ""
+            ],
+            secretScope,
+          );
+          const resolvedAuthorizationUrl = resolveTemplate(
+            authorizationUrl,
+            tenantUrlValues.plain,
+            "auth.authorizationUrl",
+            tenantUrlValues.secretKeys,
+          );
+          const resolvedTokenUrl = resolveTemplate(
+            tokenUrl,
+            tenantUrlValues.plain,
+            "auth.tokenUrl",
+            tenantUrlValues.secretKeys,
+          );
 
-        // Provider OAuth endpoints are routinely per-tenant
-        // (https://{subdomain}.provider.com/...): placeholders resolve from
-        // the tenant connection's NON-secret values, like base URLs do —
-        // including encrypted-at-rest values whose field is not classified
-        // secret. A placeholder that reaches for a secret-classified field
-        // fails with the classification named, not as a data-entry gap.
-        const tenantUrlValues = urlSafeConnectionValues(
-          tenantConnection,
-          execution.connectionValuesField,
-          providerRow[
-            entityForTable(execution.connectionTable)?.elicitOnCreate?.definitionsField ?? ""
-          ],
-          secretScope,
-        );
-        const resolvedAuthorizationUrl = resolveTemplate(
-          authorizationUrl,
-          tenantUrlValues.plain,
-          "auth.authorizationUrl",
-          tenantUrlValues.secretKeys,
-        );
-        const resolvedTokenUrl = resolveTemplate(
-          tokenUrl,
-          tenantUrlValues.plain,
-          "auth.tokenUrl",
-          tenantUrlValues.secretKeys,
-        );
-
-        const handoff = mintAuthorization({
-          tenantId: session.tenantId as string,
-          userId: session.userId as string,
-          providerTable: execution.providerTable,
-          providerRowId,
-          connectionTable: execution.connectionTable,
-          connectionProviderRef: execution.connectionProviderRef,
-          connectionValuesField: execution.connectionValuesField,
-          tokenUrl: resolvedTokenUrl,
-          clientId: credentials.clientId,
-          clientSecret: credentials.clientSecret,
-          egress: Array.isArray(providerRow.egressHosts)
-            ? (providerRow.egressHosts as string[])
-            : [],
-          scopes,
-          redirectUri: `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`,
-          providerName: String(providerRow.name ?? providerRowId),
-          connectionScope: scope_,
-          authorizationUrl: resolvedAuthorizationUrl,
-        });
-        return ok({
-          action: "authorize",
-          provider: String(providerRow.name ?? providerRowId),
-          ...(signInProviders.length > 1
-            ? { providerProgress: `${providerIndex + 1} of ${signInProviders.length}` }
-            : {}),
-          scopes,
-          authorizationUrl: handoff.authorizationUrl,
-          expiresInSeconds: handoff.expiresInSeconds,
-          instructions:
-            (reconsent
-              ? "The required permissions changed since this connection was approved; a " +
-                "fresh approval replaces the stored sign-in in place. "
-              : "") +
-            (signInProviders.length > 1
-              ? "This definition spans multiple providers; each is connected in turn. "
-              : "") +
-            "Ask the person to open authorizationUrl in their browser and approve access. " +
-            "Then wait by checking, not by asking: call this tool again every ten seconds " +
-            "or so (sleep between checks if you can) — it continues with the next provider " +
-            "or answers connected once every sign-in has landed. Only if nothing has " +
-            "landed after about three minutes, ask the person to tell you when they are " +
-            "done.",
-        });
+          const handoff = await mintAuthorization({
+            db,
+            tenantId: session.tenantId as string,
+            userId: session.userId as string,
+            providerTable: execution.providerTable,
+            providerRowId,
+            connectionTable: execution.connectionTable,
+            connectionProviderRef: execution.connectionProviderRef,
+            connectionValuesField: execution.connectionValuesField,
+            tokenUrl: resolvedTokenUrl,
+            clientId: credentials.clientId,
+            clientSecret: credentials.clientSecret,
+            egress: Array.isArray(providerRow.egressHosts)
+              ? (providerRow.egressHosts as string[])
+              : [],
+            scopes,
+            redirectUri: `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`,
+            providerName: String(providerRow.name ?? providerRowId),
+            connectionScope: scope_,
+            authorizationUrl: resolvedAuthorizationUrl,
+          });
+          return ok({
+            action: "authorize",
+            provider: String(providerRow.name ?? providerRowId),
+            ...(signInProviders.length > 1
+              ? {
+                  providerProgress: `${providerIndex + 1} of ${signInProviders.length}`,
+                }
+              : {}),
+            scopes,
+            authorizationUrl: handoff.authorizationUrl,
+            expiresInSeconds: handoff.expiresInSeconds,
+            instructions:
+              (reconsent
+                ? "The required permissions changed since this connection was approved; a " +
+                  "fresh approval replaces the stored sign-in in place. "
+                : "") +
+              (signInProviders.length > 1
+                ? "This definition spans multiple providers; each is connected in turn. "
+                : "") +
+              "Ask the person to open authorizationUrl in their browser and approve access. " +
+              "Then wait by checking, not by asking: call this tool again every ten seconds " +
+              "or so (sleep between checks if you can) — it continues with the next provider " +
+              "or answers connected once every sign-in has landed. Only if nothing has " +
+              "landed after about three minutes, ask the person to tell you when they are " +
+              "done.",
+          });
         }
         return ok({
           connected: true,
@@ -1751,12 +2169,15 @@ function buildServer(
         !sessionInAudience(personalizationEntry, session.roles) ||
         !personalizationEntry.personalization
       ) {
-        return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
+        return failed(
+          new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`),
+        );
       }
       try {
         const personalization = personalizationEntry.personalization;
         const args = requireArguments(request.params.arguments);
-        const instruction = typeof args.instruction === "string" ? args.instruction.trim() : null;
+        const instruction =
+          typeof args.instruction === "string" ? args.instruction.trim() : null;
         if (instruction === null) {
           throw new HttpError(
             400,
@@ -1776,25 +2197,36 @@ function buildServer(
         let appliesTo = "all tools";
         if (typeof args.tool === "string" && args.tool.length > 0) {
           const wanted = deriveToolName(args.tool) ?? args.tool;
-          const projected = (await derivedToolsForSession(db, session, tables)).find(
-            (tool) => tool.name === wanted && tool.table === personalizationEntry.table,
+          const projected = (
+            await derivedToolsForSession(db, session, tables)
+          ).find(
+            (tool) =>
+              tool.name === wanted && tool.table === personalizationEntry.table,
           );
           if (!projected) {
-            throw new HttpError(404, "NOT_FOUND", `No tool "${args.tool}" to set an instruction for.`);
+            throw new HttpError(
+              404,
+              "NOT_FOUND",
+              `No tool "${args.tool}" to set an instruction for.`,
+            );
           }
           serviceRowId = projected.rowId;
           appliesTo = wanted;
         }
         const preferenceTable = tables.get(personalization.table);
         if (!preferenceTable) {
-          throw new HttpError(500, "INTERNAL", "Preference table is missing from the manifest.");
+          throw new HttpError(
+            500,
+            "INTERNAL",
+            "Preference table is missing from the manifest.",
+          );
         }
         // The row is the CALLER's own, bound to them by the runtime — the
         // same ownership model as personal connections.
         const mine = (
           await listGeneratedEntitiesForTable(db, session, preferenceTable, {
             limit: 100,
-            filter: { ownerUserId: session.userId },
+            fixedWhere: [{ column: "owner_user_id", value: session.userId }],
           })
         ).rows.map((row) => serializeRow(preferenceTable, row));
         const existing = mine.find(
@@ -1808,20 +2240,36 @@ function buildServer(
           scope: "self",
         };
         if (existing) {
-          await updateGeneratedEntityForTable(db, writeSession, preferenceTable, String(existing.id), {
-            [personalization.instructionField]: instruction,
-          });
+          await updateGeneratedEntityForTable(
+            db,
+            writeSession,
+            preferenceTable,
+            String(existing.id),
+            {
+              [personalization.instructionField]: instruction,
+            },
+          );
         } else if (instruction.length > 0) {
-          await createGeneratedEntityForTable(db, writeSession, preferenceTable, {
-            key: `pref-${String(session.userId)}-${serviceRowId ?? "all"}`.toLowerCase(),
-            name: `Personal instruction (${appliesTo})`,
-            ownerUserId: session.userId,
-            ...(serviceRowId ? { [personalization.serviceRef]: serviceRowId } : {}),
-            [personalization.instructionField]: instruction,
-          });
+          await createGeneratedEntityForTable(
+            db,
+            writeSession,
+            preferenceTable,
+            {
+              key: `pref-${String(session.userId)}-${serviceRowId ?? "all"}`.toLowerCase(),
+              name: `Personal instruction (${appliesTo})`,
+              ownerUserId: session.userId,
+              ...(serviceRowId
+                ? { [personalization.serviceRef]: serviceRowId }
+                : {}),
+              [personalization.instructionField]: instruction,
+            },
+          );
         }
         // Descriptions changed for this person's sessions; nudge them.
-        onDerivedDefinitionChanged?.(personalizationEntry.table, session.tenantId ?? null);
+        onDerivedDefinitionChanged?.(
+          personalizationEntry.table,
+          session.tenantId ?? null,
+        );
         return ok({
           saved: instruction.length > 0,
           appliesTo,
@@ -1835,23 +2283,33 @@ function buildServer(
       }
     }
 
-    const dryRunEntry = catalogDerivedTools.find((entry) => entry.dryRun?.name === name);
+    const dryRunEntry = catalogDerivedTools.find(
+      (entry) => entry.dryRun?.name === name,
+    );
     if (dryRunEntry) {
       const allowed = dryRunEntry.dryRun!.roles.some((role) =>
         (session.roles ?? []).includes(role),
       );
       if (!allowed || !dryRunEntry.execution) {
-        return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
+        return failed(
+          new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`),
+        );
       }
       try {
         const execution = dryRunEntry.execution;
         const args = requireArguments(request.params.arguments);
         const toolArg = args.tool;
         if (typeof toolArg !== "string" || toolArg.length === 0) {
-          throw new HttpError(400, "VALIDATION", 'Argument "tool" is required.');
+          throw new HttpError(
+            400,
+            "VALIDATION",
+            'Argument "tool" is required.',
+          );
         }
         const toolArguments =
-          args.arguments && typeof args.arguments === "object" && !Array.isArray(args.arguments)
+          args.arguments &&
+          typeof args.arguments === "object" &&
+          !Array.isArray(args.arguments)
             ? (args.arguments as Record<string, unknown>)
             : {};
 
@@ -1859,7 +2317,8 @@ function buildServer(
         // publishing it is the point of a dry run. The caller's roles gate
         // the tool itself.
         const table = tables.get(dryRunEntry.table);
-        if (!table) throw new HttpError(404, "NOT_FOUND", `Unknown tool "${toolArg}".`);
+        if (!table)
+          throw new HttpError(404, "NOT_FOUND", `Unknown tool "${toolArg}".`);
         const rows = (
           await listGeneratedEntitiesForTable(db, session, table, {
             limit: DERIVED_TOOLS_ROW_LIMIT,
@@ -1872,21 +2331,31 @@ function buildServer(
           ungated,
           rows,
           new Set(catalog.tools.map((tool) => tool.name)),
+          session.roles ?? [],
         ).find((tool) => tool.name === wantedName);
         const definitionRow = target
           ? rows.find((row) => String(row.id ?? "") === target.rowId)
           : undefined;
         if (!target || !definitionRow) {
-          throw new HttpError(404, "NOT_FOUND", `No definition provides the tool "${toolArg}".`);
+          throw new HttpError(
+            404,
+            "NOT_FOUND",
+            `No definition provides the tool "${toolArg}".`,
+          );
         }
         assertSchemaValid(target.inputSchema, toolArguments, "arguments");
 
         const requests: Record<string, unknown>[] = [];
-        const bindings = orderedBindings(definitionRow, execution.bindingsField);
+        const bindings = orderedBindings(
+          definitionRow,
+          execution.bindingsField,
+        );
         for (const [index, binding] of bindings.entries()) {
           // Selection is part of what a dry run verifies: show WHICH bindings
           // the given arguments route to, and say why the others sit out.
-          if (!bindingSelected(binding, toolArguments as Record<string, unknown>)) {
+          if (
+            !bindingSelected(binding, toolArguments as Record<string, unknown>)
+          ) {
             const when = binding.when as Record<string, unknown>;
             requests.push({
               order: index + 1,
@@ -1906,9 +2375,15 @@ function buildServer(
           const operationId = binding[execution.operationRef];
           const operationRow =
             typeof operationId === "string"
-              ? await runtimeRowByFilter(db, session, tables, execution.operationTable, {
-                  id: operationId,
-                })
+              ? await runtimeRowByFilter(
+                  db,
+                  session,
+                  tables,
+                  execution.operationTable,
+                  {
+                    id: operationId,
+                  },
+                )
               : null;
           if (!operationRow) {
             requests.push({
@@ -1920,9 +2395,15 @@ function buildServer(
           const providerId = operationRow[execution.providerRef];
           const providerRow =
             typeof providerId === "string"
-              ? await runtimeRowByFilter(db, session, tables, execution.providerTable, {
-                  id: providerId,
-                })
+              ? await runtimeRowByFilter(
+                  db,
+                  session,
+                  tables,
+                  execution.providerTable,
+                  {
+                    id: providerId,
+                  },
+                )
               : null;
           if (!providerRow) {
             requests.push({
@@ -1939,7 +2420,9 @@ function buildServer(
             execution.connectionTable,
             { [execution.connectionProviderRef]: providerId },
           );
-          const tenantConnection = connectionRows.find((row) => !row.ownerUserId);
+          const tenantConnection = connectionRows.find(
+            (row) => !row.ownerUserId,
+          );
           if (!tenantConnection) {
             notes.push(
               `No ${execution.connectionEntity} is configured for this ` +
@@ -1949,14 +2432,19 @@ function buildServer(
           // Composition resolves URL templates from the tenant row's URL-safe
           // values — plain ones plus encrypted ones whose field is not
           // classified secret; placeholder auth needs no secrets at all.
-          const dryRunElicit = entityForTable(execution.connectionTable)?.elicitOnCreate;
+          const dryRunElicit = entityForTable(
+            execution.connectionTable,
+          )?.elicitOnCreate;
           const connectionValues = urlSafeConnectionValues(
             tenantConnection,
             execution.connectionValuesField,
             providerRow[dryRunElicit?.definitionsField ?? ""],
             dryRunElicit?.sourceTable ?? execution.providerTable,
           ).plain;
-          const providerAuth = (providerRow.auth ?? null) as Record<string, unknown> | null;
+          const providerAuth = (providerRow.auth ?? null) as Record<
+            string,
+            unknown
+          > | null;
           let providerForCompose = providerRow;
           if (providerAuth?.profile === "oauth2AuthorizationCode") {
             providerForCompose = {
@@ -1977,7 +2465,8 @@ function buildServer(
               connectionValues,
               serviceInputs: toolArguments,
               secretScope: execution.connectionTable,
-              providerDefinitions: providerRow[dryRunElicit?.definitionsField ?? ""],
+              providerDefinitions:
+                providerRow[dryRunElicit?.definitionsField ?? ""],
               mode: "describe",
             });
             requests.push({
@@ -1986,7 +2475,9 @@ function buildServer(
               method: composed.method,
               url: composed.url.toString(),
               headers: composed.headers,
-              ...(composed.body !== undefined ? { body: JSON.parse(composed.body) } : {}),
+              ...(composed.body !== undefined
+                ? { body: JSON.parse(composed.body) }
+                : {}),
               ...(notes.length > 0 ? { notes } : {}),
             });
           } catch (error) {
@@ -2013,24 +2504,35 @@ function buildServer(
     const guideTool = catalogGuideTools.find((tool) => tool.name === name);
     if (guideTool) {
       if (!guideToolsForSession(session).includes(guideTool)) {
-        return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
+        return failed(
+          new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`),
+        );
       }
       guidesCalled.add(guideTool.name);
       return { content: [{ type: "text", text: guideTool.content }] };
     }
 
-    const discoveryTool = catalogDiscoveryTools.find((tool) => tool.name === name);
+    const discoveryTool = catalogDiscoveryTools.find(
+      (tool) => tool.name === name,
+    );
     if (discoveryTool) {
       const table = tables.get(discoveryTool.table);
       if (!table || !sessionMayInvoke(table, "get", session)) {
-        return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
+        return failed(
+          new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`),
+        );
       }
       try {
-        const id = (request.params.arguments as Record<string, unknown> | undefined)?.id;
+        const id = (
+          request.params.arguments as Record<string, unknown> | undefined
+        )?.id;
         if (typeof id !== "string") {
-          throw new HttpError(400, "VALIDATION", "Argument \"id\" is required.");
+          throw new HttpError(400, "VALIDATION", 'Argument "id" is required.');
         }
-        const row = await getGeneratedEntity(db, session, { table: table.name, id });
+        const row = await getGeneratedEntity(db, session, {
+          table: table.name,
+          id,
+        });
         if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
         return ok(await discoverProviderSchema(serializeRow(table, row)));
       } catch (error) {
@@ -2042,14 +2544,21 @@ function buildServer(
     if (testTool) {
       const table = tables.get(testTool.table);
       if (!table || !sessionMayInvoke(table, "get", session)) {
-        return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
+        return failed(
+          new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`),
+        );
       }
       try {
-        const id = (request.params.arguments as Record<string, unknown> | undefined)?.id;
+        const id = (
+          request.params.arguments as Record<string, unknown> | undefined
+        )?.id;
         if (typeof id !== "string") {
           throw new HttpError(400, "VALIDATION", 'Argument "id" is required.');
         }
-        const row = await getGeneratedEntity(db, session, { table: table.name, id });
+        const row = await getGeneratedEntity(db, session, {
+          table: table.name,
+          id,
+        });
         if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
         const serialized = serializeRow(table, row);
         const elicit = entityForTable(testTool.table)?.elicitOnCreate;
@@ -2063,7 +2572,13 @@ function buildServer(
         const sourceId = serialized[elicit.sourceField];
         const sourceRow =
           typeof sourceId === "string"
-            ? await runtimeRowByFilter(db, session, tables, elicit.sourceTable, { id: sourceId })
+            ? await runtimeRowByFilter(
+                db,
+                session,
+                tables,
+                elicit.sourceTable,
+                { id: sourceId },
+              )
             : null;
         if (!sourceRow) {
           throw new HttpError(
@@ -2076,13 +2591,28 @@ function buildServer(
         // tenant sibling's plain configuration, as they do at execution.
         let fallbackPlainValues: Record<string, string> | undefined;
         if (serialized.ownerUserId) {
-          const siblings = await runtimeRowsByFilter(db, session, tables, testTool.table, {
-            [elicit.sourceField]: sourceId,
-          });
-          const tenantSibling = siblings.find((sibling) => !sibling.ownerUserId);
+          const siblings = await runtimeRowsByFilter(
+            db,
+            session,
+            tables,
+            testTool.table,
+            {
+              [elicit.sourceField]: sourceId,
+            },
+          );
+          const tenantSibling = siblings.find(
+            (sibling) => !sibling.ownerUserId,
+          );
           fallbackPlainValues = Object.fromEntries(
-            Object.entries((tenantSibling?.[elicit.into] ?? {}) as Record<string, unknown>)
-              .filter(([, value]) => value !== null && value !== undefined && typeof value !== "object")
+            Object.entries(
+              (tenantSibling?.[elicit.into] ?? {}) as Record<string, unknown>,
+            )
+              .filter(
+                ([, value]) =>
+                  value !== null &&
+                  value !== undefined &&
+                  typeof value !== "object",
+              )
               .map(([key, value]) => [key, String(value)]),
           );
         }
@@ -2105,18 +2635,24 @@ function buildServer(
     // An unknown tool and one the caller may not invoke get the same answer:
     // the listing already omitted both, so distinguishing them would leak
     // which entities exist.
-    if (!match || !table || !sessionMayInvoke(table, match.operation, session)) {
+    if (
+      !match ||
+      !table ||
+      !sessionMayInvoke(table, match.operation, session)
+    ) {
       // Not a static tool — a derived (row-defined) tool may own the name.
       // Execution of derived tools is a later slice: the definition names an
       // intent, but the connection/execution machinery that fulfils it does
       // not exist yet, so the honest answer is a clear failure, not a stub
       // success an agent would act on.
       if (catalogDerivedTools.length > 0) {
-        const derived = (await derivedToolsForSession(db, session, tables)).find(
-          (tool) => tool.name === name,
-        );
+        const derived = (
+          await derivedToolsForSession(db, session, tables)
+        ).find((tool) => tool.name === name);
         if (derived) {
-          const entry = catalogDerivedTools.find((candidate) => candidate.table === derived.table);
+          const entry = catalogDerivedTools.find(
+            (candidate) => candidate.table === derived.table,
+          );
           const execution = entry?.execution;
           if (!execution) {
             return failed(
@@ -2130,13 +2666,23 @@ function buildServer(
             );
           }
           try {
-            const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+            const args = (request.params.arguments ?? {}) as Record<
+              string,
+              unknown
+            >;
             assertSchemaValid(derived.inputSchema, args, "arguments");
 
-            const serviceRow = await runtimeRowByFilter(db, session, tables, derived.table, {
-              id: derived.rowId,
-            });
-            if (!serviceRow) throw new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`);
+            const serviceRow = await runtimeRowByFilter(
+              db,
+              session,
+              tables,
+              derived.table,
+              {
+                id: derived.rowId,
+              },
+            );
+            if (!serviceRow)
+              throw new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`);
 
             // Later bindings see earlier outputs alongside the caller's
             // inputs, which is what makes read→act chains expressible. A
@@ -2146,98 +2692,179 @@ function buildServer(
             // and every skipped one is reported honestly in `unavailable`.
             const accumulated: Record<string, unknown> = {};
             const unavailable: { binding: number; reason: string }[] = [];
-            for (const binding of orderedBindings(serviceRow, execution.bindingsField)) {
+            for (const binding of orderedBindings(
+              serviceRow,
+              execution.bindingsField,
+            )) {
               // A binding the call's selector input does not choose is not
               // part of this call at all — deliberate routing, not an
               // outage, so it does not surface in `unavailable`.
-              if (!bindingSelected(binding, args as Record<string, unknown>)) continue;
+              if (!bindingSelected(binding, args as Record<string, unknown>))
+                continue;
               try {
-              const operationId = binding[execution.operationRef];
-              const operationRow =
-                typeof operationId === "string"
-                  ? await runtimeRowByFilter(db, session, tables, execution.operationTable, {
-                      id: operationId,
-                    })
-                  : null;
-              if (!operationRow) {
-                throw new HttpError(
-                  400,
-                  "SERVICE_MISCONFIGURED",
-                  `A binding references a missing ${execution.operationEntity}.`,
-                );
-              }
-              const providerId = operationRow[execution.providerRef];
-              const providerRow =
-                typeof providerId === "string"
-                  ? await runtimeRowByFilter(db, session, tables, execution.providerTable, {
-                      id: providerId,
-                    })
-                  : null;
-              if (!providerRow) {
-                throw new HttpError(
-                  400,
-                  "SERVICE_MISCONFIGURED",
-                  `The ${execution.operationEntity} references a missing ${execution.providerEntity}.`,
-                );
-              }
-              const connectionRows = await runtimeRowsByFilter(
-                db,
-                session,
-                tables,
-                execution.connectionTable,
-                { [execution.connectionProviderRef]: providerId },
-              );
-              const providerAuth = (providerRow.auth ?? null) as Record<string, unknown> | null;
-              const elicitScope =
-                entityForTable(execution.connectionTable)?.elicitOnCreate?.sourceTable ??
-                execution.providerTable;
-              let providerForExecution = providerRow;
-              let connectionValues: unknown;
-              let secretScope = elicitScope;
-
-              if (
-                providerAuth?.profile === "oauth2AuthorizationCode" &&
-                connectionScopeOf(providerAuth) === "user"
-              ) {
-                // Personal mode: execution resolves ONLY the caller's own
-                // connection — another employee's tokens are unreachable by
-                // construction, and their absence is a clear next step.
-                const personal = connectionRows.find(
-                  (row) => row.ownerUserId === session.userId,
-                );
-                const personalScope = `${execution.connectionTable}:personal`;
-                let values = (personal?.[execution.connectionValuesField] ?? null) as
-                  | Record<string, unknown>
-                  | null;
-                if (!personal || !values?.accessToken) {
+                const operationId = binding[execution.operationRef];
+                const operationRow =
+                  typeof operationId === "string"
+                    ? await runtimeRowByFilter(
+                        db,
+                        session,
+                        tables,
+                        execution.operationTable,
+                        {
+                          id: operationId,
+                        },
+                      )
+                    : null;
+                if (!operationRow) {
                   throw new HttpError(
-                    403,
-                    "CONNECTION_REQUIRED",
-                    `This tool needs your personal ${String(providerRow.name ?? "provider")} ` +
-                      `connection. Call ${entry?.connect?.name ?? "the connect tool"} with ` +
-                      `{"tool":"${name}"} to start it.`,
+                    400,
+                    "SERVICE_MISCONFIGURED",
+                    `A binding references a missing ${execution.operationEntity}.`,
                   );
                 }
-                const expiresAtRaw = values.accessTokenExpiresAt;
-                const expiresAtMs =
-                  typeof expiresAtRaw === "string" ? Date.parse(expiresAtRaw) : Number.NaN;
-                if (
-                  Number.isFinite(expiresAtMs) &&
-                  expiresAtMs < Date.now() + 60_000 &&
-                  looksLikeStoredSecret(values.refreshToken)
-                ) {
-                  const keyring = elicitedKeyring();
-                  const tenantConnection = connectionRows.find((row) => !row.ownerUserId);
-                  const credentials = readClientCredentials(
-                    tenantConnection,
-                    execution.connectionValuesField,
-                    elicitScope,
+                const providerId = operationRow[execution.providerRef];
+                const providerRow =
+                  typeof providerId === "string"
+                    ? await runtimeRowByFilter(
+                        db,
+                        session,
+                        tables,
+                        execution.providerTable,
+                        {
+                          id: providerId,
+                        },
+                      )
+                    : null;
+                if (!providerRow) {
+                  throw new HttpError(
+                    400,
+                    "SERVICE_MISCONFIGURED",
+                    `The ${execution.operationEntity} references a missing ${execution.providerEntity}.`,
                   );
-                  if (!keyring || typeof providerAuth.tokenUrl !== "string") {
-                    throw new HttpError(400, "PROVIDER_MISCONFIGURED", "Token refresh is not configured.");
+                }
+                const connectionRows = await runtimeRowsByFilter(
+                  db,
+                  session,
+                  tables,
+                  execution.connectionTable,
+                  { [execution.connectionProviderRef]: providerId },
+                );
+                const providerAuth = (providerRow.auth ?? null) as Record<
+                  string,
+                  unknown
+                > | null;
+                const elicitScope =
+                  entityForTable(execution.connectionTable)?.elicitOnCreate
+                    ?.sourceTable ?? execution.providerTable;
+                let providerForExecution = providerRow;
+                let connectionValues: unknown;
+                let secretScope = elicitScope;
+
+                if (
+                  providerAuth?.profile === "oauth2AuthorizationCode" &&
+                  connectionScopeOf(providerAuth) === "user"
+                ) {
+                  // Personal mode: execution resolves ONLY the caller's own
+                  // connection — another employee's tokens are unreachable by
+                  // construction, and their absence is a clear next step.
+                  const personal = connectionRows.find(
+                    (row) => row.ownerUserId === session.userId,
+                  );
+                  const personalScope = `${execution.connectionTable}:personal`;
+                  let values = (personal?.[execution.connectionValuesField] ??
+                    null) as Record<string, unknown> | null;
+                  if (!personal || !values?.accessToken) {
+                    throw new HttpError(
+                      403,
+                      "CONNECTION_REQUIRED",
+                      `This tool needs your personal ${String(providerRow.name ?? "provider")} ` +
+                        `connection. Call ${entry?.connect?.name ?? "the connect tool"} with ` +
+                        `{"tool":"${name}"} to start it.`,
+                    );
                   }
-                  const tenantUrlValues = urlSafeConnectionValues(
-                    tenantConnection,
+                  if (
+                    accessTokenNeedsRefresh(values) &&
+                    looksLikeStoredSecret(values.refreshToken)
+                  ) {
+                    const keyring = elicitedKeyring();
+                    const tenantConnection = connectionRows.find(
+                      (row) => !row.ownerUserId,
+                    );
+                    const credentials = readClientCredentials(
+                      tenantConnection,
+                      execution.connectionValuesField,
+                      elicitScope,
+                    );
+                    if (!keyring || typeof providerAuth.tokenUrl !== "string") {
+                      throw new HttpError(
+                        400,
+                        "PROVIDER_MISCONFIGURED",
+                        "Token refresh is not configured.",
+                      );
+                    }
+                    const tenantUrlValues = urlSafeConnectionValues(
+                      tenantConnection,
+                      execution.connectionValuesField,
+                      providerRow[
+                        entityForTable(execution.connectionTable)
+                          ?.elicitOnCreate?.definitionsField ?? ""
+                      ],
+                      elicitScope,
+                    );
+                    const connectionTableDef = tables.get(
+                      execution.connectionTable,
+                    );
+                    if (!connectionTableDef)
+                      throw new HttpError(
+                        500,
+                        "INTERNAL",
+                        "Connection table is missing.",
+                      );
+                    values = await refreshConnectionRowLocked({
+                      db,
+                      session,
+                      table: connectionTableDef,
+                      rowId: String(personal.id),
+                      valuesField: execution.connectionValuesField,
+                      refresh: async (lockedValues) => {
+                        if (!looksLikeStoredSecret(lockedValues.refreshToken))
+                          return {};
+                        const refreshed = await refreshTokens({
+                          tokenUrl: resolveTemplate(
+                            providerAuth.tokenUrl as string,
+                            tenantUrlValues.plain,
+                            "auth.tokenUrl",
+                            tenantUrlValues.secretKeys,
+                          ),
+                          clientId: credentials.clientId,
+                          clientSecret: credentials.clientSecret,
+                          refreshToken: decryptSecret(
+                            keyring,
+                            personalScope,
+                            "refreshToken",
+                            lockedValues.refreshToken,
+                          ),
+                          egress: Array.isArray(providerRow.egressHosts)
+                            ? (providerRow.egressHosts as string[])
+                            : [],
+                          connectionTable: execution.connectionTable,
+                        });
+                        return refreshed.values;
+                      },
+                    });
+                  }
+                  // The personal connection holds only tokens; tenant-owned
+                  // NON-secret configuration (subdomain and friends) still
+                  // resolves base-URL and path templates, so merge the tenant
+                  // connection's URL-safe half underneath the personal values.
+                  // Resolving it HERE keeps the AAD scopes straight: tenant
+                  // fields decrypt under the elicitation scope, while the merged
+                  // row executes under the personal scope.
+                  const tenantConnectionForPlain = connectionRows.find(
+                    (row) => !row.ownerUserId,
+                  );
+                  const tenantUrlSafe = urlSafeConnectionValues(
+                    tenantConnectionForPlain,
                     execution.connectionValuesField,
                     providerRow[
                       entityForTable(execution.connectionTable)?.elicitOnCreate
@@ -2245,131 +2872,175 @@ function buildServer(
                     ],
                     elicitScope,
                   );
-                  const refreshed = await refreshTokens({
-                    tokenUrl: resolveTemplate(
-                      providerAuth.tokenUrl,
-                      tenantUrlValues.plain,
-                      "auth.tokenUrl",
-                      tenantUrlValues.secretKeys,
-                    ),
-                    clientId: credentials.clientId,
-                    clientSecret: credentials.clientSecret,
-                    refreshToken: decryptSecret(
-                      keyring,
-                      personalScope,
-                      "refreshToken",
-                      values.refreshToken as StoredSecret,
-                    ),
-                    egress: Array.isArray(providerRow.egressHosts)
-                      ? (providerRow.egressHosts as string[])
-                      : [],
-                    connectionTable: execution.connectionTable,
-                  });
-                  values = { ...values, ...refreshed.values };
-                  const connectionTableDef = tables.get(execution.connectionTable);
-                  if (connectionTableDef) {
-                    await updateGeneratedEntityForTable(
-                      db,
-                      session,
-                      connectionTableDef,
-                      String(personal.id),
-                      { [execution.connectionValuesField]: values },
-                    );
-                  }
-                }
-                // The personal connection holds only tokens; tenant-owned
-                // NON-secret configuration (subdomain and friends) still
-                // resolves base-URL and path templates, so merge the tenant
-                // connection's URL-safe half underneath the personal values.
-                // Resolving it HERE keeps the AAD scopes straight: tenant
-                // fields decrypt under the elicitation scope, while the merged
-                // row executes under the personal scope.
-                const tenantConnectionForPlain = connectionRows.find((row) => !row.ownerUserId);
-                const tenantUrlSafe = urlSafeConnectionValues(
-                  tenantConnectionForPlain,
-                  execution.connectionValuesField,
-                  providerRow[
-                    entityForTable(execution.connectionTable)?.elicitOnCreate
-                      ?.definitionsField ?? ""
-                  ],
-                  elicitScope,
-                );
-                connectionValues = { ...tenantUrlSafe.plain, ...values };
-                secretScope = personalScope;
-                providerForExecution = {
-                  ...providerRow,
-                  auth: { scheme: "bearer", tokenFrom: "accessToken" },
-                };
-              } else {
-                const tenantConnection =
-                  connectionRows.find((row) => !row.ownerUserId) ?? connectionRows[0];
-                if (!tenantConnection) {
-                  throw new HttpError(
-                    400,
-                    "CONNECTION_MISSING",
-                    `No ${execution.connectionEntity} is configured for this ` +
-                      `${execution.providerEntity}; an administrator must create one first.`,
-                  );
-                }
-                connectionValues = tenantConnection[execution.connectionValuesField];
-                if (providerAuth?.profile === "oauth2AuthorizationCode") {
-                  // Tenant-scoped sign-in: one consent covers the tenant; the
-                  // tokens live on the tenant connection and execute as bearer.
-                  const tenantValues = (connectionValues ?? null) as Record<string, unknown> | null;
-                  if (!tenantValues?.accessToken) {
-                    throw new HttpError(
-                      403,
-                      "CONNECTION_REQUIRED",
-                      `This provider needs a one-time sign-in for the whole tenant. ` +
-                        `An administrator calls ${entry?.connect?.name ?? "the connect tool"} ` +
-                        `with {"tool":"${name}"} and approves at the provider.`,
-                    );
-                  }
-                  // The row mixes AAD scopes: elicited fields were encrypted
-                  // under the elicitation scope, tokens under the personal
-                  // scope. Resolve the elicited URL-safe half here and keep
-                  // only the token fields for the personal-scope execution —
-                  // bearer execution never needs the OAuth client secrets.
-                  const definitions =
-                    providerRow[
-                      entityForTable(execution.connectionTable)?.elicitOnCreate
-                        ?.definitionsField ?? ""
-                    ];
-                  const tenantUrlSafe = urlSafeConnectionValues(
-                    tenantConnection,
-                    execution.connectionValuesField,
-                    definitions,
-                    elicitScope,
-                  );
-                  const elicitedKeys = definitionFieldKeys(definitions);
-                  connectionValues = {
-                    ...tenantUrlSafe.plain,
-                    ...Object.fromEntries(
-                      Object.entries(tenantValues).filter(([key]) => !elicitedKeys.has(key)),
-                    ),
-                  };
-                  secretScope = `${execution.connectionTable}:personal`;
+                  connectionValues = { ...tenantUrlSafe.plain, ...values };
+                  secretScope = personalScope;
                   providerForExecution = {
                     ...providerRow,
                     auth: { scheme: "bearer", tokenFrom: "accessToken" },
                   };
+                } else {
+                  const tenantConnection =
+                    connectionRows.find((row) => !row.ownerUserId) ??
+                    connectionRows[0];
+                  if (!tenantConnection) {
+                    throw new HttpError(
+                      400,
+                      "CONNECTION_MISSING",
+                      `No ${execution.connectionEntity} is configured for this ` +
+                        `${execution.providerEntity}; an administrator must create one first.`,
+                    );
+                  }
+                  connectionValues =
+                    tenantConnection[execution.connectionValuesField];
+                  if (providerAuth?.profile === "oauth2AuthorizationCode") {
+                    // Tenant-scoped sign-in: one consent covers the tenant; the
+                    // tokens live on the tenant connection and execute as bearer.
+                    let tenantValues = (connectionValues ?? null) as Record<
+                      string,
+                      unknown
+                    > | null;
+                    if (!tenantValues?.accessToken) {
+                      throw new HttpError(
+                        403,
+                        "CONNECTION_REQUIRED",
+                        `This provider needs a one-time sign-in for the whole tenant. ` +
+                          `An administrator calls ${entry?.connect?.name ?? "the connect tool"} ` +
+                          `with {"tool":"${name}"} and approves at the provider.`,
+                      );
+                    }
+                    if (
+                      accessTokenNeedsRefresh(tenantValues) &&
+                      looksLikeStoredSecret(tenantValues.refreshToken)
+                    ) {
+                      const keyring = elicitedKeyring();
+                      const credentials = readClientCredentials(
+                        tenantConnection,
+                        execution.connectionValuesField,
+                        elicitScope,
+                      );
+                      const connectionTableDef = tables.get(
+                        execution.connectionTable,
+                      );
+                      if (
+                        !keyring ||
+                        !connectionTableDef ||
+                        typeof providerAuth.tokenUrl !== "string"
+                      ) {
+                        throw new HttpError(
+                          400,
+                          "PROVIDER_MISCONFIGURED",
+                          "Tenant token refresh is not configured.",
+                        );
+                      }
+                      const tenantUrlValues = urlSafeConnectionValues(
+                        tenantConnection,
+                        execution.connectionValuesField,
+                        providerRow[
+                          entityForTable(execution.connectionTable)
+                            ?.elicitOnCreate?.definitionsField ?? ""
+                        ],
+                        elicitScope,
+                      );
+                      tenantValues = await refreshConnectionRowLocked({
+                        db,
+                        session,
+                        table: connectionTableDef,
+                        rowId: String(tenantConnection.id),
+                        valuesField: execution.connectionValuesField,
+                        refresh: async (lockedValues) => {
+                          if (!looksLikeStoredSecret(lockedValues.refreshToken))
+                            return {};
+                          const refreshed = await refreshTokens({
+                            tokenUrl: resolveTemplate(
+                              providerAuth.tokenUrl as string,
+                              tenantUrlValues.plain,
+                              "auth.tokenUrl",
+                              tenantUrlValues.secretKeys,
+                            ),
+                            clientId: credentials.clientId,
+                            clientSecret: credentials.clientSecret,
+                            refreshToken: decryptSecret(
+                              keyring,
+                              `${execution.connectionTable}:personal`,
+                              "refreshToken",
+                              lockedValues.refreshToken,
+                            ),
+                            egress: Array.isArray(providerRow.egressHosts)
+                              ? (providerRow.egressHosts as string[])
+                              : [],
+                            connectionTable: execution.connectionTable,
+                          });
+                          return refreshed.values;
+                        },
+                      });
+                    }
+                    // The row mixes AAD scopes: elicited fields were encrypted
+                    // under the elicitation scope, tokens under the personal
+                    // scope. Resolve the elicited URL-safe half here and keep
+                    // only the token fields for the personal-scope execution —
+                    // bearer execution never needs the OAuth client secrets.
+                    const definitions =
+                      providerRow[
+                        entityForTable(execution.connectionTable)
+                          ?.elicitOnCreate?.definitionsField ?? ""
+                      ];
+                    const tenantUrlSafe = urlSafeConnectionValues(
+                      tenantConnection,
+                      execution.connectionValuesField,
+                      definitions,
+                      elicitScope,
+                    );
+                    const elicitedKeys = definitionFieldKeys(definitions);
+                    connectionValues = {
+                      ...tenantUrlSafe.plain,
+                      ...Object.fromEntries(
+                        Object.entries(tenantValues).filter(
+                          ([key]) => !elicitedKeys.has(key),
+                        ),
+                      ),
+                    };
+                    secretScope = `${execution.connectionTable}:personal`;
+                    providerForExecution = {
+                      ...providerRow,
+                      auth: { scheme: "bearer", tokenFrom: "accessToken" },
+                    };
+                  }
                 }
-              }
 
-              const outputs = await executeBinding({
-                binding,
-                operationRow,
-                providerRow: providerForExecution,
-                connectionValues,
-                serviceInputs: { ...args, ...accumulated },
-                secretScope,
-                providerDefinitions:
-                  providerRow[
-                    entityForTable(execution.connectionTable)?.elicitOnCreate
-                      ?.definitionsField ?? ""
-                  ],
-              });
-              mergeOutputs(accumulated, outputs);
+                const operationScopes = Array.isArray(
+                  operationRow.requiredScopes,
+                )
+                  ? operationRow.requiredScopes.filter(
+                      (scope): scope is string => typeof scope === "string",
+                    )
+                  : [];
+                const grantedScopes =
+                  connectionValues && typeof connectionValues === "object"
+                    ? (connectionValues as Record<string, unknown>)
+                        .grantedScopes
+                    : undefined;
+                if (!scopesCovered(operationScopes, grantedScopes)) {
+                  throw new HttpError(
+                    403,
+                    "REAUTHORIZATION_REQUIRED",
+                    `The connection does not cover required scopes: ${operationScopes.join(", ")}.`,
+                  );
+                }
+
+                const outputs = await executeBinding({
+                  binding,
+                  operationRow,
+                  providerRow: providerForExecution,
+                  connectionValues,
+                  serviceInputs: { ...args, ...accumulated },
+                  secretScope,
+                  providerDefinitions:
+                    providerRow[
+                      entityForTable(execution.connectionTable)?.elicitOnCreate
+                        ?.definitionsField ?? ""
+                    ],
+                });
+                mergeOutputs(accumulated, outputs);
               } catch (error) {
                 if (binding.optional !== true) throw error;
                 unavailable.push({
@@ -2379,7 +3050,9 @@ function buildServer(
               }
             }
             return ok(
-              unavailable.length > 0 ? { ...accumulated, unavailable } : accumulated,
+              unavailable.length > 0
+                ? { ...accumulated, unavailable }
+                : accumulated,
             );
           } catch (error) {
             return failed(error);
@@ -2388,7 +3061,9 @@ function buildServer(
       }
       return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
     }
-    const entity = catalog.entities.find((item) => item.entity === match.entity);
+    const entity = catalog.entities.find(
+      (item) => item.entity === match.entity,
+    );
     // The "call this first" a description cannot enforce: creating the
     // guide's own entity in a session that has not read the guide is refused
     // with the guide named — agents carrying cached local procedures skip
@@ -2417,7 +3092,9 @@ function buildServer(
       let callArguments = request.params.arguments;
       if (match.operation === "create" && entity?.elicitOnCreate) {
         const elicit = entity.elicitOnCreate;
-        const modelArguments = { ...((callArguments ?? {}) as Record<string, unknown>) };
+        const modelArguments = {
+          ...((callArguments ?? {}) as Record<string, unknown>),
+        };
         // The model is not a channel for elicited values: whatever it sent for
         // the target field is discarded before the person is asked.
         delete modelArguments[elicit.into];
@@ -2442,7 +3119,9 @@ function buildServer(
         // person is asked to fill a secure form for a connection that cannot
         // work. The error names the misclassified field and the fix.
         if (sourceRow) {
-          const secretClassified = secretFieldKeys(sourceRow[elicit.definitionsField]);
+          const secretClassified = secretFieldKeys(
+            sourceRow[elicit.definitionsField],
+          );
           for (const { context, template } of providerUrlTemplates(sourceRow)) {
             for (const key of templatePlaceholders(template)) {
               if (secretClassified.has(key)) {
@@ -2457,7 +3136,10 @@ function buildServer(
             }
           }
         }
-        const sourceAuth = sourceRow?.auth as Record<string, unknown> | null | undefined;
+        const sourceAuth = sourceRow?.auth as
+          | Record<string, unknown>
+          | null
+          | undefined;
         const messagePrefix =
           sourceAuth?.profile === "oauth2AuthorizationCode"
             ? `Before entering these values, register this exact redirect URL on the ` +
@@ -2480,38 +3162,64 @@ function buildServer(
           const definitions = Array.isArray(sourceRow[elicit.definitionsField])
             ? (sourceRow[elicit.definitionsField] as Record<string, unknown>[])
             : [];
-          const minted = mintConfiguration({
+          const minted = await mintConfiguration({
+            db,
             tenantId: session.tenantId as string,
             userId: session.userId as string,
             table: table.name,
             elicit,
             modelValues: modelArguments,
             definitions,
-            displayName: String(sourceRow.name ?? entity?.entity ?? "this record"),
+            displayName: String(
+              sourceRow.name ?? entity?.entity ?? "this record",
+            ),
             messagePrefix,
           });
           const listToolName = catalog.tools.find(
-            (candidate) => candidate.table === match.table && candidate.operation === "list",
+            (candidate) =>
+              candidate.table === match.table && candidate.operation === "list",
           )?.name;
-          return ok({
+          const continuation = {
             action: "configure",
             status: "awaiting_person",
-            url: `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${minted.token}`,
             expiresInSeconds: minted.expiresInSeconds,
             // Machine-readable continuation: the record exists once the
             // person saved the form; this is how to observe that.
             ...(listToolName ? { resumeWith: listToolName } : {}),
+          };
+          const waitInstruction =
+            " Then wait by checking, not by asking: poll resumeWith every ten " +
+            "seconds or so — the record exists once they have saved. Only if " +
+            "nothing has appeared after about three minutes, ask the person to tell " +
+            "you when they are done.";
+          const prefix =
+            reason === "timeout"
+              ? "The secure form expired before it was completed — anything typed into it was NOT saved. "
+              : "The secure form could not be completed in this client. ";
+
+          if (supportsMcpApp(server)) {
+            return configurationAppResult(
+              {
+                ...continuation,
+                instructions:
+                  prefix +
+                  "The client has received a private MCP App for the secure form; the " +
+                  "URL is not exposed to this chat. The app also offers an external-browser fallback." +
+                  waitInstruction,
+              },
+              minted.token,
+              String(sourceRow.name ?? entity?.entity ?? "this record"),
+            );
+          }
+
+          return ok({
+            ...continuation,
+            externalUrl: configurationWebUrl(),
             instructions:
-              (reason === "timeout"
-                ? "The secure form expired before it was completed — anything typed into " +
-                  "it was NOT saved. "
-                : "The secure form could not be completed in this client. ") +
-              "Give the person this url to open in their browser — the same form is " +
-              "served there, and the values go directly to the runtime, never through " +
-              "this chat. Then wait by checking, not by asking: poll resumeWith every " +
-              "ten seconds or so — the record exists once they have saved. Only if " +
-              "nothing has appeared after about three minutes, ask the person to tell " +
-              "you when they are done.",
+              prefix +
+              "This client cannot render MCP Apps. Ask the person to open externalUrl; " +
+              "it is the stable, signed-in KERN form and contains no bearer handoff token." +
+              waitInstruction,
           });
         }
         // Verify the accepted values against the provider BEFORE anything is
@@ -2519,9 +3227,9 @@ function buildServer(
         // wrong subdomain or refused credential fails HERE, not on the first
         // real call. What is honestly unverifiable (no probe declared,
         // sign-in credentials before consent) reports skipped and saves.
-        const storedValues = (callArguments as Record<string, unknown> | undefined)?.[
-          elicit.into
-        ];
+        const storedValues = (
+          callArguments as Record<string, unknown> | undefined
+        )?.[elicit.into];
         if (sourceRow && storedValues && typeof storedValues === "object") {
           const report = await testElicitedRow({
             row: { [elicit.into]: storedValues },
@@ -2543,15 +3251,30 @@ function buildServer(
       {
         // Validate what the MODEL sent against the advertised schema — before
         // elicited values join, since those are server-set and outside it.
-        const modelSent = (request.params.arguments ?? {}) as Record<string, unknown>;
+        const modelSent = (request.params.arguments ?? {}) as Record<
+          string,
+          unknown
+        >;
         const elicitField = entity?.elicitOnCreate?.into;
         const toValidate =
           match.operation === "create" && elicitField
-            ? Object.fromEntries(Object.entries(modelSent).filter(([key]) => key !== elicitField))
+            ? Object.fromEntries(
+                Object.entries(modelSent).filter(
+                  ([key]) => key !== elicitField,
+                ),
+              )
             : modelSent;
         assertSchemaValid(match.inputSchema, toValidate, "arguments");
       }
-      const outcome = await invokeTool(match, entity, table, tables, db, session, callArguments);
+      const outcome = await invokeTool(
+        match,
+        entity,
+        table,
+        tables,
+        db,
+        session,
+        callArguments,
+      );
       // A successful mutation on a table whose rows project as tools changes
       // other sessions' tool lists — tell them, so they re-list instead of
       // discovering the change on their next reconnect.
@@ -2587,7 +3310,10 @@ export function registerGeneratedMcpServer(
     db: OpenShapeForgeDatabase;
     session: DbSessionInput;
   }> {
-    const resolved = await resolveSessionContext(headersFromFastify(request.headers), { db: options.db });
+    const resolved = await resolveSessionContext(
+      headersFromFastify(request.headers),
+      { db: options.db },
+    );
     if (!resolved.tenantId || !resolved.userId) {
       throw new HttpError(
         401,
@@ -2630,7 +3356,14 @@ export function registerGeneratedMcpServer(
         try {
           done(null, JSON.parse(body as string));
         } catch {
-          done(new HttpError(400, "BAD_USER_INPUT", "Request body is not valid JSON."), undefined);
+          done(
+            new HttpError(
+              400,
+              "BAD_USER_INPUT",
+              "Request body is not valid JSON.",
+            ),
+            undefined,
+          );
         }
       },
     );
@@ -2644,7 +3377,10 @@ export function registerGeneratedMcpServer(
       // learn how to authenticate. Without this header the metadata document
       // is undiscoverable and a spec-following client is stuck on a bare 401.
       if (status === 401) {
-        void reply.header("www-authenticate", buildAuthenticateChallenge(request));
+        void reply.header(
+          "www-authenticate",
+          buildAuthenticateChallenge(request),
+        );
       }
       void reply.status(status).send(body);
     });
@@ -2662,9 +3398,20 @@ export function registerGeneratedMcpServer(
       tenantId: string;
       userId: string;
       roles: string[];
+      groups: string[];
+      scope: DbSessionInput["scope"];
       lastSeenMs: number;
     };
     const mcpSessions = new Map<string, McpSessionEntry>();
+    const sameClaims = (
+      left: readonly string[],
+      right: readonly string[],
+    ): boolean => {
+      if (left.length !== right.length) return false;
+      const sortedLeft = [...left].sort();
+      const sortedRight = [...right].sort();
+      return sortedLeft.every((value, index) => value === sortedRight[index]);
+    };
     const SESSION_IDLE_LIMIT_MS = 30 * 60 * 1000;
     const sweep = setInterval(() => {
       const now = Date.now();
@@ -2685,7 +3432,10 @@ export function registerGeneratedMcpServer(
      * open notification stream simply misses the nudge; delivery is
      * best-effort by design.
      */
-    const notifyDerivedDefinitionChanged = (table: string, tenantId: string | null): void => {
+    const notifyDerivedDefinitionChanged = (
+      table: string,
+      tenantId: string | null,
+    ): void => {
       const audiences = catalogDerivedTools
         .filter((entry) => entry.table === table)
         .flatMap((entry) => entry.roles);
@@ -2721,12 +3471,16 @@ export function registerGeneratedMcpServer(
       `<p>${message}</p></body>`;
     instance.get(ENTITY_OAUTH_CALLBACK_PATH, async (request, reply) => {
       const query = (request.query ?? {}) as Record<string, unknown>;
-      const pending = redeemState(query.state);
+      const pending = await redeemState(query.state, options.db);
       if (!pending) {
         return reply
           .status(400)
           .type("text/html")
-          .send(html("This sign-in link is invalid or expired. Start again from your chat."));
+          .send(
+            html(
+              "This sign-in link is invalid or expired. Start again from your chat.",
+            ),
+          );
       }
       if (typeof query.error === "string" && query.error) {
         return reply
@@ -2738,7 +3492,11 @@ export function registerGeneratedMcpServer(
         return reply
           .status(400)
           .type("text/html")
-          .send(html("The provider sent no authorization code. Nothing was stored."));
+          .send(
+            html(
+              "The provider sent no authorization code. Nothing was stored.",
+            ),
+          );
       }
       try {
         const { values } = await exchangeCodeForTokens(pending, query.code);
@@ -2746,7 +3504,8 @@ export function registerGeneratedMcpServer(
         if (!db) throw new Error("Database is not configured.");
         const tables = tablesByName();
         const table = tables.get(pending.connectionTable);
-        if (!table) throw new Error("Connection table is missing from the manifest.");
+        if (!table)
+          throw new Error("Connection table is missing from the manifest.");
         const writeSession: DbSessionInput = {
           tenantId: pending.tenantId,
           userId: pending.userId,
@@ -2765,17 +3524,19 @@ export function registerGeneratedMcpServer(
           ? rows.find((row) => row.ownerUserId === pending.userId)
           : rows.find((row) => !row.ownerUserId);
         if (existing) {
-          const currentValues = (existing[pending.connectionValuesField] ?? {}) as Record<
-            string,
-            unknown
-          >;
-          await updateGeneratedEntityForTable(db, writeSession, table, String(existing.id), {
-            // Tenant rows keep their configuration (client credentials,
-            // subdomain); the sign-in only adds/replaces the tokens.
-            [pending.connectionValuesField]: personalScope
-              ? values
-              : { ...currentValues, ...values },
-          });
+          const currentValues = (existing[pending.connectionValuesField] ??
+            {}) as Record<string, unknown>;
+          await updateGeneratedEntityForTable(
+            db,
+            writeSession,
+            table,
+            String(existing.id),
+            {
+              // Tenant rows keep their configuration (client credentials,
+              // subdomain); the sign-in only adds/replaces the tokens.
+              [pending.connectionValuesField]: { ...currentValues, ...values },
+            },
+          );
         } else {
           await createGeneratedEntityForTable(db, writeSession, table, {
             key: `personal-${pending.userId.replace(/[^a-z0-9-]/g, "").slice(0, 20)}`,
@@ -2788,13 +3549,22 @@ export function registerGeneratedMcpServer(
         return reply
           .status(200)
           .type("text/html")
-          .send(html("Connected. You can close this window and return to your chat."));
+          .send(
+            html(
+              "Connected. You can close this window and return to your chat.",
+            ),
+          );
       } catch (error) {
-        request.log.error({ err: error }, "Personal connection callback failed.");
+        request.log.error(
+          { err: error },
+          "Personal connection callback failed.",
+        );
         return reply
           .status(500)
           .type("text/html")
-          .send(html("Storing the connection failed. Start again from your chat."));
+          .send(
+            html("Storing the connection failed. Start again from your chat."),
+          );
       }
     });
 
@@ -2807,121 +3577,245 @@ export function registerGeneratedMcpServer(
       { parseAs: "string" },
       (_request, body, done) => done(null, body),
     );
-    instance.get(`${ENTITY_CONFIGURATION_PATH}/:token`, async (request, reply) => {
-      const pending = peekConfiguration((request.params as { token?: string }).token);
-      if (!pending) {
-        return reply
-          .status(404)
-          .type("text/html")
-          .send(
-            renderMessagePage(
-              "This configuration link is invalid or expired. Ask your assistant to start again.",
-            ),
-          );
-      }
-      return reply
-        .type("text/html")
-        .send(
-          renderConfigurationForm(pending, `${ENTITY_CONFIGURATION_PATH}/${pending.token}`),
-        );
-    });
-    instance.post(`${ENTITY_CONFIGURATION_PATH}/:token`, async (request, reply) => {
-      const pending = peekConfiguration((request.params as { token?: string }).token);
-      if (!pending) {
-        return reply
-          .status(404)
-          .type("text/html")
-          .send(
-            renderMessagePage(
-              "This configuration link is invalid or expired. Ask your assistant to start again.",
-            ),
-          );
-      }
-      const body = typeof request.body === "string" ? request.body : "";
+
+    type ConfigurationSubmission =
+      | { ok: true }
+      | {
+          ok: false;
+          errors: Record<string, string>;
+          errorBanner?: string;
+          prefill: Record<string, unknown>;
+        };
+    const savePendingConfiguration = async (
+      pending: PendingConfiguration,
+      body: string,
+      writeSession: DbSessionInput,
+    ): Promise<ConfigurationSubmission> => {
       const { content, errors } = parseSubmission(pending, body);
       if (Object.keys(errors).length > 0) {
+        return { ok: false, errors, prefill: content };
+      }
+      const db = options.db;
+      if (!db)
+        throw new HttpError(
+          503,
+          "DATABASE_NOT_CONFIGURED",
+          "Database is not configured.",
+        );
+      const tableDef = tablesByName().get(pending.table);
+      if (!tableDef)
+        throw new HttpError(
+          500,
+          "INTERNAL",
+          "Table is missing from the manifest.",
+        );
+      const values = storeSubmission(pending, content, elicitedKeyring());
+      // Verify against the provider BEFORE the row exists: the person is
+      // right here at the form, so a wrong subdomain or refused credential
+      // comes back as a correctable banner instead of a stored dud.
+      const sourceRowId = pending.modelValues[pending.elicit.sourceField];
+      const sourceTable = tablesByName().get(pending.elicit.sourceTable);
+      if (typeof sourceRowId === "string" && sourceTable) {
+        const sourceResult = await listGeneratedEntitiesForTable(
+          db,
+          writeSession,
+          sourceTable,
+          {
+            limit: 1,
+            filter: { id: sourceRowId },
+          },
+        );
+        const sourceRow = sourceResult.rows[0]
+          ? serializeRow(sourceTable, sourceResult.rows[0])
+          : null;
+        if (sourceRow) {
+          const report = await testElicitedRow({
+            row: { [pending.elicit.into]: values[pending.elicit.into] },
+            sourceRow,
+            elicit: pending.elicit,
+            table: pending.table,
+          });
+          if (!report.ok) {
+            return {
+              ok: false,
+              errors: {},
+              errorBanner: `${report.source} refused these values — ${failedCheckSummary(report)}`,
+              prefill: content,
+            };
+          }
+        }
+      }
+      await createGeneratedEntityForTable(
+        db,
+        writeSession,
+        tableDef,
+        values,
+      );
+      return { ok: true };
+    };
+
+    // Stable, authenticated KERN form API. The web client sends its normal
+    // Keycloak bearer; RLS resolves the pending handoff by tenant/user. The URL
+    // exposed to the assistant therefore carries no handoff credential.
+    instance.get(`${ENTITY_CONFIGURATION_PATH}/pending`, async (request) => {
+      const { db, session } = await requireMcpSession(request);
+      const found = await latestConfigurationForSession(session, db);
+      if (!found) {
+        throw new HttpError(
+          404,
+          "NOT_FOUND",
+          "No pending configuration form was found for this user.",
+        );
+      }
+      return {
+        id: found.id,
+        displayName: found.pending.displayName,
+        messagePrefix: found.pending.messagePrefix,
+        definitions: configurationFormDefinitions(found.pending),
+      };
+    });
+    instance.post(
+      `${ENTITY_CONFIGURATION_PATH}/pending/:id`,
+      async (request, reply) => {
+        const { db, session } = await requireMcpSession(request);
+        const found = await latestConfigurationForSession(session, db);
+        const id = (request.params as { id?: string }).id;
+        if (!found || found.id !== id) {
+          throw new HttpError(
+            404,
+            "NOT_FOUND",
+            "This pending configuration form is unavailable or expired.",
+          );
+        }
+        const body = typeof request.body === "string" ? request.body : "";
+        const outcome = await savePendingConfiguration(
+          found.pending,
+          body,
+          session,
+        );
+        if (!outcome.ok) {
+          return reply.status(400).send({
+            error: {
+              code: "INVALID_CONFIGURATION",
+              message:
+                outcome.errorBanner ?? "Correct the highlighted values.",
+              fields: outcome.errors,
+            },
+          });
+        }
+        const consumed = await consumeConfigurationForSession(id, session, db);
+        if (!consumed) {
+          throw new HttpError(
+            409,
+            "CONFLICT",
+            "This configuration form was already submitted.",
+          );
+        }
+        return reply.send({ saved: true });
+      },
+    );
+
+    instance.get(
+      `${ENTITY_CONFIGURATION_PATH}/:token`,
+      async (request, reply) => {
+        const pending = await peekConfiguration(
+          (request.params as { token?: string }).token,
+          options.db,
+        );
+        if (!pending) {
+          return reply
+            .status(404)
+            .type("text/html")
+            .send(
+              renderMessagePage(
+                "This configuration link is invalid or expired. Ask your assistant to start again.",
+              ),
+            );
+        }
         return reply
-          .status(400)
           .type("text/html")
           .send(
             renderConfigurationForm(
               pending,
               `${ENTITY_CONFIGURATION_PATH}/${pending.token}`,
-              errors,
             ),
           );
-      }
-      try {
-        const db = options.db;
-        if (!db) throw new HttpError(503, "DATABASE_NOT_CONFIGURED", "Database is not configured.");
-        const tableDef = tablesByName().get(pending.table);
-        if (!tableDef) throw new HttpError(500, "INTERNAL", "Table is missing from the manifest.");
-        const writeSession: DbSessionInput = {
-          tenantId: pending.tenantId,
-          userId: pending.userId,
-          roles: [],
-          groups: [],
-          scope: "self",
-        };
-        const values = storeSubmission(pending, content);
-        // Verify against the provider BEFORE the row exists: the person is
-        // right here at the form, so a wrong subdomain or refused credential
-        // comes back as a correctable banner instead of a stored dud they
-        // discover a step later. Unverifiable contracts (no probe, sign-in
-        // clients before consent) report skipped and save.
-        const sourceRowId = pending.modelValues[pending.elicit.sourceField];
-        const sourceTable = tablesByName().get(pending.elicit.sourceTable);
-        if (typeof sourceRowId === "string" && sourceTable) {
-          const sourceResult = await listGeneratedEntitiesForTable(db, writeSession, sourceTable, {
-            limit: 1,
-            filter: { id: sourceRowId },
-          });
-          const sourceRow = sourceResult.rows[0]
-            ? serializeRow(sourceTable, sourceResult.rows[0])
-            : null;
-          if (sourceRow) {
-            const report = await testElicitedRow({
-              row: { [pending.elicit.into]: values[pending.elicit.into] },
-              sourceRow,
-              elicit: pending.elicit,
-              table: pending.table,
-            });
-            if (!report.ok) {
-              return reply
-                .status(400)
-                .type("text/html")
-                .send(
-                  renderConfigurationForm(
-                    pending,
-                    `${ENTITY_CONFIGURATION_PATH}/${pending.token}`,
-                    {},
-                    {
-                      errorBanner: `${report.source} refused these values — ${failedCheckSummary(report)}`,
-                      prefill: content,
-                    },
-                  ),
-                );
-            }
-          }
+      },
+    );
+    instance.post(
+      `${ENTITY_CONFIGURATION_PATH}/:token`,
+      async (request, reply) => {
+        const pending = await peekConfiguration(
+          (request.params as { token?: string }).token,
+          options.db,
+        );
+        if (!pending) {
+          return reply
+            .status(404)
+            .type("text/html")
+            .send(
+              renderMessagePage(
+                "This configuration link is invalid or expired. Ask your assistant to start again.",
+              ),
+            );
         }
-        await createGeneratedEntityForTable(db, writeSession, tableDef, values);
-        consumeConfiguration(pending.token);
-        return reply
-          .type("text/html")
-          .send(renderMessagePage("Saved. You can close this window and return to your chat."));
-      } catch (error) {
-        request.log.error({ err: error }, "Configuration handoff submission failed.");
-        const { body: errorBody } = toHttpError(error);
-        return reply
-          .status(400)
-          .type("text/html")
-          .send(
-            renderMessagePage(
-              `Saving failed: ${errorBody.error.message} Return to your chat and try again.`,
-            ),
+        const body = typeof request.body === "string" ? request.body : "";
+        try {
+          const writeSession: DbSessionInput = {
+            tenantId: pending.tenantId,
+            userId: pending.userId,
+            roles: [],
+            groups: [],
+            scope: "self",
+          };
+          const outcome = await savePendingConfiguration(
+            pending,
+            body,
+            writeSession,
           );
-      }
-    });
+          if (!outcome.ok) {
+            return reply
+              .status(400)
+              .type("text/html")
+              .send(
+                renderConfigurationForm(
+                  pending,
+                  `${ENTITY_CONFIGURATION_PATH}/${pending.token}`,
+                  outcome.errors,
+                  {
+                    ...(outcome.errorBanner
+                      ? { errorBanner: outcome.errorBanner }
+                      : {}),
+                    prefill: outcome.prefill,
+                  },
+                ),
+              );
+          }
+          await consumeConfiguration(pending.token, options.db);
+          return reply
+            .type("text/html")
+            .send(
+              renderMessagePage(
+                "Saved. You can close this window and return to your chat.",
+              ),
+            );
+        } catch (error) {
+          request.log.error(
+            { err: error },
+            "Configuration handoff submission failed.",
+          );
+          const { body: errorBody } = toHttpError(error);
+          return reply
+            .status(400)
+            .type("text/html")
+            .send(
+              renderMessagePage(
+                `Saving failed: ${errorBody.error.message} Return to your chat and try again.`,
+              ),
+            );
+        }
+      },
+    );
 
     instance.route({
       url: MCP_MOUNT_PATH,
@@ -2930,28 +3824,64 @@ export function registerGeneratedMcpServer(
         const { db, session } = await requireMcpSession(request);
 
         const sessionHeader = request.headers["mcp-session-id"];
-        const sessionId = Array.isArray(sessionHeader) ? sessionHeader[0] : sessionHeader;
+        const sessionId = Array.isArray(sessionHeader)
+          ? sessionHeader[0]
+          : sessionHeader;
 
         if (sessionId) {
           const existing = mcpSessions.get(sessionId);
           if (!existing) {
             // Per spec: an unknown session id answers 404 so the client
             // reinitializes, rather than being silently handled statelessly.
-            throw new HttpError(404, "SESSION_NOT_FOUND", "Unknown MCP session; reinitialize.");
+            throw new HttpError(
+              404,
+              "SESSION_NOT_FOUND",
+              "Unknown MCP session; reinitialize.",
+            );
           }
           // The session is a credential: it was initialized by one identity
           // and stays bound to it.
-          if (existing.tenantId !== session.tenantId || existing.userId !== session.userId) {
-            throw new HttpError(403, "FORBIDDEN", "MCP session belongs to another identity.");
+          if (
+            existing.tenantId !== session.tenantId ||
+            existing.userId !== session.userId
+          ) {
+            throw new HttpError(
+              403,
+              "FORBIDDEN",
+              "MCP session belongs to another identity.",
+            );
+          }
+          if (
+            !sameClaims(existing.roles, session.roles ?? []) ||
+            !sameClaims(existing.groups, session.groups ?? []) ||
+            existing.scope !== session.scope
+          ) {
+            mcpSessions.delete(sessionId);
+            void existing.transport.close();
+            void existing.server.close();
+            throw new HttpError(
+              404,
+              "SESSION_NOT_FOUND",
+              "Authorization changed; reinitialize the MCP session.",
+            );
           }
           existing.lastSeenMs = Date.now();
           reply.hijack();
-          await existing.transport.handleRequest(request.raw, reply.raw, request.body);
+          await existing.transport.handleRequest(
+            request.raw,
+            reply.raw,
+            request.body,
+          );
           return;
         }
 
         if (request.method === "POST" && isInitializeBody(request.body)) {
-          const server = buildServer(db, session, notifyDerivedDefinitionChanged, true);
+          const server = buildServer(
+            db,
+            session,
+            notifyDerivedDefinitionChanged,
+            true,
+          );
           const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
             onsessioninitialized: (id) => {
@@ -2961,6 +3891,8 @@ export function registerGeneratedMcpServer(
                 tenantId: session.tenantId as string,
                 userId: session.userId as string,
                 roles: [...(session.roles ?? [])],
+                groups: [...(session.groups ?? [])],
+                scope: session.scope,
                 lastSeenMs: Date.now(),
               });
             },
@@ -2972,7 +3904,9 @@ export function registerGeneratedMcpServer(
           // The SDK declares Transport's optional callbacks as required-when-present,
           // which collides with this repo's exactOptionalPropertyTypes. The cast is
           // to the SDK's own Transport shape and changes no behaviour.
-          await server.connect(transport as unknown as Parameters<Server["connect"]>[0]);
+          await server.connect(
+            transport as unknown as Parameters<Server["connect"]>[0],
+          );
           await transport.handleRequest(request.raw, reply.raw, request.body);
           return;
         }
@@ -2990,7 +3924,9 @@ export function registerGeneratedMcpServer(
           void server.close();
         });
         reply.hijack();
-        await server.connect(transport as unknown as Parameters<Server["connect"]>[0]);
+        await server.connect(
+          transport as unknown as Parameters<Server["connect"]>[0],
+        );
         await transport.handleRequest(request.raw, reply.raw, request.body);
       },
     });

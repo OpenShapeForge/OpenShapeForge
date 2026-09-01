@@ -21,6 +21,7 @@
     "@escape.tech/graphql-armor-max-tokens": "^2.5.1",
     "@fastify/rate-limit": "^10",
     "@graphql-yoga/plugin-persisted-operations": "^3.22.0",
+    "@modelcontextprotocol/ext-apps": "^1.7.5",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@openshapeforge/auth": "workspace:*",
     "@openshapeforge/observability": "workspace:*",

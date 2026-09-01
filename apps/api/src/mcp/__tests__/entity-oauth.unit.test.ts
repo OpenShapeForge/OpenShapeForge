@@ -14,9 +14,15 @@ import {
   redeemState,
   scopesCovered,
 } from "../entity-oauth.js";
-import { decryptSecret, keyringFromEnv, type StoredSecret } from "../../connectors/secrets.js";
+import {
+  decryptSecret,
+  keyringFromEnv,
+  type StoredSecret,
+} from "../../connectors/secrets.js";
 
-const KEYRING = keyringFromEnv(`test:${Buffer.alloc(32, 3).toString("base64")}`)!;
+const KEYRING = keyringFromEnv(
+  `test:${Buffer.alloc(32, 3).toString("base64")}`,
+)!;
 
 const BASE = {
   connectionScope: "user" as const,
@@ -37,8 +43,11 @@ const BASE = {
 };
 
 describe("mintAuthorization + redeemState", () => {
-  it("builds a PKCE authorization URL and a single-use state", () => {
-    const handoff = mintAuthorization({ ...BASE, authorizationUrl: "https://auth.example.com/authorize" });
+  it("builds a PKCE authorization URL and a single-use state", async () => {
+    const handoff = await mintAuthorization({
+      ...BASE,
+      authorizationUrl: "https://auth.example.com/authorize",
+    });
     const url = new URL(handoff.authorizationUrl);
     expect(url.searchParams.get("response_type")).toBe("code");
     expect(url.searchParams.get("client_id")).toBe("cid");
@@ -48,7 +57,7 @@ describe("mintAuthorization + redeemState", () => {
     const state = url.searchParams.get("state")!;
     expect(state).toBe(handoff.state);
 
-    const pending = redeemState(state)!;
+    const pending = (await redeemState(state))!;
     expect(pending.clientSecret).toBe("csecret");
     // The challenge in the URL is the S256 of the stored verifier.
     const challenge = createHash("sha256")
@@ -59,31 +68,57 @@ describe("mintAuthorization + redeemState", () => {
       .replace(/=+$/, "");
     expect(url.searchParams.get("code_challenge")).toBe(challenge);
     // Single use: a second redemption fails.
-    expect(redeemState(state)).toBeNull();
-    expect(redeemState("unknown")).toBeNull();
+    expect(await redeemState(state)).toBeNull();
+    expect(await redeemState("unknown")).toBeNull();
     expect(__pendingForTests.has(state)).toBe(false);
   });
 });
 
 describe("exchangeCodeForTokens", () => {
   it("posts the code with the PKCE verifier and stores encrypted tokens", async () => {
-    const handoff = mintAuthorization({ ...BASE, authorizationUrl: "https://auth.example.com/authorize" });
-    const pending = redeemState(handoff.state)!;
+    const handoff = await mintAuthorization({
+      ...BASE,
+      authorizationUrl: "https://auth.example.com/authorize",
+    });
+    const pending = (await redeemState(handoff.state))!;
     const calls: string[] = [];
-    const impl = (async (_input: string | URL | Request, init?: RequestInit) => {
+    const impl = (async (
+      _input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
       calls.push(String(init?.body ?? ""));
-      return Response.json({ access_token: "at-1", refresh_token: "rt-1", expires_in: 3600, scope: "tickets:read read" });
+      return Response.json({
+        access_token: "at-1",
+        refresh_token: "rt-1",
+        expires_in: 3600,
+        scope: "tickets:read read",
+      });
     }) as typeof fetch;
 
-    const { values } = await exchangeCodeForTokens(pending, "code-1", impl, KEYRING);
+    const { values } = await exchangeCodeForTokens(
+      pending,
+      "code-1",
+      impl,
+      KEYRING,
+    );
     expect(calls[0]).toContain("grant_type=authorization_code");
     expect(calls[0]).toContain("code=code-1");
     expect(calls[0]).toContain(`code_verifier=${pending.codeVerifier}`);
     expect(
-      decryptSecret(KEYRING, "erp.connections:personal", "accessToken", values.accessToken as StoredSecret),
+      decryptSecret(
+        KEYRING,
+        "erp.connections:personal",
+        "accessToken",
+        values.accessToken as StoredSecret,
+      ),
     ).toBe("at-1");
     expect(
-      decryptSecret(KEYRING, "erp.connections:personal", "refreshToken", values.refreshToken as StoredSecret),
+      decryptSecret(
+        KEYRING,
+        "erp.connections:personal",
+        "refreshToken",
+        values.refreshToken as StoredSecret,
+      ),
     ).toBe("rt-1");
     expect(typeof values.accessTokenExpiresAt).toBe("string");
     // The provider's answer wins over the requested set.
@@ -91,31 +126,33 @@ describe("exchangeCodeForTokens", () => {
   });
 
   it("fails closed on an out-of-egress token endpoint and a missing keyring", async () => {
-    const handoff = mintAuthorization({
+    const handoff = await mintAuthorization({
       ...BASE,
       tokenUrl: "https://evil.example.net/token",
       authorizationUrl: "https://auth.example.com/authorize",
     });
-    const pending = redeemState(handoff.state)!;
-    await expect(exchangeCodeForTokens(pending, "c", fetch, KEYRING)).rejects.toThrow(
-      /egress allow-list/,
-    );
+    const pending = (await redeemState(handoff.state))!;
+    await expect(
+      exchangeCodeForTokens(pending, "c", fetch, KEYRING),
+    ).rejects.toThrow(/egress allow-list/);
 
-    const handoff2 = mintAuthorization({ ...BASE, authorizationUrl: "https://auth.example.com/authorize" });
-    const pending2 = redeemState(handoff2.state)!;
-    await expect(exchangeCodeForTokens(pending2, "c", fetch, undefined)).rejects.toThrow(
-      /ELICITED_SECRET_KEYS/,
-    );
+    const handoff2 = await mintAuthorization({
+      ...BASE,
+      authorizationUrl: "https://auth.example.com/authorize",
+    });
+    const pending2 = (await redeemState(handoff2.state))!;
+    await expect(
+      exchangeCodeForTokens(pending2, "c", fetch, undefined),
+    ).rejects.toThrow(/ELICITED_SECRET_KEYS/);
   });
 });
 
 describe("scopesCovered", () => {
-  it("covers when every required scope was granted; legacy rows pass", () => {
+  it("covers only when every required scope was recorded as granted", () => {
     expect(scopesCovered(["read"], ["read", "tickets:write"])).toBe(true);
     expect(scopesCovered(["read"], ["tickets:read"])).toBe(false);
     expect(scopesCovered([], ["anything"])).toBe(true);
-    // Rows from before grants were stored carry no list: assumed covering.
-    expect(scopesCovered(["read"], undefined)).toBe(true);
-    expect(scopesCovered(["read"], "read")).toBe(true);
+    expect(scopesCovered(["read"], undefined)).toBe(false);
+    expect(scopesCovered(["read"], "read")).toBe(false);
   });
 });

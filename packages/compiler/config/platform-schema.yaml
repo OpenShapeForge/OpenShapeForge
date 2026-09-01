@@ -504,3 +504,31 @@ tables:
       # scanning every tenant's history.
       - name: connector_oauth_states_expires_idx
         columns: [expires_at]
+
+  # Short-lived, encrypted continuation state for MCP OAuth and secure-form
+  # handoffs. The public token is hashed; the payload is encrypted at rest.
+  - schema: platform
+    name: mcp_handoffs
+    tenantScoped: true
+    domainInternal: true
+    generatedCrud: false
+    rowScope:
+      userColumns: [user_id]
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: user_id, type: uuid, required: true }
+      - { name: kind, type: text, required: true }
+      - { name: token_hash, type: text, required: true }
+      - { name: payload_ciphertext, type: text, required: true }
+      - { name: payload_key_id, type: text, required: true }
+      - { name: payload_algorithm, type: text, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: expires_at, type: timestamptz, required: true }
+      - { name: consumed_at, type: timestamptz }
+    indexes:
+      - name: mcp_handoffs_token_hash_uidx
+        columns: [token_hash]
+        unique: true
+      - name: mcp_handoffs_expires_idx
+        columns: [expires_at]

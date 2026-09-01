@@ -27,6 +27,7 @@ import {
 } from "./generate-plugin-migrations.js";
 import { buildModuleRegistry, MODULE_REGISTRY_PATH, renderModuleRegistry } from "./generate-modules.js";
 import { MAX_DEDICATED_TOOLS, renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
+import { loadAuthoringConfig } from "./authoring/layers.js";
 import {
   auditOperationSurfaceCollisions,
   assertOperationRuntimeModules,
@@ -165,6 +166,7 @@ function assertReferentieGroepsResolve(
 export async function collectAllArtifacts(
   repoRoot: string = defaultRepoRoot,
 ): Promise<ArtifactCollection> {
+  const authoringConfig = loadAuthoringConfig(repoRoot);
   const { manifest, entities, connectors, plugins, pluginEntries } =
     await loadActivePlatformCompile(repoRoot);
   const authoringDir = resolveActiveAuthoringDir(repoRoot);
@@ -194,7 +196,12 @@ export async function collectAllArtifacts(
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, {
       source: activeManifestSource,
-      openApi: { entities, referentiedata, operations },
+      openApi: {
+        entities,
+        referentiedata,
+        operations,
+        ...(authoringConfig.restApi ? { documentation: authoringConfig.restApi } : {}),
+      },
     }),
     graphql: [
       {

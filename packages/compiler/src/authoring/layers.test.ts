@@ -624,4 +624,50 @@ describe("authoring.config.local.yaml", () => {
 
     expect(loadAuthoringConfig(root)).toEqual({ layers: ["base"], plugins: ["./ext.ts"] });
   });
+
+  test("loads committed REST API onboarding and trims its authored strings", () => {
+    const root = makeRepo();
+    mkdirSync(join(root, "base"), { recursive: true });
+    writeConfig(root, {
+      layers: ["base"],
+      restApi: {
+        title: " Example Product API ",
+        version: " 2026-09 ",
+        description: " Start with authentication. ",
+        externalDocs: {
+          description: " Developer guide ",
+          url: "https://example.com/developers",
+        },
+      },
+    });
+
+    expect(loadAuthoringConfig(root).restApi).toEqual({
+      title: "Example Product API",
+      version: "2026-09",
+      description: "Start with authentication.",
+      externalDocs: {
+        description: "Developer guide",
+        url: "https://example.com/developers",
+      },
+    });
+  });
+
+  test("rejects malformed or machine-local REST API onboarding", () => {
+    const malformed = makeRepo();
+    mkdirSync(join(malformed, "base"), { recursive: true });
+    writeConfig(malformed, {
+      layers: ["base"],
+      restApi: { title: "", description: "Guide" },
+    });
+    expect(() => loadAuthoringConfig(malformed)).toThrow(/restApi\.title.*non-empty string/);
+
+    const local = makeRepo();
+    mkdirSync(join(local, "base"), { recursive: true });
+    writeConfig(
+      local,
+      { layers: ["base"] },
+      { restApi: { title: "Local", description: "Not committed" } },
+    );
+    expect(() => loadAuthoringConfig(local)).toThrow(/cannot declare "restApi"/);
+  });
 });

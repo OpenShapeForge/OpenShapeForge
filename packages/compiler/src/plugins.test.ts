@@ -3,8 +3,10 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
-import { loadActivePlatformManifest } from "./active-manifest.js";
-import { resolveAuthoringLayers } from "./authoring/layers.js";
+import {
+  loadActivePlatformManifest,
+  resolveActiveAuthoringDir,
+} from "./active-manifest.js";
 import { collectAllArtifacts } from "./index.js";
 import { mergePluginPlatformTables } from "./plugins.js";
 import { isGeneratedCrudEligible, type PlatformSchemaManifest } from "./schema.js";
@@ -133,7 +135,7 @@ describe("compiler plugins", () => {
     // What belongs here is the layer resolution: an appShellPatch from a plugin
     // layer has to survive into the tree the web generator reads.
     const shell = YAML.parse(
-      readFileSync(join(resolveAuthoringLayers(repoRoot), "appShell.yaml"), "utf8"),
+      readFileSync(join(resolveActiveAuthoringDir(repoRoot), "appShell.yaml"), "utf8"),
     ) as { kind: string; navigation: { sidebarItems: { key: string; route?: unknown }[] } };
 
     expect(shell.kind).toBe("appShell");

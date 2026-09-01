@@ -63,6 +63,26 @@ describe("configuration validation", () => {
     ).toThrow(/unknown field "endpoin"/);
   });
 
+  it("enforces 2020-12 unevaluatedProperties closure", () => {
+    const strictValidator = new ConnectorConfigurationValidator({
+      slug: "strict-object",
+      configuration: {
+        fields: [{ key: "known" }],
+        secretFields: [],
+        schema: {
+          type: "object",
+          allOf: [{ properties: { known: { type: "string" } } }],
+          unevaluatedProperties: false,
+        },
+      },
+    });
+
+    expect(strictValidator.parse({ known: "ok" }).config).toEqual({ known: "ok" });
+    expect(() => strictValidator.parse({ known: "ok", unexpected: true })).toThrow(
+      /unknown field "unexpected"/,
+    );
+  });
+
   it("rejects a missing required field and a violated enum", () => {
     expect(() => validator.parse({ region: "eu-west" })).toThrow(/required/);
     expect(() =>

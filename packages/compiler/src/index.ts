@@ -32,6 +32,22 @@ import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
 import type { CompiledEntityInfo } from "./plugins.js";
 import type { CompiledField } from "./authoring/types.js";
 
+export type {
+  FieldDefinition,
+  FieldDefinitionAuthoringMetadata,
+  FieldDefinitionCardinality,
+  FieldDefinitionRelationship,
+  FieldDefinitionRuntimeMetadata,
+  FieldDefinitionSemanticType,
+  FieldDefinitionSemanticTypeKind,
+  FieldDefinitionSuggestions,
+  FieldDefinitionValidation,
+  FieldDefinitionValueType,
+  FieldDefinitionVariableMode,
+  FieldDefinitionWorkflowInspector,
+  FieldV2,
+} from "./authoring/types.js";
+
 const defaultRepoRoot = resolve(import.meta.dir, "../../..");
 
 export type ArtifactCollection = {

@@ -315,6 +315,54 @@ describe("rich generated REST OpenAPI", () => {
     ).toBeUndefined();
   });
 
+  it("bundles the recursive FieldDefinition contract in generated request schemas", () => {
+    const semanticContract = structuredClone(contract);
+    semanticContract.model.fields.push(
+      field({
+        key: "definition",
+        valueType: "object",
+        semanticType: "fieldDefinition",
+      }),
+    );
+    const semanticManifest = structuredClone(manifest);
+    semanticManifest.tables[0]!.columns.push({
+      name: "definition",
+      type: "jsonb",
+      sourceField: "definition",
+    });
+    const generated = JSON.parse(
+      renderOpenApiSpec(semanticManifest, "fixture", {
+        entities: [{ contract: semanticContract }],
+      }),
+    ) as { components: { schemas: Record<string, Record<string, unknown>> } };
+    const create = generated.components.schemas.RelationInput as {
+      properties: Record<string, Record<string, unknown>>;
+      $defs?: Record<string, unknown>;
+    };
+    const fieldDefinition = generated.components.schemas
+      .OpenShapeForgeFieldDefinition as {
+      $ref?: string;
+      $defs?: Record<string, unknown>;
+    };
+
+    expect(create.properties.definition?.$ref).toBe(
+      "#/components/schemas/OpenShapeForgeFieldDefinition/$defs/fieldDefinition",
+    );
+    expect(create.$defs).toBeUndefined();
+    expect(fieldDefinition.$ref).toBe(
+      "#/components/schemas/OpenShapeForgeFieldDefinition/$defs/fieldDefinition",
+    );
+    expect(fieldDefinition.$defs).toMatchObject({
+      fieldDefinition: {
+        allOf: [
+          {
+            $ref: "#/components/schemas/OpenShapeForgeFieldDefinition/$defs/fieldDefinitionProperties",
+          },
+        ],
+      },
+    });
+  });
+
   it("tags operations with the compiled entity description", () => {
     const generated = spec();
     expect(generated.tags).toEqual([

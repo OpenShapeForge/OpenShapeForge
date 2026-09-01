@@ -1,7 +1,23 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
+import Ajv2020 from "ajv/dist/2020.js";
 import type { CompiledField } from "./authoring/types.js";
-import { compiledFieldSchema, compiledObjectSchema } from "./field-json-schema.js";
+import {
+  compiledFieldSchema,
+  compiledFieldSchemaWithoutDefinitions,
+  compiledObjectSchema,
+  rebaseJsonSchemaReferences,
+} from "./field-json-schema.js";
+import type {
+  FieldDefinition,
+  FieldDefinitionSemanticTypeKind,
+} from "./index.js";
+
+const packageRootFieldDefinition = {
+  key: "definition",
+  valueType: "object",
+} satisfies FieldDefinition;
+const packageRootSemanticTypeKind: FieldDefinitionSemanticTypeKind = "object";
 
 function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): CompiledField {
   const { key, ...rest } = overrides;
@@ -17,6 +33,25 @@ function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): 
 }
 
 describe("compiled field JSON Schema projection", () => {
+  it("rebases only refs and leaves matching prose untouched", () => {
+    const source = {
+      $ref: "https://example.test/schema#/$defs/value",
+      description: "See https://example.test/schema for details.",
+    };
+
+    expect(
+      rebaseJsonSchemaReferences(source, "https://example.test/schema", "#/$defs/rebased"),
+    ).toEqual({
+      $ref: "#/$defs/rebased#/$defs/value",
+      description: source.description,
+    });
+  });
+
+  it("exports the complete canonical contract from the package root", () => {
+    expect(packageRootFieldDefinition.key).toBe("definition");
+    expect(packageRootSemanticTypeKind).toBe("object");
+  });
+
   it("projects descriptions, validation, defaults, and reference-data enums", () => {
     const schema = compiledFieldSchema(
       field({
@@ -163,5 +198,89 @@ describe("compiled field JSON Schema projection", () => {
       "name",
     ]);
     expect(compiledObjectSchema(fields, {}, { requireRequired: false }).required).toBeUndefined();
+  });
+
+  it("projects a field-definition value through the canonical recursive schema", () => {
+    const schema = compiledFieldSchema(
+      field({
+        key: "definition",
+        valueType: "object",
+        semanticType: "fieldDefinition",
+      }),
+    );
+
+    expect(schema.$ref).toBe("#/$defs/fieldDefinition");
+    expect(schema.$defs).toBeDefined();
+
+    const validate = new Ajv2020.default({ strict: false }).compile(schema);
+    expect(
+      validate({
+        key: "address",
+        valueType: "object",
+        children: [
+          { key: "street", valueType: "string" },
+          {
+            key: "residents",
+            valueType: "object",
+            cardinality: "collection",
+            item: {
+              key: "resident",
+              valueType: "object",
+              children: [{ key: "name", valueType: "string" }],
+            },
+          },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      validate({
+        key: "address",
+        valueType: "object",
+        children: [{ valueType: "string" }],
+      }),
+    ).toBe(false);
+  });
+
+  it("can project field metadata without cloning reusable definitions", () => {
+    const schema = compiledFieldSchemaWithoutDefinitions(
+      field({
+        key: "definition",
+        valueType: "object",
+        semanticType: "fieldDefinition",
+        description: { en: "Definition" },
+      }),
+    );
+
+    expect(schema).toMatchObject({
+      $ref: "#/$defs/fieldDefinition",
+      description: "Definition",
+    });
+    expect(schema.$defs).toBeUndefined();
+  });
+
+  it("bundles one reusable definition for multiple single and collection fields", () => {
+    const schema = compiledObjectSchema(
+      [
+        field({
+          key: "definition",
+          valueType: "object",
+          semanticType: "fieldDefinition",
+        }),
+        field({
+          key: "definitions",
+          valueType: "object",
+          cardinality: "collection",
+          semanticType: "fieldDefinition",
+        }),
+      ],
+      {},
+      { requireRequired: true },
+    );
+    const properties = schema.properties as Record<string, Record<string, unknown>>;
+
+    expect(properties.definition?.$ref).toBe("#/$defs/fieldDefinition");
+    expect(properties.definitions?.items).toEqual({ $ref: "#/$defs/fieldDefinition" });
+    expect(Object.keys(schema.$defs as object).filter((key) => key === "fieldDefinition")).toHaveLength(1);
+    expect(() => new Ajv2020.default({ strict: false }).compile(schema)).not.toThrow();
   });
 });

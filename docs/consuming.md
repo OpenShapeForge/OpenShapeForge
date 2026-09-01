@@ -71,6 +71,15 @@ the packaged bin, byte-for-byte.
    await runCompiler({ repoRoot: "/path/to/host" });
    ```
 
+   The package root also exports the canonical recursive authoring contract:
+
+   ```ts
+   import type { FieldDefinition } from "@openshapeforge/compiler";
+   ```
+
+   `FieldV2` remains available as a compatibility alias; new integrations
+   should use `FieldDefinition`.
+
    Without `--repo-root`/`OPENSHAPEFORGE_REPO_ROOT`, the compiler assumes it
    lives at `<repoRoot>/packages/compiler` inside its own monorepo.
 

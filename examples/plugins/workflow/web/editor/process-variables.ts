@@ -82,7 +82,7 @@ export const EMPTY_PROCESS_VARIABLE_SET: ProcessVariableSet = Object.freeze({
 
 /**
  * The value types a declaration may carry, which is the authoring field
- * contract's own list (`FieldV2ValueType`).
+ * contract's own list (`FieldDefinitionValueType`).
  *
  * Constrained because the declaration doubles as a field definition: when a
  * node config binds `{{process.<key>}}` through a `kind: "variable"` source,

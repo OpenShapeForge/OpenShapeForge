@@ -140,6 +140,32 @@ describe("input validation", () => {
     ).toThrow(/unknown property "sneaky"/);
   });
 
+  it("enforces 2020-12 unevaluatedProperties closure", () => {
+    const strictBoundary = new ConnectorContractBoundary({
+      slug: "strict-object",
+      implementation: { contractVersion: 1 },
+      checksum: "strict",
+      operations: [
+        {
+          key: "write",
+          schemas: {
+            input: {
+              type: "object",
+              allOf: [{ properties: { known: { type: "string" } } }],
+              unevaluatedProperties: false,
+            },
+            output: { type: "object" },
+          },
+        },
+      ],
+    });
+
+    expect(() => strictBoundary.assertValidInput("write", { known: "ok" })).not.toThrow();
+    expect(() =>
+      strictBoundary.assertValidInput("write", { known: "ok", unexpected: true }),
+    ).toThrow(/unknown property "unexpected"/);
+  });
+
   it("rejects a violated bound and a missing required field", () => {
     expect(() => boundary.assertValidInput("listObjects", { limit: 9000 })).toThrow(
       /\/limit .*<= 500/,

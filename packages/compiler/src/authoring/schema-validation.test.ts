@@ -12,6 +12,7 @@
  *     refused by its own documentation.
  */
 import { describe, expect, it } from "bun:test";
+import Ajv2020 from "ajv/dist/2020.js";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,6 +25,13 @@ import {
   createAuthoringValidator,
 } from "./schema-validation.js";
 import type { ConnectorDefinition } from "./types/connector.js";
+import fieldDefinitionSchema from "../../config/schemas/field-definition.schema.json" with {
+  type: "json",
+};
+import fieldV2Schema from "../../config/schemas/field-v2.schema.json" with { type: "json" };
+import workflowInspectorSchema from "../../config/schemas/workflow-inspector.schema.json" with {
+  type: "json",
+};
 
 const validator = authoringValidator();
 
@@ -76,6 +84,8 @@ describe("the schema registry", () => {
     expect(validator.schemaFiles.length).toBeGreaterThan(0);
     expect(validator.schemaFiles).toContain("core-entity.schema.json");
     expect(validator.schemaFiles).toContain("connector.schema.json");
+    expect(validator.schemaFiles).toContain("field-definition.schema.json");
+    expect(validator.schemaFiles).toContain("field-v2.schema.json");
   });
 
   it("maps every kind to a schema or to a documented reason for having none", () => {
@@ -84,6 +94,80 @@ describe("the schema registry", () => {
     for (const reason of Object.values(UNSCHEMAD_KINDS)) {
       expect(reason.length).toBeGreaterThan(10);
     }
+  });
+
+  it("keeps the FieldV2 schema id as an equivalent compatibility entry point", () => {
+    const ajv = new Ajv2020.default({ strict: false });
+    ajv.addSchema(workflowInspectorSchema);
+    ajv.addSchema(fieldDefinitionSchema);
+    ajv.addSchema(fieldV2Schema);
+    const canonical = ajv.getSchema(fieldDefinitionSchema.$id)!;
+    const compatibility = ajv.getSchema(fieldV2Schema.$id)!;
+    const compatibilityDefinition = ajv.getSchema(
+      `${fieldV2Schema.$id}#/$defs/fieldV2`,
+    )!;
+    const compatibilityProperties = ajv.getSchema(
+      `${fieldV2Schema.$id}#/$defs/fieldV2Properties`,
+    )!;
+    const recursiveDefinition = {
+      key: "address",
+      valueType: "object",
+      children: [
+        { key: "street", valueType: "string" },
+        {
+          key: "residents",
+          valueType: "object",
+          cardinality: "collection",
+          item: { key: "resident", valueType: "object" },
+        },
+      ],
+    };
+
+    expect(canonical(recursiveDefinition)).toBe(true);
+    expect(compatibility(recursiveDefinition)).toBe(true);
+    expect(compatibilityDefinition(recursiveDefinition)).toBe(true);
+    expect(compatibilityProperties(recursiveDefinition)).toBe(true);
+    expect(canonical({ valueType: "string" })).toBe(false);
+    expect(compatibility({ valueType: "string" })).toBe(false);
+    expect(compatibilityDefinition({ valueType: "string" })).toBe(false);
+    expect(compatibilityProperties({ valueType: "string" })).toBe(false);
+
+    for (const definition of Object.keys(fieldV2Schema.$defs)) {
+      expect(ajv.getSchema(`${fieldV2Schema.$id}#/$defs/${definition}`)).toBeDefined();
+    }
+  });
+
+  it("rejects a fieldDefinition semantic value with a second authored shape", () => {
+    const ajv = new Ajv2020.default({ strict: false });
+    ajv.addSchema(workflowInspectorSchema);
+    ajv.addSchema(fieldDefinitionSchema);
+    ajv.addSchema(fieldV2Schema);
+    const canonical = ajv.getSchema(fieldDefinitionSchema.$id)!;
+    const compatibility = ajv.getSchema(fieldV2Schema.$id)!;
+
+    const semanticField = {
+      key: "definition",
+      valueType: "object",
+      semanticType: "fieldDefinition",
+    };
+    expect(canonical(semanticField)).toBe(true);
+    expect(compatibility(semanticField)).toBe(true);
+
+    for (const ambiguous of [
+      { ...semanticField, children: [{ key: "extra", valueType: "string" }] },
+      { ...semanticField, item: { key: "extra", valueType: "string" } },
+    ]) {
+      expect(canonical(ambiguous)).toBe(false);
+      expect(compatibility(ambiguous)).toBe(false);
+    }
+
+    expect(
+      canonical({
+        key: "ordinaryObject",
+        valueType: "object",
+        children: [{ key: "extra", valueType: "string" }],
+      }),
+    ).toBe(true);
   });
 
   it("refuses a kind that is in neither list, rather than skipping it", () => {

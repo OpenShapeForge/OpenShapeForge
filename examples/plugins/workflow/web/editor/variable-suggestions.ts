@@ -611,7 +611,7 @@ function flattenField(
 }
 
 /**
- * `FieldV2Cardinality`, read the three ways it is authored: the word
+ * `FieldDefinitionCardinality`, read the three ways it is authored: the word
  * `"collection"`, an unbounded `max`, or a `max` above one. Anything else,
  * including absent, is a single value.
  */

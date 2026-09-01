@@ -16,7 +16,7 @@
  * delivers events must not acquire a GraphQL namespace, so surfaces are
  * projected per capability rather than for every connector.
  */
-import type { FieldV2 } from "./field-v2.js";
+import type { FieldDefinition } from "./field-definition.js";
 import type { LocalizedText } from "./common.js";
 
 // ---------------------------------------------------------------------------
@@ -154,7 +154,7 @@ export interface ConnectorOAuth {
  * field vocabulary: it routes the value to encrypted storage, keeps it out of
  * every read path, and marks it for redaction in logs and errors.
  */
-export type ConnectorConfigField = FieldV2 & { secret?: boolean };
+export type ConnectorConfigField = FieldDefinition & { secret?: boolean };
 
 export interface ConnectorNetwork {
   /**
@@ -234,7 +234,7 @@ export interface ConnectorReliability {
 
 export interface ConnectorOperationOutput {
   cardinality: "one" | "many";
-  fields: FieldV2[];
+  fields: FieldDefinition[];
 }
 
 export interface ConnectorOperation {
@@ -244,7 +244,7 @@ export interface ConnectorOperation {
   description?: string | LocalizedText;
   /** Per-operation role allow-list, enforced before the package is called. */
   authorization?: { roles: { invoke: string[] } };
-  input?: FieldV2[];
+  input?: FieldDefinition[];
   output: ConnectorOperationOutput;
   reliability?: ConnectorReliability;
   /** REST overrides; both default from the operation key and kind. */
@@ -257,7 +257,7 @@ export interface ConnectorEvent {
   key: string;
   direction: ConnectorEventDirection;
   label?: LocalizedText;
-  payload: FieldV2[];
+  payload: FieldDefinition[];
 }
 
 export interface ConnectorRestExposure {
@@ -338,7 +338,7 @@ export interface CompiledConnectorOperation {
   /** Present only when the connector exposes MCP and the operation is enabled. */
   mcp?: { toolName: string };
   roles: { invoke: string[] };
-  input: FieldV2[];
+  input: FieldDefinition[];
   output: ConnectorOperationOutput;
   /**
    * The runtime boundary with the implementation package: input is validated

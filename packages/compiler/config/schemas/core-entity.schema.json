@@ -83,9 +83,9 @@
     "fields": {
       "type": "array",
       "minItems": 1,
-      "description": "Authored fields, in the v2 shape (`valueType`, not `type`). `$defs/field` below describes the superseded v1 shape and is kept only because other schemas still reference parts of it.",
+      "description": "Authored field definitions use the canonical recursive FieldDefinition contract (`valueType`, not the superseded `type`).",
       "items": {
-        "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json"
+        "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json"
       }
     },
     "relationships": {

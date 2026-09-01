@@ -48,7 +48,7 @@
       "type": "array",
       "minItems": 0,
       "items": {
-        "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json"
+        "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json"
       }
     },
     "outputFields": {
@@ -56,7 +56,7 @@
       "minItems": 0,
       "description": "Optional workflow output fields exposed by this node for variable suggestions and downstream condition builders.",
       "items": {
-        "$ref": "https://openshapeforge.example/schema-phase1/field-v2.schema.json"
+        "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json"
       }
     }
   }

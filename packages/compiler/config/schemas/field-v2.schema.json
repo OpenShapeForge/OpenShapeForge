@@ -1,363 +1,39 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openshapeforge.example/schema-phase1/field-v2.schema.json",
-  "title": "Field V2 Schema",
-  "$ref": "#/$defs/fieldV2",
+  "title": "Field V2 Compatibility Schema",
+  "description": "Compatibility entry point for the canonical FieldDefinition schema.",
+  "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/fieldDefinition",
   "$defs": {
     "localizedText": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "en": { "type": "string" },
-        "nl": { "type": "string" },
-        "fr": { "type": "string" }
-      }
+      "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/localizedText"
     },
     "validationRule": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["value"],
-      "properties": {
-        "value": { "type": ["number", "string", "boolean"] },
-        "message": { "$ref": "#/$defs/localizedText" }
-      }
+      "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/validationRule"
     },
     "validation": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "required": {
-          "oneOf": [{ "type": "boolean" }, { "$ref": "#/$defs/validationRule" }]
-        },
-        "minLength": {
-          "oneOf": [{ "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/validationRule" }]
-        },
-        "maxLength": {
-          "oneOf": [{ "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/validationRule" }]
-        },
-        "minItems": {
-          "oneOf": [{ "type": "integer", "minimum": 0 }, { "$ref": "#/$defs/validationRule" }]
-        },
-        "min": {
-          "oneOf": [{ "type": "number" }, { "$ref": "#/$defs/validationRule" }]
-        },
-        "max": {
-          "oneOf": [{ "type": "number" }, { "$ref": "#/$defs/validationRule" }]
-        },
-        "pattern": {
-          "oneOf": [{ "type": "string" }, { "$ref": "#/$defs/validationRule" }]
-        },
-        "format": { "type": "string", "minLength": 1 },
-        "custom": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["name"],
-            "properties": {
-              "name": { "type": "string", "minLength": 1 },
-              "message": { "$ref": "#/$defs/localizedText" },
-              "params": { "type": "object" }
-            }
-          }
-        }
-      }
+      "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/validation"
     },
     "fieldOptions": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["type"],
-      "properties": {
-        "type": { "type": "string", "enum": ["static", "referentiedata", "remote", "dynamic"] },
-        "items": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["value", "label"],
-            "properties": {
-              "value": { "type": "string" },
-              "label": { "$ref": "#/$defs/localizedText" }
-            }
-          }
-        },
-        "source": { "type": "string" },
-        "referentieGroep": { "type": "string" },
-        "remoteUrl": { "type": "string" },
-        "valueField": { "type": "string" },
-        "labelField": { "type": "string" }
-      }
+      "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/fieldOptions"
     },
     "relationship": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["kind", "entity"],
-      "properties": {
-        "kind": { "type": "string", "enum": ["belongsTo", "hasMany"] },
-        "entity": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
-        },
-        "foreignKey": { "type": "string", "minLength": 1 },
-        "displayField": { "type": "string", "minLength": 1 }
-      }
+      "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/relationship"
     },
     "cardinality": {
-      "oneOf": [
-        { "type": "string", "enum": ["single", "collection"] },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "min": { "type": "integer", "minimum": 0 },
-            "max": {
-              "oneOf": [
-                { "type": "integer", "minimum": 0 },
-                { "type": "string", "const": "unbounded" }
-              ]
-            }
-          },
-          "anyOf": [
-            { "required": ["min"] },
-            { "required": ["max"] }
-          ]
-        }
-      ]
+      "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/cardinality"
     },
     "fieldAuthoring": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "profile": { "type": "string", "minLength": 1 },
-        "pinned": { "type": "boolean" },
-        "locked": { "type": "boolean" },
-        "singleton": { "type": "boolean" },
-        "visibleProperties": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": { "type": "string", "minLength": 1 }
-        }
-      }
+      "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/fieldAuthoring"
     },
     "render": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["component"],
-      "properties": {
-        "component": { "type": "string", "minLength": 1 },
-        "props": { "type": "object" }
-      }
+      "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/render"
     },
     "fieldV2": {
-      "description": "The closed field shape — what to $ref when a field is used as-is. unevaluatedProperties rather than additionalProperties because only the former sees an allOf branch beside it, which is what lets a use site extend the shape (connector configuration fields add `secret`) without the closure rejecting the addition.",
-      "allOf": [{ "$ref": "#/$defs/fieldV2Properties" }],
-      "unevaluatedProperties": false
+      "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/fieldDefinition"
     },
     "fieldV2Properties": {
-      "description": "The property set, left OPEN so a use site can extend it. Extend this one only alongside your own unevaluatedProperties: false — on its own it closes nothing.",
-      "type": "object",
-      "required": ["key", "valueType"],
-      "properties": {
-        "key": { "type": "string", "minLength": 1 },
-        "valueType": {
-          "type": "string",
-          "enum": ["string", "integer", "number", "boolean", "date", "datetime", "object"]
-        },
-        "cardinality": { "$ref": "#/$defs/cardinality" },
-        "variables": { "type": "string", "enum": ["none", "whole", "template", "both"], "default": "none" },
-        "suggestions": {
-          "type": "object",
-          "additionalProperties": false,
-          "minProperties": 1,
-          "description": "Where the variable suggestions offered for this field come from. Mirrored onto the generated page field so the renderer can offer the right list; pairs with `variables`.",
-          "properties": {
-            "sourceField": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Key of a sibling field whose value determines the available suggestions."
-            },
-            "sourceKey": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Fixed suggestion-source key, when the list does not depend on a sibling field."
-            }
-          }
-        },
-        "sortable": { "type": "boolean" },
-        "required": { "type": "boolean" },
-        "readOnly": {
-          "type": "boolean",
-          "description": "Presentation only: render the field with its display component instead of its input component. Not an API contract — use `immutable` for that."
-        },
-        "immutable": {
-          "type": "boolean",
-          "description": "API contract: the field may be set when the record is created and is refused by every generated transport afterwards (REST 400; absent from the GraphQL update input and the MCP update schema). Use it for provenance links and other values that must not be re-pointed once written."
-        },
-        "label": { "$ref": "#/$defs/localizedText" },
-        "description": { "$ref": "#/$defs/localizedText" },
-        "placeholder": { "$ref": "#/$defs/localizedText" },
-        "help": { "$ref": "#/$defs/localizedText" },
-        "semanticType": { "type": "string", "minLength": 1 },
-        "unit": { "type": "string" },
-        "currency": { "type": "string" },
-        "value": {},
-        "defaultValue": {},
-        "validation": { "$ref": "#/$defs/validation" },
-        "relationship": { "$ref": "#/$defs/relationship" },
-        "options": { "$ref": "#/$defs/fieldOptions" },
-        "persisted": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "column": { "type": "string" },
-            "storageClass": { "type": "string", "enum": ["core", "profile"] }
-          }
-        },
-        "render": { "$ref": "#/$defs/render" },
-        "permissions": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "read": { "type": "array", "items": { "type": "string" } },
-            "write": { "type": "array", "items": { "type": "string" } }
-          }
-        },
-        "authorization": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["roles"],
-          "properties": {
-            "roles": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "read": { "type": "array", "items": { "type": "string" } },
-                "write": { "type": "array", "items": { "type": "string" } }
-              }
-            }
-          }
-        },
-        "classification": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["sensitivity"],
-          "properties": {
-            "sensitivity": {
-              "type": "string",
-              "enum": ["public", "internal", "confidential", "pii", "bsn"]
-            },
-            "category": { "type": "string" }
-          }
-        },
-        "retention": { "type": "object" },
-        "audit": { "type": "boolean" },
-        "hints": { "type": "object" },
-        "visibility": { "type": "object" },
-        "computed": { "type": "object" },
-        "runtime": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "aliases": {
-              "type": "array",
-              "uniqueItems": true,
-              "items": { "type": "string", "minLength": 1 }
-            },
-            "required": { "type": "boolean" }
-          }
-        },
-        "workflowInspector": {
-          "$ref": "https://openshapeforge.example/schema-common/workflow-inspector.schema.json"
-        },
-        "layoutFraction": { "type": "number", "minimum": 0, "maximum": 1 },
-        "localized": { "type": "boolean" },
-        "shape": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/fieldV2" }
-        },
-        "authoring": { "$ref": "#/$defs/fieldAuthoring" },
-        "children": {
-          "type": "array",
-          "items": { "$ref": "#/$defs/fieldV2" }
-        },
-        "item": { "$ref": "#/$defs/fieldV2" }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "cardinality": {
-                "type": "object",
-                "properties": {
-                  "max": {
-                    "oneOf": [
-                      { "type": "integer", "minimum": 2 },
-                      { "const": "unbounded" }
-                    ]
-                  }
-                },
-                "required": ["max"]
-              }
-            },
-            "required": ["cardinality"]
-          },
-          "then": {
-            "anyOf": [
-              { "required": ["item"] },
-              { "required": ["shape"] },
-              { "required": ["semanticType"] },
-              { "required": ["relationship"] }
-            ]
-          }
-        },
-        {
-          "if": { "required": ["sortable"] },
-          "then": {
-            "required": ["cardinality"],
-            "anyOf": [
-              {
-                "properties": {
-                  "cardinality": { "const": "collection" }
-                }
-              },
-              {
-                "properties": {
-                  "cardinality": {
-                    "type": "object",
-                    "properties": {
-                      "max": {
-                        "oneOf": [
-                          { "type": "integer", "minimum": 2 },
-                          { "const": "unbounded" }
-                        ]
-                      }
-                    },
-                    "required": ["max"]
-                  }
-                }
-              }
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "semanticType": { "const": "fieldDefinition" },
-              "authoring": { "required": ["profile"] }
-            },
-            "required": ["semanticType", "authoring"]
-          },
-          "then": {
-            "not": {
-              "anyOf": [
-                { "required": ["required"] },
-                { "required": ["children"] },
-                { "required": ["item"] }
-              ]
-            }
-          }
-        }
-      ]
+      "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/fieldDefinitionProperties"
     }
   }
 }

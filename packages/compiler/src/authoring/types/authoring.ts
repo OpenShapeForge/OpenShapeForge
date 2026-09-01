@@ -4,58 +4,32 @@ import type {
   LocalizedText,
   FieldValidation,
   SemanticTypeLookupDefinition,
-  FieldReference,
-  FieldPersisted,
-  FieldRender,
-  FieldPermissions,
   EntityPermissions,
-  VisibilityConfig,
-  ComputedField,
   FieldOptions,
   DataClassification,
   RetentionPolicy,
   ContextHints,
   EntityHooks,
   AuthorizationConfig,
-  FieldAuthorizationConfig,
   ProfileAuthorizationConfig,
 } from "./common.js";
 import type { Relationship, UIDefinition } from "./views.js";
+import type {
+  FieldDefinition,
+  FieldDefinitionAuthoringMetadata,
+  FieldDefinitionCardinality,
+  FieldDefinitionRelationship,
+  FieldDefinitionRuntimeMetadata,
+  FieldDefinitionSuggestions,
+  FieldDefinitionWorkflowInspector,
+} from "./field-definition.js";
 
-export interface Field {
-  key: string;
-  valueType:
-    | "string"
-    | "integer"
-    | "number"
-    | "boolean"
-    | "date"
-    | "datetime"
-    | "object";
-  cardinality?: FieldCardinality;
-  variables?: "none" | "whole" | "template" | "both";
-  sortable?: boolean;
-  required?: boolean;
-  /** Presentation only — picks the display component over the input one. */
-  readOnly?: boolean;
-  /**
-   * API contract: settable at create, refused on update by every generated
-   * transport. Distinct from `readOnly`, which is a rendering choice (#177).
-   */
-  immutable?: boolean;
-  label?: LocalizedText;
-  description?: LocalizedText;
-  placeholder?: LocalizedText;
-  help?: LocalizedText;
-  semanticType?: string;
-  unit?: string;
-  currency?: string;
-  value?: unknown;
-  defaultValue?: unknown;
-  validation?: FieldValidation;
-  relationship?: FieldRelationship;
-  visibility?: VisibilityConfig;
-  computed?: ComputedField;
+/**
+ * Entity-authoring compatibility surface. Its structural contract comes from
+ * FieldDefinition; the remaining properties are legacy entity-only escape
+ * hatches that have not yet moved into the enforced authoring schema.
+ */
+export interface Field extends FieldDefinition {
   /**
    * Escape hatch to override the emitted GraphQL type for a non-persisted
    * field. When set, the GraphQL codegen skips the default `FIELD_TO_GQL_TYPE`
@@ -64,75 +38,17 @@ export interface Field {
    * `persisted` block so storage compilation skips the field.
    */
   graphqlType?: string;
-  options?: FieldOptions;
-  persisted?: FieldPersisted;
-  render?: FieldRender;
-  permissions?: FieldPermissions;
-  authorization?: FieldAuthorizationConfig;
-  classification?: DataClassification;
-  retention?: RetentionPolicy;
-  audit?: boolean;
-  hints?: ContextHints;
-  suggestions?: FieldSuggestions;
-  runtime?: FieldRuntimeMetadata;
-  workflowInspector?: FieldWorkflowInspector;
-  layoutFraction?: number;
-  /**
-   * When `true`, the field's *value* is `LocalizedText`-shaped
-   * (`{ nl?, en?, fr? }`) and the renderer scopes reads/writes to the active
-   * `ctx.lang`. Use for any scalar leaf whose content needs to differ per
-   * language (labels, descriptions, button text, …).
-   */
-  localized?: boolean;
   shape?: Field[];
-  authoring?: FieldAuthoringMetadata;
   children?: Field[];
   item?: Field;
 }
 
-export type FieldCardinality =
-  | "single"
-  | "collection"
-  | {
-      min?: number;
-      max?: number | "unbounded";
-    };
-
-export interface FieldAuthoringMetadata {
-  profile?: string;
-  pinned?: boolean;
-  locked?: boolean;
-  singleton?: boolean;
-  visibleProperties?: string[];
-}
-
-export interface FieldSuggestions {
-  /** Key of a sibling field whose value determines the available variable suggestions. */
-  sourceField?: string;
-  /**
-   * WEB-020 — Key of a form-level `FormVariableSource` the field opts into for
-   * its `$`-triggered variable picker. Replaces the per-field `sourceField`
-   * indirection for forms that declare their own variable sources.
-   */
-  sourceKey?: string;
-}
-
-export interface FieldRelationship {
-  kind: "belongsTo" | "hasMany";
-  entity: string;
-  foreignKey?: string;
-  displayField?: string;
-}
-
-export interface FieldRuntimeMetadata {
-  aliases?: string[];
-  required?: boolean;
-}
-
-export interface FieldWorkflowInspector {
-  objectPresentation?: "inlineChildren";
-  displayMode?: "hidden" | "display" | "readOnly";
-}
+export type FieldCardinality = FieldDefinitionCardinality;
+export type FieldAuthoringMetadata = FieldDefinitionAuthoringMetadata;
+export type FieldSuggestions = FieldDefinitionSuggestions;
+export type FieldRelationship = FieldDefinitionRelationship;
+export type FieldRuntimeMetadata = FieldDefinitionRuntimeMetadata;
+export type FieldWorkflowInspector = FieldDefinitionWorkflowInspector;
 
 export interface ComponentDefinition {
   kind: "view" | "field" | "relationship" | "custom";

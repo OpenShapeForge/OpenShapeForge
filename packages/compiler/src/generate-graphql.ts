@@ -11,7 +11,7 @@
 import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import {
-  compiledFieldSchema,
+  compiledFieldSchemaWithoutDefinitions,
   describeCompiledField,
   localizedText,
 } from "./field-json-schema.js";
@@ -67,7 +67,7 @@ function compiledDescription(
   referentiedata: CoreReferentiedataSnapshot,
 ): string | undefined {
   if (isRestricted(field)) return undefined;
-  const description = compiledFieldSchema(field, referentiedata, {
+  const description = compiledFieldSchemaWithoutDefinitions(field, referentiedata, {
     includeDefault: false,
   }).description;
   return typeof description === "string"

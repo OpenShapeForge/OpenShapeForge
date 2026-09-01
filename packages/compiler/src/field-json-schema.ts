@@ -17,13 +17,40 @@
 import type { CompiledField } from "./authoring/types.js";
 import type { LocalizedText } from "./authoring/types/common.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
+import fieldDefinitionAuthoringSchema from "../config/schemas/field-definition.schema.json" with {
+  type: "json",
+};
+import workflowInspectorSchema from "../config/schemas/workflow-inspector.schema.json" with {
+  type: "json",
+};
 
 export type JsonObject = Record<string, unknown>;
 
+export const FIELD_DEFINITION_SEMANTIC_TYPE = "fieldDefinition";
+export const FIELD_DEFINITION_SCHEMA_REF = "#/$defs/fieldDefinition";
+
+const WORKFLOW_INSPECTOR_SCHEMA_ID =
+  "https://openshapeforge.example/schema-common/workflow-inspector.schema.json";
+
+const {
+  $schema: _workflowDialect,
+  $id: _workflowId,
+  title: _workflowTitle,
+  ...workflowInspector
+} = workflowInspectorSchema;
+const fieldDefinitionDefinitions = {
+  ...(rebaseJsonSchemaReferences(
+    fieldDefinitionAuthoringSchema.$defs,
+    WORKFLOW_INSPECTOR_SCHEMA_ID,
+    "#/$defs/workflowInspector",
+  ) as JsonObject),
+  workflowInspector,
+};
+
 /**
  * The structural minimum this mapping reads. Both `CompiledField` (compiled
- * entity model) and `FieldV2` (authored connector operation fields) satisfy it,
- * so neither consumer has to convert.
+ * entity model) and `FieldDefinition` (authored connector operation fields)
+ * satisfy it, so neither consumer has to convert.
  */
 export type SchemaSourceField = {
   key: string;
@@ -31,6 +58,9 @@ export type SchemaSourceField = {
   cardinality?: unknown;
   required?: boolean;
   defaultValue?: unknown;
+  semanticType?: string;
+  children?: SchemaSourceField[];
+  item?: SchemaSourceField;
   validation?: {
     minLength?: unknown;
     maxLength?: unknown;
@@ -41,6 +71,73 @@ export type SchemaSourceField = {
     minItems?: unknown;
   };
 };
+
+function referencesFieldDefinitionSchema(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(referencesFieldDefinitionSchema);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value as JsonObject).some(
+    ([key, entry]) =>
+      (key === "$ref" && entry === FIELD_DEFINITION_SCHEMA_REF) ||
+      referencesFieldDefinitionSchema(entry),
+  );
+}
+
+export function fieldDefinitionValueSchema(): JsonObject {
+  return { $ref: FIELD_DEFINITION_SCHEMA_REF };
+}
+
+export function bundleFieldDefinitionSchema(
+  schema: JsonObject,
+): JsonObject {
+  if (!referencesFieldDefinitionSchema(schema)) return schema;
+  const existingDefinitions =
+    schema.$defs && typeof schema.$defs === "object" && !Array.isArray(schema.$defs)
+      ? (schema.$defs as JsonObject)
+      : {};
+  return {
+    ...schema,
+    $defs: {
+      ...existingDefinitions,
+      ...structuredClone(fieldDefinitionDefinitions),
+    },
+  };
+}
+
+/** Rebase only JSON Schema references, leaving descriptions and values intact. */
+export function rebaseJsonSchemaReferences(
+  value: unknown,
+  fromBase: string,
+  toBase: string,
+): unknown {
+  if (Array.isArray(value)) {
+    return value.map((entry) => rebaseJsonSchemaReferences(entry, fromBase, toBase));
+  }
+  if (!value || typeof value !== "object") return value;
+
+  const rebased: JsonObject = {};
+  for (const [key, entry] of Object.entries(value as JsonObject)) {
+    rebased[key] =
+      key === "$ref" && typeof entry === "string" && entry.startsWith(fromBase)
+        ? `${toBase}${entry.slice(fromBase.length)}`
+        : rebaseJsonSchemaReferences(entry, fromBase, toBase);
+  }
+  return rebased;
+}
+
+/** Move reusable definitions when a complete schema is nested in another root. */
+export function splitBundledDefinitions(schema: JsonObject): {
+  schema: JsonObject;
+  definitions: JsonObject;
+} {
+  const { $defs, ...unbundled } = schema;
+  return {
+    schema: unbundled,
+    definitions:
+      $defs && typeof $defs === "object" && !Array.isArray($defs)
+        ? ($defs as JsonObject)
+        : {},
+  };
+}
 
 /** Unwrap `x` or `{ value: x }` — validation rules carry either. */
 export function ruleValue(
@@ -290,12 +387,15 @@ function compiledValueSchema(
   referentiedata: CoreReferentiedataSnapshot,
   options: CompiledFieldSchemaOptions,
 ): JsonObject {
+  if (field.semanticType === FIELD_DEFINITION_SEMANTIC_TYPE) {
+    return fieldDefinitionValueSchema();
+  }
   if (
     field.valueType === "object" &&
     field.children &&
     field.children.length > 0
   ) {
-    return compiledObjectSchema(field.children, referentiedata, {
+    return compiledObjectSchemaWithoutDefinitions(field.children, referentiedata, {
       ...options,
       requireRequired: options.requireNestedRequired ?? true,
     });
@@ -341,7 +441,7 @@ function addCompiledFieldMetadata(
 }
 
 /** Project one resolved entity field into deterministic JSON Schema. */
-export function compiledFieldSchema(
+export function compiledFieldSchemaWithoutDefinitions(
   field: CompiledField,
   referentiedata: CoreReferentiedataSnapshot = {},
   options: CompiledFieldSchemaOptions = {},
@@ -370,7 +470,7 @@ export function compiledFieldSchema(
     ? {
         allOf: [
           outerItemSchema,
-          compiledFieldSchema(field.item, referentiedata, options),
+          compiledFieldSchemaWithoutDefinitions(field.item, referentiedata, options),
         ],
       }
     : outerItemSchema;
@@ -390,16 +490,37 @@ export function compiledFieldSchema(
   return array;
 }
 
+/** Project one resolved entity field and bundle reusable definitions at the schema root. */
+export function compiledFieldSchema(
+  field: CompiledField,
+  referentiedata: CoreReferentiedataSnapshot = {},
+  options: CompiledFieldSchemaOptions = {},
+): JsonObject {
+  return bundleFieldDefinitionSchema(
+    compiledFieldSchemaWithoutDefinitions(field, referentiedata, options),
+  );
+}
+
+function compiledObjectSchemaWithoutDefinitions(
+  fields: CompiledField[],
+  referentiedata: CoreReferentiedataSnapshot,
+  options: { requireRequired: boolean } & CompiledFieldSchemaOptions,
+): JsonObject {
+  return objectSchemaFrom(
+    fields,
+    (field) =>
+      compiledFieldSchemaWithoutDefinitions(field as CompiledField, referentiedata, options),
+    options,
+  );
+}
+
 /** Project a resolved field list into an object request/value schema. */
 export function compiledObjectSchema(
   fields: CompiledField[],
   referentiedata: CoreReferentiedataSnapshot = {},
   options: { requireRequired: boolean } & CompiledFieldSchemaOptions,
 ): JsonObject {
-  return objectSchemaFrom(
-    fields,
-    (field) =>
-      compiledFieldSchema(field as CompiledField, referentiedata, options),
-    options,
+  return bundleFieldDefinitionSchema(
+    compiledObjectSchemaWithoutDefinitions(fields, referentiedata, options),
   );
 }

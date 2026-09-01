@@ -5,7 +5,7 @@ import {
   connectorFieldSchema,
 } from "./connector-schemas.js";
 import { constraintsForField } from "../../field-json-schema.js";
-import type { FieldV2 } from "../types/field-v2.js";
+import type { FieldDefinition } from "../types/field-definition.js";
 
 describe("connector field schemas", () => {
   it("maps authored validation bounds into the schema", () => {
@@ -17,7 +17,7 @@ describe("connector field schemas", () => {
         maxLength: { value: 100 },
         pattern: "^[a-z/]+$",
       },
-    } as FieldV2;
+    } as FieldDefinition;
 
     expect(connectorFieldSchema(field)).toEqual({
       type: "string",
@@ -37,7 +37,7 @@ describe("connector field schemas", () => {
       ["object", { type: "object" }],
     ];
     for (const [valueType, expected] of cases) {
-      expect(connectorFieldSchema({ key: "f", valueType } as FieldV2)).toEqual(
+      expect(connectorFieldSchema({ key: "f", valueType } as FieldDefinition)).toEqual(
         expected,
       );
     }
@@ -51,7 +51,7 @@ describe("connector field schemas", () => {
         type: "static",
         items: [{ value: "fast" }, { value: "safe" }],
       },
-    } as FieldV2;
+    } as FieldDefinition;
     expect(connectorFieldSchema(field).enum).toEqual(["fast", "safe"]);
   });
 
@@ -62,7 +62,7 @@ describe("connector field schemas", () => {
       key: "kind",
       valueType: "string",
       options: { type: "referentiedata", referentieGroep: "RELATIESOORT" },
-    } as FieldV2;
+    } as FieldDefinition;
     expect(connectorFieldSchema(field).enum).toBeUndefined();
   });
 
@@ -73,7 +73,7 @@ describe("connector field schemas", () => {
       cardinality: "collection",
       description: { en: "Object keys" },
       validation: { minItems: 1, maxLength: 50 },
-    } as FieldV2;
+    } as FieldDefinition;
 
     expect(connectorFieldSchema(field)).toEqual({
       type: "array",
@@ -82,13 +82,44 @@ describe("connector field schemas", () => {
       minItems: 1,
     });
   });
+
+  it("reuses the canonical recursive schema for field-definition values", () => {
+    const schema = connectorFieldSchema({
+      key: "definitions",
+      valueType: "object",
+      cardinality: "collection",
+      semanticType: "fieldDefinition",
+    });
+
+    expect(schema).toMatchObject({
+      type: "array",
+      items: { $ref: "#/$defs/fieldDefinition" },
+      $defs: { fieldDefinition: expect.any(Object) },
+    });
+  });
+
+  it("does not bundle definitions that the connector projection never references", () => {
+    const schema = connectorFieldSchema({
+      key: "wrapper",
+      valueType: "object",
+      children: [
+        {
+          key: "definition",
+          valueType: "object",
+          semanticType: "fieldDefinition",
+        },
+      ],
+    });
+
+    expect(schema).toEqual({ type: "object" });
+  });
 });
 
 describe("operation schemas", () => {
   const input = [
     { key: "prefix", valueType: "string" },
     { key: "limit", valueType: "integer", required: true },
-  ] as FieldV2[];
+  ] as FieldDefinition[];
 
   it("builds an input object that rejects unknown properties", () => {
     const { input: schema } = buildOperationSchemas(input, {
@@ -111,7 +142,7 @@ describe("operation schemas", () => {
           required: true,
           defaultValue: "eu",
         },
-      ] as FieldV2[],
+      ] as FieldDefinition[],
       { cardinality: "one", fields: [] },
     );
     expect(schema.required).toEqual(["region"]);
@@ -122,7 +153,7 @@ describe("operation schemas", () => {
       cardinality: "many",
       fields: [
         { key: "key", valueType: "string", required: true },
-      ] as FieldV2[],
+      ] as FieldDefinition[],
     });
     expect(output).toEqual({
       type: "array",
@@ -135,10 +166,29 @@ describe("operation schemas", () => {
     });
   });
 
+  it("hoists recursive definitions when a many output wraps its row schema", () => {
+    const { output } = buildOperationSchemas([], {
+      cardinality: "many",
+      fields: [
+        {
+          key: "definition",
+          valueType: "object",
+          semanticType: "fieldDefinition",
+        },
+      ],
+    });
+    const row = output.items as Record<string, unknown>;
+    const definition = (row.properties as Record<string, Record<string, unknown>>).definition;
+
+    expect(definition?.$ref).toBe("#/$defs/fieldDefinition");
+    expect(row.$defs).toBeUndefined();
+    expect(output.$defs).toMatchObject({ fieldDefinition: expect.any(Object) });
+  });
+
   it("leaves a one-cardinality output as the bare object", () => {
     const { output } = buildOperationSchemas([], {
       cardinality: "one",
-      fields: [{ key: "key", valueType: "string" }] as FieldV2[],
+      fields: [{ key: "key", valueType: "string" }] as FieldDefinition[],
     });
     expect(output).toMatchObject({
       type: "object",
@@ -157,7 +207,7 @@ describe("shared constraint mapping", () => {
       key: "amount",
       valueType: "integer",
       validation: { min: 1, max: 10, format: "int64" },
-    } as FieldV2;
+    } as FieldDefinition;
 
     const shared = constraintsForField(field);
     const connectorSchema = connectorFieldSchema(field);

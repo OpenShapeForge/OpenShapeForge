@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import Ajv2020 from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
 import type {
   CompilerPlugin,
   JsonSchema,
@@ -18,9 +19,12 @@ const GRAPHQL_FIELD = /^[_A-Za-z][_0-9A-Za-z]*$/;
 const SECURITY_SCHEME = /^[A-Za-z0-9._-]+$/;
 const REST_PATH = /^\/api\/[a-z][a-z0-9-]*(?:\/(?::[_A-Za-z][_0-9A-Za-z]*|[a-z0-9][a-z0-9._-]*))*$/;
 const RESERVED_API_NAMESPACES = new Set([
+  "api-keys",
   "connectors",
   "control",
+  "documents",
   "graphql",
+  "health",
   "live",
   "mcp",
   "metrics",
@@ -62,7 +66,8 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
   if (!REST_PATH.test(restPath) || !restPath.startsWith(`/api/${plugin}/`)) {
     throw new Error(`${where} REST path must be a safe /api/${plugin}/ path.`);
   }
-  const ajv = new Ajv2020.default({ strict: true, allErrors: true, formats: { uuid: true, date: true, "date-time": true } });
+  const ajv = new Ajv2020.default({ strict: true, allErrors: true });
+  (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
   assertSchema(ajv, operation.inputSchema, `${where} inputSchema`);
   assertSchema(ajv, operation.outputSchema, `${where} outputSchema`);
   if (operation.inputSchema.type !== "object" ||
@@ -331,9 +336,12 @@ export function operationOpenApiPaths(operations: readonly CompiledPluginOperati
     const pathNames = new Set(pathParameters.map((parameter) => parameter.name));
     const inputProperties = operation.inputSchema.properties as Record<string, unknown> | undefined;
     const required = new Set(Array.isArray(operation.inputSchema.required) ? operation.inputSchema.required as string[] : []);
+    const idempotencyInputField = operation.idempotency.mode === "idempotency-key"
+      ? operation.idempotency.inputField
+      : undefined;
     const queryParameters = rest.method === "GET" || rest.method === "DELETE"
       ? Object.entries(inputProperties ?? {})
-          .filter(([name]) => !pathNames.has(name))
+          .filter(([name]) => !pathNames.has(name) && name !== idempotencyInputField)
           .map(([name, schema]) => ({ name, in: "query", required: required.has(name), schema }))
       : [];
     const idempotencyParameters = operation.idempotency.mode === "idempotency-key"
@@ -345,9 +353,6 @@ export function operationOpenApiPaths(operations: readonly CompiledPluginOperati
           schema: { type: "string", minLength: 1 },
         }]
       : [];
-    const idempotencyInputField = operation.idempotency.mode === "idempotency-key"
-      ? operation.idempotency.inputField
-      : undefined;
     const bodyProperties = Object.fromEntries(
       Object.entries(inputProperties ?? {}).filter(([name]) =>
         !pathNames.has(name) && name !== idempotencyInputField
@@ -356,10 +361,11 @@ export function operationOpenApiPaths(operations: readonly CompiledPluginOperati
     const bodyRequired = [...required].filter((name) =>
       !pathNames.has(name) && name !== idempotencyInputField
     );
+    const { required: _canonicalRequired, ...inputSchemaWithoutRequired } = operation.inputSchema;
     const bodySchema = {
-      ...operation.inputSchema,
+      ...inputSchemaWithoutRequired,
       properties: bodyProperties,
-      ...(bodyRequired.length > 0 ? { required: bodyRequired } : { required: undefined }),
+      ...(bodyRequired.length > 0 ? { required: bodyRequired } : {}),
     };
     paths[openApiPath] = {
       ...(paths[openApiPath] ?? {}),

@@ -29,6 +29,10 @@ describe("canonical operation runtime", () => {
     };
     const bound = bindOperationHandlers([module]).get("workflow.instance.webhook-start")!;
     await expect(invokeOperation(bound, {}, { transport: "graphql", session })).rejects.toMatchObject({ status: 400 });
+    await expect(invokeOperation(bound, {
+      definitionId: "not-a-uuid",
+      idempotencyKey: "webhook-invalid",
+    }, { transport: "graphql", session })).rejects.toMatchObject({ status: 400 });
     const result = await invokeOperation(bound, {
       definitionId: "22222222-2222-4222-8222-222222222222",
       idempotencyKey: "webhook-1",
@@ -49,6 +53,11 @@ describe("canonical operation runtime", () => {
       ...session,
       oauthScopes: ["workflow:write"],
     })).not.toThrow();
+    expect(() => requireOperationAuthorization(operation, {
+      ...session,
+      credential: "api-key",
+      oauthScopes: ["workflow:write"],
+    })).toThrow(/cannot be invoked with an API key/);
   });
 
   test("rejects a success status that differs from the canonical contract", async () => {
@@ -72,6 +81,14 @@ describe("canonical operation runtime", () => {
       name: "workflow",
       operationHandlers: { startWebhook: () => ({ value: {} }), hidden: () => ({ value: {} }) },
     }])).toThrow(/absent from its compiler contract: hidden/);
+  });
+
+  test("caches one immutable handler binding per initialized module set", () => {
+    const modules: RuntimeModule[] = [{
+      name: "workflow",
+      operationHandlers: { startWebhook: async () => ({ value: {} }) },
+    }];
+    expect(bindOperationHandlers(modules)).toBe(bindOperationHandlers(modules));
   });
 });
 
@@ -105,4 +122,39 @@ test("REST maps a required idempotency header into canonical input only", () => 
   } as never;
   expect(() => operationRestInput(bodyRequest, operation))
     .toThrow(/must only be supplied through/);
+  const emptyBodyRequest = {
+    body: new Uint8Array(),
+    query: { utm_source: "sender" },
+    params: { quoteId: "quote-1" },
+    headers: { "idempotency-key": "replay-2" },
+  } as never;
+  expect(operationRestInput(emptyBodyRequest, operation)).toEqual({ quoteId: "quote-1", idempotencyKey: "replay-2" });
+  const collidingQueryRequest = {
+    body: {},
+    query: { idempotencyKey: "query-value" },
+    params: { quoteId: "quote-1" },
+    headers: { "idempotency-key": "replay-3" },
+  } as never;
+  expect(() => operationRestInput(collidingQueryRequest, operation)).toThrow(/query parameters/);
+});
+
+test("REST coerces typed GET and DELETE query values before canonical validation", () => {
+  const operation = {
+    key: "demo.quote.list",
+    inputSchema: {
+      type: "object",
+      required: ["limit", "enabled"],
+      properties: { limit: { type: "integer" }, enabled: { type: "boolean" } },
+      additionalProperties: false,
+    },
+    idempotency: { mode: "none" },
+    transports: { rest: { method: "GET", path: "/api/demo/quotes" } },
+  } as unknown as OperationContract;
+  const request = {
+    body: undefined,
+    query: { limit: "5", enabled: "true" },
+    params: {},
+    headers: {},
+  } as never;
+  expect(operationRestInput(request, operation)).toEqual({ limit: 5, enabled: true });
 });

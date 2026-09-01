@@ -241,12 +241,6 @@ export async function collectAllArtifacts(
         path: "apps/api/src/generated/operations/catalog.json",
         contents: renderOperationCatalog(operations),
       },
-      {
-        path: "apps/api/src/generated/operations/client-metadata.json",
-        contents: renderOperationCatalog(
-          operations.filter((operation) => operation.transports.typescript.enabled),
-        ),
-      },
     ],
     connectors: [
       {

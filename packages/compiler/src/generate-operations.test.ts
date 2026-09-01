@@ -65,6 +65,35 @@ describe("first-class plugin operations", () => {
     });
     expect(paths["/api/demo/quotes/{quoteId}/publish"]!.post.requestBody.content["application/json"].schema.properties)
       .not.toHaveProperty("idempotencyKey");
+    expect(paths["/api/demo/quotes/{quoteId}/publish"]!.post.requestBody.content["application/json"].schema)
+      .not.toHaveProperty("required");
+  });
+
+  test("keeps REST idempotency exclusively in the header for query operations", () => {
+    const queryOperation: PluginOperationContract = {
+      ...operation,
+      inputSchema: {
+        type: "object",
+        required: ["quoteId", "limit", "idempotencyKey"],
+        properties: {
+          quoteId: { type: "string", format: "uuid" },
+          limit: { type: "integer", minimum: 1 },
+          idempotencyKey: { type: "string", minLength: 1 },
+        },
+        additionalProperties: false,
+      },
+      transports: {
+        ...operation.transports,
+        rest: { ...operation.transports.rest, method: "DELETE" },
+      },
+    };
+    const paths = operationOpenApiPaths(
+      collectPluginOperations([{ name: "demo", operations: [queryOperation] }], context),
+    ) as Record<string, Record<string, any>>;
+    const parameters = paths["/api/demo/quotes/{quoteId}/publish"]!.delete.parameters;
+    expect(parameters.filter((parameter: any) => parameter.name === "idempotencyKey")).toHaveLength(0);
+    expect(parameters).toContainEqual(expect.objectContaining({ name: "Idempotency-Key", in: "header", required: true }));
+    expect(parameters).toContainEqual(expect.objectContaining({ name: "limit", in: "query", required: true }));
   });
 
   test("refuses duplicate routes and dishonest binary projections", () => {
@@ -180,6 +209,16 @@ describe("first-class plugin operations", () => {
       ...operation,
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
     }] }], context)).toThrow(/path parameter "quoteId" must be a required/);
+    for (const reserved of ["api-keys", "documents", "health"]) {
+      expect(() => collectPluginOperations([{ name: reserved, operations: [{
+        ...operation,
+        key: `${reserved}.quote.publish`,
+        transports: {
+          ...operation.transports,
+          rest: { ...operation.transports.rest, path: `/api/${reserved}/quotes/:quoteId/publish` },
+        },
+      }] }], context)).toThrow(/reserved API namespace/);
+    }
   });
 
   test("rejects duplicate or invalid generated TypeScript function names", () => {

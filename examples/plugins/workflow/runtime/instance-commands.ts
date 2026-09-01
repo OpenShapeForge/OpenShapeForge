@@ -15,6 +15,7 @@ import {
 import { canViewDefinition, normalizeDefinitionAuthorization } from "./definition-authorization.js";
 import { normalizeJsonValue } from "../../../../apps/api/src/platform/entity-events.js";
 import { getWorkflowInstance, type WorkflowInstanceDetailRecord } from "./instances.js";
+import { WORKFLOW_WRITER_ROLES } from "../authorization.js";
 
 export type StartWorkflowInstanceCommandInput = {
   definitionId: string;
@@ -64,11 +65,7 @@ type InstanceForResumeRow = {
   definition_authorization: Json;
 };
 
-const workflowWriterRoles = new Set([
-  "directie",
-  "workflow-admin",
-  "workflow-operator",
-]);
+const workflowWriterRoles = new Set<string>(WORKFLOW_WRITER_ROLES);
 
 export class WorkflowInstanceCommandError extends Error {
   constructor(

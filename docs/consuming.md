@@ -98,8 +98,8 @@ check scripts (or by invoking `collectAllArtifacts(repoRoot)` — the same
 in-memory entry point `scripts/check-generated-artifacts.mjs` uses here).
 
 Plugins that declare canonical operations additionally emit
-`apps/api/src/generated/operations/{catalog.json,client-metadata.json}`. The
-same declarations are merged into REST OpenAPI, MCP tools, and GraphQL
+`apps/api/src/generated/operations/catalog.json`. The same declarations are
+merged into REST OpenAPI, MCP tools, and GraphQL
 documentation. A host runtime must use the matching runtime module and bind all
 declared handlers; serving a stale compiler half with a different runtime half
 is a startup/readiness failure, not a partial compatibility mode.

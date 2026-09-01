@@ -137,6 +137,39 @@ describe("the schema registry", () => {
     }
   });
 
+  it("rejects a fieldDefinition semantic value with a second authored shape", () => {
+    const ajv = new Ajv2020.default({ strict: false });
+    ajv.addSchema(workflowInspectorSchema);
+    ajv.addSchema(fieldDefinitionSchema);
+    ajv.addSchema(fieldV2Schema);
+    const canonical = ajv.getSchema(fieldDefinitionSchema.$id)!;
+    const compatibility = ajv.getSchema(fieldV2Schema.$id)!;
+
+    const semanticField = {
+      key: "definition",
+      valueType: "object",
+      semanticType: "fieldDefinition",
+    };
+    expect(canonical(semanticField)).toBe(true);
+    expect(compatibility(semanticField)).toBe(true);
+
+    for (const ambiguous of [
+      { ...semanticField, children: [{ key: "extra", valueType: "string" }] },
+      { ...semanticField, item: { key: "extra", valueType: "string" } },
+    ]) {
+      expect(canonical(ambiguous)).toBe(false);
+      expect(compatibility(ambiguous)).toBe(false);
+    }
+
+    expect(
+      canonical({
+        key: "ordinaryObject",
+        valueType: "object",
+        children: [{ key: "extra", valueType: "string" }],
+      }),
+    ).toBe(true);
+  });
+
   it("refuses a kind that is in neither list, rather than skipping it", () => {
     expect(() => validator.validate({ kind: "somethingNew" }, "test.yaml")).toThrow(
       /maps to no schema/,

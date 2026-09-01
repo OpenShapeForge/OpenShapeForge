@@ -27,6 +27,7 @@ import { pluralize } from "./authoring/compiler/helpers.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import {
   compiledFieldSchema,
+  compiledFieldSchemaWithoutDefinitions,
   compiledObjectSchema,
   describeCompiledField,
   localizedText,
@@ -229,7 +230,7 @@ function buildToolsForEntity(
     for (const field of fields) {
       if (field.cardinality === "collection" || field.valueType === "object")
         continue;
-      const schema = compiledFieldSchema(
+      const schema = compiledFieldSchemaWithoutDefinitions(
         field,
         referentiedata,
         MCP_FIELD_SCHEMA_OPTIONS,

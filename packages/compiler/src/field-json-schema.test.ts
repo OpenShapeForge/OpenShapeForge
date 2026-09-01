@@ -2,7 +2,12 @@
 import { describe, expect, it } from "bun:test";
 import Ajv2020 from "ajv/dist/2020.js";
 import type { CompiledField } from "./authoring/types.js";
-import { compiledFieldSchema, compiledObjectSchema } from "./field-json-schema.js";
+import {
+  compiledFieldSchema,
+  compiledFieldSchemaWithoutDefinitions,
+  compiledObjectSchema,
+  rebaseJsonSchemaReferences,
+} from "./field-json-schema.js";
 import type {
   FieldDefinition,
   FieldDefinitionSemanticTypeKind,
@@ -28,6 +33,20 @@ function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): 
 }
 
 describe("compiled field JSON Schema projection", () => {
+  it("rebases only refs and leaves matching prose untouched", () => {
+    const source = {
+      $ref: "https://example.test/schema#/$defs/value",
+      description: "See https://example.test/schema for details.",
+    };
+
+    expect(
+      rebaseJsonSchemaReferences(source, "https://example.test/schema", "#/$defs/rebased"),
+    ).toEqual({
+      $ref: "#/$defs/rebased#/$defs/value",
+      description: source.description,
+    });
+  });
+
   it("exports the complete canonical contract from the package root", () => {
     expect(packageRootFieldDefinition.key).toBe("definition");
     expect(packageRootSemanticTypeKind).toBe("object");
@@ -220,6 +239,23 @@ describe("compiled field JSON Schema projection", () => {
         children: [{ valueType: "string" }],
       }),
     ).toBe(false);
+  });
+
+  it("can project field metadata without cloning reusable definitions", () => {
+    const schema = compiledFieldSchemaWithoutDefinitions(
+      field({
+        key: "definition",
+        valueType: "object",
+        semanticType: "fieldDefinition",
+        description: { en: "Definition" },
+      }),
+    );
+
+    expect(schema).toMatchObject({
+      $ref: "#/$defs/fieldDefinition",
+      description: "Definition",
+    });
+    expect(schema.$defs).toBeUndefined();
   });
 
   it("bundles one reusable definition for multiple single and collection fields", () => {

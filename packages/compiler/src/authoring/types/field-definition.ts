@@ -51,7 +51,11 @@ export interface FieldDefinitionRelationship {
 export interface FieldDefinitionSuggestions {
   /** Key of a sibling field whose value determines the available suggestions. */
   sourceField?: string;
-  /** Fixed form-level suggestion-source key. */
+  /**
+   * WEB-020 — Key of a form-level `FormVariableSource` the field opts into for
+   * its `$`-triggered variable picker. Replaces the per-field `sourceField`
+   * indirection for forms that declare their own variable sources.
+   */
   sourceKey?: string;
 }
 
@@ -84,7 +88,10 @@ export interface FieldDefinition {
   required?: boolean;
   /** Presentation only; selects the display component instead of the input. */
   readOnly?: boolean;
-  /** Settable at create and refused on update by generated transports. */
+  /**
+   * API contract: settable at create, refused on update by every generated
+   * transport. Distinct from `readOnly`, which is a rendering choice (#177).
+   */
   immutable?: boolean;
   label?: LocalizedText;
   description?: LocalizedText;
@@ -112,7 +119,12 @@ export interface FieldDefinition {
   runtime?: FieldDefinitionRuntimeMetadata;
   workflowInspector?: FieldDefinitionWorkflowInspector;
   layoutFraction?: number;
-  /** The field value uses the LocalizedText object shape. */
+  /**
+   * When `true`, the field's *value* is `LocalizedText`-shaped
+   * (`{ nl?, en?, fr? }`) and the renderer scopes reads/writes to the active
+   * `ctx.lang`. Use for any scalar leaf whose content needs to differ per
+   * language (labels, descriptions, button text, …).
+   */
   localized?: boolean;
   shape?: FieldDefinition[];
   authoring?: FieldDefinitionAuthoringMetadata;

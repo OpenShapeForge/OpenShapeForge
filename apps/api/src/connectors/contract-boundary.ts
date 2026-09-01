@@ -22,6 +22,7 @@
  * execution trust model.
  */
 import { Ajv, type ValidateFunction } from "ajv";
+import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 
 /** Shape a compiled connector operation presents to this boundary. */
@@ -82,7 +83,7 @@ export class ConnectorBoundaryError extends Error {
  * rather than trickling them out one request at a time.
  */
 function createAjv(): Ajv {
-  const ajv = new Ajv({ allErrors: true, strict: false });
+  const ajv = new Ajv2020.default({ allErrors: true, strict: false });
   // ajv-formats is CJS; under NodeNext the default import is typed as the
   // module namespace rather than the callable it is at runtime.
   (addFormats as unknown as (instance: Ajv) => unknown)(ajv);
@@ -103,9 +104,13 @@ function describeErrors(validate: ValidateFunction): string {
     .map((error) => {
       const path = error.instancePath === "" ? "(root)" : error.instancePath;
       const detail =
-        error.keyword === "additionalProperties" &&
-        typeof error.params?.additionalProperty === "string"
-          ? `unknown property "${error.params.additionalProperty}"`
+        (error.keyword === "additionalProperties" ||
+          error.keyword === "unevaluatedProperties") &&
+        typeof (error.params?.additionalProperty ?? error.params?.unevaluatedProperty) ===
+          "string"
+          ? `unknown property "${
+              error.params.additionalProperty ?? error.params.unevaluatedProperty
+            }"`
           : (error.message ?? "is invalid");
       return `${path} ${detail}`;
     })

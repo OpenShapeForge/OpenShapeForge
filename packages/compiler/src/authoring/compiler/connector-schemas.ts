@@ -69,7 +69,7 @@ function connectorFieldSchemaWithoutDefinitions(field: FieldDefinition): JsonObj
 }
 
 export function connectorFieldSchema(field: FieldDefinition): JsonObject {
-  return bundleFieldDefinitionSchema(connectorFieldSchemaWithoutDefinitions(field), [field]);
+  return bundleFieldDefinitionSchema(connectorFieldSchemaWithoutDefinitions(field));
 }
 
 export function connectorObjectSchema(fields: FieldDefinition[]): JsonObject {
@@ -79,7 +79,6 @@ export function connectorObjectSchema(fields: FieldDefinition[]): JsonObject {
       (field) => connectorFieldSchemaWithoutDefinitions(field as FieldDefinition),
       { requireRequired: true },
     ),
-    fields,
   );
 }
 

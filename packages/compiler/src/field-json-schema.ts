@@ -39,11 +39,10 @@ const {
   ...workflowInspector
 } = workflowInspectorSchema;
 const fieldDefinitionDefinitions = {
-  ...(JSON.parse(
-    JSON.stringify(fieldDefinitionAuthoringSchema.$defs).replaceAll(
-      WORKFLOW_INSPECTOR_SCHEMA_ID,
-      "#/$defs/workflowInspector",
-    ),
+  ...(rebaseJsonSchemaReferences(
+    fieldDefinitionAuthoringSchema.$defs,
+    WORKFLOW_INSPECTOR_SCHEMA_ID,
+    "#/$defs/workflowInspector",
   ) as JsonObject),
   workflowInspector,
 };
@@ -73,11 +72,13 @@ export type SchemaSourceField = {
   };
 };
 
-export function usesFieldDefinitionSchema(field: SchemaSourceField): boolean {
-  return (
-    field.semanticType === FIELD_DEFINITION_SEMANTIC_TYPE ||
-    field.children?.some(usesFieldDefinitionSchema) === true ||
-    (field.item !== undefined && usesFieldDefinitionSchema(field.item))
+function referencesFieldDefinitionSchema(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(referencesFieldDefinitionSchema);
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value as JsonObject).some(
+    ([key, entry]) =>
+      (key === "$ref" && entry === FIELD_DEFINITION_SCHEMA_REF) ||
+      referencesFieldDefinitionSchema(entry),
   );
 }
 
@@ -87,9 +88,8 @@ export function fieldDefinitionValueSchema(): JsonObject {
 
 export function bundleFieldDefinitionSchema(
   schema: JsonObject,
-  fields: SchemaSourceField[],
 ): JsonObject {
-  if (!fields.some(usesFieldDefinitionSchema)) return schema;
+  if (!referencesFieldDefinitionSchema(schema)) return schema;
   const existingDefinitions =
     schema.$defs && typeof schema.$defs === "object" && !Array.isArray(schema.$defs)
       ? (schema.$defs as JsonObject)
@@ -441,7 +441,7 @@ function addCompiledFieldMetadata(
 }
 
 /** Project one resolved entity field into deterministic JSON Schema. */
-function compiledFieldSchemaWithoutDefinitions(
+export function compiledFieldSchemaWithoutDefinitions(
   field: CompiledField,
   referentiedata: CoreReferentiedataSnapshot = {},
   options: CompiledFieldSchemaOptions = {},
@@ -498,7 +498,6 @@ export function compiledFieldSchema(
 ): JsonObject {
   return bundleFieldDefinitionSchema(
     compiledFieldSchemaWithoutDefinitions(field, referentiedata, options),
-    [field],
   );
 }
 
@@ -523,6 +522,5 @@ export function compiledObjectSchema(
 ): JsonObject {
   return bundleFieldDefinitionSchema(
     compiledObjectSchemaWithoutDefinitions(fields, referentiedata, options),
-    fields,
   );
 }

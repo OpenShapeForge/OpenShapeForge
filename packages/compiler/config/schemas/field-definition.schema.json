@@ -340,6 +340,23 @@
           }
         },
         {
+          "description": "A fieldDefinition semantic value already supplies the complete recursive value contract; children and item would define a second, ambiguous shape.",
+          "if": {
+            "properties": {
+              "semanticType": { "const": "fieldDefinition" }
+            },
+            "required": ["semanticType"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["children"] },
+                { "required": ["item"] }
+              ]
+            }
+          }
+        },
+        {
           "if": {
             "properties": {
               "semanticType": { "const": "fieldDefinition" },

@@ -97,6 +97,22 @@ describe("connector field schemas", () => {
       $defs: { fieldDefinition: expect.any(Object) },
     });
   });
+
+  it("does not bundle definitions that the connector projection never references", () => {
+    const schema = connectorFieldSchema({
+      key: "wrapper",
+      valueType: "object",
+      children: [
+        {
+          key: "definition",
+          valueType: "object",
+          semanticType: "fieldDefinition",
+        },
+      ],
+    });
+
+    expect(schema).toEqual({ type: "object" });
+  });
 });
 
 describe("operation schemas", () => {
@@ -126,7 +142,7 @@ describe("operation schemas", () => {
           required: true,
           defaultValue: "eu",
         },
-      ] as FieldV2[],
+      ] as FieldDefinition[],
       { cardinality: "one", fields: [] },
     );
     expect(schema.required).toEqual(["region"]);

@@ -627,6 +627,7 @@ async function invokeTool(
 
 function operationMayInvoke(tool: Catalog["operationTools"][number], session: TrustedSessionContext): boolean {
   if (tool.auth.mode === "public") return true;
+  if (session.credential === "api-key" && (tool.auth.scopes ?? []).length > 0) return false;
   const roles = new Set(session.roles);
   const scopes = new Set(session.oauthScopes ?? []);
   return tool.auth.roles.some((role) => roles.has(role)) &&

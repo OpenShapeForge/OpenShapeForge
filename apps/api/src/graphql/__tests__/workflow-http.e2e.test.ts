@@ -599,21 +599,21 @@ describe("workflow over HTTP", () => {
    * part a unit test cannot see: the route exists as a function either way, and
    * the question is whether `createApiApp` actually exposes it.
    */
-async function postWebhook(
+  async function postWebhook(
     bearer: string | null,
     definitionId: string,
     body: Record<string, unknown> = {},
-    extraHeaders: Record<string, string> = {},
+    options: { idempotencyKey?: string | null; query?: string; emptyBody?: boolean } = {},
   ): Promise<{ status: number; body: any }> {
     const headers: Record<string, string> = {
       "content-type": "application/json",
-      "idempotency-key": randomUUID(),
-      ...extraHeaders,
     };
+    const idempotencyKey = options.idempotencyKey === undefined ? randomUUID() : options.idempotencyKey;
+    if (idempotencyKey !== null) headers["idempotency-key"] = idempotencyKey;
     if (bearer) headers.authorization = `Bearer ${bearer}`;
     const response = await fetch(
-      `${suite.baseUrl}/api/workflow/triggers/webhook/${definitionId}`,
-      { method: "POST", headers, body: JSON.stringify(body) },
+      `${suite.baseUrl}/api/workflow/triggers/webhook/${definitionId}${options.query ?? ""}`,
+      { method: "POST", headers, body: options.emptyBody ? new Uint8Array() : JSON.stringify(body) },
     );
     return { status: response.status, body: await response.json().catch(() => null) };
   }
@@ -682,6 +682,30 @@ async function postWebhook(
       // be indistinguishable from a route that accepted and dropped the call.
       expect(typeof body.instanceId).toBe("string");
       expect(body.instanceId.length).toBeGreaterThan(0);
+    },
+    TEST_TIMEOUT,
+  );
+
+  httpTest(
+    "the webhook requires an idempotency key",
+    async () => {
+      const definitionId = await publishTriggerable(writerToken!);
+      const { status, body } = await postWebhook(writerToken!, definitionId, {}, { idempotencyKey: null });
+      expect(status).toBe(400);
+      expect(body).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
+    },
+    TEST_TIMEOUT,
+  );
+
+  httpTest(
+    "the webhook preserves empty-body and unrelated-query compatibility",
+    async () => {
+      const definitionId = await publishTriggerable(writerToken!);
+      const { status } = await postWebhook(writerToken!, definitionId, {}, {
+        emptyBody: true,
+        query: "?utm_source=sender",
+      });
+      expect(status).toBe(202);
     },
     TEST_TIMEOUT,
   );

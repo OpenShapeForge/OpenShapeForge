@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
 import { GraphQLError } from "graphql";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import rawCatalog from "../generated/operations/catalog.json" with { type: "json" };
@@ -40,7 +41,15 @@ export type OperationContract = {
 };
 
 const catalog = rawCatalog as unknown as { version: number; operations: OperationContract[] };
-const ajv = new Ajv2020.default({ strict: true, allErrors: true, formats: { uuid: true, date: true, "date-time": true } });
+function operationAjv(coerceTypes = false) {
+  const instance = new Ajv2020.default({ strict: true, allErrors: true, coerceTypes });
+  (addFormats as unknown as (target: typeof instance) => unknown)(instance);
+  return instance;
+}
+
+const ajv = operationAjv();
+const queryAjv = operationAjv(true);
+const queryValidators = new WeakMap<OperationContract, ValidateFunction>();
 const validators = new Map<string, { input: ValidateFunction; output: ValidateFunction }>(
   catalog.operations.map((operation) => [
     operation.key,
@@ -53,8 +62,11 @@ export function listOperationContracts(): readonly OperationContract[] {
 }
 
 type Bound = { operation: OperationContract; handler: ModuleOperationHandler };
+const bindingCache = new WeakMap<readonly RuntimeModule[], Map<string, Bound>>();
 
 export function bindOperationHandlers(modules: readonly RuntimeModule[]): Map<string, Bound> {
+  const cached = bindingCache.get(modules);
+  if (cached) return cached;
   const modulesByName = new Map(modules.map((module) => [module.name, module]));
   const bound = new Map<string, Bound>();
   for (const operation of catalog.operations) {
@@ -75,6 +87,7 @@ export function bindOperationHandlers(modules: readonly RuntimeModule[]): Map<st
       throw new Error(`Runtime module "${module.name}" has operation handlers absent from its compiler contract: ${extras.sort().join(", ")}.`);
     }
   }
+  bindingCache.set(modules, bound);
   return bound;
 }
 
@@ -93,8 +106,12 @@ export function requireOperationAuthorization(
   if (!operation.auth.roles.some((role) => heldRoles.has(role))) {
     throw new HttpError(403, "FORBIDDEN", "Session lacks a required operation role.");
   }
+  const requiredScopes = operation.auth.scopes ?? [];
+  if (session.credential === "api-key" && requiredScopes.length > 0) {
+    throw new HttpError(403, "INSUFFICIENT_SCOPE", "OAuth-scoped operations cannot be invoked with an API key.");
+  }
   const heldScopes = new Set(session.oauthScopes ?? []);
-  if ((operation.auth.scopes ?? []).some((scope) => !heldScopes.has(scope))) {
+  if (requiredScopes.some((scope) => !heldScopes.has(scope))) {
     throw new HttpError(403, "INSUFFICIENT_SCOPE", "Session lacks a required OAuth scope.");
   }
 }
@@ -134,6 +151,9 @@ export function operationRestInput(
 ): Record<string, unknown> {
   let body: Record<string, unknown> = {};
   if (request.body instanceof Uint8Array) {
+    if (request.body.byteLength === 0) {
+      return operationRestInputFromParts(request, operation, body);
+    }
     try {
       const parsed = JSON.parse(new TextDecoder().decode(request.body));
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -146,6 +166,14 @@ export function operationRestInput(
   } else if (request.body && typeof request.body === "object" && !Array.isArray(request.body)) {
     body = request.body as Record<string, unknown>;
   }
+  return operationRestInputFromParts(request, operation, body);
+}
+
+function operationRestInputFromParts(
+  request: FastifyRequest,
+  operation: OperationContract,
+  body: Record<string, unknown>,
+): Record<string, unknown> {
   const query = request.query && typeof request.query === "object" ? request.query as Record<string, unknown> : {};
   const params = request.params && typeof request.params === "object" ? request.params as Record<string, unknown> : {};
   const pathParameters = new Set(
@@ -162,8 +190,14 @@ export function operationRestInput(
   if (readsInputFromQuery && Object.keys(body).length > 0) {
     throw new HttpError(400, "BAD_USER_INPUT", "This operation accepts input through path and query parameters, not a request body.");
   }
-  if (!readsInputFromQuery && Object.keys(query).length > 0) {
-    throw new HttpError(400, "BAD_USER_INPUT", "This operation accepts input through path parameters and its request body, not query parameters.");
+  if (!readsInputFromQuery) {
+    const declared = operation.inputSchema.properties && typeof operation.inputSchema.properties === "object"
+      ? operation.inputSchema.properties as Record<string, unknown>
+      : {};
+    const collisions = Object.keys(query).filter((name) => name in declared);
+    if (collisions.length > 0) {
+      throw new HttpError(400, "BAD_USER_INPUT", `Declared operation input must not be supplied through query parameters: ${collisions.sort().join(", ")}.`);
+    }
   }
   const input = readsInputFromQuery ? { ...query, ...params } : { ...body, ...params };
   if (operation.idempotency.mode === "idempotency-key") {
@@ -173,6 +207,16 @@ export function operationRestInput(
     }
     const header = request.headers[operation.idempotency.header!.toLowerCase()];
     if (typeof header === "string") input[field] = header;
+  }
+  if (readsInputFromQuery) {
+    let validate = queryValidators.get(operation);
+    if (!validate) {
+      validate = queryAjv.compile(operation.inputSchema);
+      queryValidators.set(operation, validate);
+    }
+    if (!validate(input)) {
+      throw new HttpError(400, "BAD_USER_INPUT", "Operation query input does not match its canonical schema.");
+    }
   }
   return input;
 }

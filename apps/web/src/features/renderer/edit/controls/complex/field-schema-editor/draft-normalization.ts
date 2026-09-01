@@ -191,7 +191,9 @@ export function normalizeFieldSchemaDraft(
     valueType,
     cardinality: structuredCardinality,
     ...(field.variables ? { variables: field.variables } : {}),
-    ...(field.sortable === true ? { sortable: true } : {}),
+    ...(typeof field.searchable === "boolean" ? { searchable: field.searchable } : {}),
+    ...(typeof field.filterable === "boolean" ? { filterable: field.filterable } : {}),
+    ...(typeof field.sortable === "boolean" ? { sortable: field.sortable } : {}),
     required: structuredCardinality.min > 0,
     ...(field.readOnly === true ? { readOnly: true } : {}),
     ...(normalizeLocalizedTextDraft(field.label)

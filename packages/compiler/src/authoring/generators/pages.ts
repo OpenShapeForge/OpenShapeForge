@@ -80,6 +80,8 @@ type GeneratedFormFieldConfig = {
   valueType: CompiledField["valueType"];
   cardinality?: CompiledField["cardinality"];
   variables?: CompiledField["variables"];
+  searchable?: boolean;
+  filterable?: boolean;
   sortable?: boolean;
   semanticType?: string;
   label: LocalizedText;
@@ -1829,6 +1831,8 @@ function buildCoreFieldConfig(field: CompiledField): GeneratedFormFieldConfig {
     valueType: field.valueType,
     cardinality: field.cardinality,
     variables: field.variables,
+    searchable: field.searchable,
+    filterable: field.filterable,
     sortable: field.sortable,
     semanticType: field.semanticType,
     label: field.label,

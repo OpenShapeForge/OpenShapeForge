@@ -77,6 +77,8 @@ export type GeneratedFormFieldConfig = {
   valueType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   cardinality?: "single" | "collection";
   variables?: "none" | "whole" | "template" | "both";
+  searchable?: boolean;
+  filterable?: boolean;
   sortable?: boolean;
   semanticType?: string;
   label?: LocalizedText;

@@ -46,6 +46,7 @@ type RestMetadata = NonNullable<NonNullable<GeneratedTable["source"]>["rest"]>;
 const RESERVED_LIST_PARAMS = new Set([
   "first",
   "after",
+  "search",
   "sortField",
   "sortDirection",
 ]);
@@ -238,6 +239,7 @@ function buildListInput(table: GeneratedTable, query: Record<string, unknown>) {
   return {
     ...(first === undefined ? {} : { limit: first }),
     ...(typeof query.after === "string" ? { cursor: query.after } : {}),
+    ...(typeof query.search === "string" ? { search: query.search } : {}),
     ...(Object.keys(filter).length > 0 ? { filter } : {}),
     ...(sortField || sortDirection
       ? { sort: { field: sortField ?? null, direction: sortDirection ?? null } }

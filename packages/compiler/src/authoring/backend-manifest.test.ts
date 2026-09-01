@@ -13,6 +13,7 @@ import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
 import type { ColumnDefinition, PlatformSchemaManifest } from "../schema.js";
 import {
+  buildAuthoringBackendReport,
   compileAuthoringBackendManifest,
   deriveRowScope,
 } from "./backend-manifest.js";
@@ -425,6 +426,55 @@ describe("field immutable → column immutable (#177)", () => {
     const manifest = compileFixtures(["classified-field"]);
     const table = tableByName(manifest, "classified_fields");
     expect((table?.columns ?? []).some((column) => "immutable" in column)).toBe(false);
+  });
+});
+
+describe("field query capabilities → column query metadata (#456)", () => {
+  it("emits effective defaults and independent authored opt-outs", () => {
+    const manifest = compileFixtures(["query-capabilities"]);
+    const table = tableByName(manifest, "query_capabilities");
+    const byName = new Map((table?.columns ?? []).map((column) => [column.name, column]));
+
+    expect(byName.get("label")?.query).toEqual({
+      searchable: true,
+      filterable: true,
+      sortable: true,
+    });
+    expect(byName.get("private_note")?.query).toEqual({
+      searchable: false,
+      filterable: false,
+      sortable: false,
+    });
+    expect(byName.get("rank")?.query).toEqual({
+      searchable: false,
+      filterable: true,
+      sortable: false,
+    });
+    expect(byName.get("created_at")?.query).toEqual({
+      searchable: false,
+      filterable: true,
+      sortable: true,
+    });
+  });
+
+  it("reports query-capability changes as column drift", () => {
+    const candidate = compileFixtures(["query-capabilities"]);
+    const current = structuredClone(candidate);
+    const privateNote = tableByName(current, "query_capabilities")?.columns.find(
+      (column) => column.name === "private_note",
+    );
+    if (!privateNote?.query) throw new Error("fixture did not emit private_note query metadata");
+    privateNote.query.filterable = true;
+
+    const report = buildAuthoringBackendReport(candidate, current, {
+      mode: "promote",
+      authoringEntityCount: 1,
+    });
+
+    expect(report.hasDifferences).toBe(true);
+    expect(report.tables[0]?.changedColumns).toEqual([
+      expect.objectContaining({ column: "private_note" }),
+    ]);
   });
 });
 

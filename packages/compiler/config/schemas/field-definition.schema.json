@@ -183,7 +183,18 @@
             }
           }
         },
-        "sortable": { "type": "boolean" },
+        "searchable": {
+          "type": "boolean",
+          "description": "Whether this scalar field may participate in free-text list search. Authorization is applied separately per request."
+        },
+        "filterable": {
+          "type": "boolean",
+          "description": "Whether this scalar field may be named in a structured list filter. Authorization is applied separately per request."
+        },
+        "sortable": {
+          "type": "boolean",
+          "description": "Whether this scalar field may be named as a list sort key. Authorization is applied separately per request."
+        },
         "required": { "type": "boolean" },
         "readOnly": {
           "type": "boolean",
@@ -311,32 +322,67 @@
           }
         },
         {
-          "if": { "required": ["sortable"] },
-          "then": {
-            "required": ["cardinality"],
+          "description": "Structured filter and sort capabilities are valid only for single scalar values. Explicit false remains valid on unsupported shapes as an opt-out.",
+          "if": {
             "anyOf": [
-              {
-                "properties": {
-                  "cardinality": { "const": "collection" }
-                }
-              },
-              {
-                "properties": {
-                  "cardinality": {
-                    "type": "object",
-                    "properties": {
-                      "max": {
-                        "oneOf": [
-                          { "type": "integer", "minimum": 2 },
-                          { "const": "unbounded" }
-                        ]
-                      }
-                    },
-                    "required": ["max"]
-                  }
+              { "properties": { "filterable": { "const": true } }, "required": ["filterable"] },
+              { "properties": { "sortable": { "const": true } }, "required": ["sortable"] }
+            ]
+          },
+          "then": {
+            "properties": {
+              "valueType": { "not": { "const": "object" } },
+              "cardinality": {
+                "not": {
+                  "anyOf": [
+                    { "const": "collection" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "max": {
+                          "oneOf": [
+                            { "type": "integer", "minimum": 2 },
+                            { "const": "unbounded" }
+                          ]
+                        }
+                      },
+                      "required": ["max"]
+                    }
+                  ]
                 }
               }
-            ]
+            }
+          }
+        },
+        {
+          "description": "Free-text search is valid only for a single string value.",
+          "if": {
+            "properties": { "searchable": { "const": true } },
+            "required": ["searchable"]
+          },
+          "then": {
+            "properties": {
+              "valueType": { "const": "string" },
+              "cardinality": {
+                "not": {
+                  "anyOf": [
+                    { "const": "collection" },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "max": {
+                          "oneOf": [
+                            { "type": "integer", "minimum": 2 },
+                            { "const": "unbounded" }
+                          ]
+                        }
+                      },
+                      "required": ["max"]
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         {

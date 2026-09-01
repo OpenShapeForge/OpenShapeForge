@@ -1,0 +1,35 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: QueryCapability
+title: Query Capability
+language: en
+displayTemplate: "{{label}}"
+filterField: label
+labels:
+  en: Query Capability
+  nl: Query Capability
+domains:
+  - relations
+authorization:
+  roles:
+    read: [Relaties.All.Read]
+    create: [Relaties.All.ReadWrite]
+    update: [Relaties.All.ReadWrite]
+    delete: [Relaties.All.ReadWrite]
+fields:
+  - key: label
+    valueType: string
+    required: true
+    persisted: { column: label, storageClass: core }
+  - key: privateNote
+    valueType: string
+    searchable: false
+    filterable: false
+    sortable: false
+    persisted: { column: private_note, storageClass: core }
+  - key: rank
+    valueType: integer
+    filterable: true
+    sortable: false
+    persisted: { column: rank, storageClass: core }

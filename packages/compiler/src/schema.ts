@@ -252,6 +252,16 @@ export type ColumnDefinition = {
    * keep byte-identical output.
    */
   immutable?: true;
+  /**
+   * Effective authored query capabilities for the backing field. Older
+   * manifests omit this block; runtimes then retain the legacy scalar-column
+   * defaults (text search, scalar filter and scalar sort).
+   */
+  query?: {
+    searchable: boolean;
+    filterable: boolean;
+    sortable: boolean;
+  };
 };
 
 export type LocalizedTextManifest = {

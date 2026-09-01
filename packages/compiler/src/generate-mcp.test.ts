@@ -520,7 +520,7 @@ describe("buildMcpCatalog", () => {
       expect(prop(metadata, "source").default).toBeUndefined();
     });
 
-    it("constrains list sorting to scalar fields and mentions the filter field", () => {
+    it("projects independent query capabilities into list inputs and metadata", () => {
       const catalog = buildMcpCatalog(
         [
           input(
@@ -528,6 +528,13 @@ describe("buildMcpCatalog", () => {
               filterField: "name",
               fields: [
                 field({ key: "name" }),
+                field({
+                  key: "privateNote",
+                  searchable: false,
+                  filterable: false,
+                  sortable: false,
+                }),
+                field({ key: "rank", valueType: "integer", sortable: false }),
                 field({ key: "tags", cardinality: "collection" }),
                 field({ key: "payload", valueType: "object" }),
               ],
@@ -538,7 +545,13 @@ describe("buildMcpCatalog", () => {
       );
       const list = catalog.tools.find((tool) => tool.operation === "list")!;
       expect(prop(list.inputSchema, "sortField").enum).toEqual(["name"]);
+      expect(prop(list.inputSchema, "filter").properties).toHaveProperty("name");
+      expect(prop(list.inputSchema, "filter").properties).toHaveProperty("rank");
+      expect(prop(list.inputSchema, "filter").properties).not.toHaveProperty("privateNote");
+      expect(prop(list.inputSchema, "search").description).not.toContain("privateNote");
       expect(list.description).toContain('"name"');
+      expect(catalog.entities[0]?.fields.find((entry) => entry.key === "privateNote")?.query)
+        .toEqual({ searchable: false, filterable: false, sortable: false });
     });
   });
 

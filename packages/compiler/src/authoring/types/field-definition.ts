@@ -84,6 +84,11 @@ export interface FieldDefinition {
   valueType: FieldDefinitionValueType;
   cardinality?: FieldDefinitionCardinality;
   variables?: FieldDefinitionVariableMode;
+  /** May participate in free-text list search when the active transport supports it. */
+  searchable?: boolean;
+  /** May be named in a structured list filter. */
+  filterable?: boolean;
+  /** May be named as a list sort key. */
   sortable?: boolean;
   required?: boolean;
   /** Presentation only; selects the display component instead of the input. */

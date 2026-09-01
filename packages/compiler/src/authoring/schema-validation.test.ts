@@ -137,6 +137,36 @@ describe("the schema registry", () => {
     }
   });
 
+  it("accepts scalar query capabilities and rejects unsupported opt-ins", () => {
+    const ajv = new Ajv2020.default({ strict: false });
+    ajv.addSchema(workflowInspectorSchema);
+    ajv.addSchema(fieldDefinitionSchema);
+    const validate = ajv.getSchema(fieldDefinitionSchema.$id)!;
+
+    expect(validate({
+      key: "email",
+      valueType: "string",
+      searchable: true,
+      filterable: true,
+      sortable: false,
+    })).toBe(true);
+    expect(validate({
+      key: "lines",
+      valueType: "string",
+      cardinality: "collection",
+      item: { key: "line", valueType: "string" },
+      filterable: true,
+    })).toBe(false);
+    expect(validate({ key: "rank", valueType: "integer", searchable: true })).toBe(false);
+    expect(validate({
+      key: "payload",
+      valueType: "object",
+      searchable: false,
+      filterable: false,
+      sortable: false,
+    })).toBe(true);
+  });
+
   it("rejects a fieldDefinition semantic value with a second authored shape", () => {
     const ajv = new Ajv2020.default({ strict: false });
     ajv.addSchema(workflowInspectorSchema);

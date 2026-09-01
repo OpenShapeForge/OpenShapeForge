@@ -63,7 +63,9 @@ export function resolveModelFields(
     if (field.unit) compiled.unit = field.unit;
     if (field.defaultValue !== undefined) compiled.defaultValue = field.defaultValue;
     if (field.variables) compiled.variables = field.variables;
-    if (field.sortable) compiled.sortable = field.sortable;
+    if (field.searchable !== undefined) compiled.searchable = field.searchable;
+    if (field.filterable !== undefined) compiled.filterable = field.filterable;
+    if (field.sortable !== undefined) compiled.sortable = field.sortable;
     if (field.relationship) compiled.relationship = field.relationship;
     if (field.visibility) compiled.visibility = field.visibility;
     if (field.computed) compiled.computed = field.computed;

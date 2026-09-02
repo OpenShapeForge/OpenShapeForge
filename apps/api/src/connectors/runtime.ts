@@ -159,18 +159,20 @@ export async function invokeConnectorOperation(
   // token. The package is never given a refresh token, so it cannot fail to
   // persist a rotated one. Inside the governor, so a refresh storm against a
   // failing token endpoint is rate-limited and broken like any other call.
+  // One correlation id spans token lifecycle, package execution and outcome.
+  const correlationId = randomUUID();
   const wrapFetch = await oauthFetchWrapper({
     ...context,
     contract,
     installation,
     secrets,
+    correlationId,
   });
 
   // 5 + 6. Policy around a validated, redacted execution. One correlation id
   // spans every attempt, so the answer, the audit record and the log line for
   // one call can be joined without any of them naming the tenant or the
   // installation.
-  const correlationId = randomUUID();
   try {
     return await context.governor.run(
       {
@@ -283,6 +285,7 @@ async function oauthFetchWrapper(input: {
   contract: ConnectorContract;
   installation: { id: string; instanceKey: string; config: Record<string, unknown> };
   secrets: Record<string, string>;
+  correlationId: string;
   log?: ((message: string, fields?: Record<string, unknown>) => void) | undefined;
 }): Promise<((bound: FetchLike) => FetchLike) | undefined> {
   if (!input.contract.auth) return undefined;
@@ -311,6 +314,7 @@ async function oauthFetchWrapper(input: {
       config: input.installation.config,
       secrets: input.secrets,
       boundFetch: refreshFetch,
+      correlationId: input.correlationId,
     });
     return (bound) => withOAuthAuthorization(bound, accessToken);
   } catch (error) {

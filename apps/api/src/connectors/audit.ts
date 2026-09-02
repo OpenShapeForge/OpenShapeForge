@@ -49,6 +49,7 @@ export type ConnectorAuditInput = {
   secretFields?: readonly string[];
   contractChecksum?: string;
   providerFailure?: ProviderFailureAuditFields;
+  correlationId?: string;
 };
 
 export async function recordConnectorAudit(
@@ -69,6 +70,7 @@ export async function recordConnectorAudit(
       secretFields: [...(input.secretFields ?? [])].sort(),
       ...(input.contractChecksum ? { contractChecksum: input.contractChecksum } : {}),
       ...(input.providerFailure ? { providerFailure: input.providerFailure } : {}),
+      ...(input.correlationId ? { correlationId: input.correlationId } : {}),
     },
   });
 }

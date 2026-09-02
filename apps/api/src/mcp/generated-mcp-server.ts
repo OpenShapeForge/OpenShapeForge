@@ -178,6 +178,7 @@ import {
 } from "../modules/platform.js";
 import type { ModuleEgressDispatch } from "../modules/egress.js";
 import {
+  egressSourceFromResolvedInvocation,
   InvocationSourceVault,
   parseModuleToolExecutionOptions,
   type AuthorizedInvocationSource,
@@ -2573,6 +2574,7 @@ function buildServer(
     assertParentInvocationActive?.();
     assertInterceptorActive?.();
     const selectedReference = selected?.sourceReference;
+    const egressSource = egressSourceFromResolvedInvocation(selected);
     const captured = selected?.internal as CapturedDerivedExecution | undefined;
     const operationTool = catalog.operationTools.find(
       (tool) => tool.name === name,
@@ -2626,6 +2628,7 @@ function buildServer(
             keyring: connectorKeyring(),
             roles: session.roles ?? [],
             egressOwner,
+            ...(egressSource ? { egressSource } : {}),
           },
           connectorTool.contract,
           connectorTool.operation,
@@ -4025,6 +4028,7 @@ function buildServer(
                         operation: String(operationRow.id ?? operationRow.key ?? "operation"),
                         kind: operationRow.kind === "mutation" ? "mutation" : "query",
                       },
+                      ...(egressSource ? { source: egressSource } : {}),
                     },
                   });
                 } catch (error) {

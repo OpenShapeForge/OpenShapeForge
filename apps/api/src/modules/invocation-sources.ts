@@ -5,6 +5,7 @@ import { HttpError } from "../rest/http-error.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type {
   ModuleDefinitionReference,
+  ModuleEgressInvocationSource,
   ModuleInvocationSource,
   ModuleInvocationSourceSelector,
   ModuleToolExecutionOptions,
@@ -35,6 +36,21 @@ export type ResolvedInvocationSource = ModuleInvocationSource & {
   internal?: unknown;
   authorityFingerprint?: string;
 };
+
+/**
+ * Narrow a source that has passed vault resolution to the only source metadata
+ * an egress owner may coordinate on. Caller arguments and stored configuration
+ * never enter this constructor.
+ */
+export function egressSourceFromResolvedInvocation(
+  source: ResolvedInvocationSource | undefined,
+): ModuleEgressInvocationSource | undefined {
+  if (!source) return undefined;
+  return Object.freeze({
+    sourceReference: source.sourceReference,
+    scope: source.scope,
+  });
+}
 
 const unavailable = () =>
   new HttpError(404, "NOT_FOUND", "Invocation source is unavailable.");

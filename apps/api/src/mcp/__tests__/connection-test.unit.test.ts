@@ -144,7 +144,7 @@ describe("testElicitedRow", () => {
     expect(report.ok).toBe(true);
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
-      purpose: "probe",
+      purpose: "oauth",
       scope: {
         tenantId: "tenant-1",
         actorId: "actor-1",
@@ -153,6 +153,7 @@ describe("testElicitedRow", () => {
         kind: "query",
       },
     });
+    expect(requests[0]).not.toHaveProperty("source");
   });
 
   it("fails url-templates when a URL placeholder references a secret-classified field", async () => {

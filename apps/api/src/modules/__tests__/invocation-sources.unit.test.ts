@@ -2,6 +2,7 @@
 import { describe, expect, it } from "bun:test";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import {
+  egressSourceFromResolvedInvocation,
   InvocationSourceVault,
   type AuthorizedInvocationSource,
 } from "../invocation-sources.js";
@@ -35,6 +36,43 @@ const source = (
 };
 
 describe("invocation source capabilities", () => {
+  it("narrows a resolved source to opaque coordination metadata only", async () => {
+    const vault = new InvocationSourceVault();
+    const invocation = {};
+    const [held] = await vault.resolve(
+      session(),
+      "read_item",
+      { mode: "default" },
+      async () => [source({
+        internal: {
+          sourceReference: "caller-or-config-value",
+          scope: "tenant",
+          connectionId: "raw-row-id",
+          accountLabel: "Personal account",
+        },
+      })],
+      invocation,
+    );
+    const resolved = await vault.consumeHandle(
+      session(),
+      "read_item",
+      {
+        sourceHandle: held!.sourceHandle,
+        expectedDefinition: held!.definition,
+      },
+      invocation,
+    );
+
+    const narrowed = egressSourceFromResolvedInvocation(resolved);
+    expect(narrowed).toEqual({
+      sourceReference: "msr1.reference",
+      scope: "personal",
+    });
+    expect(Object.keys(narrowed!).sort()).toEqual(["scope", "sourceReference"]);
+    expect(Object.isFrozen(narrowed)).toBe(true);
+    expect(egressSourceFromResolvedInvocation(undefined)).toBeUndefined();
+  });
+
   it("issues distinct one-call handles while preserving a durable reference", async () => {
     const vault = new InvocationSourceVault();
     const invocation = {};

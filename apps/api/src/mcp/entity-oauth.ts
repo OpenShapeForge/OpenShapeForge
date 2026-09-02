@@ -26,6 +26,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { HttpError } from "../rest/http-error.js";
+import type { ModuleEgressDispatch } from "../modules/egress.js";
 import { hostAllowed } from "../connectors/executor.js";
 import { fetchWithAllowedRedirects } from "./declarative-execution.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
@@ -229,6 +230,7 @@ export async function exchangeCodeForTokens(
   code: string,
   fetchImpl: typeof fetch = fetch,
   keyring: SecretKeyring | undefined = keyringFromEnv(process.env[KEYRING_ENV]),
+  egress?: ModuleEgressDispatch,
 ): Promise<ExchangedTokens> {
   if (!keyring) {
     throw new HttpError(
@@ -270,6 +272,7 @@ export async function exchangeCodeForTokens(
     },
     pending.egress,
     fetchImpl,
+    egress,
   );
   const text = await response.text();
   if (!response.ok) {
@@ -350,6 +353,7 @@ export async function refreshTokens(input: {
   connectionTable: string;
   fetchImpl?: typeof fetch;
   keyring?: SecretKeyring | undefined;
+  moduleEgress?: ModuleEgressDispatch | undefined;
 }): Promise<ExchangedTokens> {
   const keyring = input.keyring ?? keyringFromEnv(process.env[KEYRING_ENV]);
   if (!keyring) {
@@ -368,6 +372,7 @@ export async function refreshTokens(input: {
           { ...init, signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS) },
           input.egress,
           fetchImpl,
+          input.moduleEgress,
         ),
     });
     const scope = connectionTokenSecretScope(input.connectionTable);

@@ -7,7 +7,12 @@
  * outage this contract exists to avoid.
  */
 import { describe, expect, test } from "bun:test";
-import { loadRuntimeModules } from "../registry.js";
+import {
+  assertSingleModuleEgressOwner,
+  initRuntimeModules,
+  loadRuntimeModules,
+} from "../registry.js";
+import type { ModulePlatformServices, RuntimeModule } from "../contract.js";
 
 describe("runtime module registry", () => {
   test("loads the registered modules through the injected importer", async () => {
@@ -77,5 +82,30 @@ describe("runtime module registry", () => {
     expect(result.loaded).toEqual([]);
     expect(result.failures[0]?.reason).toBe("name_mismatch");
     expect(result.failures[0]?.message).toContain("something-else");
+  });
+
+  test("delivers the exact core platform services object during init", async () => {
+    const platform = {} as ModulePlatformServices;
+    let received: unknown;
+    const module: RuntimeModule = {
+      name: "module",
+      init: async (context) => { received = context.platform; },
+    };
+    const result = await initRuntimeModules(
+      { loaded: [module], failures: [] },
+      { platform },
+    );
+    expect(result.failures).toEqual([]);
+    expect(result.loaded).toEqual([module]);
+    expect(received).toBe(platform);
+  });
+
+  test("fails boot clearly when more than one loaded module owns egress", () => {
+    const owner = { fetch: async () => new Response() };
+    expect(() => assertSingleModuleEgressOwner([
+      { name: "first", egress: owner },
+      { name: "second", egress: owner },
+    ])).toThrow(/exactly one loaded module may own it/);
+    expect(assertSingleModuleEgressOwner([{ name: "only", egress: owner }])).toBe(owner);
   });
 });

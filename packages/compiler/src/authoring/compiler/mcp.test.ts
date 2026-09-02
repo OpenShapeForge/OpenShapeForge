@@ -11,7 +11,10 @@ const entityWithMcp = (mcp: CoreEntity["mcp"], entity = "ContactDetail"): CoreEn
     entity,
     title: "Contact Detail",
     language: "en",
-    fields: [{ key: "value", valueType: "string" }],
+    fields: [
+      { key: "value", valueType: "string" },
+      { key: "version", valueType: "integer" },
+    ],
     ...(mcp === undefined ? {} : { mcp }),
   }) as CoreEntity;
 
@@ -232,6 +235,7 @@ describe("buildMcp", () => {
       keyField: "value",
       descriptionField: "value",
       inputFieldsField: "value",
+      versionField: "version",
       execution: {
         bindingsField: "value",
         operationRef: "a",
@@ -266,5 +270,42 @@ describe("buildMcp", () => {
         }),
       ),
     ).toThrow(/Unsafe mcp derivedTools.dryRun name/);
+  });
+
+  it("requires an integer version field for every executable definition", () => {
+    const execution = {
+      bindingsField: "value",
+      operationRef: "a",
+      operationEntity: "B",
+      providerRef: "c",
+      providerEntity: "D",
+      connectionEntity: "E",
+      connectionProviderRef: "f",
+      connectionValuesField: "g",
+    };
+    const base = {
+      roles: ["viewer"],
+      keyField: "value",
+      descriptionField: "value",
+      inputFieldsField: "value",
+      execution,
+    };
+    expect(() => buildMcp(entityWithMcp({ derivedTools: base }))).toThrow(
+      /versionField.*single-value integer/,
+    );
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          derivedTools: { ...base, versionField: "value" },
+        }),
+      ),
+    ).toThrow(/versionField.*single-value integer/);
+    expect(
+      buildMcp(
+        entityWithMcp({
+          derivedTools: { ...base, versionField: "version" },
+        }),
+      )?.derivedTools?.versionField,
+    ).toBe("version");
   });
 });

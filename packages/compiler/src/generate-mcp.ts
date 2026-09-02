@@ -468,10 +468,12 @@ export type McpDerivedToolsDefinition = {
   titleField?: string;
   descriptionField: string;
   inputFieldsField: string;
+  versionField?: string;
   execution?: McpDerivedExecutionDefinition;
   visibleWhen?: { field: string; equals: string };
   /** Field holding a per-row role list restricting who sees the tool. */
   visibleToRolesField?: string;
+  internalOnlyField?: string;
   connect?: { name: string; description: string; roles: string[] };
   dryRun?: { name: string; description: string; roles: string[] };
   personalization?: {
@@ -769,11 +771,17 @@ export function buildMcpCatalog(
           : {}),
         descriptionField: mcp.derivedTools.descriptionField,
         inputFieldsField: mcp.derivedTools.inputFieldsField,
+        ...(mcp.derivedTools.versionField
+          ? { versionField: mcp.derivedTools.versionField }
+          : {}),
         ...(mcp.derivedTools.visibleWhen
           ? { visibleWhen: { ...mcp.derivedTools.visibleWhen } }
           : {}),
         ...(mcp.derivedTools.visibleToRolesField
           ? { visibleToRolesField: mcp.derivedTools.visibleToRolesField }
+          : {}),
+        ...(mcp.derivedTools.internalOnlyField
+          ? { internalOnlyField: mcp.derivedTools.internalOnlyField }
           : {}),
         ...(mcp.derivedTools.connect
           ? {

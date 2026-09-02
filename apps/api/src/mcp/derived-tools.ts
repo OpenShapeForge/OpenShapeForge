@@ -28,6 +28,8 @@ export type DerivedToolsCatalogEntry = {
   titleField?: string;
   descriptionField: string;
   inputFieldsField: string;
+  /** Monotonic integer revision required for source-selectable execution. */
+  versionField?: string;
   execution?: ExecutionCatalogEntry;
   /** Publication gate: only rows where row[field] === equals project. */
   visibleWhen?: { field: string; equals: string };
@@ -37,6 +39,8 @@ export type DerivedToolsCatalogEntry = {
    * row's tool (an administrative service stays invisible to employees).
    */
   visibleToRolesField?: string;
+  /** Boolean row field marking an intentionally internal, never-projected tool. */
+  internalOnlyField?: string;
   connect?: { name: string; description: string; roles: string[] };
   /** Composition preview for definition authors; roles are its own audience. */
   dryRun?: { name: string; description: string; roles: string[] };
@@ -274,6 +278,9 @@ export function derivedToolsFromRows(
     ) {
       continue;
     }
+    if (entry.internalOnlyField && row[entry.internalOnlyField] === true) {
+      continue;
+    }
     // The role gate: a row restricted to specific roles does not exist for
     // sessions holding none of them. Callers that omit sessionRoles (author
     // tooling like dry runs) see everything by design.
@@ -306,4 +313,30 @@ export function derivedToolsFromRows(
     });
   }
   return tools;
+}
+
+/** Closed internal-action gate used by core's context-bound dispatcher. */
+export function isAuthorizedInternalDerivedRow(
+  entry: DerivedToolsCatalogEntry,
+  row: Record<string, unknown>,
+  sessionRoles: readonly string[],
+): boolean {
+  if (!entry.internalOnlyField || row[entry.internalOnlyField] !== true)
+    return false;
+  if (
+    entry.visibleWhen &&
+    row[entry.visibleWhen.field] !== entry.visibleWhen.equals
+  ) {
+    return false;
+  }
+  const restricted = entry.visibleToRolesField
+    ? row[entry.visibleToRolesField]
+    : undefined;
+  return !(
+    Array.isArray(restricted) &&
+    restricted.length > 0 &&
+    !restricted.some(
+      (role) => typeof role === "string" && sessionRoles.includes(role),
+    )
+  );
 }

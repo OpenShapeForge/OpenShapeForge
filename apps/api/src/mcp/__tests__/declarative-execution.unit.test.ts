@@ -64,6 +64,123 @@ describe("redirect egress", () => {
     ).rejects.toThrow(/outside the egress allow-list/);
     expect(requested).toEqual(["https://allowed.example/start"]);
   });
+
+  it("keeps same-origin credentials but strips them before an allowed cross-origin hop", async () => {
+    const calls: { url: string; headers: Headers }[] = [];
+    const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), headers: new Headers(init?.headers) });
+      if (calls.length === 1) {
+        return new Response(null, { status: 302, headers: { location: "/same" } });
+      }
+      if (calls.length === 2) {
+        return new Response(null, {
+          status: 307,
+          headers: { location: "https://second.example/final" },
+        });
+      }
+      return new Response("ok");
+    }) as typeof fetch;
+    await fetchWithAllowedRedirects(
+      "https://allowed.example/start",
+      {
+        method: "GET",
+        headers: {
+          authorization: "Bearer fake",
+          cookie: "session=fake",
+          "proxy-authorization": "Basic fake",
+          "x-safe": "yes",
+          accept: "secret-in-accept",
+        },
+      },
+      ["allowed.example", "second.example"],
+      fetchImpl,
+    );
+    expect(calls[1]?.headers.get("authorization")).toBe("Bearer fake");
+    expect(calls[2]?.headers.get("authorization")).toBeNull();
+    expect(calls[2]?.headers.get("cookie")).toBeNull();
+    expect(calls[2]?.headers.get("proxy-authorization")).toBeNull();
+    expect(calls[2]?.headers.get("x-safe")).toBeNull();
+    expect(calls[2]?.headers.get("accept")).toBeNull();
+  });
+
+  it("rejects body-preserving cross-origin redirects before secrets reach the next host", async () => {
+    for (const status of [307, 308]) {
+      const calls: { url: string; body: BodyInit | null | undefined }[] = [];
+      const fetchImpl = (async (
+        input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        calls.push({ url: String(input), body: init?.body });
+        return new Response(null, {
+          status,
+          headers: { location: "https://second.example/token" },
+        });
+      }) as typeof fetch;
+      await expect(fetchWithAllowedRedirects(
+        "https://allowed.example/token",
+        {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: "client_secret=fake&refresh_token=fake",
+        },
+        ["allowed.example", "second.example"],
+        fetchImpl,
+      )).rejects.toThrow(/cannot forward a request body/);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("https://allowed.example/token");
+    }
+  });
+
+  it("delegates every allowed redirect hop to the egress owner with sanitized headers", async () => {
+    const requests: any[] = [];
+    await fetchWithAllowedRedirects(
+      "https://allowed.example/start",
+      {
+        method: "GET",
+        headers: { authorization: "Bearer fake", accept: "secret-in-accept" },
+      },
+      ["allowed.example", "second.example"],
+      (() => { throw new Error("fallback must not run"); }) as unknown as typeof fetch,
+      {
+        purpose: "provider",
+        scope: {
+          tenantId: "tenant-1",
+          actorId: "actor-1",
+          provider: "provider-1",
+          operation: "operation-1",
+          kind: "query",
+        },
+        owner: {
+          fetch: async (request) => {
+            requests.push(request);
+            return requests.length === 1
+              ? new Response(null, {
+                  status: 302,
+                  headers: { location: "https://second.example/final" },
+                })
+              : new Response("ok");
+          },
+        },
+      },
+    );
+    expect(requests).toHaveLength(2);
+    expect(requests.map((request) => request.url.href)).toEqual([
+      "https://allowed.example/start",
+      "https://second.example/final",
+    ]);
+    expect(new Headers(requests[1].init.headers).get("authorization")).toBeNull();
+    expect(new Headers(requests[1].init.headers).get("accept")).toBeNull();
+    expect(requests[1]).toMatchObject({
+      purpose: "provider",
+      scope: {
+        tenantId: "tenant-1",
+        actorId: "actor-1",
+        provider: "provider-1",
+        operation: "operation-1",
+        kind: "query",
+      },
+    });
+  });
 });
 
 describe("resolveTemplate", () => {
@@ -154,6 +271,17 @@ describe("mapping helpers", () => {
     expect(() => orderedBindings({ bindings: [] }, "bindings")).toThrow(
       /no bindings/,
     );
+    expect(() =>
+      orderedBindings(
+        { bindings: [{ order: 1 }, { order: 1 }] },
+        "bindings",
+      ),
+    ).toThrow(/unique integer order/);
+    for (const order of [undefined, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() =>
+        orderedBindings({ bindings: [{ order }] }, "bindings"),
+      ).toThrow(/unique integer order/);
+    }
   });
 });
 

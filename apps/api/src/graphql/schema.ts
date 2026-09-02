@@ -49,14 +49,11 @@ import type { GraphqlContext } from "./context.js";
 import type { ModuleRuntimeContext, RuntimeModule } from "../modules/contract.js";
 import { composeModuleGraphql, declaredFieldNames } from "../modules/graphql-composition.js";
 import { operationGraphqlContribution } from "../operations/runtime.js";
+import { assertSingleModuleEgressOwner } from "../modules/registry.js";
 
 // The connector catalog types are static — identical across deployments — so a
 // connector this deployment is not licensed for is a row with
 // status: NOT_LICENSED rather than a hole in the schema.
-const connectorResolvers = createConnectorResolvers({
-  config: readConnectorRuntimeConfig(),
-});
-
 // The fields stay in the schema whether or not provisioning is configured, so
 // the web client's queries do not change shape per environment; an
 // unconfigured deployment answers NOT_CONFIGURED.
@@ -77,6 +74,10 @@ export function buildGraphqlSchema(
   modules: readonly RuntimeModule[] = [],
   context: ModuleRuntimeContext = {},
 ) {
+  const connectorResolvers = createConnectorResolvers({
+    config: readConnectorRuntimeConfig(),
+    egressOwner: assertSingleModuleEgressOwner(modules),
+  });
   const operationModule = operationGraphqlContribution(modules, context);
   const moduleGraphql = composeModuleGraphql(operationModule ? [...modules, operationModule] : modules, context, {
     query: coreQueryFieldNames,
@@ -144,7 +145,7 @@ ${sortRootFieldDefinitions(moduleGraphql.mutationFields)}
       parseLiteral: parseJsonLiteral,
     },
     ...objectResolvers(),
-    ...connectorObjectResolvers(),
+    ...connectorObjectResolvers(connectorResolvers),
     ...moduleObjectResolvers(moduleGraphql.resolvers),
     Query: {
       ...generatedEntityResolvers.Query,
@@ -272,7 +273,9 @@ async function resolveEntityPageConfigs(
 }
 
 /** Connector namespace types (ObjectStoreQueries, …), keyed by type name. */
-function connectorObjectResolvers() {
+function connectorObjectResolvers(
+  connectorResolvers: ReturnType<typeof createConnectorResolvers>,
+) {
   const { Query: _query, Mutation: _mutation, ...namespaces } = connectorResolvers;
   return namespaces;
 }

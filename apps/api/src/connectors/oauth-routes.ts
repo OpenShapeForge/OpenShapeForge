@@ -38,6 +38,7 @@ import {
 import { consumeAuthorizationState, createAuthorizationState } from "./oauth-state.js";
 import { listInstallations } from "./store.js";
 import type { ConnectorRuntimeConfig } from "./service.js";
+import type { RuntimeModule } from "../modules/contract.js";
 
 const CONNECTOR_MOUNT = `${REST_MOUNT_PATH}/connectors`;
 export const OAUTH_CALLBACK_PATH = `${CONNECTOR_MOUNT}/oauth/callback`;
@@ -57,6 +58,7 @@ export type ConnectorOAuthRouteOptions = {
   /** Where the browser lands after the callback finishes. */
   appOrigin?: string | undefined;
   now?: () => number;
+  egressOwner?: RuntimeModule["egress"] | undefined;
 };
 
 function callbackUri(options: ConnectorOAuthRouteOptions): string {
@@ -334,7 +336,23 @@ export function registerConnectorOAuthRoutes(
         redirectUri: record.redirectUri,
         clientId,
         clientSecret,
-        boundFetch: createBoundFetch(contract, controller.signal),
+        boundFetch: createBoundFetch(
+          contract,
+          controller.signal,
+          fetch,
+          undefined,
+          {
+            owner: options.egressOwner,
+            purpose: "oauth",
+            scope: {
+              tenantId: session.tenantId ?? null,
+              actorId: session.userId ?? null,
+              provider: contract.slug,
+              operation: "exchange_authorization_code",
+              kind: "mutation",
+            },
+          },
+        ),
         now: now(),
       });
 

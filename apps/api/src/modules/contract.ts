@@ -27,7 +27,15 @@
  * that only surfaced at boot.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { Kysely } from "kysely";
+import type { Kysely, Transaction } from "kysely";
+import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type {
+  CallToolResult,
+  ReadResourceResult,
+  Resource,
+  ResourceTemplate,
+  Tool,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import type { CatalogSeedResult } from "../db/migrations/catalog-seed.js";
@@ -37,6 +45,183 @@ import type { TrustedSessionContext } from "../auth/trusted-context.js";
 export type ModuleRuntimeContext = {
   /** Absent when DATABASE_URL is unset; a module must degrade, not throw. */
   db?: OpenShapeForgeDatabase | undefined;
+  /** Core-owned capabilities. Absent alongside `db` in database-free roles. */
+  platform?: ModulePlatformServices | undefined;
+};
+
+/** Closed subjects whose identifiers core can resolve from trusted state. */
+export type ModuleAuthorizationSubject =
+  | { kind: "tool"; name: string }
+  | { kind: "entity-row"; entity: string; id: string }
+  | { kind: "resource-handle"; uri: string };
+
+export type ModuleAuthorizationDecision =
+  | { allowed: true; fieldAllowlist?: readonly string[] }
+  | {
+      allowed: false;
+      code:
+        | "NOT_FOUND"
+        | "FORBIDDEN"
+        | "CONNECTION_REQUIRED"
+        | "REAUTHORIZATION_REQUIRED";
+    };
+
+export type ModuleDefinitionReference = {
+  kind: string;
+  /** Core-owned opaque definition id; never model-visible. */
+  id: string;
+  version: number;
+};
+
+export type ModuleInvocationSource = {
+  /** Opaque core capability valid for one invocation only. */
+  sourceHandle: string;
+  /** Durable opaque reference. It carries no authority by itself. */
+  sourceReference: string;
+  scope: "tenant" | "personal";
+  binding: number;
+  definition: ModuleDefinitionReference;
+};
+
+export type ModuleInvocationSourceSelector =
+  | { mode: "default" }
+  | { mode: "explicit"; sourceHandle: string }
+  | { mode: "all-authorized" };
+
+export type ModuleToolExecutionOptions =
+  | {
+      sourceHandle: string;
+      sourceReference?: never;
+      expectedDefinition: ModuleDefinitionReference;
+    }
+  | {
+      sourceHandle?: never;
+      sourceReference: string;
+      expectedDefinition: ModuleDefinitionReference;
+    }
+  | {
+      sourceHandle?: never;
+      sourceReference?: never;
+      expectedDefinition?: never;
+    };
+
+export type ModuleToolExecutionResult = {
+  result: CallToolResult;
+  execution?: {
+    sourceHandle: string;
+    sourceReference: string;
+    binding: number;
+    definition: ModuleDefinitionReference;
+  };
+};
+
+export type ModuleEgressRequest = {
+  /** Parsed and protocol/allowlist-checked by core before this hook runs. */
+  url: URL;
+  init: RequestInit;
+  allowlist: readonly string[];
+  purpose: "provider" | "oauth" | "discovery" | "probe";
+  scope: {
+    tenantId: string | null;
+    actorId: string | null;
+    provider: string;
+    operation: string;
+    kind: "query" | "mutation";
+  };
+  signal?: AbortSignal;
+};
+
+export type ModulePlatformServices = {
+  db: {
+    withSession<T>(
+      session: TrustedSessionContext,
+      fn: (trx: Transaction<DB>) => Promise<T>,
+    ): Promise<T>;
+  };
+  events: {
+    append(
+      session: TrustedSessionContext,
+      event: {
+        aggregateType: string;
+        aggregateId: string;
+        eventType: string;
+        payload: Record<string, unknown>;
+      },
+    ): Promise<void>;
+  };
+  mcp: {
+    notifyToolsChanged(scope: { tenantId: string | null }): void;
+    notifyResourcesChanged(scope: { tenantId: string | null }): void;
+    authorize(
+      session: TrustedSessionContext,
+      request: { action: string; subject: ModuleAuthorizationSubject },
+    ): Promise<ModuleAuthorizationDecision>;
+    resolveInvocationSources(
+      session: TrustedSessionContext,
+      toolName: string,
+      selector: ModuleInvocationSourceSelector,
+    ): Promise<readonly ModuleInvocationSource[]>;
+    callTool(
+      ctx: McpInvocationContext,
+      name: string,
+      args: Record<string, unknown>,
+      options?: ModuleToolExecutionOptions,
+    ): Promise<ModuleToolExecutionResult>;
+  };
+};
+
+export type McpClientCapabilities = {
+  elicitation: boolean;
+  mcpApp: boolean;
+};
+
+export type McpProjectionContext = {
+  db: OpenShapeForgeDatabase;
+  session: TrustedSessionContext;
+  clientCapabilities: McpClientCapabilities;
+};
+
+export type McpInvocationContext = McpProjectionContext & {
+  server: Server;
+  requestId: string | number;
+};
+
+export type McpToolCallSource =
+  | "crud"
+  | "derived"
+  | "operation"
+  | "connector"
+  | "module";
+
+export type RuntimeMcpContribution = {
+  tools?(ctx: McpProjectionContext): Promise<Tool[]>;
+  callTool?(
+    name: string,
+    args: Record<string, unknown>,
+    ctx: McpInvocationContext,
+  ): Promise<CallToolResult>;
+  decorateTool?(
+    tool: Tool,
+    source: McpToolCallSource,
+    ctx: McpProjectionContext,
+  ): Tool;
+  resources?(ctx: McpProjectionContext): Promise<Resource[]>;
+  resourceTemplates?(ctx: McpProjectionContext): Promise<ResourceTemplate[]>;
+  readResource?(
+    uri: string,
+    ctx: McpInvocationContext,
+  ): Promise<ReadResourceResult | undefined>;
+  interceptToolCall?(
+    call: {
+      name: string;
+      source: McpToolCallSource;
+      arguments: Record<string, unknown>;
+      ctx: McpInvocationContext;
+    },
+    next: (
+      options?: ModuleToolExecutionOptions,
+    ) => Promise<ModuleToolExecutionResult>,
+  ): Promise<ModuleToolExecutionResult>;
 };
 
 export type ModuleGraphqlContribution = {
@@ -165,4 +350,8 @@ export type RuntimeModule = {
    * name is.
    */
   workers?: Record<string, ModuleWorker>;
+  /** Dynamic MCP projection and invocation hooks, evaluated per request. */
+  mcp?: RuntimeMcpContribution;
+  /** At most one loaded module may own final outbound request execution. */
+  egress?: { fetch(request: ModuleEgressRequest): Promise<Response> };
 };

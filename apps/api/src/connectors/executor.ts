@@ -41,6 +41,13 @@ import {
   type ObservableResponse,
 } from "./provider-outcome.js";
 import { mayRetry } from "./reliability.js";
+import {
+  fetchValidatedOutbound,
+  hostAllowed,
+  type ModuleEgressDispatch,
+} from "../modules/egress.js";
+
+export { hostAllowed } from "../modules/egress.js";
 
 export type ConnectorExecutionErrorCode =
   | "CONNECTOR_PROVENANCE_REFUSED"
@@ -177,29 +184,6 @@ export function assertExecutable(contract: ConnectorContract): void {
  * `**.example.com` is not `example.com` and not `evil-example.com`. Both
  * properties come from requiring the dot to be part of the suffix.
  */
-export function hostAllowed(host: string, allowlist: readonly string[]): boolean {
-  const candidate = host.toLowerCase();
-  return allowlist.some((entry) => {
-    const pattern = entry.toLowerCase();
-    if (pattern.startsWith("**.")) {
-      const suffix = pattern.slice(2); // ".example.com"
-      if (!candidate.endsWith(suffix)) return false;
-      // At least one label, of any depth. The apex is excluded because the
-      // prefix would be empty.
-      return candidate.length > suffix.length;
-    }
-    if (pattern.startsWith("*.")) {
-      const suffix = pattern.slice(1); // ".example.com"
-      // A wildcard covers exactly one extra label, not arbitrary depth, and
-      // never the bare apex — `*.example.com` is not `evil-example.com`.
-      if (!candidate.endsWith(suffix)) return false;
-      const prefix = candidate.slice(0, -suffix.length);
-      return prefix.length > 0 && !prefix.includes(".");
-    }
-    return candidate === pattern;
-  });
-}
-
 /**
  * A `fetch` bound to the contract's egress allowlist.
  *
@@ -217,32 +201,98 @@ export function createBoundFetch(
   signal: AbortSignal,
   underlying: FetchLike = fetch,
   observe?: (response: ObservableResponse) => void,
+  egress?: ModuleEgressDispatch,
 ): FetchLike {
   const allowlist = contract.network.egress;
   return (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = new URL(
-      typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
-    );
-    if (url.protocol !== "https:" && url.protocol !== "http:") {
-      throw new ConnectorExecutionError(
-        "CONNECTOR_EGRESS_DENIED",
-        contract.slug,
-        `Connector "${contract.slug}" attempted a ${url.protocol} request; only http(s) is permitted.`,
-      );
-    }
-    if (!hostAllowed(url.hostname, allowlist)) {
-      throw new ConnectorExecutionError(
-        "CONNECTOR_EGRESS_DENIED",
-        contract.slug,
-        `Connector "${contract.slug}" attempted to reach ${url.hostname}, which its contract ` +
-          "does not declare in network.egress.",
-      );
-    }
     // The caller's own signal is replaced, not merged: a package must not be
     // able to opt out of the operation's budget by passing its own.
-    const response = await underlying(input, { ...init, signal });
-    observe?.(response);
-    return response;
+    let target: string | URL | Request =
+      input instanceof Request
+        ? new Request(input, { ...init, signal })
+        : input;
+    let requestInit: RequestInit & { duplex?: "half" } = {
+      ...init,
+      signal,
+      redirect: "manual",
+    };
+    if (target instanceof Request) {
+      requestInit = {
+        method: target.method,
+        headers: target.headers,
+        ...(target.body ? { body: target.body, duplex: "half" } : {}),
+        signal,
+        redirect: "manual",
+      };
+    }
+
+    for (let hop = 0; hop <= 5; hop += 1) {
+      const response = await fetchValidatedOutbound({
+        target,
+        init: requestInit,
+        allowlist,
+        fallback: underlying,
+        ...(egress ? { dispatch: egress } : {}),
+        denied: (deniedUrl, reason) =>
+          new ConnectorExecutionError(
+            "CONNECTOR_EGRESS_DENIED",
+            contract.slug,
+            reason === "protocol"
+              ? `Connector "${contract.slug}" attempted a ${deniedUrl.protocol} request; only http(s) is permitted.`
+              : `Connector "${contract.slug}" attempted to reach ${deniedUrl.hostname}, which its contract does not declare in network.egress.`,
+          ),
+      });
+      observe?.(response);
+      if (response.status < 300 || response.status >= 400) return response;
+      const location = response.headers.get("location");
+      if (!location) return response;
+      if (hop === 5) {
+        throw new ConnectorExecutionError(
+          "CONNECTOR_EGRESS_DENIED",
+          contract.slug,
+          `Connector "${contract.slug}" exceeded the outbound redirect limit.`,
+        );
+      }
+      const currentUrl =
+        target instanceof Request
+          ? new URL(target.url)
+          : new URL(target instanceof URL ? target.href : target);
+      const nextUrl = new URL(location, currentUrl);
+      const becomesGet =
+        response.status === 303 ||
+        ((response.status === 301 || response.status === 302) &&
+          requestInit.method?.toUpperCase() === "POST");
+      if (becomesGet) {
+        const headers = new Headers(requestInit.headers);
+        headers.delete("content-type");
+        headers.delete("content-length");
+        requestInit = { method: "GET", headers, signal, redirect: "manual" };
+      }
+      if (nextUrl.origin !== currentUrl.origin) {
+        const method = requestInit.method?.toUpperCase() ?? "GET";
+        if (
+          requestInit.body !== undefined ||
+          (method !== "GET" && method !== "HEAD")
+        ) {
+          throw new ConnectorExecutionError(
+            "CONNECTOR_EGRESS_DENIED",
+            contract.slug,
+            `Connector "${contract.slug}" cannot forward a request body or non-read method across origins.`,
+          );
+        }
+        const headers = new Headers(requestInit.headers);
+        for (const name of [...headers.keys()]) {
+          headers.delete(name);
+        }
+        requestInit = { ...requestInit, headers };
+      }
+      target = nextUrl;
+    }
+    throw new ConnectorExecutionError(
+      "CONNECTOR_EGRESS_DENIED",
+      contract.slug,
+      `Connector "${contract.slug}" exceeded the outbound redirect limit.`,
+    );
   }) as FetchLike;
 }
 
@@ -271,6 +321,7 @@ export type InvokeInput = {
    * caller's answer together. Minted here when the caller has none.
    */
   correlationId?: string;
+  egress?: ModuleEgressDispatch;
 };
 
 /**
@@ -304,8 +355,12 @@ export async function invokeOperation(input: InvokeInput): Promise<unknown> {
 
   const correlationId = input.correlationId ?? randomUUID();
   const observations = new ProviderObservations(correlationId);
-  const boundFetch = createBoundFetch(contract, controller.signal, input.fetchImpl, (response) =>
-    observations.observe(response),
+  const boundFetch = createBoundFetch(
+    contract,
+    controller.signal,
+    input.fetchImpl,
+    (response) => observations.observe(response),
+    input.egress,
   );
   const context: ConnectorContext = {
     config: Object.freeze({ ...input.config }),

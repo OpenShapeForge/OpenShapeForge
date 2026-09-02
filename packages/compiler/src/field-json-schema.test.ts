@@ -11,6 +11,8 @@ import {
 import type {
   FieldDefinition,
   FieldDefinitionSemanticTypeKind,
+  McpDeclarativeAdapterUrls,
+  McpDeclarativeOperationUrl,
 } from "./index.js";
 
 const packageRootFieldDefinition = {
@@ -18,6 +20,13 @@ const packageRootFieldDefinition = {
   valueType: "object",
 } satisfies FieldDefinition;
 const packageRootSemanticTypeKind: FieldDefinitionSemanticTypeKind = "object";
+const packageRootAdapterUrls = {
+  baseUrlTemplate: "https://default.example.test",
+  baseUrlTemplates: { secondary: "https://secondary.example.test" },
+} satisfies McpDeclarativeAdapterUrls;
+const packageRootOperationUrl = {
+  baseUrlKey: "secondary",
+} satisfies McpDeclarativeOperationUrl;
 
 function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): CompiledField {
   const { key, ...rest } = overrides;
@@ -50,6 +59,10 @@ describe("compiled field JSON Schema projection", () => {
   it("exports the complete canonical contract from the package root", () => {
     expect(packageRootFieldDefinition.key).toBe("definition");
     expect(packageRootSemanticTypeKind).toBe("object");
+    expect(packageRootAdapterUrls.baseUrlTemplates.secondary).toBe(
+      "https://secondary.example.test",
+    );
+    expect(packageRootOperationUrl.baseUrlKey).toBe("secondary");
   });
 
   it("projects descriptions, validation, defaults, and reference-data enums", () => {

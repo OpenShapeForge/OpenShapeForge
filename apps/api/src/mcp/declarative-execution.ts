@@ -10,7 +10,8 @@
  * (`mcp.derivedTools.execution`); WHAT their fields mean is the canonical
  * vocabulary this module interprets:
  *
- *   provider row:   transport ("rest"), baseUrlTemplate, auth
+ *   provider row:   transport ("rest"), baseUrlTemplate, optional
+ *                   baseUrlTemplates, auth
  *                   { scheme: basic|bearer|header, usernameTemplate,
  *                     passwordFrom, headerName, tokenFrom }, egressHosts
  *   operation row:  kind, operation { method, pathTemplate },
@@ -65,6 +66,17 @@ export type ExecutionCatalogEntry = {
 
 type JsonRecord = Record<string, unknown>;
 
+/** Canonical authored URL fields carried by a declarative adapter row. */
+export type DeclarativeAdapterUrls = {
+  baseUrlTemplate?: string;
+  baseUrlTemplates?: Readonly<Record<string, string>>;
+};
+
+/** Canonical authored URL selector carried inside an operation definition. */
+export type DeclarativeOperationUrl = {
+  baseUrlKey?: string;
+};
+
 const KEYRING_ENV = "OPENSHAPEFORGE_ELICITED_SECRET_KEYS";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 5;
@@ -76,10 +88,18 @@ export async function fetchWithAllowedRedirects(
   allowlist: readonly string[],
   fetchImpl: typeof fetch = fetch,
   egress?: ModuleEgressDispatch,
+  protocolPolicy: "http-or-https" | "https-only" = "http-or-https",
 ): Promise<Response> {
   let url = new URL(input);
   let requestInit = { ...init };
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+    if (protocolPolicy === "https-only" && url.protocol !== "https:") {
+      throw new HttpError(
+        403,
+        "EGRESS_DENIED",
+        "A named adapter base URL and every redirect must use HTTPS.",
+      );
+    }
     const response = await fetchValidatedOutbound({
       target: url,
       init: { ...requestInit, redirect: "manual" },
@@ -183,6 +203,8 @@ export function splitConnectionValues(
 }
 
 const PLACEHOLDER = /\{([a-zA-Z][a-zA-Z0-9]*)\}/g;
+const BASE_URL_KEY = /^[a-z][a-z0-9_-]{0,63}$/;
+const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 /**
  * Sensitivities whose values are stored encrypted at rest AND barred from URL
@@ -231,6 +253,73 @@ export function templatePlaceholders(template: unknown): string[] {
   return [...template.matchAll(PLACEHOLDER)].map((match) => match[1] as string);
 }
 
+/** Validate and return every adapter-authored named base URL in stable order. */
+export function namedBaseUrlTemplates(
+  providerRow: JsonRecord,
+): Array<{ key: string; template: string }> {
+  if (providerRow.baseUrlTemplates === undefined) return [];
+  const templates = providerRow.baseUrlTemplates;
+  if (
+    templates === null ||
+    typeof templates !== "object" ||
+    Array.isArray(templates) ||
+    (Object.getPrototypeOf(templates) !== Object.prototype &&
+      Object.getPrototypeOf(templates) !== null)
+  ) {
+    throw new HttpError(
+      400,
+      "OPERATION_MISCONFIGURED",
+      "Adapter baseUrlTemplates must be a plain authored key-to-URL object.",
+    );
+  }
+
+  return Object.entries(templates as JsonRecord)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, value]) => {
+      if (!BASE_URL_KEY.test(key) || PROTOTYPE_KEYS.has(key)) {
+        throw new HttpError(
+          400,
+          "OPERATION_MISCONFIGURED",
+          `Adapter base URL key ${JSON.stringify(key)} must match ${BASE_URL_KEY} and ` +
+            "must not be prototype-sensitive.",
+        );
+      }
+      if (typeof value !== "string" || value.length === 0) {
+        throw new HttpError(
+          400,
+          "OPERATION_MISCONFIGURED",
+          `Adapter base URL ${JSON.stringify(key)} must be a non-empty string.`,
+        );
+      }
+      if (templatePlaceholders(value).length > 0) {
+        throw new HttpError(
+          400,
+          "OPERATION_MISCONFIGURED",
+          `Adapter base URL ${JSON.stringify(key)} must be a literal absolute HTTPS URL ` +
+            "without template placeholders.",
+        );
+      }
+      let url: URL;
+      try {
+        url = new URL(value);
+      } catch {
+        throw new HttpError(
+          400,
+          "OPERATION_MISCONFIGURED",
+          `Adapter base URL ${JSON.stringify(key)} must be a valid absolute HTTPS URL.`,
+        );
+      }
+      if (url.protocol !== "https:") {
+        throw new HttpError(
+          400,
+          "EGRESS_DENIED",
+          `Adapter base URL ${JSON.stringify(key)} must use HTTPS.`,
+        );
+      }
+      return { key, template: value };
+    });
+}
+
 /**
  * Every canonical URL-position template a provider row declares, with the
  * context name errors use. These are the positions secret values must never
@@ -241,8 +330,13 @@ export function providerUrlTemplates(
 ): Array<{ context: string; template: string }> {
   const auth = (providerRow.auth ?? null) as JsonRecord | null;
   const probe = (providerRow.probe ?? null) as JsonRecord | null;
+  const named = namedBaseUrlTemplates(providerRow).map(({ key, template }) => ({
+    context: `baseUrlTemplates.${key}`,
+    template,
+  }));
   return [
     { context: "baseUrlTemplate", template: providerRow.baseUrlTemplate },
+    ...named,
     { context: "probe pathTemplate", template: probe?.pathTemplate },
     { context: "auth.authorizationUrl", template: auth?.authorizationUrl },
     { context: "auth.tokenUrl", template: auth?.tokenUrl },
@@ -250,6 +344,51 @@ export function providerUrlTemplates(
     (entry): entry is { context: string; template: string } =>
       typeof entry.template === "string" && entry.template.length > 0,
   );
+}
+
+/**
+ * Select the adapter-authored base URL template for an operation. Callers and
+ * connection values never participate in this choice.
+ */
+export function operationBaseUrlTemplate(
+  providerRow: JsonRecord,
+  operation: JsonRecord,
+): { context: string; template: string; named: boolean } {
+  const named = namedBaseUrlTemplates(providerRow);
+  if (operation.baseUrlKey === undefined) {
+    return {
+      context: "provider baseUrlTemplate",
+      template:
+        typeof providerRow.baseUrlTemplate === "string"
+          ? providerRow.baseUrlTemplate
+          : "",
+      named: false,
+    };
+  }
+
+  if (
+    typeof operation.baseUrlKey !== "string" ||
+    operation.baseUrlKey.length === 0
+  ) {
+    throw new HttpError(
+      400,
+      "OPERATION_MISCONFIGURED",
+      "Operation baseUrlKey must be a non-empty authored key.",
+    );
+  }
+  const selected = named.find(({ key }) => key === operation.baseUrlKey);
+  if (!selected) {
+    throw new HttpError(
+      400,
+      "OPERATION_MISCONFIGURED",
+      `Operation baseUrlKey ${JSON.stringify(operation.baseUrlKey)} is not declared by the adapter.`,
+    );
+  }
+  return {
+    context: `provider baseUrlTemplates.${operation.baseUrlKey}`,
+    template: selected.template,
+    named: true,
+  };
 }
 
 /**
@@ -758,12 +897,11 @@ export async function composeBindingRequest(
         .map(([key, value]) => [key, String(value)]),
     ),
   };
+  const selectedBaseUrl = operationBaseUrlTemplate(providerRow, operation);
   const baseUrl = resolveTemplate(
-    typeof providerRow.baseUrlTemplate === "string"
-      ? providerRow.baseUrlTemplate
-      : "",
+    selectedBaseUrl.template,
     plain,
-    "provider baseUrlTemplate",
+    selectedBaseUrl.context,
     secretKeys,
   );
   const usedInPath = new Set<string>();
@@ -785,7 +923,23 @@ export async function composeBindingRequest(
     },
   );
 
-  const url = new URL(baseUrl.replace(/\/$/, "") + path);
+  let url: URL;
+  try {
+    url = new URL(baseUrl.replace(/\/$/, "") + path);
+  } catch {
+    throw new HttpError(
+      400,
+      "OPERATION_MISCONFIGURED",
+      "The selected adapter base URL is invalid.",
+    );
+  }
+  if (selectedBaseUrl.named && url.protocol !== "https:") {
+    throw new HttpError(
+      400,
+      "EGRESS_DENIED",
+      "A named adapter base URL must use HTTPS.",
+    );
+  }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new HttpError(
       400,
@@ -913,6 +1067,9 @@ export async function executeBinding(
   const { binding, operationRow, providerRow } = input;
   const fetchImpl = input.fetchImpl ?? fetch;
   const { method, url, headers, body } = await composeBindingRequest(input);
+  const operation = (operationRow.operation ?? {}) as JsonRecord;
+  const protocolPolicy =
+    operation.baseUrlKey === undefined ? "http-or-https" : "https-only";
   const isGraphql = providerRow.transport === "graphql";
   const egress = Array.isArray(providerRow.egressHosts)
     ? (providerRow.egressHosts as string[])
@@ -931,6 +1088,7 @@ export async function executeBinding(
       egress,
       fetchImpl,
       input.egress,
+      protocolPolicy,
     );
   } catch (error) {
     if (!(error instanceof HttpError) || error.code === "PROVIDER_ERROR") {

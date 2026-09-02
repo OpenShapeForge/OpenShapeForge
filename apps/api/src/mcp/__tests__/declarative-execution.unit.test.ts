@@ -17,8 +17,10 @@ import {
   executeBinding,
   fetchWithAllowedRedirects,
   mergeOutputs,
+  operationBaseUrlTemplate,
   extractPath,
   orderedBindings,
+  providerUrlTemplates,
   resolveTemplate,
   setPath,
   splitConnectionValues,
@@ -343,6 +345,309 @@ describe("executeBinding", () => {
     );
     const headers = spy.calls[0]?.init.headers as Record<string, string>;
     expect(headers.authorization).toBe("Bearer tok-9");
+  });
+
+  it("preserves the default base URL and never lets caller input select an origin", async () => {
+    const request = await composeBindingRequest({
+      binding: {},
+      operationRow: {
+        operation: { method: "GET", pathTemplate: "/records" },
+      },
+      providerRow: {
+        ...providerRow,
+        baseUrlTemplates: { secondary: "https://secondary.example.com" },
+        egressHosts: ["acme.example.com", "secondary.example.com"],
+      },
+      connectionValues,
+      serviceInputs: { baseUrlKey: "secondary" },
+      keyring: KEYRING,
+      secretScope: "erp.providers",
+    });
+    expect(request.url.href).toBe(
+      "https://acme.example.com/records?baseUrlKey=secondary",
+    );
+  });
+
+  it("selects an authored named HTTPS base URL through canonical egress", async () => {
+    const requests: any[] = [];
+    const outputs = await executeBinding({
+      binding: { outputMapping: [{ from: "number", to: "ticketNumber" }] },
+      operationRow: {
+        key: "search",
+        operation: {
+          method: "GET",
+          pathTemplate: "/api/search",
+          baseUrlKey: "secondary",
+        },
+        responseMapping: {
+          rootPath: "data.ticket",
+          fieldPaths: [{ field: "number", path: "number" }],
+        },
+      },
+      providerRow: {
+        ...providerRow,
+        baseUrlTemplates: {
+          secondary: "https://api.secondary.example.com",
+        },
+        egressHosts: ["api.secondary.example.com"],
+      },
+      connectionValues,
+      serviceInputs: {},
+      keyring: KEYRING,
+      fetchImpl: (() => {
+        throw new Error("fallback must not run");
+      }) as unknown as typeof fetch,
+      egress: {
+        purpose: "provider",
+        scope: {
+          tenantId: "tenant-1",
+          actorId: "actor-1",
+          provider: "provider-1",
+          operation: "operation-1",
+          kind: "query",
+        },
+        owner: {
+          fetch: async (request) => {
+            requests.push(request);
+            return new Response(
+              JSON.stringify({ data: { ticket: { number: 42 } } }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            );
+          },
+        },
+      },
+      secretScope: "erp.providers",
+    });
+    expect(outputs).toEqual({ ticketNumber: 42 });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url.href).toBe(
+      "https://api.secondary.example.com/api/search",
+    );
+  });
+
+  it("rejects a named-base HTTPS downgrade before the HTTP redirect hop", async () => {
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request) => {
+      requested.push(String(input));
+      return new Response(null, {
+        status: 302,
+        headers: { location: "http://api.example.test/plain" },
+      });
+    }) as typeof fetch;
+    await expect(
+      executeBinding({
+        binding: {},
+        operationRow: {
+          operation: {
+            method: "GET",
+            pathTemplate: "/start",
+            baseUrlKey: "secondary",
+          },
+        },
+        providerRow: {
+          transport: "rest",
+          baseUrlTemplate: "http://legacy.example.test",
+          baseUrlTemplates: {
+            secondary: "https://api.example.test",
+          },
+          egressHosts: ["api.example.test"],
+        },
+        connectionValues: {},
+        serviceInputs: {},
+        fetchImpl,
+        secretScope: "unused",
+      }),
+    ).rejects.toThrow(/every redirect must use HTTPS/);
+    expect(requested).toEqual(["https://api.example.test/start"]);
+  });
+
+  it("preserves legacy HTTP behavior for the default base URL", async () => {
+    const requested: string[] = [];
+    await executeBinding({
+      binding: {},
+      operationRow: {
+        operation: { method: "GET", pathTemplate: "/legacy" },
+      },
+      providerRow: {
+        transport: "rest",
+        baseUrlTemplate: "http://legacy.example.test",
+        egressHosts: ["legacy.example.test"],
+      },
+      connectionValues: {},
+      serviceInputs: {},
+      fetchImpl: (async (input: string | URL | Request) => {
+        requested.push(String(input));
+        return new Response("{}", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch,
+      secretScope: "unused",
+    });
+    expect(requested).toEqual(["http://legacy.example.test/legacy"]);
+  });
+
+  it("validates the complete named URL map before selecting or transporting", async () => {
+    const cases: Array<{
+      key: unknown;
+      templates: unknown;
+      egress?: string[];
+      message: RegExp;
+    }> = [
+      {
+        key: "missing",
+        templates: { secondary: "https://secondary.example.com" },
+        message: /is not declared by the adapter/,
+      },
+      {
+        key: "secondary",
+        templates: null,
+        message: /must be a plain authored key-to-URL object/,
+      },
+      {
+        key: "secondary",
+        templates: new Date(0),
+        message: /must be a plain authored key-to-URL object/,
+      },
+      {
+        key: "secondary",
+        templates: { secondary: "" },
+        message: /must be a non-empty string/,
+      },
+      {
+        key: "secondary",
+        templates: { secondary: 7 },
+        message: /must be a non-empty string/,
+      },
+      {
+        key: "secondary",
+        templates: { secondary: "not a URL" },
+        message: /valid absolute HTTPS URL/,
+      },
+      {
+        key: "secondary",
+        templates: { secondary: "http://secondary.example.com" },
+        message: /must use HTTPS/,
+      },
+      {
+        key: "secondary",
+        templates: { secondary: "https://{region}.example.com" },
+        message: /without template placeholders/,
+      },
+      {
+        key: "secondary",
+        templates: {
+          secondary: "https://secondary.example.com",
+          BadKey: "https://bad.example.com",
+        },
+        message: /key "BadKey" must match/,
+      },
+      {
+        key: "secondary",
+        templates: {
+          secondary: "https://secondary.example.com",
+          constructor: "https://bad.example.com",
+        },
+        message: /must not be prototype-sensitive/,
+      },
+      {
+        key: "secondary",
+        templates: {
+          secondary: "https://secondary.example.com",
+          unsafe: "http://bad.example.com",
+        },
+        message: /base URL "unsafe" must use HTTPS/,
+      },
+      {
+        key: "secondary",
+        templates: { secondary: "https://secondary.example.com" },
+        egress: ["elsewhere.example.com"],
+        message: /egress allow-list/,
+      },
+    ];
+    for (const testCase of cases) {
+      const spy = fetchSpy();
+      await expect(
+        executeBinding({
+          binding: {},
+          operationRow: {
+            operation: {
+              method: "GET",
+              pathTemplate: "/x",
+              baseUrlKey: testCase.key,
+            },
+          },
+          providerRow: {
+            ...providerRow,
+            baseUrlTemplates: testCase.templates,
+            egressHosts: testCase.egress ?? ["secondary.example.com"],
+          },
+          connectionValues,
+          serviceInputs: {},
+          keyring: KEYRING,
+          fetchImpl: spy.impl,
+          secretScope: "erp.providers",
+        }),
+      ).rejects.toThrow(testCase.message);
+      expect(spy.calls).toEqual([]);
+    }
+  });
+
+  it("uses the complete named-map validator during provider preflight", () => {
+    expect(
+      providerUrlTemplates({
+        baseUrlTemplate: "https://default.example.com",
+        baseUrlTemplates: {
+          secondary: "https://secondary.example.com",
+        },
+      }),
+    ).toContainEqual({
+      context: "baseUrlTemplates.secondary",
+      template: "https://secondary.example.com",
+    });
+    expect(() =>
+      providerUrlTemplates({
+        baseUrlTemplate: "https://default.example.com",
+        baseUrlTemplates: {
+          secondary: "https://secondary.example.com",
+          unsafe: "https://{secretHost}.example.com",
+        },
+      }),
+    ).toThrow(/without template placeholders/);
+    expect(() =>
+      operationBaseUrlTemplate(
+        { baseUrlTemplate: "https://default.example.com" },
+        { baseUrlKey: "toString" },
+      ),
+    ).toThrow(/is not declared by the adapter/);
+  });
+
+  it("never lets connection data choose a named origin", async () => {
+    const spy = fetchSpy();
+    await expect(
+      executeBinding({
+        binding: {},
+        operationRow: {
+          operation: {
+            method: "GET",
+            pathTemplate: "/x",
+            baseUrlKey: "secondary",
+          },
+        },
+        providerRow: {
+          ...providerRow,
+          baseUrlTemplates: {
+            secondary: "https://{subdomain}.example.com",
+          },
+        },
+        connectionValues: { subdomain: "attacker" },
+        serviceInputs: {},
+        keyring: KEYRING,
+        fetchImpl: spy.impl,
+        secretScope: "erp.providers",
+      }),
+    ).rejects.toThrow(/literal absolute HTTPS URL without template placeholders/);
+    expect(spy.calls).toEqual([]);
   });
 
   it("refuses a host outside the egress allow-list before any request", async () => {

@@ -908,32 +908,53 @@ export async function executeBinding(
     typeof extracted === "object"
   ) {
     operationOutputs = {};
-    for (const entry of fieldPaths) {
-      if (typeof entry.field !== "string") continue;
-      operationOutputs[entry.field] = extractPath(extracted, entry.path);
-    }
-    // A mapping that matches NOTHING while the provider answered with data
-    // is a definition mistake, not an empty result — an empty success here
-    // silently loses the whole response (seen live: a calendar's events
-    // vanished into {}). Name what was looked for and what was there.
-    const anyResolved = Object.values(operationOutputs).some(
-      (value) => value !== undefined,
-    );
-    const sourceKeys = Array.isArray(extracted)
-      ? extracted.length > 0
-        ? [
-            `a collection of ${extracted.length} items — use path "$" to pass it through`,
-          ]
-        : []
-      : Object.keys(extracted);
-    if (!anyResolved && sourceKeys.length > 0) {
-      throw new HttpError(
-        502,
-        "SERVICE_MISCONFIGURED",
-        `The response mapping produced no outputs: none of its field paths ` +
-          `(${fieldPaths.map((entry) => String(entry.path)).join(", ")}) exist in the ` +
-          `provider response, which holds ${sourceKeys.join(", ")}.`,
+    if (Array.isArray(extracted)) {
+      for (const entry of fieldPaths) {
+        if (typeof entry.field !== "string") continue;
+        if (entry.path === "$") {
+          operationOutputs[entry.field] = extracted;
+          continue;
+        }
+        let anyResolved = false;
+        const projected = extracted.map((item) => {
+          const value = extractPath(item, entry.path);
+          if (value !== undefined) anyResolved = true;
+          return value === undefined ? null : value;
+        });
+        if (!anyResolved && extracted.length > 0) {
+          throw new HttpError(
+            502,
+            "SERVICE_MISCONFIGURED",
+            `The response mapping produced no outputs: field path ` +
+              `(${String(entry.path)}) does not exist in the provider response, ` +
+              `which holds a collection of ${extracted.length} items — use path "$" ` +
+              "to pass it through.",
+          );
+        }
+        operationOutputs[entry.field] = projected;
+      }
+    } else {
+      for (const entry of fieldPaths) {
+        if (typeof entry.field !== "string") continue;
+        operationOutputs[entry.field] = extractPath(extracted, entry.path);
+      }
+      // A mapping that matches NOTHING while the provider answered with data
+      // is a definition mistake, not an empty result — an empty success here
+      // silently loses the whole response (seen live: a calendar's events
+      // vanished into {}). Name what was looked for and what was there.
+      const anyResolved = Object.values(operationOutputs).some(
+        (value) => value !== undefined,
       );
+      const sourceKeys = Object.keys(extracted);
+      if (!anyResolved && sourceKeys.length > 0) {
+        throw new HttpError(
+          502,
+          "SERVICE_MISCONFIGURED",
+          `The response mapping produced no outputs: none of its field paths ` +
+            `(${fieldPaths.map((entry) => String(entry.path)).join(", ")}) exist in the ` +
+            `provider response, which holds ${sourceKeys.join(", ")}.`,
+        );
+      }
     }
   } else {
     operationOutputs =

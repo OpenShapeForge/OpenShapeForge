@@ -500,6 +500,124 @@ describe("mapping honesty", () => {
     expect(extractPath({ data: { items: [3] } }, "$.data.items")).toEqual([3]);
   });
 
+  it("projects declared scalar fields from each collection element", async () => {
+    const fetchImpl = (async () =>
+      Response.json({
+        items: [
+          { id: "a", title: "First", providerOnly: "hidden-a" },
+          { id: "b", title: "Second", providerOnly: "hidden-b" },
+        ],
+      })) as unknown as typeof fetch;
+
+    const outputs = await executeBinding({
+      binding: {},
+      operationRow: {
+        key: "items",
+        operation: { method: "GET", pathTemplate: "/items" },
+        responseMapping: {
+          rootPath: "items",
+          fieldPaths: [
+            { field: "ids", path: "id" },
+            { field: "titles", path: "title" },
+          ],
+        },
+      },
+      providerRow: {
+        transport: "rest",
+        baseUrlTemplate: "https://api.example.com",
+        egressHosts: ["api.example.com"],
+      },
+      connectionValues: {},
+      serviceInputs: {},
+      secretScope: "unused",
+      fetchImpl,
+    });
+
+    expect(outputs).toEqual({
+      ids: ["a", "b"],
+      titles: ["First", "Second"],
+    });
+  });
+
+  it("projects nested paths and keeps missing collection values aligned", async () => {
+    const fetchImpl = (async () =>
+      Response.json({
+        items: [
+          { start: { dateTime: "2026-09-02T09:00:00Z" } },
+          { id: "missing-start" },
+          { start: { dateTime: "2026-09-02T10:00:00Z" } },
+        ],
+      })) as unknown as typeof fetch;
+
+    const outputs = await executeBinding({
+      binding: {},
+      operationRow: {
+        key: "items",
+        operation: { method: "GET", pathTemplate: "/items" },
+        responseMapping: {
+          rootPath: "items",
+          fieldPaths: [{ field: "starts", path: "start.dateTime" }],
+        },
+      },
+      providerRow: {
+        transport: "rest",
+        baseUrlTemplate: "https://api.example.com",
+        egressHosts: ["api.example.com"],
+      },
+      connectionValues: {},
+      serviceInputs: {},
+      secretScope: "unused",
+      fetchImpl,
+    });
+
+    expect(outputs).toEqual({
+      starts: [
+        "2026-09-02T09:00:00Z",
+        null,
+        "2026-09-02T10:00:00Z",
+      ],
+    });
+  });
+
+  it("rejects a collection field path absent from every element", async () => {
+    const fetchImpl = (async () =>
+      Response.json({
+        items: [
+          { id: "a", providerOnly: "must-not-leak" },
+          { id: "b", providerOnly: "must-not-leak" },
+        ],
+      })) as unknown as typeof fetch;
+
+    await expect(
+      executeBinding({
+        binding: {},
+        operationRow: {
+          key: "items",
+          operation: { method: "GET", pathTemplate: "/items" },
+          responseMapping: {
+            rootPath: "items",
+            fieldPaths: [
+              { field: "ids", path: "id" },
+              { field: "titles", path: "title" },
+            ],
+          },
+        },
+        providerRow: {
+          transport: "rest",
+          baseUrlTemplate: "https://api.example.com",
+          egressHosts: ["api.example.com"],
+        },
+        connectionValues: {},
+        serviceInputs: {},
+        secretScope: "unused",
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      code: "SERVICE_MISCONFIGURED",
+      message: expect.not.stringContaining("must-not-leak"),
+    });
+  });
+
   it("fails loud when a declared mapping matches nothing in a non-empty response", async () => {
     const base = {
       binding: { order: 1, outputMapping: [{ from: "events", to: "events" }] },
@@ -530,9 +648,14 @@ describe("mapping honesty", () => {
             fieldPaths: [{ field: "events", path: "nope" }],
           },
         },
-        fetchImpl: fetchWith({ items: [{ id: 1 }] }),
+        fetchImpl: fetchWith({
+          items: [{ id: 1, providerOnly: "must-not-leak" }],
+        }),
       }),
-    ).rejects.toThrow(/produced no outputs/);
+    ).rejects.toMatchObject({
+      code: "SERVICE_MISCONFIGURED",
+      message: expect.not.stringContaining("must-not-leak"),
+    });
 
     // identity path over the extracted collection works end to end
     const outputs = await executeBinding({
@@ -568,17 +691,21 @@ describe("mapping honesty", () => {
     // a genuinely empty result stays an empty success, not an error
     const empty = await executeBinding({
       ...base,
+      binding: { order: 1 },
       operationRow: {
         key: "events",
         operation: { method: "GET", pathTemplate: "/events" },
         responseMapping: {
           rootPath: "items",
-          fieldPaths: [{ field: "events", path: "$" }],
+          fieldPaths: [
+            { field: "ids", path: "id" },
+            { field: "starts", path: "start.dateTime" },
+          ],
         },
       },
       fetchImpl: fetchWith({ items: [] }),
     });
-    expect(empty.events).toEqual([]);
+    expect(empty).toEqual({ ids: [], starts: [] });
   });
 });
 

@@ -4,6 +4,7 @@ import {
   getGeneratedCrudTables,
   isGeneratedCrudOperationEnabled,
   isGeneratedCrudTableEligible,
+  substringLikePattern,
 } from "../generated-crud.js";
 import {
   renderGeneratedMutationFields,
@@ -27,6 +28,12 @@ function withOperations(
 }
 
 describe("generated GraphQL CRUD exposure", () => {
+  test("substring search treats SQL LIKE metacharacters as literal text", () => {
+    expect(substringLikePattern(String.raw`50%_off\today`)).toBe(
+      String.raw`%50\%\_off\\today%`,
+    );
+  });
+
   test("partial policies are visible to current runtimes and hidden from legacy ones", () => {
     const table = withOperations({
       list: true,

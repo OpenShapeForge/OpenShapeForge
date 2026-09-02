@@ -148,10 +148,12 @@ export function assertClassifiedQueryFieldsAllowed(
   if (canReadClassifiedColumns(authorization, session)) return;
 
   const requestedFields = [
-    ...Object.keys(filter ?? {}).map((field) => ({
-      field,
-      column: classifiedColumnForFilterField(columns, field),
-    })),
+    ...Object.entries(filter ?? {})
+      .filter(([, value]) => hasEffectiveFilterValue(value))
+      .map(([field]) => ({
+        field,
+        column: classifiedColumnForFilterField(columns, field),
+      })),
     ...(sort?.field
       ? [{ field: sort.field, column: classifiedColumnForSortField(columns, sort.field) }]
       : []),
@@ -165,6 +167,11 @@ export function assertClassifiedQueryFieldsAllowed(
     `Not authorized to filter or sort by classified field "${field}" on ${typeName}.`,
     { extensions: { code: "FORBIDDEN", status: 403 } },
   );
+}
+
+/** Values the CRUD predicate treats as no filter must not trip query guards. */
+export function hasEffectiveFilterValue(value: unknown): boolean {
+  return value != null && value !== "" && (!Array.isArray(value) || value.length > 0);
 }
 
 /**

@@ -55,6 +55,22 @@ async function withClassifiedColumn(
   }
 }
 
+async function withColumnQuery(
+  column: GeneratedColumn,
+  query: GeneratedColumn["query"],
+  fn: () => Promise<void>,
+): Promise<void> {
+  const previous = column.query;
+  if (query === undefined) delete column.query;
+  else column.query = query;
+  try {
+    await fn();
+  } finally {
+    if (previous === undefined) delete column.query;
+    else column.query = previous;
+  }
+}
+
 describe("classified filter/sort guard in listGeneratedEntities", () => {
   test("refuses a classified filter for a read-only session before any SQL", async () => {
     await withClassifiedColumn(classified, async () => {
@@ -109,5 +125,75 @@ describe("classified filter/sort guard in listGeneratedEntities", () => {
       sort: { field, direction: "asc" },
     }).catch((caught: unknown) => caught);
     expect((error as { extensions?: { code?: string } })?.extensions?.code).toBeUndefined();
+  });
+
+  test("rejects authored filter and sort opt-outs before any SQL", async () => {
+    await withColumnQuery(
+      classified,
+      { searchable: false, filterable: false, sortable: false },
+      async () => {
+        for (const input of [
+          { filter: { [field]: "probe" } },
+          { sort: { field, direction: "asc" } },
+        ]) {
+          await expect(
+            listGeneratedEntities(noDb, readOnlySession, { table: table.name, ...input }),
+          ).rejects.toMatchObject({ extensions: { code: "BAD_USER_INPUT" } });
+        }
+      },
+    );
+  });
+
+  test("authored filter opt-outs preserve empty-filter no-op semantics", async () => {
+    await withColumnQuery(
+      classified,
+      { searchable: false, filterable: false, sortable: false },
+      async () => {
+        for (const filter of [
+          { [field]: null },
+          { [field]: "" },
+          { [`${field}In`]: [] },
+        ]) {
+          const error = await listGeneratedEntities(noDb, readOnlySession, {
+            table: table.name,
+            filter,
+          }).catch((caught: unknown) => caught);
+          expect((error as { extensions?: { code?: string } })?.extensions?.code).toBeUndefined();
+        }
+      },
+    );
+  });
+
+  test("free-text search intersects authored capability with actor readability", async () => {
+    const previousQueries = table.columns.map((column) => column.query);
+    for (const column of table.columns) {
+      column.query = {
+        searchable: column === classified,
+        filterable: true,
+        sortable: true,
+      };
+    }
+    try {
+      await withClassifiedColumn(classified, async () => {
+        await expect(
+          listGeneratedEntities(noDb, readOnlySession, {
+            table: table.name,
+            search: "probe",
+          }),
+        ).rejects.toMatchObject({ extensions: { code: "BAD_USER_INPUT" } });
+
+        const error = await listGeneratedEntities(noDb, writeSession, {
+          table: table.name,
+          search: "probe",
+        }).catch((caught: unknown) => caught);
+        expect((error as { extensions?: { code?: string } })?.extensions?.code).toBeUndefined();
+      });
+    } finally {
+      table.columns.forEach((column, index) => {
+        const previous = previousQueries[index];
+        if (previous === undefined) delete column.query;
+        else column.query = previous;
+      });
+    }
   });
 });

@@ -26,6 +26,7 @@ import type {
 import { pluralize } from "./authoring/compiler/helpers.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
+import { fieldQueryCapabilities } from "./query-capabilities.js";
 import {
   compiledFieldSchema,
   compiledFieldSchemaWithoutDefinitions,
@@ -94,12 +95,12 @@ function writableFields(
   );
 }
 
-function sortableFieldKeys(fields: CompiledField[]): string[] {
+function queryFieldKeys(
+  fields: CompiledField[],
+  capability: "searchable" | "filterable" | "sortable",
+): string[] {
   return fields
-    .filter(
-      (field) =>
-        field.cardinality !== "collection" && field.valueType !== "object",
-    )
+    .filter((field) => fieldQueryCapabilities(field)[capability])
     .map((field) => field.key);
 }
 
@@ -196,7 +197,9 @@ function buildToolsForEntity(
   );
   const label = entityLabel(contract);
   const description = entityDescription(contract);
-  const sortable = sortableFieldKeys(fields);
+  const searchable = queryFieldKeys(fields, "searchable");
+  const filterable = new Set(queryFieldKeys(fields, "filterable"));
+  const sortable = queryFieldKeys(fields, "sortable");
   const filterField = contract.entity.filterField;
   const tools: McpToolDefinition[] = [];
 
@@ -229,8 +232,7 @@ function buildToolsForEntity(
   if (mcp.operations.list) {
     const filterProperties: JsonObject = {};
     for (const field of fields) {
-      if (field.cardinality === "collection" || field.valueType === "object")
-        continue;
+      if (!filterable.has(field.key)) continue;
       const schema = compiledFieldSchemaWithoutDefinitions(
         field,
         referentiedata,
@@ -265,6 +267,14 @@ function buildToolsForEntity(
             description:
               "Field equality/substring filters. Omit for no filtering.",
           },
+          ...(searchable.length > 0
+            ? {
+                search: {
+                  type: "string",
+                  description: "Free-text search across searchable fields readable by the caller.",
+                },
+              }
+            : {}),
           sortField: {
             type: "string",
             ...(sortable.length > 0 ? { enum: sortable } : {}),
@@ -407,6 +417,7 @@ export type McpEntityCatalogEntry = {
     immutable: boolean;
     schema: JsonObject;
     classification?: string;
+    query: import("./query-capabilities.js").FieldQueryCapabilities;
     relationship?: {
       kind: NonNullable<CompiledField["relationship"]>["kind"];
       entity: string;
@@ -668,6 +679,7 @@ export function buildMcpCatalog(
           required: field.required === true,
           readOnly: field.readOnly === true,
           immutable: field.immutable === true,
+          query: fieldQueryCapabilities(field),
           schema: compiledFieldSchema(
             field,
             referentiedata,

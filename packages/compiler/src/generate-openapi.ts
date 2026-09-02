@@ -46,6 +46,7 @@ const FIELD_DEFINITION_DEFS_BASE =
 const RESERVED_LIST_PARAMETER_NAMES = new Set([
   "first",
   "after",
+  "search",
   "sortField",
   "sortDirection",
 ]);
@@ -251,6 +252,15 @@ function filterSchemaForColumn(
   }
 }
 
+function columnQueryCapability(
+  column: TableDefinition["columns"][number],
+  capability: "searchable" | "filterable" | "sortable",
+): boolean {
+  if (column.query) return column.query[capability];
+  if (capability === "searchable") return column.type === "text";
+  return column.type !== "jsonb";
+}
+
 function listParameters(
   table: TableDefinition,
   fieldsByKey: Map<string, CompiledField>,
@@ -259,6 +269,7 @@ function listParameters(
     .filter(
       (column) =>
         column.name !== "tenant_id" &&
+        columnQueryCapability(column, "sortable") &&
         !isRestrictedColumn(column) &&
         !isRestrictedField(fieldsByKey.get(fieldNameForColumn(column))),
     )
@@ -285,6 +296,20 @@ function listParameters(
         "Opaque cursor returned as nextCursor by a previous list response.",
       schema: { type: "string" },
     },
+    ...(table.columns.some(
+      (column) =>
+        column.name !== "tenant_id" &&
+        columnQueryCapability(column, "searchable") &&
+        !isRestrictedColumn(column) &&
+        !isRestrictedField(fieldsByKey.get(fieldNameForColumn(column))),
+    )
+      ? [{
+          name: "search",
+          in: "query",
+          description: "Free-text search across searchable fields readable through this API contract.",
+          schema: { type: "string" },
+        }]
+      : []),
     {
       name: "sortField",
       in: "query",
@@ -308,6 +333,7 @@ function listParameters(
     const compiled = fieldsByKey.get(fieldName);
     if (
       column.name === "tenant_id" ||
+      !columnQueryCapability(column, "filterable") ||
       isRestrictedColumn(column) ||
       isRestrictedField(compiled) ||
       column.type === "jsonb" ||

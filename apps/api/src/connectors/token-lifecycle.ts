@@ -66,10 +66,14 @@ export async function ensureOAuthTokenSet<TStored>(input: {
   clientSecret: string;
   boundFetch: OAuthBoundFetch;
   now?: number;
+  signal?: AbortSignal;
 }): Promise<OAuthTokenSet> {
+  input.signal?.throwIfAborted();
   try {
     return await input.store.withLockedRow(async () => {
+      input.signal?.throwIfAborted();
       const stored = await input.store.read();
+      input.signal?.throwIfAborted();
       if (stored === undefined) {
         throw reauthorization(
           "Stored OAuth tokens are missing; authorization is required again.",
@@ -109,8 +113,11 @@ export async function ensureOAuthTokenSet<TStored>(input: {
         refreshToken: tokens.refreshToken,
         boundFetch: input.boundFetch,
         now,
+        ...(input.signal ? { signal: input.signal } : {}),
       });
+      input.signal?.throwIfAborted();
       await input.store.persist(refreshed);
+      input.signal?.throwIfAborted();
       await input.store.auditRefreshed();
       return refreshed;
     });
@@ -180,7 +187,9 @@ export async function refreshOAuthTokenSet(input: {
   refreshToken: string;
   boundFetch: OAuthBoundFetch;
   now?: number;
+  signal?: AbortSignal;
 }): Promise<OAuthTokenSet> {
+  input.signal?.throwIfAborted();
   const response = await input.boundFetch(input.tokenUrl, {
     method: "POST",
     headers: {
@@ -193,7 +202,9 @@ export async function refreshOAuthTokenSet(input: {
       client_id: input.clientId,
       client_secret: input.clientSecret,
     }).toString(),
+    ...(input.signal ? { signal: input.signal } : {}),
   });
+  input.signal?.throwIfAborted();
   if (!response.ok) {
     throw new OAuthTokenLifecycleError(
       response.status === 400 || response.status === 401

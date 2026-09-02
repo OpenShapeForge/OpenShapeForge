@@ -26,11 +26,19 @@ import {
   setPath,
   splitConnectionValues,
 } from "../declarative-execution.js";
-import { encryptSecret, keyringFromEnv } from "../../connectors/secrets.js";
+import {
+  SecretError,
+  encryptSecret,
+  keyringFromEnv,
+} from "../../connectors/secrets.js";
 import { toHttpError } from "../../rest/http-error.js";
+import { ModuleEgressError } from "../../modules/contract.js";
 
 const KEYRING = keyringFromEnv(
   `test:${Buffer.alloc(32, 9).toString("base64")}`,
+)!;
+const WRONG_KEYRING = keyringFromEnv(
+  `test:${Buffer.alloc(32, 8).toString("base64")}`,
 )!;
 
 describe("binding selection and mapped paths", () => {
@@ -430,6 +438,205 @@ describe("executeBinding", () => {
     }) as typeof fetch;
     return { calls, impl };
   };
+
+  it("does not dispatch when cancelled before declarative execution", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let hookCalls = 0;
+    await expect(
+      executeBinding({
+        binding: {},
+        operationRow: {
+          key: "search",
+          operation: { method: "GET", pathTemplate: "/api/search" },
+        },
+        providerRow,
+        connectionValues,
+        serviceInputs: {},
+        keyring: KEYRING,
+        signal: controller.signal,
+        egress: {
+          owner: {
+            fetch: async () => {
+              hookCalls += 1;
+              return new Response("{}");
+            },
+          },
+          purpose: "provider",
+          scope: {
+            tenantId: "tenant-1",
+            actorId: "actor-1",
+            provider: "provider-1",
+            operation: "search",
+            kind: "query",
+          },
+        },
+        secretScope: "erp.providers",
+      }),
+    ).rejects.toBe(controller.signal.reason);
+    expect(hookCalls).toBe(0);
+  });
+
+  it("rejects a late egress-owner response after caller cancellation", async () => {
+    const controller = new AbortController();
+    let markOwnerStarted!: () => void;
+    const ownerStarted = new Promise<void>((resolve) => {
+      markOwnerStarted = resolve;
+    });
+    let releaseOwner!: () => void;
+    const ownerBarrier = new Promise<void>((resolve) => {
+      releaseOwner = resolve;
+    });
+    const outcome = executeBinding({
+      binding: {},
+      operationRow: {
+        key: "search",
+        operation: { method: "GET", pathTemplate: "/api/search" },
+      },
+      providerRow,
+      connectionValues,
+      serviceInputs: {},
+      keyring: KEYRING,
+      signal: controller.signal,
+      egress: {
+        owner: {
+          fetch: async () => {
+            markOwnerStarted();
+            await ownerBarrier;
+            return Response.json({ accepted: true });
+          },
+        },
+        purpose: "provider",
+        scope: {
+          tenantId: "tenant-1",
+          actorId: "actor-1",
+          provider: "provider-1",
+          operation: "search",
+          kind: "query",
+        },
+      },
+      secretScope: "erp.providers",
+    });
+
+    await ownerStarted;
+    controller.abort();
+    releaseOwner();
+
+    await expect(outcome).rejects.toBe(controller.signal.reason);
+  });
+
+  it("rejects a late response body after caller cancellation", async () => {
+    const controller = new AbortController();
+    let markBodyStarted!: () => void;
+    const bodyStarted = new Promise<void>((resolve) => {
+      markBodyStarted = resolve;
+    });
+    let releaseBody!: () => void;
+    const bodyBarrier = new Promise<void>((resolve) => {
+      releaseBody = resolve;
+    });
+    const outcome = executeBinding({
+      binding: {},
+      operationRow: {
+        key: "search",
+        operation: { method: "GET", pathTemplate: "/api/search" },
+      },
+      providerRow,
+      connectionValues,
+      serviceInputs: {},
+      keyring: KEYRING,
+      signal: controller.signal,
+      egress: {
+        owner: {
+          fetch: async () =>
+            new Response(
+              new ReadableStream<Uint8Array>(
+                {
+                  async pull(streamController) {
+                    markBodyStarted();
+                    await bodyBarrier;
+                    streamController.enqueue(
+                      new TextEncoder().encode('{"accepted":true}'),
+                    );
+                    streamController.close();
+                  },
+                },
+                { highWaterMark: 0 },
+              ),
+              { headers: { "content-type": "application/json" } },
+            ),
+        },
+        purpose: "provider",
+        scope: {
+          tenantId: "tenant-1",
+          actorId: "actor-1",
+          provider: "provider-1",
+          operation: "search",
+          kind: "query",
+        },
+      },
+      secretScope: "erp.providers",
+    });
+
+    await bodyStarted;
+    controller.abort();
+    releaseBody();
+
+    await expect(outcome).rejects.toBe(controller.signal.reason);
+  });
+
+  it("preserves secret decryption failures as composition failures", async () => {
+    const spy = fetchSpy();
+    const failure = await executeBinding({
+      binding: {},
+      operationRow: {
+        key: "search",
+        operation: { method: "GET", pathTemplate: "/api/search" },
+      },
+      providerRow,
+      connectionValues,
+      serviceInputs: {},
+      keyring: WRONG_KEYRING,
+      fetchImpl: spy.impl,
+      secretScope: "erp.providers",
+    }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(SecretError);
+    expect(spy.calls).toEqual([]);
+  });
+
+  it("preserves only trusted redacted module egress failure kinds", async () => {
+    for (const [kind, category] of [
+      ["policy_blocked", "policy_blocked"],
+      ["timeout", "timeout"],
+    ] as const) {
+      const error = (await executeBinding({
+        binding: {},
+        operationRow: {
+          key: "search",
+          operation: { method: "GET", pathTemplate: "/api/search" },
+        },
+        providerRow,
+        connectionValues,
+        serviceInputs: {},
+        keyring: KEYRING,
+        egress: {
+          owner: { fetch: async () => { throw new ModuleEgressError(kind); } },
+          purpose: "provider",
+          scope: {
+            tenantId: "tenant-1",
+            actorId: "actor-1",
+            provider: "provider-1",
+            operation: "search",
+            kind: "query",
+          },
+        },
+        secretScope: "erp.providers",
+      }).catch((failure: unknown) => failure)) as ProviderOutcomeError;
+      expect(error.outcome.category).toBe(category);
+      expect(JSON.stringify(error.outcome)).not.toContain("acme.example.com");
+      expect(error.message).not.toContain("acme.example.com");
+    }
+  });
 
   it("executes a REST operation with mapped inputs, auth, and response mapping", async () => {
     const spy = fetchSpy();
@@ -1043,6 +1250,57 @@ describe("oauth2ClientCredentials", () => {
     expect(requests[0]?.source).toBeUndefined();
     expect(requests[1]?.purpose).toBe("provider");
     expect(requests[1]?.source).toEqual(source);
+  });
+
+  it("classifies a source-free OAuth denial within its declarative invocation", async () => {
+    let oauthSource: unknown = "not-called";
+    const failure = (await executeBinding({
+      binding: {},
+      operationRow: {
+        operation: { method: "GET", pathTemplate: "/items" },
+      },
+      providerRow: {
+        transport: "rest",
+        baseUrlTemplate: "https://api.example.com",
+        egressHosts: ["auth.example.com", "api.example.com"],
+        auth: {
+          scheme: "oauth2ClientCredentials",
+          tokenUrl: "https://auth.example.com/token",
+        },
+      },
+      connectionValues: {
+        clientId: "denied-source-free-client",
+        clientSecret: "obviously-fake-secret",
+      },
+      serviceInputs: {},
+      fetchImpl: (() => {
+        throw new Error("fallback must not run");
+      }) as unknown as typeof fetch,
+      egress: {
+        purpose: "provider",
+        scope: {
+          tenantId: "tenant-1",
+          actorId: "actor-1",
+          provider: "provider-1",
+          operation: "operation-1",
+          kind: "query",
+        },
+        source: {
+          sourceReference: "msr1.provider-source",
+          scope: "personal",
+        },
+        owner: {
+          fetch: async (request) => {
+            oauthSource = request.source;
+            throw new ModuleEgressError("policy_blocked");
+          },
+        },
+      },
+      secretScope: "unused",
+    }).catch((error: unknown) => error)) as ProviderOutcomeError;
+
+    expect(oauthSource).toBeUndefined();
+    expect(failure.outcome.category).toBe("policy_blocked");
   });
 
   it("refuses a token endpoint outside the egress allow-list", async () => {

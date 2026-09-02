@@ -143,6 +143,27 @@ export type ModuleEgressRequest = {
   signal?: AbortSignal;
 };
 
+export type ModuleEgressFailureKind = "policy_blocked" | "timeout";
+
+/**
+ * The only failure meaning a trusted egress owner may add to an outbound call.
+ * The type deliberately accepts no message or details: core supplies the public
+ * wording and discards the module's stack at the hook boundary.
+ */
+export class ModuleEgressError extends Error {
+  readonly kind: ModuleEgressFailureKind;
+
+  constructor(kind: ModuleEgressFailureKind) {
+    super(
+      kind === "policy_blocked"
+        ? "Outbound policy blocked the request."
+        : "Outbound request timed out.",
+    );
+    this.name = "ModuleEgressError";
+    this.kind = kind;
+  }
+}
+
 export type ModulePlatformServices = {
   db: {
     withSession<T>(
@@ -172,12 +193,14 @@ export type ModulePlatformServices = {
       session: TrustedSessionContext,
       toolName: string,
       selector: ModuleInvocationSourceSelector,
+      signal?: AbortSignal,
     ): Promise<readonly ModuleInvocationSource[]>;
     callTool(
       ctx: McpInvocationContext,
       name: string,
       args: Record<string, unknown>,
       options?: ModuleToolExecutionOptions,
+      signal?: AbortSignal,
     ): Promise<ModuleToolExecutionResult>;
   };
 };

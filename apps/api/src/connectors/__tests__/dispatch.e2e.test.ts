@@ -29,7 +29,12 @@ import type { ConnectorExecutionError } from "../executor.js";
 import { invokeConnectorOperation, verifyConnectorInstallation } from "../runtime.js";
 import { rotateSecrets } from "../store.js";
 import { CONNECTOR_AGGREGATE } from "../audit.js";
-import type { ModuleEgressRequest } from "../../modules/contract.js";
+import {
+  ModuleEgressError,
+  type ModuleEgressRequest,
+  type RuntimeModule,
+} from "../../modules/contract.js";
+import { toHttpError } from "../../rest/http-error.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -314,6 +319,205 @@ describe("the full dispatch chain", () => {
     expect(caught?.message).toMatch(/provider is unavailable\.$/);
     expect(caught?.message).not.toContain("secret internal detail");
     expect(caught?.outcome).toMatchObject({ category: "availability", requiredAction: "wait" });
+  });
+
+  test("a runtime module preserves connector egress policy and timeout outcomes", async () => {
+    for (const [kind, category, code, privateDetail] of [
+      ["policy_blocked", "policy_blocked", "CONNECTOR_EGRESS_DENIED", "private-address-192.0.2.9"],
+      ["policy_blocked", "policy_blocked", "CONNECTOR_EGRESS_DENIED", "oversize-response-private-body"],
+      ["timeout", "timeout", "CONNECTOR_TIMEOUT", "module-timeout-private-detail"],
+    ] as const) {
+      let hookCalls = 0;
+      const module: RuntimeModule = {
+        name: "egress-test-module",
+        egress: {
+          fetch: async () => {
+            hookCalls += 1;
+            const failure = new ModuleEgressError(kind) as ModuleEgressError & {
+              privateDetail: string;
+            };
+            failure.privateDetail = privateDetail;
+            throw failure;
+          },
+        },
+      };
+      const failure = (await invokeConnectorOperation(
+        {
+          ...invocationContext(TENANT, ["Connectors.All.Read"]),
+          egressOwner: module.egress,
+        },
+        contract(),
+        operation("listObjects"),
+        {},
+      ).catch((error: unknown) => error)) as ConnectorExecutionError;
+      expect(hookCalls).toBe(1);
+      expect(failure).toMatchObject({ code, outcome: { category } });
+      const serialized = JSON.stringify({
+        message: failure.message,
+        outcome: failure.outcome,
+      });
+      expect(serialized).not.toContain(privateDetail);
+      expect(serialized).not.toContain("192.0.2.9");
+      expect(serialized).not.toContain("eu.objectstore.example");
+    }
+  });
+
+  test("a hostile package cannot mutate platform failure provenance or telemetry", async () => {
+    const privateMessage = "hostile-package-private-message";
+    const forgedCorrelation = "hostile-package-correlation";
+    const loaded = registry.loaded.get(SLUG)!;
+    const hostileRegistry = {
+      loaded: new Map(registry.loaded),
+      failures: [...registry.failures],
+    };
+    hostileRegistry.loaded.set(SLUG, {
+      ...loaded,
+      pkg: {
+        ...loaded.pkg,
+        invoke: async (_operation, context) => {
+          try {
+            await context.fetch("https://eu.objectstore.example/start", {
+              method: "POST",
+              body: "credential=obviously-fake",
+            });
+          } catch (error) {
+            Object.assign(error as object, {
+              message: privateMessage,
+              code: "CONNECTOR_TIMEOUT",
+              connector: "hostile-connector",
+              operation: "hostile-operation",
+              providerStatus: 599,
+              privateDetail: "hostile-private-detail",
+              outcome: {
+                code: "CONNECTOR_TIMEOUT",
+                category: "timeout",
+                retryable: true,
+                requiredAction: "wait",
+                correlationId: forgedCorrelation,
+              },
+            });
+            throw error;
+          }
+          return [];
+        },
+      },
+    });
+
+    const telemetry = async () => {
+      const metric = getProcessPrometheusRegistry().getSingleMetric(
+        "openshapeforge_connector_provider_failures_total",
+      );
+      const metricTotal = ((await metric?.get())?.values ?? []).reduce(
+        (sum, sample) => sum + sample.value,
+        0,
+      );
+      const events = await runtime.db.connection().execute(async (conn) => {
+        await sql`select set_config('app.tenant_id', ${TENANT}, false)`.execute(conn);
+        return sql<{ count: number }>`
+          select count(*)::int as count from platform.entity_events
+           where aggregate_type = ${CONNECTOR_AGGREGATE}
+             and event_type = 'connector.provider_failed'
+        `.execute(conn);
+      });
+      return { metricTotal, eventCount: Number(events.rows[0]?.count ?? 0) };
+    };
+
+    const before = await telemetry();
+    const failure = (await invokeConnectorOperation(
+      {
+        ...invocationContext(TENANT, ["Connectors.All.Read"]),
+        registry: hostileRegistry,
+        egressOwner: {
+          fetch: async () => new Response(null, {
+            status: 307,
+            headers: { location: "https://us.objectstore.example/final" },
+          }),
+        },
+      },
+      contract(),
+      operation("listObjects"),
+      {},
+    ).catch((error: unknown) => error)) as ConnectorExecutionError;
+    const wire = toHttpError(failure);
+    const serialized = JSON.stringify({ failure, wire });
+
+    expect(failure).toMatchObject({
+      code: "CONNECTOR_EGRESS_DENIED",
+      connector: SLUG,
+    });
+    expect(failure.operation).toBeUndefined();
+    expect(failure.outcome).toBeUndefined();
+    expect(failure.providerStatus).toBeUndefined();
+    expect(wire).toMatchObject({
+      status: 502,
+      body: { error: { code: "CONNECTOR_EGRESS_DENIED" } },
+    });
+    for (const privateValue of [
+      privateMessage,
+      forgedCorrelation,
+      "hostile-connector",
+      "hostile-operation",
+      "hostile-private-detail",
+      "599",
+    ]) {
+      expect(serialized).not.toContain(privateValue);
+    }
+    expect(await telemetry()).toEqual(before);
+  });
+
+  test("module-call cancellation prevents dispatch and releases the connector lease", async () => {
+    let hookCalls = 0;
+    const before = new AbortController();
+    before.abort();
+    await expect(
+      invokeConnectorOperation(
+        {
+          ...invocationContext(TENANT, ["Connectors.All.Read"]),
+          signal: before.signal,
+          egressOwner: {
+            fetch: async () => {
+              hookCalls += 1;
+              return Response.json({ objects: [] });
+            },
+          },
+        },
+        contract(),
+        operation("listObjects"),
+        {},
+      ),
+    ).rejects.toBe(before.signal.reason);
+    expect(hookCalls).toBe(0);
+
+    const during = new AbortController();
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const pending = invokeConnectorOperation(
+      {
+        ...invocationContext(TENANT, ["Connectors.All.Read"]),
+        signal: during.signal,
+        egressOwner: {
+          fetch: async (request) => {
+            hookCalls += 1;
+            entered();
+            return new Promise<Response>((_resolve, reject) => {
+              request.signal?.addEventListener(
+                "abort",
+                () => reject(request.signal?.reason),
+                { once: true },
+              );
+            });
+          },
+        },
+      },
+      contract(),
+      operation("listObjects"),
+      {},
+    );
+    await started;
+    during.abort();
+    await expect(pending).rejects.toBe(during.signal.reason);
+    expect(hookCalls).toBe(1);
+    expect(governor.activeFor(SLUG, "listObjects", TENANT)).toBe(0);
   });
 
   // The whole chain, for the outcome this issue exists for: the provider's

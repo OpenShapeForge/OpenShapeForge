@@ -24,8 +24,11 @@
 import type { ConnectorAuthErrorCode } from "./authorization.js";
 import type { BoundaryErrorCode } from "./contract-boundary.js";
 import type { ConnectorExecutionErrorCode } from "./executor.js";
+import type { ModuleEgressFailureKind } from "../modules/contract.js";
 
 export type ConnectorProviderOutcomeCode =
+  | "CONNECTOR_EGRESS_DENIED"
+  | "CONNECTOR_TIMEOUT"
   | "CONNECTOR_PROVIDER_REJECTED_INPUT"
   | "CONNECTOR_PROVIDER_AUTHORIZATION_FAILED"
   | "CONNECTOR_PROVIDER_PERMISSION_DENIED"
@@ -34,6 +37,8 @@ export type ConnectorProviderOutcomeCode =
   | "CONNECTOR_UPSTREAM_ERROR";
 
 export type ConnectorProviderOutcomeCategory =
+  | "policy_blocked"
+  | "timeout"
   | "input"
   | "authorization"
   | "rate_limit"
@@ -54,6 +59,8 @@ export type ConnectorProviderOutcome = {
 };
 
 export const PROVIDER_OUTCOME_CODES: readonly ConnectorProviderOutcomeCode[] = [
+  "CONNECTOR_EGRESS_DENIED",
+  "CONNECTOR_TIMEOUT",
   "CONNECTOR_PROVIDER_REJECTED_INPUT",
   "CONNECTOR_PROVIDER_AUTHORIZATION_FAILED",
   "CONNECTOR_PROVIDER_PERMISSION_DENIED",
@@ -63,6 +70,8 @@ export const PROVIDER_OUTCOME_CODES: readonly ConnectorProviderOutcomeCode[] = [
 ];
 
 const CATEGORIES: readonly ConnectorProviderOutcomeCategory[] = [
+  "policy_blocked",
+  "timeout",
   "input",
   "authorization",
   "rate_limit",
@@ -205,7 +214,10 @@ export const PROVIDER_FAILURE_HINT_PROPERTY = "providerFailure";
  */
 export type ConnectorProviderFailureHint = {
   status: number;
-  code?: Exclude<ConnectorProviderOutcomeCode, "CONNECTOR_UPSTREAM_ERROR">;
+  code?: Exclude<
+    ConnectorProviderOutcomeCode,
+    "CONNECTOR_UPSTREAM_ERROR" | "CONNECTOR_EGRESS_DENIED" | "CONNECTOR_TIMEOUT"
+  >;
   retryable?: false;
 };
 
@@ -216,7 +228,15 @@ export const PROVIDER_FAILURE_HINT_SCHEMA = {
     status: { type: "integer", minimum: 100, maximum: 599 },
     code: {
       type: "string",
-      enum: PROVIDER_OUTCOME_CODES.filter((code) => code !== "CONNECTOR_UPSTREAM_ERROR"),
+      // Package hints may narrow only a status core observed from the provider.
+      // Policy and timeout meanings originate at trusted platform boundaries.
+      enum: [
+        "CONNECTOR_PROVIDER_REJECTED_INPUT",
+        "CONNECTOR_PROVIDER_AUTHORIZATION_FAILED",
+        "CONNECTOR_PROVIDER_PERMISSION_DENIED",
+        "CONNECTOR_PROVIDER_RATE_LIMITED",
+        "CONNECTOR_PROVIDER_UNAVAILABLE",
+      ],
     },
     retryable: { type: "boolean", const: false },
   },
@@ -234,6 +254,11 @@ type Disposition = {
 };
 
 const DISPOSITION_BY_CODE: Record<ConnectorProviderOutcomeCode, Disposition> = {
+  CONNECTOR_EGRESS_DENIED: {
+    category: "policy_blocked",
+    requiredAction: "contact_admin",
+  },
+  CONNECTOR_TIMEOUT: { category: "timeout", requiredAction: "wait" },
   CONNECTOR_PROVIDER_REJECTED_INPUT: { category: "input", requiredAction: "change_input" },
   CONNECTOR_PROVIDER_AUTHORIZATION_FAILED: {
     category: "authorization",
@@ -363,6 +388,26 @@ export function classifyProviderOutcome(
   };
 }
 
+/** Build a safe outcome from the unforgeable marker created at the egress hook. */
+export function classifyModuleEgressOutcome(input: {
+  kind: ModuleEgressFailureKind;
+  correlationId: string;
+  retryable: boolean;
+}): ConnectorProviderOutcome {
+  const code =
+    input.kind === "policy_blocked"
+      ? "CONNECTOR_EGRESS_DENIED"
+      : "CONNECTOR_TIMEOUT";
+  const disposition = DISPOSITION_BY_CODE[code];
+  return {
+    code,
+    category: disposition.category,
+    retryable: input.kind === "timeout" && input.retryable,
+    requiredAction: disposition.requiredAction,
+    correlationId: input.correlationId,
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /* Errors that carry an outcome                                               */
 /* -------------------------------------------------------------------------- */
@@ -373,6 +418,10 @@ export function providerOutcomeMessage(
   subject: string,
 ): string {
   switch (code) {
+    case "CONNECTOR_EGRESS_DENIED":
+      return `${subject} was blocked by outbound policy.`;
+    case "CONNECTOR_TIMEOUT":
+      return `${subject} timed out.`;
     case "CONNECTOR_PROVIDER_REJECTED_INPUT":
       return `${subject} input was rejected by its provider.`;
     case "CONNECTOR_PROVIDER_AUTHORIZATION_FAILED":

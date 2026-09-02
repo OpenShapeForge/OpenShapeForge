@@ -15,8 +15,11 @@ import type {
   ModuleToolExecutionOptions,
   RuntimeModule,
 } from "../../modules/contract.js";
+import { ModuleEgressError } from "../../modules/contract.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { __buildGeneratedMcpServerForTests } from "../../mcp/generated-mcp-server.js";
+import { connectionTokenSecretScope } from "../../mcp/entity-oauth.js";
+import { encryptSecret, keyringFromEnv } from "../../platform/secrets.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -177,6 +180,19 @@ describe("generated MCP runtime module security boundary", () => {
         const providerId = randomUUID();
         const connectionId = randomUUID();
         const otherProviderId = randomUUID();
+        const wrongKeyDefinitionId = randomUUID();
+        const wrongKeyOperationId = randomUUID();
+        const wrongKeyProviderId = randomUUID();
+        const wrongKeyConnectionId = randomUUID();
+        const storedKeyring = keyringFromEnv(
+          `test:${Buffer.alloc(32, 4).toString("base64")}`,
+        )!;
+        const unreadableToken = encryptSecret(
+          storedKeyring,
+          connectionTokenSecretScope("public.module_connection_test"),
+          "accessToken",
+          "wrong-key-access-token",
+        );
         await admin.connection().execute(async (trx) => {
           await sql`insert into public.module_service_test
             (id, tenant_id, key, description, input_fields, definition_version,
@@ -188,12 +204,18 @@ describe("generated MCP runtime module security boundary", () => {
              jsonb_build_array(jsonb_build_object('order', 1, 'operationId', ${operationId}::text))),
             (${hiddenDefinitionId}::uuid, ${tenantId}::uuid, 'hidden_read', 'Hidden read',
              '[]'::jsonb, 7, 'published', '["reader"]'::jsonb, true,
-             jsonb_build_array(jsonb_build_object('order', 1, 'operationId', ${operationId}::text)))
+             jsonb_build_array(jsonb_build_object('order', 1, 'operationId', ${operationId}::text))),
+            (${wrongKeyDefinitionId}::uuid, ${tenantId}::uuid, 'wrong_key_read', 'Wrong key read',
+             '[]'::jsonb, 1, 'published', '["reader"]'::jsonb, false,
+             jsonb_build_array(jsonb_build_object('order', 1, 'operationId', ${wrongKeyOperationId}::text)))
           `.execute(trx);
           await sql`insert into public.module_operation_test
             (id, tenant_id, key, kind, provider_id, operation, response_mapping, required_scopes)
-          values (${operationId}::uuid, ${tenantId}::uuid, 'read', 'query', ${providerId}::uuid,
-            '{"method":"GET","pathTemplate":"/item"}'::jsonb, '{}'::jsonb, '[]'::jsonb)
+          values
+            (${operationId}::uuid, ${tenantId}::uuid, 'read', 'query', ${providerId}::uuid,
+             '{"method":"GET","pathTemplate":"/item"}'::jsonb, '{}'::jsonb, '[]'::jsonb),
+            (${wrongKeyOperationId}::uuid, ${tenantId}::uuid, 'wrong_key_read', 'query', ${wrongKeyProviderId}::uuid,
+             '{"method":"GET","pathTemplate":"/item"}'::jsonb, '{}'::jsonb, '[]'::jsonb)
           `.execute(trx);
           await sql`insert into public.module_provider_test
             (id, tenant_id, key, name, transport, base_url_template, auth, egress_hosts)
@@ -201,12 +223,26 @@ describe("generated MCP runtime module security boundary", () => {
             'https://provider.example', '{"connectionScope":"tenant"}'::jsonb,
             '["provider.example"]'::jsonb),
             (${otherProviderId}::uuid, ${tenantId}::uuid, 'other', 'Other', 'rest',
-            'https://other.example', '{"connectionScope":"tenant"}'::jsonb,
-            '["other.example"]'::jsonb)
+             'https://other.example', '{"connectionScope":"tenant"}'::jsonb,
+             '["other.example"]'::jsonb),
+            (${wrongKeyProviderId}::uuid, ${tenantId}::uuid, 'wrong-key', 'Wrong key', 'rest',
+             'https://provider.example',
+             '{"connectionScope":"tenant","scheme":"bearer","tokenFrom":"accessToken"}'::jsonb,
+             '["provider.example"]'::jsonb)
           `.execute(trx);
           await sql`insert into public.module_connection_test
             (id, tenant_id, owner_user_id, provider_id, values)
-          values (${connectionId}::uuid, ${tenantId}::uuid, null, ${providerId}::uuid, '{}'::jsonb)
+          values
+            (${connectionId}::uuid, ${tenantId}::uuid, null, ${providerId}::uuid, '{}'::jsonb),
+            (${wrongKeyConnectionId}::uuid, ${tenantId}::uuid, null, ${wrongKeyProviderId}::uuid,
+             jsonb_build_object(
+               'accessToken', jsonb_build_object(
+                 'ciphertext', ${unreadableToken.ciphertext}::text,
+                 'keyId', ${unreadableToken.keyId}::text,
+                 'algorithm', ${unreadableToken.algorithm}::text
+               ),
+               'accessTokenExpiresAt', '2999-01-01T00:00:00.000Z'
+             ))
           `.execute(trx);
         });
 
@@ -296,7 +332,13 @@ describe("generated MCP runtime module security boundary", () => {
           | "fire-child"
           | "cycle"
           | "personal-sources"
-          | "hidden-collision" = "normal";
+          | "hidden-collision"
+          | "cancel-during"
+          | "cancel-late-owner"
+          | "cancel-late-body"
+          | "private-denial"
+          | "size-denial"
+          | "egress-timeout" = "normal";
         let personalSourceIndex = 0;
         let heldOptions: ModuleToolExecutionOptions | undefined;
         let sourceReference: string | undefined;
@@ -318,11 +360,65 @@ describe("generated MCP runtime module security boundary", () => {
         let moduleToolArgument: unknown;
         let workflowCalls = 0;
         const egressRequests: any[] = [];
+        let egressEntered!: () => void;
+        let egressStarted = Promise.resolve();
+        let releaseEgress!: () => void;
+        let egressBarrier = Promise.resolve();
         const module: RuntimeModule = {
           name: "test-module",
           egress: {
             fetch: async (request) => {
               egressRequests.push(request);
+              if (mode === "cancel-during") {
+                egressEntered();
+                return new Promise<Response>((_resolve, reject) => {
+                  request.signal?.addEventListener(
+                    "abort",
+                    () => reject(request.signal?.reason),
+                    { once: true },
+                  );
+                });
+              }
+              if (mode === "cancel-late-owner") {
+                egressEntered();
+                await egressBarrier;
+                return Response.json({ value: "late-owner-success" });
+              }
+              if (mode === "cancel-late-body") {
+                return new Response(
+                  new ReadableStream<Uint8Array>(
+                    {
+                      async pull(streamController) {
+                        egressEntered();
+                        await egressBarrier;
+                        streamController.enqueue(
+                          new TextEncoder().encode(
+                            '{"value":"late-body-success"}',
+                          ),
+                        );
+                        streamController.close();
+                      },
+                    },
+                    { highWaterMark: 0 },
+                  ),
+                  { headers: { "content-type": "application/json" } },
+                );
+              }
+              if (mode === "private-denial" || mode === "size-denial") {
+                const failure = new ModuleEgressError("policy_blocked") as
+                  ModuleEgressError & { privateDetail: string };
+                failure.privateDetail =
+                  mode === "private-denial"
+                    ? "private-address-192.0.2.7"
+                    : "oversize-provider-body-sentinel";
+                throw failure;
+              }
+              if (mode === "egress-timeout") {
+                const failure = new ModuleEgressError("timeout") as
+                  ModuleEgressError & { privateDetail: string };
+                failure.privateDetail = "module-timeout-private-sentinel";
+                throw failure;
+              }
               return Response.json({ value: "ok" });
             },
           },
@@ -382,7 +478,7 @@ describe("generated MCP runtime module security boundary", () => {
                   "public_read",
                   {},
                   undefined,
-                ).catch((error) => error);
+                );
                 return { contents: [{ uri, text: "started" }] };
               }
               if (uri.endsWith("/args-snapshot")) {
@@ -397,6 +493,144 @@ describe("generated MCP runtime module security boundary", () => {
                 await outcome;
                 return {
                   contents: [{ uri, text: String(moduleToolArgument) }],
+                };
+              }
+              if (uri.endsWith("/cancel-before")) {
+                const controller = new AbortController();
+                controller.abort();
+                const before = egressRequests.length;
+                const cancelled = await platform.services.mcp.callTool(
+                  ctx,
+                  "hidden_read",
+                  {},
+                  {
+                    sourceReference: sourceReference!,
+                    expectedDefinition: {
+                      kind: "Definition",
+                      id: hiddenDefinitionId,
+                      version: 7,
+                    },
+                  },
+                  controller.signal,
+                ).then(
+                  (outcome) => outcome.result.isError === true,
+                  (error) => error === controller.signal.reason,
+                );
+                return {
+                  contents: [{
+                    uri,
+                    text: JSON.stringify({
+                      noDispatch: egressRequests.length === before,
+                      cancelled,
+                    }),
+                  }],
+                };
+              }
+              if (uri.endsWith("/cancel-during")) {
+                const controller = new AbortController();
+                egressStarted = new Promise<void>((resolve) => {
+                  egressEntered = resolve;
+                });
+                mode = "cancel-during";
+                const outcomePromise = platform.services.mcp.callTool(
+                  ctx,
+                  "hidden_read",
+                  {},
+                  {
+                    sourceReference: sourceReference!,
+                    expectedDefinition: {
+                      kind: "Definition",
+                      id: hiddenDefinitionId,
+                      version: 7,
+                    },
+                  },
+                  controller.signal,
+                );
+                await egressStarted;
+                controller.abort();
+                const outcome = await outcomePromise;
+                mode = "normal";
+                return {
+                  contents: [{
+                    uri,
+                    text: JSON.stringify({
+                      isError: outcome.result.isError === true,
+                      aborted: controller.signal.aborted,
+                    }),
+                  }],
+                };
+              }
+              const lateCancellationMode = uri.endsWith("/cancel-late-owner")
+                ? "cancel-late-owner"
+                : uri.endsWith("/cancel-late-body")
+                  ? "cancel-late-body"
+                  : undefined;
+              if (lateCancellationMode) {
+                const controller = new AbortController();
+                egressStarted = new Promise<void>((resolve) => {
+                  egressEntered = resolve;
+                });
+                egressBarrier = new Promise<void>((resolve) => {
+                  releaseEgress = resolve;
+                });
+                mode = lateCancellationMode;
+                const outcomePromise = platform.services.mcp.callTool(
+                  ctx,
+                  "hidden_read",
+                  {},
+                  {
+                    sourceReference: sourceReference!,
+                    expectedDefinition: {
+                      kind: "Definition",
+                      id: hiddenDefinitionId,
+                      version: 7,
+                    },
+                  },
+                  controller.signal,
+                );
+                await egressStarted;
+                controller.abort();
+                releaseEgress();
+                const outcome = await outcomePromise;
+                mode = "normal";
+                return {
+                  contents: [{
+                    uri,
+                    text: JSON.stringify({
+                      isError: outcome.result.isError === true,
+                      aborted: controller.signal.aborted,
+                    }),
+                  }],
+                };
+              }
+              const failureMode = uri.endsWith("/private-denial")
+                ? "private-denial"
+                : uri.endsWith("/size-denial")
+                  ? "size-denial"
+                  : uri.endsWith("/egress-timeout")
+                    ? "egress-timeout"
+                    : undefined;
+              if (failureMode) {
+                mode = failureMode;
+                const outcome = await platform.services.mcp.callTool(
+                  ctx,
+                  "hidden_read",
+                  {},
+                  {
+                    sourceReference: sourceReference!,
+                    expectedDefinition: {
+                      kind: "Definition",
+                      id: hiddenDefinitionId,
+                      version: 7,
+                    },
+                  },
+                );
+                mode = "normal";
+                return {
+                  contents: [{
+                    uri,
+                    text: JSON.stringify(outcome.result.structuredContent),
+                  }],
                 };
               }
               const reference = uri.endsWith("/invalid")
@@ -603,6 +837,95 @@ describe("generated MCP runtime module security boundary", () => {
             },
           });
           expect(hiddenInterceptors).toBe(beforePublicGuess + 1);
+
+          const cancelledBefore = JSON.parse(resourceText(
+            await client.readResource({ uri: "app://internal/cancel-before" }),
+          ));
+          expect(cancelledBefore).toEqual({ noDispatch: true, cancelled: true });
+
+          const beforeCancelledEgress = egressRequests.length;
+          const cancelledDuring = JSON.parse(resourceText(
+            await client.readResource({ uri: "app://internal/cancel-during" }),
+          ));
+          expect(cancelledDuring).toEqual({ isError: true, aborted: true });
+          expect(egressRequests).toHaveLength(beforeCancelledEgress + 1);
+          expect(egressRequests.at(-1)?.signal.aborted).toBe(true);
+
+          for (const action of ["cancel-late-owner", "cancel-late-body"]) {
+            const beforeLateCancellation = egressRequests.length;
+            const cancellation = JSON.parse(resourceText(
+              await client.readResource({ uri: `app://internal/${action}` }),
+            ));
+            expect(cancellation).toEqual({ isError: true, aborted: true });
+            expect(egressRequests).toHaveLength(beforeLateCancellation + 1);
+            expect(egressRequests.at(-1)?.signal.aborted).toBe(true);
+          }
+
+          for (const [action, category, code] of [
+            ["private-denial", "policy_blocked", "CONNECTOR_EGRESS_DENIED"],
+            ["size-denial", "policy_blocked", "CONNECTOR_EGRESS_DENIED"],
+            ["egress-timeout", "timeout", "CONNECTOR_TIMEOUT"],
+          ] as const) {
+            const body = JSON.parse(resourceText(
+              await client.readResource({ uri: `app://internal/${action}` }),
+            ));
+            expect(body.error).toMatchObject({ code, category });
+            const serialized = JSON.stringify(body);
+            expect(serialized).not.toContain("192.0.2.7");
+            expect(serialized).not.toContain("provider-body-sentinel");
+            expect(serialized).not.toContain("module-timeout-private-sentinel");
+            expect(serialized).not.toContain("provider.example");
+          }
+
+          const previousSecretKeys =
+            process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
+          process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS =
+            `test:${Buffer.alloc(32, 5).toString("base64")}`;
+          try {
+            const beforeWrongKeyEgress = egressRequests.length;
+            const wrongKey = await client.callTool({
+              name: "wrong_key_read",
+              arguments: {},
+            });
+            expect(wrongKey).toMatchObject({
+              isError: true,
+              structuredContent: {
+                error: {
+                  code: "REAUTHORIZATION_REQUIRED",
+                  message:
+                    "This connection's stored authorization is unreadable and must be authorized again.",
+                },
+              },
+            });
+            expect(egressRequests).toHaveLength(beforeWrongKeyEgress);
+            const wrongKeySerialized = JSON.stringify(wrongKey);
+            expect(wrongKeySerialized).not.toContain("wrong-key-access-token");
+            expect(wrongKeySerialized).not.toContain(unreadableToken.ciphertext);
+
+            const audit = await admin.connection().execute((trx) => sql<{
+              event_type: string;
+              payload: unknown;
+            }>`
+              select event_type, payload from platform.entity_events
+               where aggregate_id = ${wrongKeyConnectionId}
+                 and event_type = 'connection.reauthorization_required'
+               order by sequence desc
+            `.execute(trx));
+            expect(audit.rows).toHaveLength(1);
+            expect(audit.rows[0]?.event_type).toBe(
+              "connection.reauthorization_required",
+            );
+            const auditSerialized = JSON.stringify(audit.rows[0]?.payload);
+            expect(auditSerialized).not.toContain("wrong-key-access-token");
+            expect(auditSerialized).not.toContain(unreadableToken.ciphertext);
+          } finally {
+            if (previousSecretKeys === undefined) {
+              delete process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
+            } else {
+              process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS =
+                previousSecretKeys;
+            }
+          }
 
           hiddenStarted = new Promise<void>((resolve) => { hiddenEntered = resolve; });
           hiddenBarrier = new Promise<void>((resolve) => { releaseHidden = resolve; });

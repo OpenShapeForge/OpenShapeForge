@@ -116,7 +116,9 @@ async function requestRefresh(
   refreshToken: string,
   boundFetch: FetchLike,
   now: number,
+  signal?: AbortSignal,
 ): Promise<OAuthTokens> {
+  signal?.throwIfAborted();
   try {
     return await refreshOAuthTokenSet({
       tokenUrl,
@@ -125,6 +127,7 @@ async function requestRefresh(
       refreshToken,
       boundFetch,
       now,
+      ...(signal ? { signal } : {}),
     });
   } catch (error) {
     if (!(error instanceof OAuthTokenLifecycleError)) throw error;
@@ -262,7 +265,9 @@ async function requestClientCredentialsToken(
   scopes: readonly string[],
   boundFetch: FetchLike,
   now: number,
+  signal?: AbortSignal,
 ): Promise<OAuthTokens> {
+  signal?.throwIfAborted();
   const body = new URLSearchParams({
     grant_type: "client_credentials",
     client_id: clientId,
@@ -278,6 +283,7 @@ async function requestClientCredentialsToken(
     },
     body: body.toString(),
   });
+  signal?.throwIfAborted();
 
   if (!response.ok) {
     // A refused client-credentials grant is a CONFIGURATION problem — a wrong
@@ -327,6 +333,7 @@ export type EnsureTokenInput = {
   boundFetch: FetchLike;
   now?: number;
   correlationId?: string;
+  signal?: AbortSignal;
 };
 
 /**
@@ -350,6 +357,7 @@ export type EnsureTokenInput = {
 export async function ensureAccessToken(
   input: EnsureTokenInput,
 ): Promise<string> {
+  input.signal?.throwIfAborted();
   const auth = input.contract.auth;
   if (!auth) {
     throw new ConnectorOAuthError(
@@ -362,6 +370,7 @@ export async function ensureAccessToken(
   }
   try {
     return await withDbSession(input.db, input.session, async (trx) => {
+      input.signal?.throwIfAborted();
       // The lock, and the reason this is a transaction at all. A second caller
       // blocks here and re-reads below, so it sees the refreshed set instead of
       // spending the same refresh token a second time.
@@ -370,6 +379,7 @@ export async function ensureAccessToken(
        where id = ${input.installationId}::uuid
          for update
     `.execute(trx);
+      input.signal?.throwIfAborted();
 
       // A waiter must use the clock after it holds the row lock. Otherwise a
       // token refreshed by the lock holder can still look inside the leeway
@@ -386,6 +396,7 @@ export async function ensureAccessToken(
        where installation_id = ${input.installationId}::uuid
          and field_key = ${PLATFORM_OAUTH_FIELD}
     `.execute(trx);
+      input.signal?.throwIfAborted();
 
       const clientCredentials = auth.flow === "clientCredentials";
       const row = stored.rows[0];
@@ -461,7 +472,9 @@ export async function ensureAccessToken(
         tokens.refreshToken,
         input.boundFetch,
         now,
+        input.signal,
       );
+      input.signal?.throwIfAborted();
 
       const encrypted = encryptSecret(
         input.keyring,
@@ -478,6 +491,7 @@ export async function ensureAccessToken(
        where installation_id = ${input.installationId}::uuid
          and field_key = ${PLATFORM_OAUTH_FIELD}
     `.execute(trx);
+      input.signal?.throwIfAborted();
 
       await recordConnectorAudit(trx, {
         tenantId: String(input.session.tenantId),
@@ -487,10 +501,12 @@ export async function ensureAccessToken(
         event: "connector.token_refreshed",
         secretFields: [PLATFORM_OAUTH_FIELD],
       });
+      input.signal?.throwIfAborted();
 
       return refreshed.accessToken;
     });
   } catch (error) {
+    input.signal?.throwIfAborted();
     const normalized =
       error instanceof SecretError
         ? new ConnectorOAuthError(
@@ -528,6 +544,7 @@ async function ensureAuthorizationCodeAccessToken(
   input: EnsureTokenInput,
   auth: NonNullable<ConnectorContract["auth"]>,
 ): Promise<string> {
+  input.signal?.throwIfAborted();
   const clientId = input.config[auth.clientIdField];
   const clientSecret = input.secrets[auth.clientSecretField];
   if (typeof clientId !== "string" || typeof clientSecret !== "string") {
@@ -545,17 +562,21 @@ async function ensureAuthorizationCodeAccessToken(
       clientSecret,
       boundFetch: input.boundFetch,
       ...(input.now === undefined ? {} : { now: input.now }),
+      ...(input.signal ? { signal: input.signal } : {}),
       store: {
         withLockedRow: (work) =>
           withDbSession(input.db, input.session, async (lockedTrx) => {
             trx = lockedTrx;
+            input.signal?.throwIfAborted();
             await sql`
               select id from platform.connector_installations
                where id = ${input.installationId}::uuid for update
             `.execute(lockedTrx);
+            input.signal?.throwIfAborted();
             return work();
           }),
         read: async () => {
+          input.signal?.throwIfAborted();
           const stored = await sql<{
             ciphertext: string;
             key_id: string;
@@ -566,6 +587,7 @@ async function ensureAuthorizationCodeAccessToken(
              where installation_id = ${input.installationId}::uuid
                and field_key = ${PLATFORM_OAUTH_FIELD}
           `.execute(trx!);
+          input.signal?.throwIfAborted();
           const row = stored.rows[0];
           return row
             ? {
@@ -585,6 +607,7 @@ async function ensureAuthorizationCodeAccessToken(
             ),
           ),
         persist: async (tokens) => {
+          input.signal?.throwIfAborted();
           const encrypted = encryptSecret(
             input.keyring,
             input.installationId,
@@ -598,6 +621,7 @@ async function ensureAuthorizationCodeAccessToken(
              where installation_id = ${input.installationId}::uuid
                and field_key = ${PLATFORM_OAUTH_FIELD}
           `.execute(trx!);
+          input.signal?.throwIfAborted();
         },
         auditRefreshed: () =>
           recordConnectorAudit(trx!, {
@@ -654,6 +678,7 @@ async function mintClientCredentialsToken(
   auth: NonNullable<ConnectorContract["auth"]>,
   now: number,
 ): Promise<string> {
+  input.signal?.throwIfAborted();
   const clientId = input.config[auth.clientIdField];
   const clientSecret = input.secrets[auth.clientSecretField];
   if (typeof clientId !== "string" || typeof clientSecret !== "string") {
@@ -675,7 +700,9 @@ async function mintClientCredentialsToken(
     auth.scopes.map((scope) => resolveEndpoint(scope, input.config)),
     input.boundFetch,
     now,
+    input.signal,
   );
+  input.signal?.throwIfAborted();
 
   const encrypted = encryptSecret(
     input.keyring,
@@ -695,6 +722,7 @@ async function mintClientCredentialsToken(
                   algorithm = excluded.algorithm,
                   updated_at = now()
   `.execute(trx);
+  input.signal?.throwIfAborted();
 
   await recordConnectorAudit(trx, {
     tenantId: String(input.session.tenantId),
@@ -704,6 +732,7 @@ async function mintClientCredentialsToken(
     event: "connector.token_refreshed",
     secretFields: [PLATFORM_OAUTH_FIELD],
   });
+  input.signal?.throwIfAborted();
 
   return minted.accessToken;
 }

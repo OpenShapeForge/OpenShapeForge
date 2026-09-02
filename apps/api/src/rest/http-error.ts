@@ -6,8 +6,14 @@
  * CRUD functions as the GraphQL resolvers without duplicating error policy.
  */
 import { GraphQLError } from "graphql";
+import {
+  failureBody,
+  httpStatusForCode,
+  providerOutcomeOf,
+  type FailureBody,
+} from "../connectors/provider-outcome.js";
 
-export type HttpErrorBody = { error: { code: string; message: string } };
+export type HttpErrorBody = FailureBody;
 
 /** REST-local error for conditions that never pass through the CRUD layer. */
 export class HttpError extends Error {
@@ -20,43 +26,6 @@ export class HttpError extends Error {
     this.code = code;
   }
 }
-
-const STATUS_BY_CODE: Record<string, number> = {
-  BAD_USER_INPUT: 400,
-  UNAUTHENTICATED: 401,
-  FORBIDDEN: 403,
-  GENERATED_CRUD_NOT_ENABLED: 404,
-  GENERATED_CRUD_OPERATION_NOT_ENABLED: 404,
-  DATABASE_NOT_CONFIGURED: 503,
-  // Connector invocation and execution. These carry their own code and a
-  // message that is already safe to surface; without an entry here they fall
-  // through to the redacted 500 below, and a caller learns nothing about a
-  // refusal it could act on (not configured, disabled, rate limited).
-  CONNECTOR_NOT_FOUND: 404,
-  CONNECTOR_NOT_EXECUTABLE: 503,
-  CONNECTOR_NOT_CONFIGURED: 409,
-  CONNECTOR_NEEDS_REPAIR: 409,
-  CONNECTOR_DISABLED: 409,
-  CONNECTOR_SECRETS_NOT_CONFIGURED: 503,
-  CONNECTOR_VERIFY_UNSUPPORTED: 501,
-  CONNECTOR_PROVENANCE_REFUSED: 403,
-  CONNECTOR_INVALID_INPUT: 400,
-  CONNECTOR_INVALID_OUTPUT: 502,
-  CONNECTOR_CONTRACT_MISMATCH: 500,
-  CONNECTOR_EGRESS_DENIED: 502,
-  CONNECTOR_UPSTREAM_ERROR: 502,
-  CONNECTOR_TIMEOUT: 504,
-  CONNECTOR_RATE_LIMITED: 429,
-  CONNECTOR_CIRCUIT_OPEN: 503,
-  // The token exchange itself failed at the provider — the same family as any
-  // other bad answer from upstream.
-  CONNECTOR_OAUTH_FAILED: 502,
-  // 409, alongside NOT_CONFIGURED and NEEDS_REPAIR: the installation exists and
-  // is in a state a person has to resolve. Not 401 — the CALLER authenticated
-  // fine; it is the connector's own authorization to the provider that lapsed,
-  // and answering 401 would send a client into its own re-login flow.
-  CONNECTOR_REAUTHORIZATION_REQUIRED: 409,
-};
 
 /**
  * @fastify/rate-limit rejects with an error carrying `statusCode: 429`. It is a
@@ -77,8 +46,10 @@ function rateLimitStatus(error: unknown): number | undefined {
 /**
  * Connector errors are plain classes rather than GraphQLErrors, so they need
  * recognising here or the mapper redacts them. Matched on the `code` field
- * against the table above: an unknown code still falls through to a redacted
- * 500, which is the right default for something nobody classified.
+ * against the canonical table in provider-outcome.ts — the same one the
+ * connector REST routes and the MCP renderer read, so the three cannot drift.
+ * An unknown code still falls through to a redacted 500, which is the right
+ * default for something nobody classified.
  */
 function connectorErrorCode(error: unknown): string | undefined {
   if (!(error instanceof Error)) return undefined;
@@ -124,11 +95,11 @@ export function toHttpError(error: unknown): {
 
   const connectorCode = connectorErrorCode(error);
   if (connectorCode !== undefined) {
-    const status = STATUS_BY_CODE[connectorCode];
+    const status = httpStatusForCode(connectorCode);
     if (status !== undefined) {
       return {
         status,
-        body: { error: { code: connectorCode, message: (error as Error).message } },
+        body: failureBody(connectorCode, (error as Error).message, providerOutcomeOf(error)),
       };
     }
   }
@@ -141,7 +112,7 @@ export function toHttpError(error: unknown): {
     const status =
       typeof error.extensions?.status === "number"
         ? error.extensions.status
-        : STATUS_BY_CODE[code];
+        : httpStatusForCode(code);
     if (status !== undefined) {
       return { status, body: { error: { code, message: error.message } } };
     }

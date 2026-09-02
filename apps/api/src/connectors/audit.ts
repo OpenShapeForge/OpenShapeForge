@@ -16,6 +16,7 @@
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import type { Transaction } from "kysely";
 import type { DB } from "../generated/db/types.js";
+import type { ProviderFailureAuditFields } from "./provider-outcome.js";
 
 export const CONNECTOR_AGGREGATE = "connector_installation";
 
@@ -30,7 +31,11 @@ export type ConnectorAuditEvent =
   // made, and attributing it to that caller would read as an administrative
   // action they did not take.
   | "connector.token_refreshed"
-  | "connector.reauthorization_required";
+  | "connector.reauthorization_required"
+  // The provider answered an invocation with a failure. Records the
+  // classification and the numeric status the platform observed — never the
+  // provider's body, headers, or anything the package said.
+  | "connector.provider_failed";
 
 export type ConnectorAuditInput = {
   tenantId: string;
@@ -43,6 +48,7 @@ export type ConnectorAuditInput = {
   /** Secret field keys written — names only, never values. */
   secretFields?: readonly string[];
   contractChecksum?: string;
+  providerFailure?: ProviderFailureAuditFields;
 };
 
 export async function recordConnectorAudit(
@@ -62,6 +68,7 @@ export async function recordConnectorAudit(
       changedFields: [...(input.changedFields ?? [])].sort(),
       secretFields: [...(input.secretFields ?? [])].sort(),
       ...(input.contractChecksum ? { contractChecksum: input.contractChecksum } : {}),
+      ...(input.providerFailure ? { providerFailure: input.providerFailure } : {}),
     },
   });
 }

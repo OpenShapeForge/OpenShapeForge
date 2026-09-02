@@ -749,6 +749,30 @@ function elicitationFallback(
   return /timed?\s*out|timeout/i.test(message) ? "timeout" : null;
 }
 
+function configurationFallbackLead(
+  reason: "unsupported" | "declined" | "timeout",
+  delivery: "app" | "external",
+): string {
+  const prefix =
+    reason === "timeout"
+      ? "The secure form expired before it was completed — anything typed into it was NOT saved. "
+      : "The secure form could not be completed in this client. ";
+  if (delivery === "app") {
+    return (
+      prefix +
+      "The client has received a private MCP App for the secure form; the " +
+      "URL is not exposed to this chat. The app also offers an external-browser fallback."
+    );
+  }
+  return (
+    prefix +
+    "This client cannot render MCP Apps. Ask the person to open externalUrl; " +
+    "it is the stable, signed-in secure configuration form and contains no bearer handoff token."
+  );
+}
+
+export const __configurationFallbackLeadForTests = configurationFallbackLead;
+
 function elicitedKeyring() {
   return keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
 }
@@ -4175,19 +4199,12 @@ function buildServer(
             "seconds or so — the record exists once they have saved. Only if " +
             "nothing has appeared after about three minutes, ask the person to tell " +
             "you when they are done.";
-          const prefix =
-            reason === "timeout"
-              ? "The secure form expired before it was completed — anything typed into it was NOT saved. "
-              : "The secure form could not be completed in this client. ";
-
           if (supportsMcpApp(server)) {
             return configurationAppResult(
               {
                 ...continuation,
                 instructions:
-                  prefix +
-                  "The client has received a private MCP App for the secure form; the " +
-                  "URL is not exposed to this chat. The app also offers an external-browser fallback." +
+                  configurationFallbackLead(reason, "app") +
                   waitInstruction,
               },
               minted.token,
@@ -4199,9 +4216,7 @@ function buildServer(
             ...continuation,
             externalUrl: configurationWebUrl(),
             instructions:
-              prefix +
-              "This client cannot render MCP Apps. Ask the person to open externalUrl; " +
-              "it is the stable, signed-in KERN form and contains no bearer handoff token." +
+              configurationFallbackLead(reason, "external") +
               waitInstruction,
           });
         }
@@ -5010,9 +5025,9 @@ export function registerGeneratedMcpServer(
       return { ok: true };
     };
 
-    // Stable, authenticated KERN form API. The web client sends its normal
-    // Keycloak bearer; RLS resolves the pending handoff by tenant/user. The URL
-    // exposed to the assistant therefore carries no handoff credential.
+    // Stable, authenticated configuration form API. The web client sends its
+    // normal Keycloak bearer; RLS resolves the pending handoff by tenant/user.
+    // The URL exposed to the assistant therefore carries no handoff credential.
     instance.get(`${ENTITY_CONFIGURATION_PATH}/pending`, async (request) => {
       const { db, session } = await requireMcpSession(request);
       const found = await latestConfigurationForSession(session, db);

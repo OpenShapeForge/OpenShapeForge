@@ -12,7 +12,7 @@
  *
  * So the decline path becomes a handoff instead of an error. MCP App clients
  * receive the single-use token only in private UI metadata. Other clients get
- * a stable KERN web URL; the signed-in web app resolves the newest handoff by
+ * a stable host web URL; the signed-in web app resolves the newest handoff by
  * tenant/user, so no bearer handoff URL enters model context. Both paths render
  * the same field definitions. Values post straight to the runtime (secrets
  * encrypted at rest, never through any MCP client); submitting creates the row

@@ -6,6 +6,7 @@
  * fetch — including the egress and secret-placement rules.
  */
 import { describe, expect, it } from "bun:test";
+import { ProviderOutcomeError } from "../../connectors/provider-outcome.js";
 import {
   composeBindingRequest,
   describeAuthHeaders,
@@ -23,6 +24,7 @@ import {
   splitConnectionValues,
 } from "../declarative-execution.js";
 import { encryptSecret, keyringFromEnv } from "../../connectors/secrets.js";
+import { toHttpError } from "../../rest/http-error.js";
 
 const KEYRING = keyringFromEnv(
   `test:${Buffer.alloc(32, 9).toString("base64")}`,
@@ -726,5 +728,91 @@ describe("mergeOutputs", () => {
     // A non-array meeting an array still overwrites - chains stay expressible.
     mergeOutputs(accumulated, { tasks: "done" });
     expect(accumulated.tasks).toBe("done");
+  });
+});
+
+describe("declarative provider failures", () => {
+  const providerRow = {
+    transport: "rest",
+    baseUrlTemplate: "https://api.example.com",
+    egressHosts: ["api.example.com"],
+  };
+  const operationRow = {
+    key: "search",
+    operation: { method: "GET", pathTemplate: "/search" },
+  };
+
+  async function failing(status: number, headers: Record<string, string> = {}) {
+    const fetchImpl = (async () =>
+      new Response("provider-body token=must-not-leak", { status, headers })) as unknown as typeof fetch;
+    try {
+      await executeBinding({
+        binding: {},
+        operationRow,
+        providerRow,
+        connectionValues: {},
+        serviceInputs: {},
+        secretScope: "unused",
+        fetchImpl,
+      });
+    } catch (error) {
+      return error as ProviderOutcomeError;
+    }
+    throw new Error("expected provider failure");
+  }
+
+  it("reuses the canonical status taxonomy and transport statuses", async () => {
+    const cases: [number, ProviderOutcomeError["code"], number][] = [
+      [400, "CONNECTOR_PROVIDER_REJECTED_INPUT", 422],
+      [401, "CONNECTOR_PROVIDER_AUTHORIZATION_FAILED", 502],
+      [403, "CONNECTOR_PROVIDER_PERMISSION_DENIED", 403],
+      [404, "CONNECTOR_UPSTREAM_ERROR", 502],
+      [429, "CONNECTOR_PROVIDER_RATE_LIMITED", 429],
+      [503, "CONNECTOR_PROVIDER_UNAVAILABLE", 503],
+    ];
+    for (const [status, code, transportStatus] of cases) {
+      const error = await failing(status);
+      expect(error).toBeInstanceOf(ProviderOutcomeError);
+      expect(error.code).toBe(code);
+      expect(error.providerStatus).toBe(status);
+      expect(toHttpError(error)).toMatchObject({ status: transportStatus, body: { error: { code } } });
+    }
+  });
+
+  it("retains only the canonical retry meaning and no provider text or headers", async () => {
+    const error = await failing(429, {
+      "retry-after": "30",
+      "x-provider-request-id": "request-secret",
+    });
+    const rendered = JSON.stringify(toHttpError(error));
+    expect(error.outcome).toMatchObject({
+      category: "rate_limit",
+      retryable: true,
+      requiredAction: "wait",
+    });
+    expect(error.outcome.retryAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(rendered).not.toContain("provider-body");
+    expect(rendered).not.toContain("must-not-leak");
+    expect(rendered).not.toContain("request-secret");
+    expect(rendered).not.toContain("x-provider-request-id");
+  });
+
+  it("turns provider contract responses into the canonical generic fallback", async () => {
+    const fetchImpl = (async () =>
+      Response.json({ errors: [{ message: "provider-body token=must-not-leak" }] })) as unknown as typeof fetch;
+    await expect(
+      executeBinding({
+        binding: {},
+        operationRow: { key: "tickets", operation: { graphqlOperation: "query { tickets }" } },
+        providerRow: { ...providerRow, transport: "graphql" },
+        connectionValues: {},
+        serviceInputs: {},
+        secretScope: "unused",
+        fetchImpl,
+      }),
+    ).rejects.toMatchObject({
+      code: "CONNECTOR_UPSTREAM_ERROR",
+      message: expect.not.stringContaining("must-not-leak"),
+    });
   });
 });

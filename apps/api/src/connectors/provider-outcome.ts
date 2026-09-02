@@ -388,6 +388,25 @@ export function providerOutcomeMessage(
   }
 }
 
+/**
+ * A provider failure from a platform-owned execution path that does not use a
+ * connector package. It carries the same safe outcome as connector execution,
+ * so the REST and MCP renderers never need a second provider taxonomy.
+ */
+export class ProviderOutcomeError extends Error {
+  readonly code: ConnectorProviderOutcomeCode;
+  readonly outcome: ConnectorProviderOutcome;
+  readonly providerStatus: number | undefined;
+
+  constructor(outcome: ConnectorProviderOutcome, message: string, providerStatus?: number) {
+    super(message);
+    this.name = "ProviderOutcomeError";
+    this.code = outcome.code;
+    this.outcome = outcome;
+    this.providerStatus = providerStatus;
+  }
+}
+
 function isOutcome(value: unknown): value is ConnectorProviderOutcome {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Record<string, unknown>;
@@ -407,7 +426,7 @@ function isOutcome(value: unknown): value is ConnectorProviderOutcome {
  */
 export function providerOutcomeOf(error: unknown): ConnectorProviderOutcome | undefined {
   if (!(error instanceof Error)) return undefined;
-  if (error.name !== "ConnectorExecutionError") {
+  if (error.name !== "ConnectorExecutionError" && error.name !== "ProviderOutcomeError") {
     return undefined;
   }
   const outcome = (error as Error & { outcome?: unknown }).outcome;

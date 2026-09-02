@@ -280,6 +280,21 @@ export interface McpDerivedDryRunConfig {
   roles: string[];
 }
 
+/**
+ * Canonical URL fields on a row interpreted as a declarative adapter.
+ * Operations may select only an entry authored in `baseUrlTemplates`; callers
+ * and connection values never supply an origin.
+ */
+export interface McpDeclarativeAdapterUrls {
+  baseUrlTemplate: string;
+  baseUrlTemplates?: Record<string, string>;
+}
+
+/** Canonical URL selector inside a declarative operation definition. */
+export interface McpDeclarativeOperationUrl {
+  baseUrlKey?: string;
+}
+
 export interface McpDerivedToolsConfig {
   /**
    * Roles whose sessions are offered the derived tools. Deliberately separate

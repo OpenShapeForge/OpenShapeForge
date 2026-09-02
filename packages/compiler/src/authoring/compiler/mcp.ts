@@ -50,6 +50,17 @@ const MCP_TOOL_PREFIX_PATTERN = /^[a-z][a-z0-9_]*$/;
 const MCP_RESOURCE_URI_PATTERN =
   /^[a-z][a-z0-9+.-]*:\/\/[A-Za-z0-9][A-Za-z0-9\/_-]*[A-Za-z0-9]$/;
 
+const MCP_DERIVED_EXECUTION_KEYS = new Set([
+  "bindingsField",
+  "operationRef",
+  "operationEntity",
+  "providerRef",
+  "providerEntity",
+  "connectionEntity",
+  "connectionProviderRef",
+  "connectionValuesField",
+]);
+
 /**
  * `ContactDetail` → `contact_detail`. Distinct from deriveTableName: a tool
  * prefix is singular, because the operation suffix already carries the
@@ -294,6 +305,16 @@ export function buildMcp(
     }
     if (authored.execution) {
       const execution = authored.execution;
+      const unknownOptions = Object.keys(execution).filter(
+        (option) => !MCP_DERIVED_EXECUTION_KEYS.has(option),
+      );
+      if (unknownOptions.length > 0) {
+        throw new Error(
+          `mcp derivedTools.execution on entity "${coreEntity.entity}" has unknown option(s): ` +
+            `${unknownOptions.sort().join(", ")}. The declarative row vocabulary is fixed; ` +
+            `authoring cannot redirect URL selection to caller-controlled fields.`,
+        );
+      }
       if (!fieldKeys.has(execution.bindingsField)) {
         throw new Error(
           `mcp derivedTools.execution bindingsField ${JSON.stringify(execution.bindingsField)} ` +

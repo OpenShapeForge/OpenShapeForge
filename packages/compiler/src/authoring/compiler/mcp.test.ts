@@ -308,4 +308,28 @@ describe("buildMcp", () => {
       )?.derivedTools?.versionField,
     ).toBe("version");
   });
+
+  it("keeps declarative URL selection on the fixed authored row vocabulary", () => {
+    const derivedTools = {
+      roles: ["viewer"],
+      keyField: "value",
+      descriptionField: "value",
+      inputFieldsField: "value",
+      versionField: "version",
+      execution: {
+        bindingsField: "value",
+        operationRef: "a",
+        operationEntity: "B",
+        providerRef: "c",
+        providerEntity: "D",
+        connectionEntity: "E",
+        connectionProviderRef: "f",
+        connectionValuesField: "g",
+        baseUrlKeyField: "callerChoice",
+      },
+    };
+    expect(() =>
+      buildMcp(entityWithMcp({ derivedTools } as CoreEntity["mcp"])),
+    ).toThrow(/unknown option.*baseUrlKeyField.*caller-controlled fields/);
+  });
 });

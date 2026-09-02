@@ -508,9 +508,15 @@
                   "properties": {
                     "bindingsField": { "type": "string" },
                     "operationRef": { "type": "string" },
-                    "operationEntity": { "type": "string" },
+                    "operationEntity": {
+                      "type": "string",
+                      "description": "Entity whose rows carry declarative operation definitions. An operation may author baseUrlKey to select one named URL from its adapter; caller input never supplies this key."
+                    },
                     "providerRef": { "type": "string" },
-                    "providerEntity": { "type": "string" },
+                    "providerEntity": {
+                      "type": "string",
+                      "description": "Entity whose rows carry the default baseUrlTemplate and an optional baseUrlTemplates object mapping authored keys to HTTPS URL templates."
+                    },
                     "connectionEntity": { "type": "string" },
                     "connectionProviderRef": { "type": "string" },
                     "connectionValuesField": { "type": "string" }

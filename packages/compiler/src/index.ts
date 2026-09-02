@@ -53,6 +53,8 @@ export type {
   FieldDefinitionVariableMode,
   FieldDefinitionWorkflowInspector,
   FieldV2,
+  McpDeclarativeAdapterUrls,
+  McpDeclarativeOperationUrl,
 } from "./authoring/types.js";
 
 const defaultRepoRoot = resolve(import.meta.dir, "../../..");

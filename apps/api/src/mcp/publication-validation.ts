@@ -25,6 +25,7 @@
  * interpretation of stored data, like declarative execution itself.
  */
 import { HttpError } from "../rest/http-error.js";
+import { requestHeaderMappings } from "./declarative-execution.js";
 import { deriveToolName, type DerivedToolsCatalogEntry } from "./derived-tools.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -201,8 +202,9 @@ export async function validateVisibleDefinition(
       );
       continue;
     }
-    if (!providers.has(providerId)) {
-      const [providerRow] = await readRows(execution.providerTable, { id: providerId });
+    let providerRow = providers.get(providerId);
+    if (!providerRow) {
+      [providerRow] = await readRows(execution.providerTable, { id: providerId });
       if (!providerRow) {
         problems.push(
           `${position}: ${execution.operationEntity} ` +
@@ -212,6 +214,13 @@ export async function validateVisibleDefinition(
         continue;
       }
       providers.set(providerId, providerRow);
+    }
+    try {
+      requestHeaderMappings(operationRow, providerRow.auth);
+    } catch (error) {
+      problems.push(
+        `${position}: ${error instanceof Error ? error.message : "request header mapping is invalid."}`,
+      );
     }
   }
 

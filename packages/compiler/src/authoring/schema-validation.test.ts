@@ -489,4 +489,36 @@ describe("coreEntity properties the compiler implements", () => {
       /baseUrlKeyField/,
     );
   });
+
+  it("does not let derived execution delegate a header name to caller input", () => {
+    const document = coreEntity({
+      fields: [
+        { key: "bindings", valueType: "object" },
+        { key: "version", valueType: "integer" },
+      ],
+      mcp: {
+        derivedTools: {
+          roles: ["viewer"],
+          keyField: "bindings",
+          descriptionField: "bindings",
+          inputFieldsField: "bindings",
+          versionField: "version",
+          execution: {
+            bindingsField: "bindings",
+            operationRef: "operationId",
+            operationEntity: "Operation",
+            providerRef: "adapterId",
+            providerEntity: "Adapter",
+            connectionEntity: "Connection",
+            connectionProviderRef: "adapterId",
+            connectionValuesField: "values",
+            requestHeaderNameField: "callerChoice",
+          },
+        },
+      },
+    });
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(
+      /requestHeaderNameField/,
+    );
+  });
 });

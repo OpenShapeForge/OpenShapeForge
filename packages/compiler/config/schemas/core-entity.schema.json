@@ -510,7 +510,7 @@
                     "operationRef": { "type": "string" },
                     "operationEntity": {
                       "type": "string",
-                      "description": "Entity whose rows carry declarative operation definitions. An operation may author baseUrlKey to select one named URL from its adapter; caller input never supplies this key."
+                      "description": "Entity whose rows carry declarative operation definitions. An operation may author baseUrlKey to select one named URL from its adapter and requestMapping.headers entries that map declared scalar inputs onto fixed non-auth header names. Caller input never supplies URL keys or header names."
                     },
                     "providerRef": { "type": "string" },
                     "providerEntity": {

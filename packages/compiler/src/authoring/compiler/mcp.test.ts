@@ -332,4 +332,28 @@ describe("buildMcp", () => {
       buildMcp(entityWithMcp({ derivedTools } as CoreEntity["mcp"])),
     ).toThrow(/unknown option.*baseUrlKeyField.*caller-controlled fields/);
   });
+
+  it("keeps declarative header names on the fixed authored row vocabulary", () => {
+    const derivedTools = {
+      roles: ["viewer"],
+      keyField: "value",
+      descriptionField: "value",
+      inputFieldsField: "value",
+      versionField: "version",
+      execution: {
+        bindingsField: "value",
+        operationRef: "a",
+        operationEntity: "B",
+        providerRef: "c",
+        providerEntity: "D",
+        connectionEntity: "E",
+        connectionProviderRef: "f",
+        connectionValuesField: "g",
+        requestHeaderNameField: "callerChoice",
+      },
+    };
+    expect(() =>
+      buildMcp(entityWithMcp({ derivedTools } as CoreEntity["mcp"])),
+    ).toThrow(/unknown option.*requestHeaderNameField.*caller-controlled fields/);
+  });
 });

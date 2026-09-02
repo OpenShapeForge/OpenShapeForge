@@ -45,6 +45,7 @@ import { ConnectorGovernor } from "./reliability.js";
 import { describeContractDrift, isUsable } from "./status.js";
 import { contractSecrets, type SecretKeyring } from "./secrets.js";
 import { listInstallations, readSecrets } from "./store.js";
+import type { RuntimeModule } from "../modules/contract.js";
 
 export class ConnectorInvocationError extends Error {
   readonly code: string;
@@ -65,6 +66,7 @@ export type InvocationContext = {
   roles: readonly string[];
   instanceKey?: string;
   log?: (message: string, fields?: Record<string, unknown>) => void;
+  egressOwner?: RuntimeModule["egress"] | undefined;
 };
 
 /**
@@ -192,6 +194,17 @@ export async function invokeConnectorOperation(
           secrets,
           input,
           correlationId,
+          egress: {
+            owner: context.egressOwner,
+            purpose: "provider",
+            scope: {
+              tenantId: context.session.tenantId ?? null,
+              actorId: context.session.userId ?? null,
+              provider: contract.slug,
+              operation: operation.key,
+              kind: operation.kind,
+            },
+          },
           ...(wrapFetch ? { wrapFetch } : {}),
           ...(context.log ? { log: context.log } : {}),
         }),
@@ -286,6 +299,7 @@ async function oauthFetchWrapper(input: {
   installation: { id: string; instanceKey: string; config: Record<string, unknown> };
   secrets: Record<string, string>;
   correlationId: string;
+  egressOwner?: RuntimeModule["egress"] | undefined;
   log?: ((message: string, fields?: Record<string, unknown>) => void) | undefined;
 }): Promise<((bound: FetchLike) => FetchLike) | undefined> {
   if (!input.contract.auth) return undefined;
@@ -301,7 +315,23 @@ async function oauthFetchWrapper(input: {
   // URL has no egress to reach it, so a denial here is a misconfigured
   // installation rather than an unreachable design.
   const controller = new AbortController();
-  const refreshFetch = createBoundFetch(input.contract, controller.signal);
+  const refreshFetch = createBoundFetch(
+    input.contract,
+    controller.signal,
+    fetch,
+    undefined,
+    {
+      owner: input.egressOwner,
+      purpose: "oauth",
+      scope: {
+        tenantId: input.session.tenantId ?? null,
+        actorId: input.session.userId ?? null,
+        provider: input.contract.slug,
+        operation: "refresh_access_token",
+        kind: "mutation",
+      },
+    },
+  );
 
   try {
     const accessToken = await ensureAccessToken({
@@ -383,7 +413,23 @@ export async function verifyConnectorInstallation(
     )({
       config: Object.freeze({ ...installation.config }),
       secrets: Object.freeze({ ...secrets }),
-      fetch: (await import("./executor.js")).createBoundFetch(contract, controller.signal),
+      fetch: (await import("./executor.js")).createBoundFetch(
+        contract,
+        controller.signal,
+        fetch,
+        undefined,
+        {
+          owner: context.egressOwner,
+          purpose: "probe",
+          scope: {
+            tenantId: context.session.tenantId ?? null,
+            actorId: context.session.userId ?? null,
+            provider: contract.slug,
+            operation: "verify_connection",
+            kind: "query",
+          },
+        },
+      ),
       signal: controller.signal,
       log: context.log ?? (() => {}),
     });

@@ -14,6 +14,7 @@ import { parse as parseYaml } from "yaml";
 import { HttpError } from "../rest/http-error.js";
 import { hostAllowed } from "../connectors/executor.js";
 import { fetchWithAllowedRedirects } from "./declarative-execution.js";
+import type { ModuleEgressDispatch } from "../modules/egress.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -108,6 +109,7 @@ function fieldSummaries(
 export async function discoverProviderSchema(
   row: JsonRecord,
   fetchImpl: typeof fetch = fetch,
+  egressDispatch?: ModuleEgressDispatch,
 ): Promise<JsonRecord> {
   const mode = row.discovery;
   if (mode !== "openapi" && mode !== "graphqlIntrospection") {
@@ -162,6 +164,7 @@ export async function discoverProviderSchema(
     },
     egress,
     fetchImpl,
+    egressDispatch,
   );
   const text = await response.text();
   if (!response.ok) {

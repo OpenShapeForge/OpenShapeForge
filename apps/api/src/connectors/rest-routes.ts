@@ -13,6 +13,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { resolveSessionContext } from "../auth/identity.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import type { RuntimeModule } from "../modules/contract.js";
 import { headersFromFastify } from "../http/headers.js";
 import { REST_MOUNT_PATH } from "../rest/rest-paths.js";
 import {
@@ -138,6 +139,7 @@ export type ConnectorRestOptions = {
   db?: OpenShapeForgeDatabase | undefined;
   config: ConnectorRuntimeConfig;
   now?: () => number;
+  egressOwner?: RuntimeModule["egress"] | undefined;
 };
 
 export function registerConnectorRestRoutes(
@@ -254,6 +256,7 @@ export function registerConnectorRestRoutes(
             keyring: connectorKeyring(),
             roles: context.session.roles ?? [],
             instanceKey,
+            egressOwner: options.egressOwner,
           },
           contract,
         );
@@ -315,6 +318,7 @@ export function registerConnectorRestRoutes(
             governor: connectorGovernor(),
             keyring: connectorKeyring(),
             roles: context.session.roles ?? [],
+            egressOwner: options.egressOwner,
             ...(typeof (request.query as Record<string, unknown>)?.instanceKey === "string"
               ? { instanceKey: String((request.query as Record<string, unknown>).instanceKey) }
               : {}),

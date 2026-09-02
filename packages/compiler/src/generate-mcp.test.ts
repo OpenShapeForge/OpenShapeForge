@@ -817,6 +817,7 @@ describe("derived tools catalog", () => {
           keyField: "name",
           descriptionField: "name",
           inputFieldsField: "name",
+          versionField: "revision",
           execution: {
             bindingsField: "bindings",
             operationRef: "operationId",
@@ -845,10 +846,13 @@ describe("derived tools catalog", () => {
       "test",
     );
 
-    expect(catalog.derivedTools[0]?.execution).toMatchObject({
+    expect(catalog.derivedTools[0]).toMatchObject({
+      versionField: "revision",
+      execution: {
       operationTable: "services.operations",
       providerTable: "services.providers",
       connectionTable: "services.connections",
+      },
     });
   });
 });

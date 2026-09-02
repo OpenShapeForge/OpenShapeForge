@@ -17,7 +17,10 @@ import { createYoga, type Plugin } from "graphql-yoga";
 import { readPositiveIntEnv } from "../config/limits.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { createGraphqlContext, type GraphqlContext } from "./context.js";
-import type { RuntimeModule } from "../modules/contract.js";
+import type {
+  ModuleRuntimeContext,
+  RuntimeModule,
+} from "../modules/contract.js";
 import { buildGraphqlSchema } from "./schema.js";
 import persistedManifest from "../generated/graphql/persisted-operations.json" with { type: "json" };
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
@@ -46,6 +49,7 @@ export type CreateGraphqlYogaOptions = {
    * `modules/registry.ts`; omitted by callers that only need the core surface.
    */
   modules?: readonly RuntimeModule[] | undefined;
+  moduleContext?: ModuleRuntimeContext | undefined;
   metricsRegistry?: Registry;
   reportUnexpectedError?: (report: SanitizedErrorReport) => void;
   /** Host-selected generated manifest; injectable for rolling-deployment contract tests. */
@@ -122,7 +126,10 @@ export function createGraphqlYoga(options: CreateGraphqlYogaOptions) {
   const isProduction = process.env.NODE_ENV === "production";
 
   return createYoga<GraphqlYogaServerContext, GraphqlContext>({
-    schema: buildGraphqlSchema(options.modules ?? [], { db: options.db }),
+    schema: buildGraphqlSchema(
+      options.modules ?? [],
+      options.moduleContext ?? { db: options.db },
+    ),
     graphqlEndpoint: "/api/graphql",
     cors: createYogaCorsConfiguration(options.cors),
     landingPage: false,

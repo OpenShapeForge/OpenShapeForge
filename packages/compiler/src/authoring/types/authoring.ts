@@ -298,6 +298,7 @@ export interface McpDerivedToolsConfig {
    * the runtime translates into the derived tool's input JSON Schema.
    */
   inputFieldsField: string;
+  versionField?: string;
   /**
    * Opt-in declarative execution: calling a derived tool runs its bindings
    * against the referenced operation/provider/connection rows, whose fields
@@ -318,6 +319,8 @@ export interface McpDerivedToolsConfig {
    * definition stays invisible to the wider audience.
    */
   visibleToRolesField?: string;
+  /** Boolean field whose true rows are callable only through internal MCP dispatch. */
+  internalOnlyField?: string;
   /**
    * Opt-in personal-connection handoff tool: given one projected row, the
    * runtime validates the row's execution chain and returns a provider

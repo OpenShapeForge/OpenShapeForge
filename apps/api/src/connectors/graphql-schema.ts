@@ -14,6 +14,7 @@
  */
 import { GraphQLError } from "graphql";
 import type { GraphqlContext } from "../graphql/context.js";
+import type { RuntimeModule } from "../modules/contract.js";
 import {
   ConnectorAuthorizationError,
   requireConnectorAdmin,
@@ -197,8 +198,11 @@ export const connectorMutationFields = `
  */
 export type ConnectorGraphqlOptions = {
   config: ConnectorRuntimeConfig;
+  egressOwner?: RuntimeModule["egress"] | undefined;
   /** Injectable for tests; production passes Date.now. */
   now?: () => number;
+  /** Resolver-wiring seam; production uses the canonical runtime verifier. */
+  verifyInstallation?: typeof verifyConnectorInstallation;
 };
 
 /**
@@ -279,6 +283,7 @@ export function createConnectorResolvers(options: ConnectorGraphqlOptions) {
                   governor: connectorGovernor(),
                   keyring: connectorKeyring(),
                   roles: context.session.roles,
+                  egressOwner: options.egressOwner,
                 },
                 contract,
                 operation,
@@ -394,7 +399,7 @@ export function createConnectorResolvers(options: ConnectorGraphqlOptions) {
               `Unknown connector "${args.slug}".`,
             );
           }
-          return await verifyConnectorInstallation(
+          return await (options.verifyInstallation ?? verifyConnectorInstallation)(
             {
               db: catalog.db,
               session: catalog.session,
@@ -402,6 +407,7 @@ export function createConnectorResolvers(options: ConnectorGraphqlOptions) {
               governor: connectorGovernor(),
               keyring: connectorKeyring(),
               roles: context.session.roles,
+              egressOwner: options.egressOwner,
               ...(args.instanceKey ? { instanceKey: args.instanceKey } : {}),
             },
             contract,

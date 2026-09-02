@@ -61,6 +61,20 @@ export type LoadModulesOptions = {
   importModule?: (specifier: string) => Promise<unknown>;
 };
 
+/** Boot invariant: outbound policy is a chain with one final owner, not a race. */
+export function assertSingleModuleEgressOwner(
+  modules: readonly RuntimeModule[],
+): RuntimeModule["egress"] | undefined {
+  const owners = modules.filter((module) => module.egress);
+  if (owners.length > 1) {
+    throw new Error(
+      `Runtime modules ${owners.map((module) => JSON.stringify(module.name)).join(", ")} ` +
+        "all declare the egress hook; exactly one loaded module may own it.",
+    );
+  }
+  return owners[0]?.egress;
+}
+
 /**
  * A module's default export, shaped enough to be worth keeping. Anything
  * without a string `name` is rejected here rather than at first use.
@@ -127,6 +141,7 @@ export async function loadRuntimeModules(
     loaded.push(module);
   }
 
+  assertSingleModuleEgressOwner(loaded);
   return { loaded, failures };
 }
 
@@ -164,5 +179,6 @@ export async function initRuntimeModules(
     }
   }
 
+  assertSingleModuleEgressOwner(loaded);
   return { loaded, failures };
 }

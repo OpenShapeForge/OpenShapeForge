@@ -138,7 +138,12 @@ import {
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
-import { failureSummary } from "../connectors/provider-outcome.js";
+import {
+  ProviderOutcomeError,
+  classifyModuleEgressOutcome,
+  failureSummary,
+  providerOutcomeMessage,
+} from "../connectors/provider-outcome.js";
 import { listConnectorContracts } from "../connectors/catalog.js";
 import {
   connectorToolsForSession,
@@ -176,7 +181,11 @@ import {
   createModuleSessionCapability,
   type ModulePlatformRuntime,
 } from "../modules/platform.js";
-import type { ModuleEgressDispatch } from "../modules/egress.js";
+import {
+  boundedAbortSignal,
+  createModuleEgressInvocation,
+  type ModuleEgressDispatch,
+} from "../modules/egress.js";
 import {
   egressSourceFromResolvedInvocation,
   InvocationSourceVault,
@@ -974,7 +983,10 @@ export async function refreshConnectionRowLocked(input: {
   secretScope: string;
   fetchImpl?: typeof fetch;
   moduleEgress?: ModuleEgressDispatch | undefined;
+  signal?: AbortSignal;
 }): Promise<Record<string, unknown>> {
+  input.signal?.throwIfAborted();
+  const egressInvocation = createModuleEgressInvocation(input.moduleEgress);
   const valuesColumn = input.table.columns.find(
     (column) =>
       (column.sourceField ??
@@ -1006,18 +1018,20 @@ export async function refreshConnectionRowLocked(input: {
       tokenUrl: input.tokenUrl,
       clientId: input.clientId,
       clientSecret: input.clientSecret,
+      ...(input.signal ? { signal: input.signal } : {}),
       boundFetch: (url, init) =>
         fetchWithAllowedRedirects(
           url instanceof Request ? url.url : url,
-          { ...init, signal: AbortSignal.timeout(15_000) },
+          { ...init, signal: boundedAbortSignal(input.signal, 15_000) },
           input.egress,
           input.fetchImpl,
-          input.moduleEgress,
+          egressInvocation.dispatch,
         ),
       store: {
         withLockedRow: (work) =>
           withDbSession(input.db, input.session, async (lockedTrx) => {
             trx = lockedTrx;
+            input.signal?.throwIfAborted();
             const locked = await sql<{
               values: Record<string, unknown> | null;
               provider_id: string | null;
@@ -1030,6 +1044,7 @@ export async function refreshConnectionRowLocked(input: {
                where ${sql.id(input.table.primaryKey!)}::text = ${input.rowId}
                for update
             `.execute(lockedTrx);
+            input.signal?.throwIfAborted();
             const lockedRow = locked.rows[0];
             if (
               !lockedRow ||
@@ -1048,6 +1063,7 @@ export async function refreshConnectionRowLocked(input: {
                 ? (JSON.parse(storedValues) as Record<string, unknown>)
                 : (storedValues ?? {});
             result = current;
+            input.signal?.throwIfAborted();
             return work();
           }),
         read: async () => current,
@@ -1065,6 +1081,7 @@ export async function refreshConnectionRowLocked(input: {
           };
         },
         persist: async (tokens) => {
+          input.signal?.throwIfAborted();
           result = {
             ...current,
             accessToken: encryptSecret(input.keyring, input.secretScope, "accessToken", tokens.accessToken),
@@ -1080,8 +1097,10 @@ export async function refreshConnectionRowLocked(input: {
                and ${sql.id(providerColumn.name)}::text = ${input.expectedProviderId}
                and ${sql.id(ownerColumn.name)}::text is not distinct from ${input.expectedOwnerUserId}
           `.execute(trx!);
+          input.signal?.throwIfAborted();
         },
         auditRefreshed: async () => {
+          input.signal?.throwIfAborted();
           await appendEntityEventInTransaction(trx!, {
             tenantId: String(input.session.tenantId),
             aggregateType: "connection",
@@ -1101,6 +1120,21 @@ export async function refreshConnectionRowLocked(input: {
     });
     return result;
   } catch (error) {
+    input.signal?.throwIfAborted();
+    const failureKind = egressInvocation.consumeFailure(error);
+    const boundedTimeout =
+      error instanceof DOMException && error.name === "TimeoutError";
+    if (failureKind || boundedTimeout) {
+      const outcome = classifyModuleEgressOutcome({
+        kind: failureKind ?? "timeout",
+        correlationId: randomUUID(),
+        retryable: false,
+      });
+      throw new ProviderOutcomeError(
+        outcome,
+        providerOutcomeMessage(outcome.code, "Connection authorization"),
+      );
+    }
     if (error instanceof OAuthTokenLifecycleError) {
       throw new HttpError(
         error.code === "REAUTHORIZATION_REQUIRED" ? 403 : 502,
@@ -2002,11 +2036,15 @@ function buildServer(
   const authorizedSources = async (
     toolName: string,
     projectedOnly: boolean,
+    signal?: AbortSignal,
   ): Promise<AuthorizedInvocationSource[]> => {
+    signal?.throwIfAborted();
     if (!session.tenantId) return [];
     const tenantId = session.tenantId;
     return withDbSession(db, session, async (trx) => {
+      signal?.throwIfAborted();
       for (const entry of catalogDerivedTools) {
+        signal?.throwIfAborted();
         const execution = entry.execution;
         if (!execution || !sessionInAudience(entry, session.roles)) continue;
         const rows = await snapshotDefinitionsByToolName(trx, entry, toolName);
@@ -2121,8 +2159,13 @@ function buildServer(
               selectedConnectionId: connection.id,
             };
             const fingerprint = authorityFingerprint(internal);
-            const validate = async () => {
-              const current = await authorizedSources(toolName, projectedOnly);
+            const validate = async (validationSignal?: AbortSignal) => {
+              validationSignal?.throwIfAborted();
+              const current = await authorizedSources(
+                toolName,
+                projectedOnly,
+                validationSignal,
+              );
               return current.find(
                 (candidate) =>
                   sameInvocationSourceReference(
@@ -2158,8 +2201,10 @@ function buildServer(
   const sourceFromReference = async (
     sourceReference: string,
     toolName: string,
+    signal?: AbortSignal,
   ): Promise<AuthorizedInvocationSource | undefined> => {
-    const candidates = await authorizedSources(toolName, false);
+    signal?.throwIfAborted();
+    const candidates = await authorizedSources(toolName, false, signal);
     const matching = candidates.filter((candidate) =>
       sameInvocationSourceReference(
         candidate.sourceReference,
@@ -2562,7 +2607,9 @@ function buildServer(
     internal: boolean,
     selectedOptions?: ModuleToolExecutionOptions,
     assertParentInvocationActive?: () => void,
+    signal?: AbortSignal,
   ): Promise<ModuleToolExecutionResult> => {
+    signal?.throwIfAborted();
     assertParentInvocationActive?.();
     const request = { params: { name, arguments: args } };
     const extra = { requestId };
@@ -2571,6 +2618,7 @@ function buildServer(
       selected?: ResolvedInvocationSource,
       assertInterceptorActive?: () => void,
     ): Promise<CallToolResult> => {
+    signal?.throwIfAborted();
     assertParentInvocationActive?.();
     assertInterceptorActive?.();
     const selectedReference = selected?.sourceReference;
@@ -2629,6 +2677,7 @@ function buildServer(
             roles: session.roles ?? [],
             egressOwner,
             ...(egressSource ? { egressSource } : {}),
+            ...(signal ? { signal } : {}),
           },
           connectorTool.contract,
           connectorTool.operation,
@@ -3801,7 +3850,7 @@ function buildServer(
                       egress: Array.isArray(providerRow.egressHosts) ? (providerRow.egressHosts as string[]) : [],
                       keyring,
                       secretScope: personalScope,
-                      moduleEgress: {
+                        moduleEgress: {
                         owner: egressOwner,
                         purpose: "oauth",
                         scope: {
@@ -3810,9 +3859,10 @@ function buildServer(
                           provider: String(providerRow.id ?? providerId),
                           operation: "refresh_access_token",
                           kind: "mutation",
+                          },
                         },
-                      },
-                    });
+                        ...(signal ? { signal } : {}),
+                      });
                   }
                   // The personal connection holds only tokens; tenant-owned
                   // NON-secret configuration (subdomain and friends) still
@@ -3945,6 +3995,7 @@ function buildServer(
                             kind: "mutation",
                           },
                         },
+                        ...(signal ? { signal } : {}),
                       });
                     }
                     // The row mixes AAD scopes: elicited fields were encrypted
@@ -4030,6 +4081,7 @@ function buildServer(
                       },
                       ...(egressSource ? { source: egressSource } : {}),
                     },
+                    ...(signal ? { signal } : {}),
                   });
                 } catch (error) {
                   if (error instanceof SecretError && oauthConnectionAudit) {
@@ -4288,6 +4340,7 @@ function buildServer(
         session,
         callArguments,
       );
+      signal?.throwIfAborted();
       // A successful mutation on a table whose rows project as tools changes
       // other sessions' tool lists — tell them, so they re-list instead of
       // discovering the change on their next reconnect.
@@ -4309,6 +4362,7 @@ function buildServer(
     let preselectedReference: ResolvedInvocationSource | undefined;
     let current: SourcedTool | undefined;
     try {
+      signal?.throwIfAborted();
       const initialSelection = parseModuleToolExecutionOptions(selectedOptions);
       if (initialSelection.kind === "reference") {
         if (!internal) {
@@ -4318,7 +4372,8 @@ function buildServer(
           session,
           name,
           selectedOptions!,
-          (reference) => sourceFromReference(reference, name),
+          (reference) => sourceFromReference(reference, name, signal),
+          signal,
         );
         const hidden = preselectedReference?.internal as
           | CapturedDerivedExecution
@@ -4359,7 +4414,9 @@ function buildServer(
           };
         }
       } else {
+        signal?.throwIfAborted();
         current = (await listedTools()).find((entry) => entry.tool.name === name);
+        signal?.throwIfAborted();
       }
     } catch (error) {
       return { result: failed(error) };
@@ -4377,6 +4434,7 @@ function buildServer(
       options?: ModuleToolExecutionOptions,
       assertInterceptorActive?: () => void,
     ): Promise<ModuleToolExecutionResult> => {
+      signal?.throwIfAborted();
       assertParentInvocationActive?.();
       assertInterceptorActive?.();
       const parsedSelection = parseModuleToolExecutionOptions(options);
@@ -4411,7 +4469,8 @@ function buildServer(
           moduleSession,
           name,
           options!,
-          (reference) => sourceFromReference(reference, name),
+          (reference) => sourceFromReference(reference, name, signal),
+          signal,
         );
         if (
           !currentSelection ||
@@ -4427,6 +4486,7 @@ function buildServer(
           name,
           options!,
           ctx,
+          signal,
         );
       }
       assertParentInvocationActive?.();
@@ -4482,6 +4542,7 @@ function buildServer(
             invoke(options, assertActive),
         );
       assertParentInvocationActive?.();
+      signal?.throwIfAborted();
       return modulePlatform
         ? await modulePlatform.withActiveInvocation(ctx, run, name)
         : await run();
@@ -4589,7 +4650,13 @@ function buildServer(
       }
       return { allowed: false, code: "NOT_FOUND" };
     },
-    resolveInvocationSources: async (toolName, selector, invocationToken) => {
+    resolveInvocationSources: async (
+      toolName,
+      selector,
+      invocationToken,
+      signal,
+    ) => {
+      signal?.throwIfAborted();
       const tool = (await listedTools()).find(
         (entry) => entry.tool.name === toolName,
       );
@@ -4598,8 +4665,9 @@ function buildServer(
         moduleSession,
         toolName,
         selector,
-        () => authorizedSources(toolName, true),
+        () => authorizedSources(toolName, true, signal),
         invocationToken,
+        signal,
       );
     },
     callTool: (
@@ -4609,6 +4677,7 @@ function buildServer(
       requestId,
       _invocationToken,
       assertInvocationActive,
+      signal,
     ) =>
       dispatchTool(
         name,
@@ -4617,6 +4686,7 @@ function buildServer(
         true,
         options,
         assertInvocationActive,
+        signal,
       ),
     endInvocation: (invocationToken) =>
       sourceVault.clearInvocation(invocationToken),

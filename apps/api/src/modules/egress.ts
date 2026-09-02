@@ -1,9 +1,103 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Canonical protocol/allowlist gate and optional runtime-module egress owner. */
-import type {
-  ModuleEgressInvocationSource,
-  RuntimeModule,
+import {
+  ModuleEgressError,
+  type ModuleEgressFailureKind,
+  type ModuleEgressInvocationSource,
+  type RuntimeModule,
 } from "./contract.js";
+
+const trustedModuleEgressFailure = new WeakMap<
+  TrustedModuleEgressError,
+  { kind: ModuleEgressFailureKind; invocation: object }
+>();
+const moduleEgressInvocation = new WeakMap<ModuleEgressDispatch, object>();
+
+class TrustedModuleEgressError extends Error {
+  constructor() {
+    super("Trusted module egress failed.");
+    this.name = "TrustedModuleEgressError";
+    Object.freeze(this);
+  }
+}
+
+/** Only this closure can brand a failure as originating at the owner hook. */
+function createTrustedModuleEgressError(
+  kind: ModuleEgressFailureKind,
+  invocation: object,
+): TrustedModuleEgressError {
+  const error = new TrustedModuleEgressError();
+  trustedModuleEgressFailure.set(error, { kind, invocation });
+  return error;
+}
+
+/** Preserve cancellation identity without letting it replay a trusted brand. */
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof TrustedModuleEgressError) {
+    trustedModuleEgressFailure.delete(signal.reason);
+  }
+  signal.throwIfAborted();
+}
+
+class DeferredModuleEgressInputError extends Error {
+  constructor() {
+    super("Outbound request input failed.");
+    this.name = "DeferredModuleEgressInputError";
+    Object.freeze(this);
+  }
+}
+
+/**
+ * Keep package-controlled stream failures outside the trusted owner rejection
+ * channel. One read per pull preserves backpressure; cancellation is forwarded
+ * without forwarding an attacker-controlled reason.
+ */
+function sanitizeRequestBody(
+  body: ReadableStream<Uint8Array>,
+): ReadableStream<Uint8Array> {
+  const reader = ReadableStream.prototype.getReader.call(body) as
+    ReadableStreamDefaultReader<Uint8Array>;
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        try {
+          const next = await reader.read();
+          if (next.done) {
+            controller.close();
+            return;
+          }
+          if (!(next.value instanceof Uint8Array)) {
+            throw new DeferredModuleEgressInputError();
+          }
+          controller.enqueue(new Uint8Array(next.value));
+        } catch {
+          controller.error(new DeferredModuleEgressInputError());
+        }
+      },
+      async cancel() {
+        try {
+          await reader.cancel();
+        } catch {
+          // The cancellation still reached the source. Its package-controlled
+          // failure must not escape through the owner rejection channel.
+        }
+      },
+    },
+    { highWaterMark: 0 },
+  );
+}
+
+/** Give the owner cancellation timing, never a package-controlled reason. */
+function sanitizeAbortSignal(signal: AbortSignal): AbortSignal {
+  const controller = new AbortController();
+  const abort = () => {
+    controller.abort(new DOMException("Outbound request cancelled.", "AbortError"));
+  };
+  if (signal.aborted) abort();
+  else signal.addEventListener("abort", abort, { once: true });
+  return controller.signal;
+}
 
 export type ModuleEgressDispatch = {
   owner?: RuntimeModule["egress"] | undefined;
@@ -17,6 +111,64 @@ export type ModuleEgressDispatch = {
   };
   source?: ModuleEgressInvocationSource | undefined;
 };
+
+/**
+ * Bind one core-owned classification capability to one invocation. The bound
+ * dispatch may span redirect hops, but neither it nor the private identity is
+ * exposed to the package or registered owner.
+ */
+export function createModuleEgressInvocation(
+  dispatch: ModuleEgressDispatch | undefined,
+): Readonly<{
+  dispatch: ModuleEgressDispatch | undefined;
+  consumeFailure(error: unknown): ModuleEgressFailureKind | undefined;
+}> {
+  const identity = Object.freeze({});
+  const boundDispatch = dispatch
+    ? Object.freeze({ ...dispatch })
+    : undefined;
+  if (boundDispatch) moduleEgressInvocation.set(boundDispatch, identity);
+  return Object.freeze({
+    dispatch: boundDispatch,
+    consumeFailure(error: unknown) {
+      if (!(error instanceof TrustedModuleEgressError)) return undefined;
+      const failure = trustedModuleEgressFailure.get(error);
+      if (!failure) return undefined;
+      // Every classification attempt consumes the brand. A mismatched
+      // invocation therefore fails closed and cannot replay it later.
+      trustedModuleEgressFailure.delete(error);
+      return failure.invocation === identity ? failure.kind : undefined;
+    },
+  });
+}
+
+/** Derive lifecycle traffic without exposing or changing invocation identity. */
+export function deriveModuleEgressDispatch(
+  dispatch: ModuleEgressDispatch | undefined,
+  purpose: ModuleEgressDispatch["purpose"],
+): ModuleEgressDispatch | undefined {
+  if (!dispatch) return undefined;
+  const derived = Object.freeze({
+    owner: dispatch.owner,
+    purpose,
+    scope: dispatch.scope,
+    ...(purpose === "provider" && dispatch.source
+      ? { source: dispatch.source }
+      : {}),
+  });
+  const identity = moduleEgressInvocation.get(dispatch);
+  if (identity) moduleEgressInvocation.set(derived, identity);
+  return derived;
+}
+
+/** Keep the platform budget binding when a caller also supplies cancellation. */
+export function boundedAbortSignal(
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
 
 /** Exact, single-label and arbitrary-depth host grants. */
 export function hostAllowed(host: string, allowlist: readonly string[]): boolean {
@@ -58,6 +210,7 @@ export async function fetchValidatedOutbound(input: {
   if (!hostAllowed(url.hostname, input.allowlist)) {
     throw input.denied(url, "host");
   }
+  throwIfAborted(input.init.signal ?? undefined);
   if (!input.dispatch?.owner) {
     return input.fallback(input.target, input.init);
   }
@@ -67,34 +220,77 @@ export async function fetchValidatedOutbound(input: {
   const source = input.dispatch.purpose === "provider" && input.dispatch.source
     ? Object.freeze({ ...input.dispatch.source })
     : undefined;
-  const inherited =
+  const normalizedInit = { ...input.init } as RequestInit & {
+    duplex?: "half";
+  };
+  if (normalizedInit.body instanceof ReadableStream) {
+    normalizedInit.duplex = "half";
+  }
+  // Request eagerly normalizes every RequestInit field except the body stream
+  // and abort reason. Those two deferred inputs are wrapped below.
+  const normalized =
     input.target instanceof Request
-      ? new Request(input.target, input.init)
-      : undefined;
-  const hookInit: RequestInit & { duplex?: "half" } = inherited
-    ? {
-        method: inherited.method,
-        headers: inherited.headers,
-        ...(inherited.body ? { body: inherited.body, duplex: "half" } : {}),
-        cache: inherited.cache,
-        credentials: inherited.credentials,
-        integrity: inherited.integrity,
-        keepalive: inherited.keepalive,
-        mode: inherited.mode,
-        redirect: inherited.redirect,
-        referrer: inherited.referrer,
-        referrerPolicy: inherited.referrerPolicy,
-        signal: inherited.signal,
-      }
-    : { ...input.init };
+      ? new Request(input.target, normalizedInit)
+      : new Request(
+          input.target instanceof URL ? input.target.href : input.target,
+          normalizedInit,
+        );
+  const hasCallerSignal =
+    input.target instanceof Request || normalizedInit.signal != null;
+  const callerSignal = hasCallerSignal ? normalized.signal : undefined;
+  throwIfAborted(callerSignal);
+  const ownerSignal = callerSignal
+    ? sanitizeAbortSignal(callerSignal)
+    : undefined;
+  const body = normalized.body
+    ? sanitizeRequestBody(normalized.body)
+    : undefined;
+  const hookInit: RequestInit & { duplex?: "half" } = {
+    method: normalized.method,
+    headers: normalized.headers,
+    ...(body ? { body, duplex: "half" } : {}),
+    cache: normalized.cache,
+    credentials: normalized.credentials,
+    integrity: normalized.integrity,
+    keepalive: normalized.keepalive,
+    mode: normalized.mode,
+    redirect: normalized.redirect,
+    referrer: normalized.referrer,
+    referrerPolicy: normalized.referrerPolicy,
+    ...(ownerSignal ? { signal: ownerSignal } : {}),
+  };
   const init = Object.freeze(hookInit);
-  return input.dispatch.owner.fetch({
-    url: new URL(url),
-    init,
-    allowlist,
-    purpose: input.dispatch.purpose,
-    scope,
-    ...(source ? { source } : {}),
-    ...(hookInit.signal ? { signal: hookInit.signal } : {}),
-  });
+  try {
+    const response = await input.dispatch.owner.fetch({
+      url: new URL(url),
+      init,
+      allowlist,
+      purpose: input.dispatch.purpose,
+      scope,
+      ...(source ? { source } : {}),
+      ...(ownerSignal ? { signal: ownerSignal } : {}),
+    });
+    // A buggy or hostile owner can ignore AbortSignal. Core still owns the
+    // cancellation outcome and must not accept a response that arrived after
+    // the caller or bounded request cancelled.
+    throwIfAborted(callerSignal);
+    return response;
+  } catch (error) {
+    // Cancellation is core-owned and wins over anything the owner or a
+    // deferred package input rejected with at the same boundary.
+    throwIfAborted(callerSignal);
+    // Only the direct, registered hook rejection is trusted. A connector
+    // package or provider can construct ModuleEgressError too, but it never
+    // crosses this catch site and therefore cannot forge a policy outcome.
+    if (
+      error instanceof ModuleEgressError &&
+      (error.kind === "policy_blocked" || error.kind === "timeout")
+    ) {
+      const invocation = moduleEgressInvocation.get(input.dispatch);
+      if (invocation) {
+        throw createTrustedModuleEgressError(error.kind, invocation);
+      }
+    }
+    throw error;
+  }
 }

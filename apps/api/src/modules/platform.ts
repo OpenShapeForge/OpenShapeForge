@@ -33,6 +33,7 @@ export type ModuleMcpServerBinding = {
     toolName: string,
     selector: ModuleInvocationSourceSelector,
     invocationToken: object,
+    signal?: AbortSignal,
   ): Promise<readonly ModuleInvocationSource[]>;
   callTool(
     name: string,
@@ -41,6 +42,7 @@ export type ModuleMcpServerBinding = {
     requestId: string | number,
     invocationToken: object,
     assertInvocationActive: () => void,
+    signal?: AbortSignal,
   ): Promise<ModuleToolExecutionResult>;
   endInvocation?(invocationToken: object): void;
 };
@@ -176,7 +178,8 @@ export class ModulePlatformRuntime {
           if (!binding) return { allowed: false, code: "NOT_FOUND" };
           return binding.authorize(request.action, request.subject);
         },
-        resolveInvocationSources: async (session, toolName, selector) => {
+        resolveInvocationSources: async (session, toolName, selector, signal) => {
+          signal?.throwIfAborted();
           const ctx = this.#invocationStorage.getStore();
           const binding = ctx ? this.#servers.get(ctx.server) : undefined;
           if (
@@ -185,10 +188,10 @@ export class ModulePlatformRuntime {
             binding.session !== session ||
             !this.#activeInvocations.has(ctx)
           ) return [];
-          return binding.resolveInvocationSources(toolName, selector, ctx);
+          return binding.resolveInvocationSources(toolName, selector, ctx, signal);
         },
-        callTool: async (ctx, name, args, options) =>
-          this.#callTool(ctx, name, args, options),
+        callTool: async (ctx, name, args, options, signal) =>
+          this.#callTool(ctx, name, args, options, signal),
       },
     };
   }
@@ -253,7 +256,9 @@ export class ModulePlatformRuntime {
     name: string,
     args: Record<string, unknown>,
     options?: ModuleToolExecutionOptions,
+    signal?: AbortSignal,
   ): Promise<ModuleToolExecutionResult> {
+    signal?.throwIfAborted();
     const binding = this.#servers.get(ctx.server);
     if (
       !binding ||
@@ -268,6 +273,7 @@ export class ModulePlatformRuntime {
     const safeOptions =
       options === undefined ? undefined : deepFreezeClone(options);
     parseModuleToolExecutionOptions(safeOptions);
+    signal?.throwIfAborted();
     const stack = this.#toolCallStack.getStore() ?? [];
     if (stack.includes(name)) {
       throw new Error("Recursive MCP platform tool calls are not allowed.");
@@ -292,6 +298,7 @@ export class ModulePlatformRuntime {
         ctx.requestId,
         ctx,
         assertInvocationActive,
+        signal,
       ),
     );
     const pending = this.#pendingChildren.get(ctx) ?? new Set<Promise<unknown>>();

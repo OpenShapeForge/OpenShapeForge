@@ -34,12 +34,16 @@ import { randomUUID } from "node:crypto";
 import { HttpError } from "../rest/http-error.js";
 import { hostAllowed } from "../connectors/executor.js";
 import {
+  boundedAbortSignal,
+  createModuleEgressInvocation,
+  deriveModuleEgressDispatch,
   fetchValidatedOutbound,
   type ModuleEgressDispatch,
 } from "../modules/egress.js";
 import {
   ProviderObservations,
   ProviderOutcomeError,
+  classifyModuleEgressOutcome,
   classifyProviderOutcome,
   providerOutcomeMessage,
 } from "../connectors/provider-outcome.js";
@@ -113,6 +117,7 @@ export async function fetchWithAllowedRedirects(
           `Redirect host ${deniedUrl.hostname} is outside the egress allow-list.`,
         ),
     });
+    requestInit.signal?.throwIfAborted();
     if (response.status < 300 || response.status >= 400) return response;
     const location = response.headers.get("location");
     if (!location) return response;
@@ -674,7 +679,9 @@ async function clientCredentialsToken(input: {
   egress: readonly string[];
   fetchImpl: typeof fetch;
   egressDispatch?: ModuleEgressDispatch | undefined;
+  signal?: AbortSignal;
 }): Promise<string> {
+  input.signal?.throwIfAborted();
   const { config } = input;
   const tokenUrlRaw =
     typeof config.tokenUrl === "string" ? config.tokenUrl : "";
@@ -723,6 +730,7 @@ async function clientCredentialsToken(input: {
       )
     : [];
   if (scopes.length > 0) form.set("scope", scopes.join(" "));
+  const requestSignal = boundedAbortSignal(input.signal, REQUEST_TIMEOUT_MS);
   const response = await fetchWithAllowedRedirects(
     tokenUrl,
     {
@@ -733,13 +741,15 @@ async function clientCredentialsToken(input: {
         accept: "application/json",
       },
       body: form.toString(),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: requestSignal,
     },
     input.egress,
     input.fetchImpl,
     input.egressDispatch,
   );
+  requestSignal.throwIfAborted();
   const text = await response.text();
+  requestSignal.throwIfAborted();
   if (!response.ok) {
     throw new HttpError(
       502,
@@ -904,6 +914,7 @@ export type ExecuteBindingInput = {
   keyring?: SecretKeyring | undefined;
   fetchImpl?: typeof fetch;
   egress?: ModuleEgressDispatch | undefined;
+  signal?: AbortSignal;
   /** AAD scope the values were encrypted under (the elicitation source table). */
   secretScope: string;
   /**
@@ -927,7 +938,9 @@ export async function acquireAuthHeaders(input: {
   egress: readonly string[];
   fetchImpl: typeof fetch;
   egressDispatch?: ModuleEgressDispatch | undefined;
+  signal?: AbortSignal;
 }): Promise<Record<string, string>> {
+  input.signal?.throwIfAborted();
   const config =
     input.auth && typeof input.auth === "object"
       ? (input.auth as AuthConfig)
@@ -936,13 +949,10 @@ export async function acquireAuthHeaders(input: {
     // Token acquisition is OAuth traffic, not execution against the resolved
     // invocation source. Preserve the core owner/scope but deliberately omit
     // source coordination metadata from this separate lifecycle request.
-    const oauthEgress = input.egressDispatch
-      ? {
-          owner: input.egressDispatch.owner,
-          purpose: "oauth" as const,
-          scope: input.egressDispatch.scope,
-        }
-      : undefined;
+    const oauthEgress = deriveModuleEgressDispatch(
+      input.egressDispatch,
+      "oauth",
+    );
     const token = await clientCredentialsToken({
       config,
       plain: input.plain,
@@ -950,6 +960,7 @@ export async function acquireAuthHeaders(input: {
       egress: input.egress,
       fetchImpl: input.fetchImpl,
       egressDispatch: oauthEgress,
+      ...(input.signal ? { signal: input.signal } : {}),
     });
     return { authorization: `Bearer ${token}` };
   }
@@ -1003,6 +1014,7 @@ export type ComposedRequest = {
 export async function composeBindingRequest(
   input: ExecuteBindingInput & { mode?: "acquire" | "describe" },
 ): Promise<ComposedRequest> {
+  input.signal?.throwIfAborted();
   const { binding, operationRow, providerRow, serviceInputs } = input;
   const mode = input.mode ?? "acquire";
   const keyring = input.keyring ?? keyringFromEnv(process.env[KEYRING_ENV]);
@@ -1199,6 +1211,7 @@ export async function composeBindingRequest(
           egress,
           fetchImpl,
           egressDispatch: input.egress,
+          ...(input.signal ? { signal: input.signal } : {}),
         });
   const headers: Record<string, string> = {
     accept: "application/json",
@@ -1281,12 +1294,35 @@ function providerFailure(
   );
 }
 
+function moduleEgressFailure(
+  operationRow: JsonRecord,
+  kind: "policy_blocked" | "timeout",
+): ProviderOutcomeError {
+  const outcome = classifyModuleEgressOutcome({
+    kind,
+    correlationId: randomUUID(),
+    retryable: false,
+  });
+  return new ProviderOutcomeError(
+    outcome,
+    providerOutcomeMessage(outcome.code, operationSubject(operationRow)),
+  );
+}
+
+function isBoundedTimeout(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "TimeoutError";
+}
+
 export async function executeBinding(
   input: ExecuteBindingInput,
 ): Promise<JsonRecord> {
+  input.signal?.throwIfAborted();
   const { binding, operationRow, providerRow } = input;
+  const egressInvocation = createModuleEgressInvocation(input.egress);
+  const invocationInput = egressInvocation.dispatch
+    ? { ...input, egress: egressInvocation.dispatch }
+    : input;
   const fetchImpl = input.fetchImpl ?? fetch;
-  const { method, url, headers, body } = await composeBindingRequest(input);
   const operation = (operationRow.operation ?? {}) as JsonRecord;
   const protocolPolicy =
     operation.baseUrlKey === undefined ? "http-or-https" : "https-only";
@@ -1295,22 +1331,48 @@ export async function executeBinding(
     ? (providerRow.egressHosts as string[])
     : [];
 
+  let request: ComposedRequest;
+  try {
+    request = await composeBindingRequest(invocationInput);
+  } catch (error) {
+    input.signal?.throwIfAborted();
+    // Composition is core work: secret decryption, authored mappings and auth
+    // construction must retain their own recovery semantics. Only a trusted
+    // module-egress denial or the bounded client-credentials deadline crosses
+    // the network boundary and is normalized here.
+    const failureKind = egressInvocation.consumeFailure(error);
+    if (failureKind) throw moduleEgressFailure(operationRow, failureKind);
+    if (isBoundedTimeout(error)) {
+      throw moduleEgressFailure(operationRow, "timeout");
+    }
+    throw error;
+  }
+
+  const requestSignal = boundedAbortSignal(input.signal, REQUEST_TIMEOUT_MS);
   let response: Response;
+  let text: string;
   try {
     response = await fetchWithAllowedRedirects(
-      url,
+      request.url,
       {
-        method,
-        headers,
-        ...(body !== undefined ? { body } : {}),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        method: request.method,
+        headers: request.headers,
+        ...(request.body !== undefined ? { body: request.body } : {}),
+        signal: requestSignal,
       },
       egress,
       fetchImpl,
-      input.egress,
+      egressInvocation.dispatch,
       protocolPolicy,
     );
+    requestSignal.throwIfAborted();
   } catch (error) {
+    input.signal?.throwIfAborted();
+    const failureKind = egressInvocation.consumeFailure(error);
+    if (failureKind) throw moduleEgressFailure(operationRow, failureKind);
+    if (isBoundedTimeout(error)) {
+      throw moduleEgressFailure(operationRow, "timeout");
+    }
     if (!(error instanceof HttpError) || error.code === "PROVIDER_ERROR") {
       throw providerFailure(operationRow);
     }
@@ -1319,7 +1381,16 @@ export async function executeBinding(
   if (!response.ok) {
     throw providerFailure(operationRow, response);
   }
-  const text = await response.text();
+  try {
+    text = await response.text();
+    requestSignal.throwIfAborted();
+  } catch (error) {
+    input.signal?.throwIfAborted();
+    if (isBoundedTimeout(error)) {
+      throw moduleEgressFailure(operationRow, "timeout");
+    }
+    throw providerFailure(operationRow);
+  }
   let parsed: unknown = null;
   try {
     parsed = text ? JSON.parse(text) : null;

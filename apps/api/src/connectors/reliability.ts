@@ -55,6 +55,15 @@ export function backoffDelayMs(
   return reliability.retry.backoff === "fixed" ? baseMs : baseMs * 2 ** (attempt - 1);
 }
 
+type ConcurrencyWaiter = {
+  resolve: (release: () => void) => void;
+  reject: (reason?: unknown) => void;
+  state: "queued" | "granted" | "accepted" | "cancelled";
+  release?: () => void;
+  signal?: AbortSignal;
+  onAbort?: () => void;
+};
+
 /**
  * Per-tenant concurrency limiter.
  *
@@ -64,30 +73,99 @@ export function backoffDelayMs(
  */
 export class ConcurrencyLimiter {
   private readonly inFlight = new Map<string, number>();
-  private readonly waiting = new Map<string, (() => void)[]>();
+  private readonly waiting = new Map<string, ConcurrencyWaiter[]>();
 
-  async acquire(key: string, limit: number): Promise<() => void> {
+  private releaseOnce(key: string): () => void {
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.release(key);
+    };
+  }
+
+  async acquire(
+    key: string,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<() => void> {
+    signal?.throwIfAborted();
     const current = this.inFlight.get(key) ?? 0;
     if (current < limit) {
       this.inFlight.set(key, current + 1);
-      return () => this.release(key);
+      return this.releaseOnce(key);
     }
-    await new Promise<void>((resolve) => {
+    let ownWaiter: ConcurrencyWaiter | undefined;
+    const release = await new Promise<() => void>((resolve, reject) => {
       const queue = this.waiting.get(key) ?? [];
-      queue.push(resolve);
+      const waiter: ConcurrencyWaiter = {
+        resolve,
+        reject,
+        state: "queued",
+        ...(signal ? { signal } : {}),
+      };
+      ownWaiter = waiter;
+      if (signal) {
+        waiter.onAbort = () => {
+          if (waiter.state === "queued") {
+            waiter.state = "cancelled";
+            const index = queue.indexOf(waiter);
+            if (index >= 0) queue.splice(index, 1);
+            if (queue.length === 0) this.waiting.delete(key);
+          } else if (waiter.state === "granted") {
+            // The promise continuation has not accepted the handoff yet. Give
+            // the already-counted slot back here; the idempotent release keeps
+            // the continuation from returning it twice.
+            waiter.state = "cancelled";
+            waiter.release?.();
+          }
+          reject(signal.reason);
+        };
+        signal.addEventListener("abort", waiter.onAbort, { once: true });
+      }
+      queue.push(waiter);
       this.waiting.set(key, queue);
     });
-    return () => this.release(key);
+    if (signal?.aborted) {
+      if (ownWaiter?.state === "granted") {
+        ownWaiter.state = "cancelled";
+        release();
+      }
+      signal.throwIfAborted();
+    }
+    if (ownWaiter) {
+      ownWaiter.state = "accepted";
+      if (ownWaiter.signal && ownWaiter.onAbort) {
+        ownWaiter.signal.removeEventListener("abort", ownWaiter.onAbort);
+      }
+    }
+    return release;
   }
 
   private release(key: string): void {
     const queue = this.waiting.get(key);
-    const next = queue?.shift();
-    if (next) {
-      // Hand the slot straight to the next waiter; the count stays put.
-      next();
-      return;
+    let next = queue?.shift();
+    while (next) {
+      if (next.state === "queued" && !next.signal?.aborted) {
+        // Hand the slot straight to the next waiter; the count stays put. Its
+        // abort listener remains armed until the promise continuation accepts
+        // the lease, closing the grant-before-continuation race.
+        next.state = "granted";
+        next.release = this.releaseOnce(key);
+        if (queue?.length === 0) this.waiting.delete(key);
+        next.resolve(next.release);
+        return;
+      }
+      if (next.state === "queued") {
+        next.state = "cancelled";
+        if (next.signal && next.onAbort) {
+          next.signal.removeEventListener("abort", next.onAbort);
+        }
+        next.reject(next.signal?.reason);
+      }
+      next = queue?.shift();
     }
+    if (queue?.length === 0) this.waiting.delete(key);
     const current = this.inFlight.get(key) ?? 1;
     if (current <= 1) this.inFlight.delete(key);
     else this.inFlight.set(key, current - 1);
@@ -161,7 +239,30 @@ export type GovernorOptions = {
   reliability: OperationReliability;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  signal?: AbortSignal;
 };
+
+async function abortableSleep(
+  ms: number,
+  sleep: (ms: number) => Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
+  if (!signal) return sleep(ms);
+  let onAbort: (() => void) | undefined;
+  try {
+    await Promise.race([
+      sleep(ms),
+      new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(signal.reason);
+        signal.addEventListener("abort", onAbort, { once: true });
+      }),
+    ]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+  signal.throwIfAborted();
+}
 
 /**
  * Runs one operation under its full declared policy: rate limit, circuit
@@ -174,6 +275,7 @@ export class ConnectorGovernor {
   private readonly breaker = new CircuitBreaker();
 
   async run<T>(options: GovernorOptions, attempt: () => Promise<T>): Promise<T> {
+    options.signal?.throwIfAborted();
     const now = options.now ?? (() => Date.now());
     const sleep =
       options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -211,6 +313,7 @@ export class ConnectorGovernor {
     const release = await this.concurrency.acquire(
       tenantKey,
       reliability.concurrency.perTenant,
+      options.signal,
     );
     const startedAt = now();
     const maxAttempts = mayRetry(options.kind, reliability)
@@ -220,11 +323,14 @@ export class ConnectorGovernor {
     try {
       let lastError: unknown;
       for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
+        options.signal?.throwIfAborted();
         try {
           const result = await attempt();
+          options.signal?.throwIfAborted();
           if (breakerConfig) this.breaker.recordSuccess(upstreamKey);
           return result;
         } catch (error) {
+          options.signal?.throwIfAborted();
           lastError = error;
           if (breakerConfig) {
             this.breaker.recordFailure(upstreamKey, breakerConfig.failureThreshold, now());
@@ -263,7 +369,7 @@ export class ConnectorGovernor {
           ) {
             break;
           }
-          await sleep(delay);
+          await abortableSleep(delay, sleep, options.signal);
         }
       }
       throw lastError;

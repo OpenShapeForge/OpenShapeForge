@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
-import type { ModuleEgressRequest, RuntimeModule } from "../contract.js";
-import { fetchValidatedOutbound } from "../egress.js";
+import {
+  ModuleEgressError,
+  type ModuleEgressRequest,
+  type RuntimeModule,
+} from "../contract.js";
+import {
+  createModuleEgressInvocation,
+  fetchValidatedOutbound,
+} from "../egress.js";
 
 const scope = {
   tenantId: "tenant-a",
@@ -45,8 +52,9 @@ describe("canonical runtime-module egress boundary", () => {
     expect(seen?.purpose).toBe("provider");
     expect(seen?.scope).toEqual(scope);
     expect(seen?.source).toEqual(source);
-    expect(seen?.signal).toBe(signal);
-    expect(seen?.init.signal).toBe(signal);
+    expect(seen?.signal).not.toBe(signal);
+    expect(seen?.signal).toBe(seen?.init.signal ?? undefined);
+    expect(seen?.signal?.aborted).toBe(false);
     expect(seen?.init.method).toBe("POST");
     expect(new Headers(seen?.init.headers).get("authorization")).toBe("Bearer fake");
     expect(new Headers(seen?.init.headers).get("x-test")).toBe("yes");
@@ -141,5 +149,213 @@ describe("canonical runtime-module egress boundary", () => {
       expect(hookCalls).toBe(0);
       expect(transportCalls).toBe(0);
     }
+  });
+
+  it("does not dispatch an already-cancelled request", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let hookCalls = 0;
+    let transportCalls = 0;
+    await expect(
+      fetchValidatedOutbound({
+        target: "https://api.example.com/items",
+        init: { signal: controller.signal },
+        allowlist: ["api.example.com"],
+        fallback: async () => {
+          transportCalls += 1;
+          return new Response();
+        },
+        dispatch: {
+          owner: {
+            fetch: async () => {
+              hookCalls += 1;
+              return new Response();
+            },
+          },
+          purpose: "provider",
+          scope,
+        },
+        denied: (_url, reason) => new Error(reason),
+      }),
+    ).rejects.toBe(controller.signal.reason);
+    expect(hookCalls).toBe(0);
+    expect(transportCalls).toBe(0);
+  });
+
+  it("rejects a late owner response when the owner ignores cancellation", async () => {
+    const controller = new AbortController();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let releaseOwner!: () => void;
+    const ownerBarrier = new Promise<void>((resolve) => {
+      releaseOwner = resolve;
+    });
+    const outcome = fetchValidatedOutbound({
+      target: "https://api.example.com/items",
+      init: { signal: controller.signal },
+      allowlist: ["api.example.com"],
+      fallback: async () => {
+        throw new Error("fallback must not run");
+      },
+      dispatch: {
+        owner: {
+          fetch: async () => {
+            markStarted();
+            await ownerBarrier;
+            return new Response("late success");
+          },
+        },
+        purpose: "provider",
+        scope,
+      },
+      denied: (_url, reason) => new Error(reason),
+    });
+
+    await started;
+    controller.abort();
+    releaseOwner();
+
+    await expect(outcome).rejects.toBe(controller.signal.reason);
+  });
+
+  it("does not trust a package-controlled request-body rejection", async () => {
+    const packageFailure = Object.assign(new ModuleEgressError("timeout"), {
+      privateDetail: "package-body-private-detail",
+    });
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          controller.error(packageFailure);
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    let ownerFailure: unknown;
+    const invocation = createModuleEgressInvocation({
+      owner: {
+        fetch: async (request) => {
+          try {
+            await new Response(request.init.body).text();
+          } catch (error) {
+            ownerFailure = error;
+            throw error;
+          }
+          return new Response("unreachable");
+        },
+      },
+      purpose: "provider",
+      scope,
+    });
+    const rejection = await fetchValidatedOutbound({
+      target: "https://api.example.com/items",
+      init: { method: "POST", body },
+      allowlist: ["api.example.com"],
+      fallback: async () => {
+        throw new Error("fallback must not run");
+      },
+      dispatch: invocation.dispatch,
+      denied: (_url, reason) => new Error(reason),
+    }).catch((error: unknown) => error);
+
+    expect(ownerFailure).not.toBe(packageFailure);
+    expect(rejection).toBe(ownerFailure);
+    expect(invocation.consumeFailure(rejection)).toBeUndefined();
+    expect((rejection as Error).message).not.toContain("package-body-private-detail");
+  });
+
+  it("does not expose or trust a package-controlled abort reason", async () => {
+    const controller = new AbortController();
+    const packageReason = Object.assign(new ModuleEgressError("timeout"), {
+      privateDetail: "package-signal-private-detail",
+    });
+    let markOwnerStarted!: () => void;
+    const ownerStarted = new Promise<void>((resolve) => {
+      markOwnerStarted = resolve;
+    });
+    let ownerReason: unknown;
+    const invocation = createModuleEgressInvocation({
+      owner: {
+        fetch: async (request) => {
+          markOwnerStarted();
+          return new Promise<Response>((_resolve, reject) => {
+            request.signal?.addEventListener(
+              "abort",
+              () => {
+                ownerReason = request.signal?.reason;
+                reject(ownerReason);
+              },
+              { once: true },
+            );
+          });
+        },
+      },
+      purpose: "provider",
+      scope,
+    });
+    const outcome = fetchValidatedOutbound({
+      target: "https://api.example.com/items",
+      init: { signal: controller.signal },
+      allowlist: ["api.example.com"],
+      fallback: async () => {
+        throw new Error("fallback must not run");
+      },
+      dispatch: invocation.dispatch,
+      denied: (_url, reason) => new Error(reason),
+    });
+
+    await ownerStarted;
+    controller.abort(packageReason);
+    const rejection = await outcome.catch((error: unknown) => error);
+
+    expect(ownerReason).not.toBe(packageReason);
+    expect(ownerReason).toBeInstanceOf(DOMException);
+    expect((ownerReason as DOMException).name).toBe("AbortError");
+    expect((ownerReason as Error).message).not.toContain(
+      "package-signal-private-detail",
+    );
+    expect(rejection).toBe(packageReason);
+    expect(invocation.consumeFailure(rejection)).toBeUndefined();
+  });
+
+  it("trusts only a typed failure rejected directly by the registered hook", async () => {
+    const invocation = createModuleEgressInvocation({
+      owner: {
+        fetch: async () => {
+          throw new ModuleEgressError("policy_blocked");
+        },
+      },
+      purpose: "provider",
+      scope,
+    });
+    const rejection = await fetchValidatedOutbound({
+      target: "https://api.example.com/items",
+      init: {},
+      allowlist: ["api.example.com"],
+      fallback: async () => new Response(),
+      dispatch: invocation.dispatch,
+      denied: (_url, reason) => new Error(reason),
+    }).catch((error: unknown) => error);
+
+    expect(Reflect.set(rejection as object, "kind", "timeout")).toBe(false);
+    const reflected = Reflect.construct(
+      (rejection as Error).constructor,
+      ["timeout"],
+    );
+    expect(reflected).toBeInstanceOf((rejection as Error).constructor);
+    expect(invocation.consumeFailure(reflected)).toBeUndefined();
+    expect(invocation.consumeFailure(rejection)).toBe("policy_blocked");
+    expect(invocation.consumeFailure(rejection)).toBeUndefined();
+    expect((rejection as Error).message).not.toContain("api.example.com");
+    expect(
+      invocation.consumeFailure(new ModuleEgressError("policy_blocked")),
+    ).toBeUndefined();
+    expect(
+      invocation.consumeFailure({
+        name: "TrustedModuleEgressError",
+        kind: "policy_blocked",
+      }),
+    ).toBeUndefined();
   });
 });

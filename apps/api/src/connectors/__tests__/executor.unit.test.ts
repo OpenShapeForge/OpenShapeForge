@@ -12,6 +12,7 @@ import {
   type ConnectorPackage,
 } from "../executor.js";
 import type { ConnectorContract, ConnectorOperationContract } from "../catalog.js";
+import { ModuleEgressError } from "../../modules/contract.js";
 
 const OPERATION: ConnectorOperationContract = {
   key: "listObjects",
@@ -374,6 +375,284 @@ describe("egress allowlist", () => {
 });
 
 describe("invocation", () => {
+  it("does not invoke a package when its parent was already cancelled", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let invoked = false;
+    await expect(
+      invoke(
+        packageReturning(async () => {
+          invoked = true;
+          return [];
+        }),
+        { signal: controller.signal },
+      ),
+    ).rejects.toBe(controller.signal.reason);
+    expect(invoked).toBe(false);
+  });
+
+  it("preserves trusted module egress failures but ignores package forgeries", async () => {
+    const pkg = packageReturning(async (context) => {
+      await context.fetch("https://api.example.com/items");
+      return [];
+    });
+    const policyFailure = (await invoke(pkg, {
+      egress: {
+        owner: {
+          fetch: async () => {
+            throw new ModuleEgressError("policy_blocked");
+          },
+        },
+        purpose: "provider",
+        scope: {
+          tenantId: "tenant-a",
+          actorId: "actor-a",
+          provider: "object-store",
+          operation: "listObjects",
+          kind: "query",
+        },
+      },
+    }).catch((error: unknown) => error)) as ConnectorExecutionError;
+    expect(policyFailure.code).toBe("CONNECTOR_EGRESS_DENIED");
+    expect(policyFailure.outcome?.category).toBe("policy_blocked");
+    expect(policyFailure.message).toBe(
+      'Connector "object-store" operation "listObjects" was blocked by outbound policy.',
+    );
+
+    const forged = (await invoke(
+      packageReturning(async () => {
+        throw new ModuleEgressError("policy_blocked");
+      }),
+    ).catch((error: unknown) => error)) as ConnectorExecutionError;
+    expect(forged.code).toBe("CONNECTOR_UPSTREAM_ERROR");
+    expect(forged.outcome?.category).toBe("provider_contract");
+  });
+
+  it("does not trust a reflected copy of a genuine module egress failure", async () => {
+    const reflected = (await invoke(
+      packageReturning(async (context) => {
+        try {
+          await context.fetch("https://api.example.com/items");
+        } catch (error) {
+          throw Reflect.construct((error as Error).constructor, ["timeout"]);
+        }
+        return [];
+      }),
+      {
+        egress: {
+          owner: {
+            fetch: async () => {
+              throw new ModuleEgressError("policy_blocked");
+            },
+          },
+          purpose: "provider",
+          scope: {
+            tenantId: "tenant-a",
+            actorId: "actor-a",
+            provider: "object-store",
+            operation: "listObjects",
+            kind: "query",
+          },
+        },
+      },
+    ).catch((error: unknown) => error)) as ConnectorExecutionError;
+
+    expect(reflected.code).toBe("CONNECTOR_UPSTREAM_ERROR");
+    expect(reflected.outcome?.category).toBe("provider_contract");
+  });
+
+  it("does not replay a retained module egress failure across invocations", async () => {
+    let retained: unknown;
+    let invocationCount = 0;
+    const pkg = packageReturning(async (context) => {
+      invocationCount += 1;
+      if (invocationCount === 1) {
+        try {
+          await context.fetch("https://api.example.com/items");
+        } catch (error) {
+          retained = error;
+          return [];
+        }
+      }
+      throw retained;
+    });
+
+    const first = await invoke(pkg, {
+      egress: {
+        owner: {
+          fetch: async () => {
+            throw new ModuleEgressError("policy_blocked");
+          },
+        },
+        purpose: "provider",
+        scope: {
+          tenantId: "tenant-a",
+          actorId: "actor-a",
+          provider: "object-store",
+          operation: "listObjects",
+          kind: "query",
+        },
+      },
+    });
+    expect(first).toEqual([]);
+
+    const replayed = (await invoke(pkg).catch(
+      (error: unknown) => error,
+    )) as ConnectorExecutionError;
+    expect(replayed.code).toBe("CONNECTOR_UPSTREAM_ERROR");
+    expect(replayed.outcome?.category).toBe("provider_contract");
+  });
+
+  it("does not trust a ModuleEgressError from a package request body", async () => {
+    const privateDetail = "package-body-private-detail";
+    const failure = (await invoke(
+      packageReturning(async (context) => {
+        const bodyFailure = Object.assign(new ModuleEgressError("timeout"), {
+          privateDetail,
+        });
+        const body = new ReadableStream<Uint8Array>(
+          {
+            pull(controller) {
+              controller.error(bodyFailure);
+            },
+          },
+          { highWaterMark: 0 },
+        );
+        await context.fetch("https://api.example.com/items", {
+          method: "POST",
+          body,
+        });
+        return [];
+      }),
+      {
+        egress: {
+          owner: {
+            fetch: async (request) => {
+              await new Response(request.init.body).text();
+              return Response.json([]);
+            },
+          },
+          purpose: "provider",
+          scope: {
+            tenantId: "tenant-a",
+            actorId: "actor-a",
+            provider: "object-store",
+            operation: "listObjects",
+            kind: "query",
+          },
+        },
+      },
+    ).catch((error: unknown) => error)) as ConnectorExecutionError;
+
+    expect(failure.code).toBe("CONNECTOR_UPSTREAM_ERROR");
+    expect(failure.outcome?.category).toBe("provider_contract");
+    expect(JSON.stringify(failure)).not.toContain(privateDetail);
+  });
+
+  it("does not let a package-controlled abort reason reach the owner", async () => {
+    const packageController = new AbortController();
+    packageController.abort(new ModuleEgressError("timeout"));
+    let ownerSignal: AbortSignal | undefined;
+    const result = await invoke(
+      packageReturning(async (context) => {
+        await context.fetch("https://api.example.com/items", {
+          signal: packageController.signal,
+        });
+        return [];
+      }),
+      {
+        egress: {
+          owner: {
+            fetch: async (request) => {
+              ownerSignal = request.signal;
+              return Response.json([]);
+            },
+          },
+          purpose: "provider",
+          scope: {
+            tenantId: "tenant-a",
+            actorId: "actor-a",
+            provider: "object-store",
+            operation: "listObjects",
+            kind: "query",
+          },
+        },
+      },
+    );
+
+    expect(result).toEqual([]);
+    expect(ownerSignal).not.toBe(packageController.signal);
+    expect(ownerSignal?.aborted).toBe(false);
+  });
+
+  it("rebuilds a capability error after a package mutates and rethrows it", async () => {
+    const privateMessage = "package-private-message";
+    const forgedCorrelation = "package-forged-correlation";
+    const failure = (await invoke(
+      packageReturning(async (context) => {
+        try {
+          await context.fetch("https://blocked.example/private");
+        } catch (error) {
+          const mutable = error as ConnectorExecutionError & {
+            code: ConnectorExecutionErrorCode;
+            connector: string;
+            operation: string;
+            outcome: unknown;
+            providerStatus: number;
+          };
+          mutable.message = privateMessage;
+          mutable.code = "CONNECTOR_TIMEOUT";
+          mutable.connector = "package-forged-connector";
+          mutable.operation = "package-forged-operation";
+          mutable.providerStatus = 599;
+          mutable.outcome = {
+            code: "CONNECTOR_TIMEOUT",
+            category: "timeout",
+            retryable: true,
+            requiredAction: "wait",
+            correlationId: forgedCorrelation,
+          };
+          throw mutable;
+        }
+        return [];
+      }),
+    ).catch((error: unknown) => error)) as ConnectorExecutionError;
+
+    expect(failure.code).toBe("CONNECTOR_EGRESS_DENIED");
+    expect(failure.connector).toBe("object-store");
+    expect(failure.operation).toBeUndefined();
+    expect(failure.outcome).toBeUndefined();
+    expect(failure.providerStatus).toBeUndefined();
+    expect(JSON.stringify(failure)).not.toContain(privateMessage);
+    expect(JSON.stringify(failure)).not.toContain(forgedCorrelation);
+
+    const constructed = (await invoke(
+      packageReturning(async () => {
+        throw new ConnectorExecutionError(
+          "CONNECTOR_TIMEOUT",
+          "package-forged-connector",
+          privateMessage,
+          "package-forged-operation",
+          {
+            providerStatus: 599,
+            outcome: {
+              code: "CONNECTOR_TIMEOUT",
+              category: "timeout",
+              retryable: true,
+              requiredAction: "wait",
+              correlationId: forgedCorrelation,
+            },
+          },
+        );
+      }),
+    ).catch((error: unknown) => error)) as ConnectorExecutionError;
+    expect(constructed.code).toBe("CONNECTOR_UPSTREAM_ERROR");
+    expect(constructed.outcome?.category).toBe("provider_contract");
+    expect(constructed.providerStatus).toBeUndefined();
+    expect(constructed.message).not.toContain(privateMessage);
+    expect(constructed.outcome?.correlationId).not.toBe(forgedCorrelation);
+  });
+
   it("validates input before calling and output after", async () => {
     let sawInput: unknown;
     const pkg = packageReturning(async (_context, input) => {

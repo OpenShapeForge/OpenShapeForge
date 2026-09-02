@@ -33,21 +33,31 @@ import type { DB } from "../generated/db/types.js";
 import { recordConnectorAudit } from "./audit.js";
 import type { ConnectorContract } from "./catalog.js";
 import { ConnectorExecutionError, type FetchLike } from "./executor.js";
-import { decryptSecret, encryptSecret, type SecretKeyring, type StoredSecret } from "./secrets.js";
+import {
+  decryptSecret,
+  encryptSecret,
+  SecretError,
+  type SecretKeyring,
+  type StoredSecret,
+} from "./secrets.js";
+import {
+  ensureOAuthTokenSet,
+  OAuthTokenLifecycleError,
+  oauthTokenNeedsRefresh,
+  parseOAuthTokenSet,
+  refreshOAuthTokenSet,
+  type OAuthTokenSet,
+} from "./token-lifecycle.js";
 
 /** The reserved secret field key holding an installation's token set. */
 export const PLATFORM_OAUTH_FIELD = "platform.oauth";
 
-export type OAuthTokens = {
-  accessToken: string;
-  /** Absent when the provider issued none; the installation then dies at expiry. */
-  refreshToken?: string;
-  /** Epoch seconds. */
-  expiresAt: number;
-};
+export type OAuthTokens = OAuthTokenSet;
 
 export class ConnectorOAuthError extends Error {
-  readonly code: "CONNECTOR_REAUTHORIZATION_REQUIRED" | "CONNECTOR_OAUTH_FAILED";
+  readonly code:
+    | "CONNECTOR_REAUTHORIZATION_REQUIRED"
+    | "CONNECTOR_OAUTH_FAILED";
   constructor(code: ConnectorOAuthError["code"], message: string) {
     super(message);
     this.name = "ConnectorOAuthError";
@@ -79,18 +89,15 @@ export function resolveEndpoint(
 }
 
 function parseTokens(raw: string): OAuthTokens {
-  const parsed = JSON.parse(raw) as Partial<OAuthTokens>;
-  if (typeof parsed.accessToken !== "string" || typeof parsed.expiresAt !== "number") {
+  try {
+    return parseOAuthTokenSet(raw);
+  } catch (error) {
+    if (!(error instanceof OAuthTokenLifecycleError)) throw error;
     throw new ConnectorOAuthError(
       "CONNECTOR_REAUTHORIZATION_REQUIRED",
-      "Stored OAuth tokens are unreadable; the installation must be authorized again.",
+      "Stored OAuth tokens are unreadable or incomplete; the installation must be authorized again.",
     );
   }
-  return {
-    accessToken: parsed.accessToken,
-    ...(typeof parsed.refreshToken === "string" ? { refreshToken: parsed.refreshToken } : {}),
-    expiresAt: parsed.expiresAt,
-  };
 }
 
 /**
@@ -110,59 +117,24 @@ async function requestRefresh(
   boundFetch: FetchLike,
   now: number,
 ): Promise<OAuthTokens> {
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: refreshToken,
-    client_id: clientId,
-    client_secret: clientSecret,
-  });
-
-  const response = await boundFetch(tokenUrl, {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      accept: "application/json",
-    },
-    body: body.toString(),
-  });
-
-  if (!response.ok) {
-    // 400 invalid_grant is the provider saying the refresh token is spent or
-    // revoked. That is not a transient upstream failure and retrying cannot fix
-    // it — somebody has to authorize the installation again — so it gets its
-    // own code rather than being folded into CONNECTOR_UPSTREAM_ERROR.
-    if (response.status === 400 || response.status === 401) {
-      throw new ConnectorOAuthError(
-        "CONNECTOR_REAUTHORIZATION_REQUIRED",
-        `Connector "${contract.slug}" was refused a token refresh; the installation must be ` +
-          "authorized again.",
-      );
-    }
+  try {
+    return await refreshOAuthTokenSet({
+      tokenUrl,
+      clientId,
+      clientSecret,
+      refreshToken,
+      boundFetch,
+      now,
+    });
+  } catch (error) {
+    if (!(error instanceof OAuthTokenLifecycleError)) throw error;
     throw new ConnectorOAuthError(
-      "CONNECTOR_OAUTH_FAILED",
-      `Connector "${contract.slug}" token refresh failed with status ${response.status}.`,
+      error.code === "REAUTHORIZATION_REQUIRED"
+        ? "CONNECTOR_REAUTHORIZATION_REQUIRED"
+        : "CONNECTOR_OAUTH_FAILED",
+      `Connector "${contract.slug}": ${error.message}`,
     );
   }
-
-  const payload = (await response.json()) as {
-    access_token?: unknown;
-    refresh_token?: unknown;
-    expires_in?: unknown;
-  };
-  if (typeof payload.access_token !== "string") {
-    throw new ConnectorOAuthError(
-      "CONNECTOR_OAUTH_FAILED",
-      `Connector "${contract.slug}" token endpoint returned no access token.`,
-    );
-  }
-  const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : 3600;
-
-  return {
-    accessToken: payload.access_token,
-    refreshToken:
-      typeof payload.refresh_token === "string" ? payload.refresh_token : refreshToken,
-    expiresAt: Math.floor(now / 1000) + expiresIn,
-  };
 }
 
 /**
@@ -225,7 +197,8 @@ export async function exchangeAuthorizationCode(input: {
       `Connector "${input.contract.slug}" token endpoint returned no access token.`,
     );
   }
-  const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : 3600;
+  const expiresIn =
+    typeof payload.expires_in === "number" ? payload.expires_in : 3600;
 
   return {
     accessToken: payload.access_token,
@@ -334,7 +307,8 @@ async function requestClientCredentialsToken(
       `Connector "${contract.slug}" token endpoint returned no access token.`,
     );
   }
-  const expiresIn = typeof payload.expires_in === "number" ? payload.expires_in : 3600;
+  const expiresIn =
+    typeof payload.expires_in === "number" ? payload.expires_in : 3600;
   return {
     accessToken: payload.access_token,
     expiresAt: Math.floor(now / 1000) + expiresIn,
@@ -352,6 +326,7 @@ export type EnsureTokenInput = {
   secrets: Record<string, string>;
   boundFetch: FetchLike;
   now?: number;
+  correlationId?: string;
 };
 
 /**
@@ -372,7 +347,9 @@ export type EnsureTokenInput = {
  * second waiter re-reads the row and finds a valid token rather than issuing a
  * second exchange.
  */
-export async function ensureAccessToken(input: EnsureTokenInput): Promise<string> {
+export async function ensureAccessToken(
+  input: EnsureTokenInput,
+): Promise<string> {
   const auth = input.contract.auth;
   if (!auth) {
     throw new ConnectorOAuthError(
@@ -380,82 +357,103 @@ export async function ensureAccessToken(input: EnsureTokenInput): Promise<string
       `Connector "${input.contract.slug}" declares no OAuth configuration.`,
     );
   }
-  const now = input.now ?? Date.now();
-
-  return withDbSession(input.db, input.session, async (trx) => {
-    // The lock, and the reason this is a transaction at all. A second caller
-    // blocks here and re-reads below, so it sees the refreshed set instead of
-    // spending the same refresh token a second time.
-    await sql`
+  if (auth.flow === "authorizationCode") {
+    return ensureAuthorizationCodeAccessToken(input, auth);
+  }
+  try {
+    return await withDbSession(input.db, input.session, async (trx) => {
+      // The lock, and the reason this is a transaction at all. A second caller
+      // blocks here and re-reads below, so it sees the refreshed set instead of
+      // spending the same refresh token a second time.
+      await sql`
       select id from platform.connector_installations
        where id = ${input.installationId}::uuid
          for update
     `.execute(trx);
 
-    const stored = await sql<{ ciphertext: string; key_id: string; algorithm: string }>`
+      // A waiter must use the clock after it holds the row lock. Otherwise a
+      // token refreshed by the lock holder can still look inside the leeway
+      // window to a stale, pre-wait timestamp and be refreshed again.
+      const now = input.now ?? Date.now();
+
+      const stored = await sql<{
+        ciphertext: string;
+        key_id: string;
+        algorithm: string;
+      }>`
       select ciphertext, key_id, algorithm
         from platform.connector_secrets
        where installation_id = ${input.installationId}::uuid
          and field_key = ${PLATFORM_OAUTH_FIELD}
     `.execute(trx);
 
-    const clientCredentials = auth.flow === "clientCredentials";
-    const row = stored.rows[0];
+      const clientCredentials = auth.flow === "clientCredentials";
+      const row = stored.rows[0];
 
-    if (!row && !clientCredentials) {
-      throw new ConnectorOAuthError(
-        "CONNECTOR_REAUTHORIZATION_REQUIRED",
-        `Connector "${input.contract.slug}" has no OAuth tokens for this installation; it must ` +
-          "be authorized before it can be used.",
+      if (!row && !clientCredentials) {
+        throw new ConnectorOAuthError(
+          "CONNECTOR_REAUTHORIZATION_REQUIRED",
+          `Connector "${input.contract.slug}" has no OAuth tokens for this installation; it must ` +
+            "be authorized before it can be used.",
+        );
+      }
+      // Client credentials have nothing to authorize: an installation with no
+      // stored token is not broken, it has simply never asked for one. Mint it
+      // here rather than reporting a state an operator cannot act on.
+      if (!row) {
+        return mintClientCredentialsToken(trx, input, auth, now);
+      }
+
+      const tokens = parseTokens(
+        decryptSecret(
+          input.keyring,
+          input.installationId,
+          PLATFORM_OAUTH_FIELD,
+          {
+            ciphertext: row.ciphertext,
+            keyId: row.key_id,
+            algorithm: row.algorithm,
+          } satisfies StoredSecret,
+        ),
       );
-    }
-    // Client credentials have nothing to authorize: an installation with no
-    // stored token is not broken, it has simply never asked for one. Mint it
-    // here rather than reporting a state an operator cannot act on.
-    if (!row) {
-      return mintClientCredentialsToken(trx, input, auth, now);
-    }
 
-    const tokens = parseTokens(
-      decryptSecret(input.keyring, input.installationId, PLATFORM_OAUTH_FIELD, {
-        ciphertext: row.ciphertext,
-        keyId: row.key_id,
-        algorithm: row.algorithm,
-      } satisfies StoredSecret),
-    );
+      // Leeway, so a token that is valid when checked cannot be expired by the
+      // time it arrives — a race that shows up as a random 401 and nothing else.
+      if (
+        !oauthTokenNeedsRefresh(
+          tokens.expiresAt,
+          auth.refreshLeewaySeconds,
+          now,
+        )
+      ) {
+        return tokens.accessToken;
+      }
 
-    // Leeway, so a token that is valid when checked cannot be expired by the
-    // time it arrives — a race that shows up as a random 401 and nothing else.
-    const deadline = Math.floor(now / 1000) + auth.refreshLeewaySeconds;
-    if (tokens.expiresAt > deadline) return tokens.accessToken;
+      // An expired application token is re-requested, not refreshed. There is no
+      // grant to keep alive and nothing single-use to spend.
+      if (clientCredentials) {
+        return mintClientCredentialsToken(trx, input, auth, now);
+      }
 
-    // An expired application token is re-requested, not refreshed. There is no
-    // grant to keep alive and nothing single-use to spend.
-    if (clientCredentials) {
-      return mintClientCredentialsToken(trx, input, auth, now);
-    }
+      if (!tokens.refreshToken) {
+        throw new ConnectorOAuthError(
+          "CONNECTOR_REAUTHORIZATION_REQUIRED",
+          `Connector "${input.contract.slug}" has an expired access token and no refresh token; ` +
+            "it must be authorized again.",
+        );
+      }
 
-    if (!tokens.refreshToken) {
-      throw new ConnectorOAuthError(
-        "CONNECTOR_REAUTHORIZATION_REQUIRED",
-        `Connector "${input.contract.slug}" has an expired access token and no refresh token; ` +
-          "it must be authorized again.",
-      );
-    }
+      const clientId = input.config[auth.clientIdField];
+      const clientSecret = input.secrets[auth.clientSecretField];
+      if (typeof clientId !== "string" || typeof clientSecret !== "string") {
+        throw new ConnectorOAuthError(
+          "CONNECTOR_OAUTH_FAILED",
+          `Connector "${input.contract.slug}" is missing the client credentials its OAuth ` +
+            "configuration names.",
+        );
+      }
 
-    const clientId = input.config[auth.clientIdField];
-    const clientSecret = input.secrets[auth.clientSecretField];
-    if (typeof clientId !== "string" || typeof clientSecret !== "string") {
-      throw new ConnectorOAuthError(
-        "CONNECTOR_OAUTH_FAILED",
-        `Connector "${input.contract.slug}" is missing the client credentials its OAuth ` +
-          "configuration names.",
-      );
-    }
-
-    let refreshed: OAuthTokens;
-    try {
-      refreshed = await requestRefresh(
+      const refreshed = await requestRefresh(
         input.contract,
         resolveEndpoint(auth.tokenUrl, input.config),
         clientId,
@@ -464,31 +462,14 @@ export async function ensureAccessToken(input: EnsureTokenInput): Promise<string
         input.boundFetch,
         now,
       );
-    } catch (error) {
-      if (
-        error instanceof ConnectorOAuthError &&
-        error.code === "CONNECTOR_REAUTHORIZATION_REQUIRED"
-      ) {
-        // Journalled so an operator can see WHEN an installation died, rather
-        // than inferring it from the first user who complained.
-        await recordConnectorAudit(trx, {
-          tenantId: String(input.session.tenantId),
-          userId: null,
-          connectorSlug: input.contract.slug,
-          instanceKey: input.instanceKey,
-          event: "connector.reauthorization_required",
-        });
-      }
-      throw error;
-    }
 
-    const encrypted = encryptSecret(
-      input.keyring,
-      input.installationId,
-      PLATFORM_OAUTH_FIELD,
-      JSON.stringify(refreshed),
-    );
-    await sql`
+      const encrypted = encryptSecret(
+        input.keyring,
+        input.installationId,
+        PLATFORM_OAUTH_FIELD,
+        JSON.stringify(refreshed),
+      );
+      await sql`
       update platform.connector_secrets
          set ciphertext = ${encrypted.ciphertext},
              key_id = ${encrypted.keyId},
@@ -498,17 +479,161 @@ export async function ensureAccessToken(input: EnsureTokenInput): Promise<string
          and field_key = ${PLATFORM_OAUTH_FIELD}
     `.execute(trx);
 
-    await recordConnectorAudit(trx, {
-      tenantId: String(input.session.tenantId),
-      userId: null,
-      connectorSlug: input.contract.slug,
-      instanceKey: input.instanceKey,
-      event: "connector.token_refreshed",
-      secretFields: [PLATFORM_OAUTH_FIELD],
-    });
+      await recordConnectorAudit(trx, {
+        tenantId: String(input.session.tenantId),
+        userId: null,
+        connectorSlug: input.contract.slug,
+        instanceKey: input.instanceKey,
+        event: "connector.token_refreshed",
+        secretFields: [PLATFORM_OAUTH_FIELD],
+      });
 
-    return refreshed.accessToken;
-  });
+      return refreshed.accessToken;
+    });
+  } catch (error) {
+    const normalized =
+      error instanceof SecretError
+        ? new ConnectorOAuthError(
+            "CONNECTOR_REAUTHORIZATION_REQUIRED",
+            `Connector "${input.contract.slug}" has unreadable OAuth tokens and must be authorized again.`,
+          )
+        : error;
+    if (
+      normalized instanceof ConnectorOAuthError &&
+      normalized.code === "CONNECTOR_REAUTHORIZATION_REQUIRED"
+    ) {
+      // The refresh transaction rolls back on the refusal. Journal in a new
+      // committed transaction so the recovery signal is not rolled back too.
+      try {
+        await withDbSession(input.db, input.session, (trx) =>
+          recordConnectorAudit(trx, {
+            tenantId: String(input.session.tenantId),
+            userId: null,
+            connectorSlug: input.contract.slug,
+            instanceKey: input.instanceKey,
+            event: "connector.reauthorization_required",
+            ...(input.correlationId ? { correlationId: input.correlationId } : {}),
+          }),
+        );
+      } catch {
+        // An audit outage must not turn a stable reauthorization result into
+        // an opaque execution failure.
+      }
+    }
+    throw normalized;
+  }
+}
+
+async function ensureAuthorizationCodeAccessToken(
+  input: EnsureTokenInput,
+  auth: NonNullable<ConnectorContract["auth"]>,
+): Promise<string> {
+  const clientId = input.config[auth.clientIdField];
+  const clientSecret = input.secrets[auth.clientSecretField];
+  if (typeof clientId !== "string" || typeof clientSecret !== "string") {
+    throw new ConnectorOAuthError(
+      "CONNECTOR_OAUTH_FAILED",
+      `Connector "${input.contract.slug}" is missing the client credentials its OAuth configuration names.`,
+    );
+  }
+  let trx: Transaction<DB> | undefined;
+  try {
+    const tokens = await ensureOAuthTokenSet({
+      refreshLeewaySeconds: auth.refreshLeewaySeconds,
+      tokenUrl: resolveEndpoint(auth.tokenUrl, input.config),
+      clientId,
+      clientSecret,
+      boundFetch: input.boundFetch,
+      ...(input.now === undefined ? {} : { now: input.now }),
+      store: {
+        withLockedRow: (work) =>
+          withDbSession(input.db, input.session, async (lockedTrx) => {
+            trx = lockedTrx;
+            await sql`
+              select id from platform.connector_installations
+               where id = ${input.installationId}::uuid for update
+            `.execute(lockedTrx);
+            return work();
+          }),
+        read: async () => {
+          const stored = await sql<{
+            ciphertext: string;
+            key_id: string;
+            algorithm: string;
+          }>`
+            select ciphertext, key_id, algorithm
+              from platform.connector_secrets
+             where installation_id = ${input.installationId}::uuid
+               and field_key = ${PLATFORM_OAUTH_FIELD}
+          `.execute(trx!);
+          const row = stored.rows[0];
+          return row
+            ? {
+                ciphertext: row.ciphertext,
+                keyId: row.key_id,
+                algorithm: row.algorithm,
+              }
+            : undefined;
+        },
+        decode: (stored) =>
+          parseTokens(
+            decryptSecret(
+              input.keyring,
+              input.installationId,
+              PLATFORM_OAUTH_FIELD,
+              stored satisfies StoredSecret,
+            ),
+          ),
+        persist: async (tokens) => {
+          const encrypted = encryptSecret(
+            input.keyring,
+            input.installationId,
+            PLATFORM_OAUTH_FIELD,
+            JSON.stringify(tokens),
+          );
+          await sql`
+            update platform.connector_secrets
+               set ciphertext = ${encrypted.ciphertext}, key_id = ${encrypted.keyId},
+                   algorithm = ${encrypted.algorithm}, updated_at = now()
+             where installation_id = ${input.installationId}::uuid
+               and field_key = ${PLATFORM_OAUTH_FIELD}
+          `.execute(trx!);
+        },
+        auditRefreshed: () =>
+          recordConnectorAudit(trx!, {
+            tenantId: String(input.session.tenantId),
+            userId: null,
+            connectorSlug: input.contract.slug,
+            instanceKey: input.instanceKey,
+            event: "connector.token_refreshed",
+            secretFields: [PLATFORM_OAUTH_FIELD],
+            ...(input.correlationId ? { correlationId: input.correlationId } : {}),
+          }),
+        auditReauthorization: () =>
+          withDbSession(input.db, input.session, (auditTrx) =>
+            recordConnectorAudit(auditTrx, {
+              tenantId: String(input.session.tenantId),
+              userId: null,
+              connectorSlug: input.contract.slug,
+              instanceKey: input.instanceKey,
+              event: "connector.reauthorization_required",
+              ...(input.correlationId ? { correlationId: input.correlationId } : {}),
+            }),
+          ),
+      },
+    });
+    return tokens.accessToken;
+  } catch (error) {
+    if (error instanceof OAuthTokenLifecycleError) {
+      throw new ConnectorOAuthError(
+        error.code === "REAUTHORIZATION_REQUIRED"
+          ? "CONNECTOR_REAUTHORIZATION_REQUIRED"
+          : "CONNECTOR_OAUTH_FAILED",
+        `Connector "${input.contract.slug}": ${error.message}`,
+      );
+    }
+    throw error;
+  }
 }
 
 /**
@@ -596,7 +721,9 @@ export function withOAuthAuthorization(
   accessToken: string,
 ): FetchLike {
   return async (input, init) => {
-    const headers = new Headers(init?.headers as Record<string, string> | undefined);
+    const headers = new Headers(
+      init?.headers as Record<string, string> | undefined,
+    );
     headers.set("authorization", `Bearer ${accessToken}`);
     return boundFetch(input, { ...init, headers });
   };

@@ -12,6 +12,7 @@ import {
   exchangeCodeForTokens,
   mintAuthorization,
   redeemState,
+  refreshTokens,
   scopesCovered,
 } from "../entity-oauth.js";
 import {
@@ -154,5 +155,53 @@ describe("scopesCovered", () => {
     expect(scopesCovered([], ["anything"])).toBe(true);
     expect(scopesCovered(["read"], undefined)).toBe(false);
     expect(scopesCovered(["read"], "read")).toBe(false);
+  });
+});
+
+describe("refreshTokens", () => {
+  it("preserves an omitted refresh token under the shared connection AAD scope", async () => {
+    const { values } = await refreshTokens({
+      tokenUrl: BASE.tokenUrl,
+      clientId: BASE.clientId,
+      clientSecret: BASE.clientSecret,
+      refreshToken: "refresh-1",
+      egress: BASE.egress,
+      connectionTable: BASE.connectionTable,
+      keyring: KEYRING,
+      fetchImpl: (async () =>
+        Response.json({
+          access_token: "access-2",
+          expires_in: 600,
+        })) as unknown as typeof fetch,
+    });
+    expect(
+      decryptSecret(
+        KEYRING,
+        "erp.connections:personal",
+        "refreshToken",
+        values.refreshToken as StoredSecret,
+      ),
+    ).toBe("refresh-1");
+    expect(typeof values.accessTokenExpiresAt).toBe("string");
+  });
+
+  it("reports a refused refresh as required reauthorization without provider text", async () => {
+    const failure = await refreshTokens({
+      tokenUrl: BASE.tokenUrl,
+      clientId: BASE.clientId,
+      clientSecret: BASE.clientSecret,
+      refreshToken: "refresh-1",
+      egress: BASE.egress,
+      connectionTable: BASE.connectionTable,
+      keyring: KEYRING,
+      fetchImpl: (async () =>
+        new Response("provider refresh=must-not-leak", {
+          status: 400,
+        })) as unknown as typeof fetch,
+    }).catch((error: unknown) => error);
+    expect((failure as { code?: string }).code).toBe(
+      "REAUTHORIZATION_REQUIRED",
+    );
+    expect(String((failure as Error).message)).not.toContain("must-not-leak");
   });
 });

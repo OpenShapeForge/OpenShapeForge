@@ -35,8 +35,21 @@ import {
   keyringFromEnv,
   type SecretKeyring,
 } from "../connectors/secrets.js";
+import {
+  OAuthTokenLifecycleError,
+  refreshOAuthTokenSet,
+} from "../connectors/token-lifecycle.js";
 
 type JsonRecord = Record<string, unknown>;
+
+/**
+ * Authored connection tokens historically use one AAD scope per connection
+ * table, including tenant-owned rows. Keep that compatibility in one place so
+ * both lifecycle scopes rotate values that existing rows can still decrypt.
+ */
+export function connectionTokenSecretScope(connectionTable: string): string {
+  return `${connectionTable}:personal`;
+}
 
 // The person behind this link may first be routed through the provider's own
 // login (password manager, second factor) before the consent screen; ten
@@ -289,7 +302,7 @@ export async function exchangeCodeForTokens(
     );
   }
 
-  const scope = `${pending.connectionTable}:personal`;
+  const scope = connectionTokenSecretScope(pending.connectionTable);
   const values: JsonRecord = {
     // Which scopes the provider actually granted: the token response's
     // `scope` when present, else the requested set. The connect flow
@@ -343,95 +356,50 @@ export async function refreshTokens(input: {
     throw new HttpError(500, "SECRET_KEYRING_MISSING", `Set ${KEYRING_ENV}.`);
   }
   const fetchImpl = input.fetchImpl ?? fetch;
-  const tokenUrl = new URL(input.tokenUrl);
-  if (
-    (tokenUrl.protocol !== "https:" && tokenUrl.protocol !== "http:") ||
-    !hostAllowed(tokenUrl.hostname, input.egress)
-  ) {
-    throw new HttpError(
-      403,
-      "EGRESS_DENIED",
-      "Token endpoint is outside the provider's egress allow-list.",
-    );
-  }
-  const form = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: input.refreshToken,
-    client_id: input.clientId,
-    client_secret: input.clientSecret,
-  });
-  const response = await fetchWithAllowedRedirects(
-    tokenUrl,
-    {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded",
-        accept: "application/json",
-      },
-      body: form.toString(),
-      signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
-    },
-    input.egress,
-    fetchImpl,
-  );
-  const text = await response.text();
-  if (!response.ok) {
-    if (response.status === 400 || response.status === 401) {
-      throw new HttpError(
-        403,
-        "REAUTHORIZATION_REQUIRED",
-        "The provider rejected the refresh token; a person must authorize the connection again.",
-      );
-    }
-    throw new HttpError(
-      502,
-      "TOKEN_ENDPOINT_ERROR",
-      `Token refresh answered ${response.status}.`,
-    );
-  }
-  let payload: {
-    access_token?: unknown;
-    refresh_token?: unknown;
-    expires_in?: unknown;
-  };
   try {
-    payload = JSON.parse(text) as typeof payload;
-  } catch {
+    const refreshed = await refreshOAuthTokenSet({
+      tokenUrl: input.tokenUrl,
+      clientId: input.clientId,
+      clientSecret: input.clientSecret,
+      refreshToken: input.refreshToken,
+      boundFetch: (url, init) =>
+        fetchWithAllowedRedirects(
+          url instanceof Request ? url.url : url,
+          { ...init, signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS) },
+          input.egress,
+          fetchImpl,
+        ),
+    });
+    const scope = connectionTokenSecretScope(input.connectionTable);
+    return {
+      values: {
+        accessToken: encryptSecret(
+          keyring,
+          scope,
+          "accessToken",
+          refreshed.accessToken,
+        ),
+        refreshToken: encryptSecret(
+          keyring,
+          scope,
+          "refreshToken",
+          refreshed.refreshToken!,
+        ),
+        accessTokenExpiresAt: new Date(
+          refreshed.expiresAt * 1000,
+        ).toISOString(),
+      },
+    };
+  } catch (error) {
+    if (!(error instanceof OAuthTokenLifecycleError)) throw error;
     throw new HttpError(
-      502,
-      "TOKEN_ENDPOINT_ERROR",
-      "Token refresh response is not JSON.",
+      error.code === "REAUTHORIZATION_REQUIRED" ? 403 : 502,
+      error.code === "REAUTHORIZATION_REQUIRED"
+        ? "REAUTHORIZATION_REQUIRED"
+        : "TOKEN_ENDPOINT_ERROR",
+      error.message,
     );
   }
-  if (typeof payload.access_token !== "string") {
-    throw new HttpError(
-      502,
-      "TOKEN_ENDPOINT_ERROR",
-      "Token refresh returned no access_token.",
-    );
-  }
-  const scope = `${input.connectionTable}:personal`;
-  return {
-    values: {
-      accessToken: encryptSecret(
-        keyring,
-        scope,
-        "accessToken",
-        payload.access_token,
-      ),
-      refreshToken:
-        typeof payload.refresh_token === "string"
-          ? encryptSecret(keyring, scope, "refreshToken", payload.refresh_token)
-          : encryptSecret(keyring, scope, "refreshToken", input.refreshToken),
-      ...(typeof payload.expires_in === "number"
-        ? {
-            accessTokenExpiresAt: new Date(
-              Date.now() + payload.expires_in * 1000,
-            ).toISOString(),
-          }
-        : {}),
-    },
-  };
 }
 
 /** Test-only view of the pending store. */

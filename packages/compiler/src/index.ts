@@ -55,6 +55,8 @@ export type {
   FieldV2,
   McpDeclarativeAdapterUrls,
   McpDeclarativeOperationUrl,
+  McpDeclarativeRequestHeaderMapping,
+  McpDeclarativeRequestMapping,
 } from "./authoring/types.js";
 
 const defaultRepoRoot = resolve(import.meta.dir, "../../..");

@@ -295,6 +295,20 @@ export interface McpDeclarativeOperationUrl {
   baseUrlKey?: string;
 }
 
+/** One authored, fixed HTTP header target fed by a declared operation input. */
+export interface McpDeclarativeRequestHeaderMapping {
+  field: string;
+  header: string;
+}
+
+/** Canonical provider-request placement rules carried by an operation row. */
+export interface McpDeclarativeRequestMapping {
+  queryParams?: Array<{ field: string; param: string }>;
+  bodyPaths?: Array<{ field: string; path: string }>;
+  /** Header names are authored metadata; callers supply only field values. */
+  headers?: McpDeclarativeRequestHeaderMapping[];
+}
+
 export interface McpDerivedToolsConfig {
   /**
    * Roles whose sessions are offered the derived tools. Deliberately separate

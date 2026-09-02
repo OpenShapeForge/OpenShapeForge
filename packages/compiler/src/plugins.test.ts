@@ -8,6 +8,7 @@ import {
   resolveActiveAuthoringDir,
 } from "./active-manifest.js";
 import { collectAllArtifacts } from "./index.js";
+import { compilerOwnedGeneratedRoots } from "./generated-artifact-paths.js";
 import { mergePluginPlatformTables } from "./plugins.js";
 import { isGeneratedCrudEligible, type PlatformSchemaManifest } from "./schema.js";
 
@@ -36,6 +37,32 @@ describe("compiler plugins", () => {
     // Existing plugins use neither invariant contract. They emit no registry
     // and gain no owner metadata, preserving the pre-contract manifest bytes.
     expect(first.groups.pluginMigrations).toEqual([]);
+    const operationCatalog = JSON.parse(first.groups.operations.find((artifact) =>
+      artifact.path.endsWith("operations/catalog.json"),
+    )!.contents) as { operations: { key: string }[] };
+    expect(operationCatalog.operations.map((entry) => entry.key)).toContain(
+      "workflow.instance.webhook-start",
+    );
+    const openApi = JSON.parse(first.groups.db.find((artifact) =>
+      artifact.path.endsWith("rest/openapi.json"),
+    )!.contents) as { paths: Record<string, Record<string, { operationId?: string }>> };
+    expect(openApi.paths["/api/workflow/triggers/webhook/{definitionId}"]?.post?.operationId)
+      .toBe("workflow.instance.webhook-start");
+    const mcp = JSON.parse(first.groups.mcp[0]!.contents) as {
+      operationTools: { key: string; name: string }[];
+    };
+    expect(mcp.operationTools).toContainEqual(expect.objectContaining({
+      key: "workflow.instance.webhook-start",
+      name: "workflow_start_webhook",
+    }));
+    const graphql = JSON.parse(first.groups.graphql[0]!.contents) as {
+      operations: { key: string; field: string }[];
+    };
+    expect(graphql.operations).toContainEqual(expect.objectContaining({
+      key: "workflow.instance.webhook-start",
+      field: "workflowStartWebhook",
+    }));
+    expect(compilerOwnedGeneratedRoots).toContain("apps/api/src/generated/operations");
     const manifest = JSON.parse(
       first.groups.db.find((artifact) => artifact.path.endsWith("manifest.json"))!
         .contents,

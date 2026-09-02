@@ -148,6 +148,7 @@ async function verifyBearerIdentity(token: string) {
     userId: identity.userId,
     roles: mergeIdentityRoles(identity),
     groups: identity.groups ?? [],
+    scopes: identity.scopes ?? [],
   };
 }
 
@@ -264,6 +265,7 @@ export async function resolveSessionContext(
         tenantId: identity.tenantId,
         userId: identity.userId,
         roles,
+        oauthScopes: identity.scopes ?? [],
         groups,
         scope: resolveScope(roles, groups),
         credential: "bearer",

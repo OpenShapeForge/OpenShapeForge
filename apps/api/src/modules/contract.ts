@@ -26,11 +26,12 @@
  * fields inside it. Handing us a second `type Query` would be a schema error
  * that only surfaced at boot.
  */
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Kysely } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import type { CatalogSeedResult } from "../db/migrations/catalog-seed.js";
+import type { TrustedSessionContext } from "../auth/trusted-context.js";
 
 /** What a module may read when building its surfaces. */
 export type ModuleRuntimeContext = {
@@ -112,6 +113,25 @@ export type ModuleWorker = {
   start(context: ModuleWorkerContext): ModuleWorkerHandle | Promise<ModuleWorkerHandle>;
 };
 
+export type ModuleOperationResult = {
+  value: unknown;
+  status?: number;
+  headers?: Record<string, string>;
+  contentType?: string;
+};
+
+export type ModuleOperationContext = ModuleRuntimeContext & {
+  transport: "rest" | "mcp" | "graphql";
+  session?: TrustedSessionContext;
+  request?: FastifyRequest;
+  reply?: FastifyReply;
+};
+
+export type ModuleOperationHandler = (
+  input: Record<string, unknown>,
+  context: ModuleOperationContext,
+) => ModuleOperationResult | Promise<ModuleOperationResult>;
+
 export type RuntimeModule = {
   /** Must match the CompilerPlugin name of the same package. */
   name: string;
@@ -134,6 +154,8 @@ export type RuntimeModule = {
    * routes use, so contributed routes are behind the rate limiter too.
    */
   restRoutes?(routes: FastifyInstance, context: ModuleRuntimeContext): void;
+  /** Handlers for compiler-declared canonical operations, keyed by `handler`. */
+  operationHandlers?: Record<string, ModuleOperationHandler>;
   /** Seed steps appended to the migration chain, in declaration order. */
   seeds?: ModuleSeed[];
   /**

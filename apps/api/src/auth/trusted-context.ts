@@ -24,6 +24,8 @@ export type TrustedSessionContext = {
   tenantId: string | null;
   userId: string | null;
   roles: string[];
+  /** OAuth scopes from a verified bearer token; empty on non-bearer carriers. */
+  oauthScopes?: string[];
   /**
    * Keycloak group paths the user belongs to. Empty when the trusted-context
    * carrier does not propagate group claims (current default — trusted-context

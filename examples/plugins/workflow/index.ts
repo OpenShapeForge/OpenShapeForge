@@ -37,6 +37,7 @@
 import type { CompilerPlugin } from "../../../packages/compiler/src/plugins.js";
 import type { GeneratedArtifact, TableDefinition } from "../../../packages/compiler/src/schema.js";
 import { generateWorkflowContractArtifacts } from "./src/workflow-contract.js";
+import { WORKFLOW_WRITER_ROLES } from "./authorization.js";
 import { WORKFLOW_WORKER_ROLE } from "./worker-role.js";
 
 const API_WORKFLOW_ROOT = "apps/api/src/generated/workflow";
@@ -920,6 +921,51 @@ function workflowExecutionTables(): TableDefinition[] {
 
 const plugin: CompilerPlugin = {
   name: "workflow",
+  operations: [
+    {
+      key: "workflow.instance.webhook-start",
+      title: "Start a workflow from a webhook",
+      description: "Starts one published workflow definition for the authenticated tenant with a replay-safe idempotency key.",
+      handler: "startWebhook",
+      inputSchema: {
+        type: "object",
+        required: ["definitionId", "idempotencyKey"],
+        properties: {
+          definitionId: { type: "string", format: "uuid" },
+          context: { type: "object" },
+          idempotencyKey: { type: "string", minLength: 1 },
+        },
+        additionalProperties: true,
+      },
+      outputSchema: {
+        type: "object",
+        required: ["status", "instanceId", "definitionId"],
+        properties: {
+          status: { const: "accepted" },
+          instanceId: { type: "string", format: "uuid" },
+          definitionId: { type: "string", format: "uuid" },
+        },
+        additionalProperties: false,
+      },
+      errors: [
+        { status: 400, code: "BAD_USER_INPUT", description: "Invalid workflow start input" },
+        { status: 401, code: "UNAUTHENTICATED", description: "Authentication is required" },
+        { status: 403, code: "FORBIDDEN", description: "A workflow writer role is required" },
+        { status: 404, code: "NOT_FOUND", description: "Definition not found" },
+        { status: 409, code: "CONFLICT", description: "Workflow cannot be started in its current state" },
+        { status: 503, code: "DATABASE_NOT_CONFIGURED", description: "Database is unavailable" },
+      ],
+      auth: { mode: "session", roles: [...WORKFLOW_WRITER_ROLES] },
+      tenancy: { mode: "required", description: "Tenant comes from the verified OSF session." },
+      idempotency: { mode: "idempotency-key", header: "Idempotency-Key", inputField: "idempotencyKey", description: "A sender reuses the key for redelivery of the same event." },
+      transports: {
+        rest: { method: "POST", path: "/api/workflow/triggers/webhook/:definitionId", response: { status: 202, kind: "json" } },
+        mcp: { enabled: true, name: "workflow_start_webhook" },
+        graphql: { enabled: true, kind: "mutation", field: "workflowStartWebhook" },
+        typescript: { enabled: true, functionName: "startWorkflowWebhook" },
+      },
+    },
+  ],
   ownedPaths: {
     // The API root is live today; the web roots are declared up front so the
     // stale/orphan gates cover them the moment apps/web returns.

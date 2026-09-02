@@ -102,8 +102,7 @@ export function buildModuleRegistry(
 }
 
 export function renderModuleRegistry(
-  repoRoot: string,
-  entries: readonly LoadedCompilerPlugin[],
+  registry: ModuleRegistry,
 ): string {
-  return `${JSON.stringify(buildModuleRegistry(repoRoot, entries), null, 2)}\n`;
+  return `${JSON.stringify(registry, null, 2)}\n`;
 }

@@ -16,6 +16,50 @@ Contracts and loaders: `packages/compiler/src/plugins.ts` (tests in
 `plugins.test.ts`) and `apps/api/src/modules/contract.ts` (tests in
 `apps/api/src/modules/__tests__/`).
 
+## Canonical operations
+
+Commands and purpose-built queries belong in `CompilerPlugin.operations`, not
+in transport-specific fragments. Each operation has one stable, plugin-prefixed
+key; method/path; JSON Schema 2020-12 input, output, and errors; authenticated
+session/public/custom authentication; tenant and idempotency semantics; a runtime handler key;
+and explicit REST, MCP, GraphQL, and TypeScript projections.
+
+Generation validates the whole catalog before emitting anything. Duplicate
+keys, REST routes, MCP tools, or plugin/entity/connector GraphQL fields fail the build.
+Collisions with host-owned core GraphQL fields fail closed when the API composes its schema at boot. Custom-auth
+operations may only project to REST, while binary/streaming REST operations
+must either expose a separate JSON artifact-handle operation or record why MCP
+and GraphQL are disabled. Disabled projections always require a reason, so a
+missing transport can never look accidental.
+
+The compiler emits the canonical catalog under
+`apps/api/src/generated/operations/`, merges operations into OpenAPI 3.1 and
+the MCP and GraphQL documentation catalogs, and exposes those same declarations
+through the live runtime. The runtime module binds compiler-side handler keys:
+
+```ts
+const runtimeModule: RuntimeModule = {
+  name: "example",
+  operationHandlers: {
+    async publishQuote(input, { db, session, transport }) {
+      return { value: await publish(db, session, input), status: 201 };
+    },
+  },
+};
+```
+
+An active module missing a declared handler, or carrying an undeclared handler,
+fails closed during surface composition. Input and JSON output are validated at
+the runtime boundary on REST, MCP, and GraphQL. Session roles and OAuth scopes
+are enforced centrally across verified bearer, API-key, and signed trusted-context
+identities. API keys deliberately cannot invoke operations that require OAuth
+scopes until keys have their own persisted scope subset; a custom scheme is handler-owned, fully described as an OpenAPI
+security scheme, and only available through its REST projection.
+
+For `idempotency-key` operations, the canonical input field is required on all
+transports. REST clients supply it only through the declared required header;
+the runtime injects that header into canonical input before validation.
+
 ## The compiler half
 
 ### The contract

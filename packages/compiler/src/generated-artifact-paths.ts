@@ -28,6 +28,9 @@ export const compilerOwnedGeneratedRoots = [
   // API's boot-time module registry. Always emitted (empty list when no plugin
   // has one) so the runtime import is unconditional.
   "apps/api/src/generated/modules",
+  // Canonical plugin operations projected into REST, MCP, GraphQL, and
+  // generated clients. Always emitted so runtime imports stay unconditional.
+  "apps/api/src/generated/operations",
   // Optional immutable DDL contributed by compiler plugins. The registry is
   // absent when no plugin uses this contract and must not linger after the
   // final contribution is removed.

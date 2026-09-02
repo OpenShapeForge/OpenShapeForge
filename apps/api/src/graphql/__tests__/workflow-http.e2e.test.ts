@@ -322,6 +322,12 @@ const PUBLISH_VERSION = /* GraphQL */ `
   }
 `;
 
+const START_WEBHOOK_OPERATION = /* GraphQL */ `
+  mutation StartWebhookOperation($input: JSON!) {
+    workflowStartWebhook(input: $input)
+  }
+`;
+
 const DEFINITION_BY_ID = /* GraphQL */ `
   query DefinitionById($id: ID!) {
     workflowDefinition(id: $id) {
@@ -582,35 +588,58 @@ describe("workflow over HTTP", () => {
   );
 
   // -------------------------------------------------------------------------
-  // The module's REST contribution
+  // The module's canonical operation REST projection
   // -------------------------------------------------------------------------
 
   /**
-   * `restRoutes` is the module contract's other half, and until the webhook
-   * trigger landed nothing implemented it — so the host's registration loop in
-   * `roles/api.ts` had never once been executed with a module that contributes
-   * a route. These three tests are the only thing standing under it.
+   * The compiler declaration and runtime handler are separate halves. These
+   * tests prove the host binds them and mounts the generated REST projection.
    *
    * They are here rather than in a unit test because mounting is precisely the
    * part a unit test cannot see: the route exists as a function either way, and
-   * the question is whether `createApiApp` ever calls it.
+   * the question is whether `createApiApp` actually exposes it.
    */
   async function postWebhook(
     bearer: string | null,
     definitionId: string,
     body: Record<string, unknown> = {},
-    extraHeaders: Record<string, string> = {},
+    options: { idempotencyKey?: string | null; query?: string; emptyBody?: boolean } = {},
   ): Promise<{ status: number; body: any }> {
     const headers: Record<string, string> = {
       "content-type": "application/json",
-      ...extraHeaders,
     };
+    const idempotencyKey = options.idempotencyKey === undefined ? randomUUID() : options.idempotencyKey;
+    if (idempotencyKey !== null) headers["idempotency-key"] = idempotencyKey;
     if (bearer) headers.authorization = `Bearer ${bearer}`;
     const response = await fetch(
-      `${suite.baseUrl}/api/workflow/triggers/webhook/${definitionId}`,
-      { method: "POST", headers, body: JSON.stringify(body) },
+      `${suite.baseUrl}/api/workflow/triggers/webhook/${definitionId}${options.query ?? ""}`,
+      { method: "POST", headers, body: options.emptyBody ? new Uint8Array() : JSON.stringify(body) },
     );
     return { status: response.status, body: await response.json().catch(() => null) };
+  }
+
+  async function callMcpWebhook(
+    bearer: string,
+    definitionId: string,
+  ): Promise<{ status: number; body: any }> {
+    const response = await fetch(`${suite.baseUrl}/api/mcp`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${bearer}`,
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "workflow_start_webhook",
+          arguments: { definitionId, context: { source: "mcp round trip" }, idempotencyKey: randomUUID() },
+        },
+      }),
+    });
+    return { status: response.status, body: await response.json() };
   }
 
   /** A published definition with a manual trigger, which a webhook may start. */
@@ -658,14 +687,69 @@ describe("workflow over HTTP", () => {
   );
 
   httpTest(
+    "the webhook requires an idempotency key",
+    async () => {
+      const definitionId = await publishTriggerable(writerToken!);
+      const { status, body } = await postWebhook(writerToken!, definitionId, {}, { idempotencyKey: null });
+      expect(status).toBe(400);
+      expect(body).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
+    },
+    TEST_TIMEOUT,
+  );
+
+  httpTest(
+    "the webhook preserves empty-body and unrelated-query compatibility",
+    async () => {
+      const definitionId = await publishTriggerable(writerToken!);
+      const { status } = await postWebhook(writerToken!, definitionId, {}, {
+        emptyBody: true,
+        query: "?utm_source=sender",
+      });
+      expect(status).toBe(202);
+    },
+    TEST_TIMEOUT,
+  );
+
+  httpTest(
+    "the same canonical operation is projected through GraphQL",
+    async () => {
+      const definitionId = await publishTriggerable(writerToken!);
+      const data = await expectData(writerToken!, START_WEBHOOK_OPERATION, {
+        input: { definitionId, context: { source: "graphql round trip" }, idempotencyKey: randomUUID() },
+      });
+      expect(data.workflowStartWebhook).toMatchObject({
+        status: "accepted",
+        definitionId,
+      });
+      expect(typeof data.workflowStartWebhook.instanceId).toBe("string");
+    },
+    TEST_TIMEOUT,
+  );
+
+  httpTest(
+    "the same canonical operation succeeds through MCP and starts a run",
+    async () => {
+      const definitionId = await publishTriggerable(writerToken!);
+      const { status, body } = await callMcpWebhook(writerToken!, definitionId);
+      const result = JSON.parse(body.result.content[0].text) as Record<string, unknown>;
+
+      expect(status).toBe(200);
+      expect(body.result.isError).not.toBe(true);
+      expect(result).toMatchObject({ status: "accepted", definitionId });
+      expect(typeof result.instanceId).toBe("string");
+    },
+    TEST_TIMEOUT,
+  );
+
+  httpTest(
     "an unauthenticated webhook call is refused, not unrouted",
     async () => {
       const definitionId = await publishTriggerable(writerToken!);
 
       const { status } = await postWebhook(null, definitionId);
 
-      // 401 rather than 404 is the whole assertion. Before the module
-      // contributed `restRoutes` this path did not exist, and an unmounted
+      // 401 rather than 404 is the whole assertion. Without the canonical
+      // operation projection this path does not exist, and an unmounted
       // route answers 404 — which is also what a *mounted* route would answer
       // for a bad definition id, so authentication is the axis that separates
       // "not wired" from "wired and guarding".
@@ -684,6 +768,22 @@ describe("workflow over HTTP", () => {
       const { status } = await postWebhook(rolelessToken!, definitionId);
 
       expect(status).toBe(403);
+    },
+    TEST_TIMEOUT,
+  );
+
+  httpTest(
+    "the URL owns path identity even when the request body disagrees",
+    async () => {
+      const definitionId = await publishTriggerable(writerToken!);
+      const otherDefinitionId = await publishTriggerable(writerToken!);
+
+      const { status, body } = await postWebhook(writerToken!, definitionId, {
+        definitionId: otherDefinitionId,
+      });
+
+      expect(status).toBe(400);
+      expect(body).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
     },
     TEST_TIMEOUT,
   );

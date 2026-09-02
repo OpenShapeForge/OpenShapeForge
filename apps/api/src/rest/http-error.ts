@@ -60,7 +60,8 @@ function connectorErrorCode(error: unknown): string | undefined {
     named !== "ConnectorBoundaryError" &&
     named !== "ConnectorServiceError" &&
     named !== "ConnectorAuthorizationError" &&
-    named !== "ConnectorConfigurationError"
+    named !== "ConnectorConfigurationError" &&
+    named !== "ProviderOutcomeError"
   ) {
     return undefined;
   }

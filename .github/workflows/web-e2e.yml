@@ -38,7 +38,7 @@ permissions:
 jobs:
   browser-e2e:
     name: Browser e2e (apps/web)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'osf-pr' || 'ubuntu-latest' }}
     services:
       # Same image and credentials as the db-tests job in ci.yml. These are the
       # documented local-dev-only values from AGENTS.md; they exist in
@@ -102,7 +102,8 @@ jobs:
         run: |
           image=$(grep -m1 '^FROM quay.io/keycloak/keycloak' packages/keycloak-spi/Dockerfile | awk '{print $2}')
           echo "keycloak image: $image"
-          docker run -d --name keycloak --network host \
+          docker run -d --name keycloak \
+            -p 127.0.0.1:8181:8181 -p 127.0.0.1:9000:9000 \
             -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
             -e KC_HTTP_ENABLED=true \
@@ -123,9 +124,18 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock') }}
 
-      - name: Install Chromium
+      - name: Install Chromium and system dependencies (GitHub-hosted)
+        if: runner.environment == 'github-hosted'
         working-directory: apps/web
         run: bunx playwright install --with-deps chromium
+
+      # The ephemeral self-hosted image installs the pinned Playwright system
+      # dependencies before dropping sudo. PR code may download its matching
+      # browser build, but cannot elevate privileges or alter the base image.
+      - name: Install Chromium (self-hosted)
+        if: runner.environment == 'self-hosted'
+        working-directory: apps/web
+        run: bunx playwright install chromium
 
       - name: Apply migrations
         env:
@@ -221,3 +231,7 @@ jobs:
             /tmp/web.log
           retention-days: 7
           if-no-files-found: ignore
+
+      - name: Clean up Keycloak
+        if: always()
+        run: docker rm -f keycloak >/dev/null 2>&1 || true

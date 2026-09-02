@@ -37,7 +37,7 @@ permissions:
 jobs:
   gates:
     name: Generate, typecheck, unit tests, notices
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'osf-pr' || 'ubuntu-latest' }}
     services:
       # Backs the shared rate-limit store tests (#161). Throwaway, no data, no
       # credentials — without it those tests skip, and a skipped test proves
@@ -162,8 +162,10 @@ jobs:
       - name: Check authoring matches its schemas
         run: bun run check:authoring-schemas
 
+      # Platform-native optional dependencies make notices host-dependent.
+      # Verify the canonical Linux set in the digest-pinned linux/amd64 image.
       - name: Check THIRD-PARTY-NOTICES is up to date
-        run: bun run check:notices
+        run: bun run check:notices:linux
 
       # A required status check is matched by job NAME. Renaming a job here
       # would silently drop the gate the branch-protection ruleset claims to
@@ -171,9 +173,12 @@ jobs:
       - name: Check branch protection requires the jobs that exist
         run: bun run check:required-checks
 
+      - name: Check trusted-source runner routing
+        run: bun run check:self-hosted-routing
+
   keycloak-spi:
     name: Build Keycloak SPI (Maven)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'osf-pr' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -199,7 +204,7 @@ jobs:
 
   helm:
     name: Lint and template Helm chart
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'osf-pr' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -321,7 +326,7 @@ jobs:
 
   db-tests:
     name: Database migration tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'osf-pr' || 'ubuntu-latest' }}
     services:
       # Matches docker-compose.local.yml (pgvector on Postgres 17). The tests
       # create throwaway scratch databases and provision the openshapeforge_app
@@ -370,7 +375,7 @@ jobs:
   # remaining half of #105.
   scan:
     name: Dependency and secret scan (Trivy)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && 'osf-pr' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 

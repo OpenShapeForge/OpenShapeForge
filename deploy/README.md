@@ -55,6 +55,33 @@ docker run --rm \
   bun apps/api/src/db/migrate.ts
 ```
 
+## Self-hosted pull-request validation
+
+Same-repository pull requests may run validation jobs on the `osf-pr` runner
+label. Forks, publishing, deployments, environments and jobs that use secrets
+remain on GitHub-hosted runners. The repository-side routing check inventories
+that split, but it is only defense in depth: a pull request controls the
+workflow and scripts in its own checkout.
+
+The actual admission boundary is the runner's pre-job hook. Operators must:
+
+- provision an isolated, ephemeral runner for each job, including a Docker
+  daemon and host-network namespace that no other runner or job shares;
+- discard that runner, its Docker daemon, containers, networks and host ports
+  after the one job, including after cancellation;
+- install `scripts/self-hosted-pre-job-policy.sh` as an immutable, root-owned
+  file outside the Actions workspace;
+- install `jq`; the hook deliberately refuses every job when it is absent;
+- set `ACTIONS_RUNNER_HOOK_JOB_STARTED` in the runner service configuration to
+  that installed copy, never to a path inside the checkout; and
+- verify the file ownership, hook configuration and installed SHA-256 against
+  `scripts/self-hosted-pre-job-policy.sha256` before registering or starting
+  the runner.
+
+If that host-side contract cannot be proved, do not attach the `osf-pr` label.
+The workflow expression and `bun run check:self-hosted-routing` cannot replace
+the pre-job hook because pull-request code can edit both.
+
 ## Deploy pipeline
 
 [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) runs

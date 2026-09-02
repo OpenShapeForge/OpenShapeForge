@@ -30,10 +30,11 @@
  * same interface, for when third-party packages are on the table.
  */
 import { randomUUID } from "node:crypto";
-import { ConnectorContractBoundary, ConnectorBoundaryError } from "./contract-boundary.js";
+import { ConnectorContractBoundary } from "./contract-boundary.js";
 import type { ConnectorContract, ConnectorOperationContract } from "./catalog.js";
 import {
   ProviderObservations,
+  classifyModuleEgressOutcome,
   classifyProviderOutcome,
   providerOutcomeMessage,
   type ConnectorProviderOutcome,
@@ -42,6 +43,7 @@ import {
 } from "./provider-outcome.js";
 import { mayRetry } from "./reliability.js";
 import {
+  createModuleEgressInvocation,
   fetchValidatedOutbound,
   hostAllowed,
   type ModuleEgressDispatch,
@@ -92,6 +94,78 @@ export class ConnectorExecutionError extends Error {
     this.outcome = details.outcome;
     this.providerStatus = details.providerStatus;
   }
+}
+
+type PlatformExecutionErrorSnapshot = Readonly<{
+  code: ConnectorExecutionErrorCode;
+  connector: string;
+  message: string;
+  operation: string | undefined;
+  outcome: Readonly<ConnectorProviderOutcome> | undefined;
+  providerStatus: number | undefined;
+}>;
+
+// A package receives errors thrown by its bound capabilities and can mutate
+// every public field before rethrowing them. Keep the platform-authored facts
+// out of the object itself: a WeakMap cannot be enumerated or written through
+// the package's reference, and the frozen snapshot is copied into a fresh
+// error only after control has returned to the executor.
+const platformExecutionErrorProvenance = new WeakMap<
+  ConnectorExecutionError,
+  PlatformExecutionErrorSnapshot
+>();
+
+function platformExecutionError(
+  code: ConnectorExecutionErrorCode,
+  connector: string,
+  message: string,
+  operation?: string,
+  details: ConnectorExecutionErrorDetails = {},
+): ConnectorExecutionError {
+  const outcome = details.outcome
+    ? Object.freeze({ ...details.outcome })
+    : undefined;
+  const error = new ConnectorExecutionError(code, connector, message, operation, {
+    ...(outcome ? { outcome } : {}),
+    ...(details.providerStatus !== undefined
+      ? { providerStatus: details.providerStatus }
+      : {}),
+  });
+  platformExecutionErrorProvenance.set(
+    error,
+    Object.freeze({
+      code,
+      connector,
+      message,
+      operation,
+      outcome,
+      providerStatus: details.providerStatus,
+    }),
+  );
+  return error;
+}
+
+/** Rebuild platform-owned capability failures without trusting public fields. */
+export function rewrapPlatformExecutionError(
+  error: unknown,
+): ConnectorExecutionError | undefined {
+  if (!(error instanceof ConnectorExecutionError)) return undefined;
+  const provenance = platformExecutionErrorProvenance.get(error);
+  if (!provenance) return undefined;
+  return new ConnectorExecutionError(
+    provenance.code,
+    provenance.connector,
+    provenance.message,
+    provenance.operation,
+    {
+      ...(provenance.outcome
+        ? { outcome: { ...provenance.outcome } as ConnectorProviderOutcome }
+        : {}),
+      ...(provenance.providerStatus !== undefined
+        ? { providerStatus: provenance.providerStatus }
+        : {}),
+    },
+  );
 }
 
 /**
@@ -234,7 +308,7 @@ export function createBoundFetch(
         fallback: underlying,
         ...(egress ? { dispatch: egress } : {}),
         denied: (deniedUrl, reason) =>
-          new ConnectorExecutionError(
+          platformExecutionError(
             "CONNECTOR_EGRESS_DENIED",
             contract.slug,
             reason === "protocol"
@@ -247,7 +321,7 @@ export function createBoundFetch(
       const location = response.headers.get("location");
       if (!location) return response;
       if (hop === 5) {
-        throw new ConnectorExecutionError(
+        throw platformExecutionError(
           "CONNECTOR_EGRESS_DENIED",
           contract.slug,
           `Connector "${contract.slug}" exceeded the outbound redirect limit.`,
@@ -274,7 +348,7 @@ export function createBoundFetch(
           requestInit.body !== undefined ||
           (method !== "GET" && method !== "HEAD")
         ) {
-          throw new ConnectorExecutionError(
+          throw platformExecutionError(
             "CONNECTOR_EGRESS_DENIED",
             contract.slug,
             `Connector "${contract.slug}" cannot forward a request body or non-read method across origins.`,
@@ -288,7 +362,7 @@ export function createBoundFetch(
       }
       target = nextUrl;
     }
-    throw new ConnectorExecutionError(
+    throw platformExecutionError(
       "CONNECTOR_EGRESS_DENIED",
       contract.slug,
       `Connector "${contract.slug}" exceeded the outbound redirect limit.`,
@@ -322,7 +396,31 @@ export type InvokeInput = {
    */
   correlationId?: string;
   egress?: ModuleEgressDispatch;
+  signal?: AbortSignal;
 };
+
+function trustedEgressExecutionError(
+  contract: ConnectorContract,
+  operation: ConnectorOperationContract,
+  correlationId: string,
+  kind: "policy_blocked" | "timeout",
+): ConnectorExecutionError {
+  const outcome = classifyModuleEgressOutcome({
+    kind,
+    correlationId,
+    retryable: mayRetry(operation.kind, operation.reliability),
+  });
+  return new ConnectorExecutionError(
+    outcome.code,
+    contract.slug,
+    providerOutcomeMessage(
+      outcome.code,
+      `Connector "${contract.slug}" operation "${operation.key}"`,
+    ),
+    operation.key,
+    { outcome },
+  );
+}
 
 /**
  * Invoke one operation: validate in, call, validate out, redact on failure.
@@ -334,13 +432,18 @@ export type InvokeInput = {
 export async function invokeOperation(input: InvokeInput): Promise<unknown> {
   const { contract, operation, boundary, pkg } = input;
 
+  input.signal?.throwIfAborted();
   assertExecutable(contract);
   boundary.assertValidInput(operation.key, input.input);
+  input.signal?.throwIfAborted();
 
   const attemptMs = operation.reliability.timeouts.attemptMs;
   const startedAt = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), attemptMs);
+  const executionSignal = input.signal
+    ? AbortSignal.any([input.signal, controller.signal])
+    : controller.signal;
 
   /**
    * Lateness is measured on the clock, NOT on the abort signal.
@@ -355,40 +458,54 @@ export async function invokeOperation(input: InvokeInput): Promise<unknown> {
 
   const correlationId = input.correlationId ?? randomUUID();
   const observations = new ProviderObservations(correlationId);
+  const egressInvocation = createModuleEgressInvocation(input.egress);
   const boundFetch = createBoundFetch(
     contract,
-    controller.signal,
+    executionSignal,
     input.fetchImpl,
     (response) => observations.observe(response),
-    input.egress,
+    egressInvocation.dispatch,
   );
   const context: ConnectorContext = {
     config: Object.freeze({ ...input.config }),
     secrets: Object.freeze({ ...input.secrets }),
     fetch: input.wrapFetch ? input.wrapFetch(boundFetch) : boundFetch,
-    signal: controller.signal,
+    signal: executionSignal,
     log: input.log ?? (() => {}),
   };
 
   let result: unknown;
   try {
+    executionSignal.throwIfAborted();
     result = await pkg.invoke(operation.key, context, input.input ?? {});
   } catch (error) {
-    if (controller.signal.aborted || overran()) {
-      throw new ConnectorExecutionError(
-        "CONNECTOR_TIMEOUT",
-        contract.slug,
-        `Connector "${contract.slug}" operation "${operation.key}" exceeded its ` +
-          `${attemptMs}ms attempt budget.`,
-        operation.key,
+    input.signal?.throwIfAborted();
+    const failureKind = egressInvocation.consumeFailure(error);
+    if (failureKind) {
+      throw trustedEgressExecutionError(
+        contract,
+        operation,
+        correlationId,
+        failureKind,
       );
     }
-    // Boundary and egress errors are ours and already safe to surface; anything
-    // else came from the package or its upstream and is redacted, because it
-    // can carry response bodies, credentials echoed back, and stack traces.
-    if (error instanceof ConnectorExecutionError || error instanceof ConnectorBoundaryError) {
-      throw error;
+    if (controller.signal.aborted || overran()) {
+      throw trustedEgressExecutionError(
+        contract,
+        operation,
+        correlationId,
+        "timeout",
+      );
     }
+    // A package can catch a genuine capability failure, mutate all of its
+    // public fields, and rethrow it. Rebuild only errors carrying the private
+    // platform snapshot; a package-created public instance is untrusted input.
+    const platformError = rewrapPlatformExecutionError(error);
+    if (platformError) throw platformError;
+    // Anything else came from the package or its upstream and is redacted,
+    // because it can carry response bodies, credentials, forged outcome
+    // fields, and stack traces. Boundary validation happens outside this catch,
+    // so a ConnectorBoundaryError thrown here is package-authored too.
     // The classification rests on what the platform saw for itself — the
     // status of the last non-success response and a Retry-After it could
     // parse. A validated package hint may narrow that; nothing in the thrown
@@ -418,13 +535,13 @@ export async function invokeOperation(input: InvokeInput): Promise<unknown> {
   // A package that resolves AFTER its budget expired still misses the budget:
   // the caller has already been told how long it may wait. Checked on the clock
   // so a package that blocked the event loop cannot slip through.
+  input.signal?.throwIfAborted();
   if (controller.signal.aborted || overran()) {
-    throw new ConnectorExecutionError(
-      "CONNECTOR_TIMEOUT",
-      contract.slug,
-      `Connector "${contract.slug}" operation "${operation.key}" exceeded its ` +
-        `${attemptMs}ms attempt budget.`,
-      operation.key,
+    throw trustedEgressExecutionError(
+      contract,
+      operation,
+      correlationId,
+      "timeout",
     );
   }
 

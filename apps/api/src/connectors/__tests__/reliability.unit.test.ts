@@ -183,6 +183,41 @@ describe("per-tenant concurrency", () => {
     release();
   });
 
+  it("removes a cancelled waiter without leaking or consuming a slot", async () => {
+    const limiter = new ConcurrencyLimiter();
+    const first = await limiter.acquire("k", 1);
+    const controller = new AbortController();
+    const waiting = limiter.acquire("k", 1, controller.signal);
+    controller.abort();
+    await expect(waiting).rejects.toBe(controller.signal.reason);
+    expect(limiter.active("k")).toBe(1);
+    first();
+    expect(limiter.active("k")).toBe(0);
+    const release = await limiter.acquire("k", 1);
+    release();
+    expect(limiter.active("k")).toBe(0);
+  });
+
+  it("atomically returns a lease cancelled after grant but before continuation", async () => {
+    const limiter = new ConcurrencyLimiter();
+    const first = await limiter.acquire("k", 1);
+    const controller = new AbortController();
+    const second = limiter.acquire("k", 1, controller.signal);
+
+    // Promise continuations run in a later microtask. Releasing and aborting
+    // synchronously makes this a deterministic grant-before-continuation
+    // handoff, which used to strand the counted lease.
+    first();
+    controller.abort();
+    await expect(second).rejects.toBe(controller.signal.reason);
+    expect(limiter.active("k")).toBe(0);
+
+    const third = await limiter.acquire("k", 1);
+    expect(limiter.active("k")).toBe(1);
+    third();
+    expect(limiter.active("k")).toBe(0);
+  });
+
   it("isolates tenants from each other", async () => {
     const governor = new ConnectorGovernor();
     const started: string[] = [];

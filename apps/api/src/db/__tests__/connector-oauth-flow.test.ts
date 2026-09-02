@@ -483,6 +483,74 @@ describe("the client-credentials flow", () => {
 
 describe("token storage and refresh", () => {
   test(
+    "cancellation aborts refresh and releases the installation row lock",
+    async () => {
+      await withMigratedDb(async (db) => {
+        const tenantId = randomUUID();
+        const session = { tenantId, userId: randomUUID(), roles: [] };
+        const installationId = await seedInstallation(db, tenantId);
+        await writeOAuthTokens({
+          db,
+          session,
+          keyring: KEYRING,
+          installationId,
+          tokens: {
+            accessToken: "expired",
+            refreshToken: "refresh-cancelled",
+            expiresAt: Math.floor(Date.now() / 1000) - 10,
+          },
+        });
+
+        const controller = new AbortController();
+        let entered!: () => void;
+        const started = new Promise<void>((resolve) => { entered = resolve; });
+        const cancelled = ensureAccessToken({
+          db,
+          session,
+          keyring: KEYRING,
+          contract: CONTRACT,
+          installationId,
+          instanceKey: "default",
+          config: { clientId: "client-abc" },
+          secrets: { clientSecret: "secret-abc" },
+          signal: controller.signal,
+          boundFetch: async (_url, init) => {
+            entered();
+            return new Promise<Response>((_resolve, reject) => {
+              init?.signal?.addEventListener(
+                "abort",
+                () => reject(init.signal?.reason),
+                { once: true },
+              );
+            });
+          },
+        });
+        await started;
+        controller.abort();
+        await expect(cancelled).rejects.toBe(controller.signal.reason);
+
+        const recovered = await ensureAccessToken({
+          db,
+          session,
+          keyring: KEYRING,
+          contract: CONTRACT,
+          installationId,
+          instanceKey: "default",
+          config: { clientId: "client-abc" },
+          secrets: { clientSecret: "secret-abc" },
+          boundFetch: async () => Response.json({
+            access_token: "access-recovered",
+            refresh_token: "refresh-recovered",
+            expires_in: 600,
+          }),
+        });
+        expect(recovered).toBe("access-recovered");
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
     "tokens are stored encrypted, and withheld from the connector's own secrets",
     async () => {
       await withMigratedDb(async (db) => {

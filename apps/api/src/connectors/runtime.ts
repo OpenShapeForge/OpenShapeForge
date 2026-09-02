@@ -27,12 +27,15 @@ import {
   ConnectorExecutionError,
   createBoundFetch,
   invokeOperation,
+  rewrapPlatformExecutionError,
   type FetchLike,
 } from "./executor.js";
 import {
   PROVIDER_FAILURE_METRIC_LABELS,
+  classifyModuleEgressOutcome,
   providerFailureAuditFields,
   providerFailureMetricLabels,
+  providerOutcomeMessage,
   type ConnectorProviderOutcome,
 } from "./provider-outcome.js";
 import {
@@ -49,6 +52,7 @@ import type {
   ModuleEgressInvocationSource,
   RuntimeModule,
 } from "../modules/contract.js";
+import { createModuleEgressInvocation } from "../modules/egress.js";
 
 export class ConnectorInvocationError extends Error {
   readonly code: string;
@@ -72,6 +76,7 @@ export type InvocationContext = {
   egressOwner?: RuntimeModule["egress"] | undefined;
   /** Optional core-resolved source; never derived from connector input/config. */
   egressSource?: ModuleEgressInvocationSource | undefined;
+  signal?: AbortSignal;
 };
 
 /**
@@ -99,6 +104,7 @@ export async function invokeConnectorOperation(
   operation: ConnectorOperationContract,
   input: unknown,
 ): Promise<unknown> {
+  context.signal?.throwIfAborted();
   // 1. Authorization, before any state is touched.
   assertMayInvoke(operation, context.roles);
 
@@ -116,6 +122,7 @@ export async function invokeConnectorOperation(
   // 3. This tenant's installation.
   const instanceKey = context.instanceKey ?? "default";
   const installations = await listInstallations(context.db, context.session);
+  context.signal?.throwIfAborted();
   const installation = installations.find(
     (candidate) =>
       candidate.connectorSlug === contract.slug && candidate.instanceKey === instanceKey,
@@ -160,6 +167,7 @@ export async function invokeConnectorOperation(
     await readSecrets(context.db, context.session, context.keyring, installation.id),
     contract.configuration.secretFields,
   );
+  context.signal?.throwIfAborted();
 
   // 4b. OAuth, when the contract declares it: the PLATFORM holds the tokens,
   // refreshes them, and hands the package a fetch already carrying the access
@@ -168,19 +176,19 @@ export async function invokeConnectorOperation(
   // failing token endpoint is rate-limited and broken like any other call.
   // One correlation id spans token lifecycle, package execution and outcome.
   const correlationId = randomUUID();
-  const wrapFetch = await oauthFetchWrapper({
-    ...context,
-    contract,
-    installation,
-    secrets,
-    correlationId,
-  });
 
   // 5 + 6. Policy around a validated, redacted execution. One correlation id
   // spans every attempt, so the answer, the audit record and the log line for
   // one call can be joined without any of them naming the tenant or the
   // installation.
   try {
+    const wrapFetch = await oauthFetchWrapper({
+      ...context,
+      contract,
+      installation,
+      secrets,
+      correlationId,
+    });
     return await context.governor.run(
       {
         connector: contract.slug,
@@ -188,6 +196,7 @@ export async function invokeConnectorOperation(
         kind: operation.kind,
         tenantId: String(context.session.tenantId),
         reliability: operation.reliability,
+        ...(context.signal ? { signal: context.signal } : {}),
       },
       () =>
         invokeOperation({
@@ -211,6 +220,7 @@ export async function invokeConnectorOperation(
             },
             ...(context.egressSource ? { source: context.egressSource } : {}),
           },
+          ...(context.signal ? { signal: context.signal } : {}),
           ...(wrapFetch ? { wrapFetch } : {}),
           ...(context.log ? { log: context.log } : {}),
         }),
@@ -307,7 +317,9 @@ async function oauthFetchWrapper(input: {
   correlationId: string;
   egressOwner?: RuntimeModule["egress"] | undefined;
   log?: ((message: string, fields?: Record<string, unknown>) => void) | undefined;
+  signal?: AbortSignal;
 }): Promise<((bound: FetchLike) => FetchLike) | undefined> {
+  input.signal?.throwIfAborted();
   if (!input.contract.auth) return undefined;
   if (!input.keyring) {
     throw new ConnectorInvocationError(
@@ -321,22 +333,26 @@ async function oauthFetchWrapper(input: {
   // URL has no egress to reach it, so a denial here is a misconfigured
   // installation rather than an unreachable design.
   const controller = new AbortController();
+  const refreshSignal = input.signal
+    ? AbortSignal.any([input.signal, controller.signal])
+    : controller.signal;
+  const egressInvocation = createModuleEgressInvocation({
+    owner: input.egressOwner,
+    purpose: "oauth",
+    scope: {
+      tenantId: input.session.tenantId ?? null,
+      actorId: input.session.userId ?? null,
+      provider: input.contract.slug,
+      operation: "refresh_access_token",
+      kind: "mutation",
+    },
+  });
   const refreshFetch = createBoundFetch(
     input.contract,
-    controller.signal,
+    refreshSignal,
     fetch,
     undefined,
-    {
-      owner: input.egressOwner,
-      purpose: "oauth",
-      scope: {
-        tenantId: input.session.tenantId ?? null,
-        actorId: input.session.userId ?? null,
-        provider: input.contract.slug,
-        operation: "refresh_access_token",
-        kind: "mutation",
-      },
-    },
+    egressInvocation.dispatch,
   );
 
   try {
@@ -351,9 +367,29 @@ async function oauthFetchWrapper(input: {
       secrets: input.secrets,
       boundFetch: refreshFetch,
       correlationId: input.correlationId,
+      ...(input.signal ? { signal: input.signal } : {}),
     });
     return (bound) => withOAuthAuthorization(bound, accessToken);
   } catch (error) {
+    input.signal?.throwIfAborted();
+    const failureKind = egressInvocation.consumeFailure(error);
+    if (failureKind) {
+      const outcome = classifyModuleEgressOutcome({
+        kind: failureKind,
+        correlationId: input.correlationId,
+        retryable: false,
+      });
+      throw new ConnectorExecutionError(
+        outcome.code,
+        input.contract.slug,
+        providerOutcomeMessage(
+          outcome.code,
+          `Connector "${input.contract.slug}" OAuth refresh`,
+        ),
+        "refresh_access_token",
+        { outcome },
+      );
+    }
     const mapped = toExecutionError(input.contract, error);
     if (mapped) throw mapped;
     throw error;
@@ -441,7 +477,8 @@ export async function verifyConnectorInstallation(
     });
     return { ok: result?.ok === true, ...(result?.message ? { message: result.message } : {}) };
   } catch (error) {
-    if (error instanceof ConnectorExecutionError) throw error;
+    const platformError = rewrapPlatformExecutionError(error);
+    if (platformError) throw platformError;
     // A verify failure is an answer, not an exception: the operator asked
     // whether it works, and "no" is a valid reply. The reason is redacted.
     return { ok: false, message: "Connectivity check failed." };

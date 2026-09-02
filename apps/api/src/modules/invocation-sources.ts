@@ -24,7 +24,7 @@ export type AuthorizedInvocationSource = {
   /** Core-private immutable rows used by the validated execution path. */
   internal?: unknown;
   /** Re-read trusted state and return the exact current execution snapshot. */
-  validate(): Promise<AuthorizedInvocationSource | undefined>;
+  validate(signal?: AbortSignal): Promise<AuthorizedInvocationSource | undefined>;
 };
 
 type HeldSource = AuthorizedInvocationSource & {
@@ -73,10 +73,17 @@ function immutableDefinition(
   });
 }
 
-async function revalidate<T>(work: () => Promise<T>): Promise<T> {
+async function revalidate<T>(
+  work: () => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  signal?.throwIfAborted();
   try {
-    return await work();
+    const result = await work();
+    signal?.throwIfAborted();
+    return result;
   } catch {
+    signal?.throwIfAborted();
     // Stored-definition and binding failures are intentionally collapsed: a
     // selector cannot be an oracle for hidden service configuration.
     throw unavailable();
@@ -196,7 +203,9 @@ export class InvocationSourceVault {
     selector: ModuleInvocationSourceSelector,
     current: () => Promise<readonly AuthorizedInvocationSource[]>,
     invocationToken: object,
+    signal?: AbortSignal,
   ): Promise<readonly ModuleInvocationSource[]> {
+    signal?.throwIfAborted();
     if (!selector || typeof selector !== "object" || Array.isArray(selector)) {
       throw unavailable();
     }
@@ -223,14 +232,14 @@ export class InvocationSourceVault {
       ) {
         throw unavailable();
       }
-      const current = await revalidate(() => held.validate());
+      const current = await revalidate(() => held.validate(signal), signal);
       if (!current || !matchesSession(current, session)) throw unavailable();
       return [exposed({ ...current, sourceHandle: held.sourceHandle })];
     }
 
     if (Object.hasOwn(selector, "sourceHandle")) throw unavailable();
 
-    const authorized = (await revalidate(current)).filter(
+    const authorized = (await revalidate(current, signal)).filter(
       (source) =>
         source.toolName === toolName && matchesSession(source, session),
     );
@@ -269,7 +278,9 @@ export class InvocationSourceVault {
     toolName: string,
     options: ModuleToolExecutionOptions,
     invocationToken: object,
+    signal?: AbortSignal,
   ): Promise<ResolvedInvocationSource | undefined> {
+    signal?.throwIfAborted();
     const parsed = parseModuleToolExecutionOptions(options);
     if (parsed.kind === "none") return undefined;
     if (parsed.kind !== "handle") throw unavailable();
@@ -288,7 +299,7 @@ export class InvocationSourceVault {
     this.#consumedByInvocation
       .get(invocationToken)
       ?.add(this.#sourceKey(held));
-    const current = await revalidate(() => held.validate());
+    const current = await revalidate(() => held.validate(signal), signal);
     if (
       !current ||
       !matchesSession(current, session) ||
@@ -309,13 +320,13 @@ export class InvocationSourceVault {
     current: (
       sourceReference: string,
     ) => Promise<AuthorizedInvocationSource | undefined>,
+    signal?: AbortSignal,
   ): Promise<ResolvedInvocationSource | undefined> {
+    signal?.throwIfAborted();
     const parsed = parseModuleToolExecutionOptions(options);
     if (parsed.kind === "none") return undefined;
     if (parsed.kind !== "reference") throw unavailable();
-    const source = await revalidate(() =>
-      current(parsed.value),
-    );
+    const source = await revalidate(() => current(parsed.value), signal);
     const expected = parsed.expectedDefinition;
     if (
       !source ||

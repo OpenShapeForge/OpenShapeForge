@@ -11,6 +11,11 @@ const scope = {
   kind: "mutation" as const,
 };
 
+const source = {
+  sourceReference: "msr1.opaque-reference",
+  scope: "personal" as const,
+};
+
 describe("canonical runtime-module egress boundary", () => {
   it("delivers the exact trusted context and preserves Request semantics and signal", async () => {
     const signal = new AbortController().signal;
@@ -32,13 +37,14 @@ describe("canonical runtime-module egress boundary", () => {
       init: {},
       allowlist: ["api.example.com"],
       fallback: async () => { throw new Error("fallback must not run"); },
-      dispatch: { owner, purpose: "provider", scope },
+      dispatch: { owner, purpose: "provider", scope, source },
       denied: (_url, reason) => new Error(reason),
     });
     expect(await response.text()).toBe("ok");
     expect(seen?.url.href).toBe("https://api.example.com/items");
     expect(seen?.purpose).toBe("provider");
     expect(seen?.scope).toEqual(scope);
+    expect(seen?.source).toEqual(source);
     expect(seen?.signal).toBe(signal);
     expect(seen?.init.signal).toBe(signal);
     expect(seen?.init.method).toBe("POST");
@@ -47,6 +53,7 @@ describe("canonical runtime-module egress boundary", () => {
     expect(await new Response(seen?.init.body).text()).toBe("payload");
     expect(Object.isFrozen(seen?.allowlist)).toBe(true);
     expect(Object.isFrozen(seen?.scope)).toBe(true);
+    expect(Object.isFrozen(seen?.source)).toBe(true);
     expect(Object.isFrozen(seen?.init)).toBe(true);
   });
 
@@ -72,6 +79,47 @@ describe("canonical runtime-module egress boundary", () => {
     expect(new Headers(seen?.init.headers).get("x-override")).toBe("yes");
     expect(new Headers(seen?.init.headers).has("x-original")).toBe(false);
     expect(await new Response(seen?.init.body).text()).toBe("override");
+    expect(seen?.source).toBeUndefined();
+  });
+
+  it("omits source coordination for lifecycle traffic and anonymous fallback", async () => {
+    for (const purpose of ["oauth", "discovery", "probe"] as const) {
+      let seen: ModuleEgressRequest | undefined;
+      await fetchValidatedOutbound({
+        target: "https://api.example.com/items",
+        init: {},
+        allowlist: ["api.example.com"],
+        fallback: async () => { throw new Error("fallback must not run"); },
+        dispatch: {
+          owner: {
+            fetch: async (request) => {
+              seen = request;
+              return new Response();
+            },
+          },
+          purpose,
+          scope,
+          // Even an accidental core dispatch cannot associate lifecycle work
+          // with a provider invocation source.
+          source,
+        },
+        denied: (_url, reason) => new Error(reason),
+      });
+      expect(seen?.source).toBeUndefined();
+    }
+
+    let fallbackCalls = 0;
+    await fetchValidatedOutbound({
+      target: "https://api.example.com/items",
+      init: {},
+      allowlist: ["api.example.com"],
+      fallback: async () => {
+        fallbackCalls += 1;
+        return new Response();
+      },
+      denied: (_url, reason) => new Error(reason),
+    });
+    expect(fallbackCalls).toBe(1);
   });
 
   it("rejects protocol and host before either hook or transport executes", async () => {

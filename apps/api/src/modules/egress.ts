@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Canonical protocol/allowlist gate and optional runtime-module egress owner. */
-import type { RuntimeModule } from "./contract.js";
+import type {
+  ModuleEgressInvocationSource,
+  RuntimeModule,
+} from "./contract.js";
 
 export type ModuleEgressDispatch = {
   owner?: RuntimeModule["egress"] | undefined;
@@ -12,6 +15,7 @@ export type ModuleEgressDispatch = {
     operation: string;
     kind: "query" | "mutation";
   };
+  source?: ModuleEgressInvocationSource | undefined;
 };
 
 /** Exact, single-label and arbitrary-depth host grants. */
@@ -60,6 +64,9 @@ export async function fetchValidatedOutbound(input: {
 
   const allowlist = Object.freeze([...input.allowlist]);
   const scope = Object.freeze({ ...input.dispatch.scope });
+  const source = input.dispatch.purpose === "provider" && input.dispatch.source
+    ? Object.freeze({ ...input.dispatch.source })
+    : undefined;
   const inherited =
     input.target instanceof Request
       ? new Request(input.target, input.init)
@@ -87,6 +94,7 @@ export async function fetchValidatedOutbound(input: {
     allowlist,
     purpose: input.dispatch.purpose,
     scope,
+    ...(source ? { source } : {}),
     ...(hookInit.signal ? { signal: hookInit.signal } : {}),
   });
 }

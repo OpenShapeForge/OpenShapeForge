@@ -29,6 +29,7 @@ import type { ConnectorExecutionError } from "../executor.js";
 import { invokeConnectorOperation, verifyConnectorInstallation } from "../runtime.js";
 import { rotateSecrets } from "../store.js";
 import { CONNECTOR_AGGREGATE } from "../audit.js";
+import type { ModuleEgressRequest } from "../../modules/contract.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -184,11 +185,25 @@ describe("the full dispatch chain", () => {
       ),
     ).toBe(true);
 
+    const egressRequests: ModuleEgressRequest[] = [];
+    const trustedSource = {
+      sourceReference: "msr1.connector-dispatch-source",
+      scope: "personal" as const,
+    };
     const { result, calls } = await withUpstream(
       () => Response.json({ objects: [{ key: "a/1.txt", size: 7 }] }),
       () =>
         invokeConnectorOperation(
-          invocationContext(TENANT, ["Connectors.All.Read"]),
+          {
+            ...invocationContext(TENANT, ["Connectors.All.Read"]),
+            egressSource: trustedSource,
+            egressOwner: {
+              fetch: async (request) => {
+                egressRequests.push(request);
+                return fetch(request.url, request.init);
+              },
+            },
+          },
           contract(),
           operation("listObjects"),
           { prefix: "a/" },
@@ -196,6 +211,8 @@ describe("the full dispatch chain", () => {
     );
 
     expect(result).toEqual([{ key: "a/1.txt", sizeBytes: 7 }]);
+    expect(egressRequests).toHaveLength(1);
+    expect(egressRequests[0]?.source).toEqual(trustedSource);
     // The stored configuration reached the package…
     expect(calls[0]?.url.origin).toBe("https://eu.objectstore.example");
     // …and so did the decrypted secret, without ever passing through a read API.

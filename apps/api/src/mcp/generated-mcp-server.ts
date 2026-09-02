@@ -32,7 +32,7 @@
  * through, so this transport inherits them by construction.
  */
 import { randomUUID } from "node:crypto";
-import { sql } from "kysely";
+import { sql, type Transaction } from "kysely";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -50,8 +50,10 @@ import rawCatalog from "../generated/mcp/tools.json" with { type: "json" };
 import { resolveSessionContext } from "../auth/identity.js";
 import { buildAuthenticateChallenge } from "./protected-resource-metadata.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import type { DB } from "../generated/db/types.js";
 import type { DbSessionInput } from "../db/session.js";
 import { withDbSession } from "../db/session.js";
+import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import {
   createGeneratedEntity,
   createGeneratedEntityForTable,
@@ -96,6 +98,7 @@ import {
   composeBindingRequest,
   definitionFieldKeys,
   executeBinding,
+  fetchWithAllowedRedirects,
   mergeOutputs,
   orderedBindings,
   providerUrlTemplates,
@@ -110,6 +113,7 @@ import { discoverProviderSchema } from "./discovery.js";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import {
+  connectionTokenSecretScope,
   exchangeCodeForTokens,
   mintAuthorization,
   redeemState,
@@ -117,10 +121,16 @@ import {
 } from "./entity-oauth.js";
 import {
   decryptSecret,
+  encryptSecret,
   keyringFromEnv,
+  SecretError,
   type StoredSecret,
 } from "../connectors/secrets.js";
-import { refreshTokens } from "./entity-oauth.js";
+import {
+  ensureOAuthTokenSet,
+  OAuthTokenLifecycleError,
+  type OAuthTokenSet,
+} from "../connectors/token-lifecycle.js";
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
@@ -138,7 +148,10 @@ import {
 import { invokeConnectorOperation } from "../connectors/runtime.js";
 import type { RuntimeModule } from "../modules/contract.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
-import { bindOperationHandlers, invokeOperation } from "../operations/runtime.js";
+import {
+  bindOperationHandlers,
+  invokeOperation,
+} from "../operations/runtime.js";
 
 export const MCP_MOUNT_PATH = "/api/mcp";
 
@@ -253,8 +266,14 @@ type Catalog = {
     description: string;
     inputSchema: Record<string, unknown>;
     outputSchema: Record<string, unknown>;
-    auth: { mode: "public" } | { mode: "session"; roles: string[]; scopes?: string[] };
-    annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean };
+    auth:
+      | { mode: "public" }
+      | { mode: "session"; roles: string[]; scopes?: string[] };
+    annotations: {
+      readOnlyHint: boolean;
+      destructiveHint: boolean;
+      idempotentHint: boolean;
+    };
   }[];
   entities: CatalogEntity[];
   resources?: CatalogResource[];
@@ -637,8 +656,7 @@ async function derivedToolsForSession(
  */
 export const ENTITY_OAUTH_CALLBACK_PATH = "/api/entity-oauth/callback";
 export const ENTITY_CONFIGURATION_PATH = "/api/entity-configuration";
-export const ENTITY_CONFIGURATION_APP_URI =
-  "ui://openshapeforge/configuration";
+export const ENTITY_CONFIGURATION_APP_URI = "ui://openshapeforge/configuration";
 const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 const MCP_APP_EXTENSION_ID = "io.modelcontextprotocol/ui";
 
@@ -719,22 +737,113 @@ function looksLikeStoredSecret(value: unknown): value is StoredSecret {
   );
 }
 
-function accessTokenNeedsRefresh(values: Record<string, unknown>): boolean {
+function accessTokenNeedsRefresh(
+  values: Record<string, unknown>,
+  refreshLeewaySeconds = 60,
+): boolean {
   const expiresAt = values.accessTokenExpiresAt;
   const expiresAtMs =
     typeof expiresAt === "string" ? Date.parse(expiresAt) : Number.NaN;
-  return Number.isFinite(expiresAtMs) && expiresAtMs < Date.now() + 60_000;
+  return (
+    !Number.isFinite(expiresAtMs) ||
+    expiresAtMs <= Date.now() + refreshLeewaySeconds * 1000
+  );
 }
 
-async function refreshConnectionRowLocked(input: {
+function refreshLeewaySeconds(auth: Record<string, unknown> | null): number {
+  const configured = auth?.refreshLeewaySeconds;
+  return typeof configured === "number" &&
+    Number.isInteger(configured) &&
+    configured >= 0
+    ? configured
+    : 60;
+}
+
+/** The only OAuth connection-row selector used by derived execution. */
+export function selectOAuthConnectionRow(
+  rows: readonly Record<string, unknown>[],
+  scope: "user" | "tenant",
+  userId: string | null | undefined,
+): Record<string, unknown> | undefined {
+  return scope === "user"
+    ? rows.find((row) => row.ownerUserId === userId)
+    : rows.find((row) => row.ownerUserId === null || row.ownerUserId === undefined);
+}
+
+type ConnectionTokenAudit = {
+  sourceTable: string;
+  connectionId: string;
+  scope: "user" | "tenant";
+  correlationId: string;
+};
+
+async function recordConnectionTokenAudit(input: {
+  db: OpenShapeForgeDatabase;
+  session: DbSessionInput;
+  audit: ConnectionTokenAudit;
+  eventType: "connection.token_refreshed" | "connection.reauthorization_required";
+}) {
+  await withDbSession(input.db, input.session, (trx, scopedSession) =>
+    appendEntityEventInTransaction(trx, {
+      tenantId: scopedSession.tenantId,
+      aggregateType: "connection",
+      aggregateId: input.audit.connectionId,
+      eventType: input.eventType,
+      // Never include token material: this event is an operational signal,
+      // not a second store for provider responses.
+      payload: {
+        sourceTable: input.audit.sourceTable,
+        connectionId: input.audit.connectionId,
+        scope: input.audit.scope,
+        correlationId: input.audit.correlationId,
+      },
+    }),
+  );
+}
+
+function decryptConnectionRefreshToken(input: {
+  keyring: NonNullable<ReturnType<typeof elicitedKeyring>>;
+  secretScope: string;
+  value: unknown;
+}): string {
+  if (!looksLikeStoredSecret(input.value)) {
+    throw new HttpError(
+      403,
+      "REAUTHORIZATION_REQUIRED",
+      "This connection has an expired access token and must be authorized again.",
+    );
+  }
+  try {
+    return decryptSecret(
+      input.keyring,
+      input.secretScope,
+      "refreshToken",
+      input.value,
+    );
+  } catch {
+    throw new HttpError(
+      403,
+      "REAUTHORIZATION_REQUIRED",
+      "This connection's stored authorization is unreadable and must be authorized again.",
+    );
+  }
+}
+
+export async function refreshConnectionRowLocked(input: {
   db: OpenShapeForgeDatabase;
   session: DbSessionInput;
   table: GeneratedTable;
   rowId: string;
   valuesField: string;
-  refresh: (
-    values: Record<string, unknown>,
-  ) => Promise<Record<string, unknown>>;
+  refreshLeewaySeconds?: number;
+  audit: ConnectionTokenAudit;
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  egress: string[];
+  keyring: NonNullable<ReturnType<typeof elicitedKeyring>>;
+  secretScope: string;
+  fetchImpl?: typeof fetch;
 }): Promise<Record<string, unknown>> {
   const valuesColumn = input.table.columns.find(
     (column) =>
@@ -750,26 +859,102 @@ async function refreshConnectionRowLocked(input: {
       "Connection values column is missing from the manifest.",
     );
   }
-  return withDbSession(input.db, input.session, async (trx) => {
-    const locked = await sql<{ values: Record<string, unknown> | null }>`
-      select ${sql.id(valuesColumn.name)} as values
-        from ${sql.id(input.table.schema, input.table.table)}
-       where ${sql.id(input.table.primaryKey!)}::text = ${input.rowId}
-       for update
-    `.execute(trx);
-    const current = locked.rows[0]?.values ?? {};
-    if (!accessTokenNeedsRefresh(current)) return current;
-    const merged = { ...current, ...(await input.refresh(current)) };
-    // Persist inside the same transaction that holds the row lock. Re-entering
-    // the generic CRUD helper here would open a nested session/transaction and
-    // release neither waiters nor the lock in the intended order.
-    await sql`
-      update ${sql.id(input.table.schema, input.table.table)}
-         set ${sql.id(valuesColumn.name)} = ${JSON.stringify(merged)}::jsonb
-       where ${sql.id(input.table.primaryKey!)}::text = ${input.rowId}
-    `.execute(trx);
-    return merged;
-  });
+  let trx: Transaction<DB> | undefined;
+  let current: Record<string, unknown> = {};
+  let result: Record<string, unknown> = {};
+  try {
+    await ensureOAuthTokenSet({
+      ...(input.refreshLeewaySeconds === undefined
+        ? {}
+        : { refreshLeewaySeconds: input.refreshLeewaySeconds }),
+      tokenUrl: input.tokenUrl,
+      clientId: input.clientId,
+      clientSecret: input.clientSecret,
+      boundFetch: (url, init) =>
+        fetchWithAllowedRedirects(
+          url instanceof Request ? url.url : url,
+          { ...init, signal: AbortSignal.timeout(15_000) },
+          input.egress,
+          input.fetchImpl,
+        ),
+      store: {
+        withLockedRow: (work) =>
+          withDbSession(input.db, input.session, async (lockedTrx) => {
+            trx = lockedTrx;
+            const locked = await sql<{ values: Record<string, unknown> | null }>`
+              select ${sql.id(valuesColumn.name)} as values
+                from ${sql.id(input.table.schema, input.table.table)}
+               where ${sql.id(input.table.primaryKey!)}::text = ${input.rowId}
+               for update
+            `.execute(lockedTrx);
+            const storedValues = locked.rows[0]?.values;
+            current =
+              typeof storedValues === "string"
+                ? (JSON.parse(storedValues) as Record<string, unknown>)
+                : (storedValues ?? {});
+            result = current;
+            return work();
+          }),
+        read: async () => current,
+        decode: (values): OAuthTokenSet => {
+          const expiresAt = Date.parse(String(values.accessTokenExpiresAt));
+          if (!Number.isFinite(expiresAt) || !looksLikeStoredSecret(values.accessToken)) {
+            throw new Error("Stored token state is incomplete.");
+          }
+          return {
+            accessToken: decryptSecret(input.keyring, input.secretScope, "accessToken", values.accessToken),
+            ...(looksLikeStoredSecret(values.refreshToken)
+              ? { refreshToken: decryptSecret(input.keyring, input.secretScope, "refreshToken", values.refreshToken) }
+              : {}),
+            expiresAt: Math.floor(expiresAt / 1000),
+          };
+        },
+        persist: async (tokens) => {
+          result = {
+            ...current,
+            accessToken: encryptSecret(input.keyring, input.secretScope, "accessToken", tokens.accessToken),
+            ...(tokens.refreshToken
+              ? { refreshToken: encryptSecret(input.keyring, input.secretScope, "refreshToken", tokens.refreshToken) }
+              : {}),
+            accessTokenExpiresAt: new Date(tokens.expiresAt * 1000).toISOString(),
+          };
+          await sql`
+            update ${sql.id(input.table.schema, input.table.table)}
+               set ${sql.id(valuesColumn.name)} = ${JSON.stringify(result)}::jsonb
+             where ${sql.id(input.table.primaryKey!)}::text = ${input.rowId}
+          `.execute(trx!);
+        },
+        auditRefreshed: async () => {
+          await appendEntityEventInTransaction(trx!, {
+            tenantId: String(input.session.tenantId),
+            aggregateType: "connection",
+            aggregateId: input.audit.connectionId,
+            eventType: "connection.token_refreshed",
+            payload: { ...input.audit },
+          });
+        },
+        auditReauthorization: () =>
+          recordConnectionTokenAudit({
+            db: input.db,
+            session: input.session,
+            audit: input.audit,
+            eventType: "connection.reauthorization_required",
+          }),
+      },
+    });
+    return result;
+  } catch (error) {
+    if (error instanceof OAuthTokenLifecycleError) {
+      throw new HttpError(
+        error.code === "REAUTHORIZATION_REQUIRED" ? 403 : 502,
+        error.code === "REAUTHORIZATION_REQUIRED"
+          ? "REAUTHORIZATION_REQUIRED"
+          : "TOKEN_ENDPOINT_ERROR",
+        error.message,
+      );
+    }
+    throw error;
+  }
 }
 
 /**
@@ -1433,13 +1618,19 @@ async function invokeTool(
   }
 }
 
-function operationMayInvoke(tool: Catalog["operationTools"][number], session: TrustedSessionContext): boolean {
+function operationMayInvoke(
+  tool: Catalog["operationTools"][number],
+  session: TrustedSessionContext,
+): boolean {
   if (tool.auth.mode === "public") return true;
-  if (session.credential === "api-key" && (tool.auth.scopes ?? []).length > 0) return false;
+  if (session.credential === "api-key" && (tool.auth.scopes ?? []).length > 0)
+    return false;
   const roles = new Set(session.roles);
   const scopes = new Set(session.oauthScopes ?? []);
-  return tool.auth.roles.some((role) => roles.has(role)) &&
-    (tool.auth.scopes ?? []).every((scope) => scopes.has(scope));
+  return (
+    tool.auth.roles.some((role) => roles.has(role)) &&
+    (tool.auth.scopes ?? []).every((scope) => scopes.has(scope))
+  );
 }
 
 function buildServer(
@@ -1482,7 +1673,8 @@ function buildServer(
         .join(""),
   });
   const tables = tablesByName();
-  const operations = modules === undefined ? new Map() : bindOperationHandlers(modules);
+  const operations =
+    modules === undefined ? new Map() : bindOperationHandlers(modules);
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const entries = entitiesForSession(session, tables);
@@ -1798,7 +1990,10 @@ function buildServer(
         annotations: { title: tool.title, ...tool.annotations },
       })),
       ...catalog.operationTools
-        .filter((tool) => operations.has(tool.key) && operationMayInvoke(tool, session))
+        .filter(
+          (tool) =>
+            operations.has(tool.key) && operationMayInvoke(tool, session),
+        )
         .map((tool) => ({
           name: tool.name,
           title: tool.title,
@@ -1812,10 +2007,17 @@ function buildServer(
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const name = request.params.name;
 
-    const operationTool = catalog.operationTools.find((tool) => tool.name === name);
+    const operationTool = catalog.operationTools.find(
+      (tool) => tool.name === name,
+    );
     if (operationTool) {
-      if (!operations.has(operationTool.key) || !operationMayInvoke(operationTool, session)) {
-        return failed(new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`));
+      if (
+        !operations.has(operationTool.key) ||
+        !operationMayInvoke(operationTool, session)
+      ) {
+        return failed(
+          new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`),
+        );
       }
       try {
         const result = await invokeOperation(
@@ -2850,6 +3052,7 @@ function buildServer(
                 let providerForExecution = providerRow;
                 let connectionValues: unknown;
                 let secretScope = elicitScope;
+                let oauthConnectionAudit: ConnectionTokenAudit | undefined;
 
                 if (
                   providerAuth?.profile === "oauth2AuthorizationCode" &&
@@ -2858,10 +3061,20 @@ function buildServer(
                   // Personal mode: execution resolves ONLY the caller's own
                   // connection — another employee's tokens are unreachable by
                   // construction, and their absence is a clear next step.
-                  const personal = connectionRows.find(
-                    (row) => row.ownerUserId === session.userId,
+                  const personal = selectOAuthConnectionRow(
+                    connectionRows,
+                    "user",
+                    session.userId,
                   );
-                  const personalScope = `${execution.connectionTable}:personal`;
+                  const personalScope = connectionTokenSecretScope(
+                    execution.connectionTable,
+                  );
+                  oauthConnectionAudit = {
+                    sourceTable: execution.providerTable,
+                    connectionId: String(personal?.id ?? ""),
+                    scope: "user",
+                    correlationId: String(extra.requestId ?? randomUUID()),
+                  };
                   let values = (personal?.[execution.connectionValuesField] ??
                     null) as Record<string, unknown> | null;
                   if (!personal || !values?.accessToken) {
@@ -2874,8 +3087,10 @@ function buildServer(
                     );
                   }
                   if (
-                    accessTokenNeedsRefresh(values) &&
-                    looksLikeStoredSecret(values.refreshToken)
+                    accessTokenNeedsRefresh(
+                      values,
+                      refreshLeewaySeconds(providerAuth),
+                    )
                   ) {
                     const keyring = elicitedKeyring();
                     const tenantConnection = connectionRows.find(
@@ -2917,31 +3132,14 @@ function buildServer(
                       table: connectionTableDef,
                       rowId: String(personal.id),
                       valuesField: execution.connectionValuesField,
-                      refresh: async (lockedValues) => {
-                        if (!looksLikeStoredSecret(lockedValues.refreshToken))
-                          return {};
-                        const refreshed = await refreshTokens({
-                          tokenUrl: resolveTemplate(
-                            providerAuth.tokenUrl as string,
-                            tenantUrlValues.plain,
-                            "auth.tokenUrl",
-                            tenantUrlValues.secretKeys,
-                          ),
-                          clientId: credentials.clientId,
-                          clientSecret: credentials.clientSecret,
-                          refreshToken: decryptSecret(
-                            keyring,
-                            personalScope,
-                            "refreshToken",
-                            lockedValues.refreshToken,
-                          ),
-                          egress: Array.isArray(providerRow.egressHosts)
-                            ? (providerRow.egressHosts as string[])
-                            : [],
-                          connectionTable: execution.connectionTable,
-                        });
-                        return refreshed.values;
-                      },
+                      refreshLeewaySeconds: refreshLeewaySeconds(providerAuth),
+                      audit: oauthConnectionAudit!,
+                      tokenUrl: resolveTemplate(providerAuth.tokenUrl as string, tenantUrlValues.plain, "auth.tokenUrl", tenantUrlValues.secretKeys),
+                      clientId: credentials.clientId,
+                      clientSecret: credentials.clientSecret,
+                      egress: Array.isArray(providerRow.egressHosts) ? (providerRow.egressHosts as string[]) : [],
+                      keyring,
+                      secretScope: personalScope,
                     });
                   }
                   // The personal connection holds only tokens; tenant-owned
@@ -2970,9 +3168,14 @@ function buildServer(
                     auth: { scheme: "bearer", tokenFrom: "accessToken" },
                   };
                 } else {
-                  const tenantConnection =
-                    connectionRows.find((row) => !row.ownerUserId) ??
-                    connectionRows[0];
+                  // Tenant OAuth is bound only to its explicit tenant-owned
+                  // row. Falling back to a personal row would let one user's
+                  // authorization power a tenant-wide execution.
+                  const tenantConnection = selectOAuthConnectionRow(
+                    connectionRows,
+                    "tenant",
+                    session.userId,
+                  );
                   if (!tenantConnection) {
                     throw new HttpError(
                       400,
@@ -2981,6 +3184,12 @@ function buildServer(
                         `${execution.providerEntity}; an administrator must create one first.`,
                     );
                   }
+                  oauthConnectionAudit = {
+                    sourceTable: execution.providerTable,
+                    connectionId: String(tenantConnection.id),
+                    scope: "tenant",
+                    correlationId: String(extra.requestId ?? randomUUID()),
+                  };
                   connectionValues =
                     tenantConnection[execution.connectionValuesField];
                   if (providerAuth?.profile === "oauth2AuthorizationCode") {
@@ -3000,8 +3209,10 @@ function buildServer(
                       );
                     }
                     if (
-                      accessTokenNeedsRefresh(tenantValues) &&
-                      looksLikeStoredSecret(tenantValues.refreshToken)
+                      accessTokenNeedsRefresh(
+                        tenantValues,
+                        refreshLeewaySeconds(providerAuth),
+                      )
                     ) {
                       const keyring = elicitedKeyring();
                       const credentials = readClientCredentials(
@@ -3038,31 +3249,15 @@ function buildServer(
                         table: connectionTableDef,
                         rowId: String(tenantConnection.id),
                         valuesField: execution.connectionValuesField,
-                        refresh: async (lockedValues) => {
-                          if (!looksLikeStoredSecret(lockedValues.refreshToken))
-                            return {};
-                          const refreshed = await refreshTokens({
-                            tokenUrl: resolveTemplate(
-                              providerAuth.tokenUrl as string,
-                              tenantUrlValues.plain,
-                              "auth.tokenUrl",
-                              tenantUrlValues.secretKeys,
-                            ),
-                            clientId: credentials.clientId,
-                            clientSecret: credentials.clientSecret,
-                            refreshToken: decryptSecret(
-                              keyring,
-                              `${execution.connectionTable}:personal`,
-                              "refreshToken",
-                              lockedValues.refreshToken,
-                            ),
-                            egress: Array.isArray(providerRow.egressHosts)
-                              ? (providerRow.egressHosts as string[])
-                              : [],
-                            connectionTable: execution.connectionTable,
-                          });
-                          return refreshed.values;
-                        },
+                        refreshLeewaySeconds:
+                          refreshLeewaySeconds(providerAuth),
+                        audit: oauthConnectionAudit!,
+                        tokenUrl: resolveTemplate(providerAuth.tokenUrl as string, tenantUrlValues.plain, "auth.tokenUrl", tenantUrlValues.secretKeys),
+                        clientId: credentials.clientId,
+                        clientSecret: credentials.clientSecret,
+                        egress: Array.isArray(providerRow.egressHosts) ? (providerRow.egressHosts as string[]) : [],
+                        keyring,
+                        secretScope: connectionTokenSecretScope(execution.connectionTable),
                       });
                     }
                     // The row mixes AAD scopes: elicited fields were encrypted
@@ -3090,7 +3285,9 @@ function buildServer(
                         ),
                       ),
                     };
-                    secretScope = `${execution.connectionTable}:personal`;
+                    secretScope = connectionTokenSecretScope(
+                      execution.connectionTable,
+                    );
                     providerForExecution = {
                       ...providerRow,
                       auth: { scheme: "bearer", tokenFrom: "accessToken" },
@@ -3118,19 +3315,41 @@ function buildServer(
                   );
                 }
 
-                const outputs = await executeBinding({
-                  binding,
-                  operationRow,
-                  providerRow: providerForExecution,
-                  connectionValues,
-                  serviceInputs: { ...args, ...accumulated },
-                  secretScope,
-                  providerDefinitions:
-                    providerRow[
-                      entityForTable(execution.connectionTable)?.elicitOnCreate
-                        ?.definitionsField ?? ""
-                    ],
-                });
+                let outputs;
+                try {
+                  outputs = await executeBinding({
+                    binding,
+                    operationRow,
+                    providerRow: providerForExecution,
+                    connectionValues,
+                    serviceInputs: { ...args, ...accumulated },
+                    secretScope,
+                    providerDefinitions:
+                      providerRow[
+                        entityForTable(execution.connectionTable)?.elicitOnCreate
+                          ?.definitionsField ?? ""
+                      ],
+                  });
+                } catch (error) {
+                  if (error instanceof SecretError && oauthConnectionAudit) {
+                    try {
+                      await recordConnectionTokenAudit({
+                        db,
+                        session,
+                        audit: oauthConnectionAudit,
+                        eventType: "connection.reauthorization_required",
+                      });
+                    } catch {
+                      // Stable recovery guidance must survive an audit outage.
+                    }
+                    throw new HttpError(
+                      403,
+                      "REAUTHORIZATION_REQUIRED",
+                      "This connection's stored authorization is unreadable and must be authorized again.",
+                    );
+                  }
+                  throw error;
+                }
                 mergeOutputs(accumulated, outputs);
               } catch (error) {
                 if (binding.optional !== true) throw error;
@@ -3389,11 +3608,18 @@ function buildServer(
 
 export function registerGeneratedMcpServer(
   app: FastifyInstance,
-  options: { db?: OpenShapeForgeDatabase | undefined; modules?: readonly RuntimeModule[] } = {},
+  options: {
+    db?: OpenShapeForgeDatabase | undefined;
+    modules?: readonly RuntimeModule[];
+  } = {},
 ): void {
   // The transport exists when EITHER surface has something to advertise; a
   // deployment with connectors but no MCP-exposed entity still needs it.
-  if (catalog.tools.length === 0 && catalog.operationTools.length === 0 && listConnectorContracts().length === 0) {
+  if (
+    catalog.tools.length === 0 &&
+    catalog.operationTools.length === 0 &&
+    listConnectorContracts().length === 0
+  ) {
     return;
   }
 
@@ -3731,12 +3957,7 @@ export function registerGeneratedMcpServer(
           }
         }
       }
-      await createGeneratedEntityForTable(
-        db,
-        writeSession,
-        tableDef,
-        values,
-      );
+      await createGeneratedEntityForTable(db, writeSession, tableDef, values);
       return { ok: true };
     };
 
@@ -3783,8 +4004,7 @@ export function registerGeneratedMcpServer(
           return reply.status(400).send({
             error: {
               code: "INVALID_CONFIGURATION",
-              message:
-                outcome.errorBanner ?? "Correct the highlighted values.",
+              message: outcome.errorBanner ?? "Correct the highlighted values.",
               fields: outcome.errors,
             },
           });

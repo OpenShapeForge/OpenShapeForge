@@ -1151,6 +1151,29 @@ function failed(error: unknown): ToolResult {
 
 export const __failedForTests = failed;
 
+/** A partial result reports failure meaning, never a free-form provider message. */
+function unavailableOutcome(error: unknown): {
+  code: string;
+  category?: string;
+  retryable: boolean;
+  retryAt?: string;
+  requiredAction: string;
+  correlationId?: string;
+} {
+  const { code, category, retryable, retryAt, requiredAction, correlationId } =
+    toHttpError(error).body.error;
+  return {
+    code,
+    ...(category !== undefined ? { category } : {}),
+    retryable: retryable ?? false,
+    ...(retryAt !== undefined ? { retryAt } : {}),
+    requiredAction: requiredAction ?? "contact_admin",
+    ...(correlationId !== undefined ? { correlationId } : {}),
+  };
+}
+
+export const __unavailableOutcomeForTests = unavailableOutcome;
+
 function requireArguments(args: unknown): Record<string, unknown> {
   if (args === undefined || args === null) return {};
   if (typeof args !== "object" || Array.isArray(args)) {
@@ -2756,7 +2779,10 @@ function buildServer(
             // still answer when one of them is down or not yet connected —
             // and every skipped one is reported honestly in `unavailable`.
             const accumulated: Record<string, unknown> = {};
-            const unavailable: { binding: number; reason: string }[] = [];
+            const unavailable: {
+              binding: number;
+              outcome: ReturnType<typeof unavailableOutcome>;
+            }[] = [];
             for (const binding of orderedBindings(
               serviceRow,
               execution.bindingsField,
@@ -3110,7 +3136,7 @@ function buildServer(
                 if (binding.optional !== true) throw error;
                 unavailable.push({
                   binding: Number(binding.order ?? 0),
-                  reason: toHttpError(error).body.error.message,
+                  outcome: unavailableOutcome(error),
                 });
               }
             }

@@ -29,8 +29,15 @@
  *   - Template placeholders form a closed vocabulary: connection value keys
  *     and operation inputs. An unresolved placeholder fails the call.
  */
+import { randomUUID } from "node:crypto";
 import { HttpError } from "../rest/http-error.js";
 import { hostAllowed } from "../connectors/executor.js";
+import {
+  ProviderObservations,
+  ProviderOutcomeError,
+  classifyProviderOutcome,
+  providerOutcomeMessage,
+} from "../connectors/provider-outcome.js";
 import {
   decryptSecret,
   keyringFromEnv,
@@ -842,6 +849,35 @@ export async function composeBindingRequest(
   return { method, url, headers, ...(body !== undefined ? { body } : {}) };
 }
 
+function operationSubject(operationRow: JsonRecord): string {
+  return `Operation "${String(operationRow.key ?? "operation")}"`;
+}
+
+/**
+ * Declarative provider calls classify only what the platform observed. Their
+ * bodies and arbitrary response metadata never enter this error.
+ */
+function providerFailure(
+  operationRow: JsonRecord,
+  response?: Response,
+  message?: string,
+): ProviderOutcomeError {
+  const observations = new ProviderObservations(randomUUID());
+  if (response) observations.observe(response);
+  const observation = observations.last();
+  const outcome = classifyProviderOutcome({
+    correlationId: observations.correlationId,
+    observation,
+    retryAllowed: false,
+    now: Date.now(),
+  });
+  return new ProviderOutcomeError(
+    outcome,
+    message ?? providerOutcomeMessage(outcome.code, operationSubject(operationRow)),
+    observation?.status,
+  );
+}
+
 export async function executeBinding(
   input: ExecuteBindingInput,
 ): Promise<JsonRecord> {
@@ -853,44 +889,47 @@ export async function executeBinding(
     ? (providerRow.egressHosts as string[])
     : [];
 
-  const response = await fetchWithAllowedRedirects(
-    url,
-    {
-      method,
-      headers,
-      ...(body !== undefined ? { body } : {}),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-    },
-    egress,
-    fetchImpl,
-  );
-  const text = await response.text();
-  if (!response.ok) {
-    throw new HttpError(
-      502,
-      "PROVIDER_ERROR",
-      `Provider answered ${response.status} for ${String(operationRow.key ?? "operation")}: ` +
-        text.slice(0, 300),
+  let response: Response;
+  try {
+    response = await fetchWithAllowedRedirects(
+      url,
+      {
+        method,
+        headers,
+        ...(body !== undefined ? { body } : {}),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      },
+      egress,
+      fetchImpl,
     );
+  } catch (error) {
+    if (!(error instanceof HttpError) || error.code === "PROVIDER_ERROR") {
+      throw providerFailure(operationRow);
+    }
+    throw error;
   }
+  if (!response.ok) {
+    throw providerFailure(operationRow, response);
+  }
+  const text = await response.text();
   let parsed: unknown = null;
   try {
     parsed = text ? JSON.parse(text) : null;
   } catch {
-    throw new HttpError(
-      502,
-      "PROVIDER_ERROR",
-      "Provider response is not valid JSON.",
+    throw providerFailure(
+      operationRow,
+      undefined,
+      `${operationSubject(operationRow)} returned an invalid response.`,
     );
   }
 
   if (isGraphql) {
     const errors = (parsed as JsonRecord | null)?.errors;
     if (Array.isArray(errors) && errors.length > 0) {
-      throw new HttpError(
-        502,
-        "PROVIDER_ERROR",
-        "Provider answered with GraphQL errors.",
+      throw providerFailure(
+        operationRow,
+        undefined,
+        `${operationSubject(operationRow)} answered with GraphQL errors.`,
       );
     }
     parsed = (parsed as JsonRecord | null)?.data ?? null;

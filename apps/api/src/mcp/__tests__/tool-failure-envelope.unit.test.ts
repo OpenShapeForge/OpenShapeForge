@@ -7,11 +7,15 @@
  */
 import { describe, expect, it } from "bun:test";
 import { ConnectorExecutionError } from "../../connectors/executor.js";
-import type { ConnectorProviderOutcome } from "../../connectors/provider-outcome.js";
+import {
+  ProviderOutcomeError,
+  type ConnectorProviderOutcome,
+} from "../../connectors/provider-outcome.js";
 import { HttpError, toHttpError } from "../../rest/http-error.js";
 import {
   __failedForTests as failed,
   __okForTests as ok,
+  __unavailableOutcomeForTests as unavailableOutcome,
 } from "../generated-mcp-server.js";
 
 const OUTCOME: ConnectorProviderOutcome = {
@@ -96,21 +100,35 @@ describe("a non-retryable classified failure", () => {
       requiredAction: "contact_admin",
       correlationId: "corr-2",
     };
-    const denied = failed(new ConnectorExecutionError(
-      outcome.code,
-      "tickets",
-      'Connector "tickets" operation "getTicket" was denied permission by its provider.',
-      "getTicket",
-      { outcome, providerStatus: 403 },
+    const denied = failed(new ProviderOutcomeError(
+      outcome,
+      'Operation "getTicket" was denied permission by its provider.',
+      403,
     ));
     expect(denied.content[0]!.text).toBe(
-      'CONNECTOR_PROVIDER_PERMISSION_DENIED: Connector "tickets" operation "getTicket" was ' +
+      'CONNECTOR_PROVIDER_PERMISSION_DENIED: Operation "getTicket" was ' +
         "denied permission by its provider. Not retryable; contact an administrator.",
     );
     expect(denied.structuredContent).toMatchObject({
       error: { retryable: false, requiredAction: "contact_admin" },
     });
     expect(JSON.stringify(denied)).not.toContain("retryAt");
+  });
+});
+
+describe("an optional binding's unavailability", () => {
+  it("returns the full normalized outcome instead of provider text", () => {
+    expect(unavailableOutcome(RATE_LIMITED)).toEqual(OUTCOME);
+  });
+
+  it("gives an unclassified optional failure a safe, message-free disposition", () => {
+    expect(
+      unavailableOutcome(new HttpError(400, "SERVICE_MISCONFIGURED", "Provider token=must-not-leak")),
+    ).toEqual({
+      code: "SERVICE_MISCONFIGURED",
+      retryable: false,
+      requiredAction: "contact_admin",
+    });
   });
 });
 

@@ -240,7 +240,7 @@ describe("invoking the example package", () => {
     expect(stub.calls).toHaveLength(0);
   });
 
-  test("redacts an upstream failure", async () => {
+  test("normalizes and redacts an upstream failure", async () => {
     const { contract, pkg, boundary } = await loadExample();
     const operation = contract.operations.find((entry) => entry.key === "listObjects")!;
     const stub = upstream(() => new Response("internal detail", { status: 503 }));
@@ -259,7 +259,14 @@ describe("invoking the example package", () => {
       throw new Error("expected a failure");
     } catch (error) {
       const message = (error as Error).message;
-      expect((error as ConnectorExecutionError).code).toBe("CONNECTOR_UPSTREAM_ERROR");
+      expect((error as ConnectorExecutionError).code).toBe(
+        "CONNECTOR_PROVIDER_UNAVAILABLE",
+      );
+      expect((error as ConnectorExecutionError).outcome).toMatchObject({
+        category: "availability",
+        retryable: false,
+        requiredAction: "wait",
+      });
       expect(message).not.toContain("503");
       expect(message).not.toContain("internal detail");
     }

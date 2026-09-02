@@ -218,10 +218,18 @@ Field-level classification is enforced on the call path too:
 
 ## Errors
 
-A failed tool call returns an MCP tool result with `isError: true` and the CRUD
-layer's error code as text (`FORBIDDEN: Not authorized to delete Relation`)
-rather than a protocol-level error. A model that receives the reason as content
-can adapt; a transport failure just terminates the call.
+A failed tool call returns an MCP tool result with `isError: true` rather than
+a protocol-level error. A model that receives the reason as content can adapt;
+a transport failure just terminates the call. The result carries the same
+`{ error: { code, message } }` body REST answers with, three ways: as
+`structuredContent`, mirrored as JSON text, and summarised first as one text
+line (`FORBIDDEN: Not authorized to delete Relation`). A connector failure the
+platform could classify adds the normalized provider outcome — `retryable`,
+`retryAt`, `requiredAction` — to that body. Connector tools do not advertise an
+`outputSchema` yet: failures provide runtime `structuredContent`, but successful
+calls keep their existing text-only shape until one unified output contract is
+defined. See
+[connectors.md](connectors.md#provider-failures).
 
 Transport-level problems — no credentials, no database — are still HTTP status
 codes (`401`, `503`) with the REST error body shape.

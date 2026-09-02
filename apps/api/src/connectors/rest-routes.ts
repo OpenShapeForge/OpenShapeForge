@@ -23,6 +23,12 @@ import {
 import { listConnectorContracts } from "./catalog.js";
 import { connectorGovernor, connectorKeyring, connectorRegistry } from "./dispatch.js";
 import {
+  failureBody,
+  httpStatusForCode,
+  providerOutcomeOf,
+  type ConnectorProviderOutcome,
+} from "./provider-outcome.js";
+import {
   ConnectorInvocationError,
   invokeConnectorOperation,
   verifyConnectorInstallation,
@@ -40,46 +46,20 @@ import {
 const CONNECTOR_MOUNT = `${REST_MOUNT_PATH}/connectors`;
 
 /**
- * Error-code → HTTP status. Deliberately explicit rather than a default:
- * an unmapped code becoming a 500 is the right failure, because it means a new
- * failure mode has appeared that nobody decided how to present.
+ * Status comes from the canonical table in provider-outcome.ts, shared with
+ * the generated REST mapper and the MCP renderer. An unmapped code becomes a
+ * 500 on purpose: it means a new failure mode has appeared that nobody decided
+ * how to present.
  */
-const STATUS_BY_CODE: Record<string, number> = {
-  UNAUTHENTICATED: 401,
-  FORBIDDEN: 403,
-  CONNECTOR_NOT_FOUND: 404,
-  CONNECTOR_NOT_CONFIGURED: 409,
-  CONNECTOR_NEEDS_REPAIR: 409,
-  CONNECTOR_SINGLE_INSTANCE: 409,
-  // Not 402: the tenant is not being asked to pay at this endpoint, it is being
-  // refused. 403 is the honest answer, with the reason in the body.
-  CONNECTOR_NOT_LICENSED: 403,
-  CONNECTOR_INVALID_CONFIGURATION: 400,
-  CONNECTOR_SECRETS_NOT_CONFIGURED: 503,
-  CONNECTOR_NOT_EXECUTABLE: 503,
-  CONNECTOR_DISABLED: 409,
-  CONNECTOR_VERIFY_UNSUPPORTED: 501,
-  CONNECTOR_PROVENANCE_REFUSED: 403,
-  CONNECTOR_EGRESS_DENIED: 502,
-  CONNECTOR_UPSTREAM_ERROR: 502,
-  CONNECTOR_TIMEOUT: 504,
-  CONNECTOR_RATE_LIMITED: 429,
-  CONNECTOR_CIRCUIT_OPEN: 503,
-  CONNECTOR_OAUTH_FAILED: 502,
-  // 409 rather than 401: the caller authenticated fine, it is the connector's
-  // own authorization to the provider that lapsed. A 401 would send a client
-  // into its own re-login flow, which cannot fix this.
-  CONNECTOR_REAUTHORIZATION_REQUIRED: 409,
-  CONNECTOR_INVALID_INPUT: 400,
-  CONNECTOR_INVALID_OUTPUT: 502,
-  CONNECTOR_CONTRACT_MISMATCH: 500,
-  DATABASE_NOT_CONFIGURED: 503,
-};
-
-function sendError(reply: FastifyReply, code: string, message: string): FastifyReply {
+function sendError(
+  reply: FastifyReply,
+  code: string,
+  message: string,
+  outcome?: ConnectorProviderOutcome,
+): FastifyReply {
   return reply
-    .status(STATUS_BY_CODE[code] ?? 500)
-    .send({ error: { code, message } });
+    .status(httpStatusForCode(code) ?? 500)
+    .send(failureBody(code, message, outcome));
 }
 
 function handleError(reply: FastifyReply, error: unknown): FastifyReply {
@@ -94,6 +74,7 @@ function handleError(reply: FastifyReply, error: unknown): FastifyReply {
       reply,
       (error as Error & { code: string }).code,
       error.message,
+      providerOutcomeOf(error),
     );
   }
   if (error instanceof ConnectorAuthorizationError) {

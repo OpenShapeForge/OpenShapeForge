@@ -17,8 +17,11 @@
  *   5. governor           — rate limit, breaker, concurrency, retries
  *   6. execute            — input validated, output validated, errors redacted
  */
+import { randomUUID } from "node:crypto";
+import { Counter, getProcessPrometheusRegistry } from "@openshapeforge/observability";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
-import type { DbSessionInput } from "../db/session.js";
+import { withDbSession, type DbSessionInput } from "../db/session.js";
+import { recordConnectorAudit } from "./audit.js";
 import type { ConnectorContract, ConnectorOperationContract } from "./catalog.js";
 import {
   ConnectorExecutionError,
@@ -26,6 +29,12 @@ import {
   invokeOperation,
   type FetchLike,
 } from "./executor.js";
+import {
+  PROVIDER_FAILURE_METRIC_LABELS,
+  providerFailureAuditFields,
+  providerFailureMetricLabels,
+  type ConnectorProviderOutcome,
+} from "./provider-outcome.js";
 import {
   ensureAccessToken,
   toExecutionError,
@@ -157,28 +166,106 @@ export async function invokeConnectorOperation(
     secrets,
   });
 
-  // 5 + 6. Policy around a validated, redacted execution.
-  return context.governor.run(
-    {
-      connector: contract.slug,
-      operationKey: operation.key,
-      kind: operation.kind,
-      tenantId: String(context.session.tenantId),
-      reliability: operation.reliability,
-    },
-    () =>
-      invokeOperation({
+  // 5 + 6. Policy around a validated, redacted execution. One correlation id
+  // spans every attempt, so the answer, the audit record and the log line for
+  // one call can be joined without any of them naming the tenant or the
+  // installation.
+  const correlationId = randomUUID();
+  try {
+    return await context.governor.run(
+      {
+        connector: contract.slug,
+        operationKey: operation.key,
+        kind: operation.kind,
+        tenantId: String(context.session.tenantId),
+        reliability: operation.reliability,
+      },
+      () =>
+        invokeOperation({
+          contract,
+          operation,
+          boundary: loaded.boundary,
+          pkg: loaded.pkg,
+          config: installation.config,
+          secrets,
+          input,
+          correlationId,
+          ...(wrapFetch ? { wrapFetch } : {}),
+          ...(context.log ? { log: context.log } : {}),
+        }),
+    );
+  } catch (error) {
+    if (error instanceof ConnectorExecutionError && error.outcome) {
+      await recordProviderFailure(
+        context,
         contract,
         operation,
-        boundary: loaded.boundary,
-        pkg: loaded.pkg,
-        config: installation.config,
-        secrets,
-        input,
-        ...(wrapFetch ? { wrapFetch } : {}),
-        ...(context.log ? { log: context.log } : {}),
-      }),
+        instanceKey,
+        error.outcome,
+        error.providerStatus,
+      );
+    }
+    throw error;
+  }
+}
+
+const PROVIDER_FAILURE_METRIC = "openshapeforge_connector_provider_failures_total";
+
+type ProviderFailureCounter = Counter<(typeof PROVIDER_FAILURE_METRIC_LABELS)[number]>;
+
+/**
+ * Registered on first use against the process registry, and found again
+ * rather than re-registered on a module reload — prom-client refuses a second
+ * metric under the same name.
+ */
+function providerFailureCounter(): ProviderFailureCounter {
+  const registry = getProcessPrometheusRegistry();
+  const existing = registry.getSingleMetric(PROVIDER_FAILURE_METRIC);
+  if (existing) return existing as ProviderFailureCounter;
+  return new Counter({
+    name: PROVIDER_FAILURE_METRIC,
+    help: "Connector invocations the provider answered with a failure, by normalized outcome.",
+    labelNames: PROVIDER_FAILURE_METRIC_LABELS,
+    registers: [registry],
+  });
+}
+
+/**
+ * What the platform keeps of a provider failure: a counter under bounded
+ * labels, and a journal entry carrying the classification and the status the
+ * bound fetch observed. Neither may replace the answer — a journal that
+ * cannot be written is logged and the provider failure is still what the
+ * caller hears.
+ */
+async function recordProviderFailure(
+  context: InvocationContext,
+  contract: ConnectorContract,
+  operation: ConnectorOperationContract,
+  instanceKey: string,
+  outcome: ConnectorProviderOutcome,
+  providerStatus: number | undefined,
+): Promise<void> {
+  providerFailureCounter().inc(
+    providerFailureMetricLabels(contract.slug, operation.key, outcome),
   );
+  try {
+    await withDbSession(context.db, context.session, (trx) =>
+      recordConnectorAudit(trx, {
+        tenantId: String(context.session.tenantId),
+        userId: context.session.userId ?? null,
+        connectorSlug: contract.slug,
+        instanceKey,
+        event: "connector.provider_failed",
+        providerFailure: providerFailureAuditFields(operation.key, outcome, providerStatus),
+      }),
+    );
+  } catch {
+    context.log?.("Connector provider failure could not be journalled.", {
+      connector: contract.slug,
+      operation: operation.key,
+      correlationId: outcome.correlationId,
+    });
+  }
 }
 
 /**

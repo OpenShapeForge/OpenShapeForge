@@ -1,0 +1,127 @@
+// SPDX-License-Identifier: BUSL-1.1
+/**
+ * The MCP failure envelope: the same body REST answers with, returned as
+ * `structuredContent`, mirrored as JSON text, summarised in one consistent
+ * line, and flagged `isError`. Shared by entity, connector and derived tools,
+ * because they all fail through the same function.
+ */
+import { describe, expect, it } from "bun:test";
+import { ConnectorExecutionError } from "../../connectors/executor.js";
+import type { ConnectorProviderOutcome } from "../../connectors/provider-outcome.js";
+import { HttpError, toHttpError } from "../../rest/http-error.js";
+import {
+  __failedForTests as failed,
+  __okForTests as ok,
+} from "../generated-mcp-server.js";
+
+const OUTCOME: ConnectorProviderOutcome = {
+  code: "CONNECTOR_PROVIDER_RATE_LIMITED",
+  category: "rate_limit",
+  retryable: true,
+  retryAt: "2026-01-01T00:00:30.000Z",
+  requiredAction: "wait",
+  correlationId: "corr-1",
+};
+
+const RATE_LIMITED = new ConnectorExecutionError(
+  OUTCOME.code,
+  "object-store",
+  'Connector "object-store" operation "listObjects" was rate limited by its provider.',
+  "listObjects",
+  { outcome: OUTCOME, providerStatus: 429 },
+);
+
+describe("a successful tool result", () => {
+  it("retains the existing text-only shape without a success envelope", () => {
+    const result = ok({ id: "example" });
+    expect(result).toEqual({
+      content: [{ type: "text", text: '{\n  "id": "example"\n}' }],
+    });
+    expect(result).not.toHaveProperty("structuredContent");
+  });
+});
+
+describe("a classified connector failure", () => {
+  const result = failed(RATE_LIMITED);
+
+  it("is a tool result, not a protocol error", () => {
+    expect(result.isError).toBe(true);
+  });
+
+  it("returns the outcome as structuredContent and mirrors it as JSON text", () => {
+    expect(result.structuredContent).toEqual({
+      error: {
+        code: "CONNECTOR_PROVIDER_RATE_LIMITED",
+        message: 'Connector "object-store" operation "listObjects" was rate limited by its provider.',
+        category: "rate_limit",
+        retryable: true,
+        retryAt: "2026-01-01T00:00:30.000Z",
+        requiredAction: "wait",
+        correlationId: "corr-1",
+      },
+    });
+    expect(JSON.parse(result.content[1]!.text)).toEqual(result.structuredContent);
+  });
+
+  it("leads with a summary that agrees with the structured retry meaning", () => {
+    const summary = result.content[0]!.text;
+    expect(summary).toBe(
+      "CONNECTOR_PROVIDER_RATE_LIMITED: Connector \"object-store\" operation \"listObjects\" " +
+        "was rate limited by its provider. Retry after 2026-01-01T00:00:30.000Z.",
+    );
+    expect(summary).toContain(OUTCOME.retryAt!);
+    expect(summary).not.toContain("Not retryable");
+  });
+
+  it("means the same thing REST does, and shows the same fields", () => {
+    const rest = toHttpError(RATE_LIMITED);
+    expect(rest.status).toBe(429);
+    expect(result.structuredContent).toEqual(rest.body);
+  });
+
+  it("carries nothing but the envelope", () => {
+    const text = JSON.stringify(result);
+    expect(text).not.toContain("providerStatus");
+    expect(text).not.toContain("429");
+    expect(text).not.toContain("http");
+  });
+});
+
+describe("a non-retryable classified failure", () => {
+  it("summarises the required action rather than a retry time", () => {
+    const outcome: ConnectorProviderOutcome = {
+      code: "CONNECTOR_PROVIDER_PERMISSION_DENIED",
+      category: "authorization",
+      retryable: false,
+      requiredAction: "contact_admin",
+      correlationId: "corr-2",
+    };
+    const denied = failed(new ConnectorExecutionError(
+      outcome.code,
+      "tickets",
+      'Connector "tickets" operation "getTicket" was denied permission by its provider.',
+      "getTicket",
+      { outcome, providerStatus: 403 },
+    ));
+    expect(denied.content[0]!.text).toBe(
+      'CONNECTOR_PROVIDER_PERMISSION_DENIED: Connector "tickets" operation "getTicket" was ' +
+        "denied permission by its provider. Not retryable; contact an administrator.",
+    );
+    expect(denied.structuredContent).toMatchObject({
+      error: { retryable: false, requiredAction: "contact_admin" },
+    });
+    expect(JSON.stringify(denied)).not.toContain("retryAt");
+  });
+});
+
+describe("an unclassified failure", () => {
+  it("keeps the plain envelope and the CODE: message summary", () => {
+    const result = failed(new HttpError(404, "NOT_FOUND", 'Unknown tool "x".'));
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe('NOT_FOUND: Unknown tool "x".');
+    expect(result.structuredContent).toEqual({
+      error: { code: "NOT_FOUND", message: 'Unknown tool "x".' },
+    });
+    expect(JSON.parse(result.content[1]!.text)).toEqual(result.structuredContent);
+  });
+});

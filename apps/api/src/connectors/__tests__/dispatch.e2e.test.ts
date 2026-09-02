@@ -16,6 +16,7 @@ import { generateKeyPairSync, randomBytes, randomUUID, sign as signEd25519 } fro
 import { SQL } from "bun";
 import { sql } from "kysely";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
+import { getProcessPrometheusRegistry } from "@openshapeforge/observability";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { runMigrationChain } from "../../db/migration-chain.js";
 import { listConnectorContracts } from "../catalog.js";
@@ -24,6 +25,7 @@ import { keyringFromEnv } from "../secrets.js";
 import { loadConnectorPackages } from "../loader.js";
 import { ConnectorGovernor } from "../reliability.js";
 import { configureConnector, setConnectorEnabled } from "../service.js";
+import type { ConnectorExecutionError } from "../executor.js";
 import { invokeConnectorOperation, verifyConnectorInstallation } from "../runtime.js";
 import { rotateSecrets } from "../store.js";
 import { CONNECTOR_AGGREGATE } from "../audit.js";
@@ -274,19 +276,122 @@ describe("the full dispatch chain", () => {
     expect(sent.get("Idempotency-Key")).toBe("req-dispatch-1");
   });
 
-  test("an upstream failure surfaces redacted", async () => {
-    await expect(
-      withUpstream(
-        () => new Response("secret internal detail", { status: 500 }),
-        () =>
-          invokeConnectorOperation(
+  test("an upstream failure surfaces classified and redacted", async () => {
+    let caught: ConnectorExecutionError | undefined;
+    await withUpstream(
+      () => new Response("secret internal detail", { status: 500 }),
+      async () => {
+        try {
+          await invokeConnectorOperation(
             invocationContext(TENANT, ["Connectors.All.Read"]),
             contract(),
             operation("listObjects"),
             {},
-          ),
-      ),
-    ).rejects.toThrow(/failed\.$/);
+          );
+        } catch (error) {
+          caught = error as ConnectorExecutionError;
+        }
+      },
+    );
+    expect(caught?.code).toBe("CONNECTOR_PROVIDER_UNAVAILABLE");
+    expect(caught?.message).toMatch(/provider is unavailable\.$/);
+    expect(caught?.message).not.toContain("secret internal detail");
+    expect(caught?.outcome).toMatchObject({ category: "availability", requiredAction: "wait" });
+  });
+
+  // The whole chain, for the outcome this issue exists for: the provider's
+  // 429 reaches the caller as a rate limit with its retry time, is journalled
+  // under the audit allowlist, and mutates nothing about the installation.
+  test("a provider 429 becomes a rate-limit outcome with retryAt, and is journalled", async () => {
+    let caught: ConnectorExecutionError | undefined;
+    const before = Date.now();
+    await withUpstream(
+      () =>
+        new Response("slow down: secret quota detail", {
+          status: 429,
+          headers: { "retry-after": "30", "x-provider-request-id": "prov-req-1" },
+        }),
+      async () => {
+        try {
+          await invokeConnectorOperation(
+            invocationContext(TENANT, ["Connectors.All.Read"]),
+            contract(),
+            operation("listObjects"),
+            {},
+          );
+        } catch (error) {
+          caught = error as ConnectorExecutionError;
+        }
+      },
+    );
+    expect(caught?.code).toBe("CONNECTOR_PROVIDER_RATE_LIMITED");
+    expect(caught?.outcome).toMatchObject({
+      category: "rate_limit",
+      retryable: true,
+      requiredAction: "wait",
+    });
+    expect(Date.parse(caught!.outcome!.retryAt!)).toBeGreaterThanOrEqual(before + 30_000);
+
+    const events = await runtime.db.connection().execute(async (conn) => {
+      await sql`select set_config('app.tenant_id', ${TENANT}, false)`.execute(conn);
+      return sql<{ tenant_id: string; event_type: string; payload: Record<string, unknown> }>`
+        select tenant_id::text, event_type, payload from platform.entity_events
+         where aggregate_type = ${CONNECTOR_AGGREGATE}
+           and event_type = 'connector.provider_failed'
+         order by sequence desc
+         limit 1
+      `.execute(conn);
+    });
+    const journalled = events.rows[0]?.payload.providerFailure as Record<string, unknown>;
+    expect(events.rows[0]?.tenant_id).toBe(TENANT);
+    expect(events.rows[0]?.payload).toMatchObject({
+      connectorSlug: SLUG,
+      instanceKey: "default",
+    });
+    expect(journalled).toEqual({
+      correlationId: caught!.outcome!.correlationId,
+      operationKey: "listObjects",
+      providerStatus: 429,
+      code: "CONNECTOR_PROVIDER_RATE_LIMITED",
+      retryable: true,
+      retryAt: caught!.outcome!.retryAt,
+    });
+    const serialized = JSON.stringify(events.rows[0]);
+    expect(serialized).not.toContain("secret quota detail");
+    expect(serialized).not.toContain("prov-req-1");
+    expect(serialized).not.toContain("eu.objectstore.example");
+    expect(serialized).not.toContain("AKIA-DISPATCH");
+    expect(serialized).not.toContain("dispatch-secret-value");
+
+    const metric = getProcessPrometheusRegistry().getSingleMetric(
+      "openshapeforge_connector_provider_failures_total",
+    );
+    const samples = (await metric?.get())?.values ?? [];
+    expect(samples).toContainEqual(
+      expect.objectContaining({
+        labels: {
+          connector: SLUG,
+          operation: "listObjects",
+          code: "CONNECTOR_PROVIDER_RATE_LIMITED",
+        },
+      }),
+    );
+    for (const sample of samples) {
+      expect(Object.keys(sample.labels).sort()).toEqual(["code", "connector", "operation"]);
+    }
+
+    // Still enabled, still usable: a provider refusal is not a lifecycle event.
+    const { result } = await withUpstream(
+      () => Response.json({ objects: [] }),
+      () =>
+        invokeConnectorOperation(
+          invocationContext(TENANT, ["Connectors.All.Read"]),
+          contract(),
+          operation("listObjects"),
+          {},
+        ),
+    );
+    expect(result).toEqual([]);
   });
 });
 

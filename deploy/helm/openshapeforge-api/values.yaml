@@ -312,7 +312,7 @@ affinity: {}
 # Extra environment variables (name/value) appended to the API container.
 # Authored MCP browser handoffs need configured, non-derived origins, for
 # example OPENSHAPEFORGE_PUBLIC_ORIGIN=https://api.example.com and
-# OPENSHAPEFORGE_WEB_ORIGIN=https://kern.example.com. Put
+# OPENSHAPEFORGE_WEB_ORIGIN=https://app.example.com. Put
 # OPENSHAPEFORGE_ELICITED_SECRET_KEYS in a Secret-backed deployment value.
 extraEnv: []
 

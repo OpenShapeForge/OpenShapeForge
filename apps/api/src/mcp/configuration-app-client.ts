@@ -7,7 +7,10 @@ const frame = document.getElementById("configuration-frame") as HTMLIFrameElemen
 const button = document.getElementById("configuration-open") as HTMLButtonElement;
 let formUrl = "";
 
-const app = new App({ name: "KERN secure configuration", version: "1.0.0" });
+const app = new App({
+  name: "Secure configuration",
+  version: "1.0.0",
+});
 app.ontoolresult = (result) => {
   const meta = result._meta as
     | { configurationUrl?: unknown; displayName?: unknown }
@@ -22,7 +25,7 @@ app.ontoolresult = (result) => {
       ? `Configure ${meta.displayName}`
       : "Secure configuration";
   message.textContent =
-    "Values go directly to KERN and never through the model.";
+    "Values go directly to the secure configuration service and never through the model.";
   frame.src = formUrl;
   frame.hidden = false;
   button.hidden = false;

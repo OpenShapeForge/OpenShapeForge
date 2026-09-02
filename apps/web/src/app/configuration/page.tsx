@@ -98,7 +98,7 @@ export default async function ConfigurationPage({
       <BodyHeader
         showBackButton={false}
         title="Veilige configuratie"
-        subtitle="Deze waarden gaan rechtstreeks naar KERN en niet via het model."
+        subtitle="Deze waarden gaan rechtstreeks naar de veilige configuratieservice en niet via het model."
       />
       <Card className="max-w-2xl">
         <CardHeader>

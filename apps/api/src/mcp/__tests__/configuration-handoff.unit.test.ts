@@ -144,7 +144,24 @@ describe("renderConfigurationForm", () => {
     const html = await renderConfigurationApp();
     expect(html).toContain('id="configuration-frame"');
     expect(html).toContain("ui/initialize");
+    expect(html).toContain("Secure configuration");
+    expect(html).toContain(
+      "Values go directly to the secure configuration service and never through the model.",
+    );
     expect(html).not.toContain("/api/entity-configuration/");
+  });
+
+  it("keeps the signed-in web form copy adopter-neutral", async () => {
+    const source = await Bun.file(
+      new URL(
+        "../../../../web/src/app/configuration/page.tsx",
+        import.meta.url,
+      ),
+    ).text();
+    expect(source).toContain(
+      'subtitle="Deze waarden gaan rechtstreeks naar de veilige configuratieservice en niet via het model."',
+    );
+    expect(source).toContain('title="Veilige configuratie"');
   });
 
   it("masks secrets, marks required fields, posts to the token path, escapes content", async () => {

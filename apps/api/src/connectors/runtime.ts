@@ -45,7 +45,10 @@ import { ConnectorGovernor } from "./reliability.js";
 import { describeContractDrift, isUsable } from "./status.js";
 import { contractSecrets, type SecretKeyring } from "./secrets.js";
 import { listInstallations, readSecrets } from "./store.js";
-import type { RuntimeModule } from "../modules/contract.js";
+import type {
+  ModuleEgressInvocationSource,
+  RuntimeModule,
+} from "../modules/contract.js";
 
 export class ConnectorInvocationError extends Error {
   readonly code: string;
@@ -67,6 +70,8 @@ export type InvocationContext = {
   instanceKey?: string;
   log?: (message: string, fields?: Record<string, unknown>) => void;
   egressOwner?: RuntimeModule["egress"] | undefined;
+  /** Optional core-resolved source; never derived from connector input/config. */
+  egressSource?: ModuleEgressInvocationSource | undefined;
 };
 
 /**
@@ -204,6 +209,7 @@ export async function invokeConnectorOperation(
               operation: operation.key,
               kind: operation.kind,
             },
+            ...(context.egressSource ? { source: context.egressSource } : {}),
           },
           ...(wrapFetch ? { wrapFetch } : {}),
           ...(context.log ? { log: context.log } : {}),

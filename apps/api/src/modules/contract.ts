@@ -83,6 +83,13 @@ export type ModuleInvocationSource = {
   definition: ModuleDefinitionReference;
 };
 
+/** Trusted coordination identity for outbound work using a resolved source. */
+export type ModuleEgressInvocationSource = {
+  /** Durable opaque reference; it carries no authority and reveals no row id. */
+  sourceReference: string;
+  scope: "tenant" | "personal";
+};
+
 export type ModuleInvocationSourceSelector =
   | { mode: "default" }
   | { mode: "explicit"; sourceHandle: string }
@@ -128,6 +135,11 @@ export type ModuleEgressRequest = {
     operation: string;
     kind: "query" | "mutation";
   };
+  /**
+   * Present only when core resolved an invocation source for this execution.
+   * OAuth, discovery, probes and other source-less traffic omit it.
+   */
+  source?: ModuleEgressInvocationSource;
   signal?: AbortSignal;
 };
 

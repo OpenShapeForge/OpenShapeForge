@@ -933,13 +933,23 @@ export async function acquireAuthHeaders(input: {
       ? (input.auth as AuthConfig)
       : undefined;
   if (config?.scheme === "oauth2ClientCredentials") {
+    // Token acquisition is OAuth traffic, not execution against the resolved
+    // invocation source. Preserve the core owner/scope but deliberately omit
+    // source coordination metadata from this separate lifecycle request.
+    const oauthEgress = input.egressDispatch
+      ? {
+          owner: input.egressDispatch.owner,
+          purpose: "oauth" as const,
+          scope: input.egressDispatch.scope,
+        }
+      : undefined;
     const token = await clientCredentialsToken({
       config,
       plain: input.plain,
       secret: input.secret,
       egress: input.egress,
       fetchImpl: input.fetchImpl,
-      egressDispatch: input.egressDispatch,
+      egressDispatch: oauthEgress,
     });
     return { authorization: `Bearer ${token}` };
   }

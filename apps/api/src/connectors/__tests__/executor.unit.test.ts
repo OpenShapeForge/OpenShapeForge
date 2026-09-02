@@ -265,6 +265,54 @@ describe("egress allowlist", () => {
     expect(requested).toEqual(["https://api.example.com/start"]);
   });
 
+  it("carries one trusted source through every connector redirect hop", async () => {
+    const source = {
+      sourceReference: "msr1.connector-source",
+      scope: "personal" as const,
+    };
+    const sourceSnapshots: unknown[] = [];
+    let calls = 0;
+    await invoke(
+      packageReturning(async (context) => {
+        await context.fetch("https://api.example.com/start");
+        return [];
+      }),
+      {
+        contract: contract({
+          network: { egress: ["api.example.com", "other.example.com"] },
+        }),
+        egress: {
+          purpose: "provider",
+          scope: {
+            tenantId: "tenant-1",
+            actorId: "actor-1",
+            provider: "provider-1",
+            operation: "operation-1",
+            kind: "query",
+          },
+          source,
+          owner: {
+            fetch: async (request) => {
+              calls += 1;
+              sourceSnapshots.push(request.source);
+              if (calls === 1) {
+                delete request.source;
+                return new Response(null, {
+                  status: 302,
+                  headers: { location: "https://other.example.com/final" },
+                });
+              }
+              return new Response("ok");
+            },
+          },
+        },
+      },
+    );
+
+    expect(sourceSnapshots).toEqual([source, source]);
+    expect(sourceSnapshots.every(Object.isFrozen)).toBe(true);
+  });
+
   it("preserves credentials on same-origin redirects and strips them across origins", async () => {
     const calls: { url: string; headers: Headers }[] = [];
     const bound = createBoundFetch(

@@ -138,6 +138,11 @@ describe("redirect egress", () => {
 
   it("delegates every allowed redirect hop to the egress owner with sanitized headers", async () => {
     const requests: any[] = [];
+    const sourceSnapshots: unknown[] = [];
+    const source = {
+      sourceReference: "msr1.declarative-source",
+      scope: "personal" as const,
+    };
     await fetchWithAllowedRedirects(
       "https://allowed.example/start",
       {
@@ -155,9 +160,16 @@ describe("redirect egress", () => {
           operation: "operation-1",
           kind: "query",
         },
+        source,
         owner: {
           fetch: async (request) => {
             requests.push(request);
+            sourceSnapshots.push(request.source);
+            if (requests.length === 1) {
+              // An owner can replace its local request property, but the next
+              // hop is reconstructed from core's immutable dispatch.
+              delete request.source;
+            }
             return requests.length === 1
               ? new Response(null, {
                   status: 302,
@@ -175,8 +187,11 @@ describe("redirect egress", () => {
     ]);
     expect(new Headers(requests[1].init.headers).get("authorization")).toBeNull();
     expect(new Headers(requests[1].init.headers).get("accept")).toBeNull();
+    expect(sourceSnapshots).toEqual([source, source]);
+    expect(sourceSnapshots.every(Object.isFrozen)).toBe(true);
     expect(requests[1]).toMatchObject({
       purpose: "provider",
+      source,
       scope: {
         tenantId: "tenant-1",
         actorId: "actor-1",
@@ -970,6 +985,64 @@ describe("oauth2ClientCredentials", () => {
     expect(calls.length).toBe(1);
     expect(calls[0]?.body).toContain("grant_type=client_credentials");
     expect(calls[0]?.body).toContain("scope=read");
+  });
+
+  it("keeps source coordination off OAuth and on the provider request", async () => {
+    const requests: any[] = [];
+    const source = {
+      sourceReference: "msr1.provider-source",
+      scope: "personal" as const,
+    };
+    const output = await executeBinding({
+      binding: {},
+      operationRow: {
+        operation: { method: "GET", pathTemplate: "/items" },
+      },
+      providerRow: {
+        transport: "rest",
+        baseUrlTemplate: "https://api.example.com",
+        egressHosts: ["auth.example.com", "api.example.com"],
+        auth: {
+          scheme: "oauth2ClientCredentials",
+          tokenUrl: "https://auth.example.com/token",
+        },
+      },
+      connectionValues: {
+        clientId: "source-absence-client",
+        clientSecret: "obviously-fake-secret",
+      },
+      serviceInputs: {},
+      fetchImpl: (() => {
+        throw new Error("fallback must not run");
+      }) as unknown as typeof fetch,
+      egress: {
+        purpose: "provider",
+        scope: {
+          tenantId: "tenant-1",
+          actorId: "actor-1",
+          provider: "provider-1",
+          operation: "operation-1",
+          kind: "query",
+        },
+        source,
+        owner: {
+          fetch: async (request) => {
+            requests.push(request);
+            return request.purpose === "oauth"
+              ? Response.json({ access_token: "cc-source-token", expires_in: 3600 })
+              : Response.json({ ok: true });
+          },
+        },
+      },
+      secretScope: "unused",
+    });
+
+    expect(output).toEqual({ ok: true });
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.purpose).toBe("oauth");
+    expect(requests[0]?.source).toBeUndefined();
+    expect(requests[1]?.purpose).toBe("provider");
+    expect(requests[1]?.source).toEqual(source);
   });
 
   it("refuses a token endpoint outside the egress allow-list", async () => {

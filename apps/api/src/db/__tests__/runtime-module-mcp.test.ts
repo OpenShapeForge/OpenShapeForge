@@ -183,7 +183,8 @@ describe("generated MCP runtime module security boundary", () => {
              status, visible_roles, internal_only, bindings)
           values
             (${publicDefinitionId}::uuid, ${tenantId}::uuid, 'public_read', 'Public read',
-             '[]'::jsonb, 1, 'published', '["reader"]'::jsonb, false,
+             '[{"key":"sourceReference","valueType":"string"},{"key":"scope","valueType":"string"}]'::jsonb,
+             1, 'published', '["reader"]'::jsonb, false,
              jsonb_build_array(jsonb_build_object('order', 1, 'operationId', ${operationId}::text))),
             (${hiddenDefinitionId}::uuid, ${tenantId}::uuid, 'hidden_read', 'Hidden read',
              '[]'::jsonb, 7, 'published', '["reader"]'::jsonb, true,
@@ -294,7 +295,9 @@ describe("generated MCP runtime module security boundary", () => {
           | "hidden-block"
           | "fire-child"
           | "cycle"
+          | "personal-sources"
           | "hidden-collision" = "normal";
+        let personalSourceIndex = 0;
         let heldOptions: ModuleToolExecutionOptions | undefined;
         let sourceReference: string | undefined;
         let capturedExecution: unknown;
@@ -455,11 +458,19 @@ describe("generated MCP runtime module security boundary", () => {
                 );
               }
               if (mode === "replay") return next(heldOptions);
-              const [source] = await platform.services.mcp.resolveInvocationSources(
+              const sources = await platform.services.mcp.resolveInvocationSources(
                 call.ctx.session,
                 call.name,
-                { mode: "default" },
+                {
+                  mode:
+                    mode === "personal-sources"
+                      ? "all-authorized"
+                      : "default",
+                },
               );
+              const source = sources[
+                mode === "personal-sources" ? personalSourceIndex : 0
+              ];
               expect(source).toBeDefined();
               const selected = {
                 sourceHandle: source!.sourceHandle,
@@ -558,6 +569,10 @@ describe("generated MCP runtime module security boundary", () => {
           expect(egressRequests).toHaveLength(1);
           expect(egressRequests[0]).toMatchObject({
             purpose: "provider",
+            source: {
+              sourceReference,
+              scope: "tenant",
+            },
             scope: {
               tenantId,
               actorId: userId,
@@ -747,6 +762,7 @@ describe("generated MCP runtime module security boundary", () => {
           }
           mode = "normal";
 
+          const secondConnectionId = randomUUID();
           await admin.connection().execute(async (trx) => {
             await sql`update public.module_provider_test
                set auth = '{"connectionScope":"user","scheme":"header","headerName":"x-api-key","tokenFrom":"apiKey"}'::jsonb
@@ -754,17 +770,77 @@ describe("generated MCP runtime module security boundary", () => {
             `.execute(trx);
             await sql`update public.module_connection_test
                set owner_user_id = ${userId}::uuid,
-                   values = '{"apiKey":"obviously-fake"}'::jsonb
+                   values = '{"apiKey":"obviously-fake","sourceReference":"config-reference","scope":"tenant"}'::jsonb
              where id = ${connectionId}::uuid
             `.execute(trx);
+            await sql`insert into public.module_connection_test
+              (id, tenant_id, owner_user_id, provider_id, values)
+            values (${secondConnectionId}::uuid, ${tenantId}::uuid,
+              ${userId}::uuid, ${providerId}::uuid,
+              '{"apiKey":"obviously-fake-two","sourceReference":"other-config-reference","scope":"tenant"}'::jsonb)
+            `.execute(trx);
           });
+
+          mode = "personal-sources";
           const beforePersonal = egressRequests.length;
-          const personalNonOauth = await client.callTool({
+          personalSourceIndex = 0;
+          const firstPersonal = await client.callTool({
             name: "public_read",
-            arguments: {},
+            arguments: {
+              sourceReference: "caller-reference",
+              scope: "tenant",
+            },
           });
-          expect(personalNonOauth.isError).not.toBe(true);
-          expect(egressRequests).toHaveLength(beforePersonal + 1);
+          const firstRequest = egressRequests.at(-1);
+          expect(firstPersonal.isError).not.toBe(true);
+          expect(firstRequest?.source?.scope).toBe("personal");
+          expect(firstRequest?.source?.sourceReference).toMatch(/^msr1\./);
+          expect(Object.keys(firstRequest.source).sort()).toEqual([
+            "scope",
+            "sourceReference",
+          ]);
+          expect(firstRequest.source.sourceReference).not.toBe(connectionId);
+          expect(firstRequest.source.sourceReference).not.toBe(secondConnectionId);
+          expect(firstRequest.source.sourceReference).not.toBe("caller-reference");
+          expect(firstRequest.source.sourceReference).not.toBe("config-reference");
+
+          const repeatPersonal = await client.callTool({
+            name: "public_read",
+            arguments: {
+              sourceReference: "different-caller-reference",
+              scope: "tenant",
+            },
+          });
+          const repeatRequest = egressRequests.at(-1);
+          expect(repeatPersonal.isError).not.toBe(true);
+
+          personalSourceIndex = 1;
+          const secondPersonal = await client.callTool({
+            name: "public_read",
+            arguments: {
+              sourceReference: "caller-reference",
+              scope: "tenant",
+            },
+          });
+          const secondRequest = egressRequests.at(-1);
+          expect(secondPersonal.isError).not.toBe(true);
+          expect(secondRequest?.source?.scope).toBe("personal");
+          expect(secondRequest?.source?.sourceReference).toMatch(/^msr1\./);
+
+          const coordinationKey = (request: any) =>
+            `${request.source.scope}:${request.source.sourceReference}`;
+          expect(coordinationKey(repeatRequest)).toBe(
+            coordinationKey(firstRequest),
+          );
+          expect(coordinationKey(secondRequest)).not.toBe(
+            coordinationKey(firstRequest),
+          );
+          expect(egressRequests).toHaveLength(beforePersonal + 3);
+          for (const outcome of [firstPersonal, repeatPersonal, secondPersonal]) {
+            expect(JSON.stringify(outcome)).not.toContain("msr1.");
+          }
+
+          mode = "normal";
           await admin.connection().execute(async (trx) => {
             await sql`update public.module_provider_test
                set auth = '{"connectionScope":"tenant"}'::jsonb
@@ -774,6 +850,9 @@ describe("generated MCP runtime module security boundary", () => {
                set owner_user_id = null,
                    values = '{}'::jsonb
              where id = ${connectionId}::uuid
+            `.execute(trx);
+            await sql`delete from public.module_connection_test
+             where id = ${secondConnectionId}::uuid
             `.execute(trx);
           });
 

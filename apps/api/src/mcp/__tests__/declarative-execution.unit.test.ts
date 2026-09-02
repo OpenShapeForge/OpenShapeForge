@@ -6,6 +6,7 @@
  * fetch — including the egress and secret-placement rules.
  */
 import { describe, expect, it } from "bun:test";
+import { ProviderOutcomeError } from "../../connectors/provider-outcome.js";
 import {
   composeBindingRequest,
   describeAuthHeaders,
@@ -599,5 +600,103 @@ describe("mergeOutputs", () => {
     // A non-array meeting an array still overwrites - chains stay expressible.
     mergeOutputs(accumulated, { tasks: "done" });
     expect(accumulated.tasks).toBe("done");
+  });
+});
+
+/**
+ * A provider failure on the authored-Service path carries the same normalized
+ * outcome the connector runtime produces — same codes, same retry meaning —
+ * and, like there, nothing the provider said.
+ */
+describe("provider failures are normalized", () => {
+  const providerRow = {
+    transport: "rest",
+    baseUrlTemplate: "https://api.example.com",
+    egressHosts: ["api.example.com"],
+  };
+  const operationRow = {
+    key: "search",
+    operation: { method: "GET", pathTemplate: "/search" },
+  };
+  const keyring = keyringFromEnv(`k4:${Buffer.alloc(32, 4).toString("base64")}`)!;
+
+  async function failing(status: number, headers: Record<string, string> = {}) {
+    const impl = (async () =>
+      new Response("secret provider body", { status, headers })) as unknown as typeof fetch;
+    try {
+      await executeBinding({
+        binding: {},
+        operationRow,
+        providerRow,
+        connectionValues: {},
+        serviceInputs: {},
+        keyring,
+        fetchImpl: impl,
+        secretScope: "erp.providers",
+      });
+    } catch (error) {
+      return error as ProviderOutcomeError;
+    }
+    throw new Error("expected a failure");
+  }
+
+  it("classifies a 429 with its retry time and no provider text", async () => {
+    const error = await failing(429, { "retry-after": "30" });
+    expect(error).toBeInstanceOf(ProviderOutcomeError);
+    expect(error.code).toBe("CONNECTOR_PROVIDER_RATE_LIMITED");
+    expect(error.outcome).toMatchObject({
+      category: "rate_limit",
+      retryable: true,
+      requiredAction: "wait",
+    });
+    expect(typeof error.outcome.retryAt).toBe("string");
+    expect(error.providerStatus).toBe(429);
+    expect(error.message).toBe('Operation "search" was rate limited by its provider.');
+    expect(error.message).not.toContain("secret provider body");
+  });
+
+  it("gives every status the connector runtime's disposition", async () => {
+    expect((await failing(400)).code).toBe("CONNECTOR_PROVIDER_REJECTED_INPUT");
+    expect((await failing(401)).code).toBe("CONNECTOR_PROVIDER_AUTHORIZATION_FAILED");
+    expect((await failing(403)).code).toBe("CONNECTOR_PROVIDER_PERMISSION_DENIED");
+    expect((await failing(404)).code).toBe("CONNECTOR_UPSTREAM_ERROR");
+    // No reliability policy exists on this path, so an outage is never
+    // retryable in-call; the caller is still told to wait.
+    const outage = await failing(503);
+    expect(outage.code).toBe("CONNECTOR_PROVIDER_UNAVAILABLE");
+    expect(outage.outcome).toMatchObject({ retryable: false, requiredAction: "wait" });
+  });
+
+  it("treats GraphQL errors as a provider contract failure without echoing them", async () => {
+    const impl = (async () =>
+      Response.json({ errors: [{ message: "boom: token=abc" }] })) as unknown as typeof fetch;
+    let caught: ProviderOutcomeError | undefined;
+    try {
+      await executeBinding({
+        binding: {},
+        operationRow: { key: "tickets", operation: { graphqlOperation: "query{x}" } },
+        providerRow: {
+          transport: "graphql",
+          baseUrlTemplate: "https://gql.example.com",
+          egressHosts: ["gql.example.com"],
+        },
+        connectionValues: {},
+        serviceInputs: {},
+        keyring,
+        fetchImpl: impl,
+        secretScope: "erp.providers",
+      });
+    } catch (error) {
+      caught = error as ProviderOutcomeError;
+    }
+    expect(caught).toBeInstanceOf(ProviderOutcomeError);
+    expect(caught!.code).toBe("CONNECTOR_UPSTREAM_ERROR");
+    expect(caught!.outcome).toMatchObject({
+      category: "provider_contract",
+      retryable: false,
+      requiredAction: "contact_admin",
+    });
+    expect(caught!.message).toBe('Operation "tickets" answered with GraphQL errors.');
+    expect(caught!.message).not.toContain("boom");
   });
 });

@@ -29,8 +29,18 @@
  * where the host can terminate the isolate — the second executor behind this
  * same interface, for when third-party packages are on the table.
  */
+import { randomUUID } from "node:crypto";
 import { ConnectorContractBoundary, ConnectorBoundaryError } from "./contract-boundary.js";
 import type { ConnectorContract, ConnectorOperationContract } from "./catalog.js";
+import {
+  ProviderObservations,
+  classifyProviderOutcome,
+  providerOutcomeMessage,
+  type ConnectorProviderOutcome,
+  type ConnectorProviderOutcomeCode,
+  type ObservableResponse,
+} from "./provider-outcome.js";
+import { mayRetry } from "./reliability.js";
 
 export type ConnectorExecutionErrorCode =
   | "CONNECTOR_PROVENANCE_REFUSED"
@@ -38,29 +48,42 @@ export type ConnectorExecutionErrorCode =
   | "CONNECTOR_TIMEOUT"
   | "CONNECTOR_RATE_LIMITED"
   | "CONNECTOR_CIRCUIT_OPEN"
-  | "CONNECTOR_UPSTREAM_ERROR"
   | "CONNECTOR_OAUTH_FAILED"
   // Distinct from every other failure because it is the only one a retry can
   // never fix and a person can always fix: the refresh token is spent or
   // revoked, and somebody has to authorize the installation again.
-  | "CONNECTOR_REAUTHORIZATION_REQUIRED";
+  | "CONNECTOR_REAUTHORIZATION_REQUIRED"
+  // What the provider answered, classified from the status the bound fetch
+  // observed — including the CONNECTOR_UPSTREAM_ERROR fallback.
+  | ConnectorProviderOutcomeCode;
+
+export type ConnectorExecutionErrorDetails = {
+  outcome?: ConnectorProviderOutcome;
+  /** The observed provider status, for the audit trail. Never on the wire. */
+  providerStatus?: number;
+};
 
 export class ConnectorExecutionError extends Error {
   readonly code: ConnectorExecutionErrorCode;
   readonly connector: string;
   readonly operation: string | undefined;
+  readonly outcome: ConnectorProviderOutcome | undefined;
+  readonly providerStatus: number | undefined;
 
   constructor(
     code: ConnectorExecutionErrorCode,
     connector: string,
     message: string,
     operation?: string,
+    details: ConnectorExecutionErrorDetails = {},
   ) {
     super(message);
     this.name = "ConnectorExecutionError";
     this.code = code;
     this.connector = connector;
     this.operation = operation;
+    this.outcome = details.outcome;
+    this.providerStatus = details.providerStatus;
   }
 }
 
@@ -183,11 +206,17 @@ export function hostAllowed(host: string, allowlist: readonly string[]): boolean
  * An empty allowlist means no outbound HTTP at all: the allowlist is the grant,
  * not a filter over an open door. Non-HTTP schemes are refused outright — a
  * `file:` URL is not egress, it is a filesystem read wearing a URL.
+ *
+ * `observe` sees every response the package receives, and is what the
+ * executor classifies a failure from. It changes nothing about the response:
+ * a package that absorbs a non-success probe and returns a result has
+ * succeeded, and the observation is simply never read.
  */
 export function createBoundFetch(
   contract: ConnectorContract,
   signal: AbortSignal,
   underlying: FetchLike = fetch,
+  observe?: (response: ObservableResponse) => void,
 ): FetchLike {
   const allowlist = contract.network.egress;
   return (async (input: string | URL | Request, init?: RequestInit) => {
@@ -211,7 +240,9 @@ export function createBoundFetch(
     }
     // The caller's own signal is replaced, not merged: a package must not be
     // able to opt out of the operation's budget by passing its own.
-    return underlying(input, { ...init, signal });
+    const response = await underlying(input, { ...init, signal });
+    observe?.(response);
+    return response;
   }) as FetchLike;
 }
 
@@ -235,6 +266,11 @@ export type InvokeInput = {
    * refusing every host the contract does not declare.
    */
   wrapFetch?: (bound: FetchLike) => FetchLike;
+  /**
+   * Platform-minted id that ties a failure's outcome, its audit record and the
+   * caller's answer together. Minted here when the caller has none.
+   */
+  correlationId?: string;
 };
 
 /**
@@ -266,7 +302,11 @@ export async function invokeOperation(input: InvokeInput): Promise<unknown> {
    */
   const overran = () => Date.now() - startedAt > attemptMs;
 
-  const boundFetch = createBoundFetch(contract, controller.signal, input.fetchImpl);
+  const correlationId = input.correlationId ?? randomUUID();
+  const observations = new ProviderObservations(correlationId);
+  const boundFetch = createBoundFetch(contract, controller.signal, input.fetchImpl, (response) =>
+    observations.observe(response),
+  );
   const context: ConnectorContext = {
     config: Object.freeze({ ...input.config }),
     secrets: Object.freeze({ ...input.secrets }),
@@ -294,11 +334,27 @@ export async function invokeOperation(input: InvokeInput): Promise<unknown> {
     if (error instanceof ConnectorExecutionError || error instanceof ConnectorBoundaryError) {
       throw error;
     }
+    // The classification rests on what the platform saw for itself — the
+    // status of the last non-success response and a Retry-After it could
+    // parse. A validated package hint may narrow that; nothing in the thrown
+    // error itself is trusted.
+    const observation = observations.last();
+    const outcome = classifyProviderOutcome({
+      correlationId,
+      observation,
+      hint: boundary.providerFailureHint(error),
+      retryAllowed: mayRetry(operation.kind, operation.reliability),
+      now: Date.now(),
+    });
     throw new ConnectorExecutionError(
-      "CONNECTOR_UPSTREAM_ERROR",
+      outcome.code,
       contract.slug,
-      `Connector "${contract.slug}" operation "${operation.key}" failed.`,
+      providerOutcomeMessage(
+        outcome.code,
+        `Connector "${contract.slug}" operation "${operation.key}"`,
+      ),
       operation.key,
+      { outcome, ...(observation ? { providerStatus: observation.status } : {}) },
     );
   } finally {
     clearTimeout(timer);

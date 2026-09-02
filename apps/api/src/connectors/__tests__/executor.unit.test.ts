@@ -8,6 +8,7 @@ import {
   hostAllowed,
   invokeOperation,
   type ConnectorContext,
+  type ConnectorExecutionErrorCode,
   type ConnectorPackage,
 } from "../executor.js";
 import type { ConnectorContract, ConnectorOperationContract } from "../catalog.js";
@@ -372,5 +373,210 @@ describe("in-process cancellation is cooperative, not enforced", () => {
     // It is reported as a timeout — the caller is not misled about lateness —
     // but the work was NOT stopped, which is exactly the gap.
     expect(outcome).toBe("rejected");
+  });
+});
+
+/**
+ * What the platform saw of the provider decides how a failure is described.
+ * The package's own error is never read for that — only the status and the
+ * Retry-After of the last non-success response the bound fetch returned, and
+ * a hint the boundary validated.
+ */
+describe("provider outcomes", () => {
+  const RETRYABLE_QUERY = {
+    ...OPERATION,
+    reliability: {
+      ...OPERATION.reliability,
+      retry: { eligible: true, maxAttempts: 3, backoff: "fixed" },
+    },
+  } as unknown as ConnectorOperationContract;
+
+  /** A package that calls the provider once and throws on anything but 2xx. */
+  function fetchingPackage(
+    onFailure: (response: Response) => unknown = (response) => {
+      throw new Error(`Object store responded ${response.status}: leaked body text`);
+    },
+  ): ConnectorPackage {
+    return packageReturning(async (context) => {
+      const response = await context.fetch("https://api.example.com/objects");
+      if (!response.ok) return onFailure(response);
+      return [];
+    });
+  }
+
+  function answering(status: number, headers: Record<string, string> = {}) {
+    return async () => new Response("secret provider body", { status, headers });
+  }
+
+  async function failure(
+    pkg: ConnectorPackage,
+    overrides: Partial<Parameters<typeof invokeOperation>[0]> = {},
+  ): Promise<ConnectorExecutionError> {
+    try {
+      await invoke(pkg, overrides);
+    } catch (error) {
+      return error as ConnectorExecutionError;
+    }
+    throw new Error("expected a failure");
+  }
+
+  it("classifies a 429 from the observed response, with a bounded retryAt", async () => {
+    const before = Date.now();
+    const error = await failure(fetchingPackage(), {
+      fetchImpl: answering(429, { "retry-after": "30" }),
+      correlationId: "corr-1",
+    });
+    expect(error.code).toBe("CONNECTOR_PROVIDER_RATE_LIMITED");
+    expect(error.outcome).toMatchObject({
+      code: "CONNECTOR_PROVIDER_RATE_LIMITED",
+      category: "rate_limit",
+      retryable: true,
+      requiredAction: "wait",
+      correlationId: "corr-1",
+    });
+    const retryAt = Date.parse(error.outcome!.retryAt!);
+    expect(retryAt).toBeGreaterThanOrEqual(before + 30_000);
+    expect(retryAt).toBeLessThanOrEqual(Date.now() + 30_000);
+    expect(error.providerStatus).toBe(429);
+    // Nothing the package or the provider said reaches the message.
+    expect(error.message).not.toContain("leaked body text");
+    expect(error.message).not.toContain("secret provider body");
+    expect(error.message).not.toContain("429");
+  });
+
+  it("gives each status its disposition", async () => {
+    const cases: [number, ConnectorExecutionErrorCode, boolean][] = [
+      [400, "CONNECTOR_PROVIDER_REJECTED_INPUT", false],
+      [409, "CONNECTOR_PROVIDER_REJECTED_INPUT", false],
+      [422, "CONNECTOR_PROVIDER_REJECTED_INPUT", false],
+      [401, "CONNECTOR_PROVIDER_AUTHORIZATION_FAILED", false],
+      [403, "CONNECTOR_PROVIDER_PERMISSION_DENIED", false],
+      [404, "CONNECTOR_UPSTREAM_ERROR", false],
+      [503, "CONNECTOR_PROVIDER_UNAVAILABLE", true],
+    ];
+    for (const [status, code, retryable] of cases) {
+      const error = await failure(fetchingPackage(), {
+        operation: RETRYABLE_QUERY,
+        fetchImpl: answering(status),
+      });
+      expect(error.code).toBe(code);
+      expect(error.outcome?.retryable).toBe(retryable);
+    }
+  });
+
+  // A resource 401 is not proof that consent was revoked; the only thing that
+  // may say so is a refused refresh, which lives in the OAuth path.
+  it("never infers reauthorization from a resource 401", async () => {
+    const error = await failure(fetchingPackage(), { fetchImpl: answering(401) });
+    expect(error.code).toBe("CONNECTOR_PROVIDER_AUTHORIZATION_FAILED");
+    expect(error.code).not.toBe("CONNECTOR_REAUTHORIZATION_REQUIRED");
+  });
+
+  it("makes an outage retryable only under the operation's policy", async () => {
+    const forbidden = await failure(fetchingPackage(), { fetchImpl: answering(503) });
+    expect(forbidden.code).toBe("CONNECTOR_PROVIDER_UNAVAILABLE");
+    expect(forbidden.outcome?.retryable).toBe(false);
+    const allowed = await failure(fetchingPackage(), {
+      operation: RETRYABLE_QUERY,
+      fetchImpl: answering(503),
+    });
+    expect(allowed.outcome?.retryable).toBe(true);
+  });
+
+  // The observation is not a fetch semantic. A package that probes and
+  // recovers has succeeded, whatever the probe answered.
+  it("does not turn an absorbed probe response into a failed operation", async () => {
+    const absorbing = fetchingPackage(() => [{ key: "fallback" }]);
+    expect(await invoke(absorbing, { fetchImpl: answering(404) })).toEqual([
+      { key: "fallback" },
+    ]);
+  });
+
+  it("classifies from the most recent non-success response", async () => {
+    const statuses = [500, 400];
+    const twice = packageReturning(async (context) => {
+      await context.fetch("https://api.example.com/first");
+      await context.fetch("https://api.example.com/second");
+      throw new Error("gave up");
+    });
+    const error = await failure(twice, {
+      fetchImpl: async () => new Response("", { status: statuses.shift()! }),
+    });
+    expect(error.code).toBe("CONNECTOR_PROVIDER_REJECTED_INPUT");
+  });
+
+  it("still observes through the OAuth wrapper", async () => {
+    const error = await failure(fetchingPackage(), {
+      fetchImpl: answering(403),
+      wrapFetch: (bound) => (input, init) => bound(input, init),
+    });
+    expect(error.code).toBe("CONNECTOR_PROVIDER_PERMISSION_DENIED");
+  });
+
+  it("keeps the fallback, with an outcome, when nothing was observed", async () => {
+    const error = await failure(packageReturning(async () => {
+      throw new Error("ECONNRESET");
+    }));
+    expect(error.code).toBe("CONNECTOR_UPSTREAM_ERROR");
+    expect(error.outcome).toMatchObject({
+      code: "CONNECTOR_UPSTREAM_ERROR",
+      category: "provider_contract",
+      retryable: false,
+    });
+    expect(error.providerStatus).toBeUndefined();
+    expect(typeof error.outcome?.correlationId).toBe("string");
+  });
+
+  describe("package hints", () => {
+    function hinting(hint: unknown): ConnectorPackage {
+      return fetchingPackage((response) => {
+        throw Object.assign(new Error(`provider said ${response.status}`), {
+          providerFailure: hint,
+        });
+      });
+    }
+
+    it("lets a valid hint narrow the platform result", async () => {
+      const error = await failure(
+        hinting({ status: 400, code: "CONNECTOR_PROVIDER_AUTHORIZATION_FAILED" }),
+        { fetchImpl: answering(400) },
+      );
+      expect(error.code).toBe("CONNECTOR_PROVIDER_AUTHORIZATION_FAILED");
+    });
+
+    it("lets a valid hint withdraw retryability", async () => {
+      const error = await failure(hinting({ status: 429, retryable: false }), {
+        fetchImpl: answering(429, { "retry-after": "5" }),
+      });
+      expect(error.code).toBe("CONNECTOR_PROVIDER_RATE_LIMITED");
+      expect(error.outcome?.retryable).toBe(false);
+      expect(error.outcome?.retryAt).toBeUndefined();
+    });
+
+    it("ignores an invalid hint whole", async () => {
+      const error = await failure(
+        hinting({
+          status: 400,
+          code: "CONNECTOR_PROVIDER_AUTHORIZATION_FAILED",
+          message: "a message the caller must not see",
+        }),
+        { fetchImpl: answering(400) },
+      );
+      expect(error.code).toBe("CONNECTOR_PROVIDER_REJECTED_INPUT");
+      expect(error.message).not.toContain("must not see");
+    });
+
+    it("ignores a hint that broadens", async () => {
+      const granting = await failure(hinting({ status: 400, retryable: true }), {
+        fetchImpl: answering(400),
+      });
+      expect(granting.outcome?.retryable).toBe(false);
+
+      const inventing = await failure(
+        hinting({ status: 429, code: "CONNECTOR_PROVIDER_RATE_LIMITED" }),
+        { fetchImpl: answering(403) },
+      );
+      expect(inventing.code).toBe("CONNECTOR_PROVIDER_PERMISSION_DENIED");
+    });
   });
 });

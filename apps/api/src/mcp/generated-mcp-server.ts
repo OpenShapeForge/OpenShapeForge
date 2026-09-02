@@ -124,6 +124,7 @@ import { refreshTokens } from "./entity-oauth.js";
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
+import { failureSummary } from "../connectors/provider-outcome.js";
 import { listConnectorContracts } from "../connectors/catalog.js";
 import {
   connectorToolsForSession,
@@ -1094,6 +1095,7 @@ export const __resourcesForSessionForTests = resourcesForSession;
 
 type ToolResult = {
   content: { type: "text"; text: string }[];
+  structuredContent?: Record<string, unknown>;
   isError?: boolean;
   _meta?: Record<string, unknown>;
 };
@@ -1126,16 +1128,49 @@ export const __configurationAppResultForTests = configurationAppResult;
  * that gets "FORBIDDEN: not authorized to delete Relation" back as content can
  * adapt, where a transport-level failure just terminates the call. The code
  * vocabulary is the CRUD layer's, unchanged.
+ *
+ * The body is the same object REST answers with, carried three ways: as
+ * `structuredContent` for clients that read it typed, mirrored as JSON text
+ * for clients that only render text, and summarised in one line first so a
+ * model sees the code and the retry meaning before anything else. The
+ * summary is derived from the same fields, so it cannot contradict them.
  */
 function failed(error: unknown): ToolResult {
   const { body } = toHttpError(error);
   return {
     content: [
-      { type: "text", text: `${body.error.code}: ${body.error.message}` },
+      { type: "text", text: failureSummary(body.error) },
+      { type: "text", text: JSON.stringify(body, null, 2) },
     ],
+    structuredContent: body,
     isError: true,
   };
 }
+
+export const __failedForTests = failed;
+
+/**
+ * What an optional binding's failure looks like inside a composed answer:
+ * the normalized outcome, not a sentence. A failure that was never
+ * classified — a misconfigured definition, a missing connection — has no
+ * retry meaning, and says so.
+ */
+function unavailableOutcome(error: unknown): {
+  code: string;
+  retryable: boolean;
+  retryAt?: string;
+  requiredAction: string;
+} {
+  const { code, retryable, retryAt, requiredAction } = toHttpError(error).body.error;
+  return {
+    code,
+    retryable: retryable ?? false,
+    ...(retryAt !== undefined ? { retryAt } : {}),
+    requiredAction: requiredAction ?? "contact_admin",
+  };
+}
+
+export const __unavailableOutcomeForTests = unavailableOutcome;
 
 function requireArguments(args: unknown): Record<string, unknown> {
   if (args === undefined || args === null) return {};
@@ -1758,6 +1793,7 @@ function buildServer(
         title: tool.title,
         description: tool.description,
         inputSchema: tool.inputSchema,
+        outputSchema: tool.outputSchema,
         annotations: { title: tool.title, ...tool.annotations },
       })),
       ...catalog.operationTools
@@ -1814,7 +1850,9 @@ function buildServer(
           connectorTool.operation,
           request.params.arguments ?? {},
         );
-        return ok(result);
+        // The tool declares an output schema for its failure envelope, and a
+        // client that sees one expects structured content on success too.
+        return { ...ok(result), structuredContent: { result } };
       } catch (error) {
         return failed(error);
       }
@@ -2742,7 +2780,10 @@ function buildServer(
             // still answer when one of them is down or not yet connected —
             // and every skipped one is reported honestly in `unavailable`.
             const accumulated: Record<string, unknown> = {};
-            const unavailable: { binding: number; reason: string }[] = [];
+            const unavailable: {
+              binding: number;
+              outcome: ReturnType<typeof unavailableOutcome>;
+            }[] = [];
             for (const binding of orderedBindings(
               serviceRow,
               execution.bindingsField,
@@ -3096,7 +3137,7 @@ function buildServer(
                 if (binding.optional !== true) throw error;
                 unavailable.push({
                   binding: Number(binding.order ?? 0),
-                  reason: toHttpError(error).body.error.message,
+                  outcome: unavailableOutcome(error),
                 });
               }
             }

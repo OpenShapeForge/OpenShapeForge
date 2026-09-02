@@ -3,10 +3,12 @@ import { describe, expect, it } from "bun:test";
 import {
   annotationsFor,
   connectorMcpTools,
+  connectorToolOutputSchema,
   connectorToolsForSession,
   resolveConnectorTool,
   sessionMayInvokeConnectorTool,
 } from "../mcp-tools.js";
+import { FAILURE_ENVELOPE_SCHEMA } from "../provider-outcome.js";
 import type { ConnectorContract, ConnectorOperationContract } from "../catalog.js";
 
 const READ_ROLE = "Connectors.All.Read";
@@ -173,5 +175,25 @@ describe("invocation lookup", () => {
     for (const name of ["object_store_list", "object_store_put", "nonsense"]) {
       expect(resolveConnectorTool(CONTRACTS, name, { roles: [] })).toBeUndefined();
     }
+  });
+});
+
+describe("output schema", () => {
+  // A client reading `retryable` and `retryAt` off a failure needs them
+  // declared; declaring them means declaring the success half as well.
+  it("declares the operation result and the failure envelope, closed", () => {
+    const tool = connectorMcpTools(CONTRACTS).find((entry) => entry.operationKey === "list")!;
+    expect(tool.outputSchema).toEqual({
+      type: "object",
+      properties: {
+        result: { type: "object" },
+        error: FAILURE_ENVELOPE_SCHEMA,
+      },
+      additionalProperties: false,
+    });
+    expect(connectorToolOutputSchema(CONTRACTS[0]!.operations[1]!).properties).toHaveProperty(
+      "error",
+      FAILURE_ENVELOPE_SCHEMA,
+    );
   });
 });

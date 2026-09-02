@@ -21,6 +21,7 @@
  * here has to police it.
  */
 import type { ConnectorContract, ConnectorOperationContract } from "./catalog.js";
+import { FAILURE_ENVELOPE_SCHEMA } from "./provider-outcome.js";
 
 export type McpSessionLike = { roles: readonly string[] };
 
@@ -31,6 +32,7 @@ export type ConnectorMcpTool = {
   title: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
   annotations: {
     readOnlyHint: boolean;
     destructiveHint: boolean;
@@ -88,6 +90,27 @@ function describeOperation(
   return parts.join(" ");
 }
 
+/**
+ * What a connector tool's `structuredContent` can hold: the operation's own
+ * output under `result`, or the failure envelope under `error`. Declaring the
+ * failure half is what lets a client read `retryable` and `retryAt` as typed
+ * fields rather than parsing them out of text; declaring the success half is
+ * the price of declaring anything, because a client that sees an output schema
+ * expects structured content on every answer.
+ */
+export function connectorToolOutputSchema(
+  operation: ConnectorOperationContract,
+): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      result: operation.schemas.output,
+      error: FAILURE_ENVELOPE_SCHEMA,
+    },
+    additionalProperties: false,
+  };
+}
+
 /** Every connector tool this build advertises, before session filtering. */
 export function connectorMcpTools(contracts: ConnectorContract[]): ConnectorMcpTool[] {
   return contracts
@@ -102,6 +125,7 @@ export function connectorMcpTools(contracts: ConnectorContract[]): ConnectorMcpT
           title: localized(operation.label) ?? operation.key,
           description: describeOperation(contract, operation),
           inputSchema: operation.schemas.input,
+          outputSchema: connectorToolOutputSchema(operation),
           annotations: annotationsFor(operation),
         })),
     )

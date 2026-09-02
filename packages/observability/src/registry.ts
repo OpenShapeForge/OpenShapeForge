@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { Registry } from "prom-client";
-export { Registry } from "prom-client";
+export { Counter, Registry } from "prom-client";
 
 const REGISTRY_KEY = Symbol.for("openshapeforge.observability.prometheus-registry");
 export const YOGA_METRICS_KEY = Symbol.for(

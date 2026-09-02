@@ -24,6 +24,11 @@
 import { Ajv, type ValidateFunction } from "ajv";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import {
+  PROVIDER_FAILURE_HINT_PROPERTY,
+  PROVIDER_FAILURE_HINT_SCHEMA,
+  type ConnectorProviderFailureHint,
+} from "./provider-outcome.js";
 
 /** Shape a compiled connector operation presents to this boundary. */
 export type BoundaryOperation = {
@@ -128,6 +133,7 @@ function describeErrors(validate: ValidateFunction): string {
 export class ConnectorContractBoundary {
   private readonly inputValidators = new Map<string, ValidateFunction>();
   private readonly outputValidators = new Map<string, ValidateFunction>();
+  private readonly hintValidator: ValidateFunction;
 
   constructor(private readonly contract: BoundaryContract) {
     const ajv = createAjv();
@@ -135,6 +141,24 @@ export class ConnectorContractBoundary {
       this.inputValidators.set(operation.key, ajv.compile(operation.schemas.input));
       this.outputValidators.set(operation.key, ajv.compile(operation.schemas.output));
     }
+    this.hintValidator = ajv.compile(PROVIDER_FAILURE_HINT_SCHEMA);
+  }
+
+  /**
+   * The provider-failure hint a thrown package error carries, if it is valid.
+   *
+   * The schema is closed: an unknown property, a status outside the HTTP
+   * range, a code the vocabulary does not know, or `retryable: true` all make
+   * the whole hint invalid, and an invalid hint is simply absent — the
+   * platform default applies and nothing the package said is used.
+   */
+  providerFailureHint(error: unknown): ConnectorProviderFailureHint | undefined {
+    if (!error || typeof error !== "object") return undefined;
+    const candidate = (error as Record<string, unknown>)[PROVIDER_FAILURE_HINT_PROPERTY];
+    if (!candidate || typeof candidate !== "object") return undefined;
+    return this.hintValidator(candidate)
+      ? (candidate as ConnectorProviderFailureHint)
+      : undefined;
   }
 
   /**

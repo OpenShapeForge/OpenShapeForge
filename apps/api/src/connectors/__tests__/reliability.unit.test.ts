@@ -9,7 +9,8 @@ import {
   mayRetry,
   type OperationReliability,
 } from "../reliability.js";
-import type { ConnectorExecutionError } from "../executor.js";
+import { ConnectorExecutionError } from "../executor.js";
+import type { ConnectorProviderOutcome } from "../provider-outcome.js";
 
 function reliability(
   overrides: Partial<OperationReliability> = {},
@@ -349,5 +350,86 @@ describe("circuit breaker", () => {
     } catch (error) {
       expect((error as ConnectorExecutionError).code).toBe("CONNECTOR_CIRCUIT_OPEN");
     }
+  });
+});
+
+/**
+ * A classified provider outcome can only ever remove attempts. The policy
+ * above decided how many there may be; a provider that says "not retryable"
+ * or names a time beyond the budget shortens that, and one that says
+ * "retryable" adds nothing to a mutation the contract never made safe.
+ */
+describe("provider outcomes and the retry loop", () => {
+  const NOW = 1_000_000;
+
+  function classified(
+    outcome: Partial<ConnectorProviderOutcome> & Pick<ConnectorProviderOutcome, "retryable">,
+  ): ConnectorExecutionError {
+    return new ConnectorExecutionError(
+      "CONNECTOR_PROVIDER_UNAVAILABLE",
+      "c",
+      "unavailable",
+      "op",
+      {
+        outcome: {
+          code: "CONNECTOR_PROVIDER_UNAVAILABLE",
+          category: "availability",
+          requiredAction: "wait",
+          correlationId: "corr",
+          ...outcome,
+        },
+      },
+    );
+  }
+
+  async function attemptsUntilFailure(
+    error: ConnectorExecutionError,
+    kind: "query" | "mutation" = "query",
+    policy: OperationReliability = reliability(),
+  ): Promise<number> {
+    const governor = new ConnectorGovernor();
+    let attempts = 0;
+    await expect(
+      governor.run(
+        {
+          connector: "c",
+          operationKey: "op",
+          kind,
+          tenantId: "t",
+          reliability: policy,
+          now: () => NOW,
+          sleep: NO_SLEEP,
+        },
+        async () => {
+          attempts += 1;
+          throw error;
+        },
+      ),
+    ).rejects.toBe(error);
+    return attempts;
+  }
+
+  it("does not retry a failure the classification says is not retryable", async () => {
+    expect(await attemptsUntilFailure(classified({ retryable: false }))).toBe(1);
+  });
+
+  it("still retries a retryable failure up to the policy's attempts", async () => {
+    expect(await attemptsUntilFailure(classified({ retryable: true }))).toBe(3);
+  });
+
+  it("does not retry in-call when retryAt lies beyond the remaining budget", async () => {
+    const beyond = new Date(NOW + 60_000).toISOString(); // budget is 10s
+    expect(await attemptsUntilFailure(classified({ retryable: true, retryAt: beyond }))).toBe(1);
+    const within = new Date(NOW + 2_000).toISOString();
+    expect(await attemptsUntilFailure(classified({ retryable: true, retryAt: within }))).toBe(3);
+  });
+
+  it("lets no provider metadata make a non-idempotent mutation retryable", async () => {
+    expect(await attemptsUntilFailure(classified({ retryable: true }), "mutation")).toBe(1);
+  });
+
+  it("lets no provider metadata override a policy that opted out", async () => {
+    const off = reliability({ retry: { eligible: false, maxAttempts: 5, backoff: "fixed" } });
+    expect(await attemptsUntilFailure(classified({ retryable: true }), "query", off)).toBe(1);
   });
 });

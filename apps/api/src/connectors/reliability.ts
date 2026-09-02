@@ -15,6 +15,7 @@
  * twice, and no amount of care afterwards undoes it.
  */
 import { ConnectorExecutionError } from "./executor.js";
+import { providerOutcomeOf } from "./provider-outcome.js";
 
 export type OperationReliability = {
   timeouts: { attemptMs: number; totalMs: number };
@@ -230,6 +231,15 @@ export class ConnectorGovernor {
           }
           if (attemptNumber >= maxAttempts) break;
 
+          // A classified failure that says it is not retryable is not retried:
+          // a provider that rejected the input or refused authorization
+          // answers the same way twice, and the attempts would only spend the
+          // caller's budget. This only ever removes attempts — the policy
+          // above decided how many there may be, and nothing the provider
+          // said can add one.
+          const outcome = providerOutcomeOf(error);
+          if (outcome && !outcome.retryable) break;
+
           // The overall budget bounds retries independently of maxAttempts:
           // without it, three attempts at the attempt budget occupy three times
           // what the caller was told to expect.
@@ -242,6 +252,17 @@ export class ConnectorGovernor {
           const elapsed = now() - startedAt;
           const wouldFinishAt = elapsed + delay + reliability.timeouts.attemptMs;
           if (wouldFinishAt > reliability.timeouts.totalMs) break;
+
+          // A retry time the provider named beyond what is left of the budget
+          // cannot be honoured in-call: the caller gets it as `retryAt` and
+          // decides. Inside the budget it is metadata only — the retry follows
+          // the declared backoff and never sleeps until the provider's time.
+          if (
+            outcome?.retryAt !== undefined &&
+            Date.parse(outcome.retryAt) - now() > reliability.timeouts.totalMs - elapsed
+          ) {
+            break;
+          }
           await sleep(delay);
         }
       }

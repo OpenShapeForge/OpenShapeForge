@@ -84,6 +84,77 @@ describe("testElicitedRow", () => {
     expect(JSON.stringify(report)).not.toContain("tok-1");
   });
 
+  it("routes client-credentials acquisition through the canonical egress owner", async () => {
+    const requests: unknown[] = [];
+    const report = await testElicitedRow({
+      row: {
+        id: "c1",
+        values: {
+          clientId: "obviously-fake-id",
+          clientSecret: encryptSecret(
+            KEYRING,
+            ELICIT.sourceTable,
+            "clientSecret",
+            "obviously-fake-secret",
+          ),
+        },
+      },
+      sourceRow: {
+        id: "provider-1",
+        name: "OAuth provider",
+        baseUrlTemplate: "https://api.example.com",
+        egressHosts: ["auth.example.com"],
+        auth: {
+          scheme: "oauth2ClientCredentials",
+          tokenUrl: "https://auth.example.com/token",
+        },
+        definitions: [
+          { key: "clientId", required: true },
+          {
+            key: "clientSecret",
+            required: true,
+            classification: { sensitivity: "confidential" },
+          },
+        ],
+      },
+      elicit: ELICIT,
+      table: TABLE,
+      keyring: KEYRING,
+      fetchImpl: refusingFetch,
+      egress: {
+        purpose: "probe",
+        scope: {
+          tenantId: "tenant-1",
+          actorId: "actor-1",
+          provider: "provider-1",
+          operation: "verify_connection",
+          kind: "query",
+        },
+        owner: {
+          fetch: async (request) => {
+            requests.push(request);
+            return Response.json({
+              access_token: "obviously-fake-access-token",
+              expires_in: 3600,
+            });
+          },
+        },
+      },
+    });
+    expect(report.ok).toBe(true);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      purpose: "probe",
+      scope: {
+        tenantId: "tenant-1",
+        actorId: "actor-1",
+        provider: "provider-1",
+        operation: "verify_connection",
+        kind: "query",
+      },
+    });
+  });
+
   it("fails url-templates when a URL placeholder references a secret-classified field", async () => {
     const source = {
       ...SOURCE,

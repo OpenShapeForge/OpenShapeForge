@@ -245,6 +245,84 @@ describe("egress allowlist", () => {
     await bound("https://api.example.com/objects");
     expect(reached).toBe("https://api.example.com/objects");
   });
+
+  it("revalidates redirects and refuses an allowed-to-disallowed hop", async () => {
+    const requested: string[] = [];
+    const bound = createBoundFetch(
+      contract(),
+      new AbortController().signal,
+      async (target) => {
+        requested.push(String(target));
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://blocked.example/private" },
+        });
+      },
+    );
+    await expect(bound("https://api.example.com/start")).rejects.toThrow(
+      /does not declare in network.egress/,
+    );
+    expect(requested).toEqual(["https://api.example.com/start"]);
+  });
+
+  it("preserves credentials on same-origin redirects and strips them across origins", async () => {
+    const calls: { url: string; headers: Headers }[] = [];
+    const bound = createBoundFetch(
+      contract({ network: { egress: ["api.example.com", "other.example.com"] } }),
+      new AbortController().signal,
+      async (target, init) => {
+        calls.push({ url: String(target), headers: new Headers(init?.headers) });
+        if (calls.length === 1) {
+          return new Response(null, { status: 302, headers: { location: "/same" } });
+        }
+        if (calls.length === 2) {
+          return new Response(null, {
+            status: 307,
+            headers: { location: "https://other.example.com/final" },
+          });
+        }
+        return new Response("ok");
+      },
+    );
+    await bound("https://api.example.com/start", {
+      headers: {
+        authorization: "Bearer fake",
+        cookie: "session=fake",
+        "proxy-authorization": "Basic fake",
+        "x-safe": "yes",
+        accept: "secret-in-accept",
+      },
+    });
+    expect(calls[1]?.headers.get("authorization")).toBe("Bearer fake");
+    expect(calls[1]?.headers.get("cookie")).toBe("session=fake");
+    expect(calls[2]?.headers.get("authorization")).toBeNull();
+    expect(calls[2]?.headers.get("cookie")).toBeNull();
+    expect(calls[2]?.headers.get("proxy-authorization")).toBeNull();
+    expect(calls[2]?.headers.get("x-safe")).toBeNull();
+    expect(calls[2]?.headers.get("accept")).toBeNull();
+  });
+
+  it("rejects body-preserving cross-origin redirects", async () => {
+    for (const status of [307, 308]) {
+      const calls: string[] = [];
+      const bound = createBoundFetch(
+        contract({ network: { egress: ["api.example.com", "other.example.com"] } }),
+        new AbortController().signal,
+        async (target) => {
+          calls.push(String(target));
+          return new Response(null, {
+            status,
+            headers: { location: "https://other.example.com/final" },
+          });
+        },
+      );
+      await expect(bound("https://api.example.com/start", {
+        method: "POST",
+        body: "apiKey=fake",
+      })).rejects.toThrow(/cannot forward a request body/);
+      expect(calls).toEqual(["https://api.example.com/start"]);
+    }
+  });
 });
 
 describe("invocation", () => {

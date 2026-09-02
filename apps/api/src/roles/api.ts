@@ -47,10 +47,12 @@ import { readApiKeyProvisioningConfig } from "../auth/api-key/runtime-config.js"
 import { resolveSessionContext } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import {
+  assertSingleModuleEgressOwner,
   initRuntimeModules,
   loadRuntimeModules,
   type ModuleRegistry,
 } from "../modules/registry.js";
+import { ModulePlatformRuntime } from "../modules/platform.js";
 import {
   classifyRequest,
   createRateLimitMetrics,
@@ -297,7 +299,15 @@ export function createApiApp(options: {
   // added directly on `app` (which happens synchronously, before the deferred
   // plugin loads) would silently escape the limiter.
   void app.register(async (routes) => {
-    const initialised = await initRuntimeModules(modules, dbOptions);
+    const modulePlatform = databaseRuntime
+      ? new ModulePlatformRuntime(databaseRuntime.db)
+      : undefined;
+    const moduleContext = {
+      ...dbOptions,
+      ...(modulePlatform ? { platform: modulePlatform.services } : {}),
+    };
+    const initialised = await initRuntimeModules(modules, moduleContext);
+    const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
     const operationPlugins = new Set(listOperationContracts().map((operation) => operation.plugin));
     const operationModulesConfigured = modules.loaded.some((module) => operationPlugins.has(module.name)) ||
       modules.failures.some((failure) => operationPlugins.has(failure.name));
@@ -310,6 +320,7 @@ export function createApiApp(options: {
         ...dbOptions,
         cors: options.cors,
         modules: initialised.loaded,
+        moduleContext,
         ...(options.persistedOperations
           ? { persistedOperations: options.persistedOperations }
           : {}),
@@ -420,6 +431,7 @@ export function createApiApp(options: {
     registerConnectorRestRoutes(routes, {
       ...dbOptions,
       config: readConnectorRuntimeConfig(),
+      egressOwner,
     });
     // Inside the same child plugin, so the callback an unauthenticated stranger
     // can reach sits behind the rate limiter like everything else.
@@ -428,10 +440,13 @@ export function createApiApp(options: {
       config: readConnectorRuntimeConfig(),
       publicOrigin: process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN,
       appOrigin: process.env.OPENSHAPEFORGE_APP_ORIGIN,
+      egressOwner,
     });
     registerGeneratedMcpServer(routes, {
       ...dbOptions,
-      ...(operationModulesConfigured ? { modules: initialised.loaded } : {}),
+      modules: initialised.loaded,
+      egressOwner,
+      ...(modulePlatform ? { modulePlatform } : {}),
     });
     registerProtectedResourceMetadata(routes);
     registerAuthorizationServerMetadataAliases(routes);
@@ -445,10 +460,10 @@ export function createApiApp(options: {
     registerControlRestRoutes(routes, dbOptions);
 
     for (const module of initialised.loaded) {
-      module.restRoutes?.(routes, dbOptions);
+      module.restRoutes?.(routes, moduleContext);
     }
     if (operationModulesConfigured) {
-      registerOperationRestRoutes(routes, initialised.loaded, dbOptions);
+      registerOperationRestRoutes(routes, initialised.loaded, moduleContext);
     }
   });
 

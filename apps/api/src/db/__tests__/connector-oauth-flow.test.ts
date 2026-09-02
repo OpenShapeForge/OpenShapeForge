@@ -789,7 +789,8 @@ describe("authored connection token lifecycle", () => {
         await admin.connection().execute(async (conn) => {
           await sql`
             create table public.oauth_authored_connection_test (
-              id uuid primary key, tenant_id uuid not null, owner_user_id uuid, values jsonb not null
+              id uuid primary key, tenant_id uuid not null, owner_user_id uuid,
+              provider_id uuid not null, values jsonb not null
             )
           `.execute(conn);
           await sql`
@@ -824,7 +825,11 @@ describe("authored connection token lifecycle", () => {
           schema: "public",
           table: "oauth_authored_connection_test",
           primaryKey: "id",
-          columns: [{ name: "values", sourceField: "values" }],
+          columns: [
+            { name: "values", sourceField: "values" },
+            { name: "provider_id", sourceField: "providerId" },
+            { name: "owner_user_id", sourceField: "ownerUserId" },
+          ],
         } as any;
         for (const scope of ["user", "tenant"] as const) {
           const tenantId = randomUUID();
@@ -833,6 +838,7 @@ describe("authored connection token lifecycle", () => {
           const foreignId = randomUUID();
           const tenantRowId = randomUUID();
           const foreignUserId = randomUUID();
+          const providerId = randomUUID();
           const secretScope = "oauth_authored_connection_test:personal";
           const initial = {
             accessToken: encryptSecret(KEYRING, secretScope, "accessToken", "access-1"),
@@ -841,10 +847,10 @@ describe("authored connection token lifecycle", () => {
           };
           await admin.connection().execute(async (conn) => {
             await sql`
-              insert into public.oauth_authored_connection_test (id, tenant_id, owner_user_id, values)
-              values (${actorRowId}::uuid, ${tenantId}::uuid, ${session.userId}::uuid, ${JSON.stringify(initial)}::jsonb),
-                     (${foreignId}::uuid, ${tenantId}::uuid, ${foreignUserId}::uuid, ${JSON.stringify(initial)}::jsonb),
-                     (${tenantRowId}::uuid, ${tenantId}::uuid, null, ${JSON.stringify(initial)}::jsonb)
+              insert into public.oauth_authored_connection_test (id, tenant_id, owner_user_id, provider_id, values)
+              values (${actorRowId}::uuid, ${tenantId}::uuid, ${session.userId}::uuid, ${providerId}::uuid, ${JSON.stringify(initial)}::jsonb),
+                     (${foreignId}::uuid, ${tenantId}::uuid, ${foreignUserId}::uuid, ${providerId}::uuid, ${JSON.stringify(initial)}::jsonb),
+                     (${tenantRowId}::uuid, ${tenantId}::uuid, null, ${providerId}::uuid, ${JSON.stringify(initial)}::jsonb)
             `.execute(conn);
           });
           const visible = await withDbSession(db, session, (trx) => sql<{
@@ -869,6 +875,8 @@ describe("authored connection token lifecycle", () => {
           let exchanges = 0;
           const refresh = () => refreshConnectionRowLocked({
             db, session, table, rowId: selectedId, valuesField: "values",
+            providerField: "providerId", expectedProviderId: providerId,
+            expectedOwnerUserId: scope === "user" ? session.userId : null,
             refreshLeewaySeconds: 60,
             audit: { sourceTable: "test.providers", connectionId: selectedId, scope, correlationId: `request-${scope}` },
             tokenUrl: "https://auth.provider.example/token", clientId: "client", clientSecret: "secret",
@@ -921,6 +929,8 @@ describe("authored connection token lifecycle", () => {
           `.execute(conn));
           await expect(refreshConnectionRowLocked({
             db, session, table, rowId: selectedId, valuesField: "values", refreshLeewaySeconds: 60,
+            providerField: "providerId", expectedProviderId: providerId,
+            expectedOwnerUserId: scope === "user" ? session.userId : null,
             audit: { sourceTable: "test.providers", connectionId: selectedId, scope, correlationId: `reauth-${scope}` },
             tokenUrl: "https://auth.provider.example/token", clientId: "client", clientSecret: "secret",
             egress: ["auth.provider.example"], keyring: KEYRING, secretScope,
@@ -947,6 +957,30 @@ describe("authored connection token lifecycle", () => {
             select values from public.oauth_authored_connection_test where id = ${selectedId}::uuid
           `.execute(conn));
           expect(afterFailure.rows[0]?.values).toEqual(beforeFailure.rows[0]?.values);
+
+          const beforeDrift = exchanges;
+          const replacementProvider = randomUUID();
+          await admin.connection().execute((conn) => sql`
+            update public.oauth_authored_connection_test
+               set provider_id = ${replacementProvider}::uuid
+             where id = ${selectedId}::uuid
+          `.execute(conn));
+          await expect(refresh()).rejects.toMatchObject({
+            status: 404,
+            code: "NOT_FOUND",
+          });
+          expect(exchanges).toBe(beforeDrift);
+          await admin.connection().execute((conn) => sql`
+            update public.oauth_authored_connection_test
+               set provider_id = ${providerId}::uuid,
+                   owner_user_id = ${scope === "user" ? foreignUserId : session.userId}::uuid
+             where id = ${selectedId}::uuid
+          `.execute(conn));
+          await expect(refresh()).rejects.toMatchObject({
+            status: 404,
+            code: "NOT_FOUND",
+          });
+          expect(exchanges).toBe(beforeDrift);
         }
       });
     },

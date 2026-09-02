@@ -239,6 +239,7 @@ export interface McpSection {
     titleField?: string;
     descriptionField: string;
     inputFieldsField: string;
+    versionField?: string;
     execution?: {
       bindingsField: string;
       operationRef: string;
@@ -251,6 +252,7 @@ export interface McpSection {
     };
     visibleWhen?: { field: string; equals: string };
     visibleToRolesField?: string;
+    internalOnlyField?: string;
     connect?: { name: string; description?: string; roles: string[] };
     dryRun?: { name: string; description?: string; roles: string[] };
     personalization?: {

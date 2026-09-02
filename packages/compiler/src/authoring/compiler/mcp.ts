@@ -193,6 +193,38 @@ export function buildMcp(
           `on entity "${coreEntity.entity}" does not name an authored field.`,
       );
     }
+    if (authored.internalOnlyField !== undefined) {
+      const field = coreEntity.fields?.find(
+        (candidate) => candidate.key === authored.internalOnlyField,
+      );
+      if (!field || field.valueType !== "boolean") {
+        throw new Error(
+          `mcp derivedTools.internalOnlyField ${JSON.stringify(authored.internalOnlyField)} ` +
+            `on entity "${coreEntity.entity}" must name an authored boolean field.`,
+        );
+      }
+      if (!authored.execution) {
+        throw new Error(
+          `mcp derivedTools.internalOnlyField on entity "${coreEntity.entity}" requires execution.`,
+        );
+      }
+    }
+    if (authored.execution) {
+      const versionField = coreEntity.fields?.find(
+        (candidate) => candidate.key === authored.versionField,
+      );
+      if (
+        !authored.versionField ||
+        !versionField ||
+        versionField.valueType !== "integer" ||
+        versionField.cardinality === "collection"
+      ) {
+        throw new Error(
+          `mcp derivedTools.versionField on executable entity "${coreEntity.entity}" ` +
+            "must name an authored single-value integer field.",
+        );
+      }
+    }
     if (authored.connect) {
       if (!MCP_TOOL_PREFIX_PATTERN.test(authored.connect.name ?? "")) {
         throw new Error(

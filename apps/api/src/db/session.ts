@@ -181,16 +181,20 @@ export async function withDbSession<TDatabase, TResult>(
   db: Kysely<TDatabase>,
   input: DbSessionInput,
   callback: (trx: Transaction<TDatabase>, session: DbSessionContext) => Promise<TResult>,
+  options: { isolationLevel?: "repeatable read" | "serializable" } = {},
 ): Promise<TResult> {
   const session = createDbSessionContext(input);
   const hooks = { afterCommit: [] as DbSessionAfterCommitHook[] };
 
-  const result = await dbSessionHooks.run(hooks, () =>
-    db.transaction().execute(async (trx) => {
+  const result = await dbSessionHooks.run(hooks, () => {
+    const transaction = options.isolationLevel
+      ? db.transaction().setIsolationLevel(options.isolationLevel)
+      : db.transaction();
+    return transaction.execute(async (trx) => {
       await applyDbSession(trx, session);
       return callback(trx, session);
-    }),
-  );
+    });
+  });
 
   for (const hook of hooks.afterCommit) {
     await hook();

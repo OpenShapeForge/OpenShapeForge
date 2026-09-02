@@ -33,6 +33,10 @@ import { randomUUID } from "node:crypto";
 import { HttpError } from "../rest/http-error.js";
 import { hostAllowed } from "../connectors/executor.js";
 import {
+  fetchValidatedOutbound,
+  type ModuleEgressDispatch,
+} from "../modules/egress.js";
+import {
   ProviderObservations,
   ProviderOutcomeError,
   classifyProviderOutcome,
@@ -71,23 +75,23 @@ export async function fetchWithAllowedRedirects(
   init: RequestInit,
   allowlist: readonly string[],
   fetchImpl: typeof fetch = fetch,
+  egress?: ModuleEgressDispatch,
 ): Promise<Response> {
   let url = new URL(input);
   let requestInit = { ...init };
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    if (
-      (url.protocol !== "https:" && url.protocol !== "http:") ||
-      !hostAllowed(url.hostname, allowlist)
-    ) {
-      throw new HttpError(
-        403,
-        "EGRESS_DENIED",
-        `Redirect host ${url.hostname} is outside the egress allow-list.`,
-      );
-    }
-    const response = await fetchImpl(url, {
-      ...requestInit,
-      redirect: "manual",
+    const response = await fetchValidatedOutbound({
+      target: url,
+      init: { ...requestInit, redirect: "manual" },
+      allowlist,
+      fallback: (target, targetInit) => fetchImpl(target, targetInit),
+      ...(egress ? { dispatch: egress } : {}),
+      denied: (deniedUrl) =>
+        new HttpError(
+          403,
+          "EGRESS_DENIED",
+          `Redirect host ${deniedUrl.hostname} is outside the egress allow-list.`,
+        ),
     });
     if (response.status < 300 || response.status >= 400) return response;
     const location = response.headers.get("location");
@@ -99,17 +103,36 @@ export async function fetchWithAllowedRedirects(
         "Provider exceeded the redirect limit.",
       );
     }
+    const previousOrigin = url.origin;
     url = new URL(location, url);
-    if (
+    const becomesGet =
       response.status === 303 ||
       ((response.status === 301 || response.status === 302) &&
-        requestInit.method === "POST")
-    ) {
+        requestInit.method?.toUpperCase() === "POST");
+    if (becomesGet) {
       const headers = new Headers(requestInit.headers);
       headers.delete("content-type");
       headers.delete("content-length");
       requestInit = { ...requestInit, method: "GET", headers };
       delete requestInit.body;
+    }
+    if (url.origin !== previousOrigin) {
+      const method = requestInit.method?.toUpperCase() ?? "GET";
+      if (
+        requestInit.body !== undefined ||
+        (method !== "GET" && method !== "HEAD")
+      ) {
+        throw new HttpError(
+          403,
+          "EGRESS_DENIED",
+          "A cross-origin redirect cannot forward a request body or non-read method.",
+        );
+      }
+      const headers = new Headers(requestInit.headers);
+      for (const name of [...headers.keys()]) {
+        headers.delete(name);
+      }
+      requestInit = { ...requestInit, headers };
     }
   }
   throw new HttpError(
@@ -329,6 +352,7 @@ async function clientCredentialsToken(input: {
   secret: Record<string, string>;
   egress: readonly string[];
   fetchImpl: typeof fetch;
+  egressDispatch?: ModuleEgressDispatch | undefined;
 }): Promise<string> {
   const { config } = input;
   const tokenUrlRaw =
@@ -392,6 +416,7 @@ async function clientCredentialsToken(input: {
     },
     input.egress,
     input.fetchImpl,
+    input.egressDispatch,
   );
   const text = await response.text();
   if (!response.ok) {
@@ -565,6 +590,7 @@ export type ExecuteBindingInput = {
   serviceInputs: JsonRecord;
   keyring?: SecretKeyring | undefined;
   fetchImpl?: typeof fetch;
+  egress?: ModuleEgressDispatch | undefined;
   /** AAD scope the values were encrypted under (the elicitation source table). */
   secretScope: string;
   /**
@@ -587,6 +613,7 @@ export async function acquireAuthHeaders(input: {
   secret: Record<string, string>;
   egress: readonly string[];
   fetchImpl: typeof fetch;
+  egressDispatch?: ModuleEgressDispatch | undefined;
 }): Promise<Record<string, string>> {
   const config =
     input.auth && typeof input.auth === "object"
@@ -599,6 +626,7 @@ export async function acquireAuthHeaders(input: {
       secret: input.secret,
       egress: input.egress,
       fetchImpl: input.fetchImpl,
+      egressDispatch: input.egressDispatch,
     });
     return { authorization: `Bearer ${token}` };
   }
@@ -802,6 +830,7 @@ export async function composeBindingRequest(
           secret,
           egress,
           fetchImpl,
+          egressDispatch: input.egress,
         })),
   };
   let body: string | undefined;
@@ -901,6 +930,7 @@ export async function executeBinding(
       },
       egress,
       fetchImpl,
+      input.egress,
     );
   } catch (error) {
     if (!(error instanceof HttpError) || error.code === "PROVIDER_ERROR") {
@@ -1070,6 +1100,7 @@ export function orderedBindings(
       "The service defines no bindings.",
     );
   }
+  const seenOrders = new Set<number>();
   return (raw as JsonRecord[])
     .map((binding, index) => {
       if (!binding || typeof binding !== "object") {
@@ -1079,7 +1110,21 @@ export function orderedBindings(
           `Binding ${index + 1} is malformed.`,
         );
       }
+      const order = binding.order;
+      if (
+        typeof order !== "number" ||
+        !Number.isFinite(order) ||
+        !Number.isInteger(order) ||
+        seenOrders.has(order)
+      ) {
+        throw new HttpError(
+          400,
+          "SERVICE_MISCONFIGURED",
+          `Binding ${index + 1} must have a unique integer order.`,
+        );
+      }
+      seenOrders.add(order);
       return binding;
     })
-    .sort((a, b) => Number(a.order ?? 0) - Number(b.order ?? 0));
+    .sort((a, b) => (a.order as number) - (b.order as number));
 }

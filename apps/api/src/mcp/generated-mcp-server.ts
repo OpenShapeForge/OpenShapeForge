@@ -31,12 +31,13 @@
  * they live in the shared CRUD core (#164), which every call below goes
  * through, so this transport inherits them by construction.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { sql, type Transaction } from "kysely";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
+  type CallToolResult,
   ErrorCode,
   ListPromptsRequestSchema,
   ListResourcesRequestSchema,
@@ -44,6 +45,7 @@ import {
   ListToolsRequestSchema,
   McpError,
   ReadResourceRequestSchema,
+  type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import rawCatalog from "../generated/mcp/tools.json" with { type: "json" };
@@ -70,6 +72,8 @@ import {
   applyPersonalNotes,
   deriveToolName,
   derivedToolsFromRows,
+  inputSchemaFromStoredFields,
+  isAuthorizedInternalDerivedRow,
   sessionInAudience,
   type DerivedTool,
   type DerivedToolsCatalogEntry,
@@ -147,6 +151,42 @@ import {
 } from "../connectors/dispatch.js";
 import { invokeConnectorOperation } from "../connectors/runtime.js";
 import type { RuntimeModule } from "../modules/contract.js";
+import type {
+  McpInvocationContext,
+  McpProjectionContext,
+  McpToolCallSource,
+  ModuleDefinitionReference,
+  ModuleToolExecutionOptions,
+  ModuleToolExecutionResult,
+  ModuleInvocationSource,
+} from "../modules/contract.js";
+import {
+  assertUniqueToolNames,
+  decorateMcpTools,
+  interceptMcpToolCall,
+  invokeModuleTool,
+  moduleResources,
+  moduleResourceTemplates,
+  moduleTools,
+  prepareModuleResourceRead,
+  readModuleResource,
+  type SourcedTool,
+} from "../modules/mcp-hooks.js";
+import {
+  createModuleSessionCapability,
+  type ModulePlatformRuntime,
+} from "../modules/platform.js";
+import type { ModuleEgressDispatch } from "../modules/egress.js";
+import {
+  InvocationSourceVault,
+  parseModuleToolExecutionOptions,
+  type AuthorizedInvocationSource,
+  type ResolvedInvocationSource,
+} from "../modules/invocation-sources.js";
+import {
+  mintInvocationSourceReference,
+  sameInvocationSourceReference,
+} from "../modules/source-reference.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import {
   bindOperationHandlers,
@@ -239,6 +279,35 @@ type CatalogGuideTool = {
   table?: string;
   requireBeforeCreate?: boolean;
 };
+
+type CapturedDerivedExecution = {
+  entry: DerivedToolsCatalogEntry;
+  serviceRow: Record<string, unknown>;
+  binding: Record<string, unknown>;
+  operationRow: Record<string, unknown>;
+  providerRow: Record<string, unknown>;
+  connectionRows: Record<string, unknown>[];
+  selectedConnectionId: string;
+};
+
+function stableSnapshotJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableSnapshotJson).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nested]) => `${JSON.stringify(key)}:${stableSnapshotJson(nested)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function authorityFingerprint(capture: CapturedDerivedExecution): string {
+  return createHash("sha256")
+    .update(stableSnapshotJson(capture))
+    .digest("base64url");
+}
 
 type CatalogDiscoveryTool = {
   name: string;
@@ -770,6 +839,38 @@ export function selectOAuthConnectionRow(
     : rows.find((row) => row.ownerUserId === null || row.ownerUserId === undefined);
 }
 
+/**
+ * Capture the single tenant-owned configuration row plus every connection
+ * owned by the active actor. Ambiguous tenant configuration is not a default
+ * selection problem: guessing would let DB row order choose credentials.
+ */
+export function capturePersonalOAuthConnections(
+  rows: readonly Record<string, unknown>[],
+  userId: string | null | undefined,
+): {
+  tenantSupport: Record<string, unknown>;
+  personal: (Record<string, unknown> & { id: string })[];
+} {
+  const support = rows.filter(
+    (row) => row.ownerUserId === null || row.ownerUserId === undefined,
+  );
+  if (
+    support.length !== 1 ||
+    typeof support[0]?.id !== "string" ||
+    support[0].id.length === 0
+  ) {
+    throw new HttpError(404, "NOT_FOUND", "Invocation source is unavailable.");
+  }
+  const personal = rows
+    .filter((row) => row.ownerUserId === userId)
+    .filter(
+      (row): row is Record<string, unknown> & { id: string } =>
+        typeof row.id === "string" && row.id.length > 0,
+    )
+    .sort((left, right) => left.id.localeCompare(right.id));
+  return { tenantSupport: support[0], personal };
+}
+
 type ConnectionTokenAudit = {
   sourceTable: string;
   connectionId: string;
@@ -835,6 +936,9 @@ export async function refreshConnectionRowLocked(input: {
   table: GeneratedTable;
   rowId: string;
   valuesField: string;
+  providerField: string;
+  expectedProviderId: string;
+  expectedOwnerUserId: string | null;
   refreshLeewaySeconds?: number;
   audit: ConnectionTokenAudit;
   tokenUrl: string;
@@ -844,6 +948,7 @@ export async function refreshConnectionRowLocked(input: {
   keyring: NonNullable<ReturnType<typeof elicitedKeyring>>;
   secretScope: string;
   fetchImpl?: typeof fetch;
+  moduleEgress?: ModuleEgressDispatch | undefined;
 }): Promise<Record<string, unknown>> {
   const valuesColumn = input.table.columns.find(
     (column) =>
@@ -852,7 +957,13 @@ export async function refreshConnectionRowLocked(input: {
           char.toUpperCase(),
         )) === input.valuesField,
   );
-  if (!valuesColumn || !input.table.primaryKey) {
+  const providerColumn = input.table.columns.find(
+    (column) => fieldNameForColumn(column) === input.providerField,
+  );
+  const ownerColumn = input.table.columns.find(
+    (column) => fieldNameForColumn(column) === "ownerUserId",
+  );
+  if (!valuesColumn || !providerColumn || !ownerColumn || !input.table.primaryKey) {
     throw new HttpError(
       500,
       "INTERNAL",
@@ -876,18 +987,37 @@ export async function refreshConnectionRowLocked(input: {
           { ...init, signal: AbortSignal.timeout(15_000) },
           input.egress,
           input.fetchImpl,
+          input.moduleEgress,
         ),
       store: {
         withLockedRow: (work) =>
           withDbSession(input.db, input.session, async (lockedTrx) => {
             trx = lockedTrx;
-            const locked = await sql<{ values: Record<string, unknown> | null }>`
-              select ${sql.id(valuesColumn.name)} as values
+            const locked = await sql<{
+              values: Record<string, unknown> | null;
+              provider_id: string | null;
+              owner_user_id: string | null;
+            }>`
+              select ${sql.id(valuesColumn.name)} as values,
+                     ${sql.id(providerColumn.name)}::text as provider_id,
+                     ${sql.id(ownerColumn.name)}::text as owner_user_id
                 from ${sql.id(input.table.schema, input.table.table)}
                where ${sql.id(input.table.primaryKey!)}::text = ${input.rowId}
                for update
             `.execute(lockedTrx);
-            const storedValues = locked.rows[0]?.values;
+            const lockedRow = locked.rows[0];
+            if (
+              !lockedRow ||
+              lockedRow.provider_id !== input.expectedProviderId ||
+              lockedRow.owner_user_id !== input.expectedOwnerUserId
+            ) {
+              throw new HttpError(
+                404,
+                "NOT_FOUND",
+                "Invocation source is unavailable.",
+              );
+            }
+            const storedValues = lockedRow.values;
             current =
               typeof storedValues === "string"
                 ? (JSON.parse(storedValues) as Record<string, unknown>)
@@ -922,6 +1052,8 @@ export async function refreshConnectionRowLocked(input: {
             update ${sql.id(input.table.schema, input.table.table)}
                set ${sql.id(valuesColumn.name)} = ${JSON.stringify(result)}::jsonb
              where ${sql.id(input.table.primaryKey!)}::text = ${input.rowId}
+               and ${sql.id(providerColumn.name)}::text = ${input.expectedProviderId}
+               and ${sql.id(ownerColumn.name)}::text is not distinct from ${input.expectedOwnerUserId}
           `.execute(trx!);
         },
         auditRefreshed: async () => {
@@ -1637,6 +1769,8 @@ function buildServer(
   db: OpenShapeForgeDatabase,
   session: TrustedSessionContext,
   modules: readonly RuntimeModule[] | undefined,
+  modulePlatform: ModulePlatformRuntime | undefined,
+  egressOwner: RuntimeModule["egress"] | undefined,
   onDerivedDefinitionChanged?: (table: string, tenantId: string | null) => void,
   /**
    * Whether this server lives across requests. The guide-before-create gate
@@ -1644,14 +1778,26 @@ function buildServer(
    * stateless single-shot request could never satisfy it.
    */
   stateful = false,
+  tableOverride?: Map<string, GeneratedTable>,
 ): Server {
+  const runtimeModules = modules ?? [];
+  const moduleSession = createModuleSessionCapability(session);
+  const hasDynamicModuleTools = hasDynamicModuleToolProjection(runtimeModules);
+  const hasDynamicModuleResources = runtimeModules.some(
+    (module) =>
+      module.mcp?.resources !== undefined ||
+      module.mcp?.resourceTemplates !== undefined,
+  );
   const guidesCalled = new Set<string>();
   const server = new Server(SERVER_INFO, {
     capabilities: {
       // listChanged is advertised only when the tool list can actually change
       // mid-session — i.e. when stored rows project as tools.
-      tools: catalogDerivedTools.length > 0 ? { listChanged: true } : {},
-      resources: {},
+      tools:
+        catalogDerivedTools.length > 0 || hasDynamicModuleTools
+          ? { listChanged: true }
+          : {},
+      resources: hasDynamicModuleResources ? { listChanged: true } : {},
       prompts: {},
     },
     // The server owns the OAuth redirect URL, so it states it here rather
@@ -1672,9 +1818,331 @@ function buildServer(
         )
         .join(""),
   });
-  const tables = tablesByName();
+  const tables = tableOverride ?? tablesByName();
   const operations =
     modules === undefined ? new Map() : bindOperationHandlers(modules);
+  const sourceVault = new InvocationSourceVault();
+
+  const projectionContext = (): McpProjectionContext => {
+    const capabilities = server.getClientCapabilities() as
+      | { elicitation?: unknown }
+      | undefined;
+    return {
+      db,
+      session: moduleSession,
+      clientCapabilities: {
+        elicitation: capabilities?.elicitation !== undefined,
+        mcpApp: supportsMcpApp(server),
+      },
+    };
+  };
+
+  const invocationContext = (requestId: string | number): McpInvocationContext => {
+    const projected = projectionContext();
+    return Object.freeze({
+      ...projected,
+      clientCapabilities: Object.freeze({ ...projected.clientCapabilities }),
+      server,
+      requestId,
+    });
+  };
+
+  const coreResourceOwnership = () => {
+    const entries = entitiesForSession(session, tables);
+    const authored = resourcesForSession(session, tables);
+    return {
+      exact: [
+        ENTITY_CATALOG_URI,
+        ENTITY_CONFIGURATION_APP_URI,
+        ...entries.map(({ entity }) => entityResourceUri(entity)),
+        ...authored.map((resource) => resource.uri),
+      ],
+      templates: authored.map((resource) => resource.templateUri),
+    };
+  };
+
+  const definitionFor = (
+    entry: DerivedToolsCatalogEntry,
+    row: Record<string, unknown>,
+  ) => {
+    const id = row.id;
+    const version = entry.versionField
+      ? row[entry.versionField]
+      : undefined;
+    if (
+      typeof id !== "string" ||
+      id.length === 0 ||
+      !Number.isInteger(version) ||
+      (version as number) < 1
+    ) {
+      throw new HttpError(
+        404,
+        "NOT_FOUND",
+        "Invocation source is unavailable.",
+      );
+    }
+    return {
+      kind: entry.entity,
+      id,
+      version: version as number,
+    };
+  };
+
+  const columnForField = (table: GeneratedTable, field: string) =>
+    table.columns.find((column) => fieldNameForColumn(column) === field);
+
+  const snapshotRowsByFilter = async (
+    trx: Transaction<DB>,
+    tableName: string,
+    filter: Record<string, unknown>,
+  ): Promise<Record<string, unknown>[]> => {
+    const table = tables.get(tableName);
+    if (!table) return [];
+    const predicates = Object.entries(filter).map(([field, value]) => {
+      const column = columnForField(table, field);
+      return column
+        ? sql`${sql.id(column.name)}::text = ${String(value)}`
+        : undefined;
+    });
+    if (predicates.some((predicate) => predicate === undefined)) return [];
+    const where = predicates.length
+      ? sql`where ${sql.join(predicates as NonNullable<(typeof predicates)[number]>[], sql` and `)}`
+      : sql``;
+    const result = await sql<{ row: Record<string, unknown> }>`
+      select to_jsonb(row_source.*) as row
+        from ${sql.id(table.schema, table.table)} as row_source
+        ${where}
+    `.execute(trx);
+    return result.rows.map(({ row }) => serializeRow(table, row));
+  };
+
+  const snapshotDefinitionsByToolName = async (
+    trx: Transaction<DB>,
+    entry: DerivedToolsCatalogEntry,
+    toolName: string,
+  ): Promise<Record<string, unknown>[]> => {
+    const table = tables.get(entry.table);
+    const keyColumn = table ? columnForField(table, entry.keyField) : undefined;
+    if (!table || !keyColumn) return [];
+    const result = await sql<{ row: Record<string, unknown> }>`
+      select to_jsonb(row_source.*) as row
+        from ${sql.id(table.schema, table.table)} as row_source
+       where lower(replace(btrim(${sql.id(keyColumn.name)}::text), '-', '_')) = ${toolName}
+       order by ${sql.id(table.primaryKey ?? keyColumn.name)}
+       limit 2
+    `.execute(trx);
+    return result.rows.map(({ row }) => serializeRow(table, row));
+  };
+
+  const derivedDefinition = async (
+    toolName: string,
+    projectedOnly: boolean,
+  ): Promise<
+    | {
+        entry: DerivedToolsCatalogEntry;
+        row: Record<string, unknown>;
+      }
+    | undefined
+  > => {
+    if (projectedOnly) {
+      const projected = (await derivedToolsForSession(db, session, tables)).find(
+        (tool) => tool.name === toolName,
+      );
+      if (!projected) return undefined;
+      const entry = catalogDerivedTools.find(
+        (candidate) => candidate.table === projected.table,
+      );
+      const row = entry
+        ? await runtimeRowByFilter(db, session, tables, entry.table, {
+            id: projected.rowId,
+          })
+        : null;
+      return entry && row ? { entry, row } : undefined;
+    }
+    return withDbSession(db, session, async (trx) => {
+      for (const entry of catalogDerivedTools) {
+        if (!entry.execution || !sessionInAudience(entry, session.roles))
+          continue;
+        const rows = await snapshotDefinitionsByToolName(trx, entry, toolName);
+        if (rows.length !== 1) continue;
+        const row = rows[0]!;
+        if (isAuthorizedInternalDerivedRow(entry, row, session.roles)) {
+          return { entry, row };
+        }
+      }
+      return undefined;
+    });
+  };
+
+  const authorizedSources = async (
+    toolName: string,
+    projectedOnly: boolean,
+  ): Promise<AuthorizedInvocationSource[]> => {
+    if (!session.tenantId) return [];
+    const tenantId = session.tenantId;
+    return withDbSession(db, session, async (trx) => {
+      for (const entry of catalogDerivedTools) {
+        const execution = entry.execution;
+        if (!execution || !sessionInAudience(entry, session.roles)) continue;
+        const rows = await snapshotDefinitionsByToolName(trx, entry, toolName);
+        if (rows.length !== 1) continue;
+        const serviceRow = rows[0]!;
+        const authorized = projectedOnly
+          ? derivedToolsFromRows(
+              entry,
+              [serviceRow],
+              new Set<string>(),
+              session.roles,
+            ).some((tool) => tool.name === toolName)
+          : isAuthorizedInternalDerivedRow(entry, serviceRow, session.roles);
+        if (!authorized) continue;
+
+        const definition = definitionFor(entry, serviceRow);
+        const definitionKind = definition.kind;
+        const definitionId = definition.id;
+        const definitionVersion = definition.version;
+        const sources: AuthorizedInvocationSource[] = [];
+        for (const binding of orderedBindings(
+          serviceRow,
+          execution.bindingsField,
+        )) {
+          const operationId = binding[execution.operationRef];
+          if (typeof operationId !== "string") continue;
+          const operationRow = (
+            await snapshotRowsByFilter(trx, execution.operationTable, {
+              id: operationId,
+            })
+          )[0];
+          if (!operationRow) continue;
+          const providerId = operationRow?.[execution.providerRef];
+          if (typeof providerId !== "string") continue;
+          const providerRow = (
+            await snapshotRowsByFilter(trx, execution.providerTable, {
+              id: providerId,
+            })
+          )[0];
+          if (!providerRow) continue;
+          const connectionRows = await snapshotRowsByFilter(
+            trx,
+            execution.connectionTable,
+            { [execution.connectionProviderRef]: providerId },
+          );
+          const providerAuth = (providerRow.auth ?? null) as Record<
+            string,
+            unknown
+          > | null;
+          const personal = connectionScopeOf(providerAuth) === "user";
+          const personalOAuth =
+            personal && providerAuth?.profile === "oauth2AuthorizationCode";
+          const bindingNumber = Number(binding.order ?? 0);
+          const personalCapture = personalOAuth
+            ? capturePersonalOAuthConnections(connectionRows, session.userId)
+            : undefined;
+          const eligible = personalCapture
+            ? personalCapture.personal
+            : connectionRows
+                .filter((row) =>
+                  personal
+                    ? row.ownerUserId === session.userId
+                    : row.ownerUserId === null || row.ownerUserId === undefined,
+                )
+                .filter(
+                  (row): row is Record<string, unknown> & { id: string } =>
+                    typeof row.id === "string" && row.id.length > 0,
+                )
+                .sort((left, right) => left.id.localeCompare(right.id));
+          const requiredScopes = Array.isArray(operationRow.requiredScopes)
+            ? operationRow.requiredScopes.filter(
+                (scope): scope is string => typeof scope === "string",
+              )
+            : [];
+          for (const connection of eligible) {
+            const connectionValues = connection[
+              execution.connectionValuesField
+            ] as Record<string, unknown> | null | undefined;
+            if (
+              !scopesCovered(requiredScopes, connectionValues?.grantedScopes)
+            ) {
+              continue;
+            }
+            if (
+              providerAuth?.profile === "oauth2AuthorizationCode" &&
+              (!connectionValues?.accessToken ||
+                (accessTokenNeedsRefresh(
+                  connectionValues,
+                  refreshLeewaySeconds(providerAuth),
+                ) &&
+                  !looksLikeStoredSecret(connectionValues.refreshToken)))
+            ) {
+              continue;
+            }
+            const identity = {
+              tenantId,
+              actorId: personal ? session.userId : null,
+              scope: personal ? ("personal" as const) : ("tenant" as const),
+              connectionTable: execution.connectionTable,
+              connectionId: connection.id,
+            };
+            const sourceReference = mintInvocationSourceReference(identity);
+            const internal: CapturedDerivedExecution = {
+              entry,
+              serviceRow,
+              binding,
+              operationRow,
+              providerRow,
+              connectionRows: personalCapture
+                ? [personalCapture.tenantSupport, connection]
+                : [connection],
+              selectedConnectionId: connection.id,
+            };
+            const fingerprint = authorityFingerprint(internal);
+            const validate = async () => {
+              const current = await authorizedSources(toolName, projectedOnly);
+              return current.find(
+                (candidate) =>
+                  sameInvocationSourceReference(
+                    candidate.sourceReference,
+                    sourceReference,
+                  ) &&
+                  candidate.binding === bindingNumber &&
+                  candidate.definition.kind === definitionKind &&
+                  candidate.definition.id === definitionId &&
+                  candidate.definition.version === definitionVersion,
+              );
+            };
+            sources.push({
+              sourceReference,
+              tenantId: identity.tenantId,
+              actorId: identity.actorId,
+              toolName,
+              scope: identity.scope,
+              binding: bindingNumber,
+              definition,
+              authorityFingerprint: fingerprint,
+              internal,
+              validate,
+            });
+          }
+        }
+        return sources;
+      }
+      return [];
+    }, { isolationLevel: "repeatable read" });
+  };
+
+  const sourceFromReference = async (
+    sourceReference: string,
+    toolName: string,
+  ): Promise<AuthorizedInvocationSource | undefined> => {
+    const candidates = await authorizedSources(toolName, false);
+    const matching = candidates.filter((candidate) =>
+      sameInvocationSourceReference(
+        candidate.sourceReference,
+        sourceReference,
+      ),
+    );
+    return matching.length === 1 ? matching[0] : undefined;
+  };
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => {
     const entries = entitiesForSession(session, tables);
@@ -1714,6 +2182,11 @@ function buildServer(
               },
             ]
           : []),
+        ...(await moduleResources(
+          runtimeModules,
+          projectionContext(),
+          coreResourceOwnership(),
+        )),
       ],
     };
   });
@@ -1726,10 +2199,34 @@ function buildServer(
         description: resource.templateDescription,
         mimeType: JSON_MIME_TYPE,
       })),
+      ...(await moduleResourceTemplates(
+        runtimeModules,
+        projectionContext(),
+        coreResourceOwnership(),
+      )),
     ],
   }));
 
-  server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
+    const ctx = invocationContext(extra.requestId);
+    const moduleRead = await prepareModuleResourceRead(
+      runtimeModules,
+      request.params.uri,
+      projectionContext(),
+      ctx,
+      coreResourceOwnership(),
+    );
+    const moduleFallback = async () => {
+      if (!moduleRead) return undefined;
+      return modulePlatform
+        ? modulePlatform.withActiveInvocation(ctx, moduleRead)
+        : moduleRead();
+    };
+    const fallbackOrNotFound = async () => {
+      const result = await moduleFallback();
+      if (result !== undefined) return result;
+      throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
+    };
     if (request.params.uri === ENTITY_CONFIGURATION_APP_URI) {
       return {
         contents: [
@@ -1755,8 +2252,7 @@ function buildServer(
       const entry = entries.find(
         ({ entity }) => entityResourceUri(entity) === request.params.uri,
       );
-      if (!entry)
-        throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
+      if (!entry) return fallbackOrNotFound();
       payload = describeEntityResource(entry, entries, tables, session);
     } else {
       const uri = request.params.uri;
@@ -1764,8 +2260,7 @@ function buildServer(
       const direct = readable.find((resource) => resource.uri === uri);
       if (direct) {
         const table = tables.get(direct.table);
-        if (!table)
-          throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
+        if (!table) return fallbackOrNotFound();
         const result = await listGeneratedEntities(db, session, {
           table: table.name,
           limit: RESOURCE_READ_LIMIT,
@@ -1779,20 +2274,22 @@ function buildServer(
         );
         const id = templated ? uri.slice(templated.uri.length + 1) : "";
         const table = templated ? tables.get(templated.table) : undefined;
-        if (!templated || !table || id.length === 0 || id.includes("/")) {
-          throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
+        if (templated && table && id.length > 0 && !id.includes("/")) {
+          const row = await getGeneratedEntity(db, session, {
+            table: table.name,
+            id,
+          });
+          if (row) {
+            payload = serializeRowForEntity(
+              entityForTable(templated.table),
+              table,
+              row,
+            );
+          }
         }
-        const row = await getGeneratedEntity(db, session, {
-          table: table.name,
-          id,
-        });
-        if (!row)
-          throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
-        payload = serializeRowForEntity(
-          entityForTable(templated.table),
-          table,
-          row,
-        );
+        if (payload === undefined) {
+          return fallbackOrNotFound();
+        }
       }
     }
     return {
@@ -1810,8 +2307,8 @@ function buildServer(
     prompts: [],
   }));
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
+  const listedTools = async (): Promise<SourcedTool[]> => {
+    const coreTools = [
       ...toolsForSession(session, tables).map(({ tool, entity }) =>
         describeTool(tool, entity, tables.get(tool.table), session),
       ),
@@ -2001,12 +2498,58 @@ function buildServer(
           inputSchema: tool.inputSchema,
           annotations: { title: tool.title, ...tool.annotations },
         })),
-    ],
+    ] as Tool[];
+    const sourceOf = (name: string): McpToolCallSource => {
+      if (catalog.tools.some((tool) => tool.name === name)) return "crud";
+      if (catalog.operationTools.some((tool) => tool.name === name))
+        return "operation";
+      if (
+        connectorToolsForSession(listConnectorContracts(), {
+          roles: session.roles ?? [],
+        }).some((tool) => tool.name === name)
+      ) {
+        return "connector";
+      }
+      return "derived";
+    };
+    const sourced: SourcedTool[] = [
+      ...coreTools.map((tool) => ({ tool, source: sourceOf(tool.name) })),
+      ...(await moduleTools(runtimeModules, projectionContext())),
+    ];
+    assertUniqueToolNames(sourced);
+    const decorated = decorateMcpTools(
+      sourced,
+      runtimeModules,
+      projectionContext(),
+    );
+    assertUniqueToolNames(decorated);
+    return decorated;
+  };
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: (await listedTools()).map((entry) => entry.tool),
   }));
 
-  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-    const name = request.params.name;
-
+  const dispatchTool = async (
+    name: string,
+    args: Record<string, unknown>,
+    requestId: string | number,
+    internal: boolean,
+    selectedOptions?: ModuleToolExecutionOptions,
+    assertParentInvocationActive?: () => void,
+  ): Promise<ModuleToolExecutionResult> => {
+    assertParentInvocationActive?.();
+    const request = { params: { name, arguments: args } };
+    const extra = { requestId };
+    const directCall = async (
+      _options?: ModuleToolExecutionOptions,
+      selected?: ResolvedInvocationSource,
+      assertInterceptorActive?: () => void,
+    ): Promise<CallToolResult> => {
+    assertParentInvocationActive?.();
+    assertInterceptorActive?.();
+    const selectedReference = selected?.sourceReference;
+    const captured = selected?.internal as CapturedDerivedExecution | undefined;
     const operationTool = catalog.operationTools.find(
       (tool) => tool.name === name,
     );
@@ -2020,10 +2563,17 @@ function buildServer(
         );
       }
       try {
+        assertParentInvocationActive?.();
+        assertInterceptorActive?.();
         const result = await invokeOperation(
           operations.get(operationTool.key)!,
           request.params.arguments ?? {},
-          { db, session, transport: "mcp" },
+          {
+            db,
+            session,
+            transport: "mcp",
+            ...(modulePlatform ? { platform: modulePlatform.services } : {}),
+          },
         );
         return ok(result.value);
       } catch (error) {
@@ -2040,14 +2590,18 @@ function buildServer(
     });
     if (connectorTool) {
       try {
+        const registry = await connectorRegistry();
+        assertParentInvocationActive?.();
+        assertInterceptorActive?.();
         const result = await invokeConnectorOperation(
           {
             db,
             session,
-            registry: await connectorRegistry(),
+            registry,
             governor: connectorGovernor(),
             keyring: connectorKeyring(),
             roles: session.roles ?? [],
+            egressOwner,
           },
           connectorTool.contract,
           connectorTool.operation,
@@ -2824,7 +3378,20 @@ function buildServer(
           id,
         });
         if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-        return ok(await discoverProviderSchema(serializeRow(table, row)));
+        const serialized = serializeRow(table, row);
+        return ok(
+          await discoverProviderSchema(serialized, fetch, {
+            owner: egressOwner,
+            purpose: "discovery",
+            scope: {
+              tenantId: session.tenantId,
+              actorId: session.userId,
+              provider: String(serialized.id ?? discoveryTool.entity),
+              operation: "discover_schema",
+              kind: "query",
+            },
+          }),
+        );
       } catch (error) {
         return failed(error);
       }
@@ -2913,6 +3480,17 @@ function buildServer(
             elicit,
             table: testTool.table,
             fallbackPlainValues,
+            egress: {
+              owner: egressOwner,
+              purpose: "probe",
+              scope: {
+                tenantId: session.tenantId,
+                actorId: session.userId,
+                provider: String(sourceRow.id ?? testTool.entity),
+                operation: "test_connection",
+                kind: "query",
+              },
+            },
           }),
         );
       } catch (error) {
@@ -2936,13 +3514,31 @@ function buildServer(
       // not exist yet, so the honest answer is a clear failure, not a stub
       // success an agent would act on.
       if (catalogDerivedTools.length > 0) {
-        const derived = (
+        let derived = (
           await derivedToolsForSession(db, session, tables)
         ).find((tool) => tool.name === name);
+        if (captured) {
+          const hidden = captured;
+          if (deriveToolName(hidden.serviceRow[hidden.entry.keyField]) === name) {
+            derived = {
+              name,
+              description:
+                String(hidden.serviceRow[hidden.entry.descriptionField] ?? ""),
+              inputSchema: inputSchemaFromStoredFields(
+                hidden.serviceRow[hidden.entry.inputFieldsField],
+              ),
+              entity: hidden.entry.entity,
+              table: hidden.entry.table,
+              rowId: String(hidden.serviceRow.id ?? ""),
+            };
+          }
+        }
         if (derived) {
-          const entry = catalogDerivedTools.find(
-            (candidate) => candidate.table === derived.table,
-          );
+          const entry =
+            captured?.entry ??
+            catalogDerivedTools.find(
+              (candidate) => candidate.table === derived.table,
+            );
           const execution = entry?.execution;
           if (!execution) {
             return failed(
@@ -2962,15 +3558,15 @@ function buildServer(
             >;
             assertSchemaValid(derived.inputSchema, args, "arguments");
 
-            const serviceRow = await runtimeRowByFilter(
-              db,
-              session,
-              tables,
-              derived.table,
-              {
-                id: derived.rowId,
-              },
-            );
+            const serviceRow =
+              captured?.serviceRow ??
+              (await runtimeRowByFilter(
+                db,
+                session,
+                tables,
+                derived.table,
+                { id: derived.rowId },
+              ));
             if (!serviceRow)
               throw new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`);
 
@@ -2989,6 +3585,12 @@ function buildServer(
               serviceRow,
               execution.bindingsField,
             )) {
+              if (
+                selected &&
+                Number(binding.order ?? 0) !== selected.binding
+              ) {
+                continue;
+              }
               // A binding the call's selector input does not choose is not
               // part of this call at all — deliberate routing, not an
               // outage, so it does not surface in `unavailable`.
@@ -2996,8 +3598,9 @@ function buildServer(
                 continue;
               try {
                 const operationId = binding[execution.operationRef];
-                const operationRow =
-                  typeof operationId === "string"
+                const operationRow = captured
+                  ? captured.operationRow
+                  : typeof operationId === "string"
                     ? await runtimeRowByFilter(
                         db,
                         session,
@@ -3016,8 +3619,9 @@ function buildServer(
                   );
                 }
                 const providerId = operationRow[execution.providerRef];
-                const providerRow =
-                  typeof providerId === "string"
+                const providerRow = captured
+                  ? captured.providerRow
+                  : typeof providerId === "string"
                     ? await runtimeRowByFilter(
                         db,
                         session,
@@ -3035,17 +3639,35 @@ function buildServer(
                     `The ${execution.operationEntity} references a missing ${execution.providerEntity}.`,
                   );
                 }
-                const connectionRows = await runtimeRowsByFilter(
-                  db,
-                  session,
-                  tables,
-                  execution.connectionTable,
-                  { [execution.connectionProviderRef]: providerId },
-                );
+                let connectionRows = captured
+                  ? captured.connectionRows
+                  : await runtimeRowsByFilter(
+                      db,
+                      session,
+                      tables,
+                      execution.connectionTable,
+                      { [execution.connectionProviderRef]: providerId },
+                    );
                 const providerAuth = (providerRow.auth ?? null) as Record<
                   string,
                   unknown
                 > | null;
+                if (selectedReference && session.tenantId && !captured) {
+                  const personalSource =
+                    connectionScopeOf(providerAuth) === "user";
+                  connectionRows = connectionRows.filter((row) =>
+                    sameInvocationSourceReference(
+                      selectedReference,
+                      mintInvocationSourceReference({
+                        tenantId: session.tenantId!,
+                        actorId: personalSource ? session.userId : null,
+                        scope: personalSource ? "personal" : "tenant",
+                        connectionTable: execution.connectionTable,
+                        connectionId: String(row.id),
+                      }),
+                    ),
+                  );
+                }
                 const elicitScope =
                   entityForTable(execution.connectionTable)?.elicitOnCreate
                     ?.sourceTable ?? execution.providerTable;
@@ -3054,18 +3676,27 @@ function buildServer(
                 let secretScope = elicitScope;
                 let oauthConnectionAudit: ConnectionTokenAudit | undefined;
 
-                if (
-                  providerAuth?.profile === "oauth2AuthorizationCode" &&
-                  connectionScopeOf(providerAuth) === "user"
-                ) {
-                  // Personal mode: execution resolves ONLY the caller's own
-                  // connection — another employee's tokens are unreachable by
-                  // construction, and their absence is a clear next step.
+                if (connectionScopeOf(providerAuth) === "user") {
+                  // Every personal auth profile resolves ONLY the caller's
+                  // captured connection. OAuth adds tenant support/config and
+                  // refresh below; API-key/header/basic profiles use this same
+                  // personal row without falling into tenant selection.
                   const personal = selectOAuthConnectionRow(
                     connectionRows,
                     "user",
                     session.userId,
                   );
+                  if (!personal) {
+                    throw new HttpError(
+                      403,
+                      "CONNECTION_REQUIRED",
+                      `This tool needs your personal ${String(providerRow.name ?? "provider")} connection.`,
+                    );
+                  }
+                  if (providerAuth?.profile !== "oauth2AuthorizationCode") {
+                    connectionValues =
+                      personal[execution.connectionValuesField];
+                  } else {
                   const personalScope = connectionTokenSecretScope(
                     execution.connectionTable,
                   );
@@ -3077,7 +3708,7 @@ function buildServer(
                   };
                   let values = (personal?.[execution.connectionValuesField] ??
                     null) as Record<string, unknown> | null;
-                  if (!personal || !values?.accessToken) {
+                  if (!values?.accessToken) {
                     throw new HttpError(
                       403,
                       "CONNECTION_REQUIRED",
@@ -3132,6 +3763,9 @@ function buildServer(
                       table: connectionTableDef,
                       rowId: String(personal.id),
                       valuesField: execution.connectionValuesField,
+                      providerField: execution.connectionProviderRef,
+                      expectedProviderId: String(providerId),
+                      expectedOwnerUserId: session.userId,
                       refreshLeewaySeconds: refreshLeewaySeconds(providerAuth),
                       audit: oauthConnectionAudit!,
                       tokenUrl: resolveTemplate(providerAuth.tokenUrl as string, tenantUrlValues.plain, "auth.tokenUrl", tenantUrlValues.secretKeys),
@@ -3140,6 +3774,17 @@ function buildServer(
                       egress: Array.isArray(providerRow.egressHosts) ? (providerRow.egressHosts as string[]) : [],
                       keyring,
                       secretScope: personalScope,
+                      moduleEgress: {
+                        owner: egressOwner,
+                        purpose: "oauth",
+                        scope: {
+                          tenantId: session.tenantId,
+                          actorId: session.userId,
+                          provider: String(providerRow.id ?? providerId),
+                          operation: "refresh_access_token",
+                          kind: "mutation",
+                        },
+                      },
                     });
                   }
                   // The personal connection holds only tokens; tenant-owned
@@ -3167,6 +3812,7 @@ function buildServer(
                     ...providerRow,
                     auth: { scheme: "bearer", tokenFrom: "accessToken" },
                   };
+                  }
                 } else {
                   // Tenant OAuth is bound only to its explicit tenant-owned
                   // row. Falling back to a personal row would let one user's
@@ -3249,6 +3895,9 @@ function buildServer(
                         table: connectionTableDef,
                         rowId: String(tenantConnection.id),
                         valuesField: execution.connectionValuesField,
+                        providerField: execution.connectionProviderRef,
+                        expectedProviderId: String(providerId),
+                        expectedOwnerUserId: null,
                         refreshLeewaySeconds:
                           refreshLeewaySeconds(providerAuth),
                         audit: oauthConnectionAudit!,
@@ -3258,6 +3907,17 @@ function buildServer(
                         egress: Array.isArray(providerRow.egressHosts) ? (providerRow.egressHosts as string[]) : [],
                         keyring,
                         secretScope: connectionTokenSecretScope(execution.connectionTable),
+                        moduleEgress: {
+                          owner: egressOwner,
+                          purpose: "oauth",
+                          scope: {
+                            tenantId: session.tenantId,
+                            actorId: session.userId,
+                            provider: String(providerRow.id ?? providerId),
+                            operation: "refresh_access_token",
+                            kind: "mutation",
+                          },
+                        },
                       });
                     }
                     // The row mixes AAD scopes: elicited fields were encrypted
@@ -3317,6 +3977,8 @@ function buildServer(
 
                 let outputs;
                 try {
+                  assertParentInvocationActive?.();
+                  assertInterceptorActive?.();
                   outputs = await executeBinding({
                     binding,
                     operationRow,
@@ -3329,6 +3991,17 @@ function buildServer(
                         entityForTable(execution.connectionTable)?.elicitOnCreate
                           ?.definitionsField ?? ""
                       ],
+                    egress: {
+                      owner: egressOwner,
+                      purpose: "provider",
+                      scope: {
+                        tenantId: session.tenantId,
+                        actorId: session.userId,
+                        provider: String(providerRow.id ?? providerRow.key ?? "provider"),
+                        operation: String(operationRow.id ?? operationRow.key ?? "operation"),
+                        kind: operationRow.kind === "mutation" ? "mutation" : "query",
+                      },
+                    },
                   });
                 } catch (error) {
                   if (error instanceof SecretError && oauthConnectionAudit) {
@@ -3546,6 +4219,17 @@ function buildServer(
             sourceRow,
             elicit,
             table: table.name,
+            egress: {
+              owner: egressOwner,
+              purpose: "probe",
+              scope: {
+                tenantId: session.tenantId,
+                actorId: session.userId,
+                provider: String(sourceRow.id ?? entity?.entity ?? "provider"),
+                operation: "test_connection",
+                kind: "query",
+              },
+            },
           });
           if (!report.ok) {
             throw new HttpError(
@@ -3601,9 +4285,347 @@ function buildServer(
     } catch (error) {
       return failed(error);
     }
+    };
+
+    let preselectedReference: ResolvedInvocationSource | undefined;
+    let current: SourcedTool | undefined;
+    try {
+      const initialSelection = parseModuleToolExecutionOptions(selectedOptions);
+      if (initialSelection.kind === "reference") {
+        if (!internal) {
+          throw new HttpError(404, "NOT_FOUND", "Invocation source is unavailable.");
+        }
+        preselectedReference = await sourceVault.resolveReference(
+          session,
+          name,
+          selectedOptions!,
+          (reference) => sourceFromReference(reference, name),
+        );
+        const hidden = preselectedReference?.internal as
+          | CapturedDerivedExecution
+          | undefined;
+        if (!hidden || hidden.operationRow.kind !== "query") {
+          throw new HttpError(404, "NOT_FOUND", "Invocation source is unavailable.");
+        }
+        const collidesWithCore =
+          catalog.tools.some((tool) => tool.name === name) ||
+          catalog.operationTools.some((tool) => tool.name === name) ||
+          catalogDerivedTools.some(
+            (entry) =>
+              entry.connect?.name === name ||
+              entry.dryRun?.name === name ||
+              entry.personalization?.set.name === name,
+          ) ||
+          catalogGuideTools.some((tool) => tool.name === name) ||
+          (catalog.discoveryTools ?? []).some((tool) => tool.name === name) ||
+          (catalog.testTools ?? []).some((tool) => tool.name === name) ||
+          resolveConnectorTool(listConnectorContracts(), name, {
+            roles: session.roles ?? [],
+          }) !== undefined;
+        if (collidesWithCore) {
+          throw new HttpError(404, "NOT_FOUND", "Invocation source is unavailable.");
+        }
+        if (hidden.entry.execution) {
+          current = {
+            source: "derived",
+            tool: {
+              name,
+              description: String(
+                hidden.serviceRow[hidden.entry.descriptionField] ?? name,
+              ),
+              inputSchema: inputSchemaFromStoredFields(
+                hidden.serviceRow[hidden.entry.inputFieldsField],
+              ) as Tool["inputSchema"],
+            },
+          };
+        }
+      } else {
+        current = (await listedTools()).find((entry) => entry.tool.name === name);
+      }
+    } catch (error) {
+      return { result: failed(error) };
+    }
+    if (!current) {
+      return {
+        result: failed(
+          new HttpError(404, "NOT_FOUND", `Unknown tool "${name}".`),
+        ),
+      };
+    }
+    assertParentInvocationActive?.();
+    const ctx = invocationContext(extra.requestId);
+    const invoke = async (
+      options?: ModuleToolExecutionOptions,
+      assertInterceptorActive?: () => void,
+    ): Promise<ModuleToolExecutionResult> => {
+      assertParentInvocationActive?.();
+      assertInterceptorActive?.();
+      const parsedSelection = parseModuleToolExecutionOptions(options);
+      if (parsedSelection.kind === "reference" && !internal) {
+        throw new HttpError(404, "NOT_FOUND", "Invocation source is unavailable.");
+      }
+      if (preselectedReference && parsedSelection.kind !== "reference") {
+        throw new HttpError(404, "NOT_FOUND", "Invocation source is unavailable.");
+      }
+      if (
+        current!.source === "module" &&
+        parsedSelection.kind !== "none"
+      ) {
+        throw new HttpError(404, "NOT_FOUND", "Invocation source is unavailable.");
+      }
+      let selected: ResolvedInvocationSource | undefined;
+      if (parsedSelection.kind === "reference") {
+        const expected = parsedSelection.expectedDefinition;
+        if (
+          !preselectedReference ||
+          parsedSelection.value !== preselectedReference.sourceReference ||
+          expected?.kind !== preselectedReference.definition.kind ||
+          expected.id !== preselectedReference.definition.id ||
+          expected.version !== preselectedReference.definition.version
+        ) {
+          throw new HttpError(404, "NOT_FOUND", "Invocation source is unavailable.");
+        }
+        // Interceptors are arbitrary async module code. Re-resolve at the
+        // execution linearization point so revocation/version/provider/scope
+        // changes during an interceptor cannot run the captured stale graph.
+        const currentSelection = await sourceVault.resolveReference(
+          moduleSession,
+          name,
+          options!,
+          (reference) => sourceFromReference(reference, name),
+        );
+        if (
+          !currentSelection ||
+          currentSelection.authorityFingerprint !==
+            preselectedReference.authorityFingerprint
+        ) {
+          throw new HttpError(404, "NOT_FOUND", "Invocation source is unavailable.");
+        }
+        selected = preselectedReference;
+      } else if (parsedSelection.kind === "handle") {
+        selected = await sourceVault.consumeHandle(
+          moduleSession,
+          name,
+          options!,
+          ctx,
+        );
+      }
+      assertParentInvocationActive?.();
+      assertInterceptorActive?.();
+      const selectedCapture = selected?.internal as
+        | CapturedDerivedExecution
+        | undefined;
+      if (
+        internal &&
+        parsedSelection.kind === "reference" &&
+        (!selectedCapture || selectedCapture.operationRow.kind !== "query")
+      ) {
+        throw new HttpError(404, "NOT_FOUND", "Invocation source is unavailable.");
+      }
+      if (current!.source === "module") {
+        return invokeModuleTool(
+            current!,
+            name,
+            (request.params.arguments ?? {}) as Record<string, unknown>,
+            ctx,
+          );
+      }
+      const result = await directCall(
+        options,
+        selected,
+        assertInterceptorActive,
+      );
+      return {
+        result,
+        ...(selected && !(result as { isError?: boolean }).isError
+          ? {
+              execution: {
+                sourceHandle: selected.sourceHandle,
+                sourceReference: selected.sourceReference,
+                binding: selected.binding,
+                definition: selected.definition,
+              },
+            }
+          : {}),
+      };
+    };
+    try {
+      const run = () =>
+        interceptMcpToolCall(
+          runtimeModules,
+          {
+            name,
+            source: current.source,
+            arguments: (request.params.arguments ?? {}) as Record<string, unknown>,
+            ctx,
+          },
+          (options = selectedOptions, assertActive) =>
+            invoke(options, assertActive),
+        );
+      assertParentInvocationActive?.();
+      return modulePlatform
+        ? await modulePlatform.withActiveInvocation(ctx, run, name)
+        : await run();
+    } catch (error) {
+      return { result: failed(error) };
+    }
+  };
+
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    const outcome = await dispatchTool(
+      request.params.name,
+      (request.params.arguments ?? {}) as Record<string, unknown>,
+      extra.requestId,
+      false,
+    );
+    return outcome.result;
+  });
+
+  modulePlatform?.registerServer({
+    server,
+    session: moduleSession,
+    liveNotifications: stateful,
+    notifyToolsChanged: () => server.sendToolListChanged(),
+    notifyResourcesChanged: () => server.sendResourceListChanged(),
+    authorize: async (action, subject) => {
+      if (subject.kind === "tool") {
+        if (action !== "call" && action !== "invoke") {
+          return { allowed: false, code: "NOT_FOUND" };
+        }
+        const current = (await listedTools()).some(
+          (entry) =>
+            entry.source !== "module" && entry.tool.name === subject.name,
+        );
+        return current
+          ? { allowed: true }
+          : { allowed: false, code: "NOT_FOUND" };
+      }
+
+      if (subject.kind === "entity-row") {
+        const operation =
+          action === "read" || action === "get"
+            ? "get"
+            : action === "update"
+              ? "update"
+              : action === "delete"
+                ? "delete"
+                : undefined;
+        const entity = catalog.entities.find(
+          (candidate) => candidate.entity === subject.entity,
+        );
+        const table = entity ? tables.get(entity.table) : undefined;
+        if (!operation || !table || !sessionMayInvoke(table, operation, session)) {
+          return { allowed: false, code: "NOT_FOUND" };
+        }
+        const row = await getGeneratedEntity(db, session, {
+          table: table.name,
+          id: subject.id,
+        });
+        if (!row) return { allowed: false, code: "NOT_FOUND" };
+        if (operation !== "get") return { allowed: true };
+        const includeClassified = canReadClassifiedColumns(
+          table.source?.authorization,
+          session,
+        );
+        return {
+          allowed: true,
+          fieldAllowlist: table.columns
+            .filter(
+              (column) =>
+                includeClassified || column.classification === undefined,
+            )
+            .map(fieldNameForColumn),
+        };
+      }
+
+      if (action !== "read") return { allowed: false, code: "NOT_FOUND" };
+      const uri = subject.uri;
+      if (
+        uri === ENTITY_CATALOG_URI ||
+        entitiesForSession(session, tables).some(
+          ({ entity }) => entityResourceUri(entity) === uri,
+        )
+      ) {
+        return { allowed: true };
+      }
+      const resources = resourcesForSession(session, tables);
+      if (resources.some((resource) => resource.uri === uri)) {
+        return { allowed: true };
+      }
+      const templated = resources.find(
+        (resource) =>
+          uri.startsWith(`${resource.uri}/`) &&
+          !uri.slice(resource.uri.length + 1).includes("/"),
+      );
+      if (templated) {
+        const table = tables.get(templated.table);
+        const id = uri.slice(templated.uri.length + 1);
+        if (table && id.length > 0) {
+          const row = await getGeneratedEntity(db, session, {
+            table: table.name,
+            id,
+          });
+          if (row) return { allowed: true };
+        }
+      }
+      return { allowed: false, code: "NOT_FOUND" };
+    },
+    resolveInvocationSources: async (toolName, selector, invocationToken) => {
+      const tool = (await listedTools()).find(
+        (entry) => entry.tool.name === toolName,
+      );
+      if (!tool || tool.source !== "derived") return [];
+      return sourceVault.resolve(
+        moduleSession,
+        toolName,
+        selector,
+        () => authorizedSources(toolName, true),
+        invocationToken,
+      );
+    },
+    callTool: (
+      name,
+      args,
+      options,
+      requestId,
+      _invocationToken,
+      assertInvocationActive,
+    ) =>
+      dispatchTool(
+        name,
+        args,
+        requestId,
+        true,
+        options,
+        assertInvocationActive,
+      ),
+    endInvocation: (invocationToken) =>
+      sourceVault.clearInvocation(invocationToken),
   });
 
   return server;
+}
+
+/** Direct in-memory transport seam for adversarial runtime-module tests. */
+export function __buildGeneratedMcpServerForTests(input: {
+  db: OpenShapeForgeDatabase;
+  session: TrustedSessionContext;
+  modules: readonly RuntimeModule[];
+  modulePlatform: ModulePlatformRuntime;
+  egressOwner?: RuntimeModule["egress"];
+  stateful?: boolean;
+  tables?: Map<string, GeneratedTable>;
+}): Server {
+  return buildServer(
+    input.db,
+    input.session,
+    input.modules,
+    input.modulePlatform,
+    input.egressOwner,
+    undefined,
+    input.stateful ?? true,
+    input.tables,
+  );
 }
 
 export function registerGeneratedMcpServer(
@@ -3611,15 +4633,13 @@ export function registerGeneratedMcpServer(
   options: {
     db?: OpenShapeForgeDatabase | undefined;
     modules?: readonly RuntimeModule[];
+    modulePlatform?: ModulePlatformRuntime;
+    egressOwner?: RuntimeModule["egress"];
   } = {},
 ): void {
   // The transport exists when EITHER surface has something to advertise; a
   // deployment with connectors but no MCP-exposed entity still needs it.
-  if (
-    catalog.tools.length === 0 &&
-    catalog.operationTools.length === 0 &&
-    listConnectorContracts().length === 0
-  ) {
+  if (!hasMcpSurface(options.modules ?? [])) {
     return;
   }
 
@@ -3712,6 +4732,7 @@ export function registerGeneratedMcpServer(
       oauthScopes: string[];
       groups: string[];
       scope: DbSessionInput["scope"];
+      credential: TrustedSessionContext["credential"];
       lastSeenMs: number;
     };
     const mcpSessions = new Map<string, McpSessionEntry>();
@@ -3730,6 +4751,7 @@ export function registerGeneratedMcpServer(
       for (const [id, entry] of mcpSessions) {
         if (now - entry.lastSeenMs > SESSION_IDLE_LIMIT_MS) {
           mcpSessions.delete(id);
+          options.modulePlatform?.unregisterServer(entry.server);
           void entry.transport.close();
           void entry.server.close();
         }
@@ -3811,7 +4833,23 @@ export function registerGeneratedMcpServer(
           );
       }
       try {
-        const { values } = await exchangeCodeForTokens(pending, query.code);
+        const { values } = await exchangeCodeForTokens(
+          pending,
+          query.code,
+          fetch,
+          undefined,
+          {
+            owner: options.egressOwner,
+            purpose: "oauth",
+            scope: {
+              tenantId: pending.tenantId,
+              actorId: pending.userId,
+              provider: pending.providerRowId,
+              operation: "exchange_authorization_code",
+              kind: "mutation",
+            },
+          },
+        );
         const db = options.db;
         if (!db) throw new Error("Database is not configured.");
         const tables = tablesByName();
@@ -3946,6 +4984,17 @@ export function registerGeneratedMcpServer(
             sourceRow,
             elicit: pending.elicit,
             table: pending.table,
+            egress: {
+              owner: options.egressOwner,
+              purpose: "probe",
+              scope: {
+                tenantId: pending.tenantId,
+                actorId: pending.userId,
+                provider: String(sourceRow.id ?? pending.elicit.sourceEntity),
+                operation: "test_connection",
+                kind: "query",
+              },
+            },
           });
           if (!report.ok) {
             return {
@@ -4161,9 +5210,11 @@ export function registerGeneratedMcpServer(
             !sameClaims(existing.roles, session.roles ?? []) ||
             !sameClaims(existing.oauthScopes, session.oauthScopes ?? []) ||
             !sameClaims(existing.groups, session.groups ?? []) ||
-            existing.scope !== session.scope
+            existing.scope !== session.scope ||
+            existing.credential !== session.credential
           ) {
             mcpSessions.delete(sessionId);
+            options.modulePlatform?.unregisterServer(existing.server);
             void existing.transport.close();
             void existing.server.close();
             throw new HttpError(
@@ -4187,6 +5238,8 @@ export function registerGeneratedMcpServer(
             db,
             session,
             options.modules,
+            options.modulePlatform,
+            options.egressOwner,
             notifyDerivedDefinitionChanged,
             true,
           );
@@ -4202,12 +5255,14 @@ export function registerGeneratedMcpServer(
                 oauthScopes: [...(session.oauthScopes ?? [])],
                 groups: [...(session.groups ?? [])],
                 scope: session.scope,
+                credential: session.credential,
                 lastSeenMs: Date.now(),
               });
             },
           });
           transport.onclose = () => {
             if (transport.sessionId) mcpSessions.delete(transport.sessionId);
+            options.modulePlatform?.unregisterServer(server);
           };
           reply.hijack();
           // The SDK declares Transport's optional callbacks as required-when-present,
@@ -4228,6 +5283,8 @@ export function registerGeneratedMcpServer(
           db,
           session,
           options.modules,
+          options.modulePlatform,
+          options.egressOwner,
           notifyDerivedDefinitionChanged,
         );
         // `sessionIdGenerator` is omitted rather than set to undefined: the SDK
@@ -4237,6 +5294,7 @@ export function registerGeneratedMcpServer(
           enableJsonResponse: true,
         });
         reply.raw.on("close", () => {
+          options.modulePlatform?.unregisterServer(server);
           void transport.close();
           void server.close();
         });
@@ -4248,4 +5306,34 @@ export function registerGeneratedMcpServer(
       },
     });
   });
+}
+
+export function hasMcpSurface(
+  modules: readonly RuntimeModule[],
+  core: {
+    tools: number;
+    operationTools: number;
+    connectors: number;
+  } = {
+    tools: catalog.tools.length,
+    operationTools: catalog.operationTools.length,
+    connectors: listConnectorContracts().length,
+  },
+): boolean {
+  return (
+    core.tools > 0 ||
+    core.operationTools > 0 ||
+    core.connectors > 0 ||
+    modules.some((module) => module.mcp !== undefined)
+  );
+}
+
+export function hasDynamicModuleToolProjection(
+  modules: readonly RuntimeModule[],
+): boolean {
+  return modules.some(
+    (module) =>
+      module.mcp?.tools !== undefined ||
+      module.mcp?.decorateTool !== undefined,
+  );
 }

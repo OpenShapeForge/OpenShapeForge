@@ -23,6 +23,7 @@
  * Secrets never appear in the report — not in details, not in errors.
  */
 import { HttpError } from "../rest/http-error.js";
+import type { ModuleEgressDispatch } from "../modules/egress.js";
 import { hostAllowed } from "../connectors/executor.js";
 import {
   decryptSecret,
@@ -95,6 +96,7 @@ export type TestElicitedRowInput = {
   fallbackPlainValues?: Record<string, string> | undefined;
   keyring?: SecretKeyring | undefined;
   fetchImpl?: typeof fetch;
+  egress?: ModuleEgressDispatch | undefined;
 };
 
 /** One line per failed check, for refusals that must explain themselves. */
@@ -238,6 +240,7 @@ export async function testElicitedRow(
         secret: split.secret,
         egress,
         fetchImpl,
+        egressDispatch: input.egress,
       });
       checks.push({
         check: "credentials",
@@ -322,6 +325,7 @@ export async function testElicitedRow(
         },
         egress,
         fetchImpl,
+        input.egress,
       );
       checks.push(
         response.ok

@@ -53,7 +53,12 @@ const PROVIDER: Row = {
     { key: "apiToken", required: true },
   ],
 };
-const OPERATION: Row = { id: "op-1", key: "search", providerId: "prov-1" };
+const OPERATION: Row = {
+  id: "op-1",
+  key: "search",
+  providerId: "prov-1",
+  inputFields: [{ key: "version", valueType: "string" }],
+};
 const CONNECTION: Row = {
   id: "conn-1",
   providerId: "prov-1",
@@ -90,6 +95,109 @@ describe("validateVisibleDefinition", () => {
         "core.services": [ROW],
       }),
     });
+  });
+
+  it("publishes a fixed If-Match mapping from a declared scalar input", async () => {
+    await validateVisibleDefinition({
+      entry: ENTRY,
+      row: ROW,
+      reservedNames: new Set(),
+      readRows: readerFor({
+        "core.operations": [
+          {
+            ...OPERATION,
+            requestMapping: {
+              headers: [{ field: "version", header: "If-Match" }],
+            },
+          },
+        ],
+        "core.providers": [PROVIDER],
+        "core.connections": [CONNECTION],
+        "core.services": [],
+      }),
+    });
+  });
+
+  it("refuses unsafe authored header mappings before publication", async () => {
+    const invalidOperations: Row[] = [
+      {
+        ...OPERATION,
+        requestMapping: {
+          headers: [{ field: "missing", header: "If-Match" }],
+        },
+      },
+      {
+        ...OPERATION,
+        requestMapping: {
+          headers: [{ field: "version", header: "Authorization" }],
+        },
+      },
+      ...[
+        "Content-Type",
+        "Accept",
+        "__proto__",
+        "prototype",
+        "constructor",
+      ].map((header) => ({
+        ...OPERATION,
+        requestMapping: {
+          headers: [{ field: "version", header }],
+        },
+      })),
+      {
+        ...OPERATION,
+        requestMapping: {
+          headers: [
+            { field: "version", header: "If-Match" },
+            { field: "version", header: "if-match" },
+          ],
+        },
+      },
+    ];
+    for (const operation of invalidOperations) {
+      const message = await failure({
+        entry: ENTRY,
+        row: ROW,
+        reservedNames: new Set(),
+        readRows: readerFor({
+          "core.operations": [operation],
+          "core.providers": [PROVIDER],
+          "core.connections": [CONNECTION],
+          "core.services": [],
+        }),
+      });
+      expect(message).toContain("binding 1: requestMapping.headers");
+    }
+  });
+
+  it("refuses a header target owned by configured authentication", async () => {
+    const provider = {
+      ...PROVIDER,
+      auth: {
+        scheme: "header",
+        headerName: "  X-Api-Key  ",
+        tokenFrom: "apiToken",
+      },
+    };
+    const message = await failure({
+      entry: ENTRY,
+      row: ROW,
+      reservedNames: new Set(),
+      readRows: readerFor({
+        "core.operations": [
+          {
+            ...OPERATION,
+            requestMapping: {
+              headers: [{ field: "version", header: "x-API-key" }],
+            },
+          },
+        ],
+        "core.providers": [provider],
+        "core.connections": [CONNECTION],
+        "core.services": [],
+      }),
+    });
+    expect(message).toContain("owned by configured authentication");
   });
 
   it("names a binding whose operation does not exist", async () => {

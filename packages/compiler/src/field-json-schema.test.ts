@@ -13,6 +13,7 @@ import type {
   FieldDefinitionSemanticTypeKind,
   McpDeclarativeAdapterUrls,
   McpDeclarativeOperationUrl,
+  McpDeclarativeRequestMapping,
 } from "./index.js";
 
 const packageRootFieldDefinition = {
@@ -27,6 +28,9 @@ const packageRootAdapterUrls = {
 const packageRootOperationUrl = {
   baseUrlKey: "secondary",
 } satisfies McpDeclarativeOperationUrl;
+const packageRootRequestMapping = {
+  headers: [{ field: "version", header: "If-Match" }],
+} satisfies McpDeclarativeRequestMapping;
 
 function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): CompiledField {
   const { key, ...rest } = overrides;
@@ -63,6 +67,7 @@ describe("compiled field JSON Schema projection", () => {
       "https://secondary.example.test",
     );
     expect(packageRootOperationUrl.baseUrlKey).toBe("secondary");
+    expect(packageRootRequestMapping.headers[0]?.header).toBe("If-Match");
   });
 
   it("projects descriptions, validation, defaults, and reference-data enums", () => {

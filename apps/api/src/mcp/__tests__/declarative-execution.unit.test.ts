@@ -21,6 +21,7 @@ import {
   extractPath,
   orderedBindings,
   providerUrlTemplates,
+  requestHeaderMappings,
   resolveTemplate,
   setPath,
   splitConnectionValues,
@@ -90,6 +91,7 @@ describe("redirect egress", () => {
           authorization: "Bearer fake",
           cookie: "session=fake",
           "proxy-authorization": "Basic fake",
+          "if-match": '"version-1"',
           "x-safe": "yes",
           accept: "secret-in-accept",
         },
@@ -101,6 +103,7 @@ describe("redirect egress", () => {
     expect(calls[2]?.headers.get("authorization")).toBeNull();
     expect(calls[2]?.headers.get("cookie")).toBeNull();
     expect(calls[2]?.headers.get("proxy-authorization")).toBeNull();
+    expect(calls[2]?.headers.get("if-match")).toBeNull();
     expect(calls[2]?.headers.get("x-safe")).toBeNull();
     expect(calls[2]?.headers.get("accept")).toBeNull();
   });
@@ -220,7 +223,7 @@ describe("buildAuthHeaders", () => {
     });
     expect(
       buildAuthHeaders(
-        { scheme: "header", headerName: "X-Api-Key", tokenFrom: "t" },
+        { scheme: "header", headerName: "  X-Api-Key  ", tokenFrom: "t" },
         {},
         { t: "x" },
       ),
@@ -248,6 +251,102 @@ describe("mapping helpers", () => {
       x: 1,
     });
     expect(applyMapping({ a: 1 }, undefined)).toEqual({ a: 1 });
+  });
+
+  it("validates fixed authored header targets against declared scalar inputs", () => {
+    const operation = {
+      inputFields: [
+        { key: "version", valueType: "string" },
+        { key: "sequence", valueType: "integer", cardinality: "single" },
+      ],
+      requestMapping: {
+        headers: [
+          { field: "version", header: "If-Match" },
+          { field: "sequence", header: "X-Sequence" },
+        ],
+      },
+    };
+    expect(requestHeaderMappings(operation, undefined)).toEqual([
+      { field: "version", header: "if-match" },
+      { field: "sequence", header: "x-sequence" },
+    ]);
+  });
+
+  it("refuses hostile or caller-directed authored header metadata", () => {
+    const operation = (headers: unknown, inputFields: unknown = [
+      { key: "version", valueType: "string" },
+    ]) => ({ inputFields, requestMapping: { headers } });
+
+    expect(() => requestHeaderMappings(operation("not-an-array"), undefined))
+      .toThrow(/must be an array/);
+    expect(() =>
+      requestHeaderMappings(
+        operation([{ field: "version", header: "X-Good", headerNameField: "caller" }]),
+        undefined,
+      ),
+    ).toThrow(/unknown option.*headerNameField/);
+    expect(() =>
+      requestHeaderMappings(operation([{ field: "missing", header: "If-Match" }]), undefined),
+    ).toThrow(/not a declared operation input/);
+    expect(() =>
+      requestHeaderMappings(
+        operation([{ field: "version", header: "If-Match" }], [
+          { key: "version", valueType: "object" },
+        ]),
+        undefined,
+      ),
+    ).toThrow(/single scalar/);
+    expect(() =>
+      requestHeaderMappings(
+        operation([{ field: "version", header: "If-Match" }], [
+          { key: "version", valueType: "string", cardinality: "collection" },
+        ]),
+        undefined,
+      ),
+    ).toThrow(/single scalar/);
+    expect(() =>
+      requestHeaderMappings(operation([{ field: "version", header: "Bad Header" }]), undefined),
+    ).toThrow(/valid HTTP header name/);
+    expect(() =>
+      requestHeaderMappings(
+        operation([
+          { field: "version", header: "If-Match" },
+          { field: "version", header: "if-match" },
+        ]),
+        undefined,
+      ),
+    ).toThrow(/duplicates the target/);
+    expect(() =>
+      requestHeaderMappings(
+        operation([{ field: "version", header: "X-Api-Key" }]),
+        { scheme: "header", headerName: "  x-API-key  " },
+      ),
+    ).toThrow(/owned by configured authentication/);
+
+    for (const header of [
+      "__proto__",
+      "Accept",
+      "Authorization",
+      "Connection",
+      "Content-Length",
+      "Content-Type",
+      "constructor",
+      "Cookie",
+      "Host",
+      "Keep-Alive",
+      "prototype",
+      "Proxy-Authenticate",
+      "Proxy-Authorization",
+      "Proxy-Connection",
+      "TE",
+      "Trailer",
+      "Transfer-Encoding",
+      "Upgrade",
+    ]) {
+      expect(() =>
+        requestHeaderMappings(operation([{ field: "version", header }]), undefined),
+      ).toThrow(/reserved or unsafe/);
+    }
   });
 
   it("extracts dot paths", () => {
@@ -346,6 +445,149 @@ describe("executeBinding", () => {
     const headers = spy.calls[0]?.init.headers as Record<string, string>;
     expect(headers.authorization).toBe("Bearer tok-9");
   });
+
+  it("composes If-Match through conditional update and delete execution", async () => {
+    const spy = fetchSpy();
+    const inputFields = [
+      { key: "id", valueType: "string" },
+      { key: "version", valueType: "string" },
+      { key: "title", valueType: "string" },
+      { key: "notify", valueType: "boolean" },
+    ];
+    const requestMapping = {
+      headers: [{ field: "version", header: "If-Match" }],
+      queryParams: [{ field: "notify", param: "sendUpdates" }],
+      bodyPaths: [{ field: "title", path: "resource.title" }],
+    };
+    await executeBinding({
+      binding: {},
+      operationRow: {
+        key: "update-record",
+        operation: { method: "PATCH", pathTemplate: "/records/{id}" },
+        inputFields,
+        requestMapping,
+      },
+      providerRow,
+      connectionValues,
+      serviceInputs: {
+        id: "record-1",
+        version: '"etag-1"',
+        title: "Updated",
+        notify: false,
+      },
+      keyring: KEYRING,
+      fetchImpl: spy.impl,
+      secretScope: "erp.providers",
+    });
+    await executeBinding({
+      binding: {},
+      operationRow: {
+        key: "delete-record",
+        operation: { method: "DELETE", pathTemplate: "/records/{id}" },
+        inputFields: inputFields.slice(0, 2),
+        requestMapping: {
+          headers: [{ field: "version", header: "If-Match" }],
+        },
+      },
+      providerRow,
+      connectionValues,
+      serviceInputs: { id: "record-2", version: '"etag-2"' },
+      keyring: KEYRING,
+      fetchImpl: spy.impl,
+      secretScope: "erp.providers",
+    });
+
+    expect(spy.calls).toHaveLength(2);
+    expect(spy.calls[0]?.url).toBe(
+      "https://acme.example.com/records/record-1?sendUpdates=false",
+    );
+    expect(new Headers(spy.calls[0]?.init.headers).get("if-match")).toBe('"etag-1"');
+    expect(JSON.parse(String(spy.calls[0]?.init.body))).toEqual({
+      resource: { title: "Updated" },
+    });
+    expect(spy.calls[1]?.url).toBe("https://acme.example.com/records/record-2");
+    expect(new Headers(spy.calls[1]?.init.headers).get("if-match")).toBe('"etag-2"');
+    expect(spy.calls[1]?.init.body).toBeUndefined();
+  });
+
+  it("rejects non-scalar and line-breaking header values before transport", async () => {
+    const spy = fetchSpy();
+    const base = {
+      binding: {},
+      operationRow: {
+        operation: { method: "DELETE", pathTemplate: "/records/1" },
+        inputFields: [{ key: "version", valueType: "string" }],
+        requestMapping: {
+          headers: [{ field: "version", header: "If-Match" }],
+        },
+      },
+      providerRow,
+      connectionValues,
+      keyring: KEYRING,
+      fetchImpl: spy.impl,
+      secretScope: "erp.providers",
+    };
+    await expect(
+      executeBinding({ ...base, serviceInputs: { version: "ok\r\nX-Evil: yes" } }),
+    ).rejects.toThrow(/forbidden line break/);
+    await expect(
+      executeBinding({ ...base, serviceInputs: { version: ["not", "scalar"] } }),
+    ).rejects.toThrow(/must be a scalar value/);
+    expect(spy.calls).toEqual([]);
+  });
+
+  it(
+    "rejects runtime-owned, prototype-sensitive, and canonical auth collisions before transport",
+    async () => {
+      const spy = fetchSpy();
+      const operation = (header: string) => ({
+        operation: { method: "DELETE", pathTemplate: "/records/1" },
+        inputFields: [{ key: "value", valueType: "string" }],
+        requestMapping: { headers: [{ field: "value", header }] },
+      });
+      for (const header of [
+        "Content-Type",
+        "aCcEpT",
+        "__proto__",
+        "prototype",
+        "constructor",
+      ]) {
+        await expect(
+          executeBinding({
+            binding: {},
+            operationRow: operation(header),
+            providerRow,
+            connectionValues,
+            serviceInputs: { value: "caller-value" },
+            keyring: KEYRING,
+            fetchImpl: spy.impl,
+            secretScope: "erp.providers",
+          }),
+        ).rejects.toThrow(/reserved or unsafe/);
+      }
+
+      await expect(
+        executeBinding({
+          binding: {},
+          operationRow: operation("X-API-KEY"),
+          providerRow: {
+            ...providerRow,
+            auth: {
+              scheme: "header",
+              headerName: "  x-Api-Key  ",
+              tokenFrom: "apiToken",
+            },
+          },
+          connectionValues,
+          serviceInputs: { value: "caller-value" },
+          keyring: KEYRING,
+          fetchImpl: spy.impl,
+          secretScope: "erp.providers",
+        }),
+      ).rejects.toThrow(/owned by configured authentication/);
+      expect(spy.calls).toEqual([]);
+    },
+  );
 
   it("preserves the default base URL and never lets caller input select an origin", async () => {
     const request = await composeBindingRequest({
@@ -852,6 +1094,10 @@ describe("composeBindingRequest (describe mode)", () => {
   const operationRow = {
     key: "create-thing",
     operation: { method: "POST", pathTemplate: "/api/things" },
+    inputFields: [{ key: "version", valueType: "string" }],
+    requestMapping: {
+      headers: [{ field: "version", header: "If-Match" }],
+    },
   };
 
   it("composes the full request with placeholder auth and never decrypts", async () => {
@@ -864,7 +1110,7 @@ describe("composeBindingRequest (describe mode)", () => {
         email: "a@b.c",
         apiToken: { ciphertext: "should-never-be-read", keyId: "k" },
       },
-      serviceInputs: { title: "Hello" },
+      serviceInputs: { title: "Hello", version: '"etag-1"' },
       secretScope: "unused",
       mode: "describe",
     });
@@ -873,8 +1119,23 @@ describe("composeBindingRequest (describe mode)", () => {
     expect(composed.headers.authorization).toBe(
       "Basic <credentials from the connection>",
     );
+    expect(composed.headers["if-match"]).toBe('"etag-1"');
     expect(JSON.parse(composed.body!)).toEqual({ title: "Hello" });
     expect(JSON.stringify(composed)).not.toContain("should-never-be-read");
+    const repeated = await composeBindingRequest({
+      binding: { order: 1 },
+      operationRow,
+      providerRow,
+      connectionValues: {
+        subdomain: "acme",
+        email: "a@b.c",
+        apiToken: { ciphertext: "should-never-be-read", keyId: "k" },
+      },
+      serviceInputs: { title: "Hello", version: '"etag-1"' },
+      secretScope: "unused",
+      mode: "describe",
+    });
+    expect(JSON.stringify(repeated)).toBe(JSON.stringify(composed));
   });
 
   it("keeps egress and template rules enforced during composition", async () => {
@@ -913,7 +1174,7 @@ describe("describeAuthHeaders", () => {
     expect(
       describeAuthHeaders({
         scheme: "header",
-        headerName: "X-Key",
+        headerName: "  X-Key  ",
         tokenFrom: "k",
       }),
     ).toEqual({

@@ -217,6 +217,8 @@ export const SECRET_SENSITIVITY = new Set(["confidential", "pii", "bsn"]);
 
 type FieldDefinition = {
   key?: unknown;
+  valueType?: unknown;
+  cardinality?: unknown;
   classification?: { sensitivity?: unknown };
 };
 
@@ -245,6 +247,186 @@ export function definitionFieldKeys(definitions: unknown): Set<string> {
     if (typeof definition?.key === "string") keys.add(definition.key);
   }
   return keys;
+}
+
+export type DeclarativeRequestHeaderMapping = {
+  field: string;
+  header: string;
+};
+
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const CUSTOM_AUTH_HEADER_NAME = /^[A-Za-z][A-Za-z0-9-]*$/;
+const FORBIDDEN_REQUEST_HEADERS = new Set([
+  "__proto__",
+  "accept",
+  "authorization",
+  "connection",
+  "content-length",
+  "content-type",
+  "constructor",
+  "cookie",
+  "host",
+  "keep-alive",
+  "prototype",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "proxy-connection",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
+
+function canonicalCustomAuthHeaderName(auth: unknown): string | undefined {
+  if (!auth || typeof auth !== "object" || Array.isArray(auth))
+    return undefined;
+  const config = auth as JsonRecord;
+  if (config.scheme !== "header") return undefined;
+  const name =
+    typeof config.headerName === "string" ? config.headerName.trim() : "";
+  if (!CUSTOM_AUTH_HEADER_NAME.test(name)) {
+    throw new HttpError(
+      400,
+      "AUTH_MISCONFIGURED",
+      "Provider auth headerName is not a valid header name.",
+    );
+  }
+  return name.toLowerCase();
+}
+
+function authOwnedHeaderNames(auth: unknown): Set<string> {
+  const names = new Set<string>();
+  if (!auth || typeof auth !== "object" || Array.isArray(auth)) return names;
+  const config = auth as JsonRecord;
+  switch (config.scheme) {
+    case "basic":
+    case "bearer":
+    case "oauth2ClientCredentials":
+      names.add("authorization");
+      break;
+    case "header": {
+      const name = canonicalCustomAuthHeaderName(config);
+      if (name) names.add(name);
+      break;
+    }
+    default:
+      break;
+  }
+  return names;
+}
+
+function requestHeaderMappingError(message: string): HttpError {
+  return new HttpError(
+    400,
+    "OPERATION_MISCONFIGURED",
+    `requestMapping.headers ${message}`,
+  );
+}
+
+/**
+ * Validate the authored header targets against the operation's declared input
+ * contract. The returned names are normalized for deterministic composition;
+ * neither caller input nor connection data can participate in choosing them.
+ */
+export function requestHeaderMappings(
+  operationRow: JsonRecord,
+  auth: unknown,
+): DeclarativeRequestHeaderMapping[] {
+  const requestMapping = operationRow.requestMapping;
+  if (
+    requestMapping === undefined ||
+    requestMapping === null ||
+    typeof requestMapping !== "object" ||
+    Array.isArray(requestMapping) ||
+    !("headers" in requestMapping)
+  ) {
+    return [];
+  }
+  const raw = (requestMapping as JsonRecord).headers;
+  if (!Array.isArray(raw)) {
+    throw requestHeaderMappingError("must be an array.");
+  }
+
+  const definitions = new Map<string, FieldDefinition>();
+  if (Array.isArray(operationRow.inputFields)) {
+    for (const definition of operationRow.inputFields as FieldDefinition[]) {
+      if (typeof definition?.key === "string") {
+        definitions.set(definition.key, definition);
+      }
+    }
+  }
+  const authOwned = authOwnedHeaderNames(auth);
+  const seenHeaders = new Set<string>();
+
+  return raw.map((value, index) => {
+    const position = `entry ${index + 1}`;
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw requestHeaderMappingError(`${position} must be an object.`);
+    }
+    const entry = value as JsonRecord;
+    const unknown = Object.keys(entry).filter(
+      (key) => key !== "field" && key !== "header",
+    );
+    if (unknown.length > 0) {
+      throw requestHeaderMappingError(
+        `${position} has unknown option(s): ${unknown.sort().join(", ")}. ` +
+          "Only an authored field and fixed header target are allowed.",
+      );
+    }
+    if (typeof entry.field !== "string" || entry.field.length === 0) {
+      throw requestHeaderMappingError(
+        `${position}.field must be a non-empty string.`,
+      );
+    }
+    if (typeof entry.header !== "string" || !HEADER_NAME.test(entry.header)) {
+      throw requestHeaderMappingError(
+        `${position}.header is not a valid HTTP header name.`,
+      );
+    }
+
+    const definition = definitions.get(entry.field);
+    if (!definition) {
+      throw requestHeaderMappingError(
+        `${position}.field ${JSON.stringify(entry.field)} is not a declared operation input.`,
+      );
+    }
+    if (
+      definition.valueType === "object" ||
+      ![
+        "string",
+        "integer",
+        "number",
+        "boolean",
+        "date",
+        "datetime",
+      ].includes(String(definition.valueType)) ||
+      (definition.cardinality !== undefined &&
+        definition.cardinality !== "single")
+    ) {
+      throw requestHeaderMappingError(
+        `${position}.field ${JSON.stringify(entry.field)} must declare a single scalar value.`,
+      );
+    }
+
+    const header = entry.header.toLowerCase();
+    if (FORBIDDEN_REQUEST_HEADERS.has(header)) {
+      throw requestHeaderMappingError(
+        `${position}.header ${JSON.stringify(entry.header)} is reserved or unsafe.`,
+      );
+    }
+    if (authOwned.has(header)) {
+      throw requestHeaderMappingError(
+        `${position}.header ${JSON.stringify(entry.header)} is owned by configured authentication.`,
+      );
+    }
+    if (seenHeaders.has(header)) {
+      throw requestHeaderMappingError(
+        `${position}.header duplicates the target ${JSON.stringify(entry.header)}.`,
+      );
+    }
+    seenHeaders.add(header);
+    return { field: entry.field, header };
+  });
 }
 
 /** The `{placeholder}` keys one template string references. */
@@ -642,17 +824,9 @@ export function buildAuthHeaders(
         authorization: `Bearer ${secretByKey(config.tokenFrom, "tokenFrom")}`,
       };
     case "header": {
-      const name =
-        typeof config.headerName === "string" ? config.headerName.trim() : "";
-      if (!/^[A-Za-z][A-Za-z0-9-]*$/.test(name)) {
-        throw new HttpError(
-          400,
-          "AUTH_MISCONFIGURED",
-          "Provider auth headerName is not a valid header name.",
-        );
-      }
+      const name = canonicalCustomAuthHeaderName(config)!;
       return {
-        [name.toLowerCase()]: secretByKey(config.tokenFrom, "tokenFrom"),
+        [name]: secretByKey(config.tokenFrom, "tokenFrom"),
       };
     }
     default:
@@ -788,11 +962,9 @@ export function describeAuthHeaders(auth: unknown): Record<string, string> {
         authorization: `Bearer <value of "${String(config.tokenFrom ?? "?")}" from the connection>`,
       };
     case "header": {
-      const name =
-        typeof config.headerName === "string" ? config.headerName.trim() : "";
-      if (!/^[A-Za-z][A-Za-z0-9-]*$/.test(name)) return {};
+      const name = canonicalCustomAuthHeaderName(config)!;
       return {
-        [name.toLowerCase()]: `<value of "${String(config.tokenFrom ?? "?")}" from the connection>`,
+        [name]: `<value of "${String(config.tokenFrom ?? "?")}" from the connection>`,
       };
     }
     case "oauth2ClientCredentials":
@@ -869,6 +1041,7 @@ export async function composeBindingRequest(
     : typeof operation.method === "string"
       ? operation.method.toUpperCase()
       : "GET";
+  const headerMappings = requestHeaderMappings(operationRow, providerRow.auth);
   // GraphQL posts to the endpoint itself; a pathTemplate is optional there
   // (e.g. "/graphql") and required for REST.
   const pathTemplate =
@@ -962,11 +1135,16 @@ export async function composeBindingRequest(
     Object.entries(operationInputs).filter(([key]) => !usedInPath.has(key)),
   );
 
-  // Canonical request mapping: inputs may be renamed into query parameters
-  // and placed at dot paths inside the JSON body — provider APIs rarely
-  // accept a flat echo of the input contract. Unmapped inputs keep the
-  // default placement (query for reads, top-level body for writes).
-  const requestMapping = (operationRow.requestMapping ?? {}) as JsonRecord;
+  // Canonical request mapping: inputs may feed fixed authored headers, be
+  // renamed into query parameters, or be placed at dot paths inside the JSON
+  // body. Unmapped inputs keep the default placement (query for reads,
+  // top-level body for writes).
+  const requestMapping =
+    operationRow.requestMapping &&
+    typeof operationRow.requestMapping === "object" &&
+    !Array.isArray(operationRow.requestMapping)
+      ? (operationRow.requestMapping as JsonRecord)
+      : {};
   const mappedBody: JsonRecord = {};
   const queryRenames = Array.isArray(requestMapping.queryParams)
     ? (requestMapping.queryParams as { field?: unknown; param?: unknown }[])
@@ -974,9 +1152,35 @@ export async function composeBindingRequest(
   const bodyPaths = Array.isArray(requestMapping.bodyPaths)
     ? (requestMapping.bodyPaths as { field?: unknown; path?: unknown }[])
     : [];
-  const headers: Record<string, string> = {
-    accept: "application/json",
-    ...(mode === "describe"
+  const authoredHeaders: Record<string, string> = Object.create(null);
+  for (const mapping of headerMappings) {
+    const value = operationInputs[mapping.field];
+    delete remaining[mapping.field];
+    if (value === undefined) continue;
+    if (
+      value === null ||
+      (typeof value !== "string" &&
+        typeof value !== "number" &&
+        typeof value !== "boolean")
+    ) {
+      throw new HttpError(
+        400,
+        "BAD_USER_INPUT",
+        `Header-mapped input ${JSON.stringify(mapping.field)} must be a scalar value.`,
+      );
+    }
+    const serialized = String(value);
+    if (/[\r\n]/.test(serialized)) {
+      throw new HttpError(
+        400,
+        "BAD_USER_INPUT",
+        `Header-mapped input ${JSON.stringify(mapping.field)} contains a forbidden line break.`,
+      );
+    }
+    authoredHeaders[mapping.header] = serialized;
+  }
+  const authHeaders =
+    mode === "describe"
       ? describeAuthHeaders(providerRow.auth)
       : await acquireAuthHeaders({
           auth: providerRow.auth,
@@ -985,7 +1189,13 @@ export async function composeBindingRequest(
           egress,
           fetchImpl,
           egressDispatch: input.egress,
-        })),
+        });
+  const headers: Record<string, string> = {
+    accept: "application/json",
+    ...authoredHeaders,
+    // Authentication is core-owned and always wins as a final safeguard even
+    // though publication/runtime validation rejects an authored collision.
+    ...authHeaders,
   };
   let body: string | undefined;
   if (isGraphql) {

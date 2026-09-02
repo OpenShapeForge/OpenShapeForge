@@ -136,7 +136,7 @@ export async function readHandoff<T extends Record<string, unknown>>(input: {
 
 /**
  * Read the newest live handoff for an already-authenticated person. Unlike the
- * token lookup, this path is for the KERN web fallback: the browser proves the
+ * token lookup, this path is for the host web fallback: the browser proves the
  * tenant/user through its normal login, so no bearer handoff token needs to be
  * exposed in the assistant conversation.
  */

@@ -49,7 +49,7 @@ any dispatch.
 
 For ordinary configuration data, the runtime preserves this UX order:
 in-client elicitation, then an MCP App when the client advertises
-`io.modelcontextprotocol/ui`, then the signed-in KERN web form. The private app
+`io.modelcontextprotocol/ui`, then the signed-in host web form. The private app
 receives its single-use handoff only in tool-result metadata. The external
 fallback is the stable `${OPENSHAPEFORGE_WEB_ORIGIN}/configuration` URL and
 resolves the pending form after normal Keycloak login, so a bearer handoff URL

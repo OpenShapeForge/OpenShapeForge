@@ -24,6 +24,7 @@ import {
   __assertWritableValuesForTests as assertWritableValues,
   __clientSupportsMcpAppForTests as clientSupportsMcpApp,
   __configurationAppResultForTests as configurationAppResult,
+  __configurationFallbackLeadForTests as configurationFallbackLead,
   __describeEntityResourceForTests as describeEntityResource,
   __describeToolForTests as describeTool,
   __sessionMayInvokeForTests as sessionMayInvoke,
@@ -94,6 +95,22 @@ describe("MCP App capability negotiation", () => {
         process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = previous;
       }
     }
+  });
+
+  it("keeps both model-visible fallback paths adopter-neutral", () => {
+    expect(configurationFallbackLead("declined", "app")).toBe(
+      "The secure form could not be completed in this client. " +
+        "The client has received a private MCP App for the secure form; the " +
+        "URL is not exposed to this chat. The app also offers an external-browser fallback.",
+    );
+    expect(configurationFallbackLead("unsupported", "external")).toBe(
+      "The secure form could not be completed in this client. " +
+        "This client cannot render MCP Apps. Ask the person to open externalUrl; " +
+        "it is the stable, signed-in secure configuration form and contains no bearer handoff token.",
+    );
+    expect(configurationFallbackLead("timeout", "external")).toStartWith(
+      "The secure form expired before it was completed — anything typed into it was NOT saved. ",
+    );
   });
 });
 

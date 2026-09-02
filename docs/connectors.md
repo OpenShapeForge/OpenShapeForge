@@ -167,6 +167,150 @@ idempotent; a mutation claims `idempotentHint` **only** when the contract
 declares a strategy, because that hint is what a model reads before deciding a
 retry is safe.
 
+## Provider failures
+
+A package that throws is never quoted. What reaches a caller is a
+**normalized outcome**, classified from what the platform observed for itself:
+the numeric status and the `Retry-After` header of the last non-success
+response the bound `fetch` returned during that invocation. Nothing the package
+or the provider *said* takes part — bodies, messages, stack traces, arbitrary
+headers, URLs and provider request ids are neither retained nor surfaced.
+
+| Code | Observed default | Retryable | Required action | REST |
+| --- | --- | --- | --- | --- |
+| `CONNECTOR_PROVIDER_REJECTED_INPUT` | `400`, `409`, `422` | no | `change_input` | `422` |
+| `CONNECTOR_PROVIDER_AUTHORIZATION_FAILED` | resource `401` | no | `contact_admin` | `502` |
+| `CONNECTOR_PROVIDER_PERMISSION_DENIED` | resource `403` | no | `contact_admin` | `403` |
+| `CONNECTOR_PROVIDER_RATE_LIMITED` | `429` | yes | `wait` | `429` |
+| `CONNECTOR_PROVIDER_UNAVAILABLE` | `5xx` | only when the reliability policy allows retry | `wait` | `503` |
+| `CONNECTOR_UPSTREAM_ERROR` | anything else, or no response observed | policy, when nothing was observed; otherwise no | `wait` / `contact_admin` | `502` |
+
+Every classified failure carries this shape, in the REST body under `error`
+and in the MCP failure envelope:
+
+```ts
+type ConnectorProviderOutcome = {
+  code: /* one of the codes above */;
+  category: "input" | "authorization" | "rate_limit" | "availability" | "provider_contract";
+  retryable: boolean;
+  retryAt?: string;          // RFC 3339 UTC instant, server-minted
+  requiredAction: "wait" | "change_input" | "contact_admin";
+  correlationId: string;     // platform-minted; joins the answer, the audit record and the log line
+};
+```
+
+There is no `source` field. The invoked tool already names the operation;
+installation ids, account labels and everything else about *which* installation
+answered stay hidden.
+
+**What stays as it was.** Every existing code keeps its meaning and its status.
+`CONNECTOR_RATE_LIMITED` is still the platform's own per-tenant governor
+refusing a call, distinct from a provider `429`. `CONNECTOR_TIMEOUT`,
+`CONNECTOR_CIRCUIT_OPEN`, `CONNECTOR_OAUTH_FAILED`, `CONNECTOR_NEEDS_REPAIR` and
+`CONNECTOR_INVALID_OUTPUT` are untouched, and `CONNECTOR_UPSTREAM_ERROR` remains
+the fallback whenever nothing safer applies.
+
+### How a failure is classified
+
+The bound `fetch` records a minimal **observation** — status, a syntactically
+valid `Retry-After`, the correlation id — of every non-success response it hands
+the package. It changes nothing about the response and fails nothing by itself:
+a package that probes, absorbs a `404`, and returns a result has succeeded, and
+the observation is simply never read. Only when the package throws something
+that is not a platform error does the executor classify from the **most
+recent** observation. With none, the fallback applies: a failure the provider
+never answered — a dropped connection, a package defect — is retryable exactly
+when the policy says so, which is what the governor already did.
+
+A provider `404` stays on the fallback deliberately. A distinct not-found
+outcome needs an authorization predicate first; without one the code becomes a
+way to enumerate what exists behind a connector.
+
+A resource `401` is **not** proof that consent was revoked, and does not touch
+the installation. `CONNECTOR_REAUTHORIZATION_REQUIRED` still comes only from a
+refresh the token endpoint conclusively refused, and transient provider health
+never produces `CONNECTOR_NEEDS_REPAIR`.
+
+### Narrowing from the package
+
+A package that knows more may say so — a little. A thrown error carrying a
+`providerFailure` property is validated by the contract boundary against a
+closed schema:
+
+```ts
+throw Object.assign(new Error("…"), {
+  providerFailure: { status: 400, code: "CONNECTOR_PROVIDER_AUTHORIZATION_FAILED" },
+});
+```
+
+| Field | Rule |
+| --- | --- |
+| `status` | required; must equal the status the platform observed, or the hint is ignored |
+| `code` | optional; only a code the observed status allows (a `400` may become an authorization failure, a `403` a quota refusal, an unlisted `4xx` a rejected input) |
+| `retryable` | optional; only `false` |
+
+A hint cannot invent or change the status, make a non-retryable default
+retryable, supply a message, supply retry timing, or touch the Connection
+lifecycle. An invalid hint — an unknown property, `retryable: true`, a code the
+status does not allow — is ignored **whole**, and the platform default applies.
+Existing packages need no change; a package that throws a plain `Error` gets the
+observed default.
+
+### Retry timing
+
+`retryAt` is the only retry-time representation on the wire; no relative seconds
+travel alongside it. Both legal `Retry-After` forms are parsed — delta-seconds
+and HTTP-date — and converted to one server-minted instant. Invalid, negative,
+zero and past values are ignored; a value more than 24 hours out is not
+believed, so the outcome keeps `wait` without a time. It is only present when
+the outcome is retryable.
+
+It is **metadata**. It never sleeps, schedules, persists a throttle or blocks a
+later request. The governor keeps its rules: retry eligibility, idempotency,
+maximum attempts, backoff and the total deadline remain authoritative, and no
+provider metadata can make a non-idempotent mutation retryable. What an outcome
+*can* do is shorten the loop — a failure classified as not retryable is not
+attempted again, and a `retryAt` beyond what is left of `timeouts.totalMs` ends
+the call at once with the time in the answer rather than a retry that could not
+finish.
+
+### One mapping, three transports
+
+`apps/api/src/connectors/provider-outcome.ts` exports the single code-to-status
+table the connector REST routes, the generated REST mapper and the MCP renderer
+all read; a test pins its key set to every public code, so a code added without
+a decision fails loudly instead of becoming a silent `500`.
+
+Over MCP, a provider failure is a **tool result**, never a protocol error:
+
+- `structuredContent` holds the same `{ error: { code, message, …outcome } }`
+  body REST sends;
+- the same object is mirrored as JSON text for clients that only render text;
+- the first text item is a one-line summary derived from the same fields
+  (`CODE: message. Retry after <instant>.`), so it cannot contradict them;
+- `isError: true`;
+- connector tools do not advertise an `outputSchema`: successful calls retain
+  their existing text-only result, while classified failures provide runtime
+  `structuredContent`. A schema is deferred until success and failure can share
+  one explicit output contract without adding a success envelope here.
+
+### Audit and metrics
+
+A classified failure is journalled as `connector.provider_failed` with the
+tenant, the correlation id, the connector slug, the operation key, the numeric
+provider status, the code, `retryable` and `retryAt` — and nothing else: no
+body, no header, no token, no URL, no account label. The counter
+`openshapeforge_connector_provider_failures_total` is labelled by `connector`,
+`operation` and `code` only; tenant, installation, correlation id, account
+identity and `retryAt` are unbounded or identifying and are not labels.
+
+### What this does not do
+
+- No composed-read partial results, aggregation policy or continuations.
+- No shared coordination: the governor is process-local, so each replica keeps
+  its own rate windows and circuit state.
+- No provider resource-not-found code, per the `404` note above.
+
 ## Licensing and availability
 
 Two things that are easy to conflate and must not be:
@@ -373,6 +517,10 @@ What a package receives is the whole of what it gets:
 No database handle, no session, no filesystem helper. A package does not
 authorize the caller, validate its own input or output, decide what it may
 reach, or manage retries and timeouts — the platform does all of that around it.
+
+Nor does it describe its own failures. A thrown error is redacted and classified
+from what the platform observed of the provider; a package may narrow that with
+a `providerFailure` hint and nothing more — see [Provider failures](#provider-failures).
 
 ## Execution trust model
 

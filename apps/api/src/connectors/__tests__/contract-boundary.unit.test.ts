@@ -244,3 +244,64 @@ describe("output validation", () => {
     }
   });
 });
+
+/**
+ * The hint is the one thing a package may say about a failure, and the schema
+ * is closed so that it can say nothing else: not a message, not a retry time,
+ * not a status it did not see.
+ */
+describe("provider failure hints", () => {
+  const boundary = new ConnectorContractBoundary(CONTRACT);
+
+  function thrown(hint: unknown): Error {
+    return Object.assign(new Error("provider said no"), { providerFailure: hint });
+  }
+
+  it("returns a hint that fits the closed schema", () => {
+    expect(
+      boundary.providerFailureHint(
+        thrown({ status: 400, code: "CONNECTOR_PROVIDER_AUTHORIZATION_FAILED" }),
+      ),
+    ).toEqual({ status: 400, code: "CONNECTOR_PROVIDER_AUTHORIZATION_FAILED" });
+    expect(boundary.providerFailureHint(thrown({ status: 429, retryable: false }))).toEqual({
+      status: 429,
+      retryable: false,
+    });
+    // A plain object works as well as an Error: the property is what counts.
+    expect(boundary.providerFailureHint({ providerFailure: { status: 503 } })).toEqual({
+      status: 503,
+    });
+  });
+
+  it("ignores anything outside the schema, as a whole", () => {
+    const invalid = [
+      { status: 400, message: "not yours to say" },
+      { status: 400, retryAt: "2026-01-01T00:00:00Z" },
+      { status: 400, retryable: true },
+      { status: 400, code: "CONNECTOR_UPSTREAM_ERROR" },
+      { status: 400, code: "SOMETHING_ELSE" },
+      { status: "400" },
+      { status: 42 },
+      { status: 600 },
+      { code: "CONNECTOR_PROVIDER_REJECTED_INPUT" },
+      "400",
+      null,
+    ];
+    for (const hint of invalid) {
+      expect(boundary.providerFailureHint(thrown(hint))).toBeUndefined();
+    }
+    expect(boundary.providerFailureHint(new Error("no hint"))).toBeUndefined();
+    expect(boundary.providerFailureHint("a string")).toBeUndefined();
+    expect(boundary.providerFailureHint(undefined)).toBeUndefined();
+  });
+
+  it("ignores package-controlled accessors that throw", () => {
+    const error = new Error("provider said no") as Error & { providerFailure?: unknown };
+    Object.defineProperty(error, "providerFailure", {
+      get() {
+        throw new Error("package-controlled getter");
+      },
+    });
+    expect(boundary.providerFailureHint(error)).toBeUndefined();
+  });
+});

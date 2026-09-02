@@ -175,3 +175,10 @@ describe("invocation lookup", () => {
     }
   });
 });
+
+describe("output contract", () => {
+  it("advertises no outputSchema until success and failure share one contract", () => {
+    const tool = connectorMcpTools(CONTRACTS).find((entry) => entry.operationKey === "list")!;
+    expect(tool).not.toHaveProperty("outputSchema");
+  });
+});

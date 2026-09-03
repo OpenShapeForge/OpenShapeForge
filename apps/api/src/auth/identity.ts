@@ -58,6 +58,14 @@ function getBearerVerifier(): BearerVerifier | null {
   const jwksUri = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
   const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
   const audience = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE;
+  const authorizedPartiesValue =
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES;
+  const authorizedParties = authorizedPartiesValue === undefined
+    ? undefined
+    : authorizedPartiesValue
+        .split(",")
+        .map((party) => party.trim())
+        .filter(Boolean);
 
   if (!jwksUri || !issuer) {
     cachedVerifier = null;
@@ -76,9 +84,12 @@ function getBearerVerifier(): BearerVerifier | null {
     );
   }
 
-  cachedVerifier = createBearerVerifier(
-    audience ? { jwksUri, issuer, audience } : { jwksUri, issuer },
-  );
+  cachedVerifier = createBearerVerifier({
+    jwksUri,
+    issuer,
+    ...(audience ? { audience } : {}),
+    ...(authorizedParties ? { authorizedParties } : {}),
+  });
   return cachedVerifier;
 }
 

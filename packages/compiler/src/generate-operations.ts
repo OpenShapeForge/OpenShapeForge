@@ -72,6 +72,9 @@ const CORE_API_ROUTES: readonly RestRoute[] = [
   { method: "GET", path: "/api/rest/docs/swagger-ui.css", owner: "core REST documentation" },
   { method: "GET", path: "/api/rest/docs/swagger-ui-bundle.js", owner: "core REST documentation" },
   { method: "GET", path: "/api/rest/docs/swagger-ui-standalone-preset.js", owner: "core REST documentation" },
+  { method: "GET", path: "/api/rest/docs/swagger-initializer.js", owner: "core REST documentation" },
+  { method: "GET", path: "/api/rest/docs/oauth2-redirect.html", owner: "core REST OAuth callback" },
+  { method: "GET", path: "/api/rest/docs/oauth2-redirect.js", owner: "core REST OAuth callback" },
   { method: "POST", path: "/api/documents", owner: "core document commands" },
   { method: "POST", path: "/api/documents/:documentId/versions", owner: "core document commands" },
   { method: "GET", path: "/api/rest/v1/connectors", owner: "core connector catalog" },
@@ -538,7 +541,10 @@ export function assertOperationRuntimeModules(
   }
 }
 
-export function operationOpenApiPaths(operations: readonly CompiledPluginOperation[]): Record<string, unknown> {
+export function operationOpenApiPaths(
+  operations: readonly CompiledPluginOperation[],
+  sessionSecuritySchemes: readonly string[] = ["bearerAuth"],
+): Record<string, unknown> {
   const paths: Record<string, Record<string, unknown>> = {};
   for (const operation of operations) {
     const rest = operation.transports.rest;
@@ -614,6 +620,9 @@ export function operationOpenApiPaths(operations: readonly CompiledPluginOperati
       if (method in (paths[openApiPath] ?? {})) {
         throw new Error(`Duplicate plugin operation OpenAPI route "${rest.method} ${openApiPath}".`);
       }
+      const sessionScopes = operation.auth.mode === "session"
+        ? operation.auth.scopes ?? []
+        : [];
       paths[openApiPath] = {
         ...(paths[openApiPath] ?? {}),
         [method]: {
@@ -623,7 +632,13 @@ export function operationOpenApiPaths(operations: readonly CompiledPluginOperati
             ? `${operation.description}\n\nDeprecated compatibility route. Use ${canonicalOpenApiPath}.`
             : operation.description,
           tags: [operation.plugin],
-          security: operation.auth.mode === "public" ? [] : operation.auth.mode === "session" ? [{ bearerAuth: operation.auth.scopes ?? [] }] : [{ [operation.auth.scheme]: [] }],
+          security: operation.auth.mode === "public"
+            ? []
+            : operation.auth.mode === "session"
+              ? sessionSecuritySchemes.map((scheme) => ({
+                  [scheme]: scheme === "oauth2Auth" ? sessionScopes : [],
+                }))
+              : [{ [operation.auth.scheme]: [] }],
           ...(isAlias ? {
             deprecated: true,
             "x-osf-rest-alias": {

@@ -65,10 +65,24 @@ export type RestApiDocumentation = {
   title: string;
   version?: string;
   description: string;
+  /** Optional guidance shown beside manual bearer entry in Swagger UI. */
+  bearerDescription?: string;
+  /** Public Authorization Code client metadata used by OpenAPI and Swagger UI. */
+  oauth2?: RestApiOAuth2Documentation;
   externalDocs?: {
     description?: string;
     url: string;
   };
+};
+
+export type RestApiOAuth2Documentation = {
+  description: string;
+  authorizationUrl: string;
+  tokenUrl: string;
+  clientId: string;
+  scopes: Record<string, string>;
+  /** Absolute public callback URL when origin inference is not suitable. */
+  redirectUrl?: string;
 };
 
 export const AUTHORING_CONFIG_FILENAME = "authoring.config.yaml";
@@ -153,7 +167,14 @@ function validateRestApiDocumentation(
   }
   const candidate = value as Record<string, unknown>;
   const unknownKeys = Object.keys(candidate).filter(
-    (key) => !["title", "version", "description", "externalDocs"].includes(key),
+    (key) => ![
+      "title",
+      "version",
+      "description",
+      "bearerDescription",
+      "oauth2",
+      "externalDocs",
+    ].includes(key),
   );
   if (unknownKeys.length > 0) {
     throw new Error(`${filename} "restApi" has unknown field(s): ${unknownKeys.sort().join(", ")}.`);
@@ -177,16 +198,7 @@ function validateRestApiDocumentation(
         `${filename} "restApi.externalDocs" has unknown field(s): ${unknownDocKeys.sort().join(", ")}.`,
       );
     }
-    const url = nonEmptyString(docs.url, `${filename} "restApi.externalDocs.url"`);
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(url);
-    } catch {
-      throw new Error(`${filename} "restApi.externalDocs.url" must be an absolute HTTP(S) URL.`);
-    }
-    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
-      throw new Error(`${filename} "restApi.externalDocs.url" must be an absolute HTTP(S) URL.`);
-    }
+    const url = absoluteHttpUrl(docs.url, `${filename} "restApi.externalDocs.url"`);
     externalDocs = {
       url,
       ...(docs.description === undefined
@@ -200,14 +212,105 @@ function validateRestApiDocumentation(
     };
   }
 
+  let oauth2: RestApiOAuth2Documentation | undefined;
+  if (candidate.oauth2 !== undefined) {
+    if (!candidate.oauth2 || typeof candidate.oauth2 !== "object" || Array.isArray(candidate.oauth2)) {
+      throw new Error(`${filename} "restApi.oauth2" must be an object.`);
+    }
+    const oauth = candidate.oauth2 as Record<string, unknown>;
+    const unknownOAuthKeys = Object.keys(oauth).filter(
+      (key) => ![
+        "description",
+        "authorizationUrl",
+        "tokenUrl",
+        "clientId",
+        "scopes",
+        "redirectUrl",
+      ].includes(key),
+    );
+    if (unknownOAuthKeys.length > 0) {
+      throw new Error(
+        `${filename} "restApi.oauth2" has unknown field(s): ${unknownOAuthKeys.sort().join(", ")}.`,
+      );
+    }
+    if (!oauth.scopes || typeof oauth.scopes !== "object" || Array.isArray(oauth.scopes)) {
+      throw new Error(`${filename} "restApi.oauth2.scopes" must be an object.`);
+    }
+    const scopes = Object.fromEntries(
+      Object.entries(oauth.scopes as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([scope, description]) => {
+          if (!/^[\x21\x23-\x5B\x5D-\x7E]+$/.test(scope)) {
+            throw new Error(
+              `${filename} "restApi.oauth2.scopes" contains invalid OAuth scope "${scope}".`,
+            );
+          }
+          return [
+            scope,
+            nonEmptyString(
+              description,
+              `${filename} "restApi.oauth2.scopes.${scope}"`,
+            ),
+          ];
+        }),
+    );
+    if (Object.keys(scopes).length === 0) {
+      throw new Error(`${filename} "restApi.oauth2.scopes" must declare at least one scope.`);
+    }
+    oauth2 = {
+      description: nonEmptyString(oauth.description, `${filename} "restApi.oauth2.description"`),
+      authorizationUrl: absoluteHttpUrl(
+        oauth.authorizationUrl,
+        `${filename} "restApi.oauth2.authorizationUrl"`,
+      ),
+      tokenUrl: absoluteHttpUrl(oauth.tokenUrl, `${filename} "restApi.oauth2.tokenUrl"`),
+      clientId: nonEmptyString(oauth.clientId, `${filename} "restApi.oauth2.clientId"`),
+      scopes,
+      ...(oauth.redirectUrl === undefined
+        ? {}
+        : {
+            redirectUrl: absoluteHttpUrl(
+              oauth.redirectUrl,
+              `${filename} "restApi.oauth2.redirectUrl"`,
+            ),
+          }),
+    };
+  }
+
   return {
     title: nonEmptyString(candidate.title, `${filename} "restApi.title"`),
     description: nonEmptyString(candidate.description, `${filename} "restApi.description"`),
     ...(candidate.version === undefined
       ? {}
       : { version: nonEmptyString(candidate.version, `${filename} "restApi.version"`) }),
+    ...(candidate.bearerDescription === undefined
+      ? {}
+      : {
+          bearerDescription: nonEmptyString(
+            candidate.bearerDescription,
+            `${filename} "restApi.bearerDescription"`,
+          ),
+        }),
+    ...(oauth2 ? { oauth2 } : {}),
     ...(externalDocs ? { externalDocs } : {}),
   };
+}
+
+function absoluteHttpUrl(value: unknown, path: string): string {
+  const url = nonEmptyString(value, path);
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    throw new Error(`${path} must be an absolute HTTP(S) URL.`);
+  }
+  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+    throw new Error(`${path} must be an absolute HTTP(S) URL.`);
+  }
+  if (parsedUrl.username || parsedUrl.password) {
+    throw new Error(`${path} must not contain credentials.`);
+  }
+  return url;
 }
 
 export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {

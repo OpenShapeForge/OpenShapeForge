@@ -59,7 +59,7 @@ const testDatabase = () => new Kysely<DB>({
   },
 });
 
-const restAliasOperation: OperationContract = {
+const restOperation: OperationContract = {
   key: "demo.quote.publish",
   plugin: "demo",
   title: "Publish quote",
@@ -98,7 +98,6 @@ const restAliasOperation: OperationContract = {
     rest: {
       method: "POST",
       path: "/api/demo/quotes/:quoteId/publish",
-      aliases: ["/api/legacy/quotes/:quoteId/publish"],
       response: { status: 202, kind: "json" },
     },
     mcp: { enabled: false, reason: "REST transport test." },
@@ -619,11 +618,11 @@ describe("canonical operation runtime", () => {
   });
 });
 
-test("REST aliases preserve authorization, tenancy, idempotency, input, output, and errors", async () => {
+test("the canonical REST route preserves authorization, tenancy, idempotency, input, output, and errors", async () => {
   const previousSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
   const previousJwks = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
   const previousIssuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
-  const secret = "operation-alias-test-context-secret";
+  const secret = "operation-rest-test-context-secret";
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = secret;
   delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
   delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
@@ -651,11 +650,8 @@ test("REST aliases preserve authorization, tenancy, idempotency, input, output, 
     },
   };
   const app = Fastify();
-  registerOperationRestRoutes(app, [module], {}, [restAliasOperation]);
-  const paths = [
-    "/api/demo/quotes/quote-1/publish",
-    "/api/legacy/quotes/quote-1/publish",
-  ];
+  registerOperationRestRoutes(app, [module], {}, [restOperation]);
+  const paths = ["/api/demo/quotes/quote-1/publish"];
   try {
     for (const path of paths) {
       expect((await app.inject({ method: "POST", url: path, payload: {} })).statusCode)
@@ -713,9 +709,8 @@ test("REST aliases preserve authorization, tenancy, idempotency, input, output, 
       expect(response.headers["x-operation-handler"]).toBe("publishQuote");
       successfulBodies.push(response.json());
     }
-    expect(successfulBodies[1]).toEqual(successfulBodies[0]);
-    expect(observations).toHaveLength(2);
-    expect(observations[1]).toEqual(observations[0]);
+    expect(successfulBodies).toHaveLength(1);
+    expect(observations).toHaveLength(1);
 
     for (const path of paths) {
       const conflict = await app.inject({
@@ -1019,12 +1014,11 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
   }
 });
 
-test("binary and stream responses pass through REST aliases without buffering changes", async () => {
+test("binary and stream responses pass through canonical REST routes without buffering changes", async () => {
   const base = (input: {
     key: string;
     handler: string;
     path: string;
-    alias: string;
     kind: "binary" | "stream";
     contentType: string;
   }): OperationContract => ({
@@ -1048,7 +1042,6 @@ test("binary and stream responses pass through REST aliases without buffering ch
       rest: {
         method: "GET",
         path: input.path,
-        aliases: [input.alias],
         response: { status: 200, kind: input.kind, contentType: input.contentType },
       },
       mcp: { enabled: false, reason: "Binary fixture." },
@@ -1061,7 +1054,6 @@ test("binary and stream responses pass through REST aliases without buffering ch
       key: "media.artifact.binary",
       handler: "binaryArtifact",
       path: "/api/media/binary/:artifactId",
-      alias: "/api/legacy/binary/:artifactId",
       kind: "binary",
       contentType: "application/octet-stream",
     }),
@@ -1069,7 +1061,6 @@ test("binary and stream responses pass through REST aliases without buffering ch
       key: "media.artifact.stream",
       handler: "streamArtifact",
       path: "/api/media/stream/:artifactId",
-      alias: "/api/legacy/stream/:artifactId",
       kind: "stream",
       contentType: "text/plain",
     }),
@@ -1084,18 +1075,15 @@ test("binary and stream responses pass through REST aliases without buffering ch
   const app = Fastify();
   registerOperationRestRoutes(app, [module], {}, operations);
   try {
-    for (const path of ["/api/media/binary/id", "/api/legacy/binary/id"]) {
-      const response = await app.inject({ method: "GET", url: path });
-      expect(response.statusCode).toBe(200);
-      expect(response.headers["content-type"]).toContain("application/octet-stream");
-      expect([...response.rawPayload]).toEqual([0, 1, 2, 255]);
-    }
-    for (const path of ["/api/media/stream/id", "/api/legacy/stream/id"]) {
-      const response = await app.inject({ method: "GET", url: path });
-      expect(response.statusCode).toBe(200);
-      expect(response.headers["content-type"]).toContain("text/plain");
-      expect(response.body).toBe("one-two");
-    }
+    const binary = await app.inject({ method: "GET", url: "/api/media/binary/id" });
+    expect(binary.statusCode).toBe(200);
+    expect(binary.headers["content-type"]).toContain("application/octet-stream");
+    expect([...binary.rawPayload]).toEqual([0, 1, 2, 255]);
+
+    const stream = await app.inject({ method: "GET", url: "/api/media/stream/id" });
+    expect(stream.statusCode).toBe(200);
+    expect(stream.headers["content-type"]).toContain("text/plain");
+    expect(stream.body).toBe("one-two");
   } finally {
     await app.close();
   }

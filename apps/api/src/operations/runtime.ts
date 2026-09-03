@@ -44,7 +44,7 @@ export type OperationContract = {
   tenancy: { mode: "required" | "derived" | "none"; description?: string };
   idempotency: { mode: "none" | "intrinsic" | "idempotency-key"; header?: string; inputField?: string; description?: string };
   transports: {
-    rest: { method: string; path: string; aliases?: string[]; response: { status?: number; kind: "json" | "binary" | "stream"; contentType?: string } };
+    rest: { method: string; path: string; response: { status?: number; kind: "json" | "binary" | "stream"; contentType?: string } };
     mcp: { enabled: boolean; name?: string; reason?: string };
     graphql: { enabled: boolean; kind?: "query" | "mutation"; field?: string; reason?: string };
     typescript: { enabled: boolean; functionName?: string; reason?: string };
@@ -558,16 +558,11 @@ export function registerOperationRestRoutes(
         return sendOperationRestFailure(reply, entry.operation, error, false);
       }
     };
-    for (const path of [
-      entry.operation.transports.rest.path,
-      ...(entry.operation.transports.rest.aliases ?? []),
-    ]) {
-      app.route({
-        method: entry.operation.transports.rest.method as "GET",
-        url: path,
-        handler,
-      });
-    }
+    app.route({
+      method: entry.operation.transports.rest.method as "GET",
+      url: entry.operation.transports.rest.path,
+      handler,
+    });
   }
 }
 

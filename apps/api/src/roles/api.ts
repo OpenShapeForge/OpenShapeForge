@@ -68,6 +68,7 @@ import {
   bindOperationHandlers,
   listOperationContracts,
   registerOperationRestRoutes,
+  type OperationContract,
 } from "../operations/runtime.js";
 
 declare module "fastify" {
@@ -84,7 +85,6 @@ declare module "fastify" {
  */
 const RATE_LIMIT_EXEMPT_PATHS = new Set([
   "/api/health",
-  "/api/graphql/health",
   "/api/ready",
 ]);
 
@@ -130,33 +130,21 @@ export function createApiApp(options: {
   readinessCacheMs?: number;
   /** Capture the real structured logger in focused privacy regressions. */
   logStream?: { write(message: string): void };
+  /** Controlled operation catalog override for startup invariant tests. */
+  operationContracts?: readonly OperationContract[];
 }) {
+  if (process.env.OPENSHAPEFORGE_ROUTE_ALIASES !== undefined) {
+    throw new Error(
+      "OPENSHAPEFORGE_ROUTE_ALIASES is no longer supported. Use the canonical " +
+        "/api/health, /api/ready, /api/metrics, and compiled API routes directly.",
+    );
+  }
   const modules: ModuleRegistry = options.modules ?? {
     loaded: [],
     failures: [],
   };
+  const operationContracts = options.operationContracts ?? listOperationContracts();
   const limits = readApiLimits();
-
-  // Deployment path aliases, e.g. a container contract that probes /healthz
-  // while this API serves /api/health. Format: comma-separated `alias=target`
-  // pairs of absolute paths; the alias is rewritten before routing, so every
-  // method and transport (including the MCP stream) works unchanged. Fails
-  // closed on a malformed entry rather than silently serving half a contract.
-  const routeAliases = new Map<string, string>();
-  for (const entry of (process.env.OPENSHAPEFORGE_ROUTE_ALIASES ?? "").split(",")) {
-    const trimmed = entry.trim();
-    if (trimmed === "") continue;
-    const separator = trimmed.indexOf("=");
-    const alias = separator > 0 ? trimmed.slice(0, separator).trim() : "";
-    const target = separator > 0 ? trimmed.slice(separator + 1).trim() : "";
-    if (!alias.startsWith("/") || !target.startsWith("/")) {
-      throw new Error(
-        `OPENSHAPEFORGE_ROUTE_ALIASES entry ${JSON.stringify(trimmed)} must be ` +
-          `"/alias=/target" with absolute paths.`,
-      );
-    }
-    routeAliases.set(alias, target);
-  }
 
   // Default level stays "info"; LOG_LEVEL=debug surfaces the drift "ok" line.
   // trustProxy lets Fastify derive the real client IP from X-Forwarded-For (the
@@ -184,14 +172,6 @@ export function createApiApp(options: {
     },
     trustProxy: limits.trustProxy,
     requestTimeout: limits.requestTimeoutMs,
-    rewriteUrl(request) {
-      const url = request.url ?? "/";
-      if (routeAliases.size === 0) return url;
-      const queryStart = url.indexOf("?");
-      const path = queryStart >= 0 ? url.slice(0, queryStart) : url;
-      const target = routeAliases.get(path);
-      return target ? target + (queryStart >= 0 ? url.slice(queryStart) : "") : url;
-    },
   });
 
   // Request-rate boundary, before GraphQL/REST execution — that ordering is
@@ -308,13 +288,27 @@ export function createApiApp(options: {
     };
     const initialised = await initRuntimeModules(modules, moduleContext);
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
-    const operationPlugins = new Set(listOperationContracts().map((operation) => operation.plugin));
+    const modulesWithUnauditedRest = initialised.loaded
+      .filter((module) => module.restRoutes)
+      .map((module) => module.name)
+      .sort();
+    if (
+      operationContracts.some((operation) => (operation.transports.rest.aliases?.length ?? 0) > 0) &&
+      modulesWithUnauditedRest.length > 0
+    ) {
+      throw new Error(
+        "Compiled REST aliases require every module route to be a canonical plugin operation; " +
+          `runtime modules still exposing restRoutes: ${modulesWithUnauditedRest.join(", ")}. ` +
+          "Migrate those routes to PluginOperationContract operations.",
+      );
+    }
+    const operationPlugins = new Set(operationContracts.map((operation) => operation.plugin));
     const operationModulesConfigured = modules.loaded.some((module) => operationPlugins.has(module.name)) ||
       modules.failures.some((failure) => operationPlugins.has(failure.name));
     // Ordinary runtime modules remain fail-soft. A canonical operation is a
     // stronger promise: every generated transport points at its handler, so a
     // load/init failure must stop boot instead of silently deleting the API.
-    if (operationModulesConfigured) bindOperationHandlers(initialised.loaded);
+    if (operationModulesConfigured) bindOperationHandlers(initialised.loaded, operationContracts);
     ready = {
       yoga: createGraphqlYoga({
         ...dbOptions,
@@ -361,11 +355,6 @@ export function createApiApp(options: {
         ? { readinessCacheMs: options.readinessCacheMs }
         : {}),
     } satisfies OperationalRoutesOptions);
-
-    routes.get("/api/graphql/health", async () => ({
-      status: "ok",
-      role: "api",
-    }));
 
     for (const url of ["/api/graphql", "/api/graphql/persisted"])
       routes.route({
@@ -463,7 +452,7 @@ export function createApiApp(options: {
       module.restRoutes?.(routes, moduleContext);
     }
     if (operationModulesConfigured) {
-      registerOperationRestRoutes(routes, initialised.loaded, moduleContext);
+      registerOperationRestRoutes(routes, initialised.loaded, moduleContext, operationContracts);
     }
   });
 

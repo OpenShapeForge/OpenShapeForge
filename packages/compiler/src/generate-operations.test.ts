@@ -47,26 +47,50 @@ const context = { repoRoot: "/repo", authoringDir: "/repo/authoring", webPresent
 
 describe("first-class plugin operations", () => {
   test("collects deterministic canonical contracts and OpenAPI path parameters", () => {
-    const plugins: CompilerPlugin[] = [{ name: "demo", operations: [operation] }];
+    const aliased = {
+      ...operation,
+      transports: {
+        ...operation.transports,
+        rest: {
+          ...operation.transports.rest,
+          aliases: ["/api/rest/v1/legacy-quotes/:quoteId/publish"],
+        },
+      },
+    };
+    const plugins: CompilerPlugin[] = [{ name: "demo", operations: [aliased] }];
     const collected = collectPluginOperations(plugins, context);
     expect(JSON.parse(renderOperationCatalog(collected)).operations[0].key).toBe(operation.key);
+    expect(collected).toHaveLength(1);
     const paths = operationOpenApiPaths(collected) as Record<string, Record<string, any>>;
-    expect(paths["/api/demo/quotes/{quoteId}/publish"]!.post.operationId).toBe(operation.key);
-    expect(paths["/api/demo/quotes/{quoteId}/publish"]!.post.responses["202"]).toBeDefined();
-    expect(paths["/api/demo/quotes/{quoteId}/publish"]!.post.parameters[0]).toMatchObject({
+    const canonical = paths["/api/demo/quotes/{quoteId}/publish"]!.post;
+    const alias = paths["/api/rest/v1/legacy-quotes/{quoteId}/publish"]!.post;
+    expect(canonical.operationId).toBe(operation.key);
+    expect(canonical.responses["202"]).toBeDefined();
+    expect(canonical.parameters[0]).toMatchObject({
       name: "quoteId",
       in: "path",
       required: true,
     });
-    expect(paths["/api/demo/quotes/{quoteId}/publish"]!.post.parameters[1]).toMatchObject({
+    expect(canonical.parameters[1]).toMatchObject({
       name: "Idempotency-Key",
       in: "header",
       required: true,
     });
-    expect(paths["/api/demo/quotes/{quoteId}/publish"]!.post.requestBody.content["application/json"].schema.properties)
+    expect(canonical.requestBody.content["application/json"].schema.properties)
       .not.toHaveProperty("idempotencyKey");
-    expect(paths["/api/demo/quotes/{quoteId}/publish"]!.post.requestBody.content["application/json"].schema)
+    expect(canonical.requestBody.content["application/json"].schema)
       .not.toHaveProperty("required");
+    expect(alias).toMatchObject({
+      deprecated: true,
+      "x-osf-rest-alias": {
+        canonicalOperationId: operation.key,
+        canonicalPath: "/api/demo/quotes/{quoteId}/publish",
+      },
+    });
+    expect(alias.operationId).not.toBe(operation.key);
+    expect(alias.parameters).toEqual(canonical.parameters);
+    expect(alias.requestBody).toEqual(canonical.requestBody);
+    expect(alias.responses).toEqual(canonical.responses);
   });
 
   test("keeps REST idempotency exclusively in the header for query operations", () => {
@@ -107,6 +131,28 @@ describe("first-class plugin operations", () => {
         rest: { ...operation.transports.rest, response: { kind: "binary" } },
       },
     }] }], context)).toThrow(/binary responses cannot project/);
+    expect(() => collectPluginOperations([{ name: "demo", operations: [
+      operation,
+      {
+        ...operation,
+        key: "demo.quote.send",
+        inputSchema: {
+          ...operation.inputSchema,
+          required: ["documentId", "idempotencyKey"],
+          properties: {
+            documentId: { type: "string", format: "uuid" },
+            idempotencyKey: { type: "string", minLength: 1 },
+          },
+        },
+        transports: {
+          ...operation.transports,
+          rest: {
+            ...operation.transports.rest,
+            path: "/api/demo/quotes/:documentId/publish",
+          },
+        },
+      },
+    ] }], context)).toThrow(/Duplicate plugin operation REST route/);
   });
 
   test("requires explicit disabled reasons for custom auth projections", () => {
@@ -219,6 +265,139 @@ describe("first-class plugin operations", () => {
         },
       }] }], context)).toThrow(/reserved API namespace/);
     }
+  });
+
+  test("requires safe aliases with canonical path parameters and no reserved-root takeover", () => {
+    const withAliases = (aliases: string[]): PluginOperationContract => ({
+      ...operation,
+      transports: {
+        ...operation.transports,
+        rest: { ...operation.transports.rest, aliases },
+      },
+    });
+    expect(() => collectPluginOperations([
+      { name: "demo", operations: [withAliases(["/outside/api/:quoteId"])] },
+    ], context)).toThrow(/safe absolute \/api/);
+    expect(() => collectPluginOperations([
+      { name: "demo", operations: [withAliases(["/api/rest"])] },
+    ], context)).toThrow(/reserved API namespace root/);
+    expect(() => collectPluginOperations([
+      { name: "demo", operations: [withAliases(["/api/legacy/:id/publish"])] },
+    ], context)).toThrow(/path parameters must match/);
+    expect(() => collectPluginOperations([
+      { name: "demo", operations: [withAliases([
+        "/api/legacy/:quoteId/publish",
+        "/api/legacy/:quoteId/publish",
+      ])] },
+    ], context)).toThrow(/Duplicate plugin operation REST route/);
+  });
+
+  test("audits aliases against core and generated REST while allowing collision-free nesting", () => {
+    const aliasOperation = (
+      method: PluginOperationContract["transports"]["rest"]["method"],
+      alias: string,
+    ): PluginOperationContract => ({
+      ...operation,
+      transports: {
+        ...operation.transports,
+        rest: { ...operation.transports.rest, method, aliases: [alias] },
+      },
+    });
+    const emptyManifest: PlatformSchemaManifest = { version: 1, tables: [] };
+    const coreCollision = collectPluginOperations([{ name: "demo", operations: [
+      aliasOperation("GET", "/api/rest/v1/connectors/:quoteId"),
+    ] }], context);
+    expect(() => auditOperationSurfaceCollisions(coreCollision, emptyManifest, [], 60))
+      .toThrow(/normalized REST route shape.*core connector catalog.*plugin operation/);
+
+    const staticCoreOverlap = collectPluginOperations([{ name: "demo", operations: [{
+      ...operation,
+      inputSchema: {
+        ...operation.inputSchema,
+        required: ["idempotencyKey"],
+        properties: { idempotencyKey: { type: "string", minLength: 1 } },
+      },
+      transports: {
+        ...operation.transports,
+        rest: {
+          ...operation.transports.rest,
+          method: "GET",
+          path: "/api/demo/connectors/acme",
+          aliases: ["/api/rest/v1/connectors/acme"],
+        },
+      },
+    }] }], context);
+    expect(() => auditOperationSurfaceCollisions(staticCoreOverlap, emptyManifest, [], 60))
+      .toThrow(/overlapping REST route.*core connector catalog.*plugin operation/);
+
+    const exactCoreCollision = collectPluginOperations([{ name: "demo", operations: [{
+      ...operation,
+      inputSchema: {
+        type: "object",
+        required: ["idempotencyKey"],
+        properties: { idempotencyKey: { type: "string", minLength: 1 } },
+        additionalProperties: false,
+      },
+      transports: {
+        ...operation.transports,
+        rest: {
+          ...operation.transports.rest,
+          method: "GET",
+          path: "/api/demo/documents",
+          aliases: ["/api/rest/openapi.json"],
+        },
+      },
+    }] }], context);
+    expect(() => auditOperationSurfaceCollisions(exactCoreCollision, emptyManifest, [], 60))
+      .toThrow(/REST route.*core REST OpenAPI.*plugin operation/);
+
+    const generatedManifest: PlatformSchemaManifest = {
+      version: 1,
+      tables: [{
+        schema: "public",
+        name: "legacy_quotes",
+        tenantScoped: true,
+        generatedCrud: true,
+        columns: [{ name: "id", type: "uuid", primaryKey: true }],
+        source: {
+          rest: {
+            basePath: "legacy-quotes",
+            operations: { list: true, get: true, create: true, update: true, delete: true },
+          },
+        },
+      }],
+    };
+    const generatedCollision = collectPluginOperations([{ name: "demo", operations: [
+      aliasOperation("PATCH", "/api/rest/v1/legacy-quotes/:quoteId"),
+    ] }], context);
+    expect(() => auditOperationSurfaceCollisions(generatedCollision, generatedManifest, [], 60))
+      .toThrow(/normalized REST route shape.*entity public.legacy_quotes.*plugin operation/);
+
+    const staticGeneratedOverlap = collectPluginOperations([{ name: "demo", operations: [{
+      ...operation,
+      inputSchema: {
+        ...operation.inputSchema,
+        required: ["idempotencyKey"],
+        properties: { idempotencyKey: { type: "string", minLength: 1 } },
+      },
+      transports: {
+        ...operation.transports,
+        rest: {
+          ...operation.transports.rest,
+          method: "PATCH",
+          path: "/api/demo/legacy-quotes/current",
+          aliases: ["/api/rest/v1/legacy-quotes/current"],
+        },
+      },
+    }] }], context);
+    expect(() => auditOperationSurfaceCollisions(staticGeneratedOverlap, generatedManifest, [], 60))
+      .toThrow(/overlapping REST route.*entity public.legacy_quotes.*plugin operation/);
+
+    const nested = collectPluginOperations([{ name: "demo", operations: [
+      aliasOperation("POST", "/api/rest/v1/legacy-quotes/:quoteId/publish"),
+    ] }], context);
+    expect(() => auditOperationSurfaceCollisions(nested, generatedManifest, [], 60))
+      .not.toThrow();
   });
 
   test("rejects duplicate or invalid generated TypeScript function names", () => {

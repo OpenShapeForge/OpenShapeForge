@@ -102,6 +102,12 @@ export type PluginOperationContract = {
   transports: {
     rest: {
       method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+      /**
+       * Deprecated compatibility paths dispatched through this operation's
+       * canonical handler and transport contract. The compiler collision-audits
+       * these paths; they are never independent operations.
+       */
+      aliases?: string[];
       path: string;
       response: {
         /** Successful REST status; defaults to 200 when omitted. */

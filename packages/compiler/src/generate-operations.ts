@@ -9,6 +9,7 @@ import type {
 } from "./plugins.js";
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
 import type { PlatformSchemaManifest } from "./schema.js";
+import { isGeneratedCrudEligible } from "./schema.js";
 
 export type CompiledPluginOperation = PluginOperationContract & { plugin: string };
 
@@ -23,6 +24,8 @@ const RESERVED_API_NAMESPACES = new Set([
   "connectors",
   "control",
   "documents",
+  "entity-configuration",
+  "entity-oauth",
   "graphql",
   "health",
   "live",
@@ -32,6 +35,91 @@ const RESERVED_API_NAMESPACES = new Set([
   "ready",
   "rest",
 ]);
+
+type RestMethod = PluginOperationContract["transports"]["rest"]["method"];
+type RestRoute = { method: RestMethod; path: string; owner: string };
+
+/**
+ * Built-in /api routes that can coexist with collision-free nested aliases.
+ * Conditional routes are included because a contract must remain safe when
+ * the corresponding runtime feature is enabled.
+ */
+const CORE_API_ROUTES: readonly RestRoute[] = [
+  { method: "GET", path: "/api/health", owner: "core health" },
+  { method: "GET", path: "/api/metrics", owner: "core metrics" },
+  { method: "GET", path: "/api/ready", owner: "core readiness" },
+  { method: "GET", path: "/api/graphql", owner: "core GraphQL" },
+  { method: "POST", path: "/api/graphql", owner: "core GraphQL" },
+  { method: "GET", path: "/api/graphql/persisted", owner: "core persisted GraphQL" },
+  { method: "POST", path: "/api/graphql/persisted", owner: "core persisted GraphQL" },
+  { method: "GET", path: "/api/rest/openapi.json", owner: "core REST OpenAPI" },
+  { method: "GET", path: "/api/rest/docs", owner: "core REST documentation" },
+  { method: "GET", path: "/api/rest/docs/swagger-ui.css", owner: "core REST documentation" },
+  { method: "GET", path: "/api/rest/docs/swagger-ui-bundle.js", owner: "core REST documentation" },
+  { method: "GET", path: "/api/rest/docs/swagger-ui-standalone-preset.js", owner: "core REST documentation" },
+  { method: "POST", path: "/api/documents", owner: "core document commands" },
+  { method: "POST", path: "/api/documents/:documentId/versions", owner: "core document commands" },
+  { method: "GET", path: "/api/rest/v1/connectors", owner: "core connector catalog" },
+  { method: "GET", path: "/api/rest/v1/connectors/:slug", owner: "core connector catalog" },
+  { method: "PUT", path: "/api/rest/v1/connectors/:slug/installations/:instanceKey", owner: "core connector configuration" },
+  { method: "POST", path: "/api/rest/v1/connectors/:slug/installations/:instanceKey/verify", owner: "core connector verification" },
+  { method: "GET", path: "/api/rest/v1/connectors/:basePath/invoke/:operationPath", owner: "core connector invocation" },
+  { method: "POST", path: "/api/rest/v1/connectors/:basePath/invoke/:operationPath", owner: "core connector invocation" },
+  { method: "POST", path: "/api/rest/v1/connectors/:slug/installations/:instanceKey/enable", owner: "core connector configuration" },
+  { method: "POST", path: "/api/rest/v1/connectors/:slug/installations/:instanceKey/disable", owner: "core connector configuration" },
+  { method: "POST", path: "/api/rest/v1/connectors/:slug/installations/:instanceKey/authorize", owner: "core connector OAuth" },
+  { method: "GET", path: "/api/rest/v1/connectors/oauth/callback", owner: "core connector OAuth" },
+  { method: "GET", path: "/api/entity-oauth/callback", owner: "core entity OAuth" },
+  { method: "GET", path: "/api/entity-configuration/pending", owner: "core entity configuration" },
+  { method: "POST", path: "/api/entity-configuration/pending/:id", owner: "core entity configuration" },
+  { method: "GET", path: "/api/entity-configuration/:token", owner: "core entity configuration" },
+  { method: "POST", path: "/api/entity-configuration/:token", owner: "core entity configuration" },
+  { method: "GET", path: "/api/mcp", owner: "core MCP" },
+  { method: "POST", path: "/api/mcp", owner: "core MCP" },
+  { method: "DELETE", path: "/api/mcp", owner: "core MCP" },
+  { method: "GET", path: "/api/api-keys", owner: "core API-key provisioning" },
+  { method: "POST", path: "/api/api-keys", owner: "core API-key provisioning" },
+  { method: "POST", path: "/api/api-keys/:integrationId/keys", owner: "core API-key provisioning" },
+  { method: "DELETE", path: "/api/api-keys/keys/:keyId", owner: "core API-key provisioning" },
+  { method: "DELETE", path: "/api/api-keys/:integrationId", owner: "core API-key provisioning" },
+  { method: "GET", path: "/api/control/v1/tenants", owner: "core control plane" },
+  { method: "POST", path: "/api/control/v1/tenants", owner: "core control plane" },
+  { method: "GET", path: "/api/control/v1/tenants/:tenantSlug", owner: "core control plane" },
+  { method: "PATCH", path: "/api/control/v1/tenants/:tenantSlug", owner: "core control plane" },
+  { method: "GET", path: "/api/control/v1/tenants/:tenantSlug/organizations", owner: "core control plane" },
+  { method: "POST", path: "/api/control/v1/tenants/:tenantSlug/organizations", owner: "core control plane" },
+  { method: "PATCH", path: "/api/control/v1/tenants/:tenantSlug/organizations/:orgUnitId", owner: "core control plane" },
+  { method: "GET", path: "/api/control/v1/reconciliation", owner: "core control plane" },
+  { method: "POST", path: "/api/control/v1/reconciliation/reapply", owner: "core control plane" },
+];
+
+function restPathParameters(path: string): string[] {
+  return [...path.matchAll(/:([_A-Za-z][_0-9A-Za-z]*)/g)].map((match) => match[1]!);
+}
+
+function normalizedRestRoute(method: RestMethod, path: string): string {
+  return `${method} ${path.replace(/:[_A-Za-z][_0-9A-Za-z]*/g, ":param")}`;
+}
+
+function restRoutesOverlap(left: RestRoute, right: RestRoute): boolean {
+  if (left.method !== right.method) return false;
+  const leftSegments = left.path.split("/").slice(1);
+  const rightSegments = right.path.split("/").slice(1);
+  const segmentOverlaps = (leftSegment: string, rightSegment: string): boolean =>
+    leftSegment === rightSegment ||
+    leftSegment.startsWith(":") ||
+    rightSegment.startsWith(":") ||
+    leftSegment === "*" ||
+    rightSegment === "*";
+  for (let index = 0; index < Math.max(leftSegments.length, rightSegments.length); index += 1) {
+    const leftSegment = leftSegments[index];
+    const rightSegment = rightSegments[index];
+    if (leftSegment === "*" || rightSegment === "*") return true;
+    if (leftSegment === undefined || rightSegment === undefined) return false;
+    if (!segmentOverlaps(leftSegment, rightSegment)) return false;
+  }
+  return true;
+}
 
 function nonEmpty(value: string, label: string): void {
   if (!value.trim()) throw new Error(`${label} must be non-empty.`);
@@ -65,6 +153,28 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
   }
   if (!REST_PATH.test(restPath) || !restPath.startsWith(`/api/${plugin}/`)) {
     throw new Error(`${where} REST path must be a safe /api/${plugin}/ path.`);
+  }
+  const canonicalParameters = restPathParameters(restPath);
+  const aliases = operation.transports.rest.aliases;
+  if (aliases !== undefined && !Array.isArray(aliases)) {
+    throw new Error(`${where} REST aliases must be an array of paths.`);
+  }
+  for (const [index, alias] of (aliases ?? []).entries()) {
+    if (typeof alias !== "string" || !REST_PATH.test(alias)) {
+      throw new Error(`${where} REST alias[${index}] must be a safe absolute /api/... path.`);
+    }
+    const namespace = alias.split("/")[2]!;
+    if (RESERVED_API_NAMESPACES.has(namespace) && alias === `/api/${namespace}`) {
+      throw new Error(`${where} REST alias[${index}] cannot claim reserved API namespace root "${alias}".`);
+    }
+    const aliasParameters = restPathParameters(alias);
+    if (aliasParameters.length !== canonicalParameters.length ||
+        aliasParameters.some((parameter, parameterIndex) => parameter !== canonicalParameters[parameterIndex])) {
+      throw new Error(
+        `${where} REST alias[${index}] path parameters must match the canonical path exactly ` +
+        `(${canonicalParameters.join(", ") || "none"}).`,
+      );
+    }
   }
   const ajv = new Ajv2020.default({ strict: true, allErrors: true });
   (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
@@ -174,10 +284,39 @@ export function auditOperationSurfaceCollisions(
 ): void {
   const graphql = new Map<string, string>();
   const mcp = new Map<string, string>();
+  // Core owns its internal precedence choices (for example a fixed route next
+  // to a parameter fallback). Generated and plugin routes may overlap neither
+  // those route languages nor each other.
+  const rest: RestRoute[] = [...CORE_API_ROUTES];
   let dedicatedMcpTools = 0;
+
+  const claimRest = (route: RestRoute): void => {
+    const previous = rest.find((claimed) => restRoutesOverlap(claimed, route));
+    if (previous) {
+      const collision = previous.path === route.path
+        ? "REST route"
+        : normalizedRestRoute(previous.method, previous.path) === normalizedRestRoute(route.method, route.path)
+          ? "normalized REST route shape"
+          : "overlapping REST route";
+      throw new Error(
+        `${collision} "${route.method} ${route.path}" is claimed by both ${previous.owner} and ${route.owner}.`,
+      );
+    }
+    rest.push(route);
+  };
 
   for (const table of manifest.tables) {
     const owner = `entity ${table.schema}.${table.name}`;
+    const entityRest = isGeneratedCrudEligible(table) ? table.source?.rest : undefined;
+    if (entityRest) {
+      const collectionPath = `/api/rest/v1/${entityRest.basePath}`;
+      const itemPath = `${collectionPath}/:id`;
+      if (entityRest.operations.list) claimRest({ method: "GET", path: collectionPath, owner });
+      if (entityRest.operations.create) claimRest({ method: "POST", path: collectionPath, owner });
+      if (entityRest.operations.get) claimRest({ method: "GET", path: itemPath, owner });
+      if (entityRest.operations.update) claimRest({ method: "PATCH", path: itemPath, owner });
+      if (entityRest.operations.delete) claimRest({ method: "DELETE", path: itemPath, owner });
+    }
     const entityGraphql = table.source?.graphql;
     if (entityGraphql) {
       for (const name of [
@@ -211,6 +350,12 @@ export function auditOperationSurfaceCollisions(
 
   for (const operation of operations) {
     const owner = `plugin operation ${operation.key}`;
+    for (const path of [
+      operation.transports.rest.path,
+      ...(operation.transports.rest.aliases ?? []),
+    ]) {
+      claimRest({ method: operation.transports.rest.method, path, owner });
+    }
     if (operation.transports.graphql.enabled) {
       claimSurface(graphql, "GraphQL root field", operation.transports.graphql.field, owner);
     }
@@ -245,7 +390,10 @@ export function collectPluginOperations(
       : plugin.operations ?? [];
     for (const operation of declared) {
       validateOperation(plugin.name, operation);
-      const restKey = `${operation.transports.rest.method} ${operation.transports.rest.path.replace(/:[_A-Za-z][_0-9A-Za-z]*/g, ":param")}`;
+      const restPaths = [
+        operation.transports.rest.path,
+        ...(operation.transports.rest.aliases ?? []),
+      ].sort();
       const graphqlKey = operation.transports.graphql.enabled
         ? `${operation.transports.graphql.kind}:${operation.transports.graphql.field}`
         : undefined;
@@ -253,7 +401,11 @@ export function collectPluginOperations(
         ? operation.transports.typescript.functionName
         : undefined;
       if (keys.has(operation.key)) throw new Error(`Duplicate plugin operation key "${operation.key}".`);
-      if (rest.has(restKey)) throw new Error(`Duplicate plugin operation REST route "${restKey}".`);
+      for (const path of restPaths) {
+        const restKey = normalizedRestRoute(operation.transports.rest.method, path);
+        if (rest.has(restKey)) throw new Error(`Duplicate plugin operation REST route "${restKey}".`);
+        rest.add(restKey);
+      }
       if (operation.transports.mcp.enabled && mcp.has(operation.transports.mcp.name)) {
         throw new Error(`Duplicate plugin operation MCP tool "${operation.transports.mcp.name}".`);
       }
@@ -275,11 +427,22 @@ export function collectPluginOperations(
         customSecurity.set(operation.auth.scheme, definition);
       }
       keys.add(operation.key);
-      rest.add(restKey);
       if (operation.transports.mcp.enabled) mcp.add(operation.transports.mcp.name);
       if (graphqlKey) graphql.add(graphqlKey);
       if (typescriptKey) typescript.add(typescriptKey);
-      operations.push({ ...operation, plugin: plugin.name });
+      operations.push({
+        ...operation,
+        plugin: plugin.name,
+        transports: {
+          ...operation.transports,
+          rest: {
+            ...operation.transports.rest,
+            ...(operation.transports.rest.aliases
+              ? { aliases: [...operation.transports.rest.aliases].sort() }
+              : {}),
+          },
+        },
+      });
     }
   }
   return operations.sort((left, right) => left.key.localeCompare(right.key));
@@ -325,25 +488,11 @@ export function operationOpenApiPaths(operations: readonly CompiledPluginOperati
         content: { "application/json": { schema: error.schema ?? { $ref: "#/components/schemas/Error" } } },
       };
     }
-    const method = rest.method.toLowerCase();
-    const openApiPath = rest.path.replace(/:([_A-Za-z][_0-9A-Za-z]*)/g, "{$1}");
-    const pathParameters = [...rest.path.matchAll(/:([_A-Za-z][_0-9A-Za-z]*)/g)].map(([, name]) => ({
-      name,
-      in: "path",
-      required: true,
-      schema: (operation.inputSchema.properties as Record<string, unknown> | undefined)?.[name!] ?? { type: "string" },
-    }));
-    const pathNames = new Set(pathParameters.map((parameter) => parameter.name));
     const inputProperties = operation.inputSchema.properties as Record<string, unknown> | undefined;
     const required = new Set(Array.isArray(operation.inputSchema.required) ? operation.inputSchema.required as string[] : []);
     const idempotencyInputField = operation.idempotency.mode === "idempotency-key"
       ? operation.idempotency.inputField
       : undefined;
-    const queryParameters = rest.method === "GET" || rest.method === "DELETE"
-      ? Object.entries(inputProperties ?? {})
-          .filter(([name]) => !pathNames.has(name) && name !== idempotencyInputField)
-          .map(([name, schema]) => ({ name, in: "query", required: required.has(name), schema }))
-      : [];
     const idempotencyParameters = operation.idempotency.mode === "idempotency-key"
       ? [{
           name: operation.idempotency.header!,
@@ -353,45 +502,76 @@ export function operationOpenApiPaths(operations: readonly CompiledPluginOperati
           schema: { type: "string", minLength: 1 },
         }]
       : [];
-    const bodyProperties = Object.fromEntries(
-      Object.entries(inputProperties ?? {}).filter(([name]) =>
+    const method = rest.method.toLowerCase();
+    const canonicalOpenApiPath = rest.path.replace(/:([_A-Za-z][_0-9A-Za-z]*)/g, "{$1}");
+    const routePaths = [rest.path, ...(rest.aliases ?? [])];
+    for (const [routeIndex, routePath] of routePaths.entries()) {
+      const isAlias = routeIndex > 0;
+      const openApiPath = routePath.replace(/:([_A-Za-z][_0-9A-Za-z]*)/g, "{$1}");
+      const pathParameters = restPathParameters(routePath).map((name) => ({
+        name,
+        in: "path",
+        required: true,
+        schema: inputProperties?.[name] ?? { type: "string" },
+      }));
+      const pathNames = new Set(pathParameters.map((parameter) => parameter.name));
+      const queryParameters = rest.method === "GET" || rest.method === "DELETE"
+        ? Object.entries(inputProperties ?? {})
+            .filter(([name]) => !pathNames.has(name) && name !== idempotencyInputField)
+            .map(([name, schema]) => ({ name, in: "query", required: required.has(name), schema }))
+        : [];
+      const bodyProperties = Object.fromEntries(
+        Object.entries(inputProperties ?? {}).filter(([name]) =>
+          !pathNames.has(name) && name !== idempotencyInputField
+        ),
+      );
+      const bodyRequired = [...required].filter((name) =>
         !pathNames.has(name) && name !== idempotencyInputField
-      ),
-    );
-    const bodyRequired = [...required].filter((name) =>
-      !pathNames.has(name) && name !== idempotencyInputField
-    );
-    const { required: _canonicalRequired, ...inputSchemaWithoutRequired } = operation.inputSchema;
-    const bodySchema = {
-      ...inputSchemaWithoutRequired,
-      properties: bodyProperties,
-      ...(bodyRequired.length > 0 ? { required: bodyRequired } : {}),
-    };
-    paths[openApiPath] = {
-      ...(paths[openApiPath] ?? {}),
-      [method]: {
-        operationId: operation.key,
-        summary: operation.title,
-        description: operation.description,
-        tags: [operation.plugin],
-        security: operation.auth.mode === "public" ? [] : operation.auth.mode === "session" ? [{ bearerAuth: operation.auth.scopes ?? [] }] : [{ [operation.auth.scheme]: [] }],
-        "x-osf-operation": {
-          key: operation.key,
-          handler: operation.handler,
-          auth: operation.auth,
-          tenancy: operation.tenancy,
-          idempotency: operation.idempotency,
-          transports: operation.transports,
+      );
+      const { required: _canonicalRequired, ...inputSchemaWithoutRequired } = operation.inputSchema;
+      const bodySchema = {
+        ...inputSchemaWithoutRequired,
+        properties: bodyProperties,
+        ...(bodyRequired.length > 0 ? { required: bodyRequired } : {}),
+      };
+      if (method in (paths[openApiPath] ?? {})) {
+        throw new Error(`Duplicate plugin operation OpenAPI route "${rest.method} ${openApiPath}".`);
+      }
+      paths[openApiPath] = {
+        ...(paths[openApiPath] ?? {}),
+        [method]: {
+          operationId: isAlias ? `${operation.key}.rest-alias.${routeIndex}` : operation.key,
+          summary: operation.title,
+          description: isAlias
+            ? `${operation.description}\n\nDeprecated compatibility route. Use ${canonicalOpenApiPath}.`
+            : operation.description,
+          tags: [operation.plugin],
+          security: operation.auth.mode === "public" ? [] : operation.auth.mode === "session" ? [{ bearerAuth: operation.auth.scopes ?? [] }] : [{ [operation.auth.scheme]: [] }],
+          ...(isAlias ? {
+            deprecated: true,
+            "x-osf-rest-alias": {
+              canonicalOperationId: operation.key,
+              canonicalPath: canonicalOpenApiPath,
+            },
+          } : {}),
+          "x-osf-operation": {
+            key: operation.key,
+            handler: operation.handler,
+            auth: operation.auth,
+            tenancy: operation.tenancy,
+            idempotency: operation.idempotency,
+            transports: operation.transports,
+          },
+          ...([...pathParameters, ...queryParameters, ...idempotencyParameters].length > 0
+            ? { parameters: [...pathParameters, ...queryParameters, ...idempotencyParameters] }
+            : {}),
+          ...(rest.method === "GET" || rest.method === "DELETE" ? {} : {
+            requestBody: { required: bodyRequired.length > 0, content: { "application/json": { schema: bodySchema } } },
+          }),
+          responses,
         },
-        ...([...pathParameters, ...queryParameters, ...idempotencyParameters].length > 0
-          ? { parameters: [...pathParameters, ...queryParameters, ...idempotencyParameters] }
-          : {}),
-        ...(rest.method === "GET" || rest.method === "DELETE" ? {} : {
-          requestBody: { required: bodyRequired.length > 0, content: { "application/json": { schema: bodySchema } } },
-        }),
-        responses,
-      },
-    };
+      };
+    }
   }
   return paths;
 }

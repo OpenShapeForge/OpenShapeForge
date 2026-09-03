@@ -30,13 +30,38 @@ export {
  */
 export const SECRET_SET_SENTINEL = "__set__";
 
+const MAX_ELICITED_VALUE_JSON_DEPTH = 64;
+
 function looksLikeStoredSecret(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;
   }
   const candidate = value as Record<string, unknown>;
-  const has = (key: string) => Object.prototype.hasOwnProperty.call(candidate, key);
+  const has = (key: string) =>
+    Object.prototype.hasOwnProperty.call(candidate, key);
   return has("ciphertext") || (has("keyId") && has("algorithm"));
+}
+
+function projectElicitedValue(value: unknown, depth: number): unknown {
+  if (looksLikeStoredSecret(value)) return SECRET_SET_SENTINEL;
+  if (Array.isArray(value)) {
+    if (depth >= MAX_ELICITED_VALUE_JSON_DEPTH) {
+      return SECRET_SET_SENTINEL;
+    }
+    return value.map((entry) => projectElicitedValue(entry, depth + 1));
+  }
+  if (typeof value === "object" && value !== null) {
+    if (depth >= MAX_ELICITED_VALUE_JSON_DEPTH) {
+      return SECRET_SET_SENTINEL;
+    }
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        projectElicitedValue(entry, depth + 1),
+      ]),
+    );
+  }
+  return value;
 }
 
 /**
@@ -51,14 +76,8 @@ export function redactElicitedValues(
   intoField: string,
 ): Record<string, unknown> {
   const values = row[intoField];
-  if (!values || typeof values !== "object" || Array.isArray(values)) return row;
-  const redacted = Object.fromEntries(
-    Object.entries(values as Record<string, unknown>).map(([key, value]) => [
-      key,
-      looksLikeStoredSecret(value) ? SECRET_SET_SENTINEL : value,
-    ]),
-  );
-  return { ...row, [intoField]: redacted };
+  if (typeof values !== "object" || values === null) return row;
+  return { ...row, [intoField]: projectElicitedValue(values, 0) };
 }
 
 /**

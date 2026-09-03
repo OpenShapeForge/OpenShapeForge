@@ -101,34 +101,81 @@ describe("redactElicitedValues", () => {
     expect(values.apiToken).toBe("__set__");
   });
 
-  it("fails closed for malformed envelopes without suppressing ordinary objects", () => {
+  it("redacts complete and malformed envelopes at any JSON depth", () => {
+    const completeEnvelope = storeElicitedValues(
+      "erp.connections",
+      elicitationSchemaFromDefinitions(DEFINITIONS).elicitable,
+      { subdomain: "acme", apiToken: "s3cret" },
+      KEYRING,
+    ).apiToken;
     const ordinary = {
       algorithm: "round-robin",
       retry: { attempts: 3 },
     };
-    const row = redactElicitedValues(
+    expect(
+      redactElicitedValues(
+        { id: "root", configurationValues: completeEnvelope },
+        "configurationValues",
+      ).configurationValues,
+    ).toBe("__set__");
+
+    const projected = redactElicitedValues(
       {
         id: "1",
         configurationValues: {
           endpoint: "https://example.test",
           routing: ordinary,
           keyReference: { keyId: "ordinary-public-reference" },
-          missingKey: { ciphertext: "must-not-cross" },
-          missingCiphertext: { keyId: "must-not-cross", algorithm: "aes-256-gcm" },
+          nested: {
+            visible: true,
+            missingKey: { ciphertext: "nested-must-not-cross" },
+            missingCiphertext: {
+              keyId: "nested-must-not-cross",
+              algorithm: "aes-256-gcm",
+            },
+          },
+          entries: [
+            { label: "visible" },
+            completeEnvelope,
+            { child: { ciphertext: "array-must-not-cross" }, visible: 42 },
+          ],
         },
       },
       "configurationValues",
-    );
-    expect(row.configurationValues).toEqual({
+    ).configurationValues;
+    expect(projected).toEqual({
       endpoint: "https://example.test",
       routing: ordinary,
       keyReference: { keyId: "ordinary-public-reference" },
-      missingKey: "__set__",
-      missingCiphertext: "__set__",
+      nested: {
+        visible: true,
+        missingKey: "__set__",
+        missingCiphertext: "__set__",
+      },
+      entries: [
+        { label: "visible" },
+        "__set__",
+        { child: "__set__", visible: 42 },
+      ],
     });
-    expect(JSON.stringify(row)).not.toContain("must-not-cross");
-    expect(JSON.stringify(row)).not.toContain("ciphertext");
-    expect(JSON.stringify(row)).toContain("ordinary-public-reference");
+    expect(JSON.stringify(projected)).not.toContain("must-not-cross");
+    expect(JSON.stringify(projected)).not.toContain("ciphertext");
+    expect(JSON.stringify(projected)).not.toContain("s3cret");
+    expect(JSON.stringify(projected)).toContain("ordinary-public-reference");
+  });
+
+  it("fails closed before pathological JSON depth can expose a secret", () => {
+    let deeplyNested: unknown = { ciphertext: "deep-must-not-cross" };
+    for (let depth = 0; depth < 70; depth += 1) {
+      deeplyNested = depth % 2 === 0 ? { child: deeplyNested } : [deeplyNested];
+    }
+    const projected = redactElicitedValues(
+      { configurationValues: deeplyNested },
+      "configurationValues",
+    ).configurationValues;
+    expect(JSON.stringify(projected)).not.toContain("deep-must-not-cross");
+    expect(JSON.stringify(projected)).not.toContain("ciphertext");
+    expect(JSON.stringify(projected)).toContain("__set__");
   });
 
   it("leaves rows without the field untouched", () => {

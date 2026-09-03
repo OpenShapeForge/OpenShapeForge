@@ -6,7 +6,6 @@ import { dirname, join, resolve } from "node:path";
 import {
   generateAuthoringUiArtifacts,
 } from "./authoring/generate-ui-artifacts.js";
-import { generatePersistedOperationArtifacts } from "./persisted-operations.js";
 import { generateAuthoringKeycloakArtifacts } from "./authoring/generate-keycloak-artifacts.js";
 import {
   activeManifestSource,
@@ -273,18 +272,12 @@ export async function collectAllArtifacts(
             },
           ],
     referentiedata: await generateCoreReferentiedataArtifacts(repoRoot, referentiedata),
-    // A host without apps/web gets no UI artifacts, but the API still imports
-    // the persisted-operations manifest unconditionally (graphql/yoga.ts), so
-    // a headless host needs the (empty) API-side manifest emitted regardless.
+    // Headless hosts get the API's empty persisted-operation manifest from the
+    // graphql group above. Web hosts generate the populated API + web pair as
+    // part of their UI corpus.
     ui: webPresent
       ? await generateAuthoringUiArtifacts(authoringDir, repoRoot)
-      : (
-          await generatePersistedOperationArtifacts({
-            repoRoot,
-            generatedWebSources: new Map(),
-            pageConfigs: undefined,
-          })
-        ).filter((artifact) => artifact.path.startsWith("apps/api/")),
+      : [],
     keycloak: generateAuthoringKeycloakArtifacts(authoringDir),
     plugins: [],
   };

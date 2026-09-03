@@ -24,6 +24,17 @@ restApi:
     Start here to integrate with the product API.
 
     Authenticate first, then create or retrieve the records needed by your workflow.
+  bearerDescription: Paste an access token issued for this API, without the Bearer prefix.
+  oauth2:
+    description: Sign in through the host identity provider using Authorization Code with PKCE.
+    authorizationUrl: https://identity.example.com/oauth/authorize
+    tokenUrl: https://identity.example.com/oauth/token
+    clientId: example-public-docs-client
+    scopes:
+      openid: Sign in
+      profile: Read profile claims
+    # Optional when the API is published behind a fixed public origin.
+    redirectUrl: https://api.example.com/api/rest/docs/oauth2-redirect.html
   externalDocs:
     description: Developer guide
     url: https://example.com/developers
@@ -47,6 +58,21 @@ restApi:
   an absolute HTTP(S) URL. The compiler follows the authored description with
   its generic safe-start guidance, copyable coding-assistant prompt, and
   generated-artifact notice.
+- `bearerDescription` is optional guidance rendered in Swagger's authorization
+  dialog. `oauth2` adds an OAuth 2.0 Authorization Code scheme and requires
+  public authorization/token URLs, a **public client ID**, and at least one
+  described scope. A client secret is neither accepted nor emitted. Swagger UI
+  uses PKCE and keeps `persistAuthorization` disabled. Its packaged callback is
+  served at `/api/rest/docs/oauth2-redirect.html`; without `redirectUrl`, the
+  browser uses that path on the documentation page's current origin. Set
+  `redirectUrl` only when the identity provider requires the explicit public
+  callback URL for that same route. Swagger's initializer and callback scripts
+  are self-hosted assets, so a host can retain a `script-src 'self'` policy
+  without allowing inline script.
+- The OAuth client determines how Swagger obtains a token; it does not widen
+  which tokens the API accepts. Keep issuer and audience verification enabled,
+  and use the authorized-party allowlist described in [api.md](api.md) to admit
+  only the intended browser and non-browser clients.
 
 ## `authoring.config.local.yaml` — deployment-local extensions
 

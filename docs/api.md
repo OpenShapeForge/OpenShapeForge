@@ -459,6 +459,11 @@ and `..._ISSUER` are set (`..._AUDIENCE` optional). When an
 `Authorization: Bearer` header is present, the token is verified against the
 JWKS; **verification failure fails closed** to an empty session — it never
 falls back to trusted-context, so bearer auth is not downgrade-attackable.
+`OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES` optionally pins the
+token's `azp` claim to a comma-separated allowlist of OAuth client IDs. When
+the variable is configured, a missing or unlisted `azp` is rejected while
+issuer and audience checks remain in force; when it is absent, existing bearer
+behavior is unchanged. A configured empty value admits no client.
 Claims used: `tid` (tenant UUID — the dev realm sets it as a user attribute
 mapped to the `tid` claim), `sub` (user id), `realm_access.roles` **unioned
 with every `resource_access.<client>.roles` list** (Keycloak expands realm
@@ -604,7 +609,8 @@ compose stack):
 | `NODE_ENV` | `production` disables GraphiQL and makes schema drift fatal |
 | `LOG_LEVEL` | fastify log level (`debug` surfaces the drift-ok line) |
 | `DATABASE_URL` | Postgres; without it the API serves `DATABASE_NOT_CONFIGURED` errors |
-| `OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI` / `_ISSUER` / `_AUDIENCE` | Keycloak bearer verification (unset ⇒ bearer ignored) |
+| `OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI` / `_ISSUER` / `_AUDIENCE` | Keycloak bearer signature, issuer, and audience verification (JWKS URI or issuer unset ⇒ bearer ignored) |
+| `OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES` | optional comma-separated exact allowlist for the verified token's `azp`; configured empty rejects every party |
 | `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` | trusted-context HMAC secret; the example default matches the repo's signing scripts (unset ⇒ trusted-context rejected) |
 | `APP_TENANT_BYPASS_ROLES` | comma-separated roles that grant `tenant` scope |
 | `OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER` / `_JWKS_URI` / `_CLIENT_ID` | control-realm operator verification; `_CLIENT_ID` pins `azp`, not `aud` |

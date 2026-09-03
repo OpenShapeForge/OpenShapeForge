@@ -262,7 +262,7 @@ export function registerGeneratedRestRoutes(
   // these routes; serve it unauthenticated like the health endpoints.
   app.get(REST_OPENAPI_PATH, async () => openApiSpec);
 
-  registerRestDocs(app);
+  registerRestDocs(app, openApiSpec);
 
   if (restTables.length === 0) {
     return;

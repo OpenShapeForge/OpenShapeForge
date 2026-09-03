@@ -606,6 +606,18 @@ describe("authoring.config.local.yaml", () => {
         title: " Example Product API ",
         version: " 2026-09 ",
         description: " Start with authentication. ",
+        bearerDescription: " Paste an API access token. ",
+        oauth2: {
+          description: " Sign in through the host identity provider. ",
+          authorizationUrl: "https://identity.example.com/oauth/authorize",
+          tokenUrl: "https://identity.example.com/oauth/token",
+          clientId: " public-docs-client ",
+          scopes: {
+            profile: " Read profile claims ",
+            openid: " Sign in ",
+          },
+          redirectUrl: "https://api.example.com/api/rest/docs/oauth2-redirect.html",
+        },
         externalDocs: {
           description: " Developer guide ",
           url: "https://example.com/developers",
@@ -617,6 +629,18 @@ describe("authoring.config.local.yaml", () => {
       title: "Example Product API",
       version: "2026-09",
       description: "Start with authentication.",
+      bearerDescription: "Paste an API access token.",
+      oauth2: {
+        description: "Sign in through the host identity provider.",
+        authorizationUrl: "https://identity.example.com/oauth/authorize",
+        tokenUrl: "https://identity.example.com/oauth/token",
+        clientId: "public-docs-client",
+        scopes: {
+          openid: "Sign in",
+          profile: "Read profile claims",
+        },
+        redirectUrl: "https://api.example.com/api/rest/docs/oauth2-redirect.html",
+      },
       externalDocs: {
         description: "Developer guide",
         url: "https://example.com/developers",
@@ -648,6 +672,85 @@ describe("authoring.config.local.yaml", () => {
       restApi: { title: "API", description: "Guide", owner: "unknown" },
     });
     expect(() => loadAuthoringConfig(unknown)).toThrow(/restApi.*unknown field.*owner/);
+
+    const secret = makeRepo();
+    mkdirSync(join(secret, "base"), { recursive: true });
+    writeConfig(secret, {
+      layers: ["base"],
+      restApi: {
+        title: "API",
+        description: "Guide",
+        oauth2: {
+          description: "Sign in",
+          authorizationUrl: "https://identity.example.com/authorize",
+          tokenUrl: "https://identity.example.com/token",
+          clientId: "public-docs-client",
+          clientSecret: "must-not-be-authored",
+          scopes: { openid: "Sign in" },
+        },
+      },
+    });
+    expect(() => loadAuthoringConfig(secret)).toThrow(/oauth2.*unknown field.*clientSecret/);
+
+    const invalidOauth = makeRepo();
+    mkdirSync(join(invalidOauth, "base"), { recursive: true });
+    writeConfig(invalidOauth, {
+      layers: ["base"],
+      restApi: {
+        title: "API",
+        description: "Guide",
+        oauth2: {
+          description: "Sign in",
+          authorizationUrl: "/authorize",
+          tokenUrl: "https://identity.example.com/token",
+          clientId: "public-docs-client",
+          scopes: { openid: "Sign in" },
+        },
+      },
+    });
+    expect(() => loadAuthoringConfig(invalidOauth)).toThrow(
+      /oauth2\.authorizationUrl.*absolute HTTP/,
+    );
+
+    const emptyScopes = makeRepo();
+    mkdirSync(join(emptyScopes, "base"), { recursive: true });
+    writeConfig(emptyScopes, {
+      layers: ["base"],
+      restApi: {
+        title: "API",
+        description: "Guide",
+        oauth2: {
+          description: "Sign in",
+          authorizationUrl: "https://identity.example.com/authorize",
+          tokenUrl: "https://identity.example.com/token",
+          clientId: "public-docs-client",
+          scopes: {},
+        },
+      },
+    });
+    expect(() => loadAuthoringConfig(emptyScopes)).toThrow(
+      /oauth2\.scopes.*at least one scope/,
+    );
+
+    const credentialUrl = makeRepo();
+    mkdirSync(join(credentialUrl, "base"), { recursive: true });
+    writeConfig(credentialUrl, {
+      layers: ["base"],
+      restApi: {
+        title: "API",
+        description: "Guide",
+        oauth2: {
+          description: "Sign in",
+          authorizationUrl: "https://user:password@identity.example.com/authorize",
+          tokenUrl: "https://identity.example.com/token",
+          clientId: "public-docs-client",
+          scopes: { openid: "Sign in" },
+        },
+      },
+    });
+    expect(() => loadAuthoringConfig(credentialUrl)).toThrow(
+      /oauth2\.authorizationUrl.*must not contain credentials/,
+    );
 
     const local = makeRepo();
     mkdirSync(join(local, "base"), { recursive: true });

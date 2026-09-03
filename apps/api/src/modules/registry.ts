@@ -182,3 +182,28 @@ export async function initRuntimeModules(
   assertSingleModuleEgressOwner(loaded);
   return { loaded, failures };
 }
+
+/** Await every successfully initialised module's cleanup in reverse init order. */
+export async function closeRuntimeModules(
+  modules: readonly RuntimeModule[],
+): Promise<void> {
+  const failures: Error[] = [];
+  for (const module of [...modules].reverse()) {
+    if (!module.close) continue;
+    try {
+      await module.close();
+    } catch (error) {
+      failures.push(
+        new Error(`Runtime module ${JSON.stringify(module.name)} failed to close.`, {
+          cause: error,
+        }),
+      );
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      `${failures.length} runtime module close hook(s) failed.`,
+    );
+  }
+}

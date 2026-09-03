@@ -667,7 +667,10 @@ just loosely. If the store is unreachable the request proceeds **uncounted**
 rather than failing: a store outage must not become an API outage. Those are
 counted in `rateLimitMetrics.storeErrors`.
 
-Health and readiness probes are never throttled.
+Health and readiness probes are never throttled. `/api/ready` is the single
+readiness route for core and runtime-module dependencies: a failed module check
+appears in the existing `checks` object and makes the response `503`, with no
+private failure details in the response.
 
 ## Local stack
 

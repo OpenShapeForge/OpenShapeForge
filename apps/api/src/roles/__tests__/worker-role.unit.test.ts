@@ -210,6 +210,7 @@ describe("startWorkerRole", () => {
         {
           name: "probe-module",
           init: async () => void order.push("init"),
+          close: async () => void order.push("close"),
           workers: {
             probe: {
               start: (context): ModuleWorkerHandle => {
@@ -231,7 +232,7 @@ describe("startWorkerRole", () => {
     expect(handle).toMatchObject({ role: "probe", module: "probe-module" });
 
     await handle.stop();
-    expect(order).toEqual(["init", "start", "stop"]);
+    expect(order).toEqual(["init", "start", "stop", "close"]);
   });
 
   test("a module whose init throws does not contribute its role", async () => {

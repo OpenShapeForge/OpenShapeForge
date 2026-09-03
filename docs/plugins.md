@@ -83,6 +83,13 @@ and response metadata unchanged. GraphQL raises an error with the code, status,
 and body in `extensions`; MCP returns an `isError` tool result instead of
 successful content.
 
+Several error codes may share one HTTP status, but each status-and-code pair
+must be unique. OpenAPI keeps the single-error response shape unchanged. For a
+shared status it publishes one response, orders the alternatives by code, and
+groups their schemas and fixed examples by declared JSON media type. Default
+error envelopes are represented as code-discriminated `oneOf` alternatives;
+custom schemas use `anyOf` because arbitrary JSON Schemas may overlap.
+
 An error declaration may also include a fixed, schema-validated `body` in its
 REST projection. It is used only when a matching
 platform `HttpError` occurs before the handler, such as centralized session or

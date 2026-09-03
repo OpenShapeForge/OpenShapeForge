@@ -32,7 +32,6 @@ import {
   keyringFromEnv,
 } from "../../connectors/secrets.js";
 import { toHttpError } from "../../rest/http-error.js";
-import { ModuleEgressError } from "../../modules/contract.js";
 
 const KEYRING = keyringFromEnv(
   `test:${Buffer.alloc(32, 9).toString("base64")}`,
@@ -620,7 +619,11 @@ describe("executeBinding", () => {
         serviceInputs: {},
         keyring: KEYRING,
         egress: {
-          owner: { fetch: async () => { throw new ModuleEgressError(kind); } },
+          owner: {
+            fetch: async (request) => {
+              throw request.createFailure(kind);
+            },
+          },
           purpose: "provider",
           scope: {
             tenantId: "tenant-1",
@@ -1292,7 +1295,7 @@ describe("oauth2ClientCredentials", () => {
         owner: {
           fetch: async (request) => {
             oauthSource = request.source;
-            throw new ModuleEgressError("policy_blocked");
+            throw request.createFailure("policy_blocked");
           },
         },
       },

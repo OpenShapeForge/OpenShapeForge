@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Canonical protocol/allowlist gate and optional runtime-module egress owner. */
-import {
-  ModuleEgressError,
-  type ModuleEgressFailureKind,
-  type ModuleEgressInvocationSource,
-  type RuntimeModule,
+import type {
+  ModuleEgressFailureKind,
+  ModuleEgressInvocationSource,
+  RuntimeModule,
 } from "./contract.js";
 
 const trustedModuleEgressFailure = new WeakMap<
@@ -12,6 +11,45 @@ const trustedModuleEgressFailure = new WeakMap<
   { kind: ModuleEgressFailureKind; invocation: object }
 >();
 const moduleEgressInvocation = new WeakMap<ModuleEgressDispatch, object>();
+
+class ModuleEgressError extends Error {
+  readonly kind: ModuleEgressFailureKind;
+
+  constructor(kind: ModuleEgressFailureKind) {
+    super(
+      kind === "policy_blocked"
+        ? "Outbound policy blocked the request."
+        : "Outbound request timed out.",
+    );
+    this.name = "ModuleEgressError";
+    this.kind = kind;
+    Object.freeze(this);
+  }
+}
+
+const issuedModuleEgressFailures = new WeakSet<ModuleEgressError>();
+const moduleEgressFailureIssuance = new WeakMap<
+  ModuleEgressError,
+  { kind: ModuleEgressFailureKind; invocation: object }
+>();
+
+/** Only this closure can issue a failure for the active invocation. */
+function createModuleEgressFailureFactory(
+  invocation: object | undefined,
+): (kind: ModuleEgressFailureKind) => Error {
+  const factory = (kind: ModuleEgressFailureKind): Error => {
+    if (kind !== "policy_blocked" && kind !== "timeout") {
+      throw new TypeError("Unsupported module egress failure kind.");
+    }
+    const error = new ModuleEgressError(kind);
+    issuedModuleEgressFailures.add(error);
+    if (invocation) {
+      moduleEgressFailureIssuance.set(error, { kind, invocation });
+    }
+    return error;
+  };
+  return Object.freeze(factory);
+}
 
 class TrustedModuleEgressError extends Error {
   constructor() {
@@ -260,6 +298,8 @@ export async function fetchValidatedOutbound(input: {
     ...(ownerSignal ? { signal: ownerSignal } : {}),
   };
   const init = Object.freeze(hookInit);
+  const invocation = moduleEgressInvocation.get(input.dispatch);
+  const createFailure = createModuleEgressFailureFactory(invocation);
   try {
     const response = await input.dispatch.owner.fetch({
       url: new URL(url),
@@ -269,6 +309,7 @@ export async function fetchValidatedOutbound(input: {
       scope,
       ...(source ? { source } : {}),
       ...(ownerSignal ? { signal: ownerSignal } : {}),
+      createFailure,
     });
     // A buggy or hostile owner can ignore AbortSignal. Core still owns the
     // cancellation outcome and must not accept a response that arrived after
@@ -279,16 +320,16 @@ export async function fetchValidatedOutbound(input: {
     // Cancellation is core-owned and wins over anything the owner or a
     // deferred package input rejected with at the same boundary.
     throwIfAborted(callerSignal);
-    // Only the direct, registered hook rejection is trusted. A connector
-    // package or provider can construct ModuleEgressError too, but it never
-    // crosses this catch site and therefore cannot forge a policy outcome.
+    // Trust only a factory-issued failure bound to this invocation, and consume
+    // its issuance at this boundary so reconstruction and replay fail closed.
     if (
       error instanceof ModuleEgressError &&
-      (error.kind === "policy_blocked" || error.kind === "timeout")
+      issuedModuleEgressFailures.has(error)
     ) {
-      const invocation = moduleEgressInvocation.get(input.dispatch);
-      if (invocation) {
-        throw createTrustedModuleEgressError(error.kind, invocation);
+      const issuance = moduleEgressFailureIssuance.get(error);
+      moduleEgressFailureIssuance.delete(error);
+      if (issuance && invocation && issuance.invocation === invocation) {
+        throw createTrustedModuleEgressError(issuance.kind, invocation);
       }
     }
     throw error;

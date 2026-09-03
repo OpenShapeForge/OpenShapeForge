@@ -57,6 +57,18 @@ export type AuthoringConfig = {
   layers: string[];
   /** Compiler plugin module specifiers (see ../plugins.ts). */
   plugins?: string[];
+  /** Host-owned developer onboarding rendered in the generated REST OpenAPI document. */
+  restApi?: RestApiDocumentation;
+};
+
+export type RestApiDocumentation = {
+  title: string;
+  version?: string;
+  description: string;
+  externalDocs?: {
+    description?: string;
+    url: string;
+  };
 };
 
 export const AUTHORING_CONFIG_FILENAME = "authoring.config.yaml";
@@ -82,13 +94,19 @@ const BUILD_DIR = ".authoring-build";
 function readConfigFile(
   path: string,
   filename: string,
-  { requireLayers }: { requireLayers: boolean },
-): { layers: string[]; plugins: string[] } {
-  const parsed = YAML.parse(readFileSync(path, "utf8")) as {
-    layers?: unknown;
-    plugins?: unknown;
-  } | null;
-  const layers = parsed?.layers ?? (requireLayers ? undefined : []);
+  { requireLayers, allowRestApi }: { requireLayers: boolean; allowRestApi: boolean },
+): { layers: string[]; plugins: string[]; restApi?: RestApiDocumentation } {
+  const parsed = YAML.parse(readFileSync(path, "utf8"));
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${filename} must be an object.`);
+  }
+  const candidate = parsed as Record<string, unknown>;
+  const allowedKeys = ["layers", "plugins", "restApi"];
+  const unknownKeys = Object.keys(candidate).filter((key) => !allowedKeys.includes(key));
+  if (unknownKeys.length > 0) {
+    throw new Error(`${filename} has unknown field(s): ${unknownKeys.sort().join(", ")}.`);
+  }
+  const layers = candidate.layers ?? (requireLayers ? undefined : []);
   const invalidLayers =
     !Array.isArray(layers) ||
     (requireLayers && layers.length === 0) ||
@@ -100,25 +118,118 @@ function readConfigFile(
         : `${filename} "layers" must be a string array.`,
     );
   }
-  const plugins = parsed?.plugins ?? [];
+  const plugins = candidate.plugins ?? [];
   if (!Array.isArray(plugins) || plugins.some((entry) => typeof entry !== "string")) {
     throw new Error(`${filename} "plugins" must be a string array.`);
   }
-  return { layers: layers as string[], plugins: plugins as string[] };
+  if (!allowRestApi && candidate.restApi !== undefined) {
+    throw new Error(
+      `${filename} cannot declare "restApi"; developer onboarding belongs in the committed config.`,
+    );
+  }
+  const restApi = candidate.restApi === undefined
+    ? undefined
+    : validateRestApiDocumentation(candidate.restApi, filename);
+  return {
+    layers: layers as string[],
+    plugins: plugins as string[],
+    ...(restApi ? { restApi } : {}),
+  };
+}
+
+function nonEmptyString(value: unknown, path: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${path} must be a non-empty string.`);
+  }
+  return value.trim();
+}
+
+function validateRestApiDocumentation(
+  value: unknown,
+  filename: string,
+): RestApiDocumentation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${filename} "restApi" must be an object.`);
+  }
+  const candidate = value as Record<string, unknown>;
+  const unknownKeys = Object.keys(candidate).filter(
+    (key) => !["title", "version", "description", "externalDocs"].includes(key),
+  );
+  if (unknownKeys.length > 0) {
+    throw new Error(`${filename} "restApi" has unknown field(s): ${unknownKeys.sort().join(", ")}.`);
+  }
+
+  let externalDocs: RestApiDocumentation["externalDocs"];
+  if (candidate.externalDocs !== undefined) {
+    if (
+      !candidate.externalDocs ||
+      typeof candidate.externalDocs !== "object" ||
+      Array.isArray(candidate.externalDocs)
+    ) {
+      throw new Error(`${filename} "restApi.externalDocs" must be an object.`);
+    }
+    const docs = candidate.externalDocs as Record<string, unknown>;
+    const unknownDocKeys = Object.keys(docs).filter(
+      (key) => !["description", "url"].includes(key),
+    );
+    if (unknownDocKeys.length > 0) {
+      throw new Error(
+        `${filename} "restApi.externalDocs" has unknown field(s): ${unknownDocKeys.sort().join(", ")}.`,
+      );
+    }
+    const url = nonEmptyString(docs.url, `${filename} "restApi.externalDocs.url"`);
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      throw new Error(`${filename} "restApi.externalDocs.url" must be an absolute HTTP(S) URL.`);
+    }
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      throw new Error(`${filename} "restApi.externalDocs.url" must be an absolute HTTP(S) URL.`);
+    }
+    externalDocs = {
+      url,
+      ...(docs.description === undefined
+        ? {}
+        : {
+            description: nonEmptyString(
+              docs.description,
+              `${filename} "restApi.externalDocs.description"`,
+            ),
+          }),
+    };
+  }
+
+  return {
+    title: nonEmptyString(candidate.title, `${filename} "restApi.title"`),
+    description: nonEmptyString(candidate.description, `${filename} "restApi.description"`),
+    ...(candidate.version === undefined
+      ? {}
+      : { version: nonEmptyString(candidate.version, `${filename} "restApi.version"`) }),
+    ...(externalDocs ? { externalDocs } : {}),
+  };
 }
 
 export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
   const configPath = join(repoRoot, AUTHORING_CONFIG_FILENAME);
   const base = existsSync(configPath)
-    ? readConfigFile(configPath, AUTHORING_CONFIG_FILENAME, { requireLayers: true })
+    ? readConfigFile(configPath, AUTHORING_CONFIG_FILENAME, {
+        requireLayers: true,
+        allowRestApi: true,
+      })
     : { layers: [DEFAULT_LAYER], plugins: [] };
 
   const localPath = join(repoRoot, AUTHORING_LOCAL_CONFIG_FILENAME);
   if (!existsSync(localPath)) {
-    return { layers: base.layers, plugins: base.plugins };
+    return {
+      layers: base.layers,
+      plugins: base.plugins,
+      ...(base.restApi ? { restApi: base.restApi } : {}),
+    };
   }
   const local = readConfigFile(localPath, AUTHORING_LOCAL_CONFIG_FILENAME, {
     requireLayers: false,
+    allowRestApi: false,
   });
 
   // A duplicate is refused rather than de-duplicated. Appending a layer that
@@ -157,6 +268,7 @@ export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
   return {
     layers: [...base.layers, ...local.layers],
     plugins: [...base.plugins, ...local.plugins],
+    ...(base.restApi ? { restApi: base.restApi } : {}),
   };
 }
 

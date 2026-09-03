@@ -16,14 +16,14 @@
 # ecosystem (.github/dependabot.yml) bumps the tag and the digest together.
 
 # --- builder: install workspace deps + generate artifacts --------------------
-FROM oven/bun:1.3.4@sha256:7608db4aeb44f1fe8169cc8ec7055376b3013557b106407ccf092b00e426407d AS builder
+FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS builder
 WORKDIR /app
 COPY . .
 RUN bun install --frozen-lockfile
 RUN bun run generate
 
 # --- runtime -----------------------------------------------------------------
-FROM oven/bun:1.3.4@sha256:7608db4aeb44f1fe8169cc8ec7055376b3013557b106407ccf092b00e426407d AS runtime
+FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS runtime
 ENV NODE_ENV=production \
     PORT=3001 \
     HOST=0.0.0.0

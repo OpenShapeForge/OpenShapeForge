@@ -90,8 +90,8 @@ export type TopnavTabProps = React.ComponentProps<"button"> &
  * @figma node-id=10-2502 — https://www.figma.com/design/zokrrtGzRevHFAesahnlVi/Battery?node-id=10-2502
  * @figma node-id=207-4654 — https://www.figma.com/design/zokrrtGzRevHFAesahnlVi/Battery?node-id=207-4654
  * @figma tab component — https://www.figma.com/design/zokrrtGzRevHFAesahnlVi/Battery?node-id=4-431
- * @figma node-id=650-24267 — https://www.figma.com/design/CbKdajB2p4lAW3bBGcHBYd/Habe%C5%8Dn-1.3?node-id=650-24267
- * @figma node-id=650-24265 — https://www.figma.com/design/CbKdajB2p4lAW3bBGcHBYd/Habe%C5%8Dn-1.3?node-id=650-24265
+ * @figma node-id=650-24267 — file-key=CbKdajB2p4lAW3bBGcHBYd node-id=650-24267
+ * @figma node-id=650-24265 — file-key=CbKdajB2p4lAW3bBGcHBYd node-id=650-24265
  */
 export function TopnavTab({
   className,

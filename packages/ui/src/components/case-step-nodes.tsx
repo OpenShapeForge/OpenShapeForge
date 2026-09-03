@@ -166,9 +166,9 @@ function StepGlyph({ step }: { step: Exclude<CaseStepNodeStep, "line"> }) {
 }
 
 /**
- * Habeon 1.3 `case-step-nodes` — vertical case workflow rail node.
+ * `case-step-nodes` — vertical case workflow rail node.
  *
- * @figma case-step-nodes — https://www.figma.com/design/CbKdajB2p4lAW3bBGcHBYd/Habe%C5%8Dn-1.3?node-id=227-60997
+ * @figma case-step-nodes file-key=CbKdajB2p4lAW3bBGcHBYd node-id=227-60997
  */
 export function CaseStepNodes({
   step = "origin",

@@ -3,16 +3,20 @@ import { describe, expect, it } from "bun:test";
 import type {
   McpInvocationContext,
   McpProjectionContext,
+  ModuleAuthorizationRequest,
   ModuleToolExecutionResult,
   RuntimeModule,
 } from "../contract.js";
 import {
   assertUniqueToolNames,
+  authorizeMcpRequest,
   decorateMcpTools,
   interceptMcpToolCall,
   invokeModuleTool,
+  moduleResourceAuthorizationOwner,
   moduleResourceTemplates,
   moduleResources,
+  moduleToolAuthorizationOwner,
   moduleTools,
   readModuleResource,
 } from "../mcp-hooks.js";
@@ -42,6 +46,247 @@ const tool = (name: string) => ({
 });
 
 describe("runtime module MCP composition", () => {
+  it("lets a module claim a core-unknown resource handle", async () => {
+    const request: ModuleAuthorizationRequest = {
+      action: "read",
+      subject: { kind: "resource-handle", uri: "app://artifacts/item-1" },
+    };
+    let receivedSession: unknown;
+    let receivedRequest: unknown;
+    const owner: RuntimeModule = {
+      name: "artifacts",
+      mcp: {
+        authorize: async (session, candidate) => {
+          receivedSession = session;
+          receivedRequest = candidate;
+          return candidate.subject.kind === "resource-handle" &&
+              candidate.subject.uri === "app://artifacts/item-1"
+            ? { allowed: true, fieldAllowlist: ["title", "id"] }
+            : undefined;
+        },
+      },
+    };
+    const decision = await authorizeMcpRequest(
+      [owner],
+      projection.session,
+      request,
+      async () => ({ allowed: false, code: "NOT_FOUND" }),
+      async () => owner,
+    );
+
+    expect(decision).toEqual({ allowed: true, fieldAllowlist: ["id", "title"] });
+    expect(receivedSession).toBe(projection.session);
+    expect(receivedRequest).not.toBe(request);
+    expect(Object.isFrozen(receivedRequest)).toBe(true);
+    expect(Object.isFrozen((receivedRequest as ModuleAuthorizationRequest).subject)).toBe(true);
+  });
+
+  it("resolves only registered module tool and exact or template resource owners", async () => {
+    const owner: RuntimeModule = {
+      name: "artifacts",
+      mcp: {
+        tools: async () => [tool("artifact_preview")],
+        resources: async () => [{ uri: "app://artifacts/current", name: "current" }],
+        resourceTemplates: async () => [{
+          uriTemplate: "app://artifacts/{id}",
+          name: "artifact",
+        }],
+        authorize: async () => ({ allowed: true }),
+      },
+    };
+    const resolveOwner = async (request: ModuleAuthorizationRequest) =>
+      request.subject.kind === "tool"
+        ? moduleToolAuthorizationOwner(
+            [owner],
+            request.subject.name,
+            projection,
+          )
+        : request.subject.kind === "resource-handle"
+          ? moduleResourceAuthorizationOwner(
+              [owner],
+              request.subject.uri,
+              projection,
+            )
+          : undefined;
+    for (const subject of [
+      { kind: "tool" as const, name: "artifact_preview" },
+      { kind: "resource-handle" as const, uri: "app://artifacts/current" },
+      { kind: "resource-handle" as const, uri: "app://artifacts/item-1" },
+    ]) {
+      await expect(authorizeMcpRequest(
+        [owner],
+        projection.session,
+        { action: subject.kind === "tool" ? "call" : "read", subject },
+        async () => ({ allowed: false, code: "NOT_FOUND" }),
+        resolveOwner,
+      )).resolves.toEqual({ allowed: true });
+    }
+
+    await expect(authorizeMcpRequest(
+      [owner],
+      projection.session,
+      {
+        action: "read",
+        subject: { kind: "resource-handle", uri: "app://unknown/item-1" },
+      },
+      async () => ({ allowed: false, code: "NOT_FOUND" }),
+      resolveOwner,
+    )).resolves.toEqual({ allowed: false, code: "NOT_FOUND" });
+  });
+
+  it("intersects tool and resource field allowlists independent of field order", async () => {
+    const modules: RuntimeModule[] = [
+      {
+        name: "first",
+        mcp: {
+          authorize: async () => ({
+            allowed: true,
+            fieldAllowlist: ["summary", "id", "title", "id"],
+          }),
+        },
+      },
+      {
+        name: "second",
+        mcp: {
+          authorize: async () => ({
+            allowed: true,
+            fieldAllowlist: ["title", "id", "status"],
+          }),
+        },
+      },
+    ];
+    for (const subject of [
+      { kind: "tool" as const, name: "preview_item" },
+      { kind: "resource-handle" as const, uri: "app://items/item-1" },
+    ]) {
+      const authorize = (ordered: RuntimeModule[]) => authorizeMcpRequest(
+        ordered,
+        projection.session,
+        { action: "read", subject },
+        async () => ({
+          allowed: true,
+          fieldAllowlist: ["title", "summary", "id"],
+        }),
+      );
+      await expect(authorize(modules)).resolves.toEqual({
+        allowed: true,
+        fieldAllowlist: ["id", "title"],
+      });
+      await expect(authorize([...modules].reverse())).resolves.toEqual({
+        allowed: true,
+        fieldAllowlist: ["id", "title"],
+      });
+    }
+  });
+
+  it("makes a participating denial win while abstentions preserve core", async () => {
+    const request: ModuleAuthorizationRequest = {
+      action: "call",
+      subject: { kind: "tool", name: "preview_item" },
+    };
+    const modules: RuntimeModule[] = [
+      { name: "abstain", mcp: { authorize: async () => undefined } },
+      { name: "allow", mcp: { authorize: async () => ({ allowed: true }) } },
+      {
+        name: "deny",
+        mcp: {
+          authorize: async () => ({ allowed: false, code: "FORBIDDEN" }),
+        },
+      },
+    ];
+    await expect(authorizeMcpRequest(
+      modules,
+      projection.session,
+      request,
+      async () => ({ allowed: true }),
+    )).resolves.toEqual({ allowed: false, code: "FORBIDDEN" });
+
+    const notFound = { allowed: false as const, code: "NOT_FOUND" as const };
+    await expect(authorizeMcpRequest(
+      [{ name: "abstain", mcp: { authorize: async () => undefined } }],
+      projection.session,
+      request,
+      async () => notFound,
+    )).resolves.toEqual(notFound);
+    await expect(authorizeMcpRequest(
+      [],
+      projection.session,
+      request,
+      async () => notFound,
+    )).resolves.toBe(notFound);
+
+    const coreAllow = {
+      allowed: true as const,
+      fieldAllowlist: ["title", "id"] as const,
+    };
+    await expect(authorizeMcpRequest(
+      [],
+      projection.session,
+      request,
+      async () => coreAllow,
+    )).resolves.toBe(coreAllow);
+    await expect(authorizeMcpRequest(
+      [{ name: "abstain", mcp: { authorize: async () => undefined } }],
+      projection.session,
+      request,
+      async () => coreAllow,
+    )).resolves.toBe(coreAllow);
+  });
+
+  it("keeps non-not-found core denials authoritative", async () => {
+    await expect(authorizeMcpRequest(
+      [{ name: "claim", mcp: { authorize: async () => ({ allowed: true }) } }],
+      projection.session,
+      { action: "read", subject: { kind: "tool", name: "core_tool" } },
+      async () => ({ allowed: false, code: "REAUTHORIZATION_REQUIRED" }),
+    )).resolves.toEqual({ allowed: false, code: "REAUTHORIZATION_REQUIRED" });
+  });
+
+  it("fails closed on malformed or rejected module decisions", async () => {
+    const request: ModuleAuthorizationRequest = {
+      action: "read",
+      subject: { kind: "resource-handle", uri: "app://artifacts/item-1" },
+    };
+    for (const authorize of [
+      async () => ({ allowed: true, fieldAllowlist: ["id", 1] }) as never,
+      async () => ({ allowed: true, fieldAllowlist: [""] }) as never,
+      async () => ({ allowed: true, extra: true }) as never,
+      async () => ({ allowed: "yes" }) as never,
+      async () => ({ allowed: false, code: "UNKNOWN" }) as never,
+      async () => { throw new Error("private module failure"); },
+    ]) {
+      await expect(authorizeMcpRequest(
+        [{ name: "invalid", mcp: { authorize } }],
+        projection.session,
+        request,
+        async () => ({ allowed: true }),
+      )).resolves.toEqual({ allowed: false, code: "FORBIDDEN" });
+    }
+  });
+
+  it("refuses recursive platform authorization composition", async () => {
+    const request: ModuleAuthorizationRequest = {
+      action: "read",
+      subject: { kind: "resource-handle", uri: "app://items/item-1" },
+    };
+    await expect(authorizeMcpRequest(
+      [{
+        name: "recursive",
+        mcp: {
+          authorize: async () => authorizeMcpRequest(
+            [],
+            projection.session,
+            request,
+            async () => ({ allowed: true }),
+          ),
+        },
+      }],
+      projection.session,
+      request,
+      async () => ({ allowed: true }),
+    )).resolves.toEqual({ allowed: false, code: "FORBIDDEN" });
+  });
+
   it("lists and decorates in registration order while preserving dispatch identity", async () => {
     const modules: RuntimeModule[] = [
       {

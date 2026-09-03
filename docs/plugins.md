@@ -335,6 +335,7 @@ export type RuntimeModule = {
   init?(ctx): Promise<void>;                        // awaited before anything serves
   readinessChecks?: readonly ModuleReadinessCheck[]; // required dependencies for /api/ready
   close?(): Promise<void>;                          // awaited during process shutdown
+  mcp?: RuntimeMcpContribution;                     // per-session MCP surfaces and policy refinements
   graphql?(ctx): ModuleGraphqlContribution;         // typeDefs + root fields + resolvers
   restRoutes?(routes, ctx): void;                   // fastify, inside the rate-limited scope
   seeds?: ModuleSeed[];                             // appended to the migration chain
@@ -342,7 +343,7 @@ export type RuntimeModule = {
 };
 ```
 
-Six properties are worth knowing:
+Seven properties are worth knowing:
 
 - **Loading is fail-soft.** A module that throws on import, loads as something
   other than a `RuntimeModule`, or disagrees with its registration about its own
@@ -367,6 +368,16 @@ Six properties are worth knowing:
   initialization order, both for the API and worker roles. A rejection does not
   skip the remaining module or host cleanup; shutdown rejects with an aggregate
   error after all cleanup has been attempted.
+- **Module authorization only narrows or claims.** `mcp.authorize(session,
+  request)` receives the verified session capability and typed subject. Return
+  `undefined` to abstain, an allowed decision to claim the module's registered
+  tool or exact/template resource, or narrow visible fields, or an existing
+  typed denial. Entity rows remain core-only. Core denials remain authoritative,
+  any module denial wins, and bounded field allowlists are intersected. The hook
+  receives no platform service or recursive callback. Malformed decisions fail
+  closed. A derived-tool projection can name its canonical output definitions
+  with `derivedTools.outputFieldsField`; core then removes secret-classified
+  fields before exposing the allowlist to module refiners.
 
 `restRoutes` is declared but unimplemented by the shipped workflow module,
 which stays that way until the webhook trigger lands rather than being stubbed.

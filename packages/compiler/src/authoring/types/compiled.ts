@@ -239,6 +239,7 @@ export interface McpSection {
     titleField?: string;
     descriptionField: string;
     inputFieldsField: string;
+    outputFieldsField?: string;
     versionField?: string;
     execution?: {
       bindingsField: string;

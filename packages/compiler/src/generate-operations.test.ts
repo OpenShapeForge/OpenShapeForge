@@ -577,11 +577,25 @@ describe("first-class plugin operations", () => {
         ...operation.transports,
         rest: { ...operation.transports.rest, path: "/api/admin/escape" },
       },
-    }] }], context)).toThrow(/safe \/api\/demo\/ path/);
+    }] }], context)).toThrow(/safe plugin root "\/api\/demo"/);
     expect(() => collectPluginOperations([{ name: "demo", operations: [{
       ...operation,
       inputSchema: { type: "object", properties: {}, additionalProperties: false },
     }] }], context)).toThrow(/path parameter "quoteId" must be a required/);
+    expect(() => collectPluginOperations([{ name: "../demo", operations: [{
+      ...operation,
+      key: "../demo.quote.publish",
+    }] }], context)).toThrow(/stable lowercase key/);
+    expect(() => collectPluginOperations([{ name: "health", operations: [{
+      ...operation,
+      key: "health.status.read",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      idempotency: { mode: "none" },
+      transports: {
+        ...operation.transports,
+        rest: { method: "GET", path: "/api/health", response: { status: 200, kind: "json" } },
+      },
+    }] }], context)).toThrow(/reserved API namespace "health"/);
     for (const reserved of ["api-keys", "documents", "health"]) {
       expect(() => collectPluginOperations([{ name: reserved, operations: [{
         ...operation,
@@ -592,6 +606,53 @@ describe("first-class plugin operations", () => {
         },
       }] }], context)).toThrow(/reserved API namespace/);
     }
+  });
+
+  test("allows a canonical operation at its exact plugin namespace root", () => {
+    const rootOperation: PluginOperationContract = {
+      ...operation,
+      key: "session.current.read",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      idempotency: { mode: "none" },
+      transports: {
+        ...operation.transports,
+        rest: { method: "GET", path: "/api/session", response: { status: 200, kind: "json" } },
+      },
+    };
+    const plugins: CompilerPlugin[] = [{ name: "session", operations: [rootOperation] }];
+
+    const first = collectPluginOperations(plugins, context);
+    const second = collectPluginOperations(plugins, context);
+
+    expect(first[0]!.transports.rest.path).toBe("/api/session");
+    expect((operationOpenApiPaths(first) as Record<string, Record<string, unknown>>)["/api/session"])
+      .toHaveProperty("get");
+    expect(renderOperationCatalog(first)).toBe(renderOperationCatalog(second));
+
+    const hyphenated = collectPluginOperations([{ name: "user-session", operations: [{
+      ...rootOperation,
+      key: "user-session.current.read",
+      transports: {
+        ...rootOperation.transports,
+        rest: { ...rootOperation.transports.rest, path: "/api/user-session" },
+      },
+    }] }], context);
+    expect(hyphenated[0]!.transports.rest.path).toBe("/api/user-session");
+  });
+
+  test("keeps nested plugin paths and rejects another plugin namespace root", () => {
+    expect(() => collectPluginOperations([{ name: "demo", operations: [operation] }], context))
+      .not.toThrow();
+    expect(() => collectPluginOperations([{ name: "session", operations: [{
+      ...operation,
+      key: "session.current.read",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      idempotency: { mode: "none" },
+      transports: {
+        ...operation.transports,
+        rest: { method: "GET", path: "/api/other", response: { status: 200, kind: "json" } },
+      },
+    }] }], context)).toThrow(/safe plugin root "\/api\/session"/);
   });
 
   test("requires safe aliases with canonical path parameters and no reserved-root takeover", () => {

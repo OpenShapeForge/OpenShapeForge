@@ -17,6 +17,16 @@ layers:
 plugins:
   - ./examples/plugins/entity-docs.ts
   - ./examples/plugins/workflow/index.ts
+restApi:
+  title: Example Product API
+  version: "1"
+  description: |-
+    Start here to integrate with the product API.
+
+    Authenticate first, then create or retrieve the records needed by your workflow.
+  externalDocs:
+    description: Developer guide
+    url: https://example.com/developers
 ```
 
 - `layers` must be a non-empty string array. Each entry resolves to a
@@ -31,6 +41,12 @@ plugins:
   **appended after all configured layers**, in plugin registration order.
   (That is why this repo, with one configured layer, still materializes
   `.authoring-build/` — the workflow plugin's layer makes it two.)
+- `restApi` is optional host-owned developer onboarding for the generated
+  OpenAPI document and Swagger UI. `title` and Markdown `description` are
+  required; `version` defaults to `1`. `externalDocs`, when present, requires
+  an absolute HTTP(S) URL. The compiler follows the authored description with
+  its generic safe-start guidance, copyable coding-assistant prompt, and
+  generated-artifact notice.
 
 ## `authoring.config.local.yaml` — deployment-local extensions
 
@@ -59,6 +75,8 @@ plugins:
 - It cannot remove, reorder or replace a committed layer or plugin.
   Re-declaring one is an error rather than a silent reordering — moving a
   committed layer to the end would change which layer patches which.
+- It cannot declare `restApi`. Developer-facing product identity and links are
+  committed, reviewable configuration rather than machine-local overrides.
 - `layers` may be omitted (plugins only), but a malformed file is an error
   rather than an ignored file.
 - While it is active, every compiler entry point warns. Generated artifacts are

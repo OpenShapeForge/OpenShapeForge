@@ -2647,7 +2647,7 @@ function buildServer(
           request.params.arguments ?? {},
           {
             db,
-            session,
+            session: moduleSession,
             transport: "mcp",
             ...(modulePlatform ? { platform: modulePlatform.services } : {}),
           },

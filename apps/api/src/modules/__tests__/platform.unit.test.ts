@@ -1,8 +1,16 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import {
+  DummyDriver,
+  Kysely,
+  PostgresAdapter,
+  PostgresIntrospector,
+  PostgresQueryCompiler,
+} from "kysely";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
+import type { DB } from "../../generated/db/types.js";
 import type { McpInvocationContext } from "../contract.js";
 import type { ModuleMcpServerBinding } from "../platform.js";
 import {
@@ -22,6 +30,23 @@ const claims = (tenantId = "tenant-a"): TrustedSessionContext => ({
   credential: "bearer",
 });
 
+const operationClaims = (
+  tenantId = "11111111-1111-4111-8111-111111111111",
+  userId = "22222222-2222-4222-8222-222222222222",
+): TrustedSessionContext => ({
+  ...claims(tenantId),
+  userId,
+});
+
+const testDatabase = () => new Kysely<DB>({
+  dialect: {
+    createAdapter: () => new PostgresAdapter(),
+    createDriver: () => new DummyDriver(),
+    createIntrospector: (db) => new PostgresIntrospector(db),
+    createQueryCompiler: () => new PostgresQueryCompiler(),
+  },
+});
+
 const binding = (
   session: TrustedSessionContext,
   overrides: Partial<ModuleMcpServerBinding> = {},
@@ -38,6 +63,243 @@ const binding = (
 });
 
 describe("runtime module platform session authority", () => {
+  it("accepts an exact operation capability only in its active async chain", async () => {
+    const db = testDatabase();
+    const runtime = new ModulePlatformRuntime(db);
+    const verified = operationClaims();
+    let retained!: TrustedSessionContext;
+    try {
+      await runtime.withActiveOperationSession(verified, async (active) => {
+        retained = active;
+        expect(active).not.toBe(verified);
+        expect(Object.isFrozen(active)).toBe(true);
+        expect(Object.isFrozen(active.roles)).toBe(true);
+        await expect(
+          runtime.services.db.withSession(active, async () => "accepted"),
+        ).resolves.toBe("accepted");
+        await expect(runtime.services.mcp.authorize(active, {
+          action: "read",
+          subject: { kind: "tool", name: "read_item" },
+        })).resolves.toEqual({ allowed: false, code: "NOT_FOUND" });
+        await expect(runtime.services.events.append(active, {
+          aggregateType: "item",
+          aggregateId: "item-1",
+          eventType: "item.read",
+          payload: { accessToken: "obviously-fake" },
+        })).rejects.toThrow(/sensitive field name/);
+        const clone = { ...active, roles: [...active.roles] };
+        expect(() =>
+          runtime.services.db.withSession(clone, async () => undefined)
+        ).toThrow(/live verified session/);
+      });
+
+      expect(() =>
+        runtime.services.db.withSession(retained, async () => undefined)
+      ).toThrow(/live verified session/);
+      expect(() =>
+        runtime.services.db.withSession(
+          operationClaims(),
+          async () => undefined,
+        )
+      ).toThrow(/live verified session/);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  it("isolates concurrent operation capabilities and prevents nested widening", async () => {
+    const db = testDatabase();
+    const runtime = new ModulePlatformRuntime(db);
+    let release!: () => void;
+    const bothEntered = new Promise<void>((resolve) => { release = resolve; });
+    const active = new Map<string, TrustedSessionContext>();
+    let entered = 0;
+    const run = (name: string, session: TrustedSessionContext) =>
+      runtime.withActiveOperationSession(session, async (capability) => {
+        active.set(name, capability);
+        entered += 1;
+        if (entered === 2) release();
+        await bothEntered;
+        const other = active.get(name === "a" ? "b" : "a")!;
+        expect(() =>
+          runtime.services.db.withSession(other, async () => undefined)
+        ).toThrow(/live verified session/);
+        await expect(
+          runtime.services.db.withSession(capability, async () => name),
+        ).resolves.toBe(name);
+      });
+
+    try {
+      await Promise.all([
+        run("a", operationClaims()),
+        run(
+          "b",
+          operationClaims(
+            "33333333-3333-4333-8333-333333333333",
+            "44444444-4444-4444-8444-444444444444",
+          ),
+        ),
+      ]);
+
+      await runtime.withActiveOperationSession(
+        operationClaims(),
+        async (outer) => {
+          await runtime.withActiveOperationSession(
+            {
+              ...operationClaims(
+                "55555555-5555-4555-8555-555555555555",
+                "66666666-6666-4666-8666-666666666666",
+              ),
+              roles: ["reader", "additional-role"],
+              scope: "tenant",
+            },
+            async (nested) => {
+              expect(nested).toBe(outer);
+              expect(nested.tenantId).toBe(outer.tenantId);
+              expect(nested.roles).not.toContain("additional-role");
+            },
+          );
+        },
+      );
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  it("keeps overlapping operations on one live MCP binding independently active", async () => {
+    const db = testDatabase();
+    const runtime = new ModulePlatformRuntime(db);
+    const live = createModuleSessionCapability(operationClaims());
+    const registered = binding(live);
+    runtime.registerServer(registered);
+    let entered!: () => void;
+    let release!: () => void;
+    const secondEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const holdSecond = new Promise<void>((resolve) => { release = resolve; });
+    try {
+      const second = runtime.withActiveOperationSession(live, async (active) => {
+        expect(active).toBe(live);
+        await expect(
+          runtime.services.db.withSession(active, async () => "second"),
+        ).resolves.toBe("second");
+        entered();
+        await holdSecond;
+        await runtime.withActiveOperationSession(
+          { ...operationClaims(), roles: ["additional-role"] },
+          async (nested) => expect(nested).toBe(live),
+        );
+      });
+      await secondEntered;
+      await runtime.withActiveOperationSession(live, async (active) => {
+        expect(active).toBe(live);
+        await expect(
+          runtime.services.db.withSession(active, async () => "first"),
+        ).resolves.toBe("first");
+      });
+      release();
+      await second;
+    } finally {
+      runtime.unregisterServer(registered.server);
+      await db.destroy();
+    }
+  });
+
+  it("does not fall back to another live MCP binding inside an operation", async () => {
+    const db = testDatabase();
+    const runtime = new ModulePlatformRuntime(db);
+    const sessionA = createModuleSessionCapability(operationClaims());
+    const sessionB = createModuleSessionCapability(
+      operationClaims(
+        "33333333-3333-4333-8333-333333333333",
+        "44444444-4444-4444-8444-444444444444",
+      ),
+    );
+    const bindingA = binding(sessionA);
+    const bindingB = binding(sessionB);
+    runtime.registerServer(bindingA);
+    runtime.registerServer(bindingB);
+    const event = {
+      aggregateType: "item",
+      aggregateId: "item-1",
+      eventType: "item.read",
+      payload: { accessToken: "obviously-fake" },
+    };
+
+    try {
+      await expect(
+        runtime.services.db.withSession(sessionB, async () => "outside"),
+      ).resolves.toBe("outside");
+      await expect(
+        runtime.services.events.append(sessionB, event),
+      ).rejects.toThrow(/sensitive field name/);
+
+      await runtime.withActiveOperationSession(sessionA, async (active) => {
+        expect(active).toBe(sessionA);
+        await expect(
+          runtime.services.db.withSession(sessionA, async () => "current"),
+        ).resolves.toBe("current");
+        expect(() =>
+          runtime.services.db.withSession(sessionB, async () => undefined)
+        ).toThrow(/live verified session/);
+        await expect(
+          runtime.services.events.append(sessionA, event),
+        ).rejects.toThrow(/sensitive field name/);
+        await expect(
+          runtime.services.events.append(sessionB, event),
+        ).rejects.toThrow(/live verified session/);
+      });
+
+      await expect(
+        runtime.services.db.withSession(sessionB, async () => "outside-again"),
+      ).resolves.toBe("outside-again");
+    } finally {
+      runtime.unregisterServer(bindingA.server);
+      runtime.unregisterServer(bindingB.server);
+      await db.destroy();
+    }
+  });
+
+  it("clears operation capabilities after failure and cancellation", async () => {
+    const db = testDatabase();
+    const runtime = new ModulePlatformRuntime(db);
+    let failed!: TrustedSessionContext;
+    let cancelled!: TrustedSessionContext;
+    try {
+      await expect(runtime.withActiveOperationSession(
+        operationClaims(),
+        async (active) => {
+          failed = active;
+          throw new Error("handler failed");
+        },
+      )).rejects.toThrow("handler failed");
+
+      const controller = new AbortController();
+      const invocation = runtime.withActiveOperationSession(
+        operationClaims(),
+        async (active) => {
+          cancelled = active;
+          await new Promise<void>((_resolve, reject) => {
+            controller.signal.addEventListener(
+              "abort",
+              () => reject(controller.signal.reason),
+              { once: true },
+            );
+          });
+        },
+      );
+      controller.abort(new DOMException("cancelled", "AbortError"));
+      await expect(invocation).rejects.toMatchObject({ name: "AbortError" });
+
+      for (const stale of [failed, cancelled]) {
+        expect(() =>
+          runtime.services.db.withSession(stale, async () => undefined)
+        ).toThrow(/live verified session/);
+      }
+    } finally {
+      await db.destroy();
+    }
+  });
+
   it("accepts only the exact active deeply-frozen session capability", async () => {
     const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
     const active = createModuleSessionCapability(claims());

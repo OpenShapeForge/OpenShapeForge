@@ -15,6 +15,7 @@ import type {
   ModuleRuntimeContext,
   RuntimeModule,
 } from "../modules/contract.js";
+import { withModuleOperationSession } from "../modules/platform.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 
 export type OperationContract = {
@@ -129,20 +130,28 @@ export async function invokeOperation(
   context: Parameters<ModuleOperationHandler>[1],
 ): Promise<ModuleOperationResult> {
   const input = asInput(inputValue);
-  requireOperationAuthorization(bound.operation, context.session);
-  const validation = validators.get(bound.operation.key)!;
-  if (!validation.input(input)) {
-    throw new HttpError(400, "BAD_USER_INPUT", "Operation input does not match its canonical schema.");
-  }
-  const result = await bound.handler(input, context);
-  const declaredStatus = bound.operation.transports.rest.response.status ?? 200;
-  if (result.status !== undefined && result.status !== declaredStatus) {
-    throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned an undeclared success status.");
-  }
-  if (bound.operation.transports.rest.response.kind === "json" && !validation.output(result.value)) {
-    throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned a value outside its canonical output schema.");
-  }
-  return result;
+  const run = async (activeContext: Parameters<ModuleOperationHandler>[1]) => {
+    requireOperationAuthorization(bound.operation, activeContext.session);
+    const validation = validators.get(bound.operation.key)!;
+    if (!validation.input(input)) {
+      throw new HttpError(400, "BAD_USER_INPUT", "Operation input does not match its canonical schema.");
+    }
+    const result = await bound.handler(input, activeContext);
+    const declaredStatus = bound.operation.transports.rest.response.status ?? 200;
+    if (result.status !== undefined && result.status !== declaredStatus) {
+      throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned an undeclared success status.");
+    }
+    if (bound.operation.transports.rest.response.kind === "json" && !validation.output(result.value)) {
+      throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned a value outside its canonical output schema.");
+    }
+    return result;
+  };
+
+  return withModuleOperationSession(
+    context.platform,
+    context.session,
+    (session) => run({ ...context, ...(session ? { session } : {}) }),
+  );
 }
 
 export function operationRestInput(

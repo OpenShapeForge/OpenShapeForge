@@ -58,6 +58,7 @@ import { withDbSession } from "../db/session.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import {
   createGeneratedEntity,
+  createGeneratedEntityAfterElicitation,
   createGeneratedEntityForTable,
   deleteGeneratedEntity,
   getGeneratedEntity,
@@ -1697,6 +1698,7 @@ async function invokeTool(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   rawArgs: unknown,
+  elicitationCompleted = false,
 ): Promise<ToolResult> {
   const args = requireArguments(rawArgs);
 
@@ -1760,10 +1762,17 @@ async function invokeTool(
       assertDeclaredProperties(tool.inputSchema, modelValues, "field");
       assertWritableValues(modelValues, entity, table, session);
       await assertPublishableWrite(db, session, tables, table, values);
-      const row = await createGeneratedEntity(db, session, {
-        table: table.name,
-        values,
-      });
+      const row =
+        elicitationCompleted && elicitField
+          ? await createGeneratedEntityAfterElicitation(db, session, {
+              table: table.name,
+              values,
+              into: elicitField,
+            })
+          : await createGeneratedEntity(db, session, {
+              table: table.name,
+              values,
+            });
       return ok(serializeRowForEntity(entity, table, row));
     }
 
@@ -4147,6 +4156,7 @@ function buildServer(
     }
     try {
       let callArguments = request.params.arguments;
+      let elicitationCompleted = false;
       if (match.operation === "create" && entity?.elicitOnCreate) {
         const elicit = entity.elicitOnCreate;
         const modelArguments = {
@@ -4211,6 +4221,7 @@ function buildServer(
             relatedRequestId: extra.requestId,
             ...(messagePrefix ? { messagePrefix } : {}),
           });
+          elicitationCompleted = true;
         } catch (error) {
           const reason = elicitationFallback(error);
           if (!reason || !sourceRow) throw error;
@@ -4333,6 +4344,7 @@ function buildServer(
         db,
         session,
         callArguments,
+        elicitationCompleted,
       );
       signal?.throwIfAborted();
       // A successful mutation on a table whose rows project as tools changes

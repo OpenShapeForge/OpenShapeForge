@@ -27,7 +27,7 @@ import {
   deleteGeneratedEntity,
   getGeneratedEntity,
   getGeneratedCrudTables,
-  isWritableColumn,
+  isCallerWritableColumn,
   listGeneratedEntities,
   updateGeneratedEntity,
 } from "../graphql/generated-crud.js";
@@ -65,10 +65,9 @@ function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
  * with 400 instead of being silently dropped by normalizeWritableValues —
  * a typo'd field name in a JSON body would otherwise appear to succeed.
  *
- * The writable set comes from the CRUD layer's own predicate rather than a
- * local copy, so a field REST accepts is exactly a field the CRUD layer will
- * store — including the create/update asymmetry an authored `immutable` field
- * introduces (#177).
+ * The writable set comes from the CRUD layer's caller predicate rather than a
+ * local copy, so REST preserves immutable-field asymmetry and never accepts
+ * the secure elicitation target.
  */
 function assertWritableBody(
   table: GeneratedTable,
@@ -80,7 +79,7 @@ function assertWritableBody(
   }
   const writable = new Set(
     table.columns
-      .filter((column) => isWritableColumn(column, operation))
+      .filter((column) => isCallerWritableColumn(table, column, operation))
       .map(fieldNameForColumn),
   );
   for (const key of Object.keys(body)) {

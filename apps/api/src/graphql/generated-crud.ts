@@ -5,6 +5,7 @@ import { sql } from "kysely";
 import { redactElicitedValues } from "../connectors/secrets.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
+import { jsonbLiteral } from "../db/sql-helpers.js";
 import { appendScopedEntityEventInTransaction } from "../platform/entity-events.js";
 import {
   assertClassifiedQueryFieldsAllowed,
@@ -762,10 +763,9 @@ async function fetchGeneratedEntityRow(
 }
 
 /**
- * The single writability rule every transport shares. REST body validation,
- * the GraphQL input types, the OpenAPI bodies and the MCP tool schemas all
- * resolve to this predicate, so a field cannot be advertised as writable by one
- * transport and refused by another (#177).
+ * The single storage-writability rule shared by generated CRUD. Caller-facing
+ * surfaces additionally apply isCallerWritableColumn so the secure
+ * elicitation target remains server-owned.
  *
  * Two rules, deliberately not merged:
  *
@@ -795,6 +795,41 @@ export function isWritableColumn(
     column.name !== "updated_at" &&
     !(operation === "update" && column.immutable === true)
   );
+}
+
+/**
+ * Caller-facing transports must never accept the field populated by secure
+ * create-time elicitation. Runtime-owned writes keep using isWritableColumn
+ * directly because OAuth and configuration handoffs legitimately persist it.
+ */
+export function isCallerWritableColumn(
+  table: GeneratedCrudTable,
+  column: GeneratedCrudColumn,
+  operation: "create" | "update",
+) {
+  return (
+    isWritableColumn(column, operation) &&
+    !isElicitedOutputColumn(table, column)
+  );
+}
+
+function assertNoCallerElicitedOutput(
+  table: GeneratedCrudTable,
+  input: Record<string, unknown>,
+): void {
+  const column = elicitedOutputColumn(table);
+  if (!column) return;
+  const field = fieldNameForColumn(column);
+  if (
+    Object.prototype.hasOwnProperty.call(input, field) ||
+    Object.prototype.hasOwnProperty.call(input, column.name)
+  ) {
+    throw generatedCrudError(
+      "Securely collected values cannot be supplied through generated CRUD.",
+      "BAD_USER_INPUT",
+      400,
+    );
+  }
 }
 
 function writableColumnMap(
@@ -882,12 +917,39 @@ export async function mergeGeneratedEntityObjectForTable(
   const values = new Map<GeneratedCrudColumn, unknown>([
     [
       column,
-      sql`coalesce(${sql.id(column.name)}, '{}'::jsonb) || ${JSON.stringify(
+      sql`coalesce(${sql.id(column.name)}, '{}'::jsonb) || ${jsonbLiteral(
         patch,
-      )}::jsonb`,
+      )}`,
     ],
   ]);
   return applyGeneratedRowUpdate(db, session, table, id, values);
+}
+
+/**
+ * Trusted MCP counterpart used only after collectElicitedValues completed.
+ * It retains the normal caller role gate but deliberately permits the one
+ * server-populated target that public CRUD rejects.
+ */
+export async function createGeneratedEntityAfterElicitation(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  input: {
+    table: string;
+    values: Record<string, unknown>;
+    into: string;
+  },
+): Promise<GeneratedEntityRow> {
+  const table = readGeneratedCrudTable(input.table, "create", session);
+  const column = elicitedOutputColumn(table);
+  if (!column || fieldNameForColumn(column) !== input.into) {
+    throw generatedCrudError(
+      "Generated CRUD elicitation metadata is invalid.",
+      "INTERNAL_SERVER_ERROR",
+      500,
+    );
+  }
+  const values = normalizeWritableValues(table, input.values, "create");
+  return insertGeneratedRow(db, session, table, values);
 }
 
 export async function createGeneratedEntity(
@@ -899,6 +961,7 @@ export async function createGeneratedEntity(
   },
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
+  assertNoCallerElicitedOutput(table, input.values);
   const values = normalizeWritableValues(table, input.values, "create");
   return insertGeneratedRow(db, session, table, values);
 }
@@ -948,6 +1011,7 @@ export async function updateGeneratedEntity(
   },
 ): Promise<GeneratedEntityRow | null> {
   const table = readGeneratedCrudTable(input.table, "update", session);
+  assertNoCallerElicitedOutput(table, input.values);
   const values = normalizeWritableValues(table, input.values, "update");
   return applyGeneratedRowUpdate(db, session, table, input.id, values);
 }

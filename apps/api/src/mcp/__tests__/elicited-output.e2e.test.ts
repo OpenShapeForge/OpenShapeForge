@@ -4,7 +4,7 @@
  * The fixture arms compiled manifest metadata in-process because the shipped
  * base authoring layer deliberately contains no provider/configuration model.
  */
-import { afterAll, beforeAll, expect } from "bun:test";
+import { afterAll, beforeAll, expect, setDefaultTimeout } from "bun:test";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { sql } from "kysely";
 import rawCatalog from "../../generated/mcp/tools.json" with { type: "json" };
@@ -12,16 +12,19 @@ import { createApiApp } from "../../roles/api.js";
 import { withDbSession } from "../../db/session.js";
 import { loadRuntimeModules } from "../../modules/registry.js";
 import {
+  createGeneratedEntityAfterElicitation,
   createGeneratedEntity,
   getGeneratedCrudTables,
   getGeneratedEntity,
   listGeneratedEntities,
+  mergeGeneratedEntityObjectForTable,
   updateGeneratedEntity,
 } from "../../graphql/generated-crud.js";
 import {
   createdRows,
   expectData,
   getRuntime,
+  gql,
   readOnly,
   registerSuiteLifecycle,
   remoteUrl,
@@ -41,6 +44,7 @@ import { MCP_MOUNT_PATH } from "../generated-mcp-server.js";
 import { REST_MOUNT_PATH } from "../../rest/generated-rest-routes.js";
 
 registerSuiteLifecycle();
+setDefaultTimeout(20_000);
 
 const table = getGeneratedCrudTables().find(
   (candidate) => candidate.source?.authoringEntityName === "Preference",
@@ -99,7 +103,6 @@ const objectSchema = {
     ownerScope: { type: "string" },
     namespace: { type: "string" },
     key: { type: "string" },
-    valueJson: { type: "object" },
     description: { type: "string" },
   },
   required: ["ownerScope", "namespace", "key"],
@@ -248,10 +251,18 @@ async function callTool(
   });
   const body = JSON.parse(response.body);
   const text = body.result?.content?.[0]?.text;
+  let payload: any;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = text;
+    }
+  }
   return {
     status: response.statusCode,
     isError: body.result?.isError === true,
-    payload: text ? JSON.parse(text) : undefined,
+    payload,
   };
 }
 
@@ -285,47 +296,39 @@ function expectSafe(row: Record<string, unknown>, field = "valueJson") {
   expect(JSON.stringify(row)).not.toContain("test-secret");
 }
 
+async function storedValue(id: string) {
+  return withDbSession(getRuntime().db, tenantA, async (trx) => {
+    const result = await sql<{ value_json: unknown }>`
+      select ${sql.id("value_json")} as value_json
+      from ${sql.id(table.schema, table.table)}
+      where ${sql.id(table.primaryKey!)}::text = ${id}
+    `.execute(trx);
+    return result.rows[0]?.value_json;
+  });
+}
+
+async function rowsWithKey(key: string) {
+  return listGeneratedEntities(getRuntime().db, tenantA, {
+    table: table.name,
+    filter: { key },
+  });
+}
+
 test.skipIf(remoteUrl)(
-  "direct CRUD, GraphQL, REST and MCP return byte-equivalent set-marker output",
+  "trusted elicitation stores encrypted values and every read returns the same marker output",
   async () => {
-    const direct = await createGeneratedEntity(getRuntime().db, tenantA, {
-      table: table.name,
-      values: values(`direct-${seed}`),
-    });
+    const direct = await createGeneratedEntityAfterElicitation(
+      getRuntime().db,
+      tenantA,
+      {
+        table: table.name,
+        values: values(`direct-${seed}`),
+        into: "valueJson",
+      },
+    );
     const directId = String(direct.id);
     track(directId);
     expectSafe(direct, "value_json");
-
-    const gqlCreated = await expectData(
-      tenantA,
-      `mutation($input: CreatePreferenceInput!) {
-        ${graphql.createMutationName}(input: $input) { id description valueJson }
-      }`,
-      { input: values(`graphql-${seed}`) },
-    );
-    const gqlRow = gqlCreated[graphql.createMutationName];
-    track(gqlRow.id);
-    expectSafe(gqlRow);
-
-    const restCreated = await rest(
-      tenantA,
-      "POST",
-      restBase,
-      values(`rest-${seed}`),
-    );
-    expect(restCreated.status).toBe(201);
-    track(restCreated.body.id);
-    expectSafe(restCreated.body);
-
-    const mcpCreated = await callTool(
-      tenantA,
-      "elicited_output_test_create",
-      values(`mcp-${seed}`),
-    );
-    expect(mcpCreated.status).toBe(200);
-    expect(mcpCreated.isError).toBe(false);
-    track(mcpCreated.payload.id);
-    expectSafe(mcpCreated.payload);
 
     const directGet = await getGeneratedEntity(getRuntime().db, tenantA, {
       table: table.name,
@@ -371,14 +374,13 @@ test.skipIf(remoteUrl)(
     );
     expect(safeValues[0]).toEqual(expectedConfiguration);
 
-    const replacement = storedConfiguration();
     const directUpdated = await updateGeneratedEntity(
       getRuntime().db,
       tenantA,
       {
         table: table.name,
         id: directId,
-        values: { valueJson: replacement },
+        values: { description: "visible sibling" },
       },
     );
     const gqlUpdated = await expectData(
@@ -386,19 +388,19 @@ test.skipIf(remoteUrl)(
       `mutation($input: UpdatePreferenceInput!) {
         ${graphql.updateMutationName}(input: $input) { id valueJson }
       }`,
-      { input: { id: gqlRow.id, valueJson: replacement } },
+      { input: { id: directId, description: "visible sibling" } },
     );
     const restUpdated = await rest(
       tenantA,
       "PATCH",
-      `${restBase}/${restCreated.body.id}`,
+      `${restBase}/${directId}`,
       {
-        valueJson: replacement,
+        description: "visible sibling",
       },
     );
     const mcpUpdated = await callTool(tenantA, "elicited_output_test_update", {
-      id: mcpCreated.payload.id,
-      values: { valueJson: replacement },
+      id: directId,
+      values: { description: "visible sibling" },
     });
     expect([
       directUpdated!.value_json,
@@ -407,18 +409,7 @@ test.skipIf(remoteUrl)(
       mcpUpdated.payload.valueJson,
     ]).toEqual(Array(4).fill(expectedConfiguration));
 
-    const stored = await withDbSession(
-      getRuntime().db,
-      tenantA,
-      async (trx) => {
-        const result = await sql<{ value_json: Record<string, unknown> }>`
-        select ${sql.id("value_json")} as value_json
-        from ${sql.id(table.schema, table.table)}
-        where ${sql.id(table.primaryKey!)}::text = ${directId}
-      `.execute(trx);
-        return result.rows[0]!.value_json;
-      },
-    );
+    const stored = (await storedValue(directId)) as Record<string, unknown>;
     expect(stored.endpoint).toBe("https://example.test");
     expect(stored.apiToken).not.toBe(SECRET_SET_SENTINEL);
     expect(
@@ -458,5 +449,200 @@ test.skipIf(remoteUrl)(
     } finally {
       delete target.classification;
     }
+  },
+);
+
+test.skipIf(remoteUrl)(
+  "direct CRUD, GraphQL, REST and MCP cannot inject or replace elicited values",
+  async () => {
+    const protectedRow = await createGeneratedEntityAfterElicitation(
+      getRuntime().db,
+      tenantA,
+      {
+        table: table.name,
+        values: values(`protected-${seed}`),
+        into: "valueJson",
+      },
+    );
+    const protectedId = String(protectedRow.id);
+    track(protectedId);
+    const originalStorage = await storedValue(protectedId);
+    const maliciousValues = [
+      { apiToken: "plaintext-secret" },
+      { apiToken: { ciphertext: "malformed" } },
+      storedConfiguration(),
+    ];
+
+    for (const [index, valueJson] of maliciousValues.entries()) {
+      const marker = `rejected-${index}-${seed}`;
+      await expect(
+        createGeneratedEntity(getRuntime().db, tenantA, {
+          table: table.name,
+          values: { ...values(marker, false), valueJson },
+        }),
+      ).rejects.toMatchObject({
+        extensions: { code: "BAD_USER_INPUT", status: 400 },
+      });
+      await expect(
+        updateGeneratedEntity(getRuntime().db, tenantA, {
+          table: table.name,
+          id: protectedId,
+          values: { valueJson },
+        }),
+      ).rejects.toMatchObject({
+        extensions: { code: "BAD_USER_INPUT", status: 400 },
+      });
+
+      const graphqlCreate = await gql(
+        tenantA,
+        `mutation($input: CreatePreferenceInput!) {
+          ${graphql.createMutationName}(input: $input) { id }
+        }`,
+        { input: { ...values(`graphql-${marker}`, false), valueJson } },
+      );
+      expect(graphqlCreate.errors?.[0]?.extensions?.code).toBe(
+        "BAD_USER_INPUT",
+      );
+      const graphqlUpdate = await gql(
+        tenantA,
+        `mutation($input: UpdatePreferenceInput!) {
+          ${graphql.updateMutationName}(input: $input) { id }
+        }`,
+        { input: { id: protectedId, valueJson } },
+      );
+      expect(graphqlUpdate.errors?.[0]?.extensions?.code).toBe(
+        "BAD_USER_INPUT",
+      );
+
+      const restCreate = await rest(tenantA, "POST", restBase, {
+        ...values(`rest-${marker}`, false),
+        valueJson,
+      });
+      expect(restCreate.status).toBe(400);
+      const restUpdate = await rest(
+        tenantA,
+        "PATCH",
+        `${restBase}/${protectedId}`,
+        { valueJson },
+      );
+      expect(restUpdate.status).toBe(400);
+
+      const mcpCreate = await callTool(
+        tenantA,
+        "elicited_output_test_create",
+        { ...values(`mcp-${marker}`, false), valueJson },
+      );
+      expect(mcpCreate.isError).toBe(true);
+      const mcpUpdate = await callTool(
+        tenantA,
+        "elicited_output_test_update",
+        { id: protectedId, values: { valueJson } },
+      );
+      expect(mcpUpdate.isError).toBe(true);
+
+      expect((await rowsWithKey(marker)).rows).toHaveLength(0);
+      expect((await rowsWithKey(`graphql-${marker}`)).rows).toHaveLength(0);
+      expect((await rowsWithKey(`rest-${marker}`)).rows).toHaveLength(0);
+      expect((await rowsWithKey(`mcp-${marker}`)).rows).toHaveLength(0);
+      expect(await storedValue(protectedId)).toEqual(originalStorage);
+
+      const serializedFailures = JSON.stringify({
+        graphqlCreate,
+        graphqlUpdate,
+        restCreate,
+        restUpdate,
+        mcpCreate,
+        mcpUpdate,
+      });
+      expect(serializedFailures).not.toContain("plaintext-secret");
+      expect(serializedFailures).not.toContain("malformed");
+      expect(serializedFailures).not.toContain("ciphertext");
+    }
+  },
+);
+
+test.skipIf(remoteUrl)(
+  "trusted JSONB merge replaces supplied tokens and preserves omitted siblings",
+  async () => {
+    const tokenDefinitions = [
+      {
+        key: "accessToken",
+        valueType: "string",
+        classification: { sensitivity: "confidential" },
+      },
+      {
+        key: "refreshToken",
+        valueType: "string",
+        classification: { sensitivity: "confidential" },
+      },
+    ];
+    const initial = storeElicitedValues(
+      table.name,
+      tokenDefinitions,
+      { accessToken: "access-old", refreshToken: "refresh-old" },
+      keyring,
+    );
+    const replacement = storeElicitedValues(
+      table.name,
+      tokenDefinitions,
+      { accessToken: "access-new" },
+      keyring,
+    );
+    const created = await createGeneratedEntityAfterElicitation(
+      getRuntime().db,
+      tenantA,
+      {
+        table: table.name,
+        values: {
+          ...values(`merge-${seed}`, false),
+          valueJson: { ...initial, endpoint: "https://example.test" },
+        },
+        into: "valueJson",
+      },
+    );
+    const id = String(created.id);
+    track(id);
+
+    const merged = await mergeGeneratedEntityObjectForTable(
+      getRuntime().db,
+      tenantA,
+      table,
+      id,
+      "valueJson",
+      {
+        accessToken: replacement.accessToken,
+        accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
+      },
+    );
+    expect(merged?.value_json).toEqual({
+      accessToken: SECRET_SET_SENTINEL,
+      refreshToken: SECRET_SET_SENTINEL,
+      endpoint: "https://example.test",
+      accessTokenExpiresAt: "2099-01-01T00:00:00.000Z",
+    });
+
+    const persisted = await storedValue(id);
+    expect(Array.isArray(persisted)).toBe(false);
+    expect(typeof persisted).toBe("object");
+    const object = persisted as Record<string, unknown>;
+    expect(object.endpoint).toBe("https://example.test");
+    expect(object.refreshToken).toEqual(initial.refreshToken);
+    expect(object.accessToken).toEqual(replacement.accessToken);
+    expect(
+      decryptSecret(
+        keyring,
+        table.name,
+        "accessToken",
+        object.accessToken as StoredSecret,
+      ),
+    ).toBe("access-new");
+    expect(
+      decryptSecret(
+        keyring,
+        table.name,
+        "refreshToken",
+        object.refreshToken as StoredSecret,
+      ),
+    ).toBe("refresh-old");
   },
 );

@@ -278,7 +278,7 @@ describe("rich generated REST OpenAPI", () => {
     });
   });
 
-  it("models create requiredness, partial PATCH, immutability, and nested JSON", () => {
+  it("models create requiredness, partial PATCH, immutability, and secure fields", () => {
     const schemas = spec().components.schemas;
     const create = schemas.RelationInput as {
       required?: string[];
@@ -311,25 +311,8 @@ describe("rich generated REST OpenAPI", () => {
     expect(update.required).toBeUndefined();
     expect(update.properties.externalId).toBeUndefined();
     expect(update.properties.displayName?.default).toBeUndefined();
-    expect(
-      (create.properties.metadata as { required?: string[] }).required,
-    ).toBeUndefined();
-    expect(create.properties.metadata).toMatchObject({
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        source: { type: "string", title: "Source", default: "api" },
-        notes: { type: "string", title: "Notes" },
-      },
-    });
-    expect(
-      (
-        update.properties.metadata?.properties as Record<
-          string,
-          Record<string, unknown>
-        >
-      )?.source?.default,
-    ).toBeUndefined();
+    expect(create.properties.metadata).toBeUndefined();
+    expect(update.properties.metadata).toBeUndefined();
   });
 
   it("bundles the recursive FieldDefinition contract in generated request schemas", () => {

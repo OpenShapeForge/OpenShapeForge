@@ -190,6 +190,8 @@ import {
   InvocationSourceVault,
   parseModuleToolExecutionOptions,
   type AuthorizedInvocationSource,
+  type AuthorizedInvocationSourceResolution,
+  type AuthorizedUnavailableInvocationSource,
   type ResolvedInvocationSource,
 } from "../modules/invocation-sources.js";
 import {
@@ -2059,10 +2061,11 @@ function buildServer(
   const authorizedSources = async (
     toolName: string,
     projectedOnly: boolean,
+    args: Record<string, unknown>,
     signal?: AbortSignal,
-  ): Promise<AuthorizedInvocationSource[]> => {
+  ): Promise<AuthorizedInvocationSourceResolution> => {
     signal?.throwIfAborted();
-    if (!session.tenantId) return [];
+    if (!session.tenantId) return { sources: [], unavailable: [] };
     const tenantId = session.tenantId;
     return withDbSession(db, session, async (trx) => {
       signal?.throwIfAborted();
@@ -2088,26 +2091,51 @@ function buildServer(
         const definitionId = definition.id;
         const definitionVersion = definition.version;
         const sources: AuthorizedInvocationSource[] = [];
-        for (const binding of orderedBindings(
+        const unavailable: AuthorizedUnavailableInvocationSource[] = [];
+        const definitionUnavailable = (
+          binding: Record<string, unknown>,
+          outcome: AuthorizedUnavailableInvocationSource["outcome"],
+        ) => unavailable.push({
+          tenantId,
+          actorId: session.userId,
+          toolName,
+          binding: Number(binding.order ?? 0),
+          definition,
+          outcome,
+        });
+        const selectedBindings = orderedBindings(
           serviceRow,
           execution.bindingsField,
-        )) {
+        ).filter((binding) => bindingSelected(binding, args));
+        for (const binding of selectedBindings) {
           const operationId = binding[execution.operationRef];
-          if (typeof operationId !== "string") continue;
+          if (typeof operationId !== "string") {
+            definitionUnavailable(binding, "unavailable");
+            continue;
+          }
           const operationRow = (
             await snapshotRowsByFilter(trx, execution.operationTable, {
               id: operationId,
             })
           )[0];
-          if (!operationRow) continue;
+          if (!operationRow) {
+            definitionUnavailable(binding, "unavailable");
+            continue;
+          }
           const providerId = operationRow?.[execution.providerRef];
-          if (typeof providerId !== "string") continue;
+          if (typeof providerId !== "string") {
+            definitionUnavailable(binding, "unavailable");
+            continue;
+          }
           const providerRow = (
             await snapshotRowsByFilter(trx, execution.providerTable, {
               id: providerId,
             })
           )[0];
-          if (!providerRow) continue;
+          if (!providerRow) {
+            definitionUnavailable(binding, "unavailable");
+            continue;
+          }
           const connectionRows = await snapshotRowsByFilter(
             trx,
             execution.connectionTable,
@@ -2121,9 +2149,20 @@ function buildServer(
           const personalOAuth =
             personal && providerAuth?.profile === "oauth2AuthorizationCode";
           const bindingNumber = Number(binding.order ?? 0);
-          const personalCapture = personalOAuth
-            ? capturePersonalOAuthConnections(connectionRows, session.userId)
-            : undefined;
+          let personalCapture:
+            | ReturnType<typeof capturePersonalOAuthConnections>
+            | undefined;
+          if (personalOAuth) {
+            try {
+              personalCapture = capturePersonalOAuthConnections(
+                connectionRows,
+                session.userId,
+              );
+            } catch {
+              definitionUnavailable(binding, "connection_required");
+              continue;
+            }
+          }
           const eligible = personalCapture
             ? personalCapture.personal
             : connectionRows
@@ -2142,24 +2181,34 @@ function buildServer(
                 (scope): scope is string => typeof scope === "string",
               )
             : [];
+          let missingRequiredScopes = false;
+          let needsReauthorization = false;
+          let eligibleSourceCount = 0;
           for (const connection of eligible) {
-            const connectionValues = connection[
+            const connectionValues = (connection[
               execution.connectionValuesField
-            ] as Record<string, unknown> | null | undefined;
+            ] ?? {}) as Record<string, unknown>;
             if (
               !scopesCovered(requiredScopes, connectionValues?.grantedScopes)
+            ) {
+              missingRequiredScopes = true;
+              continue;
+            }
+            if (
+              providerAuth?.profile === "oauth2AuthorizationCode" &&
+              !connectionValues?.accessToken
             ) {
               continue;
             }
             if (
               providerAuth?.profile === "oauth2AuthorizationCode" &&
-              (!connectionValues?.accessToken ||
-                (accessTokenNeedsRefresh(
-                  connectionValues,
-                  refreshLeewaySeconds(providerAuth),
-                ) &&
-                  !looksLikeStoredSecret(connectionValues.refreshToken)))
+              accessTokenNeedsRefresh(
+                connectionValues,
+                refreshLeewaySeconds(providerAuth),
+              ) &&
+              !looksLikeStoredSecret(connectionValues.refreshToken)
             ) {
+              needsReauthorization = true;
               continue;
             }
             const identity = {
@@ -2187,9 +2236,10 @@ function buildServer(
               const current = await authorizedSources(
                 toolName,
                 projectedOnly,
+                args,
                 validationSignal,
               );
-              return current.find(
+              return current.sources.find(
                 (candidate) =>
                   sameInvocationSourceReference(
                     candidate.sourceReference,
@@ -2213,22 +2263,32 @@ function buildServer(
               internal,
               validate,
             });
+            eligibleSourceCount += 1;
+          }
+          if (eligibleSourceCount === 0) {
+            definitionUnavailable(
+              binding,
+              missingRequiredScopes || needsReauthorization
+                ? "reauthorization_required"
+                : "connection_required",
+            );
           }
         }
-        return sources;
+        return { sources, unavailable };
       }
-      return [];
+      return { sources: [], unavailable: [] };
     }, { isolationLevel: "repeatable read" });
   };
 
   const sourceFromReference = async (
     sourceReference: string,
     toolName: string,
+    args: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<AuthorizedInvocationSource | undefined> => {
     signal?.throwIfAborted();
-    const candidates = await authorizedSources(toolName, false, signal);
-    const matching = candidates.filter((candidate) =>
+    const candidates = await authorizedSources(toolName, false, args, signal);
+    const matching = candidates.sources.filter((candidate) =>
       sameInvocationSourceReference(
         candidate.sourceReference,
         sourceReference,
@@ -4398,7 +4458,12 @@ function buildServer(
           session,
           name,
           selectedOptions!,
-          (reference) => sourceFromReference(reference, name, signal),
+          (reference) => sourceFromReference(
+            reference,
+            name,
+            (request.params.arguments ?? {}) as Record<string, unknown>,
+            signal,
+          ),
           signal,
         );
         const hidden = preselectedReference?.internal as
@@ -4495,7 +4560,12 @@ function buildServer(
           moduleSession,
           name,
           options!,
-          (reference) => sourceFromReference(reference, name, signal),
+          (reference) => sourceFromReference(
+            reference,
+            name,
+            (request.params.arguments ?? {}) as Record<string, unknown>,
+            signal,
+          ),
           signal,
         );
         if (
@@ -4678,6 +4748,7 @@ function buildServer(
     },
     resolveInvocationSources: async (
       toolName,
+      args,
       selector,
       invocationToken,
       signal,
@@ -4686,12 +4757,14 @@ function buildServer(
       const tool = (await listedTools()).find(
         (entry) => entry.tool.name === toolName,
       );
-      if (!tool || tool.source !== "derived") return [];
+      if (!tool || tool.source !== "derived") {
+        return { sources: [], unavailable: [] };
+      }
       return sourceVault.resolve(
         moduleSession,
         toolName,
         selector,
-        () => authorizedSources(toolName, true, signal),
+        () => authorizedSources(toolName, true, args, signal),
         invocationToken,
         signal,
       );

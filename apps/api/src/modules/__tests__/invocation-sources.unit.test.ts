@@ -5,6 +5,7 @@ import {
   egressSourceFromResolvedInvocation,
   InvocationSourceVault,
   type AuthorizedInvocationSource,
+  type AuthorizedUnavailableInvocationSource,
 } from "../invocation-sources.js";
 
 const session = (tenantId = "tenant-a", userId = "actor-a"): TrustedSessionContext => ({
@@ -35,22 +36,39 @@ const source = (
   return value;
 };
 
+const available = (...sources: AuthorizedInvocationSource[]) => ({
+  sources,
+  unavailable: [],
+});
+
+const unavailable = (
+  overrides: Partial<AuthorizedUnavailableInvocationSource> = {},
+): AuthorizedUnavailableInvocationSource => ({
+  tenantId: "tenant-a",
+  actorId: "actor-a",
+  toolName: "read_item",
+  binding: 2,
+  definition: { kind: "definition", id: "definition-1", version: 1 },
+  outcome: "connection_required",
+  ...overrides,
+});
+
 describe("invocation source capabilities", () => {
   it("narrows a resolved source to opaque coordination metadata only", async () => {
     const vault = new InvocationSourceVault();
     const invocation = {};
-    const [held] = await vault.resolve(
+    const { sources: [held] } = await vault.resolve(
       session(),
       "read_item",
       { mode: "default" },
-      async () => [source({
+      async () => available(source({
         internal: {
           sourceReference: "caller-or-config-value",
           scope: "tenant",
           connectionId: "raw-row-id",
           accountLabel: "Personal account",
         },
-      })],
+      })),
       invocation,
     );
     const resolved = await vault.consumeHandle(
@@ -76,10 +94,10 @@ describe("invocation source capabilities", () => {
   it("issues distinct one-call handles while preserving a durable reference", async () => {
     const vault = new InvocationSourceVault();
     const invocation = {};
-    const sources = await vault.resolve(session(), "read_item", { mode: "all-authorized" }, async () => [
+    const { sources } = await vault.resolve(session(), "read_item", { mode: "all-authorized" }, async () => available(
       source(),
       source({ sourceReference: "msr1.second", binding: 2 }),
-    ], invocation);
+    ), invocation);
     expect(sources).toHaveLength(2);
     expect(sources[0]?.sourceHandle).not.toBe(sources[1]?.sourceHandle);
     expect(sources.map((value) => value.sourceReference)).toEqual([
@@ -90,12 +108,99 @@ describe("invocation source capabilities", () => {
     expect(Object.isFrozen(sources[0]!.definition)).toBe(true);
   });
 
+  it("honors only a currently authorized preferred default source", async () => {
+    const vault = new InvocationSourceVault();
+    const invocation = {};
+    const first = source();
+    const second = source({ sourceReference: "msr1.second", binding: 2 });
+    const resolved = await vault.resolve(
+      session(),
+      "read_item",
+      { mode: "default", preferredSourceReference: "msr1.second" },
+      async () => available(first, second),
+      invocation,
+    );
+    expect(resolved.sources.map((candidate) => candidate.sourceReference))
+      .toEqual(["msr1.second"]);
+
+    await expect(vault.resolve(
+      session(),
+      "read_item",
+      { mode: "default", preferredSourceReference: "msr1.stale" },
+      async () => available(first, second),
+      {},
+    )).rejects.toMatchObject({ status: 404, code: "NOT_FOUND" });
+
+    for (const mismatched of [
+      source({
+        sourceReference: "msr1.second",
+        tenantId: "tenant-b",
+      }),
+      source({
+        sourceReference: "msr1.second",
+        actorId: "actor-b",
+      }),
+    ]) {
+      await expect(vault.resolve(
+        session(),
+        "read_item",
+        { mode: "default", preferredSourceReference: "msr1.second" },
+        async () => available(mismatched),
+        {},
+      )).rejects.toMatchObject({ status: 404, code: "NOT_FOUND" });
+    }
+  });
+
+  it("preserves matching unavailable bindings without source identity", async () => {
+    const vault = new InvocationSourceVault();
+    const resolution = await vault.resolve(
+      session(),
+      "read_item",
+      { mode: "all-authorized" },
+      async () => ({
+        sources: [source()],
+        unavailable: [
+          unavailable(),
+          unavailable({ actorId: "actor-b", binding: 3 }),
+        ],
+      }),
+      {},
+    );
+    expect(resolution.sources).toHaveLength(1);
+    expect(resolution.unavailable).toEqual([{
+      binding: 2,
+      definition: { kind: "definition", id: "definition-1", version: 1 },
+      outcome: "connection_required",
+    }]);
+    expect(Object.keys(resolution.unavailable[0]!).sort()).toEqual([
+      "binding",
+      "definition",
+      "outcome",
+    ]);
+    expect(Object.isFrozen(resolution.unavailable[0]!.definition)).toBe(true);
+  });
+
+  it("fails closed when no authorized source or unavailable binding matches", async () => {
+    await expect(new InvocationSourceVault().resolve(
+      session(),
+      "read_item",
+      { mode: "all-authorized" },
+      async () => ({ sources: [], unavailable: [] }),
+      {},
+    )).rejects.toMatchObject({ status: 404, code: "NOT_FOUND" });
+  });
+
   it("rejects malformed selectors without enumerating sources", async () => {
     for (const selector of [
       null,
       { mode: "defualt" },
       { mode: "default", sourceHandle: "unexpected" },
+      { mode: "default", preferredSourceReference: "" },
       { mode: "explicit", sourceHandle: "" },
+      {
+        mode: "all-authorized",
+        preferredSourceReference: "msr1.reference",
+      },
     ]) {
       const vault = new InvocationSourceVault();
       let enumerations = 0;
@@ -105,7 +210,7 @@ describe("invocation source capabilities", () => {
         selector as never,
         async () => {
           enumerations += 1;
-          return [source()];
+          return available(source());
         },
         {},
       )).rejects.toMatchObject({ status: 404, code: "NOT_FOUND" });
@@ -116,7 +221,7 @@ describe("invocation source capabilities", () => {
   it("rejects unknown and duplicated handles before a second execution", async () => {
     const vault = new InvocationSourceVault();
     const invocation = {};
-    const [held] = await vault.resolve(session(), "read_item", { mode: "default" }, async () => [source()], invocation);
+    const { sources: [held] } = await vault.resolve(session(), "read_item", { mode: "default" }, async () => available(source()), invocation);
     const options = {
       sourceHandle: held!.sourceHandle,
       expectedDefinition: held!.definition,
@@ -143,7 +248,7 @@ describe("invocation source capabilities", () => {
       await validation;
       return current;
     };
-    const [held] = await vault.resolve(session(), "read_item", { mode: "default" }, async () => [current], invocation);
+    const { sources: [held] } = await vault.resolve(session(), "read_item", { mode: "default" }, async () => available(current), invocation);
     const options = { sourceHandle: held!.sourceHandle, expectedDefinition: held!.definition };
     const first = vault.consumeHandle(session(), "read_item", options, invocation);
     const second = vault.consumeHandle(session(), "read_item", options, invocation);
@@ -157,18 +262,18 @@ describe("invocation source capabilities", () => {
     const vault = new InvocationSourceVault();
     const invocation = {};
     const current = source();
-    const [first] = await vault.resolve(
+    const { sources: [first] } = await vault.resolve(
       session(),
       "read_item",
       { mode: "default" },
-      async () => [current],
+      async () => available(current),
       invocation,
     );
-    const [second] = await vault.resolve(
+    const { sources: [second] } = await vault.resolve(
       session(),
       "read_item",
       { mode: "default" },
-      async () => [current],
+      async () => available(current),
       invocation,
     );
     expect(second!.sourceHandle).toBe(first!.sourceHandle);
@@ -185,9 +290,9 @@ describe("invocation source capabilities", () => {
       session(),
       "read_item",
       { mode: "default" },
-      async () => [current],
+      async () => available(current),
       invocation,
-    )).resolves.toEqual([]);
+    )).resolves.toEqual({ sources: [], unavailable: [] });
   });
 
   it("rejects stale, actor-mismatched and tenant-mismatched handles", async () => {
@@ -198,7 +303,7 @@ describe("invocation source capabilities", () => {
       if (mismatch === "stale") {
         current.validate = async () => source({ definition: { ...current.definition, version: 2 } });
       }
-      const [held] = await vault.resolve(session(), "read_item", { mode: "default" }, async () => [current], invocation);
+      const { sources: [held] } = await vault.resolve(session(), "read_item", { mode: "default" }, async () => available(current), invocation);
       const claimed = mismatch === "actor" ? session("tenant-a", "actor-b") : mismatch === "tenant" ? session("tenant-b", "actor-a") : session();
       await expect(vault.consumeHandle(claimed, "read_item", {
         sourceHandle: held!.sourceHandle,
@@ -210,7 +315,7 @@ describe("invocation source capabilities", () => {
   it("requires expected identity and rejects both selector forms", async () => {
     const vault = new InvocationSourceVault();
     const invocation = {};
-    const [held] = await vault.resolve(session(), "read_item", { mode: "default" }, async () => [source()], invocation);
+    const { sources: [held] } = await vault.resolve(session(), "read_item", { mode: "default" }, async () => available(source()), invocation);
     await expect(vault.consumeHandle(session(), "read_item", {
       sourceHandle: held!.sourceHandle,
       sourceReference: held!.sourceReference,
@@ -255,11 +360,11 @@ describe("invocation source capabilities", () => {
     initial.validate = async () => source({
       definition: { kind: "definition", id: "definition-1", version: currentVersion },
     });
-    const [held] = await vault.resolve(
+    const { sources: [held] } = await vault.resolve(
       session(),
       "read_item",
       { mode: "default" },
-      async () => [initial],
+      async () => available(initial),
       invocation,
     );
     expect(() => {
@@ -290,11 +395,11 @@ describe("invocation source capabilities", () => {
       authorityFingerprint: "captured-fingerprint",
       internal: currentGraph,
     });
-    const [held] = await vault.resolve(
+    const { sources: [held] } = await vault.resolve(
       session(),
       "read_item",
       { mode: "default" },
-      async () => [initial],
+      async () => available(initial),
       invocation,
     );
     await expect(vault.consumeHandle(
@@ -316,11 +421,11 @@ describe("invocation source capabilities", () => {
       internal: currentGraph,
     });
     const changedInvocation = {};
-    const [stale] = await vault.resolve(
+    const { sources: [stale] } = await vault.resolve(
       session(),
       "read_item",
       { mode: "default" },
-      async () => [changed],
+      async () => available(changed),
       changedInvocation,
     );
     await expect(vault.consumeHandle(
@@ -340,11 +445,11 @@ describe("invocation source capabilities", () => {
     const current = source({
       validate: async () => { throw new Error("duplicate binding order"); },
     });
-    const [held] = await vault.resolve(
+    const { sources: [held] } = await vault.resolve(
       session(),
       "read_item",
       { mode: "default" },
-      async () => [current],
+      async () => available(current),
       invocation,
     );
     await expect(vault.consumeHandle(
@@ -379,11 +484,11 @@ describe("invocation source capabilities", () => {
     const vault = new InvocationSourceVault();
     const firstRequest = {};
     const secondRequest = {};
-    const [held] = await vault.resolve(
+    const { sources: [held] } = await vault.resolve(
       session(),
       "read_item",
       { mode: "default" },
-      async () => [source()],
+      async () => available(source()),
       firstRequest,
     );
     const options = {
@@ -394,11 +499,11 @@ describe("invocation source capabilities", () => {
       vault.consumeHandle(session(), "read_item", options, secondRequest),
     ).rejects.toMatchObject({ status: 404 });
 
-    const [unused] = await vault.resolve(
+    const { sources: [unused] } = await vault.resolve(
       session(),
       "read_item",
       { mode: "default" },
-      async () => [source()],
+      async () => available(source()),
       firstRequest,
     );
     vault.clearInvocation(firstRequest);

@@ -57,7 +57,7 @@ const binding = (
   notifyToolsChanged: async () => undefined,
   notifyResourcesChanged: async () => undefined,
   authorize: async () => ({ allowed: true }),
-  resolveInvocationSources: async () => [],
+  resolveInvocationSources: async () => ({ sources: [], unavailable: [] }),
   callTool: async () => ({ result: { content: [] } }),
   ...overrides,
 });
@@ -358,6 +358,45 @@ describe("runtime module platform session authority", () => {
       });
     });
     await expect(call(context)).rejects.toThrow(/not active/);
+  });
+
+  it("snapshots invocation arguments before source selection", async () => {
+    const db = {} as OpenShapeForgeDatabase;
+    const runtime = new ModulePlatformRuntime(db);
+    const active = createModuleSessionCapability(claims());
+    const original = { selector: { name: "first" } };
+    let received: Record<string, unknown> | undefined;
+    const registered = binding(active, {
+      resolveInvocationSources: async (_tool, args) => {
+        received = args;
+        expect(args).not.toBe(original);
+        expect(Object.isFrozen(args)).toBe(true);
+        expect(Object.isFrozen(args.selector)).toBe(true);
+        expect(() => {
+          (args.selector as { name: string }).name = "forged";
+        }).toThrow();
+        return { sources: [], unavailable: [] };
+      },
+    });
+    runtime.registerServer(registered);
+    const context = Object.freeze({
+      db,
+      session: active,
+      server: registered.server,
+      requestId: "source-arguments",
+      clientCapabilities: Object.freeze({ elicitation: false, mcpApp: false }),
+    }) as McpInvocationContext;
+
+    await runtime.withActiveInvocation(context, async () => {
+      await runtime.services.mcp.resolveInvocationSources(
+        active,
+        "read_item",
+        original,
+        { mode: "default" },
+      );
+    });
+    original.selector.name = "changed-after-selection";
+    expect(received).toEqual({ selector: { name: "first" } });
   });
 
   it("rejects a different still-live context while another context is current", async () => {

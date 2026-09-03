@@ -12,6 +12,7 @@ import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
 import type {
   McpInvocationContext,
+  ModuleInvocationSourceResolution,
   ModuleToolExecutionOptions,
   RuntimeModule,
 } from "../../modules/contract.js";
@@ -176,9 +177,12 @@ describe("generated MCP runtime module security boundary", () => {
         const publicDefinitionId = randomUUID();
         const hiddenDefinitionId = randomUUID();
         const operationId = randomUUID();
+        const secondOperationId = randomUUID();
         const providerId = randomUUID();
         const connectionId = randomUUID();
         const otherProviderId = randomUUID();
+        const otherConnectionId = randomUUID();
+        const personalOtherConnectionId = randomUUID();
         const wrongKeyDefinitionId = randomUUID();
         const wrongKeyOperationId = randomUUID();
         const wrongKeyProviderId = randomUUID();
@@ -198,9 +202,21 @@ describe("generated MCP runtime module security boundary", () => {
              status, visible_roles, internal_only, bindings)
           values
             (${publicDefinitionId}::uuid, ${tenantId}::uuid, 'public_read', 'Public read',
-             '[{"key":"sourceReference","valueType":"string"},{"key":"scope","valueType":"string"}]'::jsonb,
+             '[{"key":"sourceReference","valueType":"string"},{"key":"scope","valueType":"string"},{"key":"provider","valueType":"string"}]'::jsonb,
              1, 'published', '["reader"]'::jsonb, false,
-             jsonb_build_array(jsonb_build_object('order', 1, 'operationId', ${operationId}::text))),
+             jsonb_build_array(
+               jsonb_build_object(
+                 'order', 1,
+                 'operationId', ${operationId}::text,
+                 'when', jsonb_build_object('field', 'provider', 'equals', 'first')
+               ),
+               jsonb_build_object(
+                 'order', 2,
+                 'operationId', ${secondOperationId}::text,
+                 'optional', true,
+                 'when', jsonb_build_object('field', 'provider', 'equals', 'second')
+               )
+             )),
             (${hiddenDefinitionId}::uuid, ${tenantId}::uuid, 'hidden_read', 'Hidden read',
              '[]'::jsonb, 7, 'published', '["reader"]'::jsonb, true,
              jsonb_build_array(jsonb_build_object('order', 1, 'operationId', ${operationId}::text))),
@@ -212,6 +228,8 @@ describe("generated MCP runtime module security boundary", () => {
             (id, tenant_id, key, kind, provider_id, operation, response_mapping, required_scopes)
           values
             (${operationId}::uuid, ${tenantId}::uuid, 'read', 'query', ${providerId}::uuid,
+             '{"method":"GET","pathTemplate":"/item"}'::jsonb, '{}'::jsonb, '[]'::jsonb),
+            (${secondOperationId}::uuid, ${tenantId}::uuid, 'other_read', 'query', ${otherProviderId}::uuid,
              '{"method":"GET","pathTemplate":"/item"}'::jsonb, '{}'::jsonb, '[]'::jsonb),
             (${wrongKeyOperationId}::uuid, ${tenantId}::uuid, 'wrong_key_read', 'query', ${wrongKeyProviderId}::uuid,
              '{"method":"GET","pathTemplate":"/item"}'::jsonb, '{}'::jsonb, '[]'::jsonb)
@@ -233,6 +251,7 @@ describe("generated MCP runtime module security boundary", () => {
             (id, tenant_id, owner_user_id, provider_id, values)
           values
             (${connectionId}::uuid, ${tenantId}::uuid, null, ${providerId}::uuid, '{}'::jsonb),
+            (${otherConnectionId}::uuid, ${tenantId}::uuid, null, ${otherProviderId}::uuid, '{}'::jsonb),
             (${wrongKeyConnectionId}::uuid, ${tenantId}::uuid, null, ${wrongKeyProviderId}::uuid,
              jsonb_build_object(
                'accessToken', jsonb_build_object(
@@ -330,6 +349,8 @@ describe("generated MCP runtime module security boundary", () => {
           | "hidden-block"
           | "fire-child"
           | "cycle"
+          | "all-sources"
+          | "preferred-source"
           | "personal-sources"
           | "hidden-collision"
           | "cancel-during"
@@ -339,6 +360,10 @@ describe("generated MCP runtime module security boundary", () => {
           | "size-denial"
           | "egress-timeout" = "normal";
         let personalSourceIndex = 0;
+        let preferredSourceReference: string | undefined;
+        let sourceResolution: ModuleInvocationSourceResolution | undefined;
+        const currentSourceResolution = () =>
+          sourceResolution as ModuleInvocationSourceResolution | undefined;
         let heldOptions: ModuleToolExecutionOptions | undefined;
         let sourceReference: string | undefined;
         let capturedExecution: unknown;
@@ -697,17 +722,23 @@ describe("generated MCP runtime module security boundary", () => {
                 );
               }
               if (mode === "replay") return next(heldOptions);
-              const sources = await platform.services.mcp.resolveInvocationSources(
+              const selector = mode === "personal-sources" || mode === "all-sources"
+                ? { mode: "all-authorized" as const }
+                : mode === "preferred-source"
+                  ? {
+                      mode: "default" as const,
+                      preferredSourceReference:
+                        preferredSourceReference ?? "",
+                    }
+                  : { mode: "default" as const };
+              const resolution = await platform.services.mcp.resolveInvocationSources(
                 call.ctx.session,
                 call.name,
-                {
-                  mode:
-                    mode === "personal-sources"
-                      ? "all-authorized"
-                      : "default",
-                },
+                call.arguments,
+                selector,
               );
-              const source = sources[
+              sourceResolution = resolution;
+              const source = resolution.sources[
                 mode === "personal-sources" ? personalSourceIndex : 0
               ];
               expect(source).toBeDefined();
@@ -820,6 +851,185 @@ describe("generated MCP runtime module security boundary", () => {
               kind: "query",
             },
           });
+
+          mode = "normal";
+          const selectedSecond = await client.callTool({
+            name: "public_read",
+            arguments: { provider: "second" },
+          });
+          expect(selectedSecond.isError).not.toBe(true);
+          expect(currentSourceResolution()?.sources.map((source) => source.binding))
+            .toEqual([2]);
+          expect(egressRequests.at(-1)?.scope.provider).toBe(otherProviderId);
+
+          mode = "all-sources";
+          for (const [provider, binding] of [["first", 1], ["second", 2]] as const) {
+            const selected = await client.callTool({
+              name: "public_read",
+              arguments: { provider },
+            });
+            expect(selected.isError).not.toBe(true);
+            expect(currentSourceResolution()?.sources.map((source) => source.binding))
+              .toEqual([binding]);
+            expect(currentSourceResolution()?.unavailable).toEqual([]);
+          }
+
+          const combined = await client.callTool({
+            name: "public_read",
+            arguments: {},
+          });
+          expect(combined.isError).not.toBe(true);
+          expect(currentSourceResolution()?.sources.map((source) => source.binding))
+            .toEqual([1, 2]);
+          preferredSourceReference = currentSourceResolution()?.sources.find(
+            (source) => source.binding === 2,
+          )?.sourceReference;
+          expect(preferredSourceReference).toMatch(/^msr1\./);
+
+          mode = "preferred-source";
+          const preferred = await client.callTool({
+            name: "public_read",
+            arguments: {},
+          });
+          expect(preferred.isError).not.toBe(true);
+          expect(currentSourceResolution()?.sources.map((source) => source.binding))
+            .toEqual([2]);
+          expect(egressRequests.at(-1)?.scope.provider).toBe(otherProviderId);
+
+          sourceResolution = undefined;
+          preferredSourceReference = "msr1.stale";
+          const beforeStalePreferred = egressRequests.length;
+          const stalePreferred = await client.callTool({
+            name: "public_read",
+            arguments: {},
+          });
+          expect(stalePreferred.isError).toBe(true);
+          expect(sourceResolution).toBeUndefined();
+          expect(egressRequests).toHaveLength(beforeStalePreferred);
+
+          mode = "all-sources";
+          sourceResolution = undefined;
+          const beforeNonmatch = egressRequests.length;
+          const nonmatch = await client.callTool({
+            name: "public_read",
+            arguments: { provider: "missing" },
+          });
+          expect(nonmatch.isError).toBe(true);
+          expect(sourceResolution).toBeUndefined();
+          expect(egressRequests).toHaveLength(beforeNonmatch);
+
+          await admin.connection().execute((trx) => sql`
+            delete from public.module_connection_test
+             where id = ${otherConnectionId}::uuid
+          `.execute(trx));
+          const partiallyAvailable = await client.callTool({
+            name: "public_read",
+            arguments: {},
+          });
+          expect(partiallyAvailable.isError).not.toBe(true);
+          expect(currentSourceResolution()?.sources.map((source) => source.binding))
+            .toEqual([1]);
+          expect(currentSourceResolution()?.unavailable).toEqual([{
+            binding: 2,
+            definition: {
+              kind: "Definition",
+              id: publicDefinitionId,
+              version: 1,
+            },
+            outcome: "connection_required",
+          }]);
+          const unavailableJson = JSON.stringify(
+            currentSourceResolution()?.unavailable,
+          );
+          expect(unavailableJson).not.toContain(otherProviderId);
+          expect(unavailableJson).not.toContain(otherConnectionId);
+          expect(unavailableJson).not.toContain("Other");
+
+          await admin.connection().execute((trx) => sql`
+            insert into public.module_connection_test
+              (id, tenant_id, owner_user_id, provider_id, values)
+            values (${otherConnectionId}::uuid, ${tenantId}::uuid, null,
+              ${otherProviderId}::uuid, '{}'::jsonb)
+          `.execute(trx));
+
+          await admin.connection().execute(async (trx) => {
+            await sql`update public.module_operation_test
+               set required_scopes = '["items:read"]'::jsonb
+             where id = ${secondOperationId}::uuid
+            `.execute(trx);
+            await sql`update public.module_connection_test
+               set values = '{"grantedScopes":[]}'::jsonb
+             where id = ${otherConnectionId}::uuid
+            `.execute(trx);
+          });
+          await client.callTool({ name: "public_read", arguments: {} });
+          expect(currentSourceResolution()?.sources.map((source) => source.binding))
+            .toEqual([1]);
+          expect(currentSourceResolution()?.unavailable).toHaveLength(1);
+          expect(currentSourceResolution()?.unavailable[0]).toMatchObject({
+            binding: 2,
+            outcome: "reauthorization_required",
+          });
+
+          await admin.connection().execute(async (trx) => {
+            await sql`update public.module_operation_test
+               set required_scopes = '[]'::jsonb
+             where id = ${secondOperationId}::uuid
+            `.execute(trx);
+            await sql`update public.module_provider_test
+               set auth = '{"connectionScope":"tenant","profile":"oauth2AuthorizationCode"}'::jsonb
+             where id = ${otherProviderId}::uuid
+            `.execute(trx);
+            await sql`update public.module_connection_test
+               set values = '{"accessToken":{"ciphertext":"obviously-fake","keyId":"test"},"accessTokenExpiresAt":"2000-01-01T00:00:00.000Z"}'::jsonb
+             where id = ${otherConnectionId}::uuid
+            `.execute(trx);
+          });
+          await client.callTool({ name: "public_read", arguments: {} });
+          expect(currentSourceResolution()?.sources.map((source) => source.binding))
+            .toEqual([1]);
+          expect(currentSourceResolution()?.unavailable).toHaveLength(1);
+          expect(currentSourceResolution()?.unavailable[0]).toMatchObject({
+            binding: 2,
+            outcome: "reauthorization_required",
+          });
+
+          await admin.connection().execute(async (trx) => {
+            await sql`update public.module_provider_test
+               set auth = '{"connectionScope":"user","profile":"oauth2AuthorizationCode"}'::jsonb
+             where id = ${otherProviderId}::uuid
+            `.execute(trx);
+            await sql`update public.module_connection_test
+               set values = '{}'::jsonb
+             where id = ${otherConnectionId}::uuid
+            `.execute(trx);
+            await sql`insert into public.module_connection_test
+              (id, tenant_id, owner_user_id, provider_id, values)
+            values (${personalOtherConnectionId}::uuid, ${tenantId}::uuid,
+              ${userId}::uuid, ${otherProviderId}::uuid, '{}'::jsonb)
+            `.execute(trx);
+          });
+          await client.callTool({ name: "public_read", arguments: {} });
+          expect(currentSourceResolution()?.sources.map((source) => source.binding))
+            .toEqual([1]);
+          expect(currentSourceResolution()?.unavailable).toHaveLength(1);
+          expect(currentSourceResolution()?.unavailable[0]).toMatchObject({
+            binding: 2,
+            outcome: "connection_required",
+          });
+          expect(JSON.stringify(currentSourceResolution()?.unavailable))
+            .not.toContain(personalOtherConnectionId);
+
+          await admin.connection().execute(async (trx) => {
+            await sql`delete from public.module_connection_test
+             where id = ${personalOtherConnectionId}::uuid
+            `.execute(trx);
+            await sql`update public.module_provider_test
+               set auth = '{"connectionScope":"tenant"}'::jsonb
+             where id = ${otherProviderId}::uuid
+            `.execute(trx);
+          });
+          mode = "normal";
 
           mode = "cycle";
           const beforeCycle = egressRequests.length;

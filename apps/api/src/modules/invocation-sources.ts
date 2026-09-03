@@ -7,9 +7,12 @@ import type {
   ModuleDefinitionReference,
   ModuleEgressInvocationSource,
   ModuleInvocationSource,
+  ModuleInvocationSourceResolution,
   ModuleInvocationSourceSelector,
   ModuleToolExecutionOptions,
+  ModuleUnavailableInvocationSource,
 } from "./contract.js";
+import { sameInvocationSourceReference } from "./source-reference.js";
 
 export type AuthorizedInvocationSource = {
   sourceReference: string;
@@ -25,6 +28,18 @@ export type AuthorizedInvocationSource = {
   internal?: unknown;
   /** Re-read trusted state and return the exact current execution snapshot. */
   validate(signal?: AbortSignal): Promise<AuthorizedInvocationSource | undefined>;
+};
+
+export type AuthorizedUnavailableInvocationSource =
+  ModuleUnavailableInvocationSource & {
+    tenantId: string;
+    actorId: string | null;
+    toolName: string;
+  };
+
+export type AuthorizedInvocationSourceResolution = {
+  sources: readonly AuthorizedInvocationSource[];
+  unavailable: readonly AuthorizedUnavailableInvocationSource[];
 };
 
 type HeldSource = AuthorizedInvocationSource & {
@@ -159,6 +174,16 @@ function matchesSession(
   );
 }
 
+function unavailableMatchesSession(
+  source: AuthorizedUnavailableInvocationSource,
+  session: TrustedSessionContext,
+): boolean {
+  return (
+    source.tenantId === session.tenantId &&
+    source.actorId === session.userId
+  );
+}
+
 function exposed(
   source: AuthorizedInvocationSource & { sourceHandle: string },
   includeInternal = false,
@@ -177,6 +202,16 @@ function exposed(
             : {}),
         }
       : {}),
+  };
+}
+
+function exposedUnavailable(
+  source: AuthorizedUnavailableInvocationSource,
+): ModuleUnavailableInvocationSource {
+  return {
+    binding: source.binding,
+    definition: immutableDefinition(source.definition),
+    outcome: source.outcome,
   };
 }
 
@@ -201,10 +236,10 @@ export class InvocationSourceVault {
     session: TrustedSessionContext,
     toolName: string,
     selector: ModuleInvocationSourceSelector,
-    current: () => Promise<readonly AuthorizedInvocationSource[]>,
+    current: () => Promise<AuthorizedInvocationSourceResolution>,
     invocationToken: object,
     signal?: AbortSignal,
-  ): Promise<readonly ModuleInvocationSource[]> {
+  ): Promise<ModuleInvocationSourceResolution> {
     signal?.throwIfAborted();
     if (!selector || typeof selector !== "object" || Array.isArray(selector)) {
       throw unavailable();
@@ -219,7 +254,8 @@ export class InvocationSourceVault {
     if (selector.mode === "explicit") {
       if (
         typeof selector.sourceHandle !== "string" ||
-        selector.sourceHandle.length === 0
+        selector.sourceHandle.length === 0 ||
+        Object.hasOwn(selector, "preferredSourceReference")
       ) {
         throw unavailable();
       }
@@ -234,22 +270,58 @@ export class InvocationSourceVault {
       }
       const current = await revalidate(() => held.validate(signal), signal);
       if (!current || !matchesSession(current, session)) throw unavailable();
-      return [exposed({ ...current, sourceHandle: held.sourceHandle })];
+      return {
+        sources: [exposed({ ...current, sourceHandle: held.sourceHandle })],
+        unavailable: [],
+      };
     }
 
-    if (Object.hasOwn(selector, "sourceHandle")) throw unavailable();
+    if (
+      Object.hasOwn(selector, "sourceHandle") ||
+      (selector.mode !== "default" &&
+        Object.hasOwn(selector, "preferredSourceReference"))
+    ) throw unavailable();
+    const preferredSourceReference = selector.mode === "default"
+      ? selector.preferredSourceReference
+      : undefined;
+    if (
+      preferredSourceReference !== undefined &&
+      (typeof preferredSourceReference !== "string" ||
+        preferredSourceReference.length === 0)
+    ) throw unavailable();
 
-    const authorized = (await revalidate(current, signal)).filter(
+    const resolution = await revalidate(current, signal);
+    const authorized = resolution.sources.filter(
       (source) =>
         source.toolName === toolName && matchesSession(source, session),
     );
-    const selected =
-      selector.mode === "default" ? authorized.slice(0, 1) : authorized;
+    const unavailableSources = resolution.unavailable.filter(
+      (source) =>
+        source.toolName === toolName &&
+        unavailableMatchesSession(source, session),
+    );
+    if (authorized.length === 0 && unavailableSources.length === 0) {
+      throw unavailable();
+    }
+    const preferred = preferredSourceReference === undefined
+      ? authorized
+      : authorized.filter(
+        (source) => sameInvocationSourceReference(
+          source.sourceReference,
+          preferredSourceReference,
+        ),
+      );
+    if (preferredSourceReference !== undefined && preferred.length === 0) {
+      throw unavailable();
+    }
+    const selected = selector.mode === "default"
+      ? preferred.slice(0, 1)
+      : authorized;
     const handles = this.#handlesByInvocation.get(invocationToken) ?? new Map();
     this.#handlesByInvocation.set(invocationToken, handles);
     const consumed = this.#consumedByInvocation.get(invocationToken) ?? new Set();
     this.#consumedByInvocation.set(invocationToken, consumed);
-    return selected.flatMap((source) => {
+    const sources = selected.flatMap((source) => {
       const sourceKey = this.#sourceKey(source);
       if (consumed.has(sourceKey)) return [];
       const existingHandle = handles.get(sourceKey);
@@ -267,6 +339,10 @@ export class InvocationSourceVault {
       handles.set(sourceKey, held.sourceHandle);
       return [exposed(held)];
     });
+    return {
+      sources,
+      unavailable: unavailableSources.map(exposedUnavailable),
+    };
   }
 
   /**

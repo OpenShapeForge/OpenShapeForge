@@ -18,6 +18,11 @@ type BaseVerifierOptions = {
    * sibling clients from being accepted by this service.
    */
   audience?: string | string[];
+  /**
+   * Expected OAuth authorized party (`azp`). When configured, a token without
+   * an `azp` string or with an unlisted party is rejected after JWT validation.
+   */
+  authorizedParties?: string | string[];
 };
 
 type RemoteJwksOptions = BaseVerifierOptions & { jwksUri: string };
@@ -132,9 +137,25 @@ export function createBearerVerifier(options: BearerVerifierOptions): BearerVeri
     issuer: options.issuer,
   };
   if (options.audience !== undefined) verifyOptions.audience = options.audience;
+  const authorizedParties = options.authorizedParties === undefined
+    ? null
+    : new Set(
+        typeof options.authorizedParties === "string"
+          ? [options.authorizedParties]
+          : options.authorizedParties,
+      );
+  if (authorizedParties && [...authorizedParties].some((party) => party.length === 0)) {
+    throw new TypeError("authorizedParties entries must be non-empty strings.");
+  }
 
   return async function verify(token) {
     const { payload } = await jwtVerify(token, keySet, verifyOptions);
+    if (
+      authorizedParties &&
+      (typeof payload.azp !== "string" || !authorizedParties.has(payload.azp))
+    ) {
+      throw new Error("JWT authorized party is not allowed.");
+    }
     return {
       identity: parseAuthIdentity(payload as Record<string, unknown>),
       claims: payload,

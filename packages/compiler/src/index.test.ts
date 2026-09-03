@@ -70,6 +70,14 @@ describe("compiler host artifact assembly", () => {
         "restApi:",
         "  title: Example Product API",
         "  description: Authenticate first, then follow the integration workflow.",
+        "  bearerDescription: Paste an access token issued for this API.",
+        "  oauth2:",
+        "    description: Sign in through the host identity provider.",
+        "    authorizationUrl: https://identity.example.com/oauth/authorize",
+        "    tokenUrl: https://identity.example.com/oauth/token",
+        "    clientId: public-docs-client",
+        "    scopes:",
+        "      openid: Sign in",
         "  externalDocs:",
         "    description: Developer guide",
         "    url: https://example.com/developers",
@@ -85,6 +93,8 @@ describe("compiler host artifact assembly", () => {
     ) as {
       info: { title: string; version: string; description: string };
       externalDocs: { description: string; url: string };
+      security: Array<Record<string, string[]>>;
+      components: { securitySchemes: Record<string, Record<string, unknown>> };
     };
 
     expect(openApi.info.title).toBe("Example Product API");
@@ -97,6 +107,14 @@ describe("compiler host artifact assembly", () => {
     expect(openApi.externalDocs).toEqual({
       description: "Developer guide",
       url: "https://example.com/developers",
+    });
+    expect(openApi.security).toEqual([{ bearerAuth: [] }, { oauth2Auth: [] }]);
+    expect(openApi.components.securitySchemes.bearerAuth!.description).toBe(
+      "Paste an access token issued for this API.",
+    );
+    expect(openApi.components.securitySchemes.oauth2Auth).toMatchObject({
+      type: "oauth2",
+      "x-swagger-ui-client-id": "public-docs-client",
     });
   }, 60_000);
 

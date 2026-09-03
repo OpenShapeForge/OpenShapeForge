@@ -190,6 +190,38 @@ describe("first-class plugin operations", () => {
     }
   });
 
+  test("projects session operations onto bearer and configured OAuth security schemes", () => {
+    const collected = collectPluginOperations([{ name: "demo", operations: [operation] }], context);
+    const paths = operationOpenApiPaths(collected, ["bearerAuth", "oauth2Auth"]) as Record<
+      string,
+      Record<string, any>
+    >;
+
+    expect(paths["/api/demo/quotes/{quoteId}/publish"]!.post.security).toEqual([
+      { bearerAuth: [] },
+      { oauth2Auth: ["quotes:write"] },
+    ]);
+  });
+
+  test("requires OAuth authoring to describe every session operation scope", () => {
+    const collected = collectPluginOperations([{ name: "demo", operations: [operation] }], context);
+
+    expect(() => renderOpenApiSpec({ version: 1, tables: [] }, "fixture", {
+      operations: collected,
+      documentation: {
+        title: "Example API",
+        description: "Authenticate before using protected operations.",
+        oauth2: {
+          description: "Sign in through the host identity provider.",
+          authorizationUrl: "https://identity.example.com/oauth/authorize",
+          tokenUrl: "https://identity.example.com/oauth/token",
+          clientId: "public-docs-client",
+          scopes: { openid: "Sign in" },
+        },
+      },
+    })).toThrow(/scopes do not describe required operation scope.*quotes:write/);
+  });
+
   test("keeps REST idempotency exclusively in the header for query operations", () => {
     const queryOperation: PluginOperationContract = {
       ...operation,
@@ -321,6 +353,17 @@ describe("first-class plugin operations", () => {
     const compiled = collectPluginOperations([{ name: "demo", operations: [custom] }], context);
     const spec = JSON.parse(renderOpenApiSpec({ version: 1, tables: [] }, "fixture", {
       operations: compiled,
+      documentation: {
+        title: "Example API",
+        description: "Authenticate before using protected operations.",
+        oauth2: {
+          description: "Sign in through the host identity provider.",
+          authorizationUrl: "https://identity.example.com/oauth/authorize",
+          tokenUrl: "https://identity.example.com/oauth/token",
+          clientId: "public-docs-client",
+          scopes: { openid: "Sign in" },
+        },
+      },
     })) as any;
 
     expect(spec.components.securitySchemes.Signing).toEqual({
@@ -332,6 +375,9 @@ describe("first-class plugin operations", () => {
     expect(spec.paths["/api/demo/quotes/{quoteId}/publish"].post.security).toEqual([
       { Signing: [] },
     ]);
+    expect(spec.components.securitySchemes.oauth2Auth.description).toBe(
+      "Sign in through the host identity provider.",
+    );
   });
 
   test("fails compilation when an operation plugin has no runtime module", () => {
@@ -447,6 +493,32 @@ describe("first-class plugin operations", () => {
     }] }], context);
     expect(() => auditOperationSurfaceCollisions(exactCoreCollision, emptyManifest, [], 60))
       .toThrow(/REST route.*core REST OpenAPI.*plugin operation/);
+
+    for (const [path, owner] of [
+      ["/api/rest/docs/swagger-initializer.js", "core REST documentation"],
+      ["/api/rest/docs/oauth2-redirect.html", "core REST OAuth callback"],
+    ] as const) {
+      const docsCollision = collectPluginOperations([{ name: "demo", operations: [{
+        ...operation,
+        inputSchema: {
+          type: "object",
+          required: ["idempotencyKey"],
+          properties: { idempotencyKey: { type: "string", minLength: 1 } },
+          additionalProperties: false,
+        },
+        transports: {
+          ...operation.transports,
+          rest: {
+            ...operation.transports.rest,
+            method: "GET",
+            path: "/api/demo/documents",
+            aliases: [path],
+          },
+        },
+      }] }], context);
+      expect(() => auditOperationSurfaceCollisions(docsCollision, emptyManifest, [], 60))
+        .toThrow(new RegExp(`REST route.*${owner}.*plugin operation`));
+    }
 
     const generatedManifest: PlatformSchemaManifest = {
       version: 1,

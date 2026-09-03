@@ -40,6 +40,7 @@ async function buildKeys() {
 type SignOptions = {
   issuer?: string;
   audience?: string;
+  authorizedParty?: string | null;
   expiresIn?: string;
   signWith?: CryptoKey;
 };
@@ -47,6 +48,9 @@ type SignOptions = {
 async function mintToken(signingKey: CryptoKey, options: SignOptions = {}): Promise<string> {
   const jwt = new SignJWT({
     realm_access: { roles: ["User"] },
+    ...(options.authorizedParty === null
+      ? {}
+      : { azp: options.authorizedParty ?? "api-client" }),
   })
     .setProtectedHeader({ alg: ALG, kid: KID })
     .setSubject("user-123")
@@ -216,5 +220,57 @@ describe("createBearerVerifier", () => {
     } finally {
       jwks.stop(true);
     }
+  });
+
+  test("accepts only an explicitly authorized party supplied as a string or array", async () => {
+    const { keySet, signingKey } = await buildKeys();
+    const token = await mintToken(signingKey, { authorizedParty: "docs-client" });
+
+    await expect(
+      createBearerVerifier({
+        keySet,
+        issuer: ISSUER,
+        audience: AUDIENCE,
+        authorizedParties: "docs-client",
+      })(token),
+    ).resolves.toMatchObject({ claims: { azp: "docs-client" } });
+    await expect(
+      createBearerVerifier({
+        keySet,
+        issuer: ISSUER,
+        audience: AUDIENCE,
+        authorizedParties: ["gateway-client", "docs-client"],
+      })(token),
+    ).resolves.toMatchObject({ claims: { azp: "docs-client" } });
+  });
+
+  test("rejects missing and unapproved azp claims only when an allowlist is configured", async () => {
+    const { keySet, signingKey } = await buildKeys();
+    const verifyPinned = createBearerVerifier({
+      keySet,
+      issuer: ISSUER,
+      audience: AUDIENCE,
+      authorizedParties: ["docs-client"],
+    });
+    const missing = await mintToken(signingKey, { authorizedParty: null });
+    const unapproved = await mintToken(signingKey, { authorizedParty: "sibling-client" });
+
+    await expect(verifyPinned(missing)).rejects.toThrow("JWT authorized party is not allowed.");
+    await expect(verifyPinned(unapproved)).rejects.toThrow("JWT authorized party is not allowed.");
+    await expect(createBearerVerifier({
+      keySet,
+      issuer: ISSUER,
+      audience: AUDIENCE,
+      authorizedParties: [],
+    })(unapproved)).rejects.toThrow("JWT authorized party is not allowed.");
+
+    const verifyBackwardCompatible = createBearerVerifier({
+      keySet,
+      issuer: ISSUER,
+      audience: AUDIENCE,
+    });
+    await expect(verifyBackwardCompatible(missing)).resolves.toMatchObject({
+      identity: { userId: "user-123" },
+    });
   });
 });

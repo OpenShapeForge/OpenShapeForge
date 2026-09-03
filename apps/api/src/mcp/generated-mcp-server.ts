@@ -199,6 +199,7 @@ import {
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import {
   bindOperationHandlers,
+  DeclaredOperationError,
   invokeOperation,
 } from "../operations/runtime.js";
 
@@ -1509,6 +1510,25 @@ export const __configurationAppResultForTests = configurationAppResult;
  * summary is derived from the same fields, so it cannot contradict them.
  */
 function failed(error: unknown): ToolResult {
+  if (error instanceof DeclaredOperationError) {
+    const body = error.body;
+    const bodyMessage = body && typeof body === "object" && !Array.isArray(body)
+      ? (body as { error?: { message?: unknown } }).error?.message
+      : undefined;
+    return {
+      content: [
+        {
+          type: "text",
+          text: `${error.code}: ${typeof bodyMessage === "string" ? bodyMessage : error.message}`,
+        },
+        { type: "text", text: JSON.stringify(body, null, 2) },
+      ],
+      ...(body && typeof body === "object" && !Array.isArray(body)
+        ? { structuredContent: body as Record<string, unknown> }
+        : {}),
+      isError: true,
+    };
+  }
   const { body } = toHttpError(error);
   return {
     content: [

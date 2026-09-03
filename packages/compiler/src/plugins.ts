@@ -51,11 +51,29 @@ export type PluginSchemaMigration = {
 
 export type JsonSchema = Record<string, unknown>;
 
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
 export type PluginOperationError = {
   status: number;
   code: string;
   description: string;
   schema?: JsonSchema;
+  /**
+   * REST projection metadata. A body is an optional fixed representation for
+   * a matching platform-raised error (for example an authorization rejection
+   * raised before the module handler runs). Handler-returned errors supply
+   * their own body using this declared content type.
+   */
+  rest?: {
+    body?: JsonValue;
+    contentType?: string;
+  };
 };
 
 export type PluginOperationAuth =

@@ -56,6 +56,43 @@ identities. API keys deliberately cannot invoke operations that require OAuth
 scopes until keys have their own persisted scope subset; a custom scheme is handler-owned, fully described as an OpenAPI
 security scheme, and only available through its REST projection.
 
+A handler can return a declared failure without throwing an untyped transport
+error:
+
+```ts
+return {
+  ok: false,
+  status: 409,
+  code: "CONFLICT",
+  body: { error: { code: "CONFLICT", message: "Already published." } },
+  headers: { "retry-after": "5" },
+  contentType: "application/problem+json",
+};
+```
+
+The status and code must identify one entry in the operation's `errors` list,
+and the body must validate against that entry's schema. Without an explicit
+schema, the body must use the platform `{ error: { code, message } }` envelope
+and its embedded code must match. A handler-provided content type must match
+the error's declared `rest.contentType` (or the default `application/json`), so
+the runtime response cannot contradict OpenAPI. Error content types are limited
+to bare JSON media types (`application/json` or a `+json` subtype, without
+parameters), matching the JSON Schema body contract and its UTF-8 encoding.
+REST sends the validated body
+and response metadata unchanged. GraphQL raises an error with the code, status,
+and body in `extensions`; MCP returns an `isError` tool result instead of
+successful content.
+
+An error declaration may also include a fixed, schema-validated `body` in its
+REST projection. It is used only when a matching
+platform `HttpError` occurs before the handler, such as centralized session or
+role authorization. This keeps authentication in core while allowing a
+compatibility route to retain a previously published REST error body. Thrown
+errors without such a declaration keep the platform's standard normalization.
+Authentication-service unavailability remains the historical unauthenticated
+response unless the operation explicitly declares the
+`503 AUTHENTICATION_UNAVAILABLE` error.
+
 For `idempotency-key` operations, the canonical input field is required on all
 transports. REST clients supply it only through the declared required header;
 the runtime injects that header into canonical input before validation.

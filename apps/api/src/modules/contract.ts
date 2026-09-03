@@ -319,12 +319,27 @@ export type ModuleWorker = {
   start(context: ModuleWorkerContext): ModuleWorkerHandle | Promise<ModuleWorkerHandle>;
 };
 
-export type ModuleOperationResult = {
+export type ModuleOperationSuccessResult = {
+  ok?: true;
   value: unknown;
   status?: number;
   headers?: Record<string, string>;
   contentType?: string;
 };
+
+/** A non-success result must match one error declared by the compiler plugin. */
+export type ModuleOperationErrorResult = {
+  ok: false;
+  status: number;
+  code: string;
+  body: unknown;
+  headers?: Record<string, string>;
+  contentType?: string;
+};
+
+export type ModuleOperationResult =
+  | ModuleOperationSuccessResult
+  | ModuleOperationErrorResult;
 
 export type ModuleOperationContext = ModuleRuntimeContext & {
   transport: "rest" | "mcp" | "graphql";

@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { createBearerVerifier, type BearerVerifier } from "@openshapeforge/auth";
+import {
+  BearerVerifierUnavailableError,
+  createBearerVerifier,
+  type BearerVerifier,
+} from "@openshapeforge/auth";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { keyringFromEnv, type SecretKeyring } from "../platform/secrets.js";
 import { looksLikeApiKey } from "./api-key/format.js";
@@ -17,7 +21,22 @@ export type ResolveSessionOptions = {
    * and trusted-context paths are unaffected.
    */
   db?: OpenShapeForgeDatabase | undefined;
+  /**
+   * Preserve authentication-service unavailability as a distinct failure.
+   * Ordinary callers keep the historical anonymous-session fallback.
+   */
+  failOnUnavailable?: boolean;
 };
+
+export class SessionAuthenticationUnavailableError extends Error {
+  constructor() {
+    super("Authentication is unavailable.");
+  }
+}
+
+function bearerVerifierUnavailable(error: unknown): boolean {
+  return error instanceof BearerVerifierUnavailableError;
+}
 
 const EMPTY_SESSION: TrustedSessionContext = {
   tenantId: null,
@@ -227,6 +246,9 @@ export async function resolveSessionContext(
             "(needs a database, OPENSHAPEFORGE_API_KEY_SECRET_KEYS, and a complete " +
             "bearer verifier). Rejecting.",
         );
+        if (options.failOnUnavailable) {
+          throw new SessionAuthenticationUnavailableError();
+        }
         return EMPTY_SESSION;
       }
 
@@ -252,6 +274,9 @@ export async function resolveSessionContext(
           "configured (OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI/ISSUER unset). " +
           "Rejecting the request instead of falling back to trusted-context.",
       );
+      if (options.failOnUnavailable) {
+        throw new SessionAuthenticationUnavailableError();
+      }
       return EMPTY_SESSION;
     }
 
@@ -275,6 +300,9 @@ export async function resolveSessionContext(
         "[auth] Bearer verification failed:",
         error instanceof Error ? error.message : String(error),
       );
+      if (options.failOnUnavailable && bearerVerifierUnavailable(error)) {
+        throw new SessionAuthenticationUnavailableError();
+      }
       return EMPTY_SESSION;
     }
   }

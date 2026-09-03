@@ -5,6 +5,7 @@ import {
   __resetSessionResolverForTests,
   mergeIdentityRoles,
   resolveSessionContext,
+  SessionAuthenticationUnavailableError,
 } from "./identity.js";
 
 const MANAGED_ENV = [
@@ -67,6 +68,100 @@ describe("resolveSessionContext bearer fail-closed", () => {
     headers.set("authorization", "Bearer some.jwt.token");
     const session = await resolveSessionContext(headers);
     expect(session).toEqual(EMPTY);
+  });
+
+  test("can report an unconfigured bearer verifier without changing the default fallback", async () => {
+    const headers = new Headers({ authorization: "Bearer some.jwt.token" });
+    await expect(resolveSessionContext(headers)).resolves.toEqual(EMPTY);
+    await expect(resolveSessionContext(headers, { failOnUnavailable: true }))
+      .rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
+  });
+
+  test("can distinguish an unavailable remote verifier from an invalid credential", async () => {
+    const jwks = Bun.serve({
+      port: 0,
+      fetch: () => new Response(null, { status: 503 }),
+    });
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = new URL("/jwks", jwks.url).href;
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "https://issuer.example.test";
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = "api";
+    __resetSessionResolverForTests();
+    const token = [
+      Buffer.from(JSON.stringify({ alg: "RS256", kid: "missing" })).toString("base64url"),
+      Buffer.from(JSON.stringify({ iss: "https://issuer.example.test", aud: "api" })).toString("base64url"),
+      "AA",
+    ].join(".");
+    const headers = new Headers({ authorization: `Bearer ${token}` });
+    try {
+      await expect(resolveSessionContext(headers)).resolves.toEqual(EMPTY);
+      await expect(resolveSessionContext(headers, { failOnUnavailable: true }))
+        .rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
+    } finally {
+      jwks.stop(true);
+    }
+  });
+
+  test("reports a refused JWKS connection as unavailable", async () => {
+    const listener = Bun.serve({ port: 0, fetch: () => new Response("unused") });
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = new URL("/jwks", listener.url).href;
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "https://issuer.example.test";
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = "api";
+    listener.stop(true);
+    __resetSessionResolverForTests();
+
+    const token = [
+      Buffer.from(JSON.stringify({ alg: "RS256", kid: "missing" })).toString("base64url"),
+      Buffer.from(JSON.stringify({
+        iss: "https://issuer.example.test",
+        aud: "api",
+      })).toString("base64url"),
+      "AA",
+    ].join(".");
+    const headers = new Headers({ authorization: `Bearer ${token}` });
+
+    await expect(resolveSessionContext(headers, { failOnUnavailable: true }))
+      .rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
+  });
+
+  test("keeps a malformed bearer credential as an ordinary authentication failure", async () => {
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = "http://127.0.0.1:9/jwks";
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "https://issuer.example.test";
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = "api";
+    __resetSessionResolverForTests();
+
+    const headers = new Headers({ authorization: "Bearer not-a-jwt" });
+    await expect(resolveSessionContext(headers, { failOnUnavailable: true }))
+      .resolves.toEqual(EMPTY);
+  });
+
+  test("reports unusable matching remote key material as unavailable", async () => {
+    const jwks = Bun.serve({
+      port: 0,
+      fetch: () => Response.json({
+        keys: [{ kty: "RSA", kid: "broken", alg: "RS256", n: "bad", e: "AQAB" }],
+      }),
+    });
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = new URL("/jwks", jwks.url).href;
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "https://issuer.example.test";
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = "api";
+    __resetSessionResolverForTests();
+    const token = [
+      Buffer.from(JSON.stringify({ alg: "RS256", kid: "broken" })).toString("base64url"),
+      Buffer.from(JSON.stringify({
+        iss: "https://issuer.example.test",
+        aud: "api",
+      })).toString("base64url"),
+      "AA",
+    ].join(".");
+
+    try {
+      await expect(resolveSessionContext(
+        new Headers({ authorization: `Bearer ${token}` }),
+        { failOnUnavailable: true },
+      )).rejects.toBeInstanceOf(SessionAuthenticationUnavailableError);
+    } finally {
+      jwks.stop(true);
+    }
   });
 
   test("non-bearer authorization schemes still fall through to trusted-context", async () => {

@@ -33,7 +33,10 @@ export type {
   ReadTrustedContextOptions,
 } from "./trusted-context.js";
 
-export { createBearerVerifier } from "./bearer.js";
+export {
+  BearerVerifierUnavailableError,
+  createBearerVerifier,
+} from "./bearer.js";
 export type {
   BearerVerifier,
   BearerVerifierOptions,

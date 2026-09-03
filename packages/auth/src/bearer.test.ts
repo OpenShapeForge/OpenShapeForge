@@ -7,7 +7,10 @@ import {
   generateKeyPair,
   type JWTVerifyGetKey,
 } from "jose";
-import { createBearerVerifier } from "./bearer.js";
+import {
+  BearerVerifierUnavailableError,
+  createBearerVerifier,
+} from "./bearer.js";
 
 const ALG = "RS256";
 const ISSUER = "https://issuer.example/realms/openshapeforge";
@@ -126,5 +129,92 @@ describe("createBearerVerifier", () => {
       .sign(signingKey);
 
     await expect(verify(expired)).rejects.toThrow();
+  });
+
+  test("distinguishes a remote JWKS connection failure from an invalid credential", async () => {
+    const listener = Bun.serve({ port: 0, fetch: () => new Response("unused") });
+    const jwksUri = new URL("/jwks", listener.url).href;
+    listener.stop(true);
+
+    const verify = createBearerVerifier({ jwksUri, issuer: ISSUER, audience: AUDIENCE });
+    const token = [
+      Buffer.from(JSON.stringify({ alg: ALG, kid: KID })).toString("base64url"),
+      Buffer.from(JSON.stringify({ iss: ISSUER, aud: AUDIENCE })).toString("base64url"),
+      "AA",
+    ].join(".");
+
+    await expect(verify(token)).rejects.toBeInstanceOf(BearerVerifierUnavailableError);
+  });
+
+  test("does not classify a malformed credential as remote verifier unavailability", async () => {
+    const verify = createBearerVerifier({
+      jwksUri: "http://127.0.0.1:9/jwks",
+      issuer: ISSUER,
+      audience: AUDIENCE,
+    });
+
+    try {
+      await verify("not-a-jwt");
+      throw new Error("Expected the malformed credential to be rejected.");
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(BearerVerifierUnavailableError);
+    }
+  });
+
+  test("classifies unusable matching remote key material as verifier unavailability", async () => {
+    const jwks = Bun.serve({
+      port: 0,
+      fetch: () => Response.json({
+        keys: [{ kty: "RSA", kid: KID, alg: ALG, n: "bad", e: "AQAB" }],
+      }),
+    });
+    const verify = createBearerVerifier({
+      jwksUri: new URL("/jwks", jwks.url).href,
+      issuer: ISSUER,
+      audience: AUDIENCE,
+    });
+    const token = [
+      Buffer.from(JSON.stringify({ alg: ALG, kid: KID })).toString("base64url"),
+      Buffer.from(JSON.stringify({ iss: ISSUER, aud: AUDIENCE })).toString("base64url"),
+      "AA",
+    ].join(".");
+
+    try {
+      await expect(verify(token)).rejects.toBeInstanceOf(BearerVerifierUnavailableError);
+    } finally {
+      jwks.stop(true);
+    }
+  });
+
+  test("classifies invalid matching remote EC coordinates as verifier unavailability", async () => {
+    const jwks = Bun.serve({
+      port: 0,
+      fetch: () => Response.json({
+        keys: [{
+          kty: "EC",
+          kid: KID,
+          alg: "ES256",
+          crv: "P-256",
+          x: "bad",
+          y: "bad",
+        }],
+      }),
+    });
+    const verify = createBearerVerifier({
+      jwksUri: new URL("/jwks", jwks.url).href,
+      issuer: ISSUER,
+      audience: AUDIENCE,
+    });
+    const token = [
+      Buffer.from(JSON.stringify({ alg: "ES256", kid: KID })).toString("base64url"),
+      Buffer.from(JSON.stringify({ iss: ISSUER, aud: AUDIENCE })).toString("base64url"),
+      "AA",
+    ].join(".");
+
+    try {
+      await expect(verify(token)).rejects.toBeInstanceOf(BearerVerifierUnavailableError);
+    } finally {
+      jwks.stop(true);
+    }
   });
 });

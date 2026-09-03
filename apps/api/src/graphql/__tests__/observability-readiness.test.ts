@@ -115,6 +115,127 @@ describe("operational readiness", () => {
       await app.close();
     }
   });
+
+  test("includes runtime module checks and fails readiness with their dependencies", async () => {
+    let dependencyReady = true;
+    const app = createApiApp({
+      cors: false,
+      modules: {
+        loaded: [{
+          name: "dependency-module",
+          readinessChecks: [
+            { name: "zeta_dependency", check: () => undefined },
+            {
+              name: "external_dependency",
+              check: () => {
+                if (!dependencyReady) throw new Error("private dependency detail");
+              },
+            },
+          ],
+        }],
+        failures: [],
+      },
+      readinessChecks: [],
+      readinessCacheMs: 0,
+    });
+
+    try {
+      const ready = await app.inject({ method: "GET", url: "/api/ready" });
+      expect(ready.statusCode).toBe(200);
+      expect(ready.json() as unknown).toEqual({
+        status: "ready",
+        checks: {
+          external_dependency: "ready",
+          zeta_dependency: "ready",
+        },
+      });
+
+      dependencyReady = false;
+      const unavailable = await app.inject({ method: "GET", url: "/api/ready" });
+      expect(unavailable.statusCode).toBe(503);
+      expect(unavailable.json() as unknown).toEqual({
+        status: "not_ready",
+        checks: {
+          external_dependency: "not_ready",
+          zeta_dependency: "ready",
+        },
+      });
+      expect(unavailable.body).not.toContain("private dependency detail");
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("refuses duplicate and core-reserved module readiness names", async () => {
+    for (const loaded of [
+      [{
+        name: "first",
+        readinessChecks: [{ name: "shared_dependency", check: () => undefined }],
+      }, {
+        name: "second",
+        readinessChecks: [{ name: "shared_dependency", check: () => undefined }],
+      }],
+      [{
+        name: "reserved",
+        readinessChecks: [{ name: "database", check: () => undefined }],
+      }],
+    ] satisfies RuntimeModule[][]) {
+      const app = createApiApp({
+        cors: false,
+        modules: { loaded, failures: [] },
+        readinessChecks: [],
+      });
+      await expect(app.ready()).rejects.toThrow(/collides with/);
+      await app.close().catch(() => undefined);
+    }
+  });
+
+  test("awaits every module close hook and reports cleanup rejection", async () => {
+    const order: string[] = [];
+    let release: (() => void) | undefined;
+    const app = createApiApp({
+      cors: false,
+      modules: {
+        loaded: [{
+          name: "first",
+          close: async () => void order.push("first"),
+        }, {
+          name: "rejecting",
+          close: async () => {
+            order.push("rejecting");
+            throw new Error("close failed");
+          },
+        }, {
+          name: "awaited",
+          close: () => new Promise<void>((resolve) => {
+            order.push("awaited:start");
+            release = () => {
+              order.push("awaited:end");
+              resolve();
+            };
+          }),
+        }],
+        failures: [],
+      },
+      readinessChecks: [],
+    });
+    await app.ready();
+
+    let settled = false;
+    const closing = app.close().finally(() => { settled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+    expect(order).toEqual(["awaited:start"]);
+
+    release?.();
+    await expect(closing).rejects.toThrow(/API resources failed to close/);
+    expect(order).toEqual([
+      "awaited:start",
+      "awaited:end",
+      "rejecting",
+      "first",
+    ]);
+  });
 });
 
 describe("bounded GraphQL observability", () => {

@@ -353,6 +353,13 @@ export type ModuleOperationHandler = (
   context: ModuleOperationContext,
 ) => ModuleOperationResult | Promise<ModuleOperationResult>;
 
+/** A required dependency reported through the host's canonical readiness route. */
+export type ModuleReadinessCheck = {
+  /** Stable lowercase identifier exposed as a key in the readiness response. */
+  name: string;
+  check(): Promise<void> | void;
+};
+
 export type RuntimeModule = {
   /** Must match the CompilerPlugin name of the same package. */
   name: string;
@@ -369,6 +376,10 @@ export type RuntimeModule = {
    * skipped rather than taking the process down.
    */
   init?(context: ModuleRuntimeContext): Promise<void>;
+  /** Required dependencies, evaluated with the host readiness timeout. */
+  readinessChecks?: readonly ModuleReadinessCheck[];
+  /** Async cleanup awaited when the process stops, in reverse init order. */
+  close?(): Promise<void>;
   graphql?(context: ModuleRuntimeContext): ModuleGraphqlContribution;
   /**
    * Register fastify routes. Called inside the same child plugin the core

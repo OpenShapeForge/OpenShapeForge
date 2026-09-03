@@ -6,7 +6,7 @@ two different times by two different processes:
 | Half | Entry point | Loaded by | Contributes |
 | --- | --- | --- | --- |
 | **Compiler plugin** | `<plugin>` | `bun run generate` | platform tables, generated artifacts, an authoring layer |
-| **Runtime module** | `<plugin>/runtime` | the API at boot | GraphQL, REST routes, migration seed steps |
+| **Runtime module** | `<plugin>/runtime` | the API at boot | operations, GraphQL, workers, readiness checks, cleanup |
 
 Both are registered by the same `plugins:` entry in `authoring.config.yaml`, so
 a deployment cannot end up running one half without the other. Shipping only a
@@ -344,6 +344,8 @@ IS checked, because that is repo state like `webPresent`.
 export type RuntimeModule = {
   name: string;                                     // must match the compiler plugin's
   init?(ctx): Promise<void>;                        // awaited before anything serves
+  readinessChecks?: readonly ModuleReadinessCheck[]; // required dependencies for /api/ready
+  close?(): Promise<void>;                          // awaited during process shutdown
   graphql?(ctx): ModuleGraphqlContribution;         // typeDefs + root fields + resolvers
   restRoutes?(routes, ctx): void;                   // fastify, inside the rate-limited scope
   seeds?: ModuleSeed[];                             // appended to the migration chain
@@ -351,7 +353,7 @@ export type RuntimeModule = {
 };
 ```
 
-Four properties are worth knowing:
+Six properties are worth knowing:
 
 - **Loading is fail-soft.** A module that throws on import, loads as something
   other than a `RuntimeModule`, or disagrees with its registration about its own
@@ -366,6 +368,16 @@ Four properties are worth knowing:
   one SDL blob, because the root types are assembled: `type Query` appears once
   and every module adds fields inside it.
 - **Workers are separate processes, not timers.** See below.
+- **Readiness stays one host-owned route.** A module contributes lowercase
+  check names matching `[a-z][a-z0-9_]*`; it does not add a route. Names are
+  unique across modules and cannot use the core `database`, `schema`, or
+  `runtime_modules` names. Invalid or colliding names fail startup. Module
+  checks are sorted by name after the core checks and use the same timeout,
+  redaction, caching, and `503` behavior as every other `/api/ready` check.
+- **Cleanup is awaited.** `close()` runs for every initialized module in reverse
+  initialization order, both for the API and worker roles. A rejection does not
+  skip the remaining module or host cleanup; shutdown rejects with an aggregate
+  error after all cleanup has been attempted.
 
 `restRoutes` is declared but unimplemented by the shipped workflow module,
 which stays that way until the webhook trigger lands rather than being stubbed.

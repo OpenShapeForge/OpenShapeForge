@@ -11,7 +11,7 @@ import type {
   McpInvocationContext,
   ModuleAuthorizationDecision,
   ModuleAuthorizationSubject,
-  ModuleInvocationSource,
+  ModuleInvocationSourceResolution,
   ModuleInvocationSourceSelector,
   ModulePlatformServices,
   ModuleToolExecutionOptions,
@@ -42,10 +42,11 @@ export type ModuleMcpServerBinding = {
   ): Promise<ModuleAuthorizationDecision>;
   resolveInvocationSources(
     toolName: string,
+    args: Record<string, unknown>,
     selector: ModuleInvocationSourceSelector,
     invocationToken: object,
     signal?: AbortSignal,
-  ): Promise<readonly ModuleInvocationSource[]>;
+  ): Promise<ModuleInvocationSourceResolution>;
   callTool(
     name: string,
     args: Record<string, unknown>,
@@ -191,7 +192,13 @@ export class ModulePlatformRuntime {
           if (!binding) return { allowed: false, code: "NOT_FOUND" };
           return binding.authorize(request.action, request.subject);
         },
-        resolveInvocationSources: async (session, toolName, selector, signal) => {
+        resolveInvocationSources: async (
+          session,
+          toolName,
+          args,
+          selector,
+          signal,
+        ) => {
           signal?.throwIfAborted();
           const ctx = this.#invocationStorage.getStore();
           const binding = ctx ? this.#servers.get(ctx.server) : undefined;
@@ -200,8 +207,14 @@ export class ModulePlatformRuntime {
             !binding ||
             binding.session !== session ||
             !this.#activeInvocations.has(ctx)
-          ) return [];
-          return binding.resolveInvocationSources(toolName, selector, ctx, signal);
+          ) return { sources: [], unavailable: [] };
+          return binding.resolveInvocationSources(
+            toolName,
+            deepFreezeClone(args),
+            selector,
+            ctx,
+            signal,
+          );
         },
         callTool: async (ctx, name, args, options, signal) =>
           this.#callTool(ctx, name, args, options, signal),

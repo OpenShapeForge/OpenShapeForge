@@ -30,6 +30,37 @@ export {
  */
 export const SECRET_SET_SENTINEL = "__set__";
 
+function looksLikeStoredSecret(value: unknown): value is {
+  ciphertext: string;
+  keyId: string;
+} {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as { ciphertext?: unknown }).ciphertext === "string" &&
+    typeof (value as { keyId?: unknown }).keyId === "string"
+  );
+}
+
+/**
+ * Replace encrypted elicited values with the existing set marker while
+ * preserving ordinary sibling values. This is the single representation
+ * used by every generated CRUD transport.
+ */
+export function redactElicitedValues(
+  row: Record<string, unknown>,
+  intoField: string,
+): Record<string, unknown> {
+  const values = row[intoField];
+  if (!values || typeof values !== "object" || Array.isArray(values)) return row;
+  const redacted = Object.fromEntries(
+    Object.entries(values as Record<string, unknown>).map(([key, value]) => [
+      key,
+      looksLikeStoredSecret(value) ? SECRET_SET_SENTINEL : value,
+    ]),
+  );
+  return { ...row, [intoField]: redacted };
+}
 
 /**
  * Narrow decrypted secrets to the ones a contract declares.

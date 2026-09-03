@@ -884,7 +884,7 @@ describe("elicitOnCreate catalog", () => {
         toolPrefix: "widget",
         tools: "dedicated",
         operations: {
-          list: false,
+          list: true,
           get: true,
           create: true,
           update: true,
@@ -931,6 +931,17 @@ describe("elicitOnCreate catalog", () => {
       properties: Record<string, unknown>;
     };
     expect(updateValues.properties.configurationValues).toBeUndefined();
+    const list = catalog.tools.find(
+      (tool) => tool.entity === "Widget" && tool.operation === "list",
+    );
+    const listProperties = list?.inputSchema.properties as {
+      filter: { properties: Record<string, unknown> };
+      sortField: { enum: string[] };
+    };
+    expect(
+      listProperties.filter.properties.configurationValues,
+    ).toBeUndefined();
+    expect(listProperties.sortField.enum).not.toContain("configurationValues");
   });
 
   it("fails closed on a dangling source entity or field", () => {

@@ -17,6 +17,7 @@ import graphqlDocumentation from "../generated/graphql/documentation.json" with 
 import {
   getGeneratedCrudTables,
   getGeneratedEntity,
+  isElicitedOutputColumn,
   isGeneratedCrudOperationEnabled,
   createGeneratedEntity,
   deleteGeneratedEntity,
@@ -232,7 +233,10 @@ export function renderTypeDefinition(
   const fieldDocumentation = new Map(
     (documentation?.fields ?? []).map((field) => [field.name, field]),
   );
-  const filterFieldNames = new Set(table.columns.map(fieldNameForColumn));
+  const queryableColumns = table.columns.filter(
+    (column) => !isElicitedOutputColumn(table, column),
+  );
+  const filterFieldNames = new Set(queryableColumns.map(fieldNameForColumn));
   const columnFields = table.columns
     .map((column) => {
       const field = fieldNameForColumn(column);
@@ -294,7 +298,7 @@ ${[...columnFields, ...relationshipFields].join("\n")}
     }
 
     input ${graphql.typeName}Filter {
-${table.columns
+${queryableColumns
   .flatMap((column) => {
     const field = fieldNameForColumn(column);
     const scalar = graphqlScalarForColumn(column);

@@ -1,0 +1,46 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: ElicitedOutput
+title: Elicited Output
+description: Test fixture for compiled elicited-value output metadata.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Elicited Output
+domains:
+  - relations
+mcp:
+  elicitOnCreate:
+    sourceField: name
+    sourceEntity: ElicitedOutput
+    definitionsField: configuration
+    into: configuration
+authorization:
+  roles:
+    read:
+      - Relaties.All.Read
+    create:
+      - Relaties.All.ReadWrite
+    update:
+      - Relaties.All.ReadWrite
+    delete:
+      - Relaties.All.ReadWrite
+fields:
+  - key: name
+    valueType: string
+    required: true
+    label:
+      en: Name
+    persisted:
+      column: name
+      storageClass: core
+  - key: configuration
+    valueType: object
+    required: false
+    label:
+      en: Configuration
+    persisted:
+      column: configuration
+      storageClass: core

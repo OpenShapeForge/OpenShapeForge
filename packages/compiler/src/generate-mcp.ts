@@ -94,11 +94,16 @@ function writableFields(
   );
 }
 
-function sortableFieldKeys(fields: CompiledField[]): string[] {
+function sortableFieldKeys(
+  fields: CompiledField[],
+  excludedField?: string,
+): string[] {
   return fields
     .filter(
       (field) =>
-        field.cardinality !== "collection" && field.valueType !== "object",
+        field.key !== excludedField &&
+        field.cardinality !== "collection" &&
+        field.valueType !== "object",
     )
     .map((field) => field.key);
 }
@@ -196,7 +201,7 @@ function buildToolsForEntity(
   );
   const label = entityLabel(contract);
   const description = entityDescription(contract);
-  const sortable = sortableFieldKeys(fields);
+  const sortable = sortableFieldKeys(fields, mcp.elicitOnCreate?.into);
   const filterField = contract.entity.filterField;
   const tools: McpToolDefinition[] = [];
 
@@ -229,7 +234,11 @@ function buildToolsForEntity(
   if (mcp.operations.list) {
     const filterProperties: JsonObject = {};
     for (const field of fields) {
-      if (field.cardinality === "collection" || field.valueType === "object")
+      if (
+        field.key === mcp.elicitOnCreate?.into ||
+        field.cardinality === "collection" ||
+        field.valueType === "object"
+      )
         continue;
       const schema = compiledFieldSchemaWithoutDefinitions(
         field,

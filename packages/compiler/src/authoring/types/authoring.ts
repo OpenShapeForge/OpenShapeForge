@@ -809,6 +809,73 @@ export interface AuthorizationClient {
   serviceAccountClientRoles?: Record<string, string[]>;
 }
 
+/**
+ * One Keycloak identity-provider mapper, emitted into the realm export's
+ * flattened `identityProviderMappers` list bound to its provider's alias.
+ * `identityProviderMapper` is Keycloak's mapper type id (e.g.
+ * `oidc-user-attribute-idp-mapper`, `hardcoded-role-idp-mapper`). `config` is
+ * passed through as-is except that scalars are normalized to the strings
+ * Keycloak's representation requires.
+ */
+export interface AuthorizationIdentityProviderMapper {
+  name: string;
+  identityProviderMapper: string;
+  config?: Record<string, string | number | boolean>;
+}
+
+/**
+ * One external identity provider (Keycloak `identityProviders[]` entry).
+ *
+ * Provider-agnostic on purpose: OSF ships the provider IMPLEMENTATIONS (the
+ * Keycloak built-ins and the Apple provider jar in the Keycloak image) and
+ * this contract, but never a provider. Which providers exist, and every ID,
+ * URL, scope and mapping they carry, is the consuming host's authored value
+ * and is emitted unchanged. Nothing here is enabled unless a realm authors it.
+ *
+ * `providerId` is Keycloak's provider type: a built-in (`google`, `microsoft`,
+ * `github`, `oidc`, `saml`, …), `apple` (from the bundled provider jar), or any
+ * other provider id an approved custom provider registers. It is not
+ * validated against a list so approved custom providers keep working.
+ */
+export interface AuthorizationIdentityProvider {
+  /** Realm-unique alias; also the login-URL segment and mapper binding key. */
+  alias: string;
+  providerId: string;
+  displayName?: string;
+  /** Defaults to true. */
+  enabled?: boolean;
+  /** Defaults to false: a broker-asserted email is not trusted by default. */
+  trustEmail?: boolean;
+  /** Defaults to false: provider tokens are not stored unless a host opts in. */
+  storeToken?: boolean;
+  /** Defaults to false. */
+  linkOnly?: boolean;
+  /** Defaults to false. */
+  hideOnLogin?: boolean;
+  firstBrokerLoginFlowAlias?: string;
+  postBrokerLoginFlowAlias?: string;
+  /**
+   * Non-secret Keycloak provider config (clientId, issuer, authorizationUrl,
+   * tokenUrl, jwksUrl, defaultScope, teamId, keyId, …). Emitted unchanged
+   * except that scalars become strings and `${env:VAR}` references are
+   * resolved. Secret-like keys (secret, password, privateKey, p8Key, token —
+   * case-insensitive substrings) are refused here; they belong in `secrets`.
+   */
+  config?: Record<string, string | number | boolean>;
+  /**
+   * Sensitive Keycloak config keys (e.g. `clientSecret`; for Apple, the raw
+   * `.p8` private-key content). In production every value must be a
+   * `${env:VAR}` reference whose variable is set; a literal fails generation.
+   */
+  secrets?: Record<string, string>;
+  /**
+   * Development-only literal secrets, taking precedence over `secrets` in
+   * development mode. Refused outright in production.
+   */
+  devSecrets?: Record<string, string>;
+  mappers?: AuthorizationIdentityProviderMapper[];
+}
+
 /** Nested Keycloak group tree; `path` in the export is `/parent/child`. */
 export interface AuthorizationGroupNode {
   name: string;
@@ -848,6 +915,11 @@ export interface AuthorizationConfigFile {
     realmRoles?: Record<string, AuthorizationRealmRole>;
     /** v2: clients to emit into realm-export.json. */
     clients?: AuthorizationClient[];
+    /**
+     * v2: external identity providers (social / corporate OIDC / SAML). Host
+     * authored and host owned; none is emitted unless listed here.
+     */
+    identityProviders?: AuthorizationIdentityProvider[];
   };
 
   /** v2 top-level realm roles (preferred over keycloak.realmRoles). */

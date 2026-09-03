@@ -15,7 +15,7 @@ Endpoints (`src/roles/api.ts`):
 | `GET /api/rest/openapi.json` | Generated OpenAPI 3.1 spec for the REST surface |
 | `POST /api/documents` | Atomically create a document and its first immutable version |
 | `POST /api/documents/:documentId/versions` | Atomically append a version and advance `currentVersion` |
-| `GET /api/health`, `/api/ready`, `/api/graphql/health` | liveness/readiness |
+| `GET /api/health`, `/api/ready`, `/api/metrics` | liveness, readiness, and metrics |
 
 On startup (`onReady`) the API compares the database's applied
 generated-schema checksum with the bundled manifest — see

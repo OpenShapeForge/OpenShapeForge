@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { describe, expect, test } from "bun:test";
+import { Readable } from "node:stream";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import Fastify from "fastify";
 import {
   DummyDriver,
   Kysely,
@@ -10,6 +13,7 @@ import {
 } from "kysely";
 import type { DB } from "../generated/db/types.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
+import { __resetSessionResolverForTests } from "../auth/identity.js";
 import type {
   McpInvocationContext,
   ModuleInvocationSource,
@@ -20,7 +24,8 @@ import {
   ModulePlatformRuntime,
   type ModuleMcpServerBinding,
 } from "../modules/platform.js";
-import { bindOperationHandlers, invokeOperation, operationRestInput, requireOperationAuthorization, type OperationContract } from "./runtime.js";
+import { HttpError } from "../rest/http-error.js";
+import { bindOperationHandlers, invokeOperation, operationRestInput, registerOperationRestRoutes, requireOperationAuthorization, type OperationContract } from "./runtime.js";
 
 const session = {
   tenantId: "tenant-a",
@@ -39,6 +44,54 @@ const testDatabase = () => new Kysely<DB>({
     createQueryCompiler: () => new PostgresQueryCompiler(),
   },
 });
+
+const restAliasOperation: OperationContract = {
+  key: "demo.quote.publish",
+  plugin: "demo",
+  title: "Publish quote",
+  description: "Publishes a quote.",
+  handler: "publishQuote",
+  inputSchema: {
+    type: "object",
+    required: ["quoteId", "idempotencyKey"],
+    properties: {
+      quoteId: { type: "string" },
+      idempotencyKey: { type: "string" },
+      outcome: { type: "string", enum: ["ok", "conflict"] },
+    },
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: "object",
+    required: ["quoteId", "idempotencyKey", "tenantId", "userId"],
+    properties: {
+      quoteId: { type: "string" },
+      idempotencyKey: { type: "string" },
+      tenantId: { type: "string" },
+      userId: { type: "string" },
+    },
+    additionalProperties: false,
+  },
+  errors: [{ status: 409, code: "CONFLICT", description: "Quote conflicts." }],
+  auth: { mode: "session", roles: ["quote-publisher"] },
+  tenancy: { mode: "required" },
+  idempotency: {
+    mode: "idempotency-key",
+    header: "Idempotency-Key",
+    inputField: "idempotencyKey",
+  },
+  transports: {
+    rest: {
+      method: "POST",
+      path: "/api/demo/quotes/:quoteId/publish",
+      aliases: ["/api/legacy/quotes/:quoteId/publish"],
+      response: { status: 202, kind: "json" },
+    },
+    mcp: { enabled: false, reason: "REST transport test." },
+    graphql: { enabled: false, reason: "REST transport test." },
+    typescript: { enabled: false, reason: "REST transport test." },
+  },
+};
 
 describe("canonical operation runtime", () => {
   test("fails closed when the compiler contract has no runtime handler", () => {
@@ -351,6 +404,208 @@ describe("canonical operation runtime", () => {
     }];
     expect(bindOperationHandlers(modules)).toBe(bindOperationHandlers(modules));
   });
+});
+
+test("REST aliases preserve authorization, tenancy, idempotency, input, output, and errors", async () => {
+  const previousSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+  const secret = "operation-alias-test-context-secret";
+  process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = secret;
+  __resetSessionResolverForTests();
+  const observations: unknown[] = [];
+  const module: RuntimeModule = {
+    name: "demo",
+    operationHandlers: {
+      publishQuote: async (input, context) => {
+        observations.push({ input, session: context.session, transport: context.transport });
+        if (input.outcome === "conflict") {
+          throw new HttpError(409, "CONFLICT", "Quote conflicts.");
+        }
+        return {
+          status: 202,
+          headers: { "x-operation-handler": "publishQuote" },
+          value: {
+            quoteId: input.quoteId,
+            idempotencyKey: input.idempotencyKey,
+            tenantId: context.session!.tenantId,
+            userId: context.session!.userId,
+          },
+        };
+      },
+    },
+  };
+  const app = Fastify();
+  registerOperationRestRoutes(app, [module], {}, [restAliasOperation]);
+  const paths = [
+    "/api/demo/quotes/quote-1/publish",
+    "/api/legacy/quotes/quote-1/publish",
+  ];
+  try {
+    for (const path of paths) {
+      expect((await app.inject({ method: "POST", url: path, payload: {} })).statusCode)
+        .toBe(401);
+    }
+
+    const wrongRole = new Headers({ "content-type": "application/json" });
+    applyTrustedContextHeaders(wrongRole, {
+      tenantId: "tenant-a",
+      userId: "user-a",
+      roles: ["reader"],
+      groups: [],
+    }, { secret });
+    for (const path of paths) {
+      expect((await app.inject({
+        method: "POST",
+        url: path,
+        headers: Object.fromEntries(wrongRole),
+        payload: {},
+      })).statusCode).toBe(403);
+    }
+
+    const authorized = new Headers({ "content-type": "application/json" });
+    applyTrustedContextHeaders(authorized, {
+      tenantId: "tenant-a",
+      userId: "user-a",
+      roles: ["quote-publisher"],
+      groups: ["/sales"],
+    }, { secret });
+    const successfulBodies: unknown[] = [];
+    for (const path of paths) {
+      const response = await app.inject({
+        method: "POST",
+        url: path,
+        headers: {
+          ...Object.fromEntries(authorized),
+          "idempotency-key": "request-1",
+        },
+        payload: { outcome: "ok" },
+      });
+      expect(response.statusCode).toBe(202);
+      expect(response.headers["x-operation-handler"]).toBe("publishQuote");
+      successfulBodies.push(response.json());
+    }
+    expect(successfulBodies[1]).toEqual(successfulBodies[0]);
+    expect(observations).toHaveLength(2);
+    expect(observations[1]).toEqual(observations[0]);
+
+    for (const path of paths) {
+      const conflict = await app.inject({
+        method: "POST",
+        url: path,
+        headers: {
+          ...Object.fromEntries(authorized),
+          "idempotency-key": "request-2",
+        },
+        payload: { outcome: "conflict" },
+      });
+      expect(conflict.statusCode).toBe(409);
+      expect(conflict.json() as unknown).toEqual({
+        error: { code: "CONFLICT", message: "Quote conflicts." },
+      });
+    }
+
+    for (const path of paths) {
+      const duplicated = await app.inject({
+        method: "POST",
+        url: path,
+        headers: {
+          ...Object.fromEntries(authorized),
+          "idempotency-key": "request-3",
+        },
+        payload: { idempotencyKey: "body-value" },
+      });
+      expect(duplicated.statusCode).toBe(400);
+    }
+  } finally {
+    await app.close();
+    if (previousSecret === undefined) {
+      delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+    } else {
+      process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = previousSecret;
+    }
+    __resetSessionResolverForTests();
+  }
+});
+
+test("binary and stream responses pass through REST aliases without buffering changes", async () => {
+  const base = (input: {
+    key: string;
+    handler: string;
+    path: string;
+    alias: string;
+    kind: "binary" | "stream";
+    contentType: string;
+  }): OperationContract => ({
+    key: input.key,
+    plugin: "media",
+    title: "Read artifact",
+    description: "Reads an artifact.",
+    handler: input.handler,
+    inputSchema: {
+      type: "object",
+      required: ["artifactId"],
+      properties: { artifactId: { type: "string" } },
+      additionalProperties: false,
+    },
+    outputSchema: {},
+    errors: [],
+    auth: { mode: "public" },
+    tenancy: { mode: "none" },
+    idempotency: { mode: "none" },
+    transports: {
+      rest: {
+        method: "GET",
+        path: input.path,
+        aliases: [input.alias],
+        response: { status: 200, kind: input.kind, contentType: input.contentType },
+      },
+      mcp: { enabled: false, reason: "Binary fixture." },
+      graphql: { enabled: false, reason: "Binary fixture." },
+      typescript: { enabled: false, reason: "Binary fixture." },
+    },
+  });
+  const operations = [
+    base({
+      key: "media.artifact.binary",
+      handler: "binaryArtifact",
+      path: "/api/media/binary/:artifactId",
+      alias: "/api/legacy/binary/:artifactId",
+      kind: "binary",
+      contentType: "application/octet-stream",
+    }),
+    base({
+      key: "media.artifact.stream",
+      handler: "streamArtifact",
+      path: "/api/media/stream/:artifactId",
+      alias: "/api/legacy/stream/:artifactId",
+      kind: "stream",
+      contentType: "text/plain",
+    }),
+  ];
+  const module: RuntimeModule = {
+    name: "media",
+    operationHandlers: {
+      binaryArtifact: async () => ({ value: Buffer.from([0, 1, 2, 255]) }),
+      streamArtifact: async () => ({ value: Readable.from(["one", "-two"]) }),
+    },
+  };
+  const app = Fastify();
+  registerOperationRestRoutes(app, [module], {}, operations);
+  try {
+    for (const path of ["/api/media/binary/id", "/api/legacy/binary/id"]) {
+      const response = await app.inject({ method: "GET", url: path });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["content-type"]).toContain("application/octet-stream");
+      expect([...response.rawPayload]).toEqual([0, 1, 2, 255]);
+    }
+    for (const path of ["/api/media/stream/id", "/api/legacy/stream/id"]) {
+      const response = await app.inject({ method: "GET", url: path });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers["content-type"]).toContain("text/plain");
+      expect(response.body).toBe("one-two");
+    }
+  } finally {
+    await app.close();
+  }
 });
 
 test("REST maps a required idempotency header into canonical input only", () => {

@@ -2,7 +2,7 @@
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { GraphQLError } from "graphql";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import rawCatalog from "../generated/operations/catalog.json" with { type: "json" };
 import { resolveSessionContext } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
@@ -34,7 +34,7 @@ export type OperationContract = {
   tenancy: { mode: "required" | "derived" | "none"; description?: string };
   idempotency: { mode: "none" | "intrinsic" | "idempotency-key"; header?: string; inputField?: string; description?: string };
   transports: {
-    rest: { method: string; path: string; response: { status?: number; kind: "json" | "binary" | "stream"; contentType?: string } };
+    rest: { method: string; path: string; aliases?: string[]; response: { status?: number; kind: "json" | "binary" | "stream"; contentType?: string } };
     mcp: { enabled: boolean; name?: string; reason?: string };
     graphql: { enabled: boolean; kind?: "query" | "mutation"; field?: string; reason?: string };
     typescript: { enabled: boolean; functionName?: string; reason?: string };
@@ -51,12 +51,28 @@ function operationAjv(coerceTypes = false) {
 const ajv = operationAjv();
 const queryAjv = operationAjv(true);
 const queryValidators = new WeakMap<OperationContract, ValidateFunction>();
-const validators = new Map<string, { input: ValidateFunction; output: ValidateFunction }>(
-  catalog.operations.map((operation) => [
-    operation.key,
-    { input: ajv.compile(operation.inputSchema), output: ajv.compile(operation.outputSchema) },
-  ]),
-);
+const validators = new WeakMap<OperationContract, {
+  input: ValidateFunction;
+  output: ValidateFunction;
+}>();
+for (const operation of catalog.operations) {
+  validators.set(operation, {
+    input: ajv.compile(operation.inputSchema),
+    output: ajv.compile(operation.outputSchema),
+  });
+}
+
+function validatorsFor(operation: OperationContract) {
+  let validation = validators.get(operation);
+  if (!validation) {
+    validation = {
+      input: ajv.compile(operation.inputSchema),
+      output: ajv.compile(operation.outputSchema),
+    };
+    validators.set(operation, validation);
+  }
+  return validation;
+}
 
 export function listOperationContracts(): readonly OperationContract[] {
   return catalog.operations;
@@ -65,12 +81,16 @@ export function listOperationContracts(): readonly OperationContract[] {
 type Bound = { operation: OperationContract; handler: ModuleOperationHandler };
 const bindingCache = new WeakMap<readonly RuntimeModule[], Map<string, Bound>>();
 
-export function bindOperationHandlers(modules: readonly RuntimeModule[]): Map<string, Bound> {
-  const cached = bindingCache.get(modules);
+export function bindOperationHandlers(
+  modules: readonly RuntimeModule[],
+  operations: readonly OperationContract[] = catalog.operations,
+): Map<string, Bound> {
+  const usesGeneratedCatalog = operations === catalog.operations;
+  const cached = usesGeneratedCatalog ? bindingCache.get(modules) : undefined;
   if (cached) return cached;
   const modulesByName = new Map(modules.map((module) => [module.name, module]));
   const bound = new Map<string, Bound>();
-  for (const operation of catalog.operations) {
+  for (const operation of operations) {
     const module = modulesByName.get(operation.plugin);
     if (!module) {
       throw new Error(`Canonical operation "${operation.key}" has no loaded runtime module "${operation.plugin}".`);
@@ -82,13 +102,13 @@ export function bindOperationHandlers(modules: readonly RuntimeModule[]): Map<st
     bound.set(operation.key, { operation, handler });
   }
   for (const module of modules) {
-    const declared = new Set(catalog.operations.filter((operation) => operation.plugin === module.name).map((operation) => operation.handler));
+    const declared = new Set(operations.filter((operation) => operation.plugin === module.name).map((operation) => operation.handler));
     const extras = Object.keys(module.operationHandlers ?? {}).filter((handler) => !declared.has(handler));
     if (extras.length > 0) {
       throw new Error(`Runtime module "${module.name}" has operation handlers absent from its compiler contract: ${extras.sort().join(", ")}.`);
     }
   }
-  bindingCache.set(modules, bound);
+  if (usesGeneratedCatalog) bindingCache.set(modules, bound);
   return bound;
 }
 
@@ -132,7 +152,7 @@ export async function invokeOperation(
   const input = asInput(inputValue);
   const run = async (activeContext: Parameters<ModuleOperationHandler>[1]) => {
     requireOperationAuthorization(bound.operation, activeContext.session);
-    const validation = validators.get(bound.operation.key)!;
+    const validation = validatorsFor(bound.operation);
     if (!validation.input(input)) {
       throw new HttpError(400, "BAD_USER_INPUT", "Operation input does not match its canonical schema.");
     }
@@ -234,35 +254,42 @@ export function registerOperationRestRoutes(
   app: FastifyInstance,
   modules: readonly RuntimeModule[],
   context: ModuleRuntimeContext,
+  operations: readonly OperationContract[] = catalog.operations,
 ): void {
-  const bound = bindOperationHandlers(modules);
+  const bound = bindOperationHandlers(modules, operations);
   for (const entry of bound.values()) {
-    app.route({
-      method: entry.operation.transports.rest.method as "GET",
-      url: entry.operation.transports.rest.path,
-      handler: async (request, reply) => {
-        try {
-          const session = entry.operation.auth.mode === "custom"
-            ? undefined
-            : await resolveSessionContext(headersFromFastify(request.headers), { db: context.db });
-          const result = await invokeOperation(entry, operationRestInput(request, entry.operation), {
-            ...context,
-            transport: "rest",
-            ...(session ? { session } : {}),
-            request,
-            reply,
-          });
-          for (const [name, value] of Object.entries(result.headers ?? {})) reply.header(name, value);
-          if (result.contentType ?? entry.operation.transports.rest.response.contentType) {
-            reply.type(result.contentType ?? entry.operation.transports.rest.response.contentType!);
-          }
-          return reply.status(result.status ?? entry.operation.transports.rest.response.status ?? 200).send(result.value);
-        } catch (error) {
-          const { status, body } = toHttpError(error);
-          return reply.status(status).send(body);
+    const handler = async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const session = entry.operation.auth.mode === "custom"
+          ? undefined
+          : await resolveSessionContext(headersFromFastify(request.headers), { db: context.db });
+        const result = await invokeOperation(entry, operationRestInput(request, entry.operation), {
+          ...context,
+          transport: "rest",
+          ...(session ? { session } : {}),
+          request,
+          reply,
+        });
+        for (const [name, value] of Object.entries(result.headers ?? {})) reply.header(name, value);
+        if (result.contentType ?? entry.operation.transports.rest.response.contentType) {
+          reply.type(result.contentType ?? entry.operation.transports.rest.response.contentType!);
         }
-      },
-    });
+        return reply.status(result.status ?? entry.operation.transports.rest.response.status ?? 200).send(result.value);
+      } catch (error) {
+        const { status, body } = toHttpError(error);
+        return reply.status(status).send(body);
+      }
+    };
+    for (const path of [
+      entry.operation.transports.rest.path,
+      ...(entry.operation.transports.rest.aliases ?? []),
+    ]) {
+      app.route({
+        method: entry.operation.transports.rest.method as "GET",
+        url: path,
+        handler,
+      });
+    }
   }
 }
 

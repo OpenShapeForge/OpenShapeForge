@@ -60,6 +60,17 @@ For `idempotency-key` operations, the canonical input field is required on all
 transports. REST clients supply it only through the declared required header;
 the runtime injects that header into canonical input before validation.
 
+An operation may declare `transports.rest.aliases` when established HTTP
+clients cannot move to its canonical `/api/<plugin>/...` path immediately.
+Aliases are safe absolute `/api/...` paths with exactly the canonical path
+parameter names. They register the same handler and therefore cannot vary
+authorization, tenancy, idempotency, input, output, errors, or binary/stream
+handling. Generation rejects method/path-shape collisions with core routes,
+generated CRUD, canonical operations, and every other alias. A collision-free
+nested path beneath a core namespace is allowed, but a plugin cannot claim the
+namespace root. OpenAPI marks aliases deprecated and links each one back to the
+canonical operation; MCP, GraphQL, and TypeScript still project one operation.
+
 ## The compiler half
 
 ### The contract

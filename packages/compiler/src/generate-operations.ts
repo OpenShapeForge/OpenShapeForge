@@ -242,16 +242,17 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
       throw new Error(`${where} REST path parameter "${parameter}" must be a required inputSchema property.`);
     }
   }
-  const statuses = new Set<number>();
+  const errorKeys = new Set<string>();
   for (const error of operation.errors) {
     if (!Number.isInteger(error.status) || error.status < 400 || error.status > 599) {
       throw new Error(`${where} error status must be an integer from 400 through 599.`);
     }
-    if (statuses.has(error.status)) {
-      throw new Error(`${where} declares duplicate error status ${error.status}.`);
-    }
-    statuses.add(error.status);
     nonEmpty(error.code, `${where} error code`);
+    const errorKey = JSON.stringify([error.status, error.code]);
+    if (errorKeys.has(errorKey)) {
+      throw new Error(`${where} declares duplicate error status ${error.status} and code "${error.code}".`);
+    }
+    errorKeys.add(errorKey);
     nonEmpty(error.description, `${where} error description`);
     if (error.schema) assertSchema(ajv, error.schema, `${where} error ${error.code} schema`);
     if (error.rest) {
@@ -541,6 +542,96 @@ export function assertOperationRuntimeModules(
   }
 }
 
+type OperationError = PluginOperationContract["errors"][number];
+
+function operationErrorContentType(error: OperationError): string {
+  return error.rest?.contentType ?? "application/json";
+}
+
+function singleOperationErrorMedia(error: OperationError): Record<string, unknown> {
+  return {
+    schema: error.schema ?? { $ref: "#/components/schemas/Error" },
+    ...(error.rest && Object.hasOwn(error.rest, "body")
+      ? { example: error.rest.body }
+      : {}),
+  };
+}
+
+function sharedOperationErrorSchema(error: OperationError): Record<string, unknown> {
+  return {
+    title: error.code,
+    description: error.description,
+    allOf: [
+      error.schema ?? { $ref: "#/components/schemas/Error" },
+      ...(!error.schema
+        ? [{
+            type: "object",
+            required: ["error"],
+            properties: {
+              error: {
+                type: "object",
+                required: ["code"],
+                properties: { code: { const: error.code } },
+              },
+            },
+          }]
+        : []),
+    ],
+  };
+}
+
+function sharedOperationErrorMedia(errors: readonly OperationError[]): Record<string, unknown> {
+  if (errors.length === 1) return singleOperationErrorMedia(errors[0]!);
+  const schemas = errors.map(sharedOperationErrorSchema);
+  const fixed = errors.filter((error) => error.rest && Object.hasOwn(error.rest, "body"));
+  return {
+    schema: errors.every((error) => !error.schema)
+      ? { oneOf: schemas }
+      : { anyOf: schemas },
+    ...(fixed.length > 0
+      ? {
+          examples: Object.fromEntries(fixed.map((error) => [
+            error.code,
+            { summary: error.description, value: error.rest!.body },
+          ])),
+        }
+      : {}),
+  };
+}
+
+function operationErrorResponse(errors: readonly OperationError[]): Record<string, unknown> {
+  if (errors.length === 1) {
+    const error = errors[0]!;
+    return {
+      description: error.description,
+      content: {
+        [operationErrorContentType(error)]: singleOperationErrorMedia(error),
+      },
+    };
+  }
+  const sorted = [...errors].sort((left, right) =>
+    left.code < right.code ? -1 : left.code > right.code ? 1 : 0
+  );
+  const byContentType = new Map<string, OperationError[]>();
+  for (const error of sorted) {
+    const contentType = operationErrorContentType(error);
+    const mediaErrors = byContentType.get(contentType) ?? [];
+    mediaErrors.push(error);
+    byContentType.set(contentType, mediaErrors);
+  }
+  return {
+    description: sorted.map((error) => `${error.code}: ${error.description}`).join("\n\n"),
+    content: Object.fromEntries(
+      [...byContentType.entries()]
+        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+        .map(([contentType, mediaErrors]) => [
+          contentType,
+          sharedOperationErrorMedia(mediaErrors),
+        ]),
+    ),
+  };
+}
+
 export function operationOpenApiPaths(
   operations: readonly CompiledPluginOperation[],
   sessionSecuritySchemes: readonly string[] = ["bearerAuth"],
@@ -558,18 +649,14 @@ export function operationOpenApiPaths(
         },
       },
     };
+    const errorsByStatus = new Map<number, OperationError[]>();
     for (const error of operation.errors) {
-      responses[String(error.status)] = {
-        description: error.description,
-        content: {
-          [error.rest?.contentType ?? "application/json"]: {
-            schema: error.schema ?? { $ref: "#/components/schemas/Error" },
-            ...(error.rest && Object.hasOwn(error.rest, "body")
-              ? { example: error.rest.body }
-              : {}),
-          },
-        },
-      };
+      const statusErrors = errorsByStatus.get(error.status) ?? [];
+      statusErrors.push(error);
+      errorsByStatus.set(error.status, statusErrors);
+    }
+    for (const [status, errors] of errorsByStatus) {
+      responses[String(status)] = operationErrorResponse(errors);
     }
     const inputProperties = operation.inputSchema.properties as Record<string, unknown> | undefined;
     const required = new Set(Array.isArray(operation.inputSchema.required) ? operation.inputSchema.required as string[] : []);

@@ -524,6 +524,65 @@ describe("canonical operation runtime", () => {
     });
   });
 
+  test("selects the matching schema when error codes share an HTTP status", async () => {
+    const alternateBody = {
+      error: "locked",
+      retryAfterSeconds: 30,
+    };
+    const operation: OperationContract = {
+      ...declaredErrorOperation,
+      errors: [
+        ...declaredErrorOperation.errors,
+        {
+          status: 409,
+          code: "LOCKED",
+          description: "Order submission is locked.",
+          schema: {
+            type: "object",
+            required: ["error", "retryAfterSeconds"],
+            properties: {
+              error: { const: "locked" },
+              retryAfterSeconds: { type: "integer", minimum: 1 },
+            },
+            additionalProperties: false,
+          },
+        },
+      ],
+    };
+    const invoke = (result: ModuleOperationResult) => {
+      const bound = bindOperationHandlers([{
+        name: "demo",
+        operationHandlers: { submitOrder: () => result },
+      }], [operation]).get(operation.key)!;
+      return invokeOperation(bound, {}, { transport: "rest" });
+    };
+
+    await expect(invoke(declaredConflict)).rejects.toMatchObject({
+      status: 409,
+      code: "CONFLICT",
+      body: declaredConflict.body,
+    });
+    await expect(invoke({
+      ok: false,
+      status: 409,
+      code: "LOCKED",
+      body: alternateBody,
+    })).rejects.toMatchObject({
+      status: 409,
+      code: "LOCKED",
+      body: alternateBody,
+    });
+    await expect(invoke({
+      ok: false,
+      status: 409,
+      code: "LOCKED",
+      body: declaredConflict.body,
+    })).rejects.toMatchObject({
+      status: 500,
+      code: "HANDLER_CONTRACT_VIOLATION",
+    });
+  });
+
   test("requires the standard matching-code envelope when an error schema is omitted", async () => {
     const operation: OperationContract = {
       ...declaredErrorOperation,
@@ -764,7 +823,7 @@ test("REST JSON-encodes scalar declared errors under the default advertised medi
   }
 });
 
-test("REST applies declared fixed representations to matching core authorization errors", async () => {
+test("REST applies the exact status-and-code fixed representation to core authorization errors", async () => {
   const errorSchema = (value: string) => ({
     type: "object",
     required: ["error"],
@@ -789,6 +848,13 @@ test("REST applies declared fixed representations to matching core authorization
         description: "The required role is missing.",
         schema: errorSchema("forbidden"),
         rest: { body: { error: "forbidden" } },
+      },
+      {
+        status: 503,
+        code: "SERVICE_UNAVAILABLE",
+        description: "The service is unavailable.",
+        schema: errorSchema("service_unavailable"),
+        rest: { body: { error: "service_unavailable" } },
       },
       {
         status: 503,

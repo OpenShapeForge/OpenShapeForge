@@ -190,6 +190,190 @@ describe("first-class plugin operations", () => {
     }
   });
 
+  test("documents multiple error codes at one status without changing single-error output", () => {
+    const single = operationOpenApiPaths(
+      collectPluginOperations([{ name: "demo", operations: [operation] }], context),
+    ) as Record<string, Record<string, any>>;
+    expect(JSON.stringify(single["/api/demo/quotes/{quoteId}/publish"]!.post.responses["409"]))
+      .toBe(
+        '{"description":"Quote is not publishable","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Error"}}}}',
+      );
+
+    const errors = [
+      {
+        status: 503,
+        code: "SERVICE_UNAVAILABLE",
+        description: "The service is temporarily unavailable.",
+      },
+      {
+        status: 503,
+        code: "AUTHENTICATION_UNAVAILABLE",
+        description: "Authentication is temporarily unavailable.",
+      },
+    ];
+    const shared = (declaredErrors: typeof errors) => {
+      const compiled = collectPluginOperations([{ name: "demo", operations: [{
+        ...operation,
+        errors: declaredErrors,
+      }] }], context);
+      const paths = operationOpenApiPaths(compiled) as Record<string, Record<string, any>>;
+      return paths["/api/demo/quotes/{quoteId}/publish"]!.post.responses["503"];
+    };
+    const response = shared(errors);
+    expect(response).toEqual({
+      description:
+        "AUTHENTICATION_UNAVAILABLE: Authentication is temporarily unavailable.\n\n" +
+        "SERVICE_UNAVAILABLE: The service is temporarily unavailable.",
+      content: {
+        "application/json": {
+          schema: {
+            oneOf: [
+              {
+                title: "AUTHENTICATION_UNAVAILABLE",
+                description: "Authentication is temporarily unavailable.",
+                allOf: [
+                  { $ref: "#/components/schemas/Error" },
+                  {
+                    type: "object",
+                    required: ["error"],
+                    properties: {
+                      error: {
+                        type: "object",
+                        required: ["code"],
+                        properties: { code: { const: "AUTHENTICATION_UNAVAILABLE" } },
+                      },
+                    },
+                  },
+                ],
+              },
+              {
+                title: "SERVICE_UNAVAILABLE",
+                description: "The service is temporarily unavailable.",
+                allOf: [
+                  { $ref: "#/components/schemas/Error" },
+                  {
+                    type: "object",
+                    required: ["error"],
+                    properties: {
+                      error: {
+                        type: "object",
+                        required: ["code"],
+                        properties: { code: { const: "SERVICE_UNAVAILABLE" } },
+                      },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(shared([...errors].reverse()))).toBe(JSON.stringify(response));
+  });
+
+  test("keeps shared-status schemas, fixed examples, and JSON media types honest", () => {
+    const problemSchema = (value: string) => ({
+      type: "object",
+      required: ["error"],
+      properties: { error: { const: value } },
+      additionalProperties: false,
+    });
+    const errors: PluginOperationContract["errors"] = [
+      {
+        status: 503,
+        code: "SECONDARY_UNAVAILABLE",
+        description: "The secondary dependency is unavailable.",
+        schema: problemSchema("secondary_unavailable"),
+        rest: {
+          body: { error: "secondary_unavailable" },
+          contentType: "application/problem+json",
+        },
+      },
+      {
+        status: 503,
+        code: "PRIMARY_UNAVAILABLE",
+        description: "The primary dependency is unavailable.",
+        schema: problemSchema("primary_unavailable"),
+        rest: {
+          body: { error: "primary_unavailable" },
+          contentType: "application/problem+json",
+        },
+      },
+      {
+        status: 503,
+        code: "VENDOR_UNAVAILABLE",
+        description: "The external dependency is unavailable.",
+        schema: problemSchema("vendor_unavailable"),
+        rest: {
+          body: { error: "vendor_unavailable" },
+          contentType: "application/vnd.example.error+json",
+        },
+      },
+    ];
+    const compiled = collectPluginOperations([{ name: "demo", operations: [{
+      ...operation,
+      errors,
+    }] }], context);
+    const paths = operationOpenApiPaths(compiled) as Record<string, Record<string, any>>;
+    const response = paths["/api/demo/quotes/{quoteId}/publish"]!.post.responses["503"];
+
+    expect(Object.keys(response.content)).toEqual([
+      "application/problem+json",
+      "application/vnd.example.error+json",
+    ]);
+    expect(response.content["application/problem+json"]).toEqual({
+      schema: {
+        anyOf: [
+          {
+            title: "PRIMARY_UNAVAILABLE",
+            description: "The primary dependency is unavailable.",
+            allOf: [errors[1]!.schema],
+          },
+          {
+            title: "SECONDARY_UNAVAILABLE",
+            description: "The secondary dependency is unavailable.",
+            allOf: [errors[0]!.schema],
+          },
+        ],
+      },
+      examples: {
+        PRIMARY_UNAVAILABLE: {
+          summary: "The primary dependency is unavailable.",
+          value: { error: "primary_unavailable" },
+        },
+        SECONDARY_UNAVAILABLE: {
+          summary: "The secondary dependency is unavailable.",
+          value: { error: "secondary_unavailable" },
+        },
+      },
+    });
+    expect(response.content["application/vnd.example.error+json"]).toEqual({
+      schema: errors[2]!.schema,
+      example: { error: "vendor_unavailable" },
+    });
+  });
+
+  test("rejects duplicate status and code pairs while allowing either value to differ", () => {
+    const duplicate = {
+      status: 503,
+      code: "SERVICE_UNAVAILABLE",
+      description: "The service is temporarily unavailable.",
+    };
+    expect(() => collectPluginOperations([{ name: "demo", operations: [{
+      ...operation,
+      errors: [duplicate, { ...duplicate, rest: { contentType: "application/problem+json" } }],
+    }] }], context)).toThrow(/duplicate error status 503 and code "SERVICE_UNAVAILABLE"/);
+    expect(() => collectPluginOperations([{ name: "demo", operations: [{
+      ...operation,
+      errors: [duplicate, { ...duplicate, status: 502 }],
+    }] }], context)).not.toThrow();
+    expect(() => collectPluginOperations([{ name: "demo", operations: [{
+      ...operation,
+      errors: [duplicate, { ...duplicate, code: "AUTHENTICATION_UNAVAILABLE" }],
+    }] }], context)).not.toThrow();
+  });
+
   test("projects session operations onto bearer and configured OAuth security schemes", () => {
     const collected = collectPluginOperations([{ name: "demo", operations: [operation] }], context);
     const paths = operationOpenApiPaths(collected, ["bearerAuth", "oauth2Auth"]) as Record<

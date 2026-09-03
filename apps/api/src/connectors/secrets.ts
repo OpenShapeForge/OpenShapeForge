@@ -30,22 +30,21 @@ export {
  */
 export const SECRET_SET_SENTINEL = "__set__";
 
-function looksLikeStoredSecret(value: unknown): value is {
-  ciphertext: string;
-  keyId: string;
-} {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as { ciphertext?: unknown }).ciphertext === "string" &&
-    typeof (value as { keyId?: unknown }).keyId === "string"
-  );
+function looksLikeStoredSecret(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Record<string, unknown>;
+  const has = (key: string) => Object.prototype.hasOwnProperty.call(candidate, key);
+  return has("ciphertext") || (has("keyId") && has("algorithm"));
 }
 
 /**
- * Replace encrypted elicited values with the existing set marker while
- * preserving ordinary sibling values. This is the single representation
- * used by every generated CRUD transport.
+ * Replace encrypted or suspiciously envelope-shaped elicited values with the
+ * existing set marker while preserving ordinary sibling values. Treat a
+ * partial envelope as secret too: returning malformed ciphertext or key
+ * metadata would turn storage corruption into a disclosure. This is the
+ * single representation used by every generated CRUD transport.
  */
 export function redactElicitedValues(
   row: Record<string, unknown>,

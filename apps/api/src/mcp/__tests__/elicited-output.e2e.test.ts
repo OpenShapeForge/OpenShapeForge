@@ -562,6 +562,92 @@ test.skipIf(remoteUrl)(
 );
 
 test.skipIf(remoteUrl)(
+  "malformed stored envelopes never cross create, get or list outputs",
+  async () => {
+    const ordinaryObject = {
+      algorithm: "round-robin",
+      retry: { attempts: 3 },
+    };
+    const created = await createGeneratedEntityAfterElicitation(
+      getRuntime().db,
+      tenantA,
+      {
+        table: table.name,
+        values: {
+          ...values(`malformed-${seed}`, false),
+          valueJson: {
+            endpoint: "https://example.test",
+            routing: ordinaryObject,
+            apiToken: {
+              ciphertext: "malformed-ciphertext-must-not-cross",
+              algorithm: "aes-256-gcm",
+            },
+          },
+        },
+        into: "valueJson",
+      },
+    );
+    const id = String(created.id);
+    track(id);
+
+    const directGet = await getGeneratedEntity(getRuntime().db, tenantA, {
+      table: table.name,
+      id,
+    });
+    const directList = await listGeneratedEntities(getRuntime().db, tenantA, {
+      table: table.name,
+      filter: { id },
+    });
+    const gqlGet = await expectData(
+      tenantA,
+      `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { valueJson } }`,
+      { id },
+    );
+    const gqlList = await expectData(
+      tenantA,
+      `query($filter: PreferenceFilter) {
+        ${graphql.listQueryName}(filter: $filter) { edges { node { valueJson } } }
+      }`,
+      { filter: { id } },
+    );
+    const restGet = await rest(tenantA, "GET", `${restBase}/${id}`);
+    const restList = await rest(tenantA, "GET", `${restBase}?id=${id}`);
+    const mcpGet = await callTool(tenantA, "elicited_output_test_get", { id });
+    const mcpList = await callTool(tenantA, "elicited_output_test_list", {
+      filter: { id },
+    });
+    const expected = {
+      endpoint: "https://example.test",
+      routing: ordinaryObject,
+      apiToken: SECRET_SET_SENTINEL,
+    };
+    const outputs = [
+      created.value_json,
+      directGet!.value_json,
+      directList.rows[0]!.value_json,
+      gqlGet[graphql.singleQueryName].valueJson,
+      gqlList[graphql.listQueryName].edges[0].node.valueJson,
+      restGet.body.valueJson,
+      restList.body.items[0].valueJson,
+      mcpGet.payload.valueJson,
+      mcpList.payload.items[0].valueJson,
+    ];
+    expect(outputs).toEqual(Array(outputs.length).fill(expected));
+    const serialized = JSON.stringify(outputs);
+    expect(serialized).not.toContain("malformed-ciphertext-must-not-cross");
+    expect(serialized).not.toContain("ciphertext");
+    expect(serialized).not.toContain("keyId");
+
+    const stored = (await storedValue(id)) as Record<string, unknown>;
+    expect(stored.routing).toEqual(ordinaryObject);
+    expect(stored.apiToken).toEqual({
+      ciphertext: "malformed-ciphertext-must-not-cross",
+      algorithm: "aes-256-gcm",
+    });
+  },
+);
+
+test.skipIf(remoteUrl)(
   "trusted JSONB merge replaces supplied tokens and preserves omitted siblings",
   async () => {
     const tokenDefinitions = [

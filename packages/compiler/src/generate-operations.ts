@@ -199,8 +199,12 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
   if (RESERVED_API_NAMESPACES.has(plugin)) {
     throw new Error(`${where} uses reserved API namespace "${plugin}".`);
   }
-  if (!REST_PATH.test(restPath) || !restPath.startsWith(`/api/${plugin}/`)) {
-    throw new Error(`${where} REST path must be a safe /api/${plugin}/ path.`);
+  const pluginRoot = `/api/${plugin}`;
+  if (!REST_PATH.test(restPath) ||
+      (restPath !== pluginRoot && !restPath.startsWith(`${pluginRoot}/`))) {
+    throw new Error(
+      `${where} REST path must be the safe plugin root "${pluginRoot}" or a nested ${pluginRoot}/ path.`,
+    );
   }
   const canonicalParameters = restPathParameters(restPath);
   const aliases = operation.transports.rest.aliases;

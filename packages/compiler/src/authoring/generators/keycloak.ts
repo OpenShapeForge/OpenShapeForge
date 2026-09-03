@@ -35,6 +35,10 @@
  *     realm carrying a checked-in literal secret fails generation. The rule is
  *     per-realm and mode-driven, so it fires for EVERY authored realm, not just
  *     the first one.
+ *   - external identity providers (`keycloak.identityProviders`) — the host
+ *     authors every provider, id, URL, scope and mapper; OSF emits them
+ *     unchanged and never adds one of its own. See buildIdentityProviders for
+ *     the (purely security) validations that can reject an entry.
  */
 // @ts-nocheck
 import type { CompiledEntityContract } from "../types/compiled.js";
@@ -42,6 +46,8 @@ import type {
   AuthorizationConfigFile,
   AuthorizationClient,
   AuthorizationGroupNode,
+  AuthorizationIdentityProvider,
+  AuthorizationIdentityProviderMapper,
   AuthorizationRealmConfig,
   AuthorizationRealmRole,
 } from "../types/authoring.js";
@@ -149,6 +155,27 @@ interface KeycloakClient {
   protocolMappers?: KeycloakProtocolMapper[];
 }
 
+interface KeycloakIdentityProvider {
+  alias: string;
+  displayName?: string;
+  providerId: string;
+  enabled: boolean;
+  trustEmail: boolean;
+  storeToken: boolean;
+  linkOnly: boolean;
+  hideOnLogin: boolean;
+  firstBrokerLoginFlowAlias?: string;
+  postBrokerLoginFlowAlias?: string;
+  config: Record<string, string>;
+}
+
+interface KeycloakIdentityProviderMapper {
+  name: string;
+  identityProviderAlias: string;
+  identityProviderMapper: string;
+  config: Record<string, string>;
+}
+
 interface KeycloakRealmExport {
   realm: string;
   displayName?: string;
@@ -172,6 +199,8 @@ interface KeycloakRealmExport {
   adminEventsEnabled?: boolean;
   eventsListeners?: string[];
   clients: KeycloakClient[];
+  identityProviders?: KeycloakIdentityProvider[];
+  identityProviderMappers?: KeycloakIdentityProviderMapper[];
   roles: {
     realm: KeycloakRole[];
     client: Record<string, KeycloakRole[]>;
@@ -502,6 +531,269 @@ function buildClient(
   }
 }
 
+// ---------------------------------------------------------------------------
+// External identity providers
+// ---------------------------------------------------------------------------
+
+/**
+ * Config keys whose VALUE is a credential and so must not sit in the plain
+ * `config` map. Matched on the key's name segments (camelCase, snake_case and
+ * kebab-case all split the same way), not on substrings: `tokenUrl` names an
+ * endpoint and `tokenExchangeAccountLinkingEnabled` names a switch, and both
+ * are legitimate non-secret Keycloak keys, whereas `clientSecret`, `token`,
+ * `accessToken`, `privateKey` and `p8Key` name the credential itself.
+ */
+const SECRET_LAST_SEGMENTS = new Set(["secret", "password", "token"]);
+const SECRET_SEGMENT_PAIRS: readonly [string, string][] = [
+  ["private", "key"],
+  ["p8", "key"],
+];
+
+function keyNameSegments(key: string): string[] {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.toLowerCase());
+}
+
+/** Exported for tests: is this a key that names a secret value? */
+export function isSecretLikeConfigKey(key: string): boolean {
+  const segments = keyNameSegments(key);
+  if (segments.length === 0) return false;
+  if (SECRET_LAST_SEGMENTS.has(segments[segments.length - 1])) return true;
+  for (let i = 0; i + 1 < segments.length; i++) {
+    for (const [first, second] of SECRET_SEGMENT_PAIRS) {
+      if (segments[i] === first && segments[i + 1] === second) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Config keys that carry an endpoint, issuer or metadata URL. Held to the
+ * production URL rule below. Anything ending in `Url`/`Uri`/`Endpoint` plus the
+ * OIDC `issuer`, which is also a URL by the discovery spec.
+ *
+ * Keycloak also has SWITCHES named after a URL — `useJwksUrl`,
+ * `validateSignature`-style booleans — so a key whose first segment is a
+ * verb-like prefix, or whose authored value is a YAML boolean, is a flag and
+ * not an endpoint.
+ */
+const SWITCH_PREFIXES = new Set(["use", "validate", "require", "enable", "disable", "is", "has", "should", "allow"]);
+
+function isEndpointConfigKey(key: string, raw: unknown): boolean {
+  if (typeof raw === "boolean") return false;
+  const segments = keyNameSegments(key);
+  if (SWITCH_PREFIXES.has(segments[0])) return false;
+  const last = segments[segments.length - 1];
+  return last === "url" || last === "uri" || last === "endpoint" || key === "issuer";
+}
+
+/**
+ * Production endpoint rule: an absolute https URL, no embedded credentials, no
+ * fragment. The validated value is emitted EXACTLY as authored — this only
+ * accepts or rejects, it never rewrites — so a host's dedicated provider
+ * endpoints survive byte-for-byte.
+ *
+ * Development is exempt: a local mock issuer runs over plain http.
+ */
+function assertProductionEndpoint(alias: string, key: string, value: string): void {
+  const reject = (why: string) => {
+    throw new Error(
+      `Identity provider "${alias}": config.${key} ${why} in production. ` +
+        "Endpoint, issuer and JWKS URLs must be absolute https URLs without embedded credentials or a fragment.",
+    );
+  };
+  if (value.trim() !== value || value.length === 0) reject("must be a non-empty URL without surrounding whitespace");
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    reject("is not an absolute URL");
+    return;
+  }
+  if (url.protocol !== "https:") reject(`uses ${url.protocol.replace(/:$/, "")}, not https`);
+  if (url.username !== "" || url.password !== "") reject("embeds credentials");
+  if (value.includes("#")) reject("carries a fragment");
+}
+
+function assertNonBlank(what: string, value: unknown): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`${what} must be a non-blank string.`);
+  }
+  return value;
+}
+
+/**
+ * Keycloak's representation stores every config value as a string. Authors
+ * may write YAML booleans and numbers (`useJwksUrl: true`); this is the ONLY
+ * transformation applied to a config value besides env-ref resolution.
+ */
+function normalizeConfigScalar(alias: string, key: string, value: unknown): string {
+  switch (typeof value) {
+    case "string":
+      return value;
+    case "boolean":
+    case "number":
+      return String(value);
+    default:
+      throw new Error(
+        `Identity provider "${alias}": config.${key} must be a string, number or boolean.`,
+      );
+  }
+}
+
+function buildIdentityProviderConfig(
+  def: AuthorizationIdentityProvider,
+  dev: boolean,
+): Record<string, string> {
+  const alias = def.alias;
+  const out: Record<string, string> = {};
+
+  for (const [key, raw] of Object.entries(def.config ?? {})) {
+    assertNonBlank(`Identity provider "${alias}": a config key`, key);
+    if (isSecretLikeConfigKey(key)) {
+      throw new Error(
+        `Identity provider "${alias}": config.${key} looks like a credential. ` +
+          "Move it to `secrets` (production: a ${env:VAR} reference) or `devSecrets` (development only).",
+      );
+    }
+    const scalar = normalizeConfigScalar(alias, key, raw);
+    const resolved =
+      resolveEnvRef(scalar, dev, `Identity provider "${alias}": config.${key}`) ?? scalar;
+    if (!dev && isEndpointConfigKey(key, raw)) {
+      assertProductionEndpoint(alias, key, resolved);
+    }
+    out[key] = resolved;
+  }
+
+  // Secrets. The precedence mirrors resolveClientSecret: development takes
+  // devSecrets FIRST so local work never needs a production variable, and
+  // production refuses devSecrets outright so a committed literal cannot ship.
+  const devSecrets = def.devSecrets ?? {};
+  const secrets = def.secrets ?? {};
+  if (!dev && Object.keys(devSecrets).length > 0) {
+    throw new Error(
+      `Identity provider "${alias}": devSecrets (${Object.keys(devSecrets).sort().join(", ")}) ` +
+        "are development-only, but the realm is not a development realm. Supply `secrets` as ${env:VAR} references instead.",
+    );
+  }
+  for (const key of [...Object.keys(secrets), ...Object.keys(devSecrets)]) {
+    if (key in out) {
+      throw new Error(
+        `Identity provider "${alias}": "${key}" is authored in both config and secrets/devSecrets. Keep it in one place.`,
+      );
+    }
+  }
+  for (const [key, raw] of Object.entries(secrets)) {
+    assertNonBlank(`Identity provider "${alias}": a secrets key`, key);
+    if (dev && devSecrets[key] !== undefined) continue;
+    const what = `Identity provider "${alias}": secrets.${key}`;
+    // Error messages name the key only. resolveEnvRef reports the VARIABLE
+    // name, never its value, so nothing below can leak a resolved secret.
+    assertNonBlank(what, raw);
+    const resolved = resolveEnvRef(raw, dev, what);
+    if (resolved !== undefined) {
+      out[key] = resolved;
+      continue;
+    }
+    if (!dev) {
+      throw new Error(
+        `${what}: a literal secret is committed for a non-dev realm. Use a \${env:VAR} reference resolved at generate/deploy time instead.`,
+      );
+    }
+    out[key] = raw;
+  }
+  for (const [key, raw] of Object.entries(devSecrets)) {
+    assertNonBlank(`Identity provider "${alias}": a devSecrets key`, key);
+    assertNonBlank(`Identity provider "${alias}": devSecrets.${key}`, raw);
+    out[key] = raw;
+  }
+
+  return out;
+}
+
+function buildIdentityProviderMappers(
+  def: AuthorizationIdentityProvider,
+): KeycloakIdentityProviderMapper[] {
+  const alias = def.alias;
+  const seen = new Set<string>();
+  return (def.mappers ?? []).map((mapper: AuthorizationIdentityProviderMapper) => {
+    const name = assertNonBlank(`Identity provider "${alias}": a mapper name`, mapper.name);
+    const type = assertNonBlank(
+      `Identity provider "${alias}": mapper "${name}" identityProviderMapper`,
+      mapper.identityProviderMapper,
+    );
+    if (seen.has(name)) {
+      throw new Error(
+        `Identity provider "${alias}": mapper name "${name}" is declared twice. Keycloak requires mapper names to be unique per provider.`,
+      );
+    }
+    seen.add(name);
+    const config: Record<string, string> = {};
+    for (const [key, raw] of Object.entries(mapper.config ?? {})) {
+      assertNonBlank(`Identity provider "${alias}": mapper "${name}" config key`, key);
+      config[key] = normalizeConfigScalar(alias, `mappers.${name}.${key}`, raw);
+    }
+    return {
+      name,
+      identityProviderAlias: alias,
+      identityProviderMapper: type,
+      config,
+    };
+  });
+}
+
+/**
+ * Emit the host's identity providers, unchanged.
+ *
+ * What this deliberately does NOT do: supply endpoint defaults for a built-in
+ * provider, rename an alias, add a mapper, or enable anything. A host that
+ * wants Google authors `providerId: google`; a host that wants its own
+ * workforce IdP authors `providerId: oidc` with its own URLs; a host that
+ * wants neither authors nothing and gets a realm with no external provider.
+ * The defaults applied are the conservative Keycloak ones — `enabled` on,
+ * `trustEmail`/`storeToken`/`linkOnly`/`hideOnLogin` off — and every other
+ * field is passed through as authored.
+ */
+function buildIdentityProviders(
+  defs: AuthorizationIdentityProvider[],
+  dev: boolean,
+): { identityProviders: KeycloakIdentityProvider[]; identityProviderMappers: KeycloakIdentityProviderMapper[] } {
+  const identityProviders: KeycloakIdentityProvider[] = [];
+  const identityProviderMappers: KeycloakIdentityProviderMapper[] = [];
+  const aliases = new Set<string>();
+
+  for (const def of defs) {
+    const alias = assertNonBlank("Identity provider alias", def.alias);
+    const providerId = assertNonBlank(`Identity provider "${alias}": providerId`, def.providerId);
+    if (aliases.has(alias)) {
+      throw new Error(
+        `Identity provider alias "${alias}" is declared twice in one realm. Aliases must be unique per realm.`,
+      );
+    }
+    aliases.add(alias);
+
+    identityProviders.push({
+      alias,
+      displayName: def.displayName,
+      providerId,
+      enabled: def.enabled ?? true,
+      trustEmail: def.trustEmail ?? false,
+      storeToken: def.storeToken ?? false,
+      linkOnly: def.linkOnly ?? false,
+      hideOnLogin: def.hideOnLogin ?? false,
+      firstBrokerLoginFlowAlias: def.firstBrokerLoginFlowAlias,
+      postBrokerLoginFlowAlias: def.postBrokerLoginFlowAlias,
+      config: buildIdentityProviderConfig(def, dev),
+    });
+    identityProviderMappers.push(...buildIdentityProviderMappers(def));
+  }
+
+  return { identityProviders, identityProviderMappers };
+}
+
 interface EntityRoleAggregate {
   clientRoles: Map<string, KeycloakRole[]>;
   entityComposites: Map<string, { entity: string; roles: string[] }>;
@@ -773,7 +1065,13 @@ export function generateKeycloakRealmArtifacts(
     ? aggregateFromEntities(contracts, entityRoleClient)
     : { clientRoles: new Map(), entityComposites: new Map() };
 
-  if (clientDefs.length === 0 && entityAggregate.clientRoles.size === 0) {
+  const identityProviderDefs = authConfig.keycloak?.identityProviders ?? [];
+
+  if (
+    clientDefs.length === 0 &&
+    entityAggregate.clientRoles.size === 0 &&
+    identityProviderDefs.length === 0
+  ) {
     return [];
   }
 
@@ -826,6 +1124,12 @@ export function generateKeycloakRealmArtifacts(
   }
 
   const clients = clientDefs.map((c) => buildClient(c, resourceClientIds, dev));
+
+  // External identity providers: host-authored, emitted unchanged, none by
+  // default. Only present in the export when the realm authors at least one,
+  // so a realm that stays quiet gets no `identityProviders` key at all rather
+  // than an empty list that reads like a decision.
+  const idp = buildIdentityProviders(identityProviderDefs, dev);
 
   const groupNodes = authConfig.groups ?? [];
   const groupsOut = groupNodes.length > 0 ? buildKeycloakGroupsFromAuthoring(groupNodes, "") : undefined;
@@ -904,6 +1208,12 @@ export function generateKeycloakRealmArtifacts(
     adminEventsEnabled: realmCfg.events?.adminEnabled ?? legacyEvents?.adminEventsEnabled,
     eventsListeners: realmCfg.events?.listeners ?? legacyEvents?.eventsListeners,
     clients,
+    ...(idp.identityProviders.length > 0
+      ? {
+          identityProviders: idp.identityProviders,
+          identityProviderMappers: idp.identityProviderMappers,
+        }
+      : {}),
     roles: {
       realm: realmRoles,
       client: clientRolesOut,

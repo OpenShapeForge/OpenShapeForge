@@ -153,6 +153,58 @@
               }
             }
           }
+        },
+        "identityProviders": {
+          "type": "array",
+          "description": "External identity providers (Keycloak identityProviders[]). Host-authored and host-owned: OSF ships provider implementations, never a provider. Every id, URL, scope and mapping is emitted unchanged; only the generator's security validations (unique aliases, secrets via ${env:VAR} in production, HTTPS endpoints in production, no secret-like keys in config) can reject an entry.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["alias", "providerId"],
+            "properties": {
+              "alias": { "type": "string", "minLength": 1, "description": "Realm-unique alias; also the login-URL segment and the mapper binding key." },
+              "providerId": { "type": "string", "minLength": 1, "description": "Keycloak provider type: google, microsoft, github, oidc, saml, apple (bundled provider jar), or an approved custom provider id." },
+              "displayName": { "type": "string" },
+              "enabled": { "type": "boolean", "description": "Defaults to true." },
+              "trustEmail": { "type": "boolean", "description": "Defaults to false." },
+              "storeToken": { "type": "boolean", "description": "Defaults to false; keep provider tokens unstored unless a documented use case needs them." },
+              "linkOnly": { "type": "boolean", "description": "Defaults to false." },
+              "hideOnLogin": { "type": "boolean", "description": "Defaults to false." },
+              "firstBrokerLoginFlowAlias": { "type": "string", "minLength": 1 },
+              "postBrokerLoginFlowAlias": { "type": "string", "minLength": 1 },
+              "config": {
+                "type": "object",
+                "description": "Non-secret provider config, passed through unchanged (scalars normalized to strings, ${env:VAR} resolved). Keys containing secret, password, privateKey, p8Key or token are refused here; put them in `secrets`.",
+                "additionalProperties": { "type": ["string", "number", "boolean"] }
+              },
+              "secrets": {
+                "type": "object",
+                "description": "Sensitive provider config keys (clientSecret, …). In production every value must be a ${env:VAR} reference; a literal fails generation.",
+                "additionalProperties": { "type": "string", "minLength": 1 }
+              },
+              "devSecrets": {
+                "type": "object",
+                "description": "Development-only literal secrets; override `secrets` in development mode and are refused in production.",
+                "additionalProperties": { "type": "string", "minLength": 1 }
+              },
+              "mappers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "identityProviderMapper"],
+                  "properties": {
+                    "name": { "type": "string", "minLength": 1 },
+                    "identityProviderMapper": { "type": "string", "minLength": 1, "description": "Keycloak mapper type id, e.g. oidc-user-attribute-idp-mapper." },
+                    "config": {
+                      "type": "object",
+                      "additionalProperties": { "type": ["string", "number", "boolean"] }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },

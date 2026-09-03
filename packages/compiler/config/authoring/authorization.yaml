@@ -9,6 +9,8 @@ kind: authorizationConfig
 # - groups (optional hierarchy; user membership via `users[].groups` paths)
 # - users (dev test accounts; plain passwords OK in dev)
 #
+# - identityProviders (optional; external social / corporate IdPs — NONE here)
+#
 # Entity-derived client roles (natural-person:read, etc.) are STILL appended on
 # top of the entityRoleClient by the generator, based on entity YAML auth blocks.
 
@@ -147,6 +149,63 @@ keycloak:
 # Cross-tenant platform admin (formerly `system-admin`) is granted via Keycloak's
 # built-in `realm-management.realm-admin` client role — assigned per user under
 # `users[].clientRoles` below.
+  # External identity providers — Keycloak `identityProviders[]`, one entry per
+  # provider, emitted UNCHANGED by the generator. OSF ships the provider
+  # implementations (Keycloak's built-ins plus the Apple provider jar in the
+  # Keycloak image) and this contract, never a provider: the shipped realm
+  # authors none, and a consuming host authors exactly the set it wants, with
+  # its own client IDs, endpoints, scopes and mappers as the final word. See
+  # docs/identity-providers.md.
+  #
+  # The generator only rejects unsafe entries: duplicate aliases, blank
+  # alias/providerId/mapper fields, secret-looking keys in `config` (they belong
+  # in `secrets`), literal or unset secrets in production, non-https or
+  # credential-bearing endpoint URLs in production. Defaults: enabled true;
+  # trustEmail / storeToken / linkOnly / hideOnLogin false. No account is ever
+  # auto-linked by email — Keycloak's standard first-broker-login flow applies.
+  #
+  # Two representative examples, both commented out on purpose:
+  #
+  # identityProviders:
+  #   # A Keycloak built-in. No endpoint defaults come from OSF; Keycloak's own
+  #   # `google` provider knows Google's endpoints.
+  #   - alias: google
+  #     providerId: google
+  #     displayName: Continue with Google
+  #     config:
+  #       clientId: 1234567890-example.apps.googleusercontent.com
+  #       defaultScope: openid email profile
+  #     secrets:
+  #       clientSecret: ${env:KEYCLOAK_IDP_GOOGLE_CLIENT_SECRET}
+  #     devSecrets:
+  #       clientSecret: dev-only-google-secret
+  #
+  #   # A dedicated, host-owned corporate OIDC provider. Every URL is the host's;
+  #   # `providerId: saml` works the same way with SAML metadata keys.
+  #   - alias: customer-workforce
+  #     providerId: oidc
+  #     displayName: Continue with company account
+  #     firstBrokerLoginFlowAlias: first broker login
+  #     config:
+  #       clientId: customer-workforce
+  #       issuer: https://identity.customer.example
+  #       authorizationUrl: https://identity.customer.example/oauth2/authorize
+  #       tokenUrl: https://identity.customer.example/oauth2/token
+  #       jwksUrl: https://identity.customer.example/.well-known/jwks.json
+  #       useJwksUrl: true
+  #       defaultScope: openid profile email
+  #     secrets:
+  #       clientSecret: ${env:KEYCLOAK_IDP_CUSTOMER_WORKFORCE_CLIENT_SECRET}
+  #     devSecrets:
+  #       clientSecret: dev-only-workforce-secret
+  #     mappers:
+  #       - name: department
+  #         identityProviderMapper: oidc-user-attribute-idp-mapper
+  #         config:
+  #           claim: dept
+  #           user.attribute: department
+  #           syncMode: FORCE
+
 realmRoles:
   directie:
     description: "Directie: global read/write/approve on all resources"

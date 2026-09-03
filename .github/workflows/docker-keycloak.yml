@@ -106,10 +106,14 @@ jobs:
       # Cheap structural check first: if the Maven stage silently produced
       # nothing, the jar would be missing and Keycloak would still start fine
       # without the SPI — a failure mode the health probe alone cannot catch.
-      - name: Verify the SPI provider jar is present
+      # The same goes for the Apple provider jar (#488): a realm that authors
+      # `providerId: apple` would import fine and only fail at first login.
+      - name: Verify both provider jars are present
         run: |
           docker run --rm --entrypoint ls openshapeforge-keycloak:ci \
             /opt/keycloak/providers/openshapeforge-keycloak-spi.jar
+          docker run --rm --entrypoint sh openshapeforge-keycloak:ci -c \
+            'ls /opt/keycloak/providers/apple-identity-provider-*.jar'
 
       # Prove the image actually reaches a ready state against Postgres. Host
       # networking lets the container reach the service container on localhost.
@@ -127,18 +131,49 @@ jobs:
             -e KC_HOSTNAME_STRICT=false \
             openshapeforge-keycloak:ci start-dev
           # Keycloak serves health on the management port (9000), not 8080.
+          ready=0
           for i in $(seq 1 90); do
             if curl -fsS http://127.0.0.1:9000/health/ready 2>/dev/null | grep -q '"status": *"UP"'; then
               echo "keycloak ready after ${i}s"
-              docker rm -f kc-smoke >/dev/null
-              exit 0
+              ready=1
+              break
             fi
             sleep 1
           done
-          echo "::error::keycloak did not become ready within 90s"
-          docker logs kc-smoke
+          if [ "$ready" != 1 ]; then
+            echo "::error::keycloak did not become ready within 90s"
+            docker logs kc-smoke
+            docker rm -f kc-smoke >/dev/null
+            exit 1
+          fi
+
+          # Prove the provider FACTORIES loaded, not just that the jars sit on
+          # disk: /admin/serverinfo lists every identity-provider factory the
+          # running server registered. `apple` comes from the third-party jar;
+          # `oidc` is a built-in and doubles as a sanity check on the query.
+          # The bootstrap admin is a throwaway credential local to this runner.
+          token=$(curl -fsS -X POST \
+            http://127.0.0.1:8080/realms/master/protocol/openid-connect/token \
+            -d grant_type=password -d client_id=admin-cli \
+            -d username=admin -d password=admin \
+            | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+          if [ -z "$token" ]; then
+            echo "::error::could not obtain a master-realm admin token for the serverinfo check"
+            docker logs kc-smoke
+            docker rm -f kc-smoke >/dev/null
+            exit 1
+          fi
+          serverinfo=$(curl -fsS -H "Authorization: Bearer $token" http://127.0.0.1:8080/admin/serverinfo)
+          for provider in apple oidc; do
+            if ! printf '%s' "$serverinfo" | grep -Eq "\"id\" *: *\"$provider\""; then
+              echo "::error::identity provider factory '$provider' is not registered in the running image"
+              printf '%s' "$serverinfo" | grep -o '"identityProviders":\[[^]]*\]' || true
+              docker rm -f kc-smoke >/dev/null
+              exit 1
+            fi
+            echo "identity provider factory '$provider' registered"
+          done
           docker rm -f kc-smoke >/dev/null
-          exit 1
 
       # The chart runs the container with securityContext.readOnlyRootFilesystem
       # (issue #24), writable emptyDirs mounted only at /opt/keycloak/data and

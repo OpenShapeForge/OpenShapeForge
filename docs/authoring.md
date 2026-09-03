@@ -315,6 +315,10 @@ Keeping operators out of the tenant realm is the point of the split: an
 identity that can create and suspend tenants has no business existing in the
 realm those tenants log into.
 
+Either realm may also author `keycloak.identityProviders` — external social or
+corporate (OIDC/SAML) providers, emitted exactly as written. Neither shipped
+realm does; see [identity-providers.md](identity-providers.md).
+
 ## `appShell.yaml`
 
 Shell component + sidebar navigation (labels, icons, `entity:` references).

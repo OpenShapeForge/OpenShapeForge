@@ -101,6 +101,36 @@ describe("redactElicitedValues", () => {
     expect(values.apiToken).toBe("__set__");
   });
 
+  it("fails closed for malformed envelopes without suppressing ordinary objects", () => {
+    const ordinary = {
+      algorithm: "round-robin",
+      retry: { attempts: 3 },
+    };
+    const row = redactElicitedValues(
+      {
+        id: "1",
+        configurationValues: {
+          endpoint: "https://example.test",
+          routing: ordinary,
+          keyReference: { keyId: "ordinary-public-reference" },
+          missingKey: { ciphertext: "must-not-cross" },
+          missingCiphertext: { keyId: "must-not-cross", algorithm: "aes-256-gcm" },
+        },
+      },
+      "configurationValues",
+    );
+    expect(row.configurationValues).toEqual({
+      endpoint: "https://example.test",
+      routing: ordinary,
+      keyReference: { keyId: "ordinary-public-reference" },
+      missingKey: "__set__",
+      missingCiphertext: "__set__",
+    });
+    expect(JSON.stringify(row)).not.toContain("must-not-cross");
+    expect(JSON.stringify(row)).not.toContain("ciphertext");
+    expect(JSON.stringify(row)).toContain("ordinary-public-reference");
+  });
+
   it("leaves rows without the field untouched", () => {
     expect(redactElicitedValues({ id: "1" }, "configurationValues")).toEqual({ id: "1" });
   });

@@ -55,7 +55,7 @@ type RestMethod = PluginOperationContract["transports"]["rest"]["method"];
 type RestRoute = { method: RestMethod; path: string; owner: string };
 
 /**
- * Built-in /api routes that can coexist with collision-free nested aliases.
+ * Built-in /api routes reserved from generated and plugin operations.
  * Conditional routes are included because a contract must remain safe when
  * the corresponding runtime feature is enabled.
  */
@@ -205,28 +205,6 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
     throw new Error(
       `${where} REST path must be the safe plugin root "${pluginRoot}" or a nested ${pluginRoot}/ path.`,
     );
-  }
-  const canonicalParameters = restPathParameters(restPath);
-  const aliases = operation.transports.rest.aliases;
-  if (aliases !== undefined && !Array.isArray(aliases)) {
-    throw new Error(`${where} REST aliases must be an array of paths.`);
-  }
-  for (const [index, alias] of (aliases ?? []).entries()) {
-    if (typeof alias !== "string" || !REST_PATH.test(alias)) {
-      throw new Error(`${where} REST alias[${index}] must be a safe absolute /api/... path.`);
-    }
-    const namespace = alias.split("/")[2]!;
-    if (RESERVED_API_NAMESPACES.has(namespace) && alias === `/api/${namespace}`) {
-      throw new Error(`${where} REST alias[${index}] cannot claim reserved API namespace root "${alias}".`);
-    }
-    const aliasParameters = restPathParameters(alias);
-    if (aliasParameters.length !== canonicalParameters.length ||
-        aliasParameters.some((parameter, parameterIndex) => parameter !== canonicalParameters[parameterIndex])) {
-      throw new Error(
-        `${where} REST alias[${index}] path parameters must match the canonical path exactly ` +
-        `(${canonicalParameters.join(", ") || "none"}).`,
-      );
-    }
   }
   const ajv = new Ajv2020.default({ strict: true, allErrors: true });
   (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
@@ -428,12 +406,11 @@ export function auditOperationSurfaceCollisions(
 
   for (const operation of operations) {
     const owner = `plugin operation ${operation.key}`;
-    for (const path of [
-      operation.transports.rest.path,
-      ...(operation.transports.rest.aliases ?? []),
-    ]) {
-      claimRest({ method: operation.transports.rest.method, path, owner });
-    }
+    claimRest({
+      method: operation.transports.rest.method,
+      path: operation.transports.rest.path,
+      owner,
+    });
     if (operation.transports.graphql.enabled) {
       claimSurface(graphql, "GraphQL root field", operation.transports.graphql.field, owner);
     }
@@ -468,10 +445,10 @@ export function collectPluginOperations(
       : plugin.operations ?? [];
     for (const operation of declared) {
       validateOperation(plugin.name, operation);
-      const restPaths = [
+      const restKey = normalizedRestRoute(
+        operation.transports.rest.method,
         operation.transports.rest.path,
-        ...(operation.transports.rest.aliases ?? []),
-      ].sort();
+      );
       const graphqlKey = operation.transports.graphql.enabled
         ? `${operation.transports.graphql.kind}:${operation.transports.graphql.field}`
         : undefined;
@@ -479,11 +456,7 @@ export function collectPluginOperations(
         ? operation.transports.typescript.functionName
         : undefined;
       if (keys.has(operation.key)) throw new Error(`Duplicate plugin operation key "${operation.key}".`);
-      for (const path of restPaths) {
-        const restKey = normalizedRestRoute(operation.transports.rest.method, path);
-        if (rest.has(restKey)) throw new Error(`Duplicate plugin operation REST route "${restKey}".`);
-        rest.add(restKey);
-      }
+      if (rest.has(restKey)) throw new Error(`Duplicate plugin operation REST route "${restKey}".`);
       if (operation.transports.mcp.enabled && mcp.has(operation.transports.mcp.name)) {
         throw new Error(`Duplicate plugin operation MCP tool "${operation.transports.mcp.name}".`);
       }
@@ -505,21 +478,13 @@ export function collectPluginOperations(
         customSecurity.set(operation.auth.scheme, definition);
       }
       keys.add(operation.key);
+      rest.add(restKey);
       if (operation.transports.mcp.enabled) mcp.add(operation.transports.mcp.name);
       if (graphqlKey) graphql.add(graphqlKey);
       if (typescriptKey) typescript.add(typescriptKey);
       operations.push({
         ...operation,
         plugin: plugin.name,
-        transports: {
-          ...operation.transports,
-          rest: {
-            ...operation.transports.rest,
-            ...(operation.transports.rest.aliases
-              ? { aliases: [...operation.transports.rest.aliases].sort() }
-              : {}),
-          },
-        },
       });
     }
   }
@@ -677,84 +642,70 @@ export function operationOpenApiPaths(
         }]
       : [];
     const method = rest.method.toLowerCase();
-    const canonicalOpenApiPath = rest.path.replace(/:([_A-Za-z][_0-9A-Za-z]*)/g, "{$1}");
-    const routePaths = [rest.path, ...(rest.aliases ?? [])];
-    for (const [routeIndex, routePath] of routePaths.entries()) {
-      const isAlias = routeIndex > 0;
-      const openApiPath = routePath.replace(/:([_A-Za-z][_0-9A-Za-z]*)/g, "{$1}");
-      const pathParameters = restPathParameters(routePath).map((name) => ({
-        name,
-        in: "path",
-        required: true,
-        schema: inputProperties?.[name] ?? { type: "string" },
-      }));
-      const pathNames = new Set(pathParameters.map((parameter) => parameter.name));
-      const queryParameters = rest.method === "GET" || rest.method === "DELETE"
-        ? Object.entries(inputProperties ?? {})
-            .filter(([name]) => !pathNames.has(name) && name !== idempotencyInputField)
-            .map(([name, schema]) => ({ name, in: "query", required: required.has(name), schema }))
-        : [];
-      const bodyProperties = Object.fromEntries(
-        Object.entries(inputProperties ?? {}).filter(([name]) =>
-          !pathNames.has(name) && name !== idempotencyInputField
-        ),
-      );
-      const bodyRequired = [...required].filter((name) =>
+    const openApiPath = rest.path.replace(/:([_A-Za-z][_0-9A-Za-z]*)/g, "{$1}");
+    const pathParameters = restPathParameters(rest.path).map((name) => ({
+      name,
+      in: "path",
+      required: true,
+      schema: inputProperties?.[name] ?? { type: "string" },
+    }));
+    const pathNames = new Set(pathParameters.map((parameter) => parameter.name));
+    const queryParameters = rest.method === "GET" || rest.method === "DELETE"
+      ? Object.entries(inputProperties ?? {})
+          .filter(([name]) => !pathNames.has(name) && name !== idempotencyInputField)
+          .map(([name, schema]) => ({ name, in: "query", required: required.has(name), schema }))
+      : [];
+    const bodyProperties = Object.fromEntries(
+      Object.entries(inputProperties ?? {}).filter(([name]) =>
         !pathNames.has(name) && name !== idempotencyInputField
-      );
-      const { required: _canonicalRequired, ...inputSchemaWithoutRequired } = operation.inputSchema;
-      const bodySchema = {
-        ...inputSchemaWithoutRequired,
-        properties: bodyProperties,
-        ...(bodyRequired.length > 0 ? { required: bodyRequired } : {}),
-      };
-      if (method in (paths[openApiPath] ?? {})) {
-        throw new Error(`Duplicate plugin operation OpenAPI route "${rest.method} ${openApiPath}".`);
-      }
-      const sessionScopes = operation.auth.mode === "session"
-        ? operation.auth.scopes ?? []
-        : [];
-      paths[openApiPath] = {
-        ...(paths[openApiPath] ?? {}),
-        [method]: {
-          operationId: isAlias ? `${operation.key}.rest-alias.${routeIndex}` : operation.key,
-          summary: operation.title,
-          description: isAlias
-            ? `${operation.description}\n\nDeprecated compatibility route. Use ${canonicalOpenApiPath}.`
-            : operation.description,
-          tags: [operation.plugin],
-          security: operation.auth.mode === "public"
-            ? []
-            : operation.auth.mode === "session"
-              ? sessionSecuritySchemes.map((scheme) => ({
-                  [scheme]: scheme === "oauth2Auth" ? sessionScopes : [],
-                }))
-              : [{ [operation.auth.scheme]: [] }],
-          ...(isAlias ? {
-            deprecated: true,
-            "x-osf-rest-alias": {
-              canonicalOperationId: operation.key,
-              canonicalPath: canonicalOpenApiPath,
-            },
-          } : {}),
-          "x-osf-operation": {
-            key: operation.key,
-            handler: operation.handler,
-            auth: operation.auth,
-            tenancy: operation.tenancy,
-            idempotency: operation.idempotency,
-            transports: operation.transports,
-          },
-          ...([...pathParameters, ...queryParameters, ...idempotencyParameters].length > 0
-            ? { parameters: [...pathParameters, ...queryParameters, ...idempotencyParameters] }
-            : {}),
-          ...(rest.method === "GET" || rest.method === "DELETE" ? {} : {
-            requestBody: { required: bodyRequired.length > 0, content: { "application/json": { schema: bodySchema } } },
-          }),
-          responses,
-        },
-      };
+      ),
+    );
+    const bodyRequired = [...required].filter((name) =>
+      !pathNames.has(name) && name !== idempotencyInputField
+    );
+    const { required: _canonicalRequired, ...inputSchemaWithoutRequired } = operation.inputSchema;
+    const bodySchema = {
+      ...inputSchemaWithoutRequired,
+      properties: bodyProperties,
+      ...(bodyRequired.length > 0 ? { required: bodyRequired } : {}),
+    };
+    if (method in (paths[openApiPath] ?? {})) {
+      throw new Error(`Duplicate plugin operation OpenAPI route "${rest.method} ${openApiPath}".`);
     }
+    const sessionScopes = operation.auth.mode === "session"
+      ? operation.auth.scopes ?? []
+      : [];
+    paths[openApiPath] = {
+      ...(paths[openApiPath] ?? {}),
+      [method]: {
+        operationId: operation.key,
+        summary: operation.title,
+        description: operation.description,
+        tags: [operation.plugin],
+        security: operation.auth.mode === "public"
+          ? []
+          : operation.auth.mode === "session"
+            ? sessionSecuritySchemes.map((scheme) => ({
+                [scheme]: scheme === "oauth2Auth" ? sessionScopes : [],
+              }))
+            : [{ [operation.auth.scheme]: [] }],
+        "x-osf-operation": {
+          key: operation.key,
+          handler: operation.handler,
+          auth: operation.auth,
+          tenancy: operation.tenancy,
+          idempotency: operation.idempotency,
+          transports: operation.transports,
+        },
+        ...([...pathParameters, ...queryParameters, ...idempotencyParameters].length > 0
+          ? { parameters: [...pathParameters, ...queryParameters, ...idempotencyParameters] }
+          : {}),
+        ...(rest.method === "GET" || rest.method === "DELETE" ? {} : {
+          requestBody: { required: bodyRequired.length > 0, content: { "application/json": { schema: bodySchema } } },
+        }),
+        responses,
+      },
+    };
   }
   return paths;
 }

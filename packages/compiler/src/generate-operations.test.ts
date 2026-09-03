@@ -9,6 +9,7 @@ import {
   operationOpenApiPaths,
   renderOperationCatalog,
 } from "./generate-operations.js";
+import type { CompiledPluginOperation } from "./generate-operations.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 
 const operation: PluginOperationContract = {
@@ -47,23 +48,12 @@ const context = { repoRoot: "/repo", authoringDir: "/repo/authoring", webPresent
 
 describe("first-class plugin operations", () => {
   test("collects deterministic canonical contracts and OpenAPI path parameters", () => {
-    const aliased = {
-      ...operation,
-      transports: {
-        ...operation.transports,
-        rest: {
-          ...operation.transports.rest,
-          aliases: ["/api/rest/v1/legacy-quotes/:quoteId/publish"],
-        },
-      },
-    };
-    const plugins: CompilerPlugin[] = [{ name: "demo", operations: [aliased] }];
+    const plugins: CompilerPlugin[] = [{ name: "demo", operations: [operation] }];
     const collected = collectPluginOperations(plugins, context);
     expect(JSON.parse(renderOperationCatalog(collected)).operations[0].key).toBe(operation.key);
     expect(collected).toHaveLength(1);
     const paths = operationOpenApiPaths(collected) as Record<string, Record<string, any>>;
     const canonical = paths["/api/demo/quotes/{quoteId}/publish"]!.post;
-    const alias = paths["/api/rest/v1/legacy-quotes/{quoteId}/publish"]!.post;
     expect(canonical.operationId).toBe(operation.key);
     expect(canonical.responses["202"]).toBeDefined();
     expect(canonical.parameters[0]).toMatchObject({
@@ -80,17 +70,6 @@ describe("first-class plugin operations", () => {
       .not.toHaveProperty("idempotencyKey");
     expect(canonical.requestBody.content["application/json"].schema)
       .not.toHaveProperty("required");
-    expect(alias).toMatchObject({
-      deprecated: true,
-      "x-osf-rest-alias": {
-        canonicalOperationId: operation.key,
-        canonicalPath: "/api/demo/quotes/{quoteId}/publish",
-      },
-    });
-    expect(alias.operationId).not.toBe(operation.key);
-    expect(alias.parameters).toEqual(canonical.parameters);
-    expect(alias.requestBody).toEqual(canonical.requestBody);
-    expect(alias.responses).toEqual(canonical.responses);
   });
 
   test("validates and documents REST projections for declared errors", () => {
@@ -655,87 +634,28 @@ describe("first-class plugin operations", () => {
     }] }], context)).toThrow(/safe plugin root "\/api\/session"/);
   });
 
-  test("requires safe aliases with canonical path parameters and no reserved-root takeover", () => {
-    const withAliases = (aliases: string[]): PluginOperationContract => ({
-      ...operation,
-      transports: {
-        ...operation.transports,
-        rest: { ...operation.transports.rest, aliases },
-      },
-    });
-    expect(() => collectPluginOperations([
-      { name: "demo", operations: [withAliases(["/outside/api/:quoteId"])] },
-    ], context)).toThrow(/safe absolute \/api/);
-    expect(() => collectPluginOperations([
-      { name: "demo", operations: [withAliases(["/api/rest"])] },
-    ], context)).toThrow(/reserved API namespace root/);
-    expect(() => collectPluginOperations([
-      { name: "demo", operations: [withAliases(["/api/legacy/:id/publish"])] },
-    ], context)).toThrow(/path parameters must match/);
-    expect(() => collectPluginOperations([
-      { name: "demo", operations: [withAliases([
-        "/api/legacy/:quoteId/publish",
-        "/api/legacy/:quoteId/publish",
-      ])] },
-    ], context)).toThrow(/Duplicate plugin operation REST route/);
-  });
-
-  test("audits aliases against core and generated REST while allowing collision-free nesting", () => {
-    const aliasOperation = (
+  test("audits canonical REST routes against core and generated REST surfaces", () => {
+    const compiledOperation = (
       method: PluginOperationContract["transports"]["rest"]["method"],
-      alias: string,
-    ): PluginOperationContract => ({
+      path: string,
+    ): CompiledPluginOperation => ({
       ...operation,
+      plugin: "demo",
       transports: {
         ...operation.transports,
-        rest: { ...operation.transports.rest, method, aliases: [alias] },
+        rest: { ...operation.transports.rest, method, path },
       },
     });
     const emptyManifest: PlatformSchemaManifest = { version: 1, tables: [] };
-    const coreCollision = collectPluginOperations([{ name: "demo", operations: [
-      aliasOperation("GET", "/api/rest/v1/connectors/:quoteId"),
-    ] }], context);
+    const coreCollision = [compiledOperation("GET", "/api/rest/v1/connectors/:quoteId")];
     expect(() => auditOperationSurfaceCollisions(coreCollision, emptyManifest, [], 60))
       .toThrow(/normalized REST route shape.*core connector catalog.*plugin operation/);
 
-    const staticCoreOverlap = collectPluginOperations([{ name: "demo", operations: [{
-      ...operation,
-      inputSchema: {
-        ...operation.inputSchema,
-        required: ["idempotencyKey"],
-        properties: { idempotencyKey: { type: "string", minLength: 1 } },
-      },
-      transports: {
-        ...operation.transports,
-        rest: {
-          ...operation.transports.rest,
-          method: "GET",
-          path: "/api/demo/connectors/acme",
-          aliases: ["/api/rest/v1/connectors/acme"],
-        },
-      },
-    }] }], context);
+    const staticCoreOverlap = [compiledOperation("GET", "/api/rest/v1/connectors/acme")];
     expect(() => auditOperationSurfaceCollisions(staticCoreOverlap, emptyManifest, [], 60))
       .toThrow(/overlapping REST route.*core connector catalog.*plugin operation/);
 
-    const exactCoreCollision = collectPluginOperations([{ name: "demo", operations: [{
-      ...operation,
-      inputSchema: {
-        type: "object",
-        required: ["idempotencyKey"],
-        properties: { idempotencyKey: { type: "string", minLength: 1 } },
-        additionalProperties: false,
-      },
-      transports: {
-        ...operation.transports,
-        rest: {
-          ...operation.transports.rest,
-          method: "GET",
-          path: "/api/demo/documents",
-          aliases: ["/api/rest/openapi.json"],
-        },
-      },
-    }] }], context);
+    const exactCoreCollision = [compiledOperation("GET", "/api/rest/openapi.json")];
     expect(() => auditOperationSurfaceCollisions(exactCoreCollision, emptyManifest, [], 60))
       .toThrow(/REST route.*core REST OpenAPI.*plugin operation/);
 
@@ -743,24 +663,7 @@ describe("first-class plugin operations", () => {
       ["/api/rest/docs/swagger-initializer.js", "core REST documentation"],
       ["/api/rest/docs/oauth2-redirect.html", "core REST OAuth callback"],
     ] as const) {
-      const docsCollision = collectPluginOperations([{ name: "demo", operations: [{
-        ...operation,
-        inputSchema: {
-          type: "object",
-          required: ["idempotencyKey"],
-          properties: { idempotencyKey: { type: "string", minLength: 1 } },
-          additionalProperties: false,
-        },
-        transports: {
-          ...operation.transports,
-          rest: {
-            ...operation.transports.rest,
-            method: "GET",
-            path: "/api/demo/documents",
-            aliases: [path],
-          },
-        },
-      }] }], context);
+      const docsCollision = [compiledOperation("GET", path)];
       expect(() => auditOperationSurfaceCollisions(docsCollision, emptyManifest, [], 60))
         .toThrow(new RegExp(`REST route.*${owner}.*plugin operation`));
     }
@@ -781,36 +684,18 @@ describe("first-class plugin operations", () => {
         },
       }],
     };
-    const generatedCollision = collectPluginOperations([{ name: "demo", operations: [
-      aliasOperation("PATCH", "/api/rest/v1/legacy-quotes/:quoteId"),
-    ] }], context);
+    const generatedCollision = [compiledOperation("PATCH", "/api/rest/v1/legacy-quotes/:quoteId")];
     expect(() => auditOperationSurfaceCollisions(generatedCollision, generatedManifest, [], 60))
       .toThrow(/normalized REST route shape.*entity public.legacy_quotes.*plugin operation/);
 
-    const staticGeneratedOverlap = collectPluginOperations([{ name: "demo", operations: [{
-      ...operation,
-      inputSchema: {
-        ...operation.inputSchema,
-        required: ["idempotencyKey"],
-        properties: { idempotencyKey: { type: "string", minLength: 1 } },
-      },
-      transports: {
-        ...operation.transports,
-        rest: {
-          ...operation.transports.rest,
-          method: "PATCH",
-          path: "/api/demo/legacy-quotes/current",
-          aliases: ["/api/rest/v1/legacy-quotes/current"],
-        },
-      },
-    }] }], context);
+    const staticGeneratedOverlap = [
+      compiledOperation("PATCH", "/api/rest/v1/legacy-quotes/current"),
+    ];
     expect(() => auditOperationSurfaceCollisions(staticGeneratedOverlap, generatedManifest, [], 60))
       .toThrow(/overlapping REST route.*entity public.legacy_quotes.*plugin operation/);
 
-    const nested = collectPluginOperations([{ name: "demo", operations: [
-      aliasOperation("POST", "/api/rest/v1/legacy-quotes/:quoteId/publish"),
-    ] }], context);
-    expect(() => auditOperationSurfaceCollisions(nested, generatedManifest, [], 60))
+    const canonical = collectPluginOperations([{ name: "demo", operations: [operation] }], context);
+    expect(() => auditOperationSurfaceCollisions(canonical, generatedManifest, [], 60))
       .not.toThrow();
   });
 

@@ -303,20 +303,6 @@ export function createApiApp(options: {
     const initialised = await initRuntimeModules(modules, moduleContext);
     initialisedModules = initialised.loaded;
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
-    const modulesWithUnauditedRest = initialised.loaded
-      .filter((module) => module.restRoutes)
-      .map((module) => module.name)
-      .sort();
-    if (
-      operationContracts.some((operation) => (operation.transports.rest.aliases?.length ?? 0) > 0) &&
-      modulesWithUnauditedRest.length > 0
-    ) {
-      throw new Error(
-        "Compiled REST aliases require every module route to be a canonical plugin operation; " +
-          `runtime modules still exposing restRoutes: ${modulesWithUnauditedRest.join(", ")}. ` +
-          "Migrate those routes to PluginOperationContract operations.",
-      );
-    }
     const operationPlugins = new Set(operationContracts.map((operation) => operation.plugin));
     const operationModulesConfigured = modules.loaded.some((module) => operationPlugins.has(module.name)) ||
       modules.failures.some((failure) => operationPlugins.has(failure.name));

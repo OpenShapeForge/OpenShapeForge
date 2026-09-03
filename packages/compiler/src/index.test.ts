@@ -1,0 +1,83 @@
+// SPDX-License-Identifier: BUSL-1.1
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, test } from "bun:test";
+import { collectAllArtifacts } from "./index.js";
+import { renderEmptyApiPersistedOperationArtifact } from "./persisted-operations.js";
+
+const roots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    roots.splice(0).map((root) => rm(root, { recursive: true })),
+  );
+});
+
+async function hostRoot(options: { web?: boolean; plugin?: string } = {}) {
+  const root = await mkdtemp(join(tmpdir(), "osf-compiler-host-"));
+  roots.push(root);
+  await writeFile(
+    join(root, "authoring.config.yaml"),
+    [
+      "layers:",
+      "  - packages/compiler/config/authoring",
+      ...(options.plugin ? ["plugins:", `  - ./${options.plugin}`] : []),
+      "",
+    ].join("\n"),
+  );
+  if (options.web) {
+    await mkdir(join(root, "apps/web"), { recursive: true });
+  }
+  return root;
+}
+
+describe("compiler host artifact assembly", () => {
+  test("headless hosts receive exactly one deterministic empty API manifest", async () => {
+    const root = await hostRoot();
+    const first = await collectAllArtifacts(root);
+    const second = await collectAllArtifacts(root);
+    const path = "apps/api/src/generated/graphql/persisted-operations.json";
+    const matches = first.all.filter((artifact) => artifact.path === path);
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toEqual(renderEmptyApiPersistedOperationArtifact());
+    expect(first.groups.ui).toEqual([]);
+    expect(second.all).toEqual(first.all);
+  }, 60_000);
+
+  test("web hosts retain the populated API and web manifest pair", async () => {
+    const root = await hostRoot({ web: true });
+    const { all } = await collectAllArtifacts(root);
+    const paths = [
+      "apps/api/src/generated/graphql/persisted-operations.json",
+      "apps/web/src/generated/persisted-operations.json",
+    ];
+    const persisted = all.filter((artifact) => paths.includes(artifact.path));
+
+    expect(persisted.map((artifact) => artifact.path).sort()).toEqual(paths);
+    expect(persisted[0]!.contents).toBe(persisted[1]!.contents);
+    expect(JSON.parse(persisted[0]!.contents).operationNames.length).toBeGreaterThan(0);
+  }, 60_000);
+
+  test("independent producers still fail closed on duplicate paths", async () => {
+    const plugin = "duplicate-plugin.ts";
+    const root = await hostRoot({ plugin });
+    await writeFile(
+      join(root, plugin),
+      `export default {
+        name: "duplicate-artifact",
+        generate() {
+          return [{
+            path: "apps/api/src/generated/graphql/persisted-operations.json",
+            contents: "{}\\n",
+          }];
+        },
+      };\n`,
+    );
+
+    await expect(collectAllArtifacts(root)).rejects.toThrow(
+      "Artifact path collision: apps/api/src/generated/graphql/persisted-operations.json emitted twice.",
+    );
+  }, 60_000);
+});

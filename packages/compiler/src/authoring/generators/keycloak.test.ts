@@ -806,6 +806,55 @@ describe("identity providers — dedicated generic OIDC provider (host override)
 });
 
 describe("identity providers — Apple", () => {
+  const apple = (config: Record<string, string | number | boolean>): AuthorizationIdentityProvider => ({
+    alias: "apple",
+    providerId: "apple",
+    config: { clientId: "example.web.service-id", teamId: "TEAMID1234", keyId: "KEYID12345", ...config },
+    devSecrets: { clientSecret: "p8" },
+  });
+
+  it("refuses an apple provider that enables token-exchange account linking", () => {
+    expect(() => realmOf(idpConfig([apple({ tokenExchangeAccountLinkingEnabled: true })]))).toThrow(
+      /config\.tokenExchangeAccountLinkingEnabled must be false, not true/,
+    );
+    expect(() => realmOf(idpConfig([apple({ tokenExchangeAccountLinkingEnabled: "true" })]))).toThrow(
+      /must be false, not "true"/,
+    );
+    expect(() => realmOf(idpConfig([apple({ tokenExchangeAccountLinkingEnabled: "yes" })]))).toThrow(/must be false/);
+  });
+
+  it("refuses an apple provider that leaves the linking flag unauthored", () => {
+    expect(() => realmOf(idpConfig([apple({})]))).toThrow(
+      /config\.tokenExchangeAccountLinkingEnabled must be authored explicitly as false/,
+    );
+  });
+
+  it("refuses it in production too, before any secret is resolved", () => {
+    process.env.KC_TEST_GW_SECRET = "gw";
+    try {
+      const { devSecrets: _dev, ...prodApple } = apple({ tokenExchangeAccountLinkingEnabled: true });
+      expect(() =>
+        realmOf(prodIdpConfig([{ ...prodApple, secrets: { clientSecret: "${env:KC_TEST_UNSET_APPLE}" } }]), "production"),
+      ).toThrow(/must be false, not true/);
+    } finally {
+      delete process.env.KC_TEST_GW_SECRET;
+    }
+  });
+
+  it("accepts an explicit false (boolean or string) and emits it as the string \"false\"", () => {
+    for (const value of [false, "false", "FALSE"] as const) {
+      const realm = realmOf(idpConfig([apple({ tokenExchangeAccountLinkingEnabled: value })]));
+      expect((realm.identityProviders![0] as { config: Record<string, string> }).config.tokenExchangeAccountLinkingEnabled).toBe(
+        String(value),
+      );
+    }
+  });
+
+  it("does not impose the apple rule on other providers", () => {
+    const realm = realmOf(idpConfig([{ alias: "g", providerId: "google", config: { clientId: "x" } }]));
+    expect((realm.identityProviders![0] as { config: Record<string, string> }).config).toEqual({ clientId: "x" });
+  });
+
   it("emits the apple provider with tokenExchangeAccountLinkingEnabled=false as authored", () => {
     const realm = realmOf(
       idpConfig([
@@ -901,14 +950,46 @@ describe("identity providers — structural validation", () => {
 });
 
 describe("identity providers — secret-like keys in config", () => {
-  it("classifies keys by what they name, not by substring", () => {
-    for (const key of ["clientSecret", "client_secret", "secret", "password", "privateKey", "private_key", "p8Key", "p8-key", "token", "accessToken", "refresh_token"]) {
+  it("flags a secret segment anywhere in the key name, not only as a suffix", () => {
+    for (const key of [
+      "clientSecret", "client_secret", "secret", "password", "privateKey", "private_key", "p8Key", "p8-key",
+      "token", "accessToken", "refresh_token",
+      // Longer names that a suffix-only rule let through.
+      "clientSecretValue", "passwordCredential", "accessTokenValue", "secretKeyBase64", "privateKeyPem",
+      "p8KeyContent", "tokenValue", "PASSWORD_HASH", "my-secret-thing",
+    ]) {
       expect(isSecretLikeConfigKey(key)).toBe(true);
     }
-    for (const key of ["tokenUrl", "tokenExchangeAccountLinkingEnabled", "clientId", "useJwksUrl", "issuer", "keyId", "teamId", "publicKeySignatureVerifier", "signingCertificate"]) {
+  });
+
+  it("allows only the exact known non-secret keys that mention a secret word", () => {
+    for (const key of ["tokenUrl", "tokenIntrospectionUrl", "accessTokenIsJwt", "tokenExchangeAccountLinkingEnabled"]) {
+      expect(isSecretLikeConfigKey(key)).toBe(false);
+    }
+    // A near-miss of an allow-listed key is not allowed.
+    for (const key of ["tokenUrlSecret", "TokenUrl", "tokenExchangeAccountLinkingEnabledValue"]) {
+      expect(isSecretLikeConfigKey(key)).toBe(true);
+    }
+    for (const key of ["clientId", "useJwksUrl", "issuer", "keyId", "teamId", "publicKeySignatureVerifier", "signingCertificate", "defaultScope"]) {
       expect(isSecretLikeConfigKey(key)).toBe(false);
     }
   });
+
+  it.each(["clientSecretValue", "passwordCredential", "accessTokenValue"])(
+    "refuses %s in config in production even though it is not a plain suffix match",
+    (key) => {
+      process.env.KC_TEST_GW_SECRET = "gw";
+      const err = () =>
+        realmOf(prodIdpConfig([{ alias: "g", providerId: "google", config: { clientId: "id", [key]: "literal-credential" } }]), "production");
+      expect(err).toThrow(new RegExp(`config\.${key} looks like a credential`));
+      try {
+        err();
+      } catch (e) {
+        expect(String((e as Error).message)).not.toContain("literal-credential");
+      }
+      delete process.env.KC_TEST_GW_SECRET;
+    },
+  );
 
   it("refuses a secret-like key in config and points at secrets", () => {
     const err = () =>

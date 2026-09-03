@@ -537,17 +537,42 @@ function buildClient(
 
 /**
  * Config keys whose VALUE is a credential and so must not sit in the plain
- * `config` map. Matched on the key's name segments (camelCase, snake_case and
- * kebab-case all split the same way), not on substrings: `tokenUrl` names an
- * endpoint and `tokenExchangeAccountLinkingEnabled` names a switch, and both
- * are legitimate non-secret Keycloak keys, whereas `clientSecret`, `token`,
- * `accessToken`, `privateKey` and `p8Key` name the credential itself.
+ * `config` map.
+ *
+ * A key is secret-like when ANY of its name segments (camelCase, snake_case
+ * and kebab-case all split the same way) is `secret`, `password` or `token`,
+ * or when `private`/`p8` is immediately followed by `key`. Matching anywhere
+ * in the name — not only at the end — is what closes `clientSecretValue`,
+ * `passwordCredential` and `accessTokenValue`: a suffix-only rule let a
+ * literal credential through under a slightly longer name.
+ *
+ * The cost is that a few legitimate non-secret Keycloak keys carry `token` in
+ * their name. Those are listed explicitly in NON_SECRET_CONFIG_KEYS — an
+ * allow-list of exact keys, deliberately short, rather than a looser pattern
+ * that could be gamed the same way.
  */
-const SECRET_LAST_SEGMENTS = new Set(["secret", "password", "token"]);
+const SECRET_SEGMENTS = new Set(["secret", "password", "token"]);
 const SECRET_SEGMENT_PAIRS: readonly [string, string][] = [
   ["private", "key"],
   ["p8", "key"],
 ];
+
+/**
+ * Exact Keycloak identity-provider config keys that mention a secret word but
+ * name a URL or a switch, never a credential. Extend only with a key from
+ * Keycloak's own provider representations.
+ */
+const NON_SECRET_CONFIG_KEYS = new Set([
+  // OIDC endpoints and switches.
+  "tokenUrl",
+  "tokenIntrospectionUrl",
+  "accessTokenIsJwt",
+  "tokenExchangeAccountLinkingEnabled",
+  // Keycloak-to-Keycloak / OIDC token-exchange switches.
+  "tokenExchangeEnabled",
+  "tokenExchangeExternalInternalEnabled",
+  "tokenExchangeSupported",
+]);
 
 function keyNameSegments(key: string): string[] {
   return key
@@ -559,9 +584,9 @@ function keyNameSegments(key: string): string[] {
 
 /** Exported for tests: is this a key that names a secret value? */
 export function isSecretLikeConfigKey(key: string): boolean {
+  if (NON_SECRET_CONFIG_KEYS.has(key)) return false;
   const segments = keyNameSegments(key);
-  if (segments.length === 0) return false;
-  if (SECRET_LAST_SEGMENTS.has(segments[segments.length - 1])) return true;
+  if (segments.some((segment) => SECRET_SEGMENTS.has(segment))) return true;
   for (let i = 0; i + 1 < segments.length; i++) {
     for (const [first, second] of SECRET_SEGMENT_PAIRS) {
       if (segments[i] === first && segments[i + 1] === second) return true;
@@ -746,6 +771,35 @@ function buildIdentityProviderMappers(
 }
 
 /**
+ * The bundled Apple provider can, on token exchange, link an incoming Apple
+ * identity to an EXISTING account by matching e-mail address when
+ * `tokenExchangeAccountLinkingEnabled` is on. That is exactly the silent
+ * e-mail linking #488 rules out, so for `providerId: apple` the flag is not a
+ * pass-through: it must be authored, and it must be `false`. An absent flag is
+ * refused too — the provider's own default is not something this generator
+ * vouches for, and an explicit `false` in the realm is what a reviewer can see.
+ */
+const APPLE_LINKING_KEY = "tokenExchangeAccountLinkingEnabled";
+
+function assertAppleLinkingPolicy(
+  alias: string,
+  providerId: string,
+  config: Record<string, unknown>,
+): void {
+  if (providerId !== "apple") return;
+  const raw = config[APPLE_LINKING_KEY];
+  const value = typeof raw === "string" ? raw.trim().toLowerCase() : raw;
+  if (value === false || value === "false") return;
+  throw new Error(
+    raw === undefined
+      ? `Identity provider "${alias}" (apple): config.${APPLE_LINKING_KEY} must be authored explicitly as false. ` +
+          "Automatic e-mail-based account linking on token exchange is outside the approved design."
+      : `Identity provider "${alias}" (apple): config.${APPLE_LINKING_KEY} must be false, not ${JSON.stringify(raw)}. ` +
+          "Enabling it would let the Apple provider link an existing account by e-mail address without the user's first-broker-login confirmation.",
+  );
+}
+
+/**
  * Emit the host's identity providers, unchanged.
  *
  * What this deliberately does NOT do: supply endpoint defaults for a built-in
@@ -774,6 +828,7 @@ function buildIdentityProviders(
       );
     }
     aliases.add(alias);
+    assertAppleLinkingPolicy(alias, providerId, def.config ?? {});
 
     identityProviders.push({
       alias,

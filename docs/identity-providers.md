@@ -136,8 +136,12 @@ secret.
 - **Name and email arrive once.** Apple sends them only on the first
   authorization. The provider persists them at first broker login; a later login
   carries only the stable subject.
-- `tokenExchangeAccountLinkingEnabled: false` is authored explicitly: native
-  token exchange and automatic linking are out of scope and stay off.
+- `tokenExchangeAccountLinkingEnabled: false` is **required**, not merely
+  recommended: for `providerId: apple` the generator refuses `true` and
+  refuses an absent flag. With it on, the provider would link an incoming
+  Apple identity to an existing account by e-mail on token exchange, which is
+  exactly the silent linking ruled out below. Native token exchange stays out
+  of scope.
 - Never commit the `.p8` file or a generated JWT. Store the key content in the
   secret store that feeds `KEYCLOAK_IDP_APPLE_P8_KEY` at generate/deploy time.
   **Rotating the key**: create a new key in the Apple developer portal, update
@@ -151,7 +155,8 @@ Everything a host writes is preserved; only unsafe entries fail generation.
 | Rule | Mode |
 | --- | --- |
 | Aliases unique per realm; alias, `providerId`, mapper `name` and `identityProviderMapper` non-blank; mapper names unique per provider | always |
-| A key that names a credential (`clientSecret`, `password`, `privateKey`, `p8Key`, `token`, …) is refused in `config`; move it to `secrets` | always |
+| A key whose name contains `secret`, `password` or `token` as a segment anywhere (`clientSecret`, `clientSecretValue`, `passwordCredential`, `accessTokenValue`, …), or `private`/`p8` followed by `key`, is refused in `config`; move it to `secrets`. Only a short allow-list of exact Keycloak keys is exempt (`tokenUrl`, `tokenIntrospectionUrl`, `accessTokenIsJwt`, `tokenExchangeAccountLinkingEnabled` and the token-exchange switches) | always |
+| `providerId: apple` must author `tokenExchangeAccountLinkingEnabled: false`; `true` or absent fails | always |
 | A key authored in both `config` and `secrets`/`devSecrets` is refused | always |
 | `devSecrets` take precedence over `secrets`; a literal in `secrets` is accepted | development |
 | Every `secrets` value must be a `${env:VAR}` reference whose variable is set; a literal, a `:-fallback`, or any `devSecrets` fails | production |
@@ -173,6 +178,22 @@ reviewed design.
 Provider tokens are not stored (`storeToken: false`) unless the host enables it
 for a documented use case, because a stored upstream token is a second
 credential to protect.
+
+### What is proven, and where
+
+| Evidence | Where |
+| --- | --- |
+| Serialisation, defaults, every rejection rule above, two realms with independent provider sets, no secret in diagnostics | `packages/compiler/src/authoring/generators/keycloak.test.ts` |
+| The Apple jar is present, `kc.sh build` completes, the image boots (also on a read-only rootfs), and the `apple` factory is registered | `.github/workflows/docker-keycloak.yml` |
+| Compiler-generated realms import unchanged; a dedicated OIDC provider with a claim mapper logs in end-to-end; repeat login keeps the subject; an e-mail match with an existing local account stops at the confirm-link page and is not linked; a generic SAML provider with attribute mappers logs in end-to-end | `scripts/keycloak-broker-acceptance.ts`, run by the same workflow against the built image |
+| Apple web first login and repeat login with a real Service ID and `.p8` key | External product evidence — needs real Apple credentials and a registered domain, so it is not in OSF CI |
+
+The acceptance script also runs locally against any Keycloak 26.5 with a
+bootstrap admin, e.g. a container with port 8080 mapped to 18080:
+
+```bash
+KC_URL=http://127.0.0.1:18080 KC_INTERNAL_URL=http://127.0.0.1:8080 bun scripts/keycloak-broker-acceptance.ts
+```
 
 ## 3. Deployment and reconciliation
 

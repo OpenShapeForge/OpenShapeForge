@@ -4,13 +4,12 @@
 # (.github/dependabot.yml) bumps the tag and the digest together.
 FROM maven:3.9-eclipse-temurin-17@sha256:1ed5d1f54416b706707b4f3238f63a20bb06aab27c6d240090a2bb9ad895ed45 AS builder
 WORKDIR /build
-COPY pom.xml .
-RUN mvn dependency:go-offline -B
-COPY src ./src
-RUN mvn package -B -DskipTests
 
 # Third-party provider jars, fetched and checksum-verified in the builder stage
 # (the Keycloak runtime image ships neither curl nor a shell worth relying on).
+# This sits BEFORE the Maven build on purpose: it depends only on the ARGs, so
+# a Java source change does not re-download the jar, and a GitHub outage does
+# not block an SPI-only rebuild while the layer is cached.
 #
 # Apple Sign-in provider: klausbetz/apple-identity-provider-keycloak (Apache-2.0).
 # Present in the image, dormant until a realm authors `providerId: apple`
@@ -26,6 +25,11 @@ RUN set -eu; \
       -o /build/providers/apple-identity-provider-${APPLE_IDP_VERSION}.jar \
       "https://github.com/klausbetz/apple-identity-provider-keycloak/releases/download/${APPLE_IDP_VERSION}/apple-identity-provider-${APPLE_IDP_VERSION}.jar"; \
     echo "${APPLE_IDP_SHA512}  /build/providers/apple-identity-provider-${APPLE_IDP_VERSION}.jar" | sha512sum -c -
+
+COPY pom.xml .
+RUN mvn dependency:go-offline -B
+COPY src ./src
+RUN mvn package -B -DskipTests
 
 FROM quay.io/keycloak/keycloak:26.5.3@sha256:5a236ae4dd8ece77490115bace15a11a4d15e9cbcf58a490b95a7da2cd71d32a
 # Two separate jars on purpose: the OSF SPI is first-party code built above; the

@@ -78,11 +78,26 @@ function dockerfileArg(name) {
   return match?.[1]?.trim();
 }
 
+// Strict MAJOR.MINOR.PATCH. Anything else — a rebuild suffix such as
+// `26.5.0-0`, a `latest` tag, a two-part version — is rejected up front rather
+// than parsed leniently: `Number("0-0")` is NaN, and a NaN comparison would
+// pass the minimum-version guard below silently.
+const STRICT_VERSION = /^(\d+)\.(\d+)\.(\d+)$/;
+
+function parseStrictVersion(value, where) {
+  const match = STRICT_VERSION.exec(value);
+  if (!match) {
+    failures.push(
+      `${where}: version "${value}" is not a strict MAJOR.MINOR.PATCH version, so it cannot be compared against a minimum Keycloak version.`,
+    );
+    return undefined;
+  }
+  return match.slice(1, 4).map(Number);
+}
+
 function compareVersions(a, b) {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+  for (let i = 0; i < 3; i++) {
+    const d = a[i] - b[i];
     if (d !== 0) return d;
   }
   return 0;
@@ -138,14 +153,14 @@ for (const [name, entry] of Object.entries(providers)) {
   if (typeof entry.artifact === "string" && typeof entry.version === "string" && !entry.artifact.includes(entry.version)) {
     failures.push(`${where}: "artifact" ${entry.artifact} does not name version ${entry.version}.`);
   }
-  if (
-    runtimeVersion &&
-    typeof entry.minimumKeycloak === "string" &&
-    compareVersions(runtimeVersion, entry.minimumKeycloak) < 0
-  ) {
-    failures.push(
-      `${name} ${entry.version} requires Keycloak >= ${entry.minimumKeycloak}, but the image runs ${runtimeVersion}.`,
-    );
+  if (runtimeVersion && typeof entry.minimumKeycloak === "string") {
+    const runtime = parseStrictVersion(runtimeVersion, `${DOCKERFILE_PATH} (Keycloak base image tag)`);
+    const minimum = parseStrictVersion(entry.minimumKeycloak, `${where} → minimumKeycloak`);
+    if (runtime && minimum && compareVersions(runtime, minimum) < 0) {
+      failures.push(
+        `${name} ${entry.version} requires Keycloak >= ${entry.minimumKeycloak}, but the image runs ${runtimeVersion}.`,
+      );
+    }
   }
 }
 

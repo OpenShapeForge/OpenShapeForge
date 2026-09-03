@@ -117,6 +117,8 @@ jobs:
 
       # Prove the image actually reaches a ready state against Postgres. Host
       # networking lets the container reach the service container on localhost.
+      # scripts/wait-for-keycloak-ready.sh polls the health endpoint and, on
+      # timeout, prints the logs and removes the container before failing.
       - name: Smoke test the image
         run: |
           docker run -d --name kc-smoke --network host \
@@ -130,22 +132,7 @@ jobs:
             -e KC_HTTP_ENABLED=true \
             -e KC_HOSTNAME_STRICT=false \
             openshapeforge-keycloak:ci start-dev
-          # Keycloak serves health on the management port (9000), not 8080.
-          ready=0
-          for i in $(seq 1 90); do
-            if curl -fsS http://127.0.0.1:9000/health/ready 2>/dev/null | grep -q '"status": *"UP"'; then
-              echo "keycloak ready after ${i}s"
-              ready=1
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ready" != 1 ]; then
-            echo "::error::keycloak did not become ready within 90s"
-            docker logs kc-smoke
-            docker rm -f kc-smoke >/dev/null
-            exit 1
-          fi
+          scripts/wait-for-keycloak-ready.sh kc-smoke
 
           # Prove the provider FACTORIES loaded, not just that the jars sit on
           # disk: /admin/serverinfo lists every identity-provider factory the
@@ -163,7 +150,12 @@ jobs:
             docker rm -f kc-smoke >/dev/null
             exit 1
           fi
-          serverinfo=$(curl -fsS -H "Authorization: Bearer $token" http://127.0.0.1:8080/admin/serverinfo)
+          if ! serverinfo=$(curl -fsS -H "Authorization: Bearer $token" http://127.0.0.1:8080/admin/serverinfo); then
+            echo "::error::could not read /admin/serverinfo from the running image"
+            docker logs kc-smoke
+            docker rm -f kc-smoke >/dev/null
+            exit 1
+          fi
           for provider in apple oidc; do
             if ! printf '%s' "$serverinfo" | grep -Eq "\"id\" *: *\"$provider\""; then
               echo "::error::identity provider factory '$provider' is not registered in the running image"
@@ -199,20 +191,7 @@ jobs:
             -e KC_HTTP_ENABLED=true \
             -e KC_HOSTNAME_STRICT=false \
             openshapeforge-keycloak:ci start --optimized
-          ready=0
-          for i in $(seq 1 90); do
-            if curl -fsS http://127.0.0.1:9000/health/ready 2>/dev/null | grep -q '"status": *"UP"'; then
-              ready=1
-              break
-            fi
-            sleep 1
-          done
-          if [ "$ready" != 1 ]; then
-            echo "::error::keycloak did not become ready for the broker acceptance run"
-            docker logs kc-broker
-            docker rm -f kc-broker >/dev/null
-            exit 1
-          fi
+          scripts/wait-for-keycloak-ready.sh kc-broker
           if ! KC_URL=http://127.0.0.1:8080 bun scripts/keycloak-broker-acceptance.ts; then
             echo "::error::broker login acceptance failed"
             docker logs kc-broker | tail -100
@@ -246,18 +225,8 @@ jobs:
             -e KC_HTTP_ENABLED=true \
             -e KC_HOSTNAME_STRICT=false \
             openshapeforge-keycloak:ci start --optimized
-          for i in $(seq 1 90); do
-            if curl -fsS http://127.0.0.1:9000/health/ready 2>/dev/null | grep -q '"status": *"UP"'; then
-              echo "keycloak ready on a read-only rootfs after ${i}s"
-              docker rm -f kc-rofs >/dev/null
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "::error::keycloak did not become ready on a read-only rootfs within 90s"
-          docker logs kc-rofs
+          scripts/wait-for-keycloak-ready.sh kc-rofs
           docker rm -f kc-rofs >/dev/null
-          exit 1
 
       - name: Log in to GHCR
         if: env.PUBLISH == 'true'

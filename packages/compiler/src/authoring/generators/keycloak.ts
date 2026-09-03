@@ -402,41 +402,70 @@ export function resolveUserPassword(
   return user.password;
 }
 
-export function resolveClientSecret(
-  def: AuthorizationClient,
+/**
+ * The one secret-resolution policy, shared by client secrets and identity-
+ * provider secrets so a tightening applied to one cannot be missed in the
+ * other:
+ *   - development takes the dev-only literal FIRST, before any env reference
+ *     is resolved, so local work never needs a production variable;
+ *   - a `${env:VAR}` / `${env:VAR:-fallback}` value is resolved in any mode
+ *     (the fallback is development-only, see resolveEnvRef);
+ *   - a literal value is accepted in development only;
+ *   - production with nothing but a dev-only literal is refused.
+ *
+ * Error messages name `what` and, through resolveEnvRef, a variable name —
+ * never a resolved or authored value.
+ */
+function resolveSecretValue(
+  what: string,
+  value: string | undefined,
+  devValue: string | undefined,
   dev: boolean,
+  wording: { literal: string; devOnly: string; devOnlyHint: string },
 ): string | undefined {
-  // Development takes devSecret FIRST, before any env reference is resolved.
-  // The order matters: `secret: ${env:VAR}` and `devSecret: literal` are
-  // complementary — one value per mode — so resolving the env ref first would
-  // make local work fail on an unset production variable it has no business
-  // needing.
-  if (dev && def.devSecret !== undefined) {
-    return def.devSecret;
-  }
+  if (dev && devValue !== undefined) return devValue;
 
-  if (def.secret !== undefined) {
-    const resolved = resolveEnvRef(def.secret, dev, `Client "${def.id}": secret`);
+  if (value !== undefined) {
+    const resolved = resolveEnvRef(value, dev, what);
     if (resolved !== undefined) return resolved;
     // Literal secret: acceptable only where committed credentials are.
     if (!dev) {
       throw new Error(
-        `Client "${def.id}": a literal client secret is committed for a non-dev realm. Use a \${env:VAR} reference resolved at generate/deploy time instead.`,
+        `${what}: a literal ${wording.literal} is committed for a non-dev realm. Use a \${env:VAR} reference resolved at generate/deploy time instead.`,
       );
     }
-    return def.secret;
+    return value;
   }
 
-  if (def.devSecret !== undefined) {
+  if (devValue !== undefined) {
     // Production, and the only value on offer is a committed literal. Refusing
     // here is the whole point of the guard: it is what stops a published realm
     // shipping a secret that is readable in the repository.
     throw new Error(
-      `Client "${def.id}": only a devSecret is configured, but the realm is not a development realm. Add "secret: \${env:VAR}" alongside it for production.`,
+      `${what}: only a ${wording.devOnly} is configured, but the realm is not a development realm. ${wording.devOnlyHint}`,
     );
   }
 
   return undefined;
+}
+
+const CLIENT_SECRET_WORDING = {
+  literal: "client secret",
+  devOnly: "devSecret",
+  devOnlyHint: 'Add "secret: ${env:VAR}" alongside it for production.',
+};
+
+const IDP_SECRET_WORDING = {
+  literal: "secret",
+  devOnly: "devSecrets entry",
+  devOnlyHint: "Supply `secrets` as ${env:VAR} references instead.",
+};
+
+export function resolveClientSecret(
+  def: AuthorizationClient,
+  dev: boolean,
+): string | undefined {
+  return resolveSecretValue(`Client "${def.id}"`, def.secret, def.devSecret, dev, CLIENT_SECRET_WORDING);
 }
 
 /**
@@ -539,23 +568,20 @@ function buildClient(
  * Config keys whose VALUE is a credential and so must not sit in the plain
  * `config` map.
  *
- * A key is secret-like when ANY of its name segments (camelCase, snake_case
- * and kebab-case all split the same way) is `secret`, `password` or `token`,
- * or when `private`/`p8` is immediately followed by `key`. Matching anywhere
- * in the name — not only at the end — is what closes `clientSecretValue`,
- * `passwordCredential` and `accessTokenValue`: a suffix-only rule let a
- * literal credential through under a slightly longer name.
+ * A key is secret-like when its name, lower-cased with every separator
+ * removed, CONTAINS `secret`, `password`, `token`, `privatekey`, `p8key` or
+ * `apikey`. Matching a substring anywhere in the flattened name — not a
+ * suffix, and not a camelCase/snake_case segment — is what closes both
+ * `clientSecretValue` / `passwordCredential` / `accessTokenValue` (a longer
+ * name) and `clientsecret` / `p8key` / `privatekey` (no segment boundary at
+ * all): a literal credential must not get through under any spelling.
  *
  * The cost is that a few legitimate non-secret Keycloak keys carry `token` in
  * their name. Those are listed explicitly in NON_SECRET_CONFIG_KEYS — an
  * allow-list of exact keys, deliberately short, rather than a looser pattern
  * that could be gamed the same way.
  */
-const SECRET_SEGMENTS = new Set(["secret", "password", "token"]);
-const SECRET_SEGMENT_PAIRS: readonly [string, string][] = [
-  ["private", "key"],
-  ["p8", "key"],
-];
+const SECRET_WORDS = ["secret", "password", "token", "privatekey", "p8key", "apikey"];
 
 /**
  * Exact Keycloak identity-provider config keys that mention a secret word but
@@ -582,17 +608,19 @@ function keyNameSegments(key: string): string[] {
     .map((segment) => segment.toLowerCase());
 }
 
-/** Exported for tests: is this a key that names a secret value? */
+/**
+ * Exported for tests: is this a key that names a secret value?
+ *
+ * The key is flattened — lower-cased, every separator removed — and matched
+ * for the secret words as SUBSTRINGS. Splitting on camelCase / separators is
+ * deliberately not relied on: `p8key`, `privatekey`, `clientsecret` and
+ * `apikey` are one segment each and would slip past a per-segment rule while
+ * naming exactly the credential this check exists to keep out of a realm.
+ */
 export function isSecretLikeConfigKey(key: string): boolean {
   if (NON_SECRET_CONFIG_KEYS.has(key)) return false;
-  const segments = keyNameSegments(key);
-  if (segments.some((segment) => SECRET_SEGMENTS.has(segment))) return true;
-  for (let i = 0; i + 1 < segments.length; i++) {
-    for (const [first, second] of SECRET_SEGMENT_PAIRS) {
-      if (segments[i] === first && segments[i + 1] === second) return true;
-    }
-  }
-  return false;
+  const flat = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return SECRET_WORDS.some((word) => flat.includes(word));
 }
 
 /**
@@ -693,9 +721,10 @@ function buildIdentityProviderConfig(
     out[key] = resolved;
   }
 
-  // Secrets. The precedence mirrors resolveClientSecret: development takes
-  // devSecrets FIRST so local work never needs a production variable, and
-  // production refuses devSecrets outright so a committed literal cannot ship.
+  // Secrets. resolveSecretValue is the same policy resolveClientSecret uses:
+  // development takes devSecrets FIRST so local work never needs a production
+  // variable. Production additionally refuses devSecrets as a whole, up front,
+  // so a committed literal cannot ship even next to a valid env reference.
   const devSecrets = def.devSecrets ?? {};
   const secrets = def.secrets ?? {};
   if (!dev && Object.keys(devSecrets).length > 0) {
@@ -711,29 +740,17 @@ function buildIdentityProviderConfig(
       );
     }
   }
-  for (const [key, raw] of Object.entries(secrets)) {
+  for (const key of new Set([...Object.keys(secrets), ...Object.keys(devSecrets)])) {
     assertNonBlank(`Identity provider "${alias}": a secrets key`, key);
-    if (dev && devSecrets[key] !== undefined) continue;
     const what = `Identity provider "${alias}": secrets.${key}`;
+    const value = secrets[key];
+    const devValue = devSecrets[key];
+    if (value !== undefined) assertNonBlank(what, value);
+    if (devValue !== undefined) assertNonBlank(`Identity provider "${alias}": devSecrets.${key}`, devValue);
     // Error messages name the key only. resolveEnvRef reports the VARIABLE
     // name, never its value, so nothing below can leak a resolved secret.
-    assertNonBlank(what, raw);
-    const resolved = resolveEnvRef(raw, dev, what);
-    if (resolved !== undefined) {
-      out[key] = resolved;
-      continue;
-    }
-    if (!dev) {
-      throw new Error(
-        `${what}: a literal secret is committed for a non-dev realm. Use a \${env:VAR} reference resolved at generate/deploy time instead.`,
-      );
-    }
-    out[key] = raw;
-  }
-  for (const [key, raw] of Object.entries(devSecrets)) {
-    assertNonBlank(`Identity provider "${alias}": a devSecrets key`, key);
-    assertNonBlank(`Identity provider "${alias}": devSecrets.${key}`, raw);
-    out[key] = raw;
+    const resolved = resolveSecretValue(what, value, devValue, dev, IDP_SECRET_WORDING);
+    if (resolved !== undefined) out[key] = resolved;
   }
 
   return out;
@@ -741,6 +758,7 @@ function buildIdentityProviderConfig(
 
 function buildIdentityProviderMappers(
   def: AuthorizationIdentityProvider,
+  dev: boolean,
 ): KeycloakIdentityProviderMapper[] {
   const alias = def.alias;
   const seen = new Set<string>();
@@ -759,7 +777,12 @@ function buildIdentityProviderMappers(
     const config: Record<string, string> = {};
     for (const [key, raw] of Object.entries(mapper.config ?? {})) {
       assertNonBlank(`Identity provider "${alias}": mapper "${name}" config key`, key);
-      config[key] = normalizeConfigScalar(alias, `mappers.${name}.${key}`, raw);
+      // Same rules as provider config: YAML scalars become strings and
+      // `${env:VAR}` references resolve at generate time, so a parameterised
+      // role or attribute mapper never imports a literal placeholder.
+      const scalar = normalizeConfigScalar(alias, `mappers.${name}.${key}`, raw);
+      config[key] =
+        resolveEnvRef(scalar, dev, `Identity provider "${alias}": mapper "${name}" config.${key}`) ?? scalar;
     }
     return {
       name,
@@ -843,7 +866,7 @@ function buildIdentityProviders(
       postBrokerLoginFlowAlias: def.postBrokerLoginFlowAlias,
       config: buildIdentityProviderConfig(def, dev),
     });
-    identityProviderMappers.push(...buildIdentityProviderMappers(def));
+    identityProviderMappers.push(...buildIdentityProviderMappers(def, dev));
   }
 
   return { identityProviders, identityProviderMappers };

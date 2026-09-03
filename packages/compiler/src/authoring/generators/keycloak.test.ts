@@ -957,10 +957,31 @@ describe("identity providers — secret-like keys in config", () => {
       // Longer names that a suffix-only rule let through.
       "clientSecretValue", "passwordCredential", "accessTokenValue", "secretKeyBase64", "privateKeyPem",
       "p8KeyContent", "tokenValue", "PASSWORD_HASH", "my-secret-thing",
+      // Spellings with no segment boundary at all, which a per-segment rule
+      // let through: the credential is the same however the key is cased.
+      "p8key", "privatekey", "clientsecret", "secretkey", "PRIVATEKEY", "client-secret-value",
+      // API keys are credentials too.
+      "apiKey", "api_key", "apikey", "ApiKeyValue",
     ]) {
       expect(isSecretLikeConfigKey(key)).toBe(true);
     }
   });
+
+  it.each(["p8key", "privatekey", "apikey"])(
+    "refuses a lowercase compound key %s in config in production",
+    (key) => {
+      process.env.KC_TEST_GW_SECRET = "gw";
+      const err = () =>
+        realmOf(prodIdpConfig([{ alias: "g", providerId: "google", config: { clientId: "id", [key]: "-----BEGIN PRIVATE KEY-----literal" } }]), "production");
+      expect(err).toThrow(new RegExp(`config\\.${key} looks like a credential`));
+      try {
+        err();
+      } catch (e) {
+        expect(String((e as Error).message)).not.toContain("BEGIN PRIVATE KEY");
+      }
+      delete process.env.KC_TEST_GW_SECRET;
+    },
+  );
 
   it("allows only the exact known non-secret keys that mention a secret word", () => {
     for (const key of ["tokenUrl", "tokenIntrospectionUrl", "accessTokenIsJwt", "tokenExchangeAccountLinkingEnabled"]) {
@@ -1104,6 +1125,48 @@ describe("identity providers — secrets and modes", () => {
       err();
     } catch (e) {
       expect(String((e as Error).message)).not.toContain("dev-only-literal");
+    }
+  });
+
+  it("resolves ${env:VAR} in mapper config the same way as in provider config", () => {
+    process.env[ENV] = "admin";
+    process.env.KC_TEST_GW_SECRET = "gw";
+    const realm = realmOf(
+      prodIdpConfig([
+        {
+          alias: "g",
+          providerId: "google",
+          config: { clientId: `\${env:${ENV}}` },
+          secrets: { clientSecret: `\${env:${ENV}}` },
+          mappers: [
+            { name: "role", identityProviderMapper: "hardcoded-role-idp-mapper", config: { role: `\${env:${ENV}}`, syncMode: "INHERIT" } },
+          ],
+        },
+      ]),
+      "production",
+    );
+    expect(realm.identityProviderMappers![0]!.config).toEqual({ role: "admin", syncMode: "INHERIT" });
+  });
+
+  it("fails on an unset ${env:VAR} in mapper config, naming the mapper and variable but no value", () => {
+    process.env.KC_TEST_GW_SECRET = "gw";
+    const err = () =>
+      realmOf(
+        prodIdpConfig([
+          {
+            alias: "g",
+            providerId: "google",
+            config: { clientId: "id" },
+            mappers: [{ name: "role", identityProviderMapper: "hardcoded-role-idp-mapper", config: { role: `\${env:${ENV}:-committed-role}` } }],
+          },
+        ]),
+        "production",
+      );
+    expect(err).toThrow(new RegExp(`mapper "role" config\\.role: env var ${ENV} is not set`));
+    try {
+      err();
+    } catch (e) {
+      expect(String((e as Error).message)).not.toContain("committed-role");
     }
   });
 

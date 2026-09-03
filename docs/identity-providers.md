@@ -84,7 +84,9 @@ Only these transformations are applied to a value:
   requires (`useJwksUrl: true` → `"true"`).
 - `${env:VAR}` / `${env:VAR:-fallback}` references are resolved at generate
   time, under the same rules as client secrets (the fallback is
-  development-only).
+  development-only). This applies to provider `config` and to every mapper's
+  `config` alike, so a parameterised role or attribute mapper never imports a
+  literal placeholder.
 
 ### Built-in providers
 

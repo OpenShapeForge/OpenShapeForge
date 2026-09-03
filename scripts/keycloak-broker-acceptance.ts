@@ -52,6 +52,7 @@
  *                    KC_INTERNAL_URL=http://127.0.0.1:8080)
  *   KC_ADMIN_USER / KC_ADMIN_PASSWORD  bootstrap admin (default admin/admin)
  */
+import { readJwtClaims } from "../packages/auth/src/index.ts";
 import { generateKeycloakRealmArtifacts } from "../packages/compiler/src/authoring/generators/keycloak.ts";
 import type { AuthorizationConfigFile } from "../packages/compiler/src/authoring/types/authoring.ts";
 
@@ -332,11 +333,6 @@ function parseForm(html: string, test: (tag: string) => boolean): { action: stri
   return { action: unescapeHtml(action), fields };
 }
 
-function decodeJwtPayload(jwt: string): Record<string, unknown> {
-  const [, payload] = jwt.split(".");
-  return JSON.parse(Buffer.from(payload!, "base64url").toString("utf8")) as Record<string, unknown>;
-}
-
 // ---------------------------------------------------------------------------
 // Login flows
 // ---------------------------------------------------------------------------
@@ -390,7 +386,9 @@ async function exchangeCode(callbackUrl: string): Promise<Record<string, unknown
   });
   if (!res.ok) throw new Error(`token exchange: ${res.status} ${await res.text()}`);
   const { access_token } = (await res.json()) as { access_token: string };
-  return decodeJwtPayload(access_token);
+  const claims = readJwtClaims(access_token);
+  if (!claims) throw new Error("token exchange returned an access_token that is not a decodable JWT");
+  return claims;
 }
 
 interface FederatedIdentity { identityProvider: string; userId: string; userName: string }

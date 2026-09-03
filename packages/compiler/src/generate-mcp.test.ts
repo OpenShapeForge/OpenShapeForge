@@ -776,6 +776,7 @@ describe("derived tools catalog", () => {
         keyField: "name",
         descriptionField: "name",
         inputFieldsField: "name",
+        outputFieldsField: "name",
       },
     };
     const catalog = buildMcpCatalog([input(contract({ mcp }))], "test");
@@ -787,6 +788,7 @@ describe("derived tools catalog", () => {
         keyField: "name",
         descriptionField: "name",
         inputFieldsField: "name",
+        outputFieldsField: "name",
       },
     ]);
     expect(buildMcpCatalog([input(contract())], "test").derivedTools).toEqual(

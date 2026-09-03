@@ -490,6 +490,37 @@ describe("coreEntity properties the compiler implements", () => {
     );
   });
 
+  it("accepts the optional derived-tool output definition field", () => {
+    const document = coreEntity({
+      fields: [
+        {
+          key: "inputs",
+          valueType: "object",
+          semanticType: "fieldDefinition",
+          cardinality: { min: 0, max: "unbounded" },
+        },
+        {
+          key: "outputs",
+          valueType: "object",
+          semanticType: "fieldDefinition",
+          cardinality: { min: 0, max: "unbounded" },
+        },
+      ],
+      mcp: {
+        derivedTools: {
+          roles: ["viewer"],
+          keyField: "inputs",
+          descriptionField: "inputs",
+          inputFieldsField: "inputs",
+          outputFieldsField: "outputs",
+        },
+      },
+    });
+    expect(validator.validate(document, "billing-run.yaml")).toBe(
+      "core-entity.schema.json",
+    );
+  });
+
   it("does not let derived execution delegate a header name to caller input", () => {
     const document = coreEntity({
       fields: [

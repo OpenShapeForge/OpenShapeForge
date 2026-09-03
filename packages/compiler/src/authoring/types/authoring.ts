@@ -327,6 +327,11 @@ export interface McpDerivedToolsConfig {
    * the runtime translates into the derived tool's input JSON Schema.
    */
   inputFieldsField: string;
+  /**
+   * Optional field holding canonical FieldDefinition objects for model-visible
+   * outputs. Core uses it to bound runtime authorization decisions.
+   */
+  outputFieldsField?: string;
   versionField?: string;
   /**
    * Opt-in declarative execution: calling a derived tool runs its bindings

@@ -11,7 +11,8 @@ import {
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
-import type { McpInvocationContext } from "../contract.js";
+import type { McpInvocationContext, RuntimeModule } from "../contract.js";
+import { authorizeMcpRequest } from "../mcp-hooks.js";
 import type { ModuleMcpServerBinding } from "../platform.js";
 import {
   __assertSecretFreeModuleEventForTests,
@@ -63,6 +64,59 @@ const binding = (
 });
 
 describe("runtime module platform session authority", () => {
+  it("authorizes a module-owned resource handle only for its exact live session", async () => {
+    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const active = createModuleSessionCapability(claims());
+    let hookCalls = 0;
+    const owner: RuntimeModule = {
+      name: "artifacts",
+      mcp: {
+        authorize: async (session, request) => {
+          hookCalls += 1;
+          expect(session).toBe(active);
+          return request.subject.kind === "resource-handle" &&
+              request.subject.uri === "app://artifacts/item-1"
+            ? { allowed: true, fieldAllowlist: ["title", "id"] }
+            : undefined;
+        },
+      },
+    };
+    const registered = binding(active, {
+      authorize: (action, subject) => authorizeMcpRequest(
+        [owner],
+        active,
+        { action, subject },
+        async () => ({ allowed: false, code: "NOT_FOUND" }),
+        async () => owner,
+      ),
+    });
+    runtime.registerServer(registered);
+    const request = {
+      action: "read",
+      subject: {
+        kind: "resource-handle" as const,
+        uri: "app://artifacts/item-1",
+      },
+    };
+
+    await expect(runtime.services.mcp.authorize(active, request)).resolves.toEqual({
+      allowed: true,
+      fieldAllowlist: ["id", "title"],
+    });
+    await expect(runtime.services.mcp.authorize(
+      { ...active, roles: [...active.roles] },
+      request,
+    )).resolves.toEqual({ allowed: false, code: "NOT_FOUND" });
+    expect(hookCalls).toBe(1);
+
+    runtime.unregisterServer(registered.server);
+    await expect(runtime.services.mcp.authorize(active, request)).resolves.toEqual({
+      allowed: false,
+      code: "NOT_FOUND",
+    });
+    expect(hookCalls).toBe(1);
+  });
+
   it("accepts an exact operation capability only in its active async chain", async () => {
     const db = testDatabase();
     const runtime = new ModulePlatformRuntime(db);

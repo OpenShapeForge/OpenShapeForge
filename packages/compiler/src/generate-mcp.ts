@@ -477,6 +477,7 @@ export type McpDerivedToolsDefinition = {
   titleField?: string;
   descriptionField: string;
   inputFieldsField: string;
+  outputFieldsField?: string;
   versionField?: string;
   execution?: McpDerivedExecutionDefinition;
   visibleWhen?: { field: string; equals: string };
@@ -780,6 +781,9 @@ export function buildMcpCatalog(
           : {}),
         descriptionField: mcp.derivedTools.descriptionField,
         inputFieldsField: mcp.derivedTools.inputFieldsField,
+        ...(mcp.derivedTools.outputFieldsField
+          ? { outputFieldsField: mcp.derivedTools.outputFieldsField }
+          : {}),
         ...(mcp.derivedTools.versionField
           ? { versionField: mcp.derivedTools.versionField }
           : {}),

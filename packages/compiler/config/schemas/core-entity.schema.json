@@ -419,6 +419,7 @@
                 "titleField": { "type": "string" },
                 "descriptionField": { "type": "string" },
                 "inputFieldsField": { "type": "string" },
+                "outputFieldsField": { "type": "string" },
                 "versionField": { "type": "string" },
                 "visibleToRolesField": { "type": "string" },
                 "internalOnlyField": { "type": "string" },

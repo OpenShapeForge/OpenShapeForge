@@ -144,6 +144,7 @@ describe("buildMcp", () => {
       keyField: "value",
       descriptionField: "value",
       inputFieldsField: "value",
+      outputFieldsField: "value",
     };
     expect(buildMcp(entityWithMcp({ derivedTools }))?.derivedTools).toEqual(derivedTools);
   });
@@ -163,6 +164,19 @@ describe("buildMcp", () => {
         }),
       ),
     ).toThrow(/does not name an authored field/);
+    expect(() =>
+      buildMcp(
+        entityWithMcp({
+          derivedTools: {
+            roles: ["viewer"],
+            keyField: "value",
+            descriptionField: "value",
+            inputFieldsField: "value",
+            outputFieldsField: "missing",
+          },
+        }),
+      ),
+    ).toThrow(/outputFieldsField.*does not name an authored field/);
   });
 
   it("carries a validated elicitOnCreate block through to the section", () => {

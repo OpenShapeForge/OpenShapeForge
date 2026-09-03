@@ -29,11 +29,11 @@ import type { ConnectorExecutionError } from "../executor.js";
 import { invokeConnectorOperation, verifyConnectorInstallation } from "../runtime.js";
 import { rotateSecrets } from "../store.js";
 import { CONNECTOR_AGGREGATE } from "../audit.js";
-import {
-  ModuleEgressError,
-  type ModuleEgressRequest,
-  type RuntimeModule,
-} from "../../modules/contract.js";
+import type { ModuleEgressRequest } from "../../modules/contract.js";
+import externalRuntimeModule, {
+  externalOwnerLastMutationResult,
+  setExternalOwnerMode,
+} from "../../modules/__tests__/fixtures/external-egress-owner/runtime.js";
 import { toHttpError } from "../../rest/http-error.js";
 
 const ADMIN_URL =
@@ -321,43 +321,28 @@ describe("the full dispatch chain", () => {
     expect(caught?.outcome).toMatchObject({ category: "availability", requiredAction: "wait" });
   });
 
-  test("a runtime module preserves connector egress policy and timeout outcomes", async () => {
-    for (const [kind, category, code, privateDetail] of [
-      ["policy_blocked", "policy_blocked", "CONNECTOR_EGRESS_DENIED", "private-address-192.0.2.9"],
-      ["policy_blocked", "policy_blocked", "CONNECTOR_EGRESS_DENIED", "oversize-response-private-body"],
-      ["timeout", "timeout", "CONNECTOR_TIMEOUT", "module-timeout-private-detail"],
+  test("an external package-shaped module preserves connector egress outcomes", async () => {
+    for (const [kind, category, code] of [
+      ["policy_blocked", "policy_blocked", "CONNECTOR_EGRESS_DENIED"],
+      ["timeout", "timeout", "CONNECTOR_TIMEOUT"],
     ] as const) {
-      let hookCalls = 0;
-      const module: RuntimeModule = {
-        name: "egress-test-module",
-        egress: {
-          fetch: async () => {
-            hookCalls += 1;
-            const failure = new ModuleEgressError(kind) as ModuleEgressError & {
-              privateDetail: string;
-            };
-            failure.privateDetail = privateDetail;
-            throw failure;
-          },
-        },
-      };
+      setExternalOwnerMode(kind);
       const failure = (await invokeConnectorOperation(
         {
           ...invocationContext(TENANT, ["Connectors.All.Read"]),
-          egressOwner: module.egress,
+          egressOwner: externalRuntimeModule.egress,
         },
         contract(),
         operation("listObjects"),
         {},
       ).catch((error: unknown) => error)) as ConnectorExecutionError;
-      expect(hookCalls).toBe(1);
+      expect(externalOwnerLastMutationResult()).toBe(false);
       expect(failure).toMatchObject({ code, outcome: { category } });
       const serialized = JSON.stringify({
         message: failure.message,
         outcome: failure.outcome,
       });
-      expect(serialized).not.toContain(privateDetail);
-      expect(serialized).not.toContain("192.0.2.9");
+      expect(serialized).not.toContain("external-owner-detail-must-not-survive");
       expect(serialized).not.toContain("eu.objectstore.example");
     }
   });

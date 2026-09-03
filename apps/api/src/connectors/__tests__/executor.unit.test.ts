@@ -12,7 +12,6 @@ import {
   type ConnectorPackage,
 } from "../executor.js";
 import type { ConnectorContract, ConnectorOperationContract } from "../catalog.js";
-import { ModuleEgressError } from "../../modules/contract.js";
 
 const OPERATION: ConnectorOperationContract = {
   key: "listObjects",
@@ -399,8 +398,8 @@ describe("invocation", () => {
     const policyFailure = (await invoke(pkg, {
       egress: {
         owner: {
-          fetch: async () => {
-            throw new ModuleEgressError("policy_blocked");
+          fetch: async (request) => {
+            throw request.createFailure("policy_blocked");
           },
         },
         purpose: "provider",
@@ -421,7 +420,10 @@ describe("invocation", () => {
 
     const forged = (await invoke(
       packageReturning(async () => {
-        throw new ModuleEgressError("policy_blocked");
+        throw Object.assign(new Error("package failure"), {
+          name: "ModuleEgressError",
+          kind: "policy_blocked",
+        });
       }),
     ).catch((error: unknown) => error)) as ConnectorExecutionError;
     expect(forged.code).toBe("CONNECTOR_UPSTREAM_ERROR");
@@ -441,8 +443,8 @@ describe("invocation", () => {
       {
         egress: {
           owner: {
-            fetch: async () => {
-              throw new ModuleEgressError("policy_blocked");
+            fetch: async (request) => {
+              throw request.createFailure("policy_blocked");
             },
           },
           purpose: "provider",
@@ -480,8 +482,8 @@ describe("invocation", () => {
     const first = await invoke(pkg, {
       egress: {
         owner: {
-          fetch: async () => {
-            throw new ModuleEgressError("policy_blocked");
+          fetch: async (request) => {
+            throw request.createFailure("policy_blocked");
           },
         },
         purpose: "provider",
@@ -507,7 +509,9 @@ describe("invocation", () => {
     const privateDetail = "package-body-private-detail";
     const failure = (await invoke(
       packageReturning(async (context) => {
-        const bodyFailure = Object.assign(new ModuleEgressError("timeout"), {
+        const bodyFailure = Object.assign(new Error("package body failure"), {
+          name: "ModuleEgressError",
+          kind: "timeout",
           privateDetail,
         });
         const body = new ReadableStream<Uint8Array>(
@@ -551,7 +555,12 @@ describe("invocation", () => {
 
   it("does not let a package-controlled abort reason reach the owner", async () => {
     const packageController = new AbortController();
-    packageController.abort(new ModuleEgressError("timeout"));
+    packageController.abort(
+      Object.assign(new Error("package signal failure"), {
+        name: "ModuleEgressError",
+        kind: "timeout",
+      }),
+    );
     let ownerSignal: AbortSignal | undefined;
     const result = await invoke(
       packageReturning(async (context) => {

@@ -255,10 +255,12 @@ function listParameters(
   table: TableDefinition,
   fieldsByKey: Map<string, CompiledField>,
 ): JsonObject[] {
+  const elicitedOutputField = table.source?.mcp?.elicitOnCreate?.into;
   const sortableFields = table.columns
     .filter(
       (column) =>
         column.name !== "tenant_id" &&
+        fieldNameForColumn(column) !== elicitedOutputField &&
         !isRestrictedColumn(column) &&
         !isRestrictedField(fieldsByKey.get(fieldNameForColumn(column))),
     )
@@ -308,6 +310,7 @@ function listParameters(
     const compiled = fieldsByKey.get(fieldName);
     if (
       column.name === "tenant_id" ||
+      fieldName === elicitedOutputField ||
       isRestrictedColumn(column) ||
       isRestrictedField(compiled) ||
       column.type === "jsonb" ||

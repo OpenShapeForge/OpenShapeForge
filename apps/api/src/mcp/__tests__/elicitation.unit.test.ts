@@ -7,9 +7,9 @@
  * end-to-end by the host repo's proof flow.
  */
 import { describe, expect, it } from "bun:test";
+import { redactElicitedValues } from "../../connectors/secrets.js";
 import {
   elicitationSchemaFromDefinitions,
-  redactElicitedValues,
   storeElicitedValues,
 } from "../elicitation.js";
 import { decryptSecret, keyringFromEnv, type StoredSecret } from "../../connectors/secrets.js";

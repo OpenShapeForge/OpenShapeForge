@@ -65,6 +65,8 @@ import {
   isGeneratedCrudOperationEnabled,
   listGeneratedEntities,
   listGeneratedEntitiesForTable,
+  listGeneratedEntityStorageRowsForTable,
+  mergeGeneratedEntityObjectForTable,
   updateGeneratedEntity,
   updateGeneratedEntityForTable,
 } from "../graphql/generated-crud.js";
@@ -78,11 +80,7 @@ import {
   type DerivedTool,
   type DerivedToolsCatalogEntry,
 } from "./derived-tools.js";
-import {
-  collectElicitedValues,
-  redactElicitedValues,
-  type ElicitOnCreateEntry,
-} from "./elicitation.js";
+import { collectElicitedValues, type ElicitOnCreateEntry } from "./elicitation.js";
 import {
   consumeConfiguration,
   consumeConfigurationForSession,
@@ -409,11 +407,6 @@ function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
 }
 
 /**
- * serializeRow plus elicited-secret redaction: for an entity whose create
- * elicits configuration, the target field's encrypted values leave the server
- * only as the `__set__` sentinel.
- */
-/**
  * Whether a provider's connections are per-employee. Explicit
  * auth.connectionScope wins; absent, personal sign-in implies "user" and
  * everything else "tenant".
@@ -438,27 +431,24 @@ function oauthProviderTables(): Set<string> {
 }
 
 function serializeRowForEntity(
-  entity: CatalogEntity | undefined,
+  _entity: CatalogEntity | undefined,
   table: GeneratedTable,
   row: Record<string, unknown>,
 ) {
   const serialized = serializeRow(table, row);
-  const redacted = entity?.elicitOnCreate
-    ? redactElicitedValues(serialized, entity.elicitOnCreate.into)
-    : serialized;
   // A provider declaring personal sign-in needs its OAuth client registered
   // with THIS server's redirect URL — a fact only this process knows, so it
   // rides along on the row instead of being asked of anyone.
-  const auth = redacted.auth as Record<string, unknown> | null | undefined;
+  const auth = serialized.auth as Record<string, unknown> | null | undefined;
   if (
     oauthProviderTables().has(table.name) &&
     auth &&
     typeof auth === "object" &&
     auth.profile === "oauth2AuthorizationCode"
   ) {
-    redacted.oauthRedirectUrl = `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`;
+    serialized.oauthRedirectUrl = `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`;
   }
-  return redacted;
+  return serialized;
 }
 
 function entityForTable(table: string): CatalogEntity | undefined {
@@ -1239,10 +1229,12 @@ async function runtimeRowsByFilter(
 ): Promise<Record<string, unknown>[]> {
   const table = tables.get(tableName);
   if (!table) return [];
-  const result = await listGeneratedEntitiesForTable(db, session, table, {
-    limit,
-    filter,
-  });
+  const result = await listGeneratedEntityStorageRowsForTable(
+    db,
+    session,
+    table,
+    { limit, filter },
+  );
   return result.rows.map((row) => serializeRow(table, row));
 }
 
@@ -1255,10 +1247,12 @@ async function runtimeRowByFilter(
 ): Promise<Record<string, unknown> | null> {
   const table = tables.get(tableName);
   if (!table) return null;
-  const result = await listGeneratedEntitiesForTable(db, session, table, {
-    limit: 1,
-    filter,
-  });
+  const result = await listGeneratedEntityStorageRowsForTable(
+    db,
+    session,
+    table,
+    { limit: 1, filter },
+  );
   const row = result.rows[0];
   return row ? serializeRow(table, row) : null;
 }
@@ -4963,18 +4957,13 @@ export function registerGeneratedMcpServer(
           ? rows.find((row) => row.ownerUserId === pending.userId)
           : rows.find((row) => !row.ownerUserId);
         if (existing) {
-          const currentValues = (existing[pending.connectionValuesField] ??
-            {}) as Record<string, unknown>;
-          await updateGeneratedEntityForTable(
+          await mergeGeneratedEntityObjectForTable(
             db,
             writeSession,
             table,
             String(existing.id),
-            {
-              // Tenant rows keep their configuration (client credentials,
-              // subdomain); the sign-in only adds/replaces the tokens.
-              [pending.connectionValuesField]: { ...currentValues, ...values },
-            },
+            pending.connectionValuesField,
+            values,
           );
         } else {
           await createGeneratedEntityForTable(db, writeSession, table, {

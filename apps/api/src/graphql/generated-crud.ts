@@ -2,6 +2,7 @@
 import manifest from "../generated/db/manifest.json" with { type: "json" };
 import { GraphQLError } from "graphql";
 import { sql } from "kysely";
+import { redactElicitedValues } from "../connectors/secrets.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
 import { appendScopedEntityEventInTransaction } from "../platform/entity-events.js";
@@ -74,6 +75,13 @@ type GeneratedCrudTable = {
         create: boolean;
         update: boolean;
         delete: boolean;
+      };
+      elicitOnCreate?: {
+        sourceField: string;
+        sourceEntity: string;
+        definitionsField: string;
+        into: string;
+        message?: string;
       };
     };
     /**
@@ -260,23 +268,86 @@ function entityLabel(table: GeneratedCrudTable) {
  * below, so GraphQL, the generated REST routes and any transport added later
  * inherit redaction by construction instead of having to remember it (#164).
  *
- * Write paths (create/update returning rows) are deliberately not redacted:
- * their role gate already required a write grant, which is exactly what
- * authorizes reading classified columns.
+ * Classification and elicited-secret projection are composed here so every
+ * generated CRUD return path has one output policy. A write grant can reveal
+ * classified plain values, but encrypted elicited values always leave as the
+ * existing set marker.
  */
-function redactRows(
+function projectRows(
   table: GeneratedCrudTable,
   session: DbSessionInput,
   rows: GeneratedEntityRow[],
 ): GeneratedEntityRow[] {
-  // Hot path: an entity with no classified column costs one column scan per
-  // page instead of a per-row scan inside redactRow.
-  if (!table.columns.some((column) => column.classification)) {
+  const hasClassification = table.columns.some(
+    (column) => column.classification,
+  );
+  const hasElicitedOutput = table.source?.mcp?.elicitOnCreate !== undefined;
+  if (!hasClassification && !hasElicitedOutput) {
     return rows;
   }
-  return rows.map((row) =>
-    redactRow(row, table.columns, table.source?.authorization, session),
+  return rows.map((row) => projectGeneratedEntityRow(table, session, row));
+}
+
+function elicitedOutputColumn(
+  table: GeneratedCrudTable,
+): GeneratedCrudColumn | undefined {
+  const target = table.source?.mcp?.elicitOnCreate?.into;
+  if (!target) return undefined;
+  const column = table.columns.find(
+    (candidate) => fieldNameForColumn(candidate) === target,
   );
+  if (!column) {
+    throw generatedCrudError(
+      "Generated CRUD elicited-output metadata is invalid.",
+      "INTERNAL_SERVER_ERROR",
+      500,
+    );
+  }
+  return column;
+}
+
+export function isElicitedOutputColumn(
+  table: GeneratedCrudTable,
+  column: GeneratedCrudColumn,
+): boolean {
+  return elicitedOutputColumn(table)?.name === column.name;
+}
+
+export function projectGeneratedEntityRow(
+  table: GeneratedCrudTable,
+  session: DbSessionInput,
+  row: GeneratedEntityRow,
+): GeneratedEntityRow {
+  const classified = redactRow(
+    row,
+    table.columns,
+    table.source?.authorization,
+    session,
+  );
+  const column = elicitedOutputColumn(table);
+  return column
+    ? redactElicitedValues(classified, column.name)
+    : classified;
+}
+
+/** Elicited values cannot be used as list membership or ordering oracles. */
+function assertElicitedQueryAllowed(
+  table: GeneratedCrudTable,
+  input: Pick<ListPageInput, "filter" | "sort">,
+): void {
+  const column = elicitedOutputColumn(table);
+  if (!column) return;
+  const field = fieldNameForColumn(column);
+  const filtered = Object.keys(input.filter ?? {}).some(
+    (candidate) => candidate === field || candidate === `${field}In`,
+  );
+  if (filtered || input.sort?.field === field) {
+    throw generatedCrudError(
+      "Filtering or sorting by an elicited-output field is not permitted.",
+      "FORBIDDEN",
+      403,
+    );
+  }
 }
 
 /** The oracle guard for caller-supplied list filters and ordering. */
@@ -310,9 +381,9 @@ export function getGeneratedCrudTables() {
   return [...generatedCrudTables.values()];
 }
 
-function generatedCrudError(message: string, code: string) {
+function generatedCrudError(message: string, code: string, status?: number) {
   return new GraphQLError(message, {
-    extensions: { code },
+    extensions: { code, ...(status === undefined ? {} : { status }) },
   });
 }
 
@@ -545,14 +616,18 @@ function buildSortExpression(
  * on behalf of an audience that holds none of the entity's CRUD roles. Every
  * caller-facing path must keep going through listGeneratedEntities.
  */
-export async function listGeneratedEntitiesForTable(
+async function listGeneratedEntityRowsForTable(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   table: GeneratedCrudTable,
   input: ListPageInput & {
     fixedWhere?: Array<{ column: string; value: unknown }>;
   },
+  projectOutput: boolean,
 ): Promise<GeneratedEntityConnection> {
+  // This helper intentionally bypasses entity-role checks for trusted runtime
+  // projections, but it must not bypass the value-oracle boundary.
+  assertElicitedQueryAllowed(table, input);
   const limit = normalizeLimit(input.limit);
   const offset = decodeOffsetCursor(input.cursor);
   const fixedWhere = [...tenantFixedWhere(table, session), ...(input.fixedWhere ?? [])];
@@ -581,11 +656,10 @@ export async function listGeneratedEntitiesForTable(
       totalCount = Number(countResult.rows[0]?.total_count ?? 0);
     }
 
-    const rows = redactRows(
-      table,
-      session,
-      result.rows.slice(0, limit).map((row) => row.row),
-    );
+    const storageRows = result.rows.slice(0, limit).map((row) => row.row);
+    const rows = projectOutput
+      ? projectRows(table, session, storageRows)
+      : storageRows;
     return {
       rows,
       totalCount,
@@ -593,6 +667,32 @@ export async function listGeneratedEntitiesForTable(
         result.rows.length > limit ? encodeOffsetCursor(offset + limit) : null,
     };
   });
+}
+
+export function listGeneratedEntitiesForTable(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  input: ListPageInput & {
+    fixedWhere?: Array<{ column: string; value: unknown }>;
+  },
+): Promise<GeneratedEntityConnection> {
+  return listGeneratedEntityRowsForTable(db, session, table, input, true);
+}
+
+/**
+ * Explicit storage-side read for trusted runtime execution that must decrypt
+ * values. Never use this for a transport response or other caller output.
+ */
+export function listGeneratedEntityStorageRowsForTable(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  input: ListPageInput & {
+    fixedWhere?: Array<{ column: string; value: unknown }>;
+  },
+): Promise<GeneratedEntityConnection> {
+  return listGeneratedEntityRowsForTable(db, session, table, input, false);
 }
 
 export async function listGeneratedEntities(
@@ -630,16 +730,13 @@ export async function getGeneratedEntity(
   const row = await fetchGeneratedEntityRow(db, session, table, input.id);
   return row === null
     ? null
-    : redactRow(row, table.columns, table.source?.authorization, session);
+    : projectGeneratedEntityRow(table, session, row);
 }
 
 /**
- * Row fetch WITHOUT the role gate or classification redaction — callers must
- * have already authorized the operation that led here and must redact before
- * handing the row to a reader (getGeneratedEntity gates "read" and redacts;
- * the empty-body update path in updateGeneratedEntity gates "update",
- * deliberately not requiring read on top, and needs no redaction because an
- * update grant is itself a write grant).
+ * Row fetch WITHOUT the role gate or output projection. Callers must have
+ * already authorized the operation that led here and must project before
+ * handing the row to a reader.
  */
 async function fetchGeneratedEntityRow(
   db: OpenShapeForgeDatabase,
@@ -761,6 +858,38 @@ export async function updateGeneratedEntityForTable(
   return applyGeneratedRowUpdate(db, session, table, id, values);
 }
 
+/**
+ * Merge an object field entirely inside PostgreSQL. Runtime flows use this to
+ * preserve encrypted siblings without reading their storage representation
+ * back through the shared CRUD output boundary.
+ */
+export async function mergeGeneratedEntityObjectForTable(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  id: string,
+  field: string,
+  patch: Record<string, unknown>,
+): Promise<GeneratedEntityRow | null> {
+  const column = writableColumnMap(table, "update").get(field);
+  if (!column || column.type !== "jsonb") {
+    throw generatedCrudError(
+      "Generated CRUD object-merge metadata is invalid.",
+      "INTERNAL_SERVER_ERROR",
+      500,
+    );
+  }
+  const values = new Map<GeneratedCrudColumn, unknown>([
+    [
+      column,
+      sql`coalesce(${sql.id(column.name)}, '{}'::jsonb) || ${JSON.stringify(
+        patch,
+      )}::jsonb`,
+    ],
+  ]);
+  return applyGeneratedRowUpdate(db, session, table, id, values);
+}
+
 export async function createGeneratedEntity(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
@@ -805,7 +934,7 @@ function insertGeneratedRow(
       aggregateId: generatedCrudAggregateId(table, row),
       eventType: "created",
     });
-    return row;
+    return projectGeneratedEntityRow(table, session, row);
   });
 }
 
@@ -823,7 +952,7 @@ export async function updateGeneratedEntity(
   return applyGeneratedRowUpdate(db, session, table, input.id, values);
 }
 
-function applyGeneratedRowUpdate(
+async function applyGeneratedRowUpdate(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   table: GeneratedCrudTable,
@@ -840,8 +969,10 @@ function applyGeneratedRowUpdate(
 
   if (assignments.length === 0) {
     // Already authorized as an update above; an empty-body update must not
-    // additionally require the read role, so fetch without re-gating.
-    return fetchGeneratedEntityRow(db, session, table, id);
+    // additionally require the read role, so fetch without re-gating and then
+    // apply the same output projection as every other return path.
+    const row = await fetchGeneratedEntityRow(db, session, table, id);
+    return row === null ? null : projectGeneratedEntityRow(table, session, row);
   }
 
   return withDbSession(db, session, async (trx) => {
@@ -863,7 +994,7 @@ function applyGeneratedRowUpdate(
       aggregateId: generatedCrudAggregateId(table, row),
       eventType: "updated",
     });
-    return row;
+    return projectGeneratedEntityRow(table, session, row);
   });
 }
 
@@ -976,8 +1107,9 @@ export async function listGeneratedEntityRelation(
  */
 function readableDefaultSort(table: GeneratedCrudTable, session: DbSessionInput) {
   const sort = table.source?.graphql?.defaultSort;
-  if (!sort || canReadClassifiedColumns(table.source?.authorization, session)) {
-    return sort;
-  }
-  return fieldColumnMap(table).get(sort.field)?.classification ? undefined : sort;
+  if (!sort) return undefined;
+  const column = fieldColumnMap(table).get(sort.field);
+  if (column && isElicitedOutputColumn(table, column)) return undefined;
+  if (canReadClassifiedColumns(table.source?.authorization, session)) return sort;
+  return column?.classification ? undefined : sort;
 }

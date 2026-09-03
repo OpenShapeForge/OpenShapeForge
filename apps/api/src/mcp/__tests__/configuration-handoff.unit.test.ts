@@ -20,9 +20,9 @@ import {
 } from "../configuration-handoff.js";
 import {
   keyringFromEnv,
+  redactElicitedValues,
   SECRET_SET_SENTINEL,
 } from "../../connectors/secrets.js";
-import { redactElicitedValues } from "../elicitation.js";
 
 const KEYRING = keyringFromEnv(
   `test:${Buffer.alloc(32, 5).toString("base64")}`,

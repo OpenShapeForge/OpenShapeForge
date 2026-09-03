@@ -318,6 +318,19 @@ describe("generated REST exposure (source.rest bridge)", () => {
     expect(table?.source?.mcp?.operations).toEqual(expected);
   });
 
+  it("emits compiled elicitation metadata for shared CRUD output projection", () => {
+    const manifest = compileRestFixtures(["elicited-output"], {
+      generatedCrudAllowlist: ["elicited-output"],
+    });
+    const table = tableByName(manifest, "elicited_outputs");
+    expect(table?.source?.mcp?.elicitOnCreate).toEqual({
+      sourceField: "name",
+      sourceEntity: "ElicitedOutput",
+      definitionsField: "configuration",
+      into: "configuration",
+    });
+  });
+
   it("fails closed when a rest-enabled entity is not generated-CRUD allowlisted", () => {
     expect(() => compileRestFixtures(["rest-enabled"])).toThrow(
       /declares a rest: block but is not generated-CRUD enabled/,

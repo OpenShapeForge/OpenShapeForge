@@ -359,6 +359,18 @@ export type TableSourceDefinition = {
       update: boolean;
       delete: boolean;
     };
+    /**
+     * Compiled create-time elicitation metadata. The shared generated CRUD
+     * runtime consumes `into` to project encrypted values as set markers on
+     * every output path; the remaining fields drive MCP's create handoff.
+     */
+    elicitOnCreate?: {
+      sourceField: string;
+      sourceEntity: string;
+      definitionsField: string;
+      into: string;
+      message?: string;
+    };
   };
   /**
    * Per-operation entity role allow-lists, bridged from the authored

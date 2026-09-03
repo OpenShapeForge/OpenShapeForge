@@ -28,9 +28,7 @@ import { HttpError } from "../rest/http-error.js";
 import {
   encryptSecret,
   keyringFromEnv,
-  SECRET_SET_SENTINEL,
   type SecretKeyring,
-  type StoredSecret,
 } from "../connectors/secrets.js";
 // One policy, one source: the same set decides what is encrypted at rest
 // (here) and what is barred from URL positions (declarative-execution).
@@ -178,35 +176,6 @@ export function storeElicitedValues(
     stored[key] = value;
   }
   return stored;
-}
-
-function looksLikeStoredSecret(value: unknown): value is StoredSecret {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    typeof (value as StoredSecret).ciphertext === "string" &&
-    typeof (value as StoredSecret).keyId === "string"
-  );
-}
-
-/**
- * Read-side redaction for the elicited target field: encrypted values come
- * back as the `__set__` sentinel so a caller can tell "set, not shown" from
- * "not set" — and neither the value nor its ciphertext is ever advertised.
- */
-export function redactElicitedValues(
-  row: Record<string, unknown>,
-  intoField: string,
-): Record<string, unknown> {
-  const values = row[intoField];
-  if (!values || typeof values !== "object" || Array.isArray(values)) return row;
-  const redacted = Object.fromEntries(
-    Object.entries(values as Record<string, unknown>).map(([key, value]) => [
-      key,
-      looksLikeStoredSecret(value) ? SECRET_SET_SENTINEL : value,
-    ]),
-  );
-  return { ...row, [intoField]: redacted };
 }
 
 /**

@@ -167,6 +167,23 @@ const manifest: PlatformSchemaManifest = {
       source: {
         authoringEntityName: "Relation",
         rest: contract.rest!,
+        mcp: {
+          toolPrefix: "relation",
+          tools: "dedicated",
+          operations: {
+            list: true,
+            get: true,
+            create: true,
+            update: true,
+            delete: true,
+          },
+          elicitOnCreate: {
+            sourceField: "externalId",
+            sourceEntity: "ExternalSystem",
+            definitionsField: "metadata",
+            into: "metadata",
+          },
+        },
       },
     },
   ],
@@ -394,7 +411,6 @@ describe("rich generated REST OpenAPI", () => {
         "id",
         "displayName",
         "relationType",
-        "metadata",
         "externalId",
         "first",
         "status",

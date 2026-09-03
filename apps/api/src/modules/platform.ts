@@ -19,6 +19,17 @@ import type {
 } from "./contract.js";
 import { parseModuleToolExecutionOptions } from "./invocation-sources.js";
 
+const platformRuntimes = new WeakMap<
+  ModulePlatformServices,
+  ModulePlatformRuntime
+>();
+type ActiveOperationSession = {
+  runtime: ModulePlatformRuntime;
+  session: TrustedSessionContext;
+};
+const activeOperationSessionStorage =
+  new AsyncLocalStorage<ActiveOperationSession>();
+
 export type ModuleMcpServerBinding = {
   server: Server;
   session: TrustedSessionContext;
@@ -106,9 +117,9 @@ function assertSecretFree(value: unknown, path = "payload"): void {
 }
 
 /**
- * Mint the object-identity capability modules receive for one live MCP
- * session. The clone prevents a module from mutating core's session object;
- * freezing every nested authority-bearing array prevents widening the clone.
+ * Mint an object-identity capability from a core-verified session. The clone
+ * prevents a module from mutating core's session object; freezing every nested
+ * authority-bearing array prevents widening the clone.
  */
 export function createModuleSessionCapability(
   session: TrustedSessionContext,
@@ -124,17 +135,19 @@ export function createModuleSessionCapability(
 }
 
 /**
- * Process-local live-session directory and capability dispatcher.
+ * Process-local session capability dispatcher.
  *
- * Session objects supplied by modules are never authority: every method first
- * matches them to a currently registered server whose session came from the
- * verified transport. Closed servers are removed, so stale handles and
- * notifications cannot cross a reconnect boundary.
+ * Session objects supplied by modules are never authority. MCP services match
+ * the exact capability of a currently registered server; operation-scoped
+ * work matches the exact capability in the current async invocation. Closed
+ * servers and completed operations are removed, so stale handles cannot cross
+ * a reconnect or request boundary.
  */
 export class ModulePlatformRuntime {
   readonly services: ModulePlatformServices;
   readonly #db: OpenShapeForgeDatabase;
   readonly #servers = new Map<Server, ModuleMcpServerBinding>();
+  readonly #activeOperationSessions = new WeakSet<ActiveOperationSession>();
   readonly #activeInvocations = new WeakMap<McpInvocationContext, number>();
   readonly #invocationStorage = new AsyncLocalStorage<McpInvocationContext>();
   readonly #toolCallStack = new AsyncLocalStorage<readonly string[]>();
@@ -148,7 +161,7 @@ export class ModulePlatformRuntime {
     this.services = {
       db: {
         withSession: (session, fn) => {
-          if (!this.#bindingForSession(session)) {
+          if (!this.#acceptsScopedSession(session)) {
             throw new Error("Module database work requires a live verified session.");
           }
           return withDbSession(this.#db, session, fn);
@@ -156,7 +169,7 @@ export class ModulePlatformRuntime {
       },
       events: {
         append: async (session, event) => {
-          if (!this.#bindingForSession(session)) {
+          if (!this.#acceptsScopedSession(session)) {
             throw new Error("Module event append requires a live verified session.");
           }
           assertSecretFree(event.payload);
@@ -194,6 +207,7 @@ export class ModulePlatformRuntime {
           this.#callTool(ctx, name, args, options, signal),
       },
     };
+    platformRuntimes.set(this.services, this);
   }
 
   registerServer(binding: ModuleMcpServerBinding): void {
@@ -202,6 +216,41 @@ export class ModulePlatformRuntime {
 
   unregisterServer(server: Server): void {
     this.#servers.delete(server);
+  }
+
+  /**
+   * Activate one immutable session capability while core invokes a canonical
+   * operation handler. An existing live MCP capability keeps its exact identity;
+   * other transports receive an invocation-scoped capability. A nested dispatch
+   * inherits the outer capability, so its caller-supplied session cannot widen
+   * authority. AsyncLocalStorage keeps concurrent requests disjoint, while the
+   * live set makes continuations retained past completion fail closed.
+   */
+  async withActiveOperationSession<T>(
+    verifiedSession: TrustedSessionContext,
+    work: (session: TrustedSessionContext) => Promise<T>,
+  ): Promise<T> {
+    const current = activeOperationSessionStorage.getStore();
+    if (current) {
+      if (!current.runtime.#activeOperationSessions.has(current)) {
+        throw new Error("Module operation session is no longer active.");
+      }
+      return work(current.session);
+    }
+
+    const capability = this.#bindingForSession(verifiedSession)
+      ? verifiedSession
+      : createModuleSessionCapability(verifiedSession);
+    const active = { runtime: this, session: capability };
+    this.#activeOperationSessions.add(active);
+    try {
+      return await activeOperationSessionStorage.run(
+        active,
+        () => work(capability),
+      );
+    } finally {
+      this.#activeOperationSessions.delete(active);
+    }
   }
 
   /** Keep one exact invocation capability live only while core runs its hook chain. */
@@ -249,6 +298,17 @@ export class ModulePlatformRuntime {
       if (binding.session === session) return binding;
     }
     return undefined;
+  }
+
+  #acceptsScopedSession(session: TrustedSessionContext): boolean {
+    const current = activeOperationSessionStorage.getStore();
+    // An operation context is authoritative, including after its live token is
+    // cleared. Never fall back to an unrelated registered MCP binding here.
+    if (current) {
+      return current.runtime === this && current.session === session &&
+        this.#activeOperationSessions.has(current);
+    }
+    return this.#bindingForSession(session) !== undefined;
   }
 
   async #callTool(
@@ -323,6 +383,28 @@ export class ModulePlatformRuntime {
       });
     }
   }
+}
+
+/**
+ * Run a canonical operation with the runtime that owns its exact platform
+ * capability. The ownership lookup is identity-based and is not exposed to
+ * modules, so a platform-shaped object cannot activate a session.
+ */
+export async function withModuleOperationSession<T>(
+  platform: ModulePlatformServices | undefined,
+  verifiedSession: TrustedSessionContext | undefined,
+  work: (session: TrustedSessionContext | undefined) => Promise<T>,
+): Promise<T> {
+  const current = activeOperationSessionStorage.getStore();
+  if (current) {
+    return current.runtime.withActiveOperationSession(current.session, work);
+  }
+  if (!platform || !verifiedSession) return work(verifiedSession);
+  const runtime = platformRuntimes.get(platform);
+  if (!runtime) {
+    throw new Error("Module operation platform is not core-owned.");
+  }
+  return runtime.withActiveOperationSession(verifiedSession, work);
 }
 
 export const __assertSecretFreeModuleEventForTests = assertSecretFree;

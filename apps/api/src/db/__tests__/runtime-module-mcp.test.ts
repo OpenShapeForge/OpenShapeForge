@@ -15,7 +15,6 @@ import type {
   ModuleToolExecutionOptions,
   RuntimeModule,
 } from "../../modules/contract.js";
-import { ModuleEgressError } from "../../modules/contract.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { __buildGeneratedMcpServerForTests } from "../../mcp/generated-mcp-server.js";
 import { connectionTokenSecretScope } from "../../mcp/entity-oauth.js";
@@ -364,6 +363,7 @@ describe("generated MCP runtime module security boundary", () => {
         let egressStarted = Promise.resolve();
         let releaseEgress!: () => void;
         let egressBarrier = Promise.resolve();
+        let egressFailureMutation: boolean | undefined;
         const module: RuntimeModule = {
           name: "test-module",
           egress: {
@@ -405,18 +405,23 @@ describe("generated MCP runtime module security boundary", () => {
                 );
               }
               if (mode === "private-denial" || mode === "size-denial") {
-                const failure = new ModuleEgressError("policy_blocked") as
-                  ModuleEgressError & { privateDetail: string };
-                failure.privateDetail =
+                const failure = request.createFailure("policy_blocked");
+                egressFailureMutation = Reflect.set(
+                  failure,
+                  "privateDetail",
                   mode === "private-denial"
                     ? "private-address-192.0.2.7"
-                    : "oversize-provider-body-sentinel";
+                    : "oversize-provider-body-sentinel",
+                );
                 throw failure;
               }
               if (mode === "egress-timeout") {
-                const failure = new ModuleEgressError("timeout") as
-                  ModuleEgressError & { privateDetail: string };
-                failure.privateDetail = "module-timeout-private-sentinel";
+                const failure = request.createFailure("timeout");
+                egressFailureMutation = Reflect.set(
+                  failure,
+                  "privateDetail",
+                  "module-timeout-private-sentinel",
+                );
                 throw failure;
               }
               return Response.json({ value: "ok" });
@@ -870,6 +875,7 @@ describe("generated MCP runtime module security boundary", () => {
               await client.readResource({ uri: `app://internal/${action}` }),
             ));
             expect(body.error).toMatchObject({ code, category });
+            expect(egressFailureMutation).toBe(false);
             const serialized = JSON.stringify(body);
             expect(serialized).not.toContain("192.0.2.7");
             expect(serialized).not.toContain("provider-body-sentinel");

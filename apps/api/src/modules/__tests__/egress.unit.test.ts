@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
-import {
-  ModuleEgressError,
-  type ModuleEgressRequest,
-  type RuntimeModule,
-} from "../contract.js";
+import type { ModuleEgressRequest, RuntimeModule } from "../contract.js";
 import {
   createModuleEgressInvocation,
   fetchValidatedOutbound,
 } from "../egress.js";
+import externalRuntimeModule, {
+  externalOwnerLastMutationResult,
+  setExternalOwnerMode,
+} from "./fixtures/external-egress-owner/runtime.js";
 
 const scope = {
   tenantId: "tenant-a",
@@ -221,7 +221,9 @@ describe("canonical runtime-module egress boundary", () => {
   });
 
   it("does not trust a package-controlled request-body rejection", async () => {
-    const packageFailure = Object.assign(new ModuleEgressError("timeout"), {
+    const packageFailure = Object.assign(new Error("package body failed"), {
+      name: "ModuleEgressError",
+      kind: "timeout",
       privateDetail: "package-body-private-detail",
     });
     const body = new ReadableStream<Uint8Array>(
@@ -267,7 +269,9 @@ describe("canonical runtime-module egress boundary", () => {
 
   it("does not expose or trust a package-controlled abort reason", async () => {
     const controller = new AbortController();
-    const packageReason = Object.assign(new ModuleEgressError("timeout"), {
+    const packageReason = Object.assign(new Error("package signal failed"), {
+      name: "ModuleEgressError",
+      kind: "timeout",
       privateDetail: "package-signal-private-detail",
     });
     let markOwnerStarted!: () => void;
@@ -322,8 +326,8 @@ describe("canonical runtime-module egress boundary", () => {
   it("trusts only a typed failure rejected directly by the registered hook", async () => {
     const invocation = createModuleEgressInvocation({
       owner: {
-        fetch: async () => {
-          throw new ModuleEgressError("policy_blocked");
+        fetch: async (request) => {
+          throw request.createFailure("policy_blocked");
         },
       },
       purpose: "provider",
@@ -349,7 +353,10 @@ describe("canonical runtime-module egress boundary", () => {
     expect(invocation.consumeFailure(rejection)).toBeUndefined();
     expect((rejection as Error).message).not.toContain("api.example.com");
     expect(
-      invocation.consumeFailure(new ModuleEgressError("policy_blocked")),
+      invocation.consumeFailure({
+        name: "ModuleEgressError",
+        kind: "policy_blocked",
+      }),
     ).toBeUndefined();
     expect(
       invocation.consumeFailure({
@@ -357,5 +364,123 @@ describe("canonical runtime-module egress boundary", () => {
         kind: "policy_blocked",
       }),
     ).toBeUndefined();
+  });
+
+  it("accepts only closed failures from an external package-shaped owner", async () => {
+    for (const kind of ["policy_blocked", "timeout"] as const) {
+      setExternalOwnerMode(kind);
+      const invocation = createModuleEgressInvocation({
+        owner: externalRuntimeModule.egress,
+        purpose: "provider",
+        scope,
+      });
+      const rejection = await fetchValidatedOutbound({
+        target: "https://api.example.com/items",
+        init: {},
+        allowlist: ["api.example.com"],
+        fallback: async () => new Response(),
+        dispatch: invocation.dispatch,
+        denied: (_url, reason) => new Error(reason),
+      }).catch((error: unknown) => error);
+
+      expect(externalOwnerLastMutationResult()).toBe(false);
+      expect((rejection as Record<string, unknown>).detail).toBeUndefined();
+      expect((rejection as Error).message).not.toContain(
+        "external-owner-detail-must-not-survive",
+      );
+      expect(invocation.consumeFailure(rejection)).toBe(kind);
+      expect(invocation.consumeFailure(rejection)).toBeUndefined();
+    }
+
+    setExternalOwnerMode("normal");
+    const invocation = createModuleEgressInvocation({
+      owner: externalRuntimeModule.egress,
+      purpose: "provider",
+      scope,
+    });
+    const response = await fetchValidatedOutbound({
+      target: "https://api.example.com/items",
+      init: {},
+      allowlist: ["api.example.com"],
+      fallback: async () => new Response(),
+      dispatch: invocation.dispatch,
+      denied: (_url, reason) => new Error(reason),
+    });
+    expect(await response.json()).toEqual({ value: "ok" });
+  });
+
+  it("rejects unsupported failure kinds without retaining their value", async () => {
+    const invocation = createModuleEgressInvocation({
+      owner: {
+        fetch: async (request) => {
+          throw request.createFailure("provider-private-detail" as never);
+        },
+      },
+      purpose: "provider",
+      scope,
+    });
+    const rejection = await fetchValidatedOutbound({
+      target: "https://api.example.com/items",
+      init: {},
+      allowlist: ["api.example.com"],
+      fallback: async () => new Response(),
+      dispatch: invocation.dispatch,
+      denied: (_url, reason) => new Error(reason),
+    }).catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(TypeError);
+    expect((rejection as Error).message).not.toContain("provider-private-detail");
+    expect(invocation.consumeFailure(rejection)).toBeUndefined();
+  });
+
+  it("rejects reconstructed and cross-invocation replayed failures", async () => {
+    setExternalOwnerMode("reconstruct");
+    const reconstructedInvocation = createModuleEgressInvocation({
+      owner: externalRuntimeModule.egress,
+      purpose: "provider",
+      scope,
+    });
+    const reconstructed = await fetchValidatedOutbound({
+      target: "https://api.example.com/items",
+      init: {},
+      allowlist: ["api.example.com"],
+      fallback: async () => new Response(),
+      dispatch: reconstructedInvocation.dispatch,
+      denied: (_url, reason) => new Error(reason),
+    }).catch((error: unknown) => error);
+    expect(reconstructedInvocation.consumeFailure(reconstructed)).toBeUndefined();
+
+    setExternalOwnerMode("retain");
+    const firstInvocation = createModuleEgressInvocation({
+      owner: externalRuntimeModule.egress,
+      purpose: "provider",
+      scope,
+    });
+    await fetchValidatedOutbound({
+      target: "https://api.example.com/items",
+      init: {},
+      allowlist: ["api.example.com"],
+      fallback: async () => new Response(),
+      dispatch: firstInvocation.dispatch,
+      denied: (_url, reason) => new Error(reason),
+    });
+
+    setExternalOwnerMode("replay");
+    const secondInvocation = createModuleEgressInvocation({
+      owner: externalRuntimeModule.egress,
+      purpose: "provider",
+      scope,
+    });
+    const replayed = await fetchValidatedOutbound({
+      target: "https://api.example.com/items",
+      init: {},
+      allowlist: ["api.example.com"],
+      fallback: async () => new Response(),
+      dispatch: secondInvocation.dispatch,
+      denied: (_url, reason) => new Error(reason),
+    }).catch((error: unknown) => error);
+
+    expect(secondInvocation.consumeFailure(replayed)).toBeUndefined();
+    expect(firstInvocation.consumeFailure(replayed)).toBeUndefined();
   });
 });

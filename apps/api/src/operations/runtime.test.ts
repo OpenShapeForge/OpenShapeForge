@@ -278,7 +278,10 @@ describe("canonical operation runtime", () => {
         subject.name === "known_tool"
           ? { allowed: true }
           : { allowed: false, code: "NOT_FOUND" },
-      resolveInvocationSources: async () => [source],
+      resolveInvocationSources: async () => ({
+        sources: [source],
+        unavailable: [],
+      }),
       callTool: async () => ({ result: { content: [] } }),
     };
     platform.registerServer(registered);
@@ -301,8 +304,9 @@ describe("canonical operation runtime", () => {
           expect(await context.platform!.mcp.resolveInvocationSources(
             context.session!,
             "known_tool",
+            { selector: "accepted" },
             { mode: "default" },
-          )).toEqual([source]);
+          )).toEqual({ sources: [source], unavailable: [] });
           await expect(context.platform!.db.withSession(
             context.session!,
             async () => "accepted",

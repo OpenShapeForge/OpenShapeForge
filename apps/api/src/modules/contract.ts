@@ -83,6 +83,26 @@ export type ModuleInvocationSource = {
   definition: ModuleDefinitionReference;
 };
 
+/**
+ * A matching authored binding for which core found no eligible source.
+ *
+ * The closed outcome lets a coordinating module report an honest partial or
+ * failed result without exposing a connection, provider or stored row.
+ */
+export type ModuleUnavailableInvocationSource = {
+  binding: number;
+  definition: ModuleDefinitionReference;
+  outcome:
+    | "unavailable"
+    | "connection_required"
+    | "reauthorization_required";
+};
+
+export type ModuleInvocationSourceResolution = {
+  sources: readonly ModuleInvocationSource[];
+  unavailable: readonly ModuleUnavailableInvocationSource[];
+};
+
 /** Trusted coordination identity for outbound work using a resolved source. */
 export type ModuleEgressInvocationSource = {
   /** Durable opaque reference; it carries no authority and reveals no row id. */
@@ -91,7 +111,11 @@ export type ModuleEgressInvocationSource = {
 };
 
 export type ModuleInvocationSourceSelector =
-  | { mode: "default" }
+  | {
+      mode: "default";
+      /** A hint only; core re-authorizes it within the matching source set. */
+      preferredSourceReference?: string;
+    }
   | { mode: "explicit"; sourceHandle: string }
   | { mode: "all-authorized" };
 
@@ -178,9 +202,11 @@ export type ModulePlatformServices = {
     resolveInvocationSources(
       session: TrustedSessionContext,
       toolName: string,
+      /** Untrusted invocation values, cloned and frozen by core. */
+      args: Record<string, unknown>,
       selector: ModuleInvocationSourceSelector,
       signal?: AbortSignal,
-    ): Promise<readonly ModuleInvocationSource[]>;
+    ): Promise<ModuleInvocationSourceResolution>;
     callTool(
       ctx: McpInvocationContext,
       name: string,

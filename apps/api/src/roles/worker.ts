@@ -28,7 +28,12 @@
 import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js";
 import { WORKER_ROLE } from "../db/migrations/worker-role.js";
 import type { ModuleWorker, ModuleWorkerHandle, ModuleWorkerLogger } from "../modules/contract.js";
-import { initRuntimeModules, loadRuntimeModules, type ModuleRegistry } from "../modules/registry.js";
+import {
+  closeRuntimeModules,
+  initRuntimeModules,
+  loadRuntimeModules,
+  type ModuleRegistry,
+} from "../modules/registry.js";
 
 export type StartWorkerRoleOptions = {
   databaseUrl?: string;
@@ -169,6 +174,7 @@ export async function startWorkerRole(
   const registry = options.modules ?? (await loadRuntimeModules());
 
   let databaseRuntime: DatabaseRuntime | undefined;
+  let initialised: ModuleRegistry | undefined;
   try {
     databaseRuntime = createDatabaseRuntime({ databaseUrl });
 
@@ -176,7 +182,7 @@ export async function startWorkerRole(
     // catalog and registers its node bridges there; a worker that skipped it
     // would claim commands and then fail every one of them with NO_BRIDGE —
     // burning the retry bound on a configuration problem.
-    const initialised = await initRuntimeModules(registry, { db: databaseRuntime.db });
+    initialised = await initRuntimeModules(registry, { db: databaseRuntime.db });
     const workers = indexModuleWorkers(initialised);
     const resolved = workers.get(role);
 
@@ -208,19 +214,52 @@ export async function startWorkerRole(
     log.info({ role, module: resolved.module }, `Worker role "${role}" started.`);
 
     const runtime = databaseRuntime;
+    const activeModules = initialised.loaded;
     return {
       role,
       module: resolved.module,
       stop: async () => {
         // Worker first, connection second: stop() settles after the in-flight
         // tick, and that tick still needs the pool.
-        await handle.stop();
-        await runtime.close();
+        const failures: unknown[] = [];
+        for (const close of [
+          () => handle.stop(),
+          () => closeRuntimeModules(activeModules),
+          () => runtime.close(),
+        ]) {
+          try {
+            await close();
+          } catch (error) {
+            failures.push(error);
+          }
+        }
+        if (failures.length > 0) {
+          throw new AggregateError(
+            failures,
+            `Worker role ${JSON.stringify(role)} failed to stop cleanly.`,
+          );
+        }
         log.info({ role, module: resolved.module }, `Worker role "${role}" stopped.`);
       },
     };
   } catch (error) {
-    await databaseRuntime?.close();
+    const cleanupFailures: unknown[] = [];
+    try {
+      await closeRuntimeModules(initialised?.loaded ?? []);
+    } catch (cleanupError) {
+      cleanupFailures.push(cleanupError);
+    }
+    try {
+      await databaseRuntime?.close();
+    } catch (cleanupError) {
+      cleanupFailures.push(cleanupError);
+    }
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(
+        [error, ...cleanupFailures],
+        `Worker role ${JSON.stringify(role)} failed to start and clean up.`,
+      );
+    }
     throw error;
   }
 }

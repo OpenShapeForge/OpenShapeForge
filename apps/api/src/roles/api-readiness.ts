@@ -16,6 +16,12 @@ import { versionedMigrations } from "../db/migrations/versioned/index.js";
 import { createPluginMigrationLedgerVerifier } from "../db/migrations/generated-plugin-migrations.js";
 
 const DRIFT_CHECK_TIMEOUT_MS = 5_000;
+const READINESS_CHECK_NAME = /^[a-z][a-z0-9_]*$/;
+const CORE_READINESS_CHECK_NAMES = [
+  "database",
+  "schema",
+  "runtime_modules",
+] as const;
 
 export const API_READINESS_ERROR_CODES = new Set([
   "GENERATED_SCHEMA_BEHIND",
@@ -111,11 +117,12 @@ export async function enforceGeneratedSchemaFreshness(
 export function createApiReadinessChecks(
   databaseRuntime: DatabaseRuntime | undefined,
   modules: ModuleRegistry,
+  baseChecks?: readonly ReadinessCheck[],
 ): ReadinessCheck[] {
   const verifyVersionedLedger =
     createVersionedMigrationLedgerVerifier(versionedMigrations);
   const verifyPluginLedger = createPluginMigrationLedgerVerifier();
-  return [
+  const checks: ReadinessCheck[] = baseChecks ? [...baseChecks] : [
     {
       name: "database",
       check: async () => {
@@ -166,4 +173,46 @@ export function createApiReadinessChecks(
       },
     },
   ];
+
+  const owners = new Map<string, string>();
+  for (const check of checks) {
+    if (owners.has(check.name)) {
+      throw new Error(
+        `Readiness check ${JSON.stringify(check.name)} is declared more than once.`,
+      );
+    }
+    owners.set(check.name, "core");
+  }
+  for (const name of CORE_READINESS_CHECK_NAMES) {
+    if (!owners.has(name)) owners.set(name, "core reserved name");
+  }
+  const moduleChecks = modules.loaded
+    .flatMap((module) =>
+      (module.readinessChecks ?? []).map((check) => ({ module, check })),
+    )
+    .sort(
+      (left, right) =>
+        left.check.name.localeCompare(right.check.name) ||
+        left.module.name.localeCompare(right.module.name),
+    );
+
+  for (const { module, check } of moduleChecks) {
+    if (!READINESS_CHECK_NAME.test(check.name)) {
+      throw new Error(
+        `Runtime module ${JSON.stringify(module.name)} declares invalid readiness check ` +
+          `${JSON.stringify(check.name)}; names must match ${READINESS_CHECK_NAME}.`,
+      );
+    }
+    const owner = owners.get(check.name);
+    if (owner) {
+      throw new Error(
+        `Runtime module ${JSON.stringify(module.name)} readiness check ` +
+          `${JSON.stringify(check.name)} collides with ${owner}.`,
+      );
+    }
+    owners.set(check.name, `runtime module ${JSON.stringify(module.name)}`);
+    checks.push(check);
+  }
+
+  return checks;
 }

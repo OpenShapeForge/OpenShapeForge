@@ -48,6 +48,7 @@ import { resolveSessionContext } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import {
   assertSingleModuleEgressOwner,
+  closeRuntimeModules,
   initRuntimeModules,
   loadRuntimeModules,
   type ModuleRegistry,
@@ -194,9 +195,6 @@ export function createApiApp(options: {
     : undefined;
 
   if (sharedStore) {
-    app.addHook("onClose", async () => {
-      await sharedStore.close();
-    });
     app.log.info(
       "Rate limiting uses a shared store: one budget across all replicas.",
     );
@@ -251,10 +249,6 @@ export function createApiApp(options: {
       databaseUrl: options.databaseUrl,
     });
 
-    app.addHook("onClose", async () => {
-      await databaseRuntime?.close();
-    });
-
     const runtime = databaseRuntime;
     app.addHook("onReady", async () => {
       await enforceGeneratedSchemaFreshness(app.log, runtime.db);
@@ -272,6 +266,26 @@ export function createApiApp(options: {
   // callers — tests included — should not have to await a server they are only
   // constructing.
   let ready: { yoga: ReturnType<typeof createGraphqlYoga> } | null = null;
+  let initialisedModules: ModuleRegistry["loaded"] = [];
+  const databaseToClose = databaseRuntime;
+
+  app.addHook("onClose", async () => {
+    const failures: unknown[] = [];
+    for (const close of [
+      () => closeRuntimeModules(initialisedModules),
+      ...(sharedStore ? [() => sharedStore.close()] : []),
+      ...(databaseToClose ? [() => databaseToClose.close()] : []),
+    ]) {
+      try {
+        await close();
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "One or more API resources failed to close.");
+    }
+  });
 
   // Register the routes inside a child plugin so they load AFTER the rate-limit
   // plugin above. @fastify/rate-limit attaches its per-route guard through an
@@ -287,6 +301,7 @@ export function createApiApp(options: {
       ...(modulePlatform ? { platform: modulePlatform.services } : {}),
     };
     const initialised = await initRuntimeModules(modules, moduleContext);
+    initialisedModules = initialised.loaded;
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
     const modulesWithUnauditedRest = initialised.loaded
       .filter((module) => module.restRoutes)
@@ -342,9 +357,11 @@ export function createApiApp(options: {
       role: "api",
     }));
 
-    const readinessChecks =
-      options.readinessChecks ??
-      createApiReadinessChecks(databaseRuntime, initialised);
+    const readinessChecks = createApiReadinessChecks(
+      databaseRuntime,
+      initialised,
+      options.readinessChecks,
+    );
     registerOperationalRoutes(routes, {
       readinessChecks,
       allowedReadinessErrorCodes: API_READINESS_ERROR_CODES,

@@ -3,10 +3,12 @@
 import { describe, expect, test } from "bun:test";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import {
+  createGeneratedEntity,
   getGeneratedCrudTables,
   listGeneratedEntities,
   listGeneratedEntitiesForTable,
   projectGeneratedEntityRow,
+  updateGeneratedEntity,
 } from "../generated-crud.js";
 import { renderTypeDefinition } from "../generated-entity-schema.js";
 
@@ -166,11 +168,53 @@ describe("elicited-value shared CRUD output", () => {
     });
   });
 
-  test("withholds the target from the GraphQL filter input", async () => {
+  test("rejects caller-supplied elicited targets before SQL", async () => {
+    await withElicitedTarget(async () => {
+      for (const supplied of [
+        "plaintext-secret",
+        { ciphertext: "malformed" },
+        storedSecret,
+        null,
+      ]) {
+        const createError = await createGeneratedEntity(noDb, writeSession, {
+          table: table.name,
+          values: { valueJson: supplied },
+        }).catch((caught: unknown) => caught);
+        expect(createError).toMatchObject({
+          extensions: { code: "BAD_USER_INPUT", status: 400 },
+        });
+        expect((createError as Error).message).not.toContain(
+          JSON.stringify(supplied),
+        );
+
+        const updateError = await updateGeneratedEntity(noDb, writeSession, {
+          table: table.name,
+          id: "row-1",
+          values: { valueJson: supplied },
+        }).catch((caught: unknown) => caught);
+        expect(updateError).toMatchObject({
+          extensions: { code: "BAD_USER_INPUT", status: 400 },
+        });
+        expect((updateError as Error).message).not.toContain(
+          JSON.stringify(supplied),
+        );
+      }
+    });
+  });
+
+  test("withholds the target from GraphQL filters and mutation inputs", async () => {
     await withElicitedTarget(() => {
       const sdl = renderTypeDefinition(table);
       const filter = sdl.split("input PreferenceFilter {")[1]!.split("}")[0]!;
       expect(filter).not.toContain("valueJson");
+      const create = sdl
+        .split("input CreatePreferenceInput {")[1]!
+        .split("}")[0]!;
+      const update = sdl
+        .split("input UpdatePreferenceInput {")[1]!
+        .split("}")[0]!;
+      expect(create).not.toContain("valueJson");
+      expect(update).not.toContain("valueJson");
       expect(sdl).toContain("valueJson: JSON");
     });
   });

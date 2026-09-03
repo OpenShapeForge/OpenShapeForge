@@ -96,10 +96,9 @@ function schemaForScalar(type: ScalarType): JsonObject {
   }
 }
 
-// Mirrors the writable-column predicate of the API's generated CRUD layer
-// (isWritableColumn in apps/api/src/graphql/generated-crud.ts): server-managed
-// columns are never accepted in request bodies, and a column authored
-// `immutable` is accepted on create only (#177).
+// Mirrors the storage-writable predicate of generated CRUD. Request schema
+// construction additionally removes the secure elicitation target, matching
+// isCallerWritableColumn in the API runtime.
 function isWritableColumn(
   column: TableDefinition["columns"][number],
   operation: "create" | "update",
@@ -445,6 +444,7 @@ export function renderOpenApiSpec(
     );
     const label = entityLabel(contract, name);
     const description = entityDescription(contract);
+    const elicitedOutputField = table.source?.mcp?.elicitOnCreate?.into;
     tags.push({ name, ...(description ? { description } : {}) });
 
     const read = columnProperties(
@@ -454,10 +454,12 @@ export function renderOpenApiSpec(
       "storage",
     );
     const creatableColumns = table.columns.filter((column) =>
-      isWritableColumn(column, "create"),
+      isWritableColumn(column, "create") &&
+      fieldNameForColumn(column) !== elicitedOutputField,
     );
     const updatableColumns = table.columns.filter((column) =>
-      isWritableColumn(column, "update"),
+      isWritableColumn(column, "update") &&
+      fieldNameForColumn(column) !== elicitedOutputField,
     );
     const creatable = columnProperties(
       creatableColumns,

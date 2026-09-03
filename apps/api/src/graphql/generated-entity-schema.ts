@@ -21,7 +21,7 @@ import {
   isGeneratedCrudOperationEnabled,
   createGeneratedEntity,
   deleteGeneratedEntity,
-  isWritableColumn,
+  isCallerWritableColumn,
   listGeneratedEntities,
   listGeneratedEntityRelation,
   updateGeneratedEntity,
@@ -252,15 +252,14 @@ export function renderTypeDefinition(
       `      ${relationship.name}: ${relationFieldType(relationship)}`,
       `      ${relationship.name}Aggregate: AggregateResult!`,
     ]);
-  // Create and update inputs are rendered from the CRUD layer's own
-  // writability predicate, per operation: a column authored `immutable` is
-  // offered on create and absent from the update input, so a mutation naming it
-  // fails GraphQL validation rather than being silently dropped (#177).
+  // Create and update inputs are rendered from the CRUD layer's caller
+  // predicate: immutable fields retain their operation asymmetry, while the
+  // secure elicitation target is absent from both inputs.
   const creatableColumns = table.columns.filter((column) =>
-    isWritableColumn(column, "create"),
+    isCallerWritableColumn(table, column, "create"),
   );
   const updatableColumns = table.columns.filter((column) =>
-    isWritableColumn(column, "update"),
+    isCallerWritableColumn(table, column, "update"),
   );
   const createInputBody = creatableColumns.length === 0
     ? "      _empty: String"

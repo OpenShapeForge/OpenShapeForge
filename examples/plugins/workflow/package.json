@@ -7,13 +7,13 @@
   "description": "Example plugin: workflow node catalogs and the workflow runtime (generators + platform tables + authoring layer + runtime module).",
   "module": "index.ts",
   "dependencies": {
-    "@restatedev/restate-sdk": "^1.10.4",
-    "cron-parser": "^5.5.0",
-    "fastify": "^5.8.2",
-    "kysely": "^0.29.4",
-    "react": "19.2.7",
+    "@restatedev/restate-sdk": "^1.16.9",
+    "cron-parser": "^5.10.0",
+    "fastify": "^5.12.1",
+    "kysely": "^0.29.5",
+    "react": "19.2.8",
     "yaml": "^2.8.3",
-    "zod": "^4.3.6"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@types/react": "^19"

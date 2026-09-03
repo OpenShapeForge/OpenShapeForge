@@ -111,6 +111,7 @@ describe("generated MCP runtime module security boundary", () => {
               key text not null,
               description text not null,
               input_fields jsonb not null,
+              output_fields jsonb not null,
               definition_version integer not null,
               status text not null,
               visible_roles jsonb not null,
@@ -198,11 +199,12 @@ describe("generated MCP runtime module security boundary", () => {
         );
         await admin.connection().execute(async (trx) => {
           await sql`insert into public.module_service_test
-            (id, tenant_id, key, description, input_fields, definition_version,
+            (id, tenant_id, key, description, input_fields, output_fields, definition_version,
              status, visible_roles, internal_only, bindings)
           values
             (${publicDefinitionId}::uuid, ${tenantId}::uuid, 'public_read', 'Public read',
              '[{"key":"sourceReference","valueType":"string"},{"key":"scope","valueType":"string"},{"key":"provider","valueType":"string"}]'::jsonb,
+             '[{"key":"title","classification":{"sensitivity":"public"}},{"key":"privateNote","classification":{"sensitivity":"confidential"}}]'::jsonb,
              1, 'published', '["reader"]'::jsonb, false,
              jsonb_build_array(
                jsonb_build_object(
@@ -218,10 +220,12 @@ describe("generated MCP runtime module security boundary", () => {
                )
              )),
             (${hiddenDefinitionId}::uuid, ${tenantId}::uuid, 'hidden_read', 'Hidden read',
-             '[]'::jsonb, 7, 'published', '["reader"]'::jsonb, true,
+             '[]'::jsonb,
+             '[{"key":"title","classification":{"sensitivity":"public"}},{"key":"privateNote","classification":{"sensitivity":"confidential"}}]'::jsonb,
+             7, 'published', '["reader"]'::jsonb, true,
              jsonb_build_array(jsonb_build_object('order', 1, 'operationId', ${operationId}::text))),
             (${wrongKeyDefinitionId}::uuid, ${tenantId}::uuid, 'wrong_key_read', 'Wrong key read',
-             '[]'::jsonb, 1, 'published', '["reader"]'::jsonb, false,
+             '[]'::jsonb, '[]'::jsonb, 1, 'published', '["reader"]'::jsonb, false,
              jsonb_build_array(jsonb_build_object('order', 1, 'operationId', ${wrongKeyOperationId}::text)))
           `.execute(trx);
           await sql`insert into public.module_operation_test
@@ -272,6 +276,7 @@ describe("generated MCP runtime module security boundary", () => {
             column("key", "key"),
             column("description", "description"),
             column("input_fields", "inputFields", "jsonb"),
+            column("output_fields", "outputFields", "jsonb"),
             column("definition_version", "definitionVersion", "integer"),
             column("status", "status"),
             column("visible_roles", "visibleRoles", "jsonb"),
@@ -314,6 +319,7 @@ describe("generated MCP runtime module security boundary", () => {
           keyField: "key",
           descriptionField: "description",
           inputFieldsField: "inputFields",
+          outputFieldsField: "outputFields",
           versionField: "definitionVersion",
           visibleWhen: { field: "status", equals: "published" },
           visibleToRolesField: "visibleRoles",
@@ -353,6 +359,7 @@ describe("generated MCP runtime module security boundary", () => {
           | "preferred-source"
           | "personal-sources"
           | "hidden-collision"
+          | "hidden-tool-collision"
           | "cancel-during"
           | "cancel-late-owner"
           | "cancel-late-body"
@@ -459,14 +466,32 @@ describe("generated MCP runtime module security boundary", () => {
                 await childToolsBarrier;
               }
               return [{
-              name: "module_tool",
-              description: "Module-owned",
-              inputSchema: { type: "object", additionalProperties: false },
+                name: mode === "hidden-tool-collision"
+                  ? "hidden_read"
+                  : "module_tool",
+                description: "Module-owned",
+                inputSchema: { type: "object", additionalProperties: false },
               }];
             },
             callTool: async (_name, args) => {
               moduleToolArgument = args.id;
               return { content: [{ type: "text", text: "module" }] };
+            },
+            authorize: async (_session, request) => {
+              if (request.subject.kind !== "tool") return undefined;
+              if (request.subject.name === "module_tool") {
+                return { allowed: true, fieldAllowlist: ["moduleField"] };
+              }
+              if (
+                request.subject.name === "public_read" ||
+                request.subject.name === "hidden_read"
+              ) {
+                return {
+                  allowed: true,
+                  fieldAllowlist: ["privateNote", "title"],
+                };
+              }
+              return undefined;
             },
             resources: async (ctx) => {
               try {
@@ -499,7 +524,20 @@ describe("generated MCP runtime module security boundary", () => {
                   ctx.session,
                   { action: "call", subject: { kind: "tool", name: "public_read" } },
                 );
-                return { contents: [{ uri, text: JSON.stringify({ moduleDecision, coreDecision }) }] };
+                const hiddenDecision = await platform.services.mcp.authorize(
+                  ctx.session,
+                  { action: "call", subject: { kind: "tool", name: "hidden_read" } },
+                );
+                return {
+                  contents: [{
+                    uri,
+                    text: JSON.stringify({
+                      moduleDecision,
+                      coreDecision,
+                      hiddenDecision,
+                    }),
+                  }],
+                };
               }
               if (uri.endsWith("/fire-child")) {
                 mode = "fire-child";
@@ -828,6 +866,12 @@ describe("generated MCP runtime module security boundary", () => {
           expect(listed.tools.map((tool) => tool.name)).toContain("public_read");
           expect(listed.tools.map((tool) => tool.name)).not.toContain("hidden_read");
           expect(listed.tools.map((tool) => tool.name)).toContain("module_tool");
+
+          mode = "hidden-tool-collision";
+          await expect(client.listTools()).rejects.toThrow(
+            /contributed more than once/,
+          );
+          mode = "normal";
 
           const publicResult = await client.callTool({ name: "public_read", arguments: {} });
           expect(publicResult.isError).not.toBe(true);
@@ -1223,8 +1267,12 @@ describe("generated MCP runtime module security boundary", () => {
 
           const authorization = await client.readResource({ uri: "app://internal/authorize" });
           expect(JSON.parse(resourceText(authorization))).toEqual({
-            moduleDecision: { allowed: false, code: "NOT_FOUND" },
-            coreDecision: { allowed: true },
+            moduleDecision: {
+              allowed: true,
+              fieldAllowlist: ["moduleField"],
+            },
+            coreDecision: { allowed: true, fieldAllowlist: ["title"] },
+            hiddenDecision: { allowed: true, fieldAllowlist: ["title"] },
           });
           await expect(platform.services.mcp.callTool(
             retainedContext!,

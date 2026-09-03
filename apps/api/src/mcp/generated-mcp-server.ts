@@ -145,6 +145,7 @@ import {
 } from "../connectors/provider-outcome.js";
 import { listConnectorContracts } from "../connectors/catalog.js";
 import {
+  connectorMcpTools,
   connectorToolsForSession,
   resolveConnectorTool,
 } from "../connectors/mcp-tools.js";
@@ -166,11 +167,14 @@ import type {
 } from "../modules/contract.js";
 import {
   assertUniqueToolNames,
+  createMcpAuthorizationHandler,
   decorateMcpTools,
   interceptMcpToolCall,
   invokeModuleTool,
+  moduleResourceAuthorizationOwner,
   moduleResources,
   moduleResourceTemplates,
+  moduleToolAuthorizationOwner,
   moduleTools,
   prepareModuleResourceRead,
   readModuleResource,
@@ -575,6 +579,22 @@ const catalogDiscoveryTools: CatalogDiscoveryTool[] =
 const catalogTestTools: CatalogTestTool[] = catalog.testTools ?? [];
 const catalogGuideTools: CatalogGuideTool[] = catalog.guideTools ?? [];
 
+function coreOwnsStaticToolName(name: string): boolean {
+  return [
+    ...catalog.tools.map((tool) => tool.name),
+    ...catalog.operationTools.map((tool) => tool.name),
+    ...catalogDerivedTools.flatMap((entry) => [
+      ...(entry.connect ? [entry.connect.name] : []),
+      ...(entry.dryRun ? [entry.dryRun.name] : []),
+      ...(entry.personalization ? [entry.personalization.set.name] : []),
+    ]),
+    ...catalogGuideTools.map((tool) => tool.name),
+    ...catalogDiscoveryTools.map((tool) => tool.name),
+    ...catalogTestTools.map((tool) => tool.name),
+    ...connectorMcpTools(listConnectorContracts()).map((tool) => tool.name),
+  ].includes(name);
+}
+
 function guideToolsForSession(session: DbSessionInput): CatalogGuideTool[] {
   const granted = new Set(session.roles ?? []);
   return catalogGuideTools.filter((tool) =>
@@ -608,6 +628,18 @@ function testToolsForSession(
  * longer tool list — tool selection quality degrades well before the cap.
  */
 const DERIVED_TOOLS_ROW_LIMIT = 100;
+
+function derivedToolOutputFieldAllowlist(
+  entry: DerivedToolsCatalogEntry,
+  row: Record<string, unknown>,
+): readonly string[] | undefined {
+  if (!entry.outputFieldsField) return undefined;
+  const definitions = row[entry.outputFieldsField];
+  const withheld = secretFieldKeys(definitions);
+  return [...definitionFieldKeys(definitions)]
+    .filter((field) => !withheld.has(field))
+    .sort();
+}
 
 /**
  * The per-session derived tools: definition rows read tenant-scoped (but
@@ -1931,18 +1963,16 @@ function buildServer(
     });
   };
 
-  const coreResourceOwnership = () => {
-    const entries = entitiesForSession(session, tables);
-    const authored = resourcesForSession(session, tables);
-    return {
-      exact: [
-        ENTITY_CATALOG_URI,
-        ENTITY_CONFIGURATION_APP_URI,
-        ...entries.map(({ entity }) => entityResourceUri(entity)),
-        ...authored.map((resource) => resource.uri),
-      ],
-      templates: authored.map((resource) => resource.templateUri),
-    };
+  // Ownership is deployment-wide, not session-visible: a module must never
+  // shadow a core URI merely because this caller cannot see the core surface.
+  const coreResourceOwnership = {
+    exact: [
+      ENTITY_CATALOG_URI,
+      ENTITY_CONFIGURATION_APP_URI,
+      ...catalog.entities.map(entityResourceUri),
+      ...catalogResources.map((resource) => resource.uri),
+    ],
+    templates: catalogResources.map((resource) => resource.templateUri),
   };
 
   const definitionFor = (
@@ -2016,6 +2046,49 @@ function buildServer(
        limit 2
     `.execute(trx);
     return result.rows.map(({ row }) => serializeRow(table, row));
+  };
+
+  const coreOwnsDerivedToolName = async (toolName: string): Promise<boolean> => {
+    if (coreOwnsStaticToolName(toolName)) return true;
+    if (!session.tenantId || catalogDerivedTools.length === 0) return false;
+    return withDbSession(db, session, async (trx) => {
+      for (const entry of catalogDerivedTools) {
+        if ((await snapshotDefinitionsByToolName(trx, entry, toolName)).length > 0) {
+          return true;
+        }
+      }
+      return false;
+    });
+  };
+
+  const assertModuleToolNamesAvailable = async (
+    tools: readonly SourcedTool[],
+  ): Promise<void> => {
+    assertUniqueToolNames(tools);
+    for (const { tool } of tools) {
+      if (coreOwnsStaticToolName(tool.name)) {
+        throw new Error(
+          `MCP tool name ${JSON.stringify(tool.name)} is contributed more than once.`,
+        );
+      }
+    }
+    if (!session.tenantId || catalogDerivedTools.length === 0 || tools.length === 0) {
+      return;
+    }
+    await withDbSession(db, session, async (trx) => {
+      for (const { tool } of tools) {
+        for (const entry of catalogDerivedTools) {
+          if (
+            (await snapshotDefinitionsByToolName(trx, entry, tool.name)).length >
+            0
+          ) {
+            throw new Error(
+              `MCP tool name ${JSON.stringify(tool.name)} is contributed more than once.`,
+            );
+          }
+        }
+      }
+    });
   };
 
   const derivedDefinition = async (
@@ -2338,7 +2411,7 @@ function buildServer(
         ...(await moduleResources(
           runtimeModules,
           projectionContext(),
-          coreResourceOwnership(),
+          coreResourceOwnership,
         )),
       ],
     };
@@ -2355,7 +2428,7 @@ function buildServer(
       ...(await moduleResourceTemplates(
         runtimeModules,
         projectionContext(),
-        coreResourceOwnership(),
+        coreResourceOwnership,
       )),
     ],
   }));
@@ -2367,7 +2440,7 @@ function buildServer(
       request.params.uri,
       projectionContext(),
       ctx,
-      coreResourceOwnership(),
+      coreResourceOwnership,
     );
     const moduleFallback = async () => {
       if (!moduleRead) return undefined;
@@ -2665,9 +2738,14 @@ function buildServer(
       }
       return "derived";
     };
+    const projectedModuleTools = await moduleTools(
+      runtimeModules,
+      projectionContext(),
+    );
+    await assertModuleToolNamesAvailable(projectedModuleTools);
     const sourced: SourcedTool[] = [
       ...coreTools.map((tool) => ({ tool, source: sourceOf(tool.name) })),
-      ...(await moduleTools(runtimeModules, projectionContext())),
+      ...projectedModuleTools,
     ];
     assertUniqueToolNames(sourced);
     const decorated = decorateMcpTools(
@@ -4663,89 +4741,142 @@ function buildServer(
     liveNotifications: stateful,
     notifyToolsChanged: () => server.sendToolListChanged(),
     notifyResourcesChanged: () => server.sendResourceListChanged(),
-    authorize: async (action, subject) => {
-      if (subject.kind === "tool") {
-        if (action !== "call" && action !== "invoke") {
-          return { allowed: false, code: "NOT_FOUND" };
-        }
-        const current = (await listedTools()).some(
-          (entry) =>
-            entry.source !== "module" && entry.tool.name === subject.name,
-        );
-        return current
-          ? { allowed: true }
-          : { allowed: false, code: "NOT_FOUND" };
-      }
-
-      if (subject.kind === "entity-row") {
-        const operation =
-          action === "read" || action === "get"
-            ? "get"
-            : action === "update"
-              ? "update"
-              : action === "delete"
-                ? "delete"
-                : undefined;
-        const entity = catalog.entities.find(
-          (candidate) => candidate.entity === subject.entity,
-        );
-        const table = entity ? tables.get(entity.table) : undefined;
-        if (!operation || !table || !sessionMayInvoke(table, operation, session)) {
-          return { allowed: false, code: "NOT_FOUND" };
-        }
-        const row = await getGeneratedEntity(db, session, {
-          table: table.name,
-          id: subject.id,
-        });
-        if (!row) return { allowed: false, code: "NOT_FOUND" };
-        if (operation !== "get") return { allowed: true };
-        const includeClassified = canReadClassifiedColumns(
-          table.source?.authorization,
-          session,
-        );
-        return {
-          allowed: true,
-          fieldAllowlist: table.columns
-            .filter(
-              (column) =>
-                includeClassified || column.classification === undefined,
+    authorize: createMcpAuthorizationHandler(
+      runtimeModules,
+      moduleSession,
+      async ({ action, subject }) => {
+        if (subject.kind === "tool") {
+          if (action !== "call" && action !== "invoke") {
+            return { allowed: false, code: "NOT_FOUND" };
+          }
+          const entityTool = catalog.tools.find(
+            (tool) => tool.name === subject.name,
+          );
+          if (entityTool) {
+            return sessionMayInvoke(
+              tables.get(entityTool.table),
+              entityTool.operation,
+              session,
             )
-            .map(fieldNameForColumn),
-        };
-      }
+              ? { allowed: true }
+              : { allowed: false, code: "NOT_FOUND" };
+          }
+          const current = (await listedTools()).find(
+            (entry) =>
+              entry.source !== "module" && entry.tool.name === subject.name,
+          );
+          if (current?.source === "derived") {
+            const definition = await derivedDefinition(subject.name, true);
+            if (!definition) return { allowed: false, code: "NOT_FOUND" };
+            const fieldAllowlist = derivedToolOutputFieldAllowlist(
+              definition.entry,
+              definition.row,
+            );
+            return fieldAllowlist === undefined
+              ? { allowed: true }
+              : { allowed: true, fieldAllowlist };
+          }
+          if (current) return { allowed: true };
+          const internal = await derivedDefinition(subject.name, false);
+          if (!internal) return { allowed: false, code: "NOT_FOUND" };
+          const fieldAllowlist = derivedToolOutputFieldAllowlist(
+            internal.entry,
+            internal.row,
+          );
+          return fieldAllowlist === undefined
+            ? { allowed: true }
+            : { allowed: true, fieldAllowlist };
+        }
 
-      if (action !== "read") return { allowed: false, code: "NOT_FOUND" };
-      const uri = subject.uri;
-      if (
-        uri === ENTITY_CATALOG_URI ||
-        entitiesForSession(session, tables).some(
-          ({ entity }) => entityResourceUri(entity) === uri,
-        )
-      ) {
-        return { allowed: true };
-      }
-      const resources = resourcesForSession(session, tables);
-      if (resources.some((resource) => resource.uri === uri)) {
-        return { allowed: true };
-      }
-      const templated = resources.find(
-        (resource) =>
-          uri.startsWith(`${resource.uri}/`) &&
-          !uri.slice(resource.uri.length + 1).includes("/"),
-      );
-      if (templated) {
-        const table = tables.get(templated.table);
-        const id = uri.slice(templated.uri.length + 1);
-        if (table && id.length > 0) {
+        if (subject.kind === "entity-row") {
+          const operation =
+            action === "read" || action === "get"
+              ? "get"
+              : action === "update"
+                ? "update"
+                : action === "delete"
+                  ? "delete"
+                  : undefined;
+          const entity = catalog.entities.find(
+            (candidate) => candidate.entity === subject.entity,
+          );
+          const table = entity ? tables.get(entity.table) : undefined;
+          if (!operation || !table || !sessionMayInvoke(table, operation, session)) {
+            return { allowed: false, code: "NOT_FOUND" };
+          }
           const row = await getGeneratedEntity(db, session, {
             table: table.name,
-            id,
+            id: subject.id,
           });
-          if (row) return { allowed: true };
+          if (!row) return { allowed: false, code: "NOT_FOUND" };
+          if (operation !== "get") return { allowed: true };
+          const includeClassified = canReadClassifiedColumns(
+            table.source?.authorization,
+            session,
+          );
+          return {
+            allowed: true,
+            fieldAllowlist: table.columns
+              .filter(
+                (column) =>
+                  includeClassified || column.classification === undefined,
+              )
+              .map(fieldNameForColumn),
+          };
         }
-      }
-      return { allowed: false, code: "NOT_FOUND" };
-    },
+
+        if (action !== "read") return { allowed: false, code: "NOT_FOUND" };
+        const uri = subject.uri;
+        if (
+          uri === ENTITY_CATALOG_URI ||
+          entitiesForSession(session, tables).some(
+            ({ entity }) => entityResourceUri(entity) === uri,
+          )
+        ) {
+          return { allowed: true };
+        }
+        const resources = resourcesForSession(session, tables);
+        if (resources.some((resource) => resource.uri === uri)) {
+          return { allowed: true };
+        }
+        const templated = resources.find(
+          (resource) =>
+            uri.startsWith(`${resource.uri}/`) &&
+            !uri.slice(resource.uri.length + 1).includes("/"),
+        );
+        if (templated) {
+          const table = tables.get(templated.table);
+          const id = uri.slice(templated.uri.length + 1);
+          if (table && id.length > 0) {
+            const row = await getGeneratedEntity(db, session, {
+              table: table.name,
+              id,
+            });
+            if (row) return { allowed: true };
+          }
+        }
+        return { allowed: false, code: "NOT_FOUND" };
+      },
+      async (request) => {
+        if (request.subject.kind === "entity-row") return undefined;
+        if (request.subject.kind === "tool") {
+          if (await coreOwnsDerivedToolName(request.subject.name)) {
+            return undefined;
+          }
+          return moduleToolAuthorizationOwner(
+            runtimeModules,
+            request.subject.name,
+            projectionContext(),
+          );
+        }
+        return moduleResourceAuthorizationOwner(
+          runtimeModules,
+          request.subject.uri,
+          projectionContext(),
+          coreResourceOwnership,
+        );
+      },
+    ),
     resolveInvocationSources: async (
       toolName,
       args,

@@ -55,6 +55,11 @@ export type ModuleAuthorizationSubject =
   | { kind: "entity-row"; entity: string; id: string }
   | { kind: "resource-handle"; uri: string };
 
+export type ModuleAuthorizationRequest = {
+  action: string;
+  subject: ModuleAuthorizationSubject;
+};
+
 export type ModuleAuthorizationDecision =
   | { allowed: true; fieldAllowlist?: readonly string[] }
   | {
@@ -197,7 +202,7 @@ export type ModulePlatformServices = {
     notifyResourcesChanged(scope: { tenantId: string | null }): void;
     authorize(
       session: TrustedSessionContext,
-      request: { action: string; subject: ModuleAuthorizationSubject },
+      request: ModuleAuthorizationRequest,
     ): Promise<ModuleAuthorizationDecision>;
     resolveInvocationSources(
       session: TrustedSessionContext,
@@ -241,6 +246,16 @@ export type McpToolCallSource =
   | "module";
 
 export type RuntimeMcpContribution = {
+  /**
+   * Refine core authorization or claim a registered module-owned MCP surface.
+   * Return `undefined` to abstain. This hook deliberately receives no platform
+   * service, projection context, or `next` callback: core authorization is
+   * composed exactly once outside module code.
+   */
+  authorize?(
+    session: TrustedSessionContext,
+    request: ModuleAuthorizationRequest,
+  ): Promise<ModuleAuthorizationDecision | undefined>;
   tools?(ctx: McpProjectionContext): Promise<Tool[]>;
   callTool?(
     name: string,

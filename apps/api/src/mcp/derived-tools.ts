@@ -28,6 +28,8 @@ export type DerivedToolsCatalogEntry = {
   titleField?: string;
   descriptionField: string;
   inputFieldsField: string;
+  /** Canonical FieldDefinition collection bounding model-visible outputs. */
+  outputFieldsField?: string;
   /** Monotonic integer revision required for source-selectable execution. */
   versionField?: string;
   execution?: ExecutionCatalogEntry;

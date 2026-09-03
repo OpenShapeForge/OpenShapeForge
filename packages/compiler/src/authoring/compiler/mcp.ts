@@ -172,6 +172,9 @@ export function buildMcp(
       ["keyField", authored.keyField],
       ["descriptionField", authored.descriptionField],
       ["inputFieldsField", authored.inputFieldsField],
+      ...(authored.outputFieldsField !== undefined
+        ? [["outputFieldsField", authored.outputFieldsField]]
+        : []),
       ...(authored.titleField !== undefined
         ? [["titleField", authored.titleField]]
         : []),

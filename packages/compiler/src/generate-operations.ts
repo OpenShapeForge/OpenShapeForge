@@ -36,6 +36,21 @@ const RESERVED_API_NAMESPACES = new Set([
   "rest",
 ]);
 
+const DEFAULT_OPERATION_ERROR_SCHEMA = {
+  type: "object",
+  required: ["error"],
+  properties: {
+    error: {
+      type: "object",
+      required: ["code", "message"],
+      properties: {
+        code: { type: "string" },
+        message: { type: "string" },
+      },
+    },
+  },
+} as const;
+
 type RestMethod = PluginOperationContract["transports"]["rest"]["method"];
 type RestRoute = { method: RestMethod; path: string; owner: string };
 
@@ -125,12 +140,42 @@ function nonEmpty(value: string, label: string): void {
   if (!value.trim()) throw new Error(`${label} must be non-empty.`);
 }
 
+function isJsonContentType(value: string): boolean {
+  if (value !== value.trim()) return false;
+  const mediaType = value.toLowerCase();
+  return mediaType === "application/json" ||
+    /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+\+json$/.test(mediaType);
+}
+
 function assertSchema(ajv: { compile(schema: unknown): unknown }, schema: JsonSchema, label: string): void {
   try {
     ajv.compile(schema);
   } catch (error) {
     throw new Error(`${label} is not valid JSON Schema 2020-12: ${String(error)}`);
   }
+}
+
+function isJsonValue(value: unknown, seen = new Set<object>()): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "object" || seen.has(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null) return false;
+  if (Object.getOwnPropertySymbols(value).length > 0) return false;
+  seen.add(value);
+  let valid = true;
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      if (!(index in value) || !isJsonValue(value[index], seen)) {
+        valid = false;
+        break;
+      }
+    }
+  } else {
+    valid = Object.values(value).every((entry) => isJsonValue(entry, seen));
+  }
+  seen.delete(value);
+  return valid;
 }
 
 function validateOperation(plugin: string, operation: PluginOperationContract): void {
@@ -206,6 +251,31 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
     nonEmpty(error.code, `${where} error code`);
     nonEmpty(error.description, `${where} error description`);
     if (error.schema) assertSchema(ajv, error.schema, `${where} error ${error.code} schema`);
+    if (error.rest) {
+      if (error.rest.contentType !== undefined) {
+        nonEmpty(error.rest.contentType, `${where} error ${error.code} REST content type`);
+        if (!isJsonContentType(error.rest.contentType)) {
+          throw new Error(`${where} error ${error.code} REST content type must be a JSON media type.`);
+        }
+      }
+      if (Object.hasOwn(error.rest, "body")) {
+        if (!isJsonValue(error.rest.body)) {
+          throw new Error(`${where} error ${error.code} fixed REST body must be a JSON value.`);
+        }
+        const validateErrorBody = ajv.compile(error.schema ?? DEFAULT_OPERATION_ERROR_SCHEMA);
+        if (!validateErrorBody(error.rest.body)) {
+          throw new Error(`${where} error ${error.code} fixed REST body does not match its schema.`);
+        }
+        if (!error.schema) {
+          const bodyCode = (error.rest.body as { error?: { code?: unknown } }).error?.code;
+          if (bodyCode !== error.code) {
+            throw new Error(
+              `${where} error ${error.code} uses the default error schema, so its fixed REST body must carry the same error.code.`,
+            );
+          }
+        }
+      }
+    }
   }
   if (operation.auth.mode === "session" && operation.auth.roles.length === 0) {
     throw new Error(`${where} session auth must declare at least one role.`);
@@ -485,7 +555,14 @@ export function operationOpenApiPaths(operations: readonly CompiledPluginOperati
     for (const error of operation.errors) {
       responses[String(error.status)] = {
         description: error.description,
-        content: { "application/json": { schema: error.schema ?? { $ref: "#/components/schemas/Error" } } },
+        content: {
+          [error.rest?.contentType ?? "application/json"]: {
+            schema: error.schema ?? { $ref: "#/components/schemas/Error" },
+            ...(error.rest && Object.hasOwn(error.rest, "body")
+              ? { example: error.rest.body }
+              : {}),
+          },
+        },
       };
     }
     const inputProperties = operation.inputSchema.properties as Record<string, unknown> | undefined;

@@ -93,6 +93,103 @@ describe("first-class plugin operations", () => {
     expect(alias.responses).toEqual(canonical.responses);
   });
 
+  test("validates and documents REST projections for declared errors", () => {
+    const represented: PluginOperationContract = {
+      ...operation,
+      errors: [{
+        status: 409,
+        code: "CONFLICT",
+        description: "Quote is not publishable",
+        schema: {
+          type: "object",
+          required: ["error"],
+          properties: { error: { const: "conflict" } },
+          additionalProperties: false,
+        },
+        rest: {
+          body: { error: "conflict" },
+          contentType: "application/problem+json",
+        },
+      }],
+    };
+    const collected = collectPluginOperations(
+      [{ name: "demo", operations: [represented] }],
+      context,
+    );
+    const paths = operationOpenApiPaths(collected) as Record<string, Record<string, any>>;
+    expect(paths["/api/demo/quotes/{quoteId}/publish"]!.post.responses["409"])
+      .toMatchObject({
+        content: {
+          "application/problem+json": {
+            schema: represented.errors[0]!.schema,
+            example: { error: "conflict" },
+          },
+        },
+      });
+
+    const dynamic = {
+      ...represented,
+      errors: [{
+        ...represented.errors[0]!,
+        rest: { contentType: "application/problem+json" },
+      }],
+    };
+    const dynamicPaths = operationOpenApiPaths(
+      collectPluginOperations([{ name: "demo", operations: [dynamic] }], context),
+    ) as Record<string, Record<string, any>>;
+    expect(dynamicPaths["/api/demo/quotes/{quoteId}/publish"]!.post.responses["409"])
+      .toEqual({
+        description: "Quote is not publishable",
+        content: {
+          "application/problem+json": { schema: represented.errors[0]!.schema },
+        },
+      });
+
+    expect(() => collectPluginOperations([{ name: "demo", operations: [{
+      ...represented,
+      errors: [{ ...represented.errors[0]!, rest: { body: { error: "other" } } }],
+    }] }], context)).toThrow(/fixed REST body does not match/);
+    expect(() => collectPluginOperations([{ name: "demo", operations: [{
+      ...operation,
+      errors: [{
+        status: 409,
+        code: "CONFLICT",
+        description: "Quote is not publishable",
+        rest: { body: { error: { code: "OTHER", message: "Conflict." } } },
+      }],
+    }] }], context)).toThrow(/must carry the same error.code/);
+    expect(() => collectPluginOperations([{ name: "demo", operations: [{
+      ...operation,
+      errors: [{
+        status: 409,
+        code: "CONFLICT",
+        description: "Quote is not publishable",
+        schema: {},
+        rest: { body: Number.NaN },
+      }],
+    }] }], context)).toThrow(/must be a JSON value/);
+    expect(() => collectPluginOperations([{ name: "demo", operations: [{
+      ...represented,
+      errors: [{
+        ...represented.errors[0]!,
+        rest: { contentType: "text/plain" },
+      }],
+    }] }], context)).toThrow(/must be a JSON media type/);
+    for (const contentType of [
+      "application/json; charset=iso-8859-1",
+      "application/json; charset=utf-8",
+      "application/json\r\nx-unsafe: value",
+    ]) {
+      expect(() => collectPluginOperations([{ name: "demo", operations: [{
+        ...represented,
+        errors: [{
+          ...represented.errors[0]!,
+          rest: { contentType },
+        }],
+      }] }], context)).toThrow(/must be a JSON media type/);
+    }
+  });
+
   test("keeps REST idempotency exclusively in the header for query operations", () => {
     const queryOperation: PluginOperationContract = {
       ...operation,

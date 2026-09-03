@@ -1,6 +1,6 @@
 {
   "name": "@openshapeforge/compiler",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Compiles OpenShapeForge authoring YAML into database, API, UI and Keycloak artifacts. Runs under Bun; see docs/consuming.md in the repository.",
   "//publishConfig": "Published to the GitHub Packages npm registry by .github/workflows/package-compiler.yml on pushes to main (only when this version does not exist there yet — bump `version` to release). The registry pin means a stray `npm publish` from a dev machine cannot land on npmjs.com.",
   "publishConfig": {

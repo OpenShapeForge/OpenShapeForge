@@ -2,8 +2,11 @@
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { describe, expect, test } from "bun:test";
 import { Readable } from "node:stream";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import Fastify from "fastify";
+import { GraphQLError } from "graphql";
 import {
   DummyDriver,
   Kysely,
@@ -17,15 +20,26 @@ import { __resetSessionResolverForTests } from "../auth/identity.js";
 import type {
   McpInvocationContext,
   ModuleInvocationSource,
+  ModuleOperationResult,
   RuntimeModule,
 } from "../modules/contract.js";
+import { __buildGeneratedMcpServerForTests } from "../mcp/generated-mcp-server.js";
 import {
   createModuleSessionCapability,
   ModulePlatformRuntime,
   type ModuleMcpServerBinding,
 } from "../modules/platform.js";
 import { HttpError } from "../rest/http-error.js";
-import { bindOperationHandlers, invokeOperation, operationRestInput, registerOperationRestRoutes, requireOperationAuthorization, type OperationContract } from "./runtime.js";
+import {
+  bindOperationHandlers,
+  DeclaredOperationError,
+  invokeOperation,
+  operationGraphqlContribution,
+  operationRestInput,
+  registerOperationRestRoutes,
+  requireOperationAuthorization,
+  type OperationContract,
+} from "./runtime.js";
 
 const session = {
   tenantId: "tenant-a",
@@ -90,6 +104,66 @@ const restAliasOperation: OperationContract = {
     mcp: { enabled: false, reason: "REST transport test." },
     graphql: { enabled: false, reason: "REST transport test." },
     typescript: { enabled: false, reason: "REST transport test." },
+  },
+};
+
+const declaredErrorOperation: OperationContract = {
+  key: "demo.order.submit",
+  plugin: "demo",
+  title: "Submit order",
+  description: "Submits an order.",
+  handler: "submitOrder",
+  inputSchema: {
+    type: "object",
+    required: [],
+    properties: {},
+    additionalProperties: false,
+  },
+  outputSchema: {
+    type: "object",
+    required: ["accepted"],
+    properties: { accepted: { const: true } },
+    additionalProperties: false,
+  },
+  errors: [{
+    status: 409,
+    code: "CONFLICT",
+    description: "Order conflicts.",
+    schema: {
+      type: "object",
+      required: ["error", "requestId", "details"],
+      properties: {
+        error: { const: "conflict" },
+        requestId: { type: "string" },
+        details: { type: "object" },
+      },
+      additionalProperties: false,
+    },
+    rest: { contentType: "application/problem+json" },
+  }],
+  auth: { mode: "public" },
+  tenancy: { mode: "none" },
+  idempotency: { mode: "none" },
+  transports: {
+    rest: {
+      method: "POST",
+      path: "/api/demo/orders/submit",
+      response: { status: 200, kind: "json" },
+    },
+    mcp: { enabled: false, reason: "Transport-specific fixture." },
+    graphql: { enabled: false, reason: "Transport-specific fixture." },
+    typescript: { enabled: false, reason: "Transport-specific fixture." },
+  },
+};
+
+const declaredConflict = {
+  ok: false as const,
+  status: 409,
+  code: "CONFLICT",
+  body: {
+    error: "conflict",
+    requestId: "request-1",
+    details: { currentVersion: 3 },
   },
 };
 
@@ -390,6 +464,86 @@ describe("canonical operation runtime", () => {
     }, { transport: "rest", session })).rejects.toMatchObject({ status: 500 });
   });
 
+  test("accepts only schema-valid errors declared by status and code", async () => {
+    const invoke = (result: ModuleOperationResult) => {
+      const bound = bindOperationHandlers([{
+        name: "demo",
+        operationHandlers: { submitOrder: () => result },
+      }], [declaredErrorOperation]).get(declaredErrorOperation.key)!;
+      return invokeOperation(bound, {}, { transport: "rest" });
+    };
+
+    await expect(invoke(declaredConflict)).rejects.toMatchObject({
+      status: 409,
+      code: "CONFLICT",
+      body: declaredConflict.body,
+    });
+    await expect(invoke({ ...declaredConflict, status: 422 })).rejects.toMatchObject({
+      status: 500,
+      code: "HANDLER_CONTRACT_VIOLATION",
+    });
+    await expect(invoke({ ...declaredConflict, code: "OTHER_CONFLICT" })).rejects.toMatchObject({
+      status: 500,
+      code: "HANDLER_CONTRACT_VIOLATION",
+    });
+    await expect(invoke({
+      ...declaredConflict,
+      ok: "false",
+    } as unknown as ModuleOperationResult)).rejects.toMatchObject({
+      status: 500,
+      code: "HANDLER_CONTRACT_VIOLATION",
+    });
+    await expect(invoke({ ...declaredConflict, body: { error: "conflict" } })).rejects.toMatchObject({
+      status: 500,
+      code: "HANDLER_CONTRACT_VIOLATION",
+    });
+    await expect(invoke({ ...declaredConflict, contentType: "application/json" })).rejects.toMatchObject({
+      status: 500,
+      code: "HANDLER_CONTRACT_VIOLATION",
+    });
+    const cyclic = { ...declaredConflict.body, details: {} as Record<string, unknown> };
+    cyclic.details.self = cyclic;
+    await expect(invoke({ ...declaredConflict, body: cyclic })).rejects.toMatchObject({
+      status: 500,
+      code: "HANDLER_CONTRACT_VIOLATION",
+    });
+
+    const inner = bindOperationHandlers([{
+      name: "demo",
+      operationHandlers: { submitOrder: () => declaredConflict },
+    }], [declaredErrorOperation]).get(declaredErrorOperation.key)!;
+    const outer = bindOperationHandlers([{
+      name: "demo",
+      operationHandlers: {
+        submitOrder: async () => invokeOperation(inner, {}, { transport: "rest" }),
+      },
+    }], [declaredErrorOperation]).get(declaredErrorOperation.key)!;
+    await expect(invokeOperation(outer, {}, { transport: "rest" })).rejects.toMatchObject({
+      status: 500,
+      code: "HANDLER_CONTRACT_VIOLATION",
+    });
+  });
+
+  test("requires the standard matching-code envelope when an error schema is omitted", async () => {
+    const operation: OperationContract = {
+      ...declaredErrorOperation,
+      errors: [{ status: 409, code: "CONFLICT", description: "Order conflicts." }],
+    };
+    const invoke = (body: unknown) => {
+      const bound = bindOperationHandlers([{
+        name: "demo",
+        operationHandlers: {
+          submitOrder: () => ({ ok: false, status: 409, code: "CONFLICT", body }),
+        },
+      }], [operation]).get(operation.key)!;
+      return invokeOperation(bound, {}, { transport: "rest" });
+    };
+    await expect(invoke({ error: { code: "CONFLICT", message: "Order conflicts." } }))
+      .rejects.toBeInstanceOf(DeclaredOperationError);
+    await expect(invoke({ error: { code: "OTHER", message: "Order conflicts." } }))
+      .rejects.toMatchObject({ status: 500, code: "HANDLER_CONTRACT_VIOLATION" });
+  });
+
   test("does not advertise an uncontracted runtime handler", () => {
     expect(() => bindOperationHandlers([{
       name: "workflow",
@@ -408,8 +562,12 @@ describe("canonical operation runtime", () => {
 
 test("REST aliases preserve authorization, tenancy, idempotency, input, output, and errors", async () => {
   const previousSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+  const previousJwks = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
+  const previousIssuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
   const secret = "operation-alias-test-context-secret";
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = secret;
+  delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
+  delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
   __resetSessionResolverForTests();
   const observations: unknown[] = [];
   const module: RuntimeModule = {
@@ -444,6 +602,19 @@ test("REST aliases preserve authorization, tenancy, idempotency, input, output, 
       expect((await app.inject({ method: "POST", url: path, payload: {} })).statusCode)
         .toBe(401);
     }
+    const undeclaredUnavailable = await app.inject({
+      method: "POST",
+      url: paths[0]!,
+      headers: { authorization: "Bearer test-token" },
+      payload: {},
+    });
+    expect(undeclaredUnavailable.statusCode).toBe(401);
+    expect(undeclaredUnavailable.json() as unknown).toEqual({
+      error: {
+        code: "UNAUTHENTICATED",
+        message: "Operation requires an authenticated bearer session.",
+      },
+    });
 
     const wrongRole = new Headers({ "content-type": "application/json" });
     applyTrustedContextHeaders(wrongRole, {
@@ -522,7 +693,263 @@ test("REST aliases preserve authorization, tenancy, idempotency, input, output, 
     } else {
       process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = previousSecret;
     }
+    if (previousJwks === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
+    else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = previousJwks;
+    if (previousIssuer === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+    else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = previousIssuer;
     __resetSessionResolverForTests();
+  }
+});
+
+test("REST sends a declared handler error body and metadata unchanged", async () => {
+  const app = Fastify();
+  registerOperationRestRoutes(app, [{
+    name: "demo",
+    operationHandlers: {
+      submitOrder: () => ({
+        ...declaredConflict,
+        headers: { "x-error-source": "operation" },
+        contentType: "application/problem+json",
+      }),
+    },
+  }], {}, [declaredErrorOperation]);
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/demo/orders/submit",
+      payload: {},
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.headers["x-error-source"]).toBe("operation");
+    expect(response.headers["content-type"]).toBe("application/problem+json");
+    expect(JSON.parse(response.body)).toEqual(declaredConflict.body);
+  } finally {
+    await app.close();
+  }
+});
+
+test("REST JSON-encodes scalar declared errors under the default advertised media type", async () => {
+  const operation: OperationContract = {
+    ...declaredErrorOperation,
+    errors: [{
+      status: 409,
+      code: "CONFLICT",
+      description: "Order conflicts.",
+      schema: { type: "string" },
+    }],
+  };
+  const app = Fastify();
+  registerOperationRestRoutes(app, [{
+    name: "demo",
+    operationHandlers: {
+      submitOrder: () => ({
+        ok: false,
+        status: 409,
+        code: "CONFLICT",
+        body: "Order conflicts.",
+      }),
+    },
+  }], {}, [operation]);
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: operation.transports.rest.path,
+      payload: {},
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.headers["content-type"]).toBe("application/json");
+    expect(response.body).toBe('"Order conflicts."');
+  } finally {
+    await app.close();
+  }
+});
+
+test("REST applies declared fixed representations to matching core authorization errors", async () => {
+  const errorSchema = (value: string) => ({
+    type: "object",
+    required: ["error"],
+    properties: { error: { const: value } },
+    additionalProperties: false,
+  });
+  const operation: OperationContract = {
+    ...declaredErrorOperation,
+    auth: { mode: "session", roles: ["seller"] },
+    tenancy: { mode: "required" },
+    errors: [
+      {
+        status: 401,
+        code: "UNAUTHENTICATED",
+        description: "Authentication is required.",
+        schema: errorSchema("unauthorized"),
+        rest: { body: { error: "unauthorized" } },
+      },
+      {
+        status: 403,
+        code: "FORBIDDEN",
+        description: "The required role is missing.",
+        schema: errorSchema("forbidden"),
+        rest: { body: { error: "forbidden" } },
+      },
+      {
+        status: 503,
+        code: "AUTHENTICATION_UNAVAILABLE",
+        description: "Authentication is unavailable.",
+        schema: errorSchema("authentication_unavailable"),
+        rest: { body: { error: "authentication_unavailable" } },
+      },
+    ],
+  };
+  const previous = {
+    secret: process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET,
+    jwks: process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI,
+    issuer: process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER,
+  };
+  process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = "declared-auth-error-test-secret";
+  delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
+  delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+  __resetSessionResolverForTests();
+  let throwFromHandler = false;
+  const app = Fastify();
+  registerOperationRestRoutes(app, [{
+    name: "demo",
+    operationHandlers: {
+      submitOrder: () => {
+        if (throwFromHandler) throw new HttpError(403, "FORBIDDEN", "Handler failure.");
+        return { value: { accepted: true } };
+      },
+    },
+  }], {}, [operation]);
+  try {
+    const unauthenticated = await app.inject({
+      method: "POST",
+      url: operation.transports.rest.path,
+      payload: {},
+    });
+    expect(unauthenticated.statusCode).toBe(401);
+    expect(unauthenticated.headers["content-type"]).toBe("application/json");
+    expect(JSON.parse(unauthenticated.body)).toEqual({ error: "unauthorized" });
+
+    const wrongRole = new Headers({ "content-type": "application/json" });
+    applyTrustedContextHeaders(wrongRole, {
+      tenantId: "tenant-a",
+      userId: "user-a",
+      roles: ["reader"],
+      groups: [],
+    }, { secret: "declared-auth-error-test-secret" });
+    const forbidden = await app.inject({
+      method: "POST",
+      url: operation.transports.rest.path,
+      headers: Object.fromEntries(wrongRole),
+      payload: {},
+    });
+    expect(forbidden.statusCode).toBe(403);
+    expect(JSON.parse(forbidden.body)).toEqual({ error: "forbidden" });
+
+    const unavailable = await app.inject({
+      method: "POST",
+      url: operation.transports.rest.path,
+      headers: { authorization: "Bearer test-token" },
+      payload: {},
+    });
+    expect(unavailable.statusCode).toBe(503);
+    expect(JSON.parse(unavailable.body)).toEqual({ error: "authentication_unavailable" });
+
+    const authorized = new Headers({ "content-type": "application/json" });
+    applyTrustedContextHeaders(authorized, {
+      tenantId: "tenant-a",
+      userId: "user-a",
+      roles: ["seller"],
+      groups: [],
+    }, { secret: "declared-auth-error-test-secret" });
+    throwFromHandler = true;
+    const handlerFailure = await app.inject({
+      method: "POST",
+      url: operation.transports.rest.path,
+      headers: Object.fromEntries(authorized),
+      payload: {},
+    });
+    expect(handlerFailure.statusCode).toBe(403);
+    expect(JSON.parse(handlerFailure.body)).toEqual({
+      error: { code: "FORBIDDEN", message: "Handler failure." },
+    });
+  } finally {
+    await app.close();
+    if (previous.secret === undefined) delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+    else process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = previous.secret;
+    if (previous.jwks === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
+    else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = previous.jwks;
+    if (previous.issuer === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
+    else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = previous.issuer;
+    __resetSessionResolverForTests();
+  }
+});
+
+test("GraphQL and MCP project declared handler results as transport errors", async () => {
+  const body = {
+    error: { code: "CONFLICT", message: "The operation conflicts." },
+  };
+  const module: RuntimeModule = {
+    name: "workflow",
+    operationHandlers: {
+      startWebhook: () => ({
+        ok: false,
+        status: 409,
+        code: "CONFLICT",
+        body,
+      }),
+    },
+  };
+  const input = {
+    definitionId: "22222222-2222-4222-8222-222222222222",
+    idempotencyKey: "declared-error",
+  };
+
+  const contribution = operationGraphqlContribution([module], {})?.graphql?.({});
+  const resolver = contribution?.resolvers?.Mutation?.workflowStartWebhook as
+    | ((_parent: unknown, args: { input: unknown }, context: { session: TrustedSessionContext }) => Promise<unknown>)
+    | undefined;
+  expect(resolver).toBeDefined();
+  let graphqlError: unknown;
+  try {
+    await resolver!(undefined, { input }, { session });
+  } catch (error) {
+    graphqlError = error;
+  }
+  expect(graphqlError).toBeInstanceOf(GraphQLError);
+  expect(graphqlError).toMatchObject({
+    extensions: { code: "CONFLICT", status: 409, body },
+  });
+
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  const server = __buildGeneratedMcpServerForTests({
+    db,
+    session,
+    modules: [module],
+    modulePlatform: platform,
+  });
+  const client = new Client(
+    { name: "declared-operation-error-test", version: "1" },
+    { capabilities: {} },
+  );
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const result = await client.callTool({
+      name: "workflow_start_webhook",
+      arguments: input,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual(body);
+    expect(result.content).toContainEqual(expect.objectContaining({
+      type: "text",
+      text: "CONFLICT: The operation conflicts.",
+    }));
+  } finally {
+    await client.close();
+    await server.close();
+    await db.destroy();
   }
 });
 

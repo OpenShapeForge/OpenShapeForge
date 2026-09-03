@@ -4,14 +4,18 @@ import addFormats from "ajv-formats";
 import { GraphQLError } from "graphql";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import rawCatalog from "../generated/operations/catalog.json" with { type: "json" };
-import { resolveSessionContext } from "../auth/identity.js";
+import {
+  resolveSessionContext,
+  SessionAuthenticationUnavailableError,
+} from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { GraphqlContext } from "../graphql/context.js";
 import { headersFromFastify } from "../http/headers.js";
 import type {
   ModuleGraphqlContribution,
+  ModuleOperationErrorResult,
   ModuleOperationHandler,
-  ModuleOperationResult,
+  ModuleOperationSuccessResult,
   ModuleRuntimeContext,
   RuntimeModule,
 } from "../modules/contract.js";
@@ -26,7 +30,13 @@ export type OperationContract = {
   handler: string;
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
-  errors: { status: number; code: string; description: string }[];
+  errors: {
+    status: number;
+    code: string;
+    description: string;
+    schema?: Record<string, unknown>;
+    rest?: { body?: unknown; contentType?: string };
+  }[];
   auth:
     | { mode: "public" }
     | { mode: "session"; roles: string[]; scopes?: string[] }
@@ -51,27 +61,81 @@ function operationAjv(coerceTypes = false) {
 const ajv = operationAjv();
 const queryAjv = operationAjv(true);
 const queryValidators = new WeakMap<OperationContract, ValidateFunction>();
-const validators = new WeakMap<OperationContract, {
+const defaultErrorSchema = {
+  type: "object",
+  required: ["error"],
+  properties: {
+    error: {
+      type: "object",
+      required: ["code", "message"],
+      properties: {
+        code: { type: "string" },
+        message: { type: "string" },
+      },
+    },
+  },
+} as const;
+type OperationValidators = {
   input: ValidateFunction;
   output: ValidateFunction;
-}>();
-for (const operation of catalog.operations) {
-  validators.set(operation, {
+  errors: Map<string, ValidateFunction>;
+};
+const validators = new WeakMap<OperationContract, OperationValidators>();
+
+function errorKey(status: number, code: string): string {
+  return `${status}:${code}`;
+}
+
+function isJsonContentType(value: string): boolean {
+  if (value !== value.trim()) return false;
+  const mediaType = value.toLowerCase();
+  return mediaType === "application/json" ||
+    /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+\+json$/.test(mediaType);
+}
+
+function compileValidators(operation: OperationContract): OperationValidators {
+  return {
     input: ajv.compile(operation.inputSchema),
     output: ajv.compile(operation.outputSchema),
-  });
+    errors: new Map(operation.errors.map((error) => [
+      errorKey(error.status, error.code),
+      ajv.compile(error.schema ?? defaultErrorSchema),
+    ])),
+  };
+}
+
+for (const operation of catalog.operations) {
+  validators.set(operation, compileValidators(operation));
 }
 
 function validatorsFor(operation: OperationContract) {
   let validation = validators.get(operation);
   if (!validation) {
-    validation = {
-      input: ajv.compile(operation.inputSchema),
-      output: ajv.compile(operation.outputSchema),
-    };
+    validation = compileValidators(operation);
     validators.set(operation, validation);
   }
   return validation;
+}
+
+/** Validated declared failure carried to each transport's error projection. */
+export class DeclaredOperationError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly body: unknown;
+  readonly headers: Record<string, string> | undefined;
+  readonly contentType: string | undefined;
+
+  constructor(
+    declaration: OperationContract["errors"][number],
+    result: ModuleOperationErrorResult,
+  ) {
+    super(declaration.description);
+    this.status = result.status;
+    this.code = result.code;
+    this.body = result.body;
+    this.headers = result.headers;
+    this.contentType = result.contentType ?? declaration.rest?.contentType ?? "application/json";
+  }
 }
 
 export function listOperationContracts(): readonly OperationContract[] {
@@ -144,11 +208,34 @@ function asInput(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function isJsonValue(value: unknown, seen = new Set<object>()): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "object" || seen.has(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null) return false;
+  if (Object.getOwnPropertySymbols(value).length > 0) return false;
+  seen.add(value);
+  let valid = true;
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      if (!(index in value) || !isJsonValue(value[index], seen)) {
+        valid = false;
+        break;
+      }
+    }
+  } else {
+    valid = Object.values(value).every((entry) => isJsonValue(entry, seen));
+  }
+  seen.delete(value);
+  return valid;
+}
+
 export async function invokeOperation(
   bound: Bound,
   inputValue: unknown,
   context: Parameters<ModuleOperationHandler>[1],
-): Promise<ModuleOperationResult> {
+): Promise<ModuleOperationSuccessResult> {
   const input = asInput(inputValue);
   const run = async (activeContext: Parameters<ModuleOperationHandler>[1]) => {
     requireOperationAuthorization(bound.operation, activeContext.session);
@@ -156,7 +243,85 @@ export async function invokeOperation(
     if (!validation.input(input)) {
       throw new HttpError(400, "BAD_USER_INPUT", "Operation input does not match its canonical schema.");
     }
-    const result = await bound.handler(input, activeContext);
+    let result;
+    try {
+      result = await bound.handler(input, activeContext);
+    } catch (error) {
+      if (error instanceof DeclaredOperationError) {
+        throw new HttpError(
+          500,
+          "HANDLER_CONTRACT_VIOLATION",
+          "Operation handlers must return declared errors instead of forwarding a transport error.",
+        );
+      }
+      throw error;
+    }
+    if (!result || typeof result !== "object" || Array.isArray(result)) {
+      throw new HttpError(
+        500,
+        "HANDLER_CONTRACT_VIOLATION",
+        "Operation handler must return an operation result object.",
+      );
+    }
+    if ("ok" in result && result.ok !== true && result.ok !== false) {
+      throw new HttpError(
+        500,
+        "HANDLER_CONTRACT_VIOLATION",
+        "Operation handler returned an invalid result discriminant.",
+      );
+    }
+    if (result.ok === false) {
+      const declaration = bound.operation.errors.find((error) =>
+        error.status === result.status && error.code === result.code
+      );
+      if (!declaration) {
+        throw new HttpError(
+          500,
+          "HANDLER_CONTRACT_VIOLATION",
+          "Operation handler returned an undeclared error status or code.",
+        );
+      }
+      if (!isJsonValue(result.body)) {
+        throw new HttpError(
+          500,
+          "HANDLER_CONTRACT_VIOLATION",
+          "Operation handler returned a non-serializable error body.",
+        );
+      }
+      const validate = validation.errors.get(errorKey(result.status, result.code))!;
+      if (!validate(result.body)) {
+        throw new HttpError(
+          500,
+          "HANDLER_CONTRACT_VIOLATION",
+          "Operation handler returned a body outside its declared error schema.",
+        );
+      }
+      if (!declaration.schema) {
+        const bodyCode = (result.body as { error?: { code?: unknown } }).error?.code;
+        if (bodyCode !== result.code) {
+          throw new HttpError(
+            500,
+            "HANDLER_CONTRACT_VIOLATION",
+            "Operation handler returned an error code inconsistent with the default error body.",
+          );
+        }
+      }
+      const declaredContentType = declaration.rest?.contentType ?? "application/json";
+      const headerContentType = Object.entries(result.headers ?? {})
+        .find(([name]) => name.toLowerCase() === "content-type")?.[1];
+      if (
+        !isJsonContentType(declaredContentType) ||
+        (result.contentType !== undefined && result.contentType !== declaredContentType) ||
+        (headerContentType !== undefined && headerContentType !== declaredContentType)
+      ) {
+        throw new HttpError(
+          500,
+          "HANDLER_CONTRACT_VIOLATION",
+          "Operation handler returned an error content type outside its declaration.",
+        );
+      }
+      throw new DeclaredOperationError(declaration, result);
+    }
     const declaredStatus = bound.operation.transports.rest.response.status ?? 200;
     if (result.status !== undefined && result.status !== declaredStatus) {
       throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned an undeclared success status.");
@@ -172,6 +337,97 @@ export async function invokeOperation(
     context.session,
     (session) => run({ ...context, ...(session ? { session } : {}) }),
   );
+}
+
+function applyErrorResponseMetadata(
+  reply: FastifyReply,
+  response: {
+    headers?: Record<string, string> | undefined;
+    contentType?: string | undefined;
+  },
+): void {
+  for (const [name, value] of Object.entries(response.headers ?? {})) {
+    reply.header(name, value);
+  }
+  if (response.contentType) reply.header("content-type", response.contentType);
+}
+
+function sendDeclaredRestError(
+  reply: FastifyReply,
+  response: {
+    status: number;
+    body: unknown;
+    headers?: Record<string, string> | undefined;
+    contentType?: string | undefined;
+  },
+) {
+  const headerContentType = Object.entries(response.headers ?? {})
+    .find(([name]) => name.toLowerCase() === "content-type")?.[1];
+  const contentType = response.contentType ?? headerContentType ?? "application/json";
+  applyErrorResponseMetadata(reply, { ...response, contentType });
+  const serialized = JSON.stringify(response.body);
+  if (serialized === undefined) {
+    throw new HttpError(
+      500,
+      "HANDLER_CONTRACT_VIOLATION",
+      "Operation error body is not JSON serializable.",
+    );
+  }
+  return reply.status(response.status).send(Buffer.from(serialized));
+}
+
+function fixedDeclaredRestError(
+  operation: OperationContract,
+  error: unknown,
+): { status: number; body: unknown; contentType?: string } | undefined {
+  if (!(error instanceof HttpError)) return undefined;
+  const declaration = operation.errors.find((candidate) =>
+    candidate.status === error.status && candidate.code === error.code
+  );
+  if (!declaration?.rest || !Object.hasOwn(declaration.rest, "body")) return undefined;
+  const validate = validatorsFor(operation).errors.get(errorKey(error.status, error.code));
+  if (!isJsonValue(declaration.rest.body) || !validate?.(declaration.rest.body)) {
+    throw new HttpError(
+      500,
+      "HANDLER_CONTRACT_VIOLATION",
+      "Operation contract contains an invalid fixed REST error body.",
+    );
+  }
+  if (
+    !declaration.schema &&
+    (declaration.rest.body as { error?: { code?: unknown } }).error?.code !== declaration.code
+  ) {
+    throw new HttpError(
+      500,
+      "HANDLER_CONTRACT_VIOLATION",
+      "Operation contract contains a fixed REST body inconsistent with its error code.",
+    );
+  }
+  return {
+    status: declaration.status,
+    body: declaration.rest.body,
+    contentType: declaration.rest.contentType ?? "application/json",
+  };
+}
+
+function sendOperationRestFailure(
+  reply: FastifyReply,
+  operation: OperationContract,
+  error: unknown,
+  allowFixedRepresentation: boolean,
+) {
+  const projectedError = error instanceof SessionAuthenticationUnavailableError
+    ? new HttpError(503, "AUTHENTICATION_UNAVAILABLE", error.message)
+    : error;
+  if (projectedError instanceof DeclaredOperationError) {
+    return sendDeclaredRestError(reply, projectedError);
+  }
+  const fixed = allowFixedRepresentation
+    ? fixedDeclaredRestError(operation, projectedError)
+    : undefined;
+  if (fixed) return sendDeclaredRestError(reply, fixed);
+  const { status, body } = toHttpError(projectedError);
+  return reply.status(status).send(body);
 }
 
 export function operationRestInput(
@@ -259,11 +515,34 @@ export function registerOperationRestRoutes(
   const bound = bindOperationHandlers(modules, operations);
   for (const entry of bound.values()) {
     const handler = async (request: FastifyRequest, reply: FastifyReply) => {
+      let session: TrustedSessionContext | undefined;
       try {
-        const session = entry.operation.auth.mode === "custom"
+        const declaresAuthenticationUnavailable = entry.operation.errors.some((error) =>
+          error.status === 503 && error.code === "AUTHENTICATION_UNAVAILABLE"
+        );
+        session = entry.operation.auth.mode === "custom"
           ? undefined
-          : await resolveSessionContext(headersFromFastify(request.headers), { db: context.db });
-        const result = await invokeOperation(entry, operationRestInput(request, entry.operation), {
+          : await resolveSessionContext(headersFromFastify(request.headers), {
+              db: context.db,
+              failOnUnavailable:
+                entry.operation.auth.mode === "session" && declaresAuthenticationUnavailable,
+            });
+      } catch (error) {
+        return sendOperationRestFailure(reply, entry.operation, error, true);
+      }
+      let input: Record<string, unknown>;
+      try {
+        input = operationRestInput(request, entry.operation);
+      } catch (error) {
+        return sendOperationRestFailure(reply, entry.operation, error, false);
+      }
+      try {
+        requireOperationAuthorization(entry.operation, session);
+      } catch (error) {
+        return sendOperationRestFailure(reply, entry.operation, error, true);
+      }
+      try {
+        const result = await invokeOperation(entry, input, {
           ...context,
           transport: "rest",
           ...(session ? { session } : {}),
@@ -276,8 +555,7 @@ export function registerOperationRestRoutes(
         }
         return reply.status(result.status ?? entry.operation.transports.rest.response.status ?? 200).send(result.value);
       } catch (error) {
-        const { status, body } = toHttpError(error);
-        return reply.status(status).send(body);
+        return sendOperationRestFailure(reply, entry.operation, error, false);
       }
     };
     for (const path of [
@@ -316,6 +594,11 @@ export function operationGraphqlContribution(
           session: context.session,
         })).value;
       } catch (error) {
+        if (error instanceof DeclaredOperationError) {
+          throw new GraphQLError(error.message, {
+            extensions: { code: error.code, status: error.status, body: error.body },
+          });
+        }
         const { status, body } = toHttpError(error);
         throw new GraphQLError(body.error.message, { extensions: { code: body.error.code, status } });
       }

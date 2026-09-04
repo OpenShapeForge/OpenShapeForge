@@ -396,6 +396,87 @@ through the tools invalidates it there and shows up elsewhere within the TTL.
 Not part of this: Keycloak user attributes as a data source, relation ids in
 tokens, and RelationRoles — the administrator assigns those.
 
+## First use: onboarding
+
+The first time a person connects, the assistant has to set them up and has to
+know when that is done. Both are server-side facts, not remembered prose:
+
+- the server's `initialize` instructions end with one sentence — *Call
+  `whoami` first. If its `onboarding.status` is not Completed, follow
+  `onboarding_guide`.* — which is what every client shows the model;
+- `whoami` carries an `onboarding` object: a **computed checklist**, also
+  available on its own as the `onboarding_status` tool;
+- `complete_onboarding` records completion durably, once, per (identity,
+  tenant); `onboarding_guide` is the process for the assistant.
+
+All three tools are listed for every authenticated session
+(`apps/api/src/mcp/onboarding.ts`; wired into the generated server by a few
+delimited hunks).
+
+```json
+"onboarding": {
+  "status": "In progress",
+  "version": 1,
+  "completedAt": null,
+  "steps": [
+    { "key": "identity",    "title": "Linked to your Relation",         "status": "done",           "howTo": "Your login is linked to your Relation." },
+    { "key": "connections", "title": "Personal sign-ins at providers",  "status": "todo",           "howTo": "Run connect_service { tool: \"google_koppelen\" } to sign in at Google; the person opens the returned URL and approves." },
+    { "key": "preferences", "title": "Working preferences",             "status": "todo",           "howTo": "Ask the person, in one batched question, about working hours, priorities and house style, then save the answer with set_my_preferences (omit `tool` to apply it to all tools). They may skip this: complete_onboarding { skip: true }." },
+    { "key": "guide",       "title": "Role guide read",                 "status": "not_applicable", "howTo": "No role guide applies to this person's roles." }
+  ],
+  "summary": "Onboarding is in progress: 1 of 3 steps done (to do: connections, preferences). Follow onboarding_guide."
+}
+```
+
+**The steps.** Each is `done`, `todo` or `not_applicable`, with a `howTo`
+naming the exact next call:
+
+| step | done when | not applicable when |
+| --- | --- | --- |
+| `identity` | `session.relation.status === "linked"` (see [Identities and Relations](#identities-and-relations)). Pending with a candidate → `confirm_my_link`; without → an administrator's `link_identity`. | the session carries no person (development identity, API key) |
+| `connections` | for every published Service this person can use whose provider needs a **personal** sign-in (`auth.connectionScope: user`, or an `oauth2AuthorizationCode` profile), a Connection row owned by this person exists. The `howTo` names `connect_service` with the tool that binds the widest set of that provider's capabilities — the natural entry point, since one consent covers the provider. | no such Service is published for this person (a fresh tenant, or a person outside the Services' audience) |
+| `preferences` | at least one PersonalInstruction of this person exists (`set_my_preferences`), or the person skipped the step (`complete_onboarding { skip: true }`) | the deployment offers no personal instructions to this person |
+| `guide` | every role guide the session is shown (`pentest_guide` for pentest roles, `provider_setup_guide` for integration administrators) was read — in this session, or recorded at an earlier completion | no guide applies to the person's roles |
+
+**Status.** `Completed` once `complete_onboarding` succeeded under the current
+`ONBOARDING_VERSION`; otherwise `In progress` when any applicable step is done
+(the just-in-time identity link usually makes it so), `Not started` when none
+is, and `Not applicable` for a session that carries no person at all.
+
+**What is stored** — on `platform.identity_relations`, the same row as the
+identity link (`apps/api/src/db/migrations/onboarding.ts`, additive columns
+applied on every migrate):
+
+| column | meaning |
+| --- | --- |
+| `onboarding_completed_at` | when `complete_onboarding` last succeeded |
+| `onboarding_version` | the `ONBOARDING_VERSION` it completed under; bumping the constant (a new required step) re-opens onboarding for everyone, and the checklist says so |
+| `onboarding_preferences_skipped` | the person chose to skip the preferences step |
+| `onboarding_guides_read` | the guides read by then, so a later session still counts the step as done |
+
+Nothing else is persisted: the checklist is recomputed on every call, so a
+connection that disappears shows up as `todo` again in `onboarding_status`,
+while `status` stays `Completed` — onboarding is a one-time event, not a
+health check.
+
+**`complete_onboarding`** verifies the checklist first and refuses with
+`409 ONBOARDING_INCOMPLETE` listing the missing steps (`error.missing`, each
+with its `howTo`); the optional `skip: true` satisfies `preferences` only.
+On success it writes the row (the identity's own, under the existing
+row-level policy) and answers the final checklist. Calling it again answers
+`alreadyCompleted: true`.
+
+**`onboarding_guide`** is the process for the assistant: call `whoami` first;
+walk the `todo` steps in order; ask the preferences in one batched question,
+never one item at a time; never ask for secrets in chat (sign-ins go through
+the URL `connect_service` returns, organization credentials through the
+secure form); confirm with `complete_onboarding`; afterwards never mention
+onboarding again. Its wording follows the caller's role: an organization
+administrator is also told about the organization's side (shared connections
+through `create_connection` with a client that supports elicitation, linking
+colleagues with `link_identity`), an employee is told to ask an administrator
+for what they cannot do themselves.
+
 ## Errors
 
 A failed tool call returns an MCP tool result with `isError: true` rather than

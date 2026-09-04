@@ -51,6 +51,7 @@ import { applyWorkerRoleMigration, applyWorkerRoleGrants } from "./migrations/wo
 import { applyAppHelpersMigration } from "./migrations/app-helpers.js";
 import { applySystemBypassAuditMigration } from "./migrations/system-bypass-audit.js";
 import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
+import { applyOnboardingMigration } from "./migrations/onboarding.js";
 import {
   applyVersionedMigrations,
   type VersionedMigration,
@@ -118,6 +119,7 @@ export async function runMigrationChain(
     options.appliedBy,
   );
   await applyIdentityLinkMigration(db);
+  await applyOnboardingMigration(db);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
   // The worker role's grants are enumerated from the manifest rather than

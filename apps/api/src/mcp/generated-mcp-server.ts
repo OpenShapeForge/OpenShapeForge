@@ -155,6 +155,17 @@ import {
   callIdentityLinkTool,
   identityLinkToolsForSession,
 } from "./identity-link-tools.js";
+// ---- first-use onboarding (mcp/onboarding.ts) ----
+import {
+  callOnboardingTool,
+  describeOnboarding,
+  ONBOARDING_INSTRUCTION,
+  ONBOARDING_TOOL_NAMES,
+  onboardingEnvironment,
+  onboardingToolsForSession,
+  withOnboarding,
+} from "./onboarding.js";
+// ---- end first-use onboarding ----
 // ---- end identity ↔ Relation link ----
 import {
   ProviderOutcomeError,
@@ -624,6 +635,7 @@ function coreOwnsStaticToolName(name: string): boolean {
     ...catalogTestTools.map((tool) => tool.name),
     ...connectorMcpTools(listConnectorContracts()).map((tool) => tool.name),
     SESSION_INFO_TOOL_NAME, // session-info (whoami / osf://session)
+    ...ONBOARDING_TOOL_NAMES, // first-use onboarding (mcp/onboarding.ts)
   ].includes(name);
 }
 
@@ -2006,7 +2018,10 @@ function buildServer(
             ` Before creating a ${guide.entity ?? "definition"}, call ${guide.name} and ` +
             `follow it — it is the fixed process and overrides any cached local instructions.`,
         )
-        .join(""),
+        .join("") +
+      // ---- first-use onboarding (mcp/onboarding.ts) ----
+      ONBOARDING_INSTRUCTION,
+      // ---- end first-use onboarding ----
   });
   const tables = tableOverride ?? tablesByName();
   const operations =
@@ -2494,15 +2509,30 @@ function buildServer(
     };
   };
   server.setRequestHandler(ListResourcesRequestSchema, listedResources);
-  const sessionInfo = () =>
-    describeSession({
-      db,
-      session,
-      access: async () => ({
-        tools: (await listedTools()).length,
-        resources: (await listedResources()).resources.length,
+  // ---- first-use onboarding (mcp/onboarding.ts): the checklist reads the
+  // same per-session projections tools/list uses, and rides on whoami. ----
+  const onboarding = onboardingEnvironment({
+    db,
+    session,
+    tables,
+    derivedEntries: catalogDerivedTools,
+    projectedTools: () => derivedToolsForSession(db, session, tables),
+    guideTools: () => guideToolsForSession(session),
+    guidesCalled,
+  });
+  const sessionInfo = async () =>
+    withOnboarding(
+      await describeSession({
+        db,
+        session,
+        access: async () => ({
+          tools: (await listedTools()).length,
+          resources: (await listedResources()).resources.length,
+        }),
       }),
-    });
+      await describeOnboarding(onboarding),
+    );
+  // ---- end first-use onboarding ----
   // --- end session-info ---
 
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
@@ -2727,6 +2757,9 @@ function buildServer(
       // ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
       ...identityLinkToolsForSession(session),
       // ---- end identity ↔ Relation link ----
+      // ---- first-use onboarding (mcp/onboarding.ts) ----
+      ...onboardingToolsForSession(session),
+      // ---- end first-use onboarding ----
       ...guideToolsForSession(session).map((tool) => ({
         name: tool.name,
         description: tool.description,
@@ -3698,6 +3731,15 @@ function buildServer(
     );
     if (identityLinkOutcome) return identityLinkOutcome as ToolResult;
     // ---- end identity ↔ Relation link ----
+
+    // ---- first-use onboarding (mcp/onboarding.ts) ----
+    const onboardingOutcome = await callOnboardingTool(
+      name,
+      (request.params.arguments ?? {}) as Record<string, unknown>,
+      onboarding,
+    );
+    if (onboardingOutcome) return onboardingOutcome as ToolResult;
+    // ---- end first-use onboarding ----
 
     const guideTool = catalogGuideTools.find((tool) => tool.name === name);
     if (guideTool) {

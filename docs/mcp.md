@@ -138,6 +138,57 @@ OpenShapeForge does not currently author MCP prompts or resource templates, so
 their list methods return valid empty catalogs. This keeps generic MCP clients
 from treating an intentionally empty optional surface as a protocol failure.
 
+## Who am I: `whoami` and `osf://session`
+
+Every authenticated session sees one tool that takes no arguments, `whoami`,
+and one resource, `osf://session`. Both return the same answer: who the server
+thinks the caller is, in plain language. No role is required — the answer only
+contains facts the caller already presented in its own credential — and it is
+never the token: no claims, no ids, no slugs, no tenant keys.
+
+```json
+{
+  "name": "Hans Eilers",
+  "email": "hans@example.com",
+  "organization": "Zerocopter",
+  "role": "Organization administrator",
+  "permissions": ["Pentest.All.ReadWrite", "Relations.All.ReadWrite"],
+  "groups": [{ "name": "Zerocopter", "active": true }],
+  "signedInVia": "Codex",
+  "signInExpiresAt": "2026-09-04T10:12:00.000Z",
+  "signInExpiresIn": "in 12 minutes",
+  "access": { "tools": 68, "resources": 13 },
+  "employeeRecord": { "status": "Not linked yet", "name": null, "relation": null },
+  "summary": "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. Your sign-in expires in 12 minutes. You can use 68 tools and 13 resources."
+}
+```
+
+- `organization` is the display name from the tenant registry
+  (`platform.tenants.name`), read as the session's own row under the same
+  row-level-security policy `Query.currentTenant` relies on.
+- `role` is derived from the realm's composite roles — `org_admin` reads as
+  "Organization administrator", `org_employee` as "Employee" — and otherwise
+  falls back to the raw role list. `permissions` lists the remaining role names
+  (Keycloak's own bookkeeping roles such as `offline_access` are dropped).
+- `groups` are the Keycloak Organization memberships the token carries, with
+  the one the session acts for marked `active`. Only the active group can be
+  named from the registry; other memberships show their alias.
+- `signedInVia` names the client the token was issued to (`codex` → "Codex",
+  `openshapeforge-inspector` → "MCP Inspector", `openshapeforge-gateway` →
+  "Hubble", any other `azp` as is). A trusted-context session reports
+  "Development identity" and has no expiry.
+- `access` counts what THIS session sees, through the same per-session
+  builders `tools/list` and `resources/list` use — it is not a deployment-wide
+  number.
+- `employeeRecord` is a placeholder: nothing links a sign-in to an employee
+  yet. A later link fills `name` and `relation` and flips `status`.
+
+The tool result carries the JSON both as text content and as
+`structuredContent`. The implementation is `apps/api/src/mcp/session-info.ts`;
+the display facts a token carries beyond the session context (name, client,
+expiry, memberships) are captured at the MCP entry point from the request that
+was already verified, so they reflect the token that initialised the session.
+
 ## What the field definition contributes
 
 The catalog is generated from the compiled contracts (`model.fields`), not the

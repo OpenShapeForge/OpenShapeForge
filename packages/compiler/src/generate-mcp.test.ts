@@ -30,6 +30,7 @@ const contract = (
     mcp?: CompiledEntityContract["mcp"];
     filterField?: string;
     relationships?: CompiledRelationship[];
+    columns?: CompiledEntityContract["storage"]["columns"];
   } = {},
 ): CompiledEntityContract =>
   ({
@@ -45,7 +46,7 @@ const contract = (
       domains: ["things"],
       ...(overrides.filterField ? { filterField: overrides.filterField } : {}),
     },
-    storage: { table: "widgets", columns: [] },
+    storage: { table: "widgets", columns: overrides.columns ?? [] },
     model: {
       fields: overrides.fields ?? [field({ key: "name" })],
       relationships: overrides.relationships ?? [],
@@ -351,6 +352,7 @@ describe("buildMcpCatalog", () => {
           kind: "belongsTo",
           target: "Relation",
           foreignKey: "relation_id",
+          field: "relationId",
           label: "Relation",
         },
       ]);
@@ -1029,5 +1031,217 @@ describe("test tool catalog", () => {
         "test",
       ),
     ).toThrow(/Duplicate MCP tool name "widget_get"/);
+  });
+});
+
+describe("relationship keys", () => {
+  const belongsTo = (
+    key: string,
+    target: string,
+    foreignKey: string,
+  ): CompiledRelationship => ({
+    key,
+    kind: "belongsTo",
+    target,
+    foreignKey,
+    label: { en: target },
+  });
+
+  /** The shared factory labels everything "Widget"; a relationship description names two entities. */
+  const labelled = (c: CompiledEntityContract, label: string) => {
+    c.entity.labels = { en: label };
+    return c;
+  };
+
+  /** A Finding-shaped contract: two belongsTo keys and a hasMany that must not leak. */
+  const finding = (
+    columns: CompiledEntityContract["storage"]["columns"] = [],
+  ) =>
+    labelled(contract({
+      name: "Finding",
+      fields: [field({ key: "title", required: true })],
+      relationships: [
+        belongsTo("assessment", "Assessment", "assessment_id"),
+        belongsTo("testTarget", "TestTarget", "test_target_id"),
+        {
+          key: "evidence",
+          kind: "hasMany",
+          target: "Evidence",
+          foreignKey: "finding_id",
+        },
+      ],
+      columns,
+      mcp: {
+        toolPrefix: "finding",
+        tools: "dedicated",
+        operations: {
+          list: true,
+          get: true,
+          create: true,
+          update: true,
+          delete: true,
+        },
+      },
+    }), "Finding");
+
+  const assessment = labelled(contract({
+    name: "Assessment",
+    mcp: {
+      toolPrefix: "assessment",
+      tools: "dedicated",
+      operations: {
+        list: true,
+        get: true,
+        create: false,
+        update: false,
+        delete: false,
+      },
+    },
+  }), "Assessment");
+
+  const toolNamed = (
+    catalog: ReturnType<typeof buildMcpCatalog>,
+    name: string,
+  ) => {
+    const tool = catalog.tools.find((candidate) => candidate.name === name);
+    if (!tool) throw new Error(`expected tool ${name}`);
+    return tool;
+  };
+
+  it("advertises <key>Id on create, update.values and list.filter, never the hasMany side", () => {
+    const catalog = buildMcpCatalog(
+      [input(finding(), "finding", "pentest.findings"), input(assessment, "assessment", "pentest.assessments")],
+      "test",
+    );
+
+    const create = toolNamed(catalog, "finding_create").inputSchema;
+    expect(Object.keys(create.properties as object)).toEqual([
+      "title",
+      "assessmentId",
+      "testTargetId",
+    ]);
+    expect(prop(create, "assessmentId")).toEqual({
+      type: "string",
+      format: "uuid",
+      description:
+        "Identifier of the Assessment this Finding belongs to, as returned by `assessment_list`.",
+    });
+    expect(create.additionalProperties).toBe(false);
+
+    const values = prop(toolNamed(catalog, "finding_update").inputSchema, "values");
+    expect(Object.keys(values.properties as object)).toEqual([
+      "title",
+      "assessmentId",
+      "testTargetId",
+    ]);
+    expect(values.required).toBeUndefined();
+
+    const filter = prop(toolNamed(catalog, "finding_list").inputSchema, "filter");
+    expect(prop(filter, "assessmentId")).toMatchObject({ type: "string", format: "uuid" });
+    expect(prop(filter, "testTargetId")).toMatchObject({ type: "string", format: "uuid" });
+    expect((filter.properties as object)).not.toHaveProperty("evidenceId");
+    expect((filter.properties as object)).not.toHaveProperty("findingId");
+
+    // The get and delete tools take only an id.
+    expect(Object.keys(toolNamed(catalog, "finding_get").inputSchema.properties as object)).toEqual(["id"]);
+  });
+
+  it("requires the key exactly when the storage column refuses null", () => {
+    const catalog = buildMcpCatalog(
+      [
+        input(
+          finding([
+            { field: "title", column: "title", type: "text", nullable: false, storageClass: "core" },
+            { field: "assessmentId", column: "assessment_id", type: "uuid", nullable: false, storageClass: "core" },
+            { field: "testTargetId", column: "test_target_id", type: "uuid", nullable: true, storageClass: "core" },
+          ]),
+        ),
+      ],
+      "test",
+    );
+    const create = toolNamed(catalog, "finding_create").inputSchema;
+    expect(create.required).toEqual(["title", "assessmentId"]);
+    // Update stays a partial: a NOT NULL column is still "leave it alone" when omitted.
+    const values = prop(toolNamed(catalog, "finding_update").inputSchema, "values");
+    expect(values.required).toBeUndefined();
+  });
+
+  it("names the storage column's field key, not a recomputed one", () => {
+    const catalog = buildMcpCatalog(
+      [
+        input(
+          contract({
+            name: "Finding",
+            relationships: [belongsTo("assessment", "Assessment", "assessment_id")],
+            columns: [
+              { field: "assessmentId", column: "assessment_id", type: "uuid", nullable: true, storageClass: "core" },
+            ],
+          }),
+        ),
+      ],
+      "test",
+    );
+    expect(catalog.entities[0]?.relationships[0]).toMatchObject({
+      key: "assessment",
+      field: "assessmentId",
+    });
+    expect(prop(toolNamed(catalog, "widget_create").inputSchema, "assessmentId")).toBeDefined();
+  });
+
+  it("does not duplicate a foreign key an authored field already owns", () => {
+    // PaymentDetail.relationId persists at relation_id and is a real field with
+    // its own schema; the relationship must not add a second property for it.
+    const catalog = buildMcpCatalog(
+      [
+        input(
+          contract({
+            name: "PaymentDetail",
+            fields: [
+              field({ key: "relationId", valueType: "string" }),
+              field({ key: "iban" }),
+            ],
+            relationships: [belongsTo("relation", "Relation", "relation_id")],
+            columns: [
+              { field: "relationId", column: "relation_id", type: "uuid", nullable: true, storageClass: "core" },
+              { field: "iban", column: "iban", type: "text", nullable: true, storageClass: "core" },
+            ],
+          }),
+        ),
+      ],
+      "test",
+    );
+    const create = toolNamed(catalog, "widget_create").inputSchema;
+    expect(Object.keys(create.properties as object)).toEqual(["relationId", "iban"]);
+    expect(prop(create, "relationId")).not.toHaveProperty("format");
+    expect(catalog.entities[0]?.relationships[0]).toMatchObject({ field: "relationId" });
+  });
+
+  it("points at the target's list tool only when the target is in the catalog", () => {
+    const generic = contract({
+      name: "Assessment",
+      mcp: {
+        toolPrefix: "assessment",
+        tools: "generic",
+        operations: { list: true, get: true, create: false, update: false, delete: false },
+      },
+    });
+    const withGeneric = buildMcpCatalog(
+      [input(finding(), "finding", "pentest.findings"), input(generic, "assessment", "pentest.assessments")],
+      "test",
+    );
+    expect(
+      prop(toolNamed(withGeneric, "finding_create").inputSchema, "assessmentId").description,
+    ).toBe("Identifier of the Widget this Finding belongs to, as returned by `osf_list`.");
+
+    const alone = buildMcpCatalog([input(finding(), "finding", "pentest.findings")], "test");
+    expect(
+      prop(toolNamed(alone, "finding_create").inputSchema, "assessmentId").description,
+    ).toBe("Identifier of the Assessment this Finding belongs to.");
+  });
+
+  it("emits relationship keys deterministically", () => {
+    const build = () =>
+      JSON.stringify(buildMcpCatalog([input(finding(), "finding", "pentest.findings")], "test"));
+    expect(build()).toBe(build());
   });
 });

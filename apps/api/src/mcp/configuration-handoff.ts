@@ -26,10 +26,18 @@ import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
   elicitationSchemaFromDefinitions,
-  isSecretDefinition,
   storeElicitedValues,
   type ElicitOnCreateEntry,
 } from "./elicitation.js";
+import { renderNoticePage } from "./browser-pages.js";
+
+export {
+  renderConfigurationExpiredPage,
+  renderConfigurationFailedPage,
+  renderConfigurationForm,
+  renderConfigurationSavedPage,
+  type ConfigurationFormOptions,
+} from "./browser-pages.js";
 import { keyringFromEnv, type SecretKeyring } from "../connectors/secrets.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
@@ -191,27 +199,6 @@ export async function consumeConfigurationForSession(
   });
 }
 
-function localized(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object") {
-    const en = (value as JsonRecord).en;
-    if (typeof en === "string") return en;
-    const first = Object.values(value as JsonRecord).find(
-      (entry) => typeof entry === "string",
-    );
-    if (typeof first === "string") return first;
-  }
-  return "";
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 /**
  * Translate one submitted form value to the definition's type. Returns
  * undefined for an absent optional value; a string error for a bad one.
@@ -295,11 +282,12 @@ export function storeSubmission(
 const PAGE_STYLE =
   "font-family:system-ui;margin:3rem auto;max-width:30rem;padding:0 1rem;line-height:1.5";
 
+/**
+ * A branded single-sentence page. Call sites that know the outcome should
+ * use the dedicated pages in browser-pages.ts (saved / expired / failed).
+ */
 export function renderMessagePage(message: string): string {
-  return (
-    `<!doctype html><meta charset="utf-8"><title>Configuration</title>` +
-    `<body style="${PAGE_STYLE}"><p>${escapeHtml(message)}</p></body>`
-  );
+  return renderNoticePage(message);
 }
 
 let configurationAppScript: Promise<string> | undefined;
@@ -340,113 +328,5 @@ export async function renderConfigurationApp(): Promise<string> {
     `<iframe id="configuration-frame" hidden title="Secure configuration" ` +
     `style="width:100%;min-height:32rem;border:1px solid #ccc;border-radius:6px"></iframe>` +
     `<script type="module">${script}</script></body>`
-  );
-}
-
-/**
- * The form itself, generated from the same definitions the elicitation
- * schema uses. Secret-classified fields render as password inputs; values
- * travel only in the POST body, never in the URL.
- */
-export function renderConfigurationForm(
-  pending: PendingConfiguration,
-  actionPath: string,
-  errors: Record<string, string> = {},
-  options: {
-    /** Verification failure shown above the form after a rejected submit. */
-    errorBanner?: string;
-    /** Non-secret values to prefill on a retry; secrets are never echoed. */
-    prefill?: Record<string, unknown>;
-  } = {},
-): string {
-  const { elicitable, skipped } = elicitationSchemaFromDefinitions(
-    pending.definitions,
-  );
-  const rows = (elicitable as StoredFieldDefinition[])
-    .map((definition) => {
-      const key = definition.key as string;
-      const escapedKey = escapeHtml(key);
-      const label = escapeHtml(localized(definition.label) || key);
-      const description = escapeHtml(localized(definition.description));
-      const required = definition.required === true;
-      const error = errors[key];
-      const valueType =
-        typeof definition.valueType === "string"
-          ? definition.valueType
-          : "string";
-      const optionItems = definition.options?.items;
-
-      let control: string;
-      if (Array.isArray(optionItems) && optionItems.length > 0) {
-        const options = optionItems
-          .filter((item) => typeof item?.value === "string")
-          .map((item) => {
-            const value = escapeHtml(item.value as string);
-            const text = escapeHtml(
-              localized(item.label) || (item.value as string),
-            );
-            return `<option value="${value}">${text}</option>`;
-          })
-          .join("");
-        control = `<select name="${escapedKey}" style="width:100%;padding:.5rem">${required ? "" : `<option value=""></option>`}${options}</select>`;
-      } else if (valueType === "boolean") {
-        control = `<input type="checkbox" name="${escapedKey}">`;
-      } else {
-        const secret = isSecretDefinition(definition as never);
-        const type = secret
-          ? "password"
-          : valueType === "integer" || valueType === "number"
-            ? "number"
-            : "text";
-        const step = valueType === "number" ? ` step="any"` : "";
-        const prefillValue = !secret && options.prefill?.[key];
-        const valueAttribute =
-          prefillValue !== undefined &&
-          prefillValue !== null &&
-          prefillValue !== false
-            ? ` value="${escapeHtml(String(prefillValue))}"`
-            : "";
-        control =
-          `<input type="${type}" name="${escapedKey}"${step}${valueAttribute}${required ? " required" : ""} ` +
-          `autocomplete="off" style="width:100%;padding:.5rem;box-sizing:border-box">`;
-      }
-
-      return (
-        `<label style="display:block;margin:1rem 0">` +
-        `<span style="font-weight:600">${label}${required ? " *" : ""}</span>` +
-        (description ? `<br><small>${description}</small>` : "") +
-        `<br>${control}` +
-        (error
-          ? `<br><small style="color:#b00">${escapeHtml(error)}</small>`
-          : "") +
-        `</label>`
-      );
-    })
-    .join("");
-
-  const banner = options.errorBanner
-    ? `<p style="background:#fde8e8;border:1px solid #d08c8c;padding:.75rem;border-radius:6px">` +
-      `${escapeHtml(options.errorBanner)} Nothing was saved; correct the values and save again.</p>`
-    : "";
-  const prefix = pending.messagePrefix
-    ? `<p style="background:#fff6d8;border:1px solid #e0c869;padding:.75rem;border-radius:6px">${escapeHtml(pending.messagePrefix)}</p>`
-    : "";
-  const skippedNote =
-    skipped.length > 0
-      ? `<p><small>Not collected in this form: ${escapeHtml(skipped.join(", "))}.</small></p>`
-      : "";
-
-  return (
-    `<!doctype html><meta charset="utf-8"><title>Configuration</title>` +
-    `<body style="${PAGE_STYLE}">` +
-    `<h2 style="font-size:1.2rem">Configuration for ${escapeHtml(pending.displayName)}</h2>` +
-    `<p><small>Entered here, these values go directly to the runtime — never through any ` +
-    `chat or model. Secret values are stored encrypted and never shown back.</small></p>` +
-    banner +
-    prefix +
-    `<form method="post" action="${escapeHtml(actionPath)}">${rows}` +
-    `<button type="submit" style="padding:.5rem 1.5rem">Save</button></form>` +
-    skippedNote +
-    `</body>`
   );
 }

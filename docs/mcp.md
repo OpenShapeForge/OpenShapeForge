@@ -89,6 +89,60 @@ unset.
 The server is registered inside the rate-limited plugin scope, so the API's
 request-rate boundary applies.
 
+### Per-organization resources
+
+Beside `/api/mcp` the same server answers on one resource per Keycloak
+Organization:
+
+    POST|GET|DELETE /api/mcp/organizations/<alias>
+
+`<alias>` is the Organization's Keycloak alias — the key of the `organization`
+claim and the name the built-in `organization:<alias>` scope selects — not the
+tenant slug or id. On `/api/mcp` the tenant comes from the token alone (`tid`,
+or the single Organization membership); a user who is a member of several
+Organizations therefore holds one token that is good for all of them. On a
+per-organization resource the session is admitted only when token, path and
+registry agree (`apps/api/src/auth/organization-binding.ts`):
+
+1. **membership** — `organization.<alias>.id` is present for the path's alias;
+2. **audience** — `aud` contains the canonical URL of *this* resource, i.e.
+   the token was minted for it (RFC 8707 as Keycloak 26 can express it: a
+   per-organization client scope carrying an audience mapper, because Keycloak
+   does not fold the `resource` request parameter into `aud`);
+3. **registry** — `platform.tenants.keycloak_organization_id` links that
+   Organization (in the token's realm) to a tenant, which the session is
+   pinned to regardless of any other membership or `tid` in the token.
+
+Any failure — an alias that does not exist, an Organization the caller is not
+a member of, a token that was not requested for this resource — answers the
+same `403 ORGANIZATION_RESOURCE_FORBIDDEN`, with a body naming the scopes to
+request and `WWW-Authenticate: Bearer error="insufficient_scope", scope="…",
+resource_metadata="…"`. The audience is not authority: Keycloak mints the
+per-organization audience for anyone who requests its scope; membership is
+what the identity provider actually asserts, the audience is what stops a token
+minted for another resource (another Organization, another origin) from being
+replayed here. Only a bearer JWT is accepted on these paths; API keys and
+trusted-context headers name a tenant, not a membership, and are refused.
+
+Each resource has its own metadata document,
+`/.well-known/oauth-protected-resource/api/mcp/organizations/<alias>`, whose
+`resource` is that exact URL and whose `scopes_supported` lists the two scopes
+a client must request:
+
+- `organization:<alias>` — Keycloak's built-in dynamic scope; selects the
+  membership and emits `organization.<alias>.id`;
+- `mcp-resource:<alias>` — a deployment-managed client scope with one
+  `oidc-audience-mapper` per public origin, value
+  `<origin>/api/mcp/organizations/<alias>`. It deliberately does not share the
+  `organization:` prefix: a static client scope named `organization:<alias>`
+  shadows the dynamic one, and the token then carries the audience but no
+  membership claim.
+
+The document echoes the alias it was asked about without any lookup, so it is
+not an oracle for which Organizations exist. An MCP session id is bound to the
+resource it was initialized on as well as to the identity; replaying it on
+another path is `403`.
+
 ## Tool surface
 
 Two catalog styles, chosen per entity:

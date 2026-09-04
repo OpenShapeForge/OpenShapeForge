@@ -21,9 +21,35 @@
  * fatal in production when unset (see config/production-guard.ts).
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { MCP_MOUNT_PATH } from "./generated-mcp-server.js";
+import {
+  isOrganizationAlias,
+  MCP_MOUNT_PATH,
+  ORGANIZATION_MCP_PATH_PREFIX,
+  organizationAliasFromPath,
+  organizationMcpPath,
+  organizationResourceScopes,
+} from "./organization-resource.js";
 
 export const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
+
+/** `https://host`, honouring a proxy's `x-forwarded-proto`. */
+export function requestOrigin(request: FastifyRequest): string {
+  const forwardedProto = request.headers["x-forwarded-proto"];
+  const proto =
+    (typeof forwardedProto === "string" ? forwardedProto.split(",")[0]?.trim() : undefined) ??
+    request.protocol;
+  const host = request.headers.host ?? "localhost";
+  return `${proto}://${host}`;
+}
+
+/**
+ * The resource path a request is addressed to: the per-organization mount
+ * when the URL names a well-formed alias, the legacy mount otherwise.
+ */
+export function resourcePathOf(request: FastifyRequest, alias?: string | null): string {
+  const resolved = alias ?? organizationAliasFromPath(request.url);
+  return resolved ? organizationMcpPath(resolved) : MCP_MOUNT_PATH;
+}
 
 /**
  * The canonical resource identifier, per RFC 8707 §2: absolute URI, no
@@ -32,45 +58,78 @@ export const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-re
  * server expects to find in the token's audience, so it is derived from the
  * request rather than configured separately: a mismatch between the two is
  * exactly the confused-deputy case the parameter exists to prevent.
+ *
+ * With `alias`, the per-organization resource `/api/mcp/organizations/<alias>`
+ * (organization-resource.ts); without, the alias is read off the request URL
+ * and the legacy `/api/mcp` is the fallback.
  */
-export function canonicalResourceUri(request: FastifyRequest): string {
-  const forwardedProto = request.headers["x-forwarded-proto"];
-  const proto =
-    (typeof forwardedProto === "string" ? forwardedProto.split(",")[0]?.trim() : undefined) ??
-    request.protocol;
-  const host = request.headers.host ?? "localhost";
-  return `${proto}://${host}${MCP_MOUNT_PATH}`;
+export function canonicalResourceUri(request: FastifyRequest, alias?: string | null): string {
+  return `${requestOrigin(request)}${resourcePathOf(request, alias)}`;
 }
+
+export type AuthenticateChallengeOptions = {
+  /** Per-organization resource; the challenge then names its scopes. */
+  alias?: string | null;
+  /**
+   * RFC 6750 §3.1 `insufficient_scope`: the token verified but is not bound
+   * to this resource. Sent with 403 so a client can step up rather than
+   * retry the same token.
+   */
+  insufficientScope?: boolean;
+};
 
 /**
  * The `WWW-Authenticate` challenge for an unauthenticated MCP request.
  *
- * `scope` is deliberately absent. The spec permits it and recommends it where
- * a server knows which scopes an operation needs — but this deployment
- * authorizes by ROLE, resolved per entity from the compiled manifest, not by
- * OAuth scope. Advertising a scope the authorization server does not issue
- * would send clients to request something meaningless and make the failure
- * harder to read, not easier.
+ * On the legacy mount `scope` is deliberately absent. The spec permits it and
+ * recommends it where a server knows which scopes an operation needs — but
+ * this deployment authorizes by ROLE, resolved per entity from the compiled
+ * manifest, not by OAuth scope. Advertising a scope the authorization server
+ * does not issue would send clients to request something meaningless and
+ * make the failure harder to read, not easier.
+ *
+ * On a per-organization resource the scopes ARE known and are not authority:
+ * `organization:<alias>` makes Keycloak select the membership and
+ * `mcp-resource:<alias>` mints the resource audience. They are named here and
+ * in the metadata's `scopes_supported` so a client that follows the pointer
+ * requests a token that will actually be accepted on this path.
  */
-export function buildAuthenticateChallenge(request: FastifyRequest): string {
-  const resource = canonicalResourceUri(request);
-  const origin = resource.slice(0, resource.length - MCP_MOUNT_PATH.length);
-  return `Bearer resource_metadata="${origin}${PROTECTED_RESOURCE_METADATA_PATH}"`;
+export function buildAuthenticateChallenge(
+  request: FastifyRequest,
+  options: AuthenticateChallengeOptions = {},
+): string {
+  const alias = options.alias ?? organizationAliasFromPath(request.url);
+  const metadataPath = alias
+    ? `${PROTECTED_RESOURCE_METADATA_PATH}${organizationMcpPath(alias)}`
+    : PROTECTED_RESOURCE_METADATA_PATH;
+  const parts = ["Bearer"];
+  const attributes: string[] = [];
+  if (options.insufficientScope) {
+    attributes.push(
+      'error="insufficient_scope"',
+      'error_description="The token is not bound to this organization resource."',
+    );
+  }
+  attributes.push(`resource_metadata="${requestOrigin(request)}${metadataPath}"`);
+  if (alias) attributes.push(`scope="${organizationResourceScopes(alias).join(" ")}"`);
+  return `${parts.join(" ")} ${attributes.join(", ")}`;
 }
 
 export type ProtectedResourceMetadata = {
   resource: string;
   authorization_servers?: string[];
   bearer_methods_supported: string[];
+  scopes_supported?: string[];
   resource_documentation?: string;
 };
 
 export function buildProtectedResourceMetadata(
   request: FastifyRequest,
   issuer: string | undefined,
+  alias?: string | null,
 ): ProtectedResourceMetadata {
   return {
-    resource: canonicalResourceUri(request),
+    resource: canonicalResourceUri(request, alias ?? null),
     // Omitted rather than empty when the deployment has no bearer verifier
     // configured: an empty list would assert "this resource has no
     // authorization server", which is a different and false claim.
@@ -78,6 +137,10 @@ export function buildProtectedResourceMetadata(
     // Header only. The spec forbids access tokens in query strings, and this
     // server never reads one from a body.
     bearer_methods_supported: ["header"],
+    // Per-organization resources name their scopes so a client requests the
+    // token this path accepts (RFC 9728 §2; MCP clients pass these to the
+    // authorization request). The legacy mount advertises none, see above.
+    ...(alias ? { scopes_supported: organizationResourceScopes(alias) } : {}),
   };
 }
 
@@ -109,6 +172,25 @@ export function registerProtectedResourceMetadata(app: FastifyInstance): void {
       return reply
         .header("cache-control", "public, max-age=3600")
         .send(buildProtectedResourceMetadata(request, issuer || undefined));
+    },
+  );
+
+  // One document per organization resource. It echoes the alias the client
+  // asked about and nothing else — no registry read, no membership — so it is
+  // not an oracle for which organizations exist; that is settled by the
+  // token checks on the resource itself. A malformed alias is a 404 because
+  // no resource can have that path.
+  app.get(
+    `${PROTECTED_RESOURCE_METADATA_PATH}${ORGANIZATION_MCP_PATH_PREFIX}/:alias`,
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const alias = (request.params as { alias?: unknown }).alias;
+      if (!isOrganizationAlias(alias)) {
+        return reply.code(404).send({ error: "unknown resource" });
+      }
+      const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER?.trim();
+      return reply
+        .header("cache-control", "public, max-age=3600")
+        .send(buildProtectedResourceMetadata(request, issuer || undefined, alias));
     },
   );
 }

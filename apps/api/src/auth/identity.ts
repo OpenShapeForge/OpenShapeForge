@@ -11,6 +11,12 @@ import { keyringFromEnv, type SecretKeyring } from "../platform/secrets.js";
 import { looksLikeApiKey } from "./api-key/format.js";
 import { resolveApiKeySession } from "./api-key/resolve.js";
 import {
+  bindOrganizationResource,
+  OrganizationBindingError,
+  type OrganizationResourceBinding,
+  type TenantForOrganization,
+} from "./organization-binding.js";
+import {
   readTrustedSessionContext,
   type SessionScope,
   type TrustedSessionContext,
@@ -28,6 +34,16 @@ export type ResolveSessionOptions = {
    * Ordinary callers keep the historical anonymous-session fallback.
    */
   failOnUnavailable?: boolean;
+  /**
+   * Set by the per-organization MCP resource (`/api/mcp/organizations/<alias>`).
+   * The session is then only produced from a bearer JWT that is bound to that
+   * resource — membership of the organization, the resource URL in `aud`, a
+   * tenant linked to the organization — and is pinned to that tenant. Any
+   * other credential is refused, and a bound token that fails a check raises
+   * {@link OrganizationBindingError} instead of degrading to the empty session
+   * (see auth/organization-binding.ts).
+   */
+  organization?: OrganizationResourceBinding;
 };
 
 export class SessionAuthenticationUnavailableError extends Error {
@@ -132,7 +148,20 @@ export function __resetSessionResolverForTests(): void {
   apiKeyKeyringInitialized = false;
   cachedApiKeyKeyring = null;
   organizationTenantCache.clear();
+  tenantForOrganizationOverride = null;
 }
+
+/**
+ * Test-only: stand in for the registry read
+ * (`app.tenant_for_keycloak_organization`) so the organization paths can be
+ * exercised end to end without a database. Cleared by the reset above.
+ */
+export function __setTenantForOrganizationForTests(
+  lookup: TenantForOrganization | null,
+): void {
+  tenantForOrganizationOverride = lookup;
+}
+let tenantForOrganizationOverride: TenantForOrganization | null = null;
 
 // ---------------------------------------------------------------------------
 // Tenant from Keycloak Organization membership
@@ -202,6 +231,36 @@ export function selectOrganizationMembership(
   return chosen.length === 1 ? chosen[0]! : null;
 }
 
+/**
+ * The registry read behind both organization paths: which tenant is linked to
+ * (realm, organization id). Cached briefly; null when no row links them.
+ */
+async function lookupTenantForOrganization(
+  db: OpenShapeForgeDatabase | undefined,
+  realm: string,
+  organizationId: string,
+): Promise<string | null> {
+  if (tenantForOrganizationOverride) {
+    return tenantForOrganizationOverride(realm, organizationId);
+  }
+  if (!db) return null;
+  const cacheKey = `${realm} ${organizationId}`;
+  const cached = organizationTenantCache.get(cacheKey);
+  if (cached && cached.expiresAtMs > Date.now()) return cached.tenantId;
+
+  const result = await sql<{ tenant_id: string | null }>`
+    select app.tenant_for_keycloak_organization(${realm}, ${organizationId}) as tenant_id
+  `.execute(db);
+  const tenantId = result.rows[0]?.tenant_id ?? null;
+  if (tenantId) {
+    organizationTenantCache.set(cacheKey, {
+      tenantId,
+      expiresAtMs: Date.now() + ORGANIZATION_TENANT_CACHE_TTL_MS,
+    });
+  }
+  return tenantId;
+}
+
 async function resolveTenantFromOrganization(
   identity: AuthIdentity,
   claims: Record<string, unknown>,
@@ -224,7 +283,7 @@ async function resolveTenantFromOrganization(
     console.warn("[auth] Bearer token issuer is not a Keycloak realm URL; tenant unresolved.");
     return null;
   }
-  if (!db) {
+  if (!db && !tenantForOrganizationOverride) {
     console.warn(
       "[auth] Bearer token names its tenant by Keycloak Organization membership, but this " +
         "surface resolves sessions without a database. Tenant unresolved.",
@@ -232,14 +291,7 @@ async function resolveTenantFromOrganization(
     return null;
   }
 
-  const cacheKey = `${realm} ${membership.id}`;
-  const cached = organizationTenantCache.get(cacheKey);
-  if (cached && cached.expiresAtMs > Date.now()) return cached.tenantId;
-
-  const result = await sql<{ tenant_id: string | null }>`
-    select app.tenant_for_keycloak_organization(${realm}, ${membership.id}) as tenant_id
-  `.execute(db);
-  const tenantId = result.rows[0]?.tenant_id ?? null;
+  const tenantId = await lookupTenantForOrganization(db, realm, membership.id);
   if (!tenantId) {
     console.warn(
       `[auth] No tenant is linked to Keycloak Organization "${membership.alias}" ` +
@@ -248,11 +300,32 @@ async function resolveTenantFromOrganization(
     );
     return null;
   }
-  organizationTenantCache.set(cacheKey, {
-    tenantId,
-    expiresAtMs: Date.now() + ORGANIZATION_TENANT_CACHE_TTL_MS,
-  });
   return tenantId;
+}
+
+/**
+ * The per-organization resource path. Membership, audience and registry are
+ * checked in auth/organization-binding.ts; this is the glue to the verifier's
+ * output and the database. Throws OrganizationBindingError on any refusal.
+ */
+async function resolveTenantForBoundOrganization(
+  identity: AuthIdentity,
+  claims: Record<string, unknown>,
+  binding: OrganizationResourceBinding,
+  db: OpenShapeForgeDatabase | undefined,
+): Promise<string> {
+  const realm = realmFromIssuer(claims.iss);
+  const lookup: TenantForOrganization = async (realmName, organizationId) => {
+    if (!db && !tenantForOrganizationOverride) {
+      throw new OrganizationBindingError(
+        binding,
+        "the organization resource resolves sessions without a database",
+      );
+    }
+    return lookupTenantForOrganization(db, realmName, organizationId);
+  };
+  const bound = await bindOrganizationResource(identity, claims, binding, realm, lookup);
+  return bound.tenantId;
 }
 
 /** Matches an `Authorization: Bearer <token>` header (case-insensitive). */
@@ -372,6 +445,15 @@ export async function resolveSessionContext(
     // forgot to configure the keyring would silently start treating API keys as
     // JWTs, which is the same downgrade the bearer path already refuses.
     if (looksLikeApiKey(presented)) {
+      if (options.organization) {
+        // An API key proves a tenant, not an Organization membership, and
+        // carries no per-resource audience. Fail closed on the bound resource.
+        console.warn(
+          "[auth] An API key was presented to a per-organization MCP resource; only a " +
+            "bearer token bound to that resource is accepted there. Rejecting.",
+        );
+        return EMPTY_SESSION;
+      }
       const keyring = getApiKeyKeyring();
       const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
 
@@ -421,15 +503,23 @@ export async function resolveSessionContext(
       const { identity, claims } = await verifier(token);
       const groups = identity.groups ?? [];
       const roles = mergeIdentityRoles(identity);
-      // `tid` when the realm mints one; otherwise the Organization membership
-      // resolved against the tenant registry. See the section above.
-      const tenantId =
-        identity.tenantId ??
-        (await resolveTenantFromOrganization(
-          identity,
-          claims as Record<string, unknown>,
-          options.db,
-        ));
+      // On a per-organization resource the tenant is the one the path's
+      // organization links to, and nothing else in the token may pick it.
+      // Elsewhere: `tid` when the realm mints one, otherwise the Organization
+      // membership resolved against the tenant registry (section above).
+      const tenantId = options.organization
+        ? await resolveTenantForBoundOrganization(
+            identity,
+            claims as Record<string, unknown>,
+            options.organization,
+            options.db,
+          )
+        : identity.tenantId ??
+          (await resolveTenantFromOrganization(
+            identity,
+            claims as Record<string, unknown>,
+            options.db,
+          ));
       return {
         tenantId,
         userId: identity.userId,
@@ -440,6 +530,15 @@ export async function resolveSessionContext(
         credential: "bearer",
       };
     } catch (error) {
+      if (error instanceof OrganizationBindingError) {
+        // The token verified; it is just not a token for this resource. The
+        // caller answers with the scopes to request rather than a bare 401,
+        // and the log keeps the reason the caller must not learn.
+        console.warn(
+          `[auth] Bearer token refused on organization resource ${options.organization?.resource}: ${error.reason}.`,
+        );
+        throw error;
+      }
       console.warn(
         "[auth] Bearer verification failed:",
         error instanceof Error ? error.message : String(error),
@@ -449,6 +548,13 @@ export async function resolveSessionContext(
       }
       return EMPTY_SESSION;
     }
+  }
+
+  if (options.organization) {
+    // Trusted-context headers name a tenant directly; they cannot prove
+    // membership of the path's organization, so the bound resource ignores
+    // them rather than letting an in-mesh hop pick any tenant by path.
+    return EMPTY_SESSION;
   }
 
   return readTrustedSessionContext(headers);

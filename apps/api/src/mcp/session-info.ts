@@ -43,6 +43,34 @@ import { withDbSession } from "../db/session.js";
 export const SESSION_INFO_TOOL_NAME = "whoami";
 export const SESSION_RESOURCE_URI = "osf://session";
 
+/**
+ * How long a sign-in survives without activity. The access token `exp` a
+ * client sees is short (minutes) and refreshes silently; what a person
+ * experiences as "signed in" is the identity provider's SSO / offline
+ * session, which idles out after this many days. The realm's own value is
+ * not cheaply readable from here (it lives in the identity provider's admin
+ * API), so deployments state it: `OPENSHAPEFORGE_SESSION_IDLE_DAYS`, default
+ * 14 — the value the reference realm setup configures.
+ */
+export const SESSION_IDLE_DAYS_ENV = "OPENSHAPEFORGE_SESSION_IDLE_DAYS";
+export const DEFAULT_SESSION_IDLE_DAYS = 14;
+
+export function sessionIdleDaysFromEnv(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = env[SESSION_IDLE_DAYS_ENV]?.trim();
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_SESSION_IDLE_DAYS;
+}
+
+/** How to end the session; the server cannot do it for the client. */
+export const SIGN_OUT_INSTRUCTION =
+  "Sign out in your client (Codex: codex mcp logout <entry>; ChatGPT: the connector's menu).";
+
+/** What `relation` means, for a person who has never heard the word. */
+export const RELATION_EXPLANATION =
+  "The record you act as in this organization; roles like employee or supplier are assigned by an administrator.";
+
 const JSON_MIME_TYPE = "application/json";
 
 /** The `tools/list` entry. Static: it does not depend on the session. */
@@ -261,6 +289,14 @@ export type SessionInfo = {
   signInExpiresAt?: string;
   /** "in 12 minutes". Absent when the sign-in does not expire. */
   signInExpiresIn?: string;
+  /**
+   * "14 days": the sign-in ends only after this long without activity; the
+   * access token above refreshes automatically before then. Absent for a
+   * credential that does not expire (development identity, API key).
+   */
+  sessionEndsAfterInactivity?: string;
+  /** Where to sign out — the client owns the session, not this server. Absent as above. */
+  signOut?: string;
   /** What this session currently sees, after the server's per-session filtering. */
   access: { tools: number; resources: number };
   /**
@@ -275,6 +311,8 @@ export type SessionInfo = {
     name: string | null;
     /** `relation_type` of the record: "person" for a just-in-time link. */
     kind: string | null;
+    /** One line saying what a Relation is. */
+    explanation: string;
   };
   /** One or two English sentences saying the same thing. */
   summary: string;
@@ -289,6 +327,8 @@ export type SessionInfoInput = {
   /** `session.relation`: the identity ↔ Relation link state, when any. */
   relation?: IdentityLinkState | null;
   access: { tools: number; resources: number };
+  /** Days of inactivity after which the sign-in ends; defaults to the env / 14. */
+  sessionIdleDays?: number;
   /** Test seam; defaults to the wall clock. */
   nowMs?: number;
 };
@@ -391,6 +431,8 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
           at: new Date(identity.expiresAtMs).toISOString(),
           relative: describeExpiry(identity.expiresAtMs, nowMs),
         };
+  const idleDays = input.sessionIdleDays ?? sessionIdleDaysFromEnv();
+  const idle = plural(idleDays, "day");
 
   const who =
     identity.name ??
@@ -416,10 +458,13 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
     sentences.push(`You belong to ${plural(groups.length, "group")}; ${active.name} is the active one.`);
   }
   if (expiry) {
+    // The token expiry is not the sign-in's end: it refreshes silently. Say
+    // what the person experiences, and only report the token when it has
+    // actually lapsed (a client that stopped refreshing).
     sentences.push(
       expiry.relative.startsWith("in ")
-        ? `Your sign-in expires ${expiry.relative}.`
-        : `Your sign-in expired ${expiry.relative}.`,
+        ? `Your session stays signed in for ${idle} after your last activity; this access token refreshes automatically.`
+        : `Your access token expired ${expiry.relative}; if the client does not refresh it, sign in again.`,
     );
   }
   const relation = describeRelation(input.relation ?? null);
@@ -440,7 +485,14 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
     permissions,
     groups,
     signedInVia,
-    ...(expiry ? { signInExpiresAt: expiry.at, signInExpiresIn: expiry.relative } : {}),
+    ...(expiry
+      ? {
+          signInExpiresAt: expiry.at,
+          signInExpiresIn: expiry.relative,
+          sessionEndsAfterInactivity: idle,
+          signOut: SIGN_OUT_INSTRUCTION,
+        }
+      : {}),
     access: { tools: access.tools, resources: access.resources },
     relation,
     summary: sentences.join(" "),
@@ -457,13 +509,24 @@ export function describeRelation(
   link: IdentityLinkState | null,
 ): SessionInfo["relation"] {
   const linked = sessionRelation({ relation: link });
+  const explanation = RELATION_EXPLANATION;
   if (linked) {
-    return { status: "Linked", name: linked.displayName, kind: link?.relationType ?? null };
+    return {
+      status: "Linked",
+      name: linked.displayName,
+      kind: link?.relationType ?? null,
+      explanation,
+    };
   }
   if (link?.status === "pending_confirmation" && link.candidateRelationId) {
-    return { status: "Pending confirmation", name: link.displayName, kind: link.relationType };
+    return {
+      status: "Pending confirmation",
+      name: link.displayName,
+      kind: link.relationType,
+      explanation,
+    };
   }
-  return { status: "Not linked", name: null, kind: null };
+  return { status: "Not linked", name: null, kind: null, explanation };
 }
 
 // ---------------------------------------------------------------------------

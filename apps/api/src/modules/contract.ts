@@ -101,6 +101,13 @@ export type ModuleUnavailableInvocationSource = {
     | "unavailable"
     | "connection_required"
     | "reauthorization_required";
+  /**
+   * The platform's own next step for a connection gap, worded for the
+   * caller (mcp/connection-guidance.ts): which Adapter, which tool, who may
+   * run it. Never provider text. A coordinating module should surface it
+   * verbatim as the source's explanation when present.
+   */
+  guidance?: string;
 };
 
 export type ModuleInvocationSourceResolution = {

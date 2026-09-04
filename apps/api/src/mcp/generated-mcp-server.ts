@@ -122,6 +122,7 @@ import {
   secretFieldKeys,
   secretUrlPlaceholderError,
   templatePlaceholders,
+  type ExecutionCatalogEntry,
 } from "./declarative-execution.js";
 import { validateVisibleDefinition } from "./publication-validation.js";
 import { failedCheckSummary, testElicitedRow } from "./connection-test.js";
@@ -165,6 +166,20 @@ import {
   onboardingToolsForSession,
   withOnboarding,
 } from "./onboarding.js";
+// ---- connection guidance (mcp/connection-guidance.ts): one vocabulary for
+// "a connection is needed" across descriptions, errors and onboarding ----
+import {
+  connectionFieldsOf,
+  connectionNeedsOf,
+  connectionProblemError,
+  connectionProblemMessage,
+  describeConnectionNeeds,
+  isConnectionProblemCode,
+  missingRequiredConnectionValues,
+  withConnectionNeeds,
+  type ConnectionProblem,
+} from "./connection-guidance.js";
+import { isOrganizationAdministrator } from "./onboarding.js";
 // ---- end first-use onboarding ----
 // ---- end identity ↔ Relation link ----
 import {
@@ -730,7 +745,7 @@ async function derivedToolsForSession(
         );
         const operationTraits = new Map<
           string,
-          { mutation: boolean; destructive: boolean }
+          { mutation: boolean; destructive: boolean; providerId: string }
         >();
         for (const raw of operationRows.rows) {
           const row = serializeRow(operationTable, raw);
@@ -740,7 +755,36 @@ async function derivedToolsForSession(
             destructive:
               typeof operation.method === "string" &&
               operation.method.toUpperCase() === "DELETE",
+            providerId: String(row[entry.execution.providerRef] ?? ""),
           });
+        }
+        // What each provider needs from the organization and the person,
+        // read from the Adapter rows (auth block and configuration contract)
+        // so the generated sentence can never disagree with execution.
+        const providerNeeds = new Map<string, string>();
+        const providerTable = tables.get(entry.execution.providerTable);
+        if (providerTable) {
+          const providerRows = await listGeneratedEntitiesForTable(
+            db,
+            session,
+            providerTable,
+            { limit: DERIVED_TOOLS_ROW_LIMIT },
+          );
+          const definitionsField =
+            entityForTable(entry.execution.connectionTable)?.elicitOnCreate
+              ?.definitionsField ?? "";
+          const toolNames = connectionToolsFor(entry.execution, entry);
+          for (const raw of providerRows.rows) {
+            const row = serializeRow(providerTable, raw);
+            providerNeeds.set(
+              String(row.id),
+              describeConnectionNeeds(
+                providerDisplayName(row, entry.execution),
+                connectionNeedsOf(row.auth, row[definitionsField]),
+                toolNames,
+              ),
+            );
+          }
         }
         const rowById = new Map(rows.map((row) => [String(row.id), row]));
         entryTools = entryTools.map((tool) => {
@@ -753,6 +797,7 @@ async function derivedToolsForSession(
           let mutation = false;
           let destructive = false;
           let resolved = bindings.length > 0;
+          const needs: string[] = [];
           for (const binding of bindings) {
             const traits = operationTraits.get(
               String(binding?.[entry.execution!.operationRef] ?? ""),
@@ -763,8 +808,15 @@ async function derivedToolsForSession(
             }
             mutation ||= traits.mutation;
             destructive ||= traits.destructive;
+            const sentence = providerNeeds.get(traits.providerId);
+            if (sentence && !needs.includes(sentence)) needs.push(sentence);
           }
-          return { ...tool, readOnly: resolved && !mutation, destructive };
+          return {
+            ...tool,
+            description: withConnectionNeeds(tool.description, needs.join(" ")),
+            readOnly: resolved && !mutation,
+            destructive,
+          };
         });
       }
     }
@@ -846,8 +898,8 @@ function configurationFallbackLead(
   }
   return (
     prefix +
-    "This client cannot render MCP Apps. Ask the person to open externalUrl; " +
-    "it is the stable, signed-in secure configuration form and contains no bearer handoff token."
+    "Give the person configurationUrl: open this link in a browser and enter " +
+    "the values there; they never pass through the chat."
   );
 }
 
@@ -870,18 +922,32 @@ function callbackOrigin(): string {
   );
 }
 
-function configurationWebUrl(): string {
+/**
+ * The signed-in host web form, when a web origin is deployed. Optional: the
+ * handoff page is served on the API's own origin, so the runtime never needs
+ * a web origin to hand a person a working form.
+ */
+function configurationWebUrl(): string | undefined {
   const configured = process.env.OPENSHAPEFORGE_WEB_ORIGIN?.trim().replace(
     /\/$/,
     "",
   );
-  if (configured) return `${configured}/configuration`;
-  throw new HttpError(
-    503,
-    "WEB_ORIGIN_NOT_CONFIGURED",
-    "Set OPENSHAPEFORGE_WEB_ORIGIN before using the external configuration fallback.",
-  );
+  return configured ? `${configured}/configuration` : undefined;
 }
+
+/**
+ * The MCP App renders the handoff form in an iframe inside the host's own
+ * (https) sandbox, so the form's origin must be https as well: an http or
+ * loopback origin — local development, a tunnel-less laptop — is blocked by
+ * the browser and leaves the person with a blank panel. Such deployments
+ * skip the app and hand out the URL directly instead.
+ */
+function publicOriginIsHttps(): boolean {
+  const configured = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN?.trim() ?? "";
+  return /^https:\/\//i.test(configured);
+}
+
+export const __publicOriginIsHttpsForTests = publicOriginIsHttps;
 
 function clientSupportsMcpApp(capabilities: unknown): boolean {
   const typed = capabilities as
@@ -1218,6 +1284,140 @@ export async function refreshConnectionRowLocked(input: {
   }
 }
 
+/** The tool names connection guidance refers to for one projection. */
+function connectionToolsFor(
+  execution: ExecutionCatalogEntry,
+  entry: Pick<DerivedToolsCatalogEntry, "connect"> | undefined,
+): { create: string; connect: string | null } {
+  const create =
+    catalog.tools.find(
+      (tool) =>
+        tool.table === execution.connectionTable && tool.operation === "create",
+    )?.name ?? `create_${execution.connectionEntity.toLowerCase()}`;
+  return { create, connect: entry?.connect?.name ?? null };
+}
+
+function providerDisplayName(
+  providerRow: Record<string, unknown>,
+  execution: ExecutionCatalogEntry,
+): string {
+  return String(providerRow.name ?? providerRow.key ?? execution.providerEntity);
+}
+
+/**
+ * The organization-connection failure, worded for the caller (see
+ * connection-guidance.ts). An organization administrator additionally gets a
+ * fresh browser handoff to the same secure form the create tool would show,
+ * so setup can continue from a client that cannot render forms at all. The
+ * handoff is minted only when no Connection row exists yet (an incomplete
+ * row is recreated through the create tool, which names the missing values)
+ * and only when the create contract can be satisfied from the Adapter alone.
+ */
+async function organizationConnectionProblem(input: {
+  db: OpenShapeForgeDatabase;
+  session: DbSessionInput;
+  tables: Map<string, GeneratedTable>;
+  execution: ExecutionCatalogEntry;
+  entry: Pick<DerivedToolsCatalogEntry, "connect"> | undefined;
+  providerRow: Record<string, unknown>;
+  missingValues?: string[];
+}): Promise<HttpError> {
+  const { execution, providerRow, session } = input;
+  const elicit = entityForTable(execution.connectionTable)?.elicitOnCreate;
+  const adapterId = String(providerRow.id ?? "");
+  const administrator = isOrganizationAdministrator(session.roles);
+  const problem: ConnectionProblem = {
+    kind: "organization_missing",
+    adapter: providerDisplayName(providerRow, execution),
+    adapterId,
+    createTool: connectionToolsFor(execution, input.entry).create,
+    adapterArgument: elicit?.sourceField ?? "adapterId",
+    administrator,
+    ...(input.missingValues && input.missingValues.length > 0
+      ? { missingValues: input.missingValues }
+      : {}),
+  };
+  const table = input.tables.get(execution.connectionTable);
+  const createTool = catalog.tools.find(
+    (tool) => tool.table === execution.connectionTable && tool.operation === "create",
+  );
+  const required = Array.isArray(
+    (createTool?.inputSchema as { required?: unknown } | undefined)?.required,
+  )
+    ? ((createTool!.inputSchema as { required: unknown[] }).required as string[])
+    : [];
+  const modelValues: Record<string, unknown> = {};
+  if (elicit) {
+    modelValues[elicit.sourceField] = adapterId;
+    if (typeof providerRow.key === "string") modelValues.key = providerRow.key;
+    modelValues.name = problem.adapter;
+  }
+  const satisfiable = required.every((field) => field in modelValues);
+  if (
+    administrator &&
+    elicit &&
+    table &&
+    satisfiable &&
+    !problem.missingValues &&
+    session.tenantId &&
+    session.userId
+  ) {
+    try {
+      const definitions = Array.isArray(providerRow[elicit.definitionsField])
+        ? (providerRow[elicit.definitionsField] as Record<string, unknown>[])
+        : [];
+      const sourceAuth = providerRow.auth as Record<string, unknown> | null | undefined;
+      const messagePrefix =
+        sourceAuth?.profile === "oauth2AuthorizationCode"
+          ? `Before entering these values, register this exact redirect URL on the ` +
+            `provider's OAuth client: ${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`
+          : undefined;
+      const minted = await mintConfiguration({
+        db: input.db,
+        tenantId: session.tenantId,
+        userId: session.userId,
+        table: table.name,
+        elicit,
+        modelValues,
+        definitions,
+        displayName: problem.adapter,
+        messagePrefix,
+      });
+      problem.configurationUrl = `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${minted.token}`;
+      problem.expiresAt = new Date(
+        Date.now() + minted.expiresInSeconds * 1000,
+      ).toISOString();
+    } catch {
+      // No public origin or no keyring: the create-tool instruction stands
+      // on its own; the handoff is an extra, never a precondition.
+    }
+  }
+  return connectionProblemError(problem);
+}
+
+/**
+ * Re-raise a refresh failure as guidance naming the sign-in tool: the
+ * refresh helpers know the row, not the tool the person was using.
+ */
+function reauthorizationProblem(
+  error: unknown,
+  context: {
+    adapter: string;
+    toolName: string;
+    connectTool: string | null;
+    scope: "user" | "tenant";
+  },
+): unknown {
+  if (error instanceof HttpError && error.code === "REAUTHORIZATION_REQUIRED") {
+    return connectionProblemError({
+      kind: "reauthorization",
+      ...context,
+      reason: "expired and could not be refreshed",
+    });
+  }
+  return error;
+}
+
 /**
  * The tenant-level connection's OAuth client credentials, decrypted. The
  * secret goes only into token-endpoint calls, never anywhere else.
@@ -1398,7 +1598,10 @@ function describeTool(
       title: tool.title,
       ...tool.annotations,
     },
-    ...(tool.operation === "create" && entity?.elicitOnCreate
+    // The MCP App is only advertised where it can render (https origin —
+    // see publicOriginIsHttps); elsewhere the create tool answers with a
+    // plain configuration URL instead.
+    ...(tool.operation === "create" && entity?.elicitOnCreate && publicOriginIsHttps()
       ? { _meta: { ui: { resourceUri: ENTITY_CONFIGURATION_APP_URI } } }
       : {}),
   };
@@ -1618,6 +1821,55 @@ function configurationAppResult(
 export const __configurationAppResultForTests = configurationAppResult;
 
 /**
+ * The model-visible handoff for clients without a usable secure form: the
+ * configuration URL in plain text AND structured, so an assistant can tell
+ * the person exactly where to go. The URL is the single-use, time-bound
+ * handoff token; the values are entered in the browser and never pass
+ * through the chat or the model.
+ */
+function configurationHandoffResult(input: {
+  continuation: Record<string, unknown>;
+  token: string;
+  expiresInSeconds: number;
+  definitions: unknown;
+  instructions: string;
+  nowMs?: number;
+}): ToolResult {
+  const configurationUrl = `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${input.token}`;
+  const expiresAt = new Date(
+    (input.nowMs ?? Date.now()) + input.expiresInSeconds * 1000,
+  ).toISOString();
+  const externalUrl = configurationWebUrl();
+  const payload = {
+    ...input.continuation,
+    pending: true,
+    configurationUrl,
+    expiresAt,
+    fields: connectionFieldsOf(input.definitions).map(({ key, label, secret }) => ({
+      key,
+      label,
+      secret,
+    })),
+    ...(externalUrl ? { externalUrl } : {}),
+    instructions: input.instructions,
+  };
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `Configuration needed: open ${configurationUrl} in a browser and enter the ` +
+          `values there (link valid until ${expiresAt}); they never pass through the chat.`,
+      },
+      { type: "text", text: JSON.stringify(payload, null, 2) },
+    ],
+    structuredContent: payload,
+  };
+}
+
+export const __configurationHandoffResultForTests = configurationHandoffResult;
+
+/**
  * Errors are returned as tool results rather than protocol errors: a model
  * that gets "FORBIDDEN: not authorized to delete Relation" back as content can
  * adapt, where a transport-level failure just terminates the call. The code
@@ -1670,8 +1922,10 @@ function unavailableOutcome(error: unknown): {
   retryAt?: string;
   requiredAction: string;
   correlationId?: string;
+  /** Server-authored next step for a connection gap; never provider text. */
+  guidance?: string;
 } {
-  const { code, category, retryable, retryAt, requiredAction, correlationId } =
+  const { code, category, retryable, retryAt, requiredAction, correlationId, message } =
     toHttpError(error).body.error;
   return {
     code,
@@ -1680,6 +1934,9 @@ function unavailableOutcome(error: unknown): {
     ...(retryAt !== undefined ? { retryAt } : {}),
     requiredAction: requiredAction ?? "contact_admin",
     ...(correlationId !== undefined ? { correlationId } : {}),
+    // Connection failures are worded by connection-guidance.ts, so the
+    // message is the platform's own instruction and safe to pass on.
+    ...(isConnectionProblemCode(code) ? { guidance: message } : {}),
   };
 }
 
@@ -2257,6 +2514,7 @@ function buildServer(
         const definitionUnavailable = (
           binding: Record<string, unknown>,
           outcome: AuthorizedUnavailableInvocationSource["outcome"],
+          guidance?: string,
         ) => unavailable.push({
           tenantId,
           actorId: session.userId,
@@ -2264,7 +2522,56 @@ function buildServer(
           binding: Number(binding.order ?? 0),
           definition,
           outcome,
+          ...(guidance !== undefined ? { guidance } : {}),
         });
+        // The next step for a connection gap on this provider, worded for
+        // the caller — the same text the direct execution path raises.
+        const connectionGuidance = (
+          providerRow: Record<string, unknown>,
+          gap: "organization" | "personal" | "tenant_sign_in" | "reauthorization",
+        ): string => {
+          const adapter = providerDisplayName(providerRow, execution);
+          const connectTool = entry.connect?.name ?? null;
+          switch (gap) {
+            case "organization":
+              return connectionProblemMessage({
+                kind: "organization_missing",
+                adapter,
+                adapterId: String(providerRow.id ?? ""),
+                createTool: connectionToolsFor(execution, entry).create,
+                adapterArgument:
+                  entityForTable(execution.connectionTable)?.elicitOnCreate
+                    ?.sourceField ?? "adapterId",
+                administrator: isOrganizationAdministrator(session.roles),
+              });
+            case "personal":
+              return connectionProblemMessage({
+                kind: "personal_missing",
+                adapter,
+                toolName,
+                connectTool,
+              });
+            case "tenant_sign_in":
+              return connectionProblemMessage({
+                kind: "tenant_sign_in",
+                adapter,
+                toolName,
+                connectTool,
+                administrator: isOrganizationAdministrator(session.roles),
+              });
+            case "reauthorization":
+              return connectionProblemMessage({
+                kind: "reauthorization",
+                adapter,
+                toolName,
+                connectTool,
+                scope: connectionScopeOf(
+                  (providerRow.auth ?? null) as Record<string, unknown> | null,
+                ),
+                reason: "expired or no longer covers the scopes this tool needs",
+              });
+          }
+        };
         const selectedBindings = orderedBindings(
           serviceRow,
           execution.bindingsField,
@@ -2321,7 +2628,13 @@ function buildServer(
                 session.userId,
               );
             } catch {
-              definitionUnavailable(binding, "connection_required");
+              // No (single) tenant support row: the organization's side is
+              // missing, which comes before any personal sign-in.
+              definitionUnavailable(
+                binding,
+                "connection_required",
+                connectionGuidance(providerRow, "organization"),
+              );
               continue;
             }
           }
@@ -2428,11 +2741,20 @@ function buildServer(
             eligibleSourceCount += 1;
           }
           if (eligibleSourceCount === 0) {
+            const reauthorize = missingRequiredScopes || needsReauthorization;
             definitionUnavailable(
               binding,
-              missingRequiredScopes || needsReauthorization
-                ? "reauthorization_required"
-                : "connection_required",
+              reauthorize ? "reauthorization_required" : "connection_required",
+              connectionGuidance(
+                providerRow,
+                reauthorize
+                  ? "reauthorization"
+                  : personal
+                    ? "personal"
+                    : providerAuth?.profile === "oauth2AuthorizationCode"
+                      ? "tenant_sign_in"
+                      : "organization",
+              ),
             );
           }
         }
@@ -2519,6 +2841,27 @@ function buildServer(
     projectedTools: () => derivedToolsForSession(db, session, tables),
     guideTools: () => guideToolsForSession(session),
     guidesCalled,
+    // The administrator step reads the same contract the create tool and
+    // the execution path use: which fields the form asks, which tool
+    // creates the row, and the redirect URL an OAuth client must register.
+    connectionContract: (connectionTable) => {
+      const elicit = entityForTable(connectionTable)?.elicitOnCreate;
+      const createTool = catalog.tools.find(
+        (tool) => tool.table === connectionTable && tool.operation === "create",
+      )?.name;
+      return elicit && createTool ? { elicit, createTool } : null;
+    },
+    tenantConnection: (connectionTable, providerRef, providerId) =>
+      runtimeRowsByFilter(db, session, tables, connectionTable, {
+        [providerRef]: providerId,
+      }).then((rows) => rows.find((row) => !row.ownerUserId) ?? null),
+    redirectUri: () => {
+      try {
+        return `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`;
+      } catch {
+        return null;
+      }
+    },
   });
   const sessionInfo = async () =>
     withOnboarding(
@@ -3287,11 +3630,38 @@ function buildServer(
           const secretScope =
             entityForTable(execution.connectionTable)?.elicitOnCreate
               ?.sourceTable ?? execution.providerTable;
-          const credentials = readClientCredentials(
-            tenantConnection,
-            execution.connectionValuesField,
-            secretScope,
-          );
+          let credentials: ReturnType<typeof readClientCredentials>;
+          try {
+            credentials = readClientCredentials(
+              tenantConnection,
+              execution.connectionValuesField,
+              secretScope,
+            );
+          } catch (error) {
+            if (error instanceof HttpError && error.code === "CONNECTION_MISSING") {
+              throw await organizationConnectionProblem({
+                db,
+                session,
+                tables,
+                execution,
+                entry: connectEntry,
+                providerRow,
+                ...(tenantConnection
+                  ? {
+                      missingValues: missingRequiredConnectionValues(
+                        providerRow[
+                          entityForTable(execution.connectionTable)?.elicitOnCreate
+                            ?.definitionsField ?? ""
+                        ],
+                        auth,
+                        tenantConnection[execution.connectionValuesField],
+                      ),
+                    }
+                  : {}),
+              });
+            }
+            throw error;
+          }
 
           // Provider OAuth endpoints are routinely per-tenant
           // (https://{subdomain}.provider.com/...): placeholders resolve from
@@ -4107,11 +4477,35 @@ function buildServer(
                     session.userId,
                   );
                   if (!personal) {
-                    throw new HttpError(
-                      403,
-                      "CONNECTION_REQUIRED",
-                      `This tool needs your personal ${String(providerRow.name ?? "provider")} connection.`,
+                    // The organization's side comes first: a person cannot
+                    // sign in at a provider whose shared configuration (the
+                    // OAuth client, say) nobody has created yet.
+                    const needs = connectionNeedsOf(
+                      providerAuth,
+                      providerRow[
+                        entityForTable(execution.connectionTable)?.elicitOnCreate
+                          ?.definitionsField ?? ""
+                      ],
                     );
+                    if (
+                      needs.organization &&
+                      !connectionRows.some((row) => !row.ownerUserId)
+                    ) {
+                      throw await organizationConnectionProblem({
+                        db,
+                        session,
+                        tables,
+                        execution,
+                        entry,
+                        providerRow,
+                      });
+                    }
+                    throw connectionProblemError({
+                      kind: "personal_missing",
+                      adapter: providerDisplayName(providerRow, execution),
+                      toolName: name,
+                      connectTool: entry?.connect?.name ?? null,
+                    });
                   }
                   if (providerAuth?.profile !== "oauth2AuthorizationCode") {
                     connectionValues =
@@ -4129,13 +4523,12 @@ function buildServer(
                   let values = (personal?.[execution.connectionValuesField] ??
                     null) as Record<string, unknown> | null;
                   if (!values?.accessToken) {
-                    throw new HttpError(
-                      403,
-                      "CONNECTION_REQUIRED",
-                      `This tool needs your personal ${String(providerRow.name ?? "provider")} ` +
-                        `connection. Call ${entry?.connect?.name ?? "the connect tool"} with ` +
-                        `{"tool":"${name}"} to start it.`,
-                    );
+                    throw connectionProblemError({
+                      kind: "personal_missing",
+                      adapter: providerDisplayName(providerRow, execution),
+                      toolName: name,
+                      connectTool: entry?.connect?.name ?? null,
+                    });
                   }
                   if (
                     accessTokenNeedsRefresh(
@@ -4147,11 +4540,29 @@ function buildServer(
                     const tenantConnection = connectionRows.find(
                       (row) => !row.ownerUserId,
                     );
-                    const credentials = readClientCredentials(
-                      tenantConnection,
-                      execution.connectionValuesField,
-                      elicitScope,
-                    );
+                    let credentials: ReturnType<typeof readClientCredentials>;
+                    try {
+                      credentials = readClientCredentials(
+                        tenantConnection,
+                        execution.connectionValuesField,
+                        elicitScope,
+                      );
+                    } catch (error) {
+                      if (
+                        error instanceof HttpError &&
+                        error.code === "CONNECTION_MISSING"
+                      ) {
+                        throw await organizationConnectionProblem({
+                          db,
+                          session,
+                          tables,
+                          execution,
+                          entry,
+                          providerRow,
+                        });
+                      }
+                      throw error;
+                    }
                     if (!keyring || typeof providerAuth.tokenUrl !== "string") {
                       throw new HttpError(
                         400,
@@ -4177,6 +4588,7 @@ function buildServer(
                         "INTERNAL",
                         "Connection table is missing.",
                       );
+                    try {
                     values = await refreshConnectionRowLocked({
                       db,
                       session,
@@ -4207,6 +4619,14 @@ function buildServer(
                         },
                         ...(signal ? { signal } : {}),
                       });
+                    } catch (error) {
+                      throw reauthorizationProblem(error, {
+                        adapter: providerDisplayName(providerRow, execution),
+                        toolName: name,
+                        connectTool: entry?.connect?.name ?? null,
+                        scope: "user",
+                      });
+                    }
                   }
                   // The personal connection holds only tokens; tenant-owned
                   // NON-secret configuration (subdomain and friends) still
@@ -4244,12 +4664,14 @@ function buildServer(
                     session.userId,
                   );
                   if (!tenantConnection) {
-                    throw new HttpError(
-                      400,
-                      "CONNECTION_MISSING",
-                      `No ${execution.connectionEntity} is configured for this ` +
-                        `${execution.providerEntity}; an administrator must create one first.`,
-                    );
+                    throw await organizationConnectionProblem({
+                      db,
+                      session,
+                      tables,
+                      execution,
+                      entry,
+                      providerRow,
+                    });
                   }
                   oauthConnectionAudit = {
                     sourceTable: execution.providerTable,
@@ -4267,13 +4689,13 @@ function buildServer(
                       unknown
                     > | null;
                     if (!tenantValues?.accessToken) {
-                      throw new HttpError(
-                        403,
-                        "CONNECTION_REQUIRED",
-                        `This provider needs a one-time sign-in for the whole tenant. ` +
-                          `An administrator calls ${entry?.connect?.name ?? "the connect tool"} ` +
-                          `with {"tool":"${name}"} and approves at the provider.`,
-                      );
+                      throw connectionProblemError({
+                        kind: "tenant_sign_in",
+                        adapter: providerDisplayName(providerRow, execution),
+                        toolName: name,
+                        connectTool: entry?.connect?.name ?? null,
+                        administrator: isOrganizationAdministrator(session.roles),
+                      });
                     }
                     if (
                       accessTokenNeedsRefresh(
@@ -4282,11 +4704,37 @@ function buildServer(
                       )
                     ) {
                       const keyring = elicitedKeyring();
-                      const credentials = readClientCredentials(
-                        tenantConnection,
-                        execution.connectionValuesField,
-                        elicitScope,
-                      );
+                      let credentials: ReturnType<typeof readClientCredentials>;
+                      try {
+                        credentials = readClientCredentials(
+                          tenantConnection,
+                          execution.connectionValuesField,
+                          elicitScope,
+                        );
+                      } catch (error) {
+                        if (
+                          error instanceof HttpError &&
+                          error.code === "CONNECTION_MISSING"
+                        ) {
+                          throw await organizationConnectionProblem({
+                            db,
+                            session,
+                            tables,
+                            execution,
+                            entry,
+                            providerRow,
+                            missingValues: missingRequiredConnectionValues(
+                              providerRow[
+                                entityForTable(execution.connectionTable)
+                                  ?.elicitOnCreate?.definitionsField ?? ""
+                              ],
+                              providerAuth,
+                              tenantConnection[execution.connectionValuesField],
+                            ),
+                          });
+                        }
+                        throw error;
+                      }
                       const connectionTableDef = tables.get(
                         execution.connectionTable,
                       );
@@ -4310,6 +4758,7 @@ function buildServer(
                         ],
                         elicitScope,
                       );
+                      try {
                       tenantValues = await refreshConnectionRowLocked({
                         db,
                         session,
@@ -4341,6 +4790,14 @@ function buildServer(
                         },
                         ...(signal ? { signal } : {}),
                       });
+                      } catch (error) {
+                        throw reauthorizationProblem(error, {
+                          adapter: providerDisplayName(providerRow, execution),
+                          toolName: name,
+                          connectTool: entry?.connect?.name ?? null,
+                          scope: "tenant",
+                        });
+                      }
                     }
                     // The row mixes AAD scopes: elicited fields were encrypted
                     // under the elicitation scope, tokens under the personal
@@ -4390,11 +4847,14 @@ function buildServer(
                         .grantedScopes
                     : undefined;
                 if (!scopesCovered(operationScopes, grantedScopes)) {
-                  throw new HttpError(
-                    403,
-                    "REAUTHORIZATION_REQUIRED",
-                    `The connection does not cover required scopes: ${operationScopes.join(", ")}.`,
-                  );
+                  throw connectionProblemError({
+                    kind: "reauthorization",
+                    adapter: providerDisplayName(providerRow, execution),
+                    toolName: name,
+                    connectTool: entry?.connect?.name ?? null,
+                    scope: connectionScopeOf(providerAuth),
+                    reason: `does not cover the required scopes: ${operationScopes.join(", ")}`,
+                  });
                 }
 
                 let outputs;
@@ -4472,11 +4932,14 @@ function buildServer(
                     } catch {
                       // Stable recovery guidance must survive an audit outage.
                     }
-                    throw new HttpError(
-                      403,
-                      "REAUTHORIZATION_REQUIRED",
-                      "This connection's stored authorization is unreadable and must be authorized again.",
-                    );
+                    throw connectionProblemError({
+                      kind: "reauthorization",
+                      adapter: providerDisplayName(providerRow, execution),
+                      toolName: name,
+                      connectTool: entry?.connect?.name ?? null,
+                      scope: connectionScopeOf(providerAuth),
+                      reason: "is stored in a form this runtime can no longer read",
+                    });
                   }
                   throw error;
                 }
@@ -4634,7 +5097,9 @@ function buildServer(
             "seconds or so — the record exists once they have saved. Only if " +
             "nothing has appeared after about three minutes, ask the person to tell " +
             "you when they are done.";
-          if (supportsMcpApp(server)) {
+          // The private MCP App only where its iframe can render (https
+          // origin); every other client gets the URL in the open.
+          if (supportsMcpApp(server) && publicOriginIsHttps()) {
             return configurationAppResult(
               {
                 ...continuation,
@@ -4647,9 +5112,11 @@ function buildServer(
             );
           }
 
-          return ok({
-            ...continuation,
-            externalUrl: configurationWebUrl(),
+          return configurationHandoffResult({
+            continuation,
+            token: minted.token,
+            expiresInSeconds: minted.expiresInSeconds,
+            definitions,
             instructions:
               configurationFallbackLead(reason, "external") +
               waitInstruction,

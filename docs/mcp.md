@@ -47,14 +47,45 @@ same bearer token, customer-provisioned API key, or signed trusted-context
 headers every other transport takes; an unauthenticated request is `401` before
 any dispatch.
 
-For ordinary configuration data, the runtime preserves this UX order:
-in-client elicitation, then an MCP App when the client advertises
-`io.modelcontextprotocol/ui`, then the signed-in host web form. The private app
-receives its single-use handoff only in tool-result metadata. The external
-fallback is the stable `${OPENSHAPEFORGE_WEB_ORIGIN}/configuration` URL and
-resolves the pending form after normal Keycloak login, so a bearer handoff URL
-never enters model context. Secret and confidential values post directly to the
-runtime and are encrypted at rest with `OPENSHAPEFORGE_ELICITED_SECRET_KEYS`.
+For ordinary configuration data (a `create_connection` for an Adapter, or any
+entity with `mcp.elicitOnCreate`), the runtime preserves this UX order:
+
+1. **In-client elicitation** — the secure form in place; values never touch
+   the model.
+2. **An MCP App**, only when the client advertises `io.modelcontextprotocol/ui`
+   **and** `OPENSHAPEFORGE_PUBLIC_ORIGIN` is `https://`. The app renders the
+   handoff form in an iframe inside the host's own https sandbox, so an
+   `http://` or loopback origin (local development) cannot render there — the
+   panel stays blank — and the runtime does not offer it at all. The private
+   app receives its single-use handoff only in tool-result metadata.
+3. **The configuration URL in the open.** Every other client (Codex, ChatGPT
+   without an MCP-App-capable origin, a plain connector) gets a result whose
+   text and `structuredContent` both carry it:
+
+   ```json
+   {
+     "action": "configure", "status": "awaiting_person", "pending": true,
+     "configurationUrl": "https://api.example.com/api/entity-configuration/<token>",
+     "expiresAt": "2026-09-05T10:30:00.000Z", "expiresInSeconds": 1800,
+     "fields": [
+       { "key": "clientId", "label": "Google OAuth client ID", "secret": false },
+       { "key": "clientSecret", "label": "Google OAuth client secret", "secret": true }
+     ],
+     "resumeWith": "list_connections",
+     "instructions": "The secure form could not be completed in this client. Give the person configurationUrl: open this link in a browser and enter the values there; they never pass through the chat. …"
+   }
+   ```
+
+   The page is served on the API's own origin (`/api/entity-configuration/<token>`,
+   branded, see `browser-pages.ts`), so no web origin is needed; the token is
+   single-use and expires after 30 minutes. Submitting the form verifies the
+   values the way `test_connection` does, creates the row, and burns the
+   token. When `OPENSHAPEFORGE_WEB_ORIGIN` is set the result also carries
+   `externalUrl`, the signed-in host web form that resolves the same pending
+   handoff after Keycloak login.
+
+Secret and confidential values post directly to the runtime and are encrypted
+at rest with `OPENSHAPEFORGE_ELICITED_SECRET_KEYS`.
 
 ### Discovery
 
@@ -211,9 +242,14 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   "signedInVia": "Codex",
   "signInExpiresAt": "2026-09-04T10:12:00.000Z",
   "signInExpiresIn": "in 12 minutes",
+  "sessionEndsAfterInactivity": "14 days",
+  "signOut": "Sign out in your client (Codex: codex mcp logout <entry>; ChatGPT: the connector's menu).",
   "access": { "tools": 68, "resources": 13 },
-  "relation": { "status": "Linked", "name": "Hans Eilers", "kind": "person" },
-  "summary": "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. Your sign-in expires in 12 minutes. You act as the record Hans Eilers. You can use 68 tools and 13 resources."
+  "relation": {
+    "status": "Linked", "name": "Hans Eilers", "kind": "person",
+    "explanation": "The record you act as in this organization; roles like employee or supplier are assigned by an administrator."
+  },
+  "summary": "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You act as the record Hans Eilers. You can use 68 tools and 13 resources."
 }
 ```
 
@@ -236,6 +272,14 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   "Hubble", any other `azp` as is). A trusted-context session reports
   "Development identity" and has no expiry. On a per-organization endpoint the
   summary adds "on the Zerocopter endpoint" (the organization's display name).
+- `signInExpiresAt` / `signInExpiresIn` are the access token's own expiry,
+  which a client refreshes silently; `sessionEndsAfterInactivity` is what the
+  person experiences — the identity provider's SSO / offline session, which
+  idles out after `OPENSHAPEFORGE_SESSION_IDLE_DAYS` days (default 14, the
+  value the reference realm setup configures; the realm's own value is not
+  cheaply readable from the API). The summary states the latter and mentions
+  the token only once it has actually lapsed. `signOut` says where to end the
+  session, since the client owns it, not this server.
 - `access` counts what THIS session sees, through the same per-session
   builders `tools/list` and `resources/list` use — it is not a deployment-wide
   number.
@@ -247,7 +291,8 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   exists; `name`/`kind` describe that candidate and the summary says "A record
   with your e-mail exists — run confirm_my_link to use it.") or "Not linked"
   (no record, or a session that carries no person: API key, development
-  identity). No ids leave the answer.
+  identity). `explanation` is one fixed line saying what a Relation is. No
+  ids leave the answer.
 
 The tool result carries the JSON both as text content and as
 `structuredContent`. The implementation is `apps/api/src/mcp/session-info.ts`;
@@ -416,15 +461,16 @@ delimited hunks).
 ```json
 "onboarding": {
   "status": "In progress",
-  "version": 1,
+  "version": 2,
   "completedAt": null,
   "steps": [
-    { "key": "identity",    "title": "Linked to your Relation",         "status": "done",           "howTo": "Your login is linked to your Relation." },
-    { "key": "connections", "title": "Personal sign-ins at providers",  "status": "todo",           "howTo": "Run connect_service { tool: \"google_koppelen\" } to sign in at Google; the person opens the returned URL and approves." },
-    { "key": "preferences", "title": "Working preferences",             "status": "todo",           "howTo": "Ask the person, in one batched question, about working hours, priorities and house style, then save the answer with set_my_preferences (omit `tool` to apply it to all tools). They may skip this: complete_onboarding { skip: true }." },
-    { "key": "guide",       "title": "Role guide read",                 "status": "not_applicable", "howTo": "No role guide applies to this person's roles." }
+    { "key": "identity",                 "title": "Linked to your Relation",                 "status": "done",           "howTo": "Your login is linked to your Relation." },
+    { "key": "organization_connections", "title": "Organization connections to providers",  "status": "todo",           "howTo": "Run create_connection { adapterId: \"…\", key, name } for Google. The secure form asks for: Google OAuth client ID, Google OAuth client secret (secret). Register this redirect URL on the provider's OAuth client first: https://api.example.com/api/entity-oauth/callback. Never ask for the values in chat: a capable client shows a secure form, any other client receives a configurationUrl to open in a browser." },
+    { "key": "connections",              "title": "Personal sign-ins at providers",          "status": "todo",           "howTo": "Run connect_service { tool: \"google_koppelen\" } to sign in at Google; the person opens the returned URL and approves." },
+    { "key": "preferences",              "title": "Working preferences",                     "status": "todo",           "howTo": "Ask the person, in one batched question, about working hours, priorities and house style, then save the answer with set_my_preferences (omit `tool` to apply it to all tools). They may skip this: complete_onboarding { skip: true }." },
+    { "key": "guide",                    "title": "Role guide read",                         "status": "not_applicable", "howTo": "No role guide applies to this person's roles." }
   ],
-  "summary": "Onboarding is in progress: 1 of 3 steps done (to do: connections, preferences). Follow onboarding_guide."
+  "summary": "Onboarding is in progress: 1 of 4 steps done (to do: organization_connections, connections, preferences). Follow onboarding_guide."
 }
 ```
 
@@ -434,6 +480,7 @@ naming the exact next call:
 | step | done when | not applicable when |
 | --- | --- | --- |
 | `identity` | `session.relation.status === "linked"` (see [Identities and Relations](#identities-and-relations)). Pending with a candidate → `confirm_my_link`; without → an administrator's `link_identity`. | the session carries no person (development identity, API key) |
+| `organization_connections` | **organization administrators only** (`org_admin`): for every Adapter in the organization whose auth needs organization-level configuration — it declares `configurationFields`, or its auth profile references credential values (an API key, basic credentials, the OAuth client behind a personal sign-in) — a tenant-owned Connection exists and passes the same required-values check `test_connection` runs. The `howTo` names `create_connection` with the `adapterId`, lists the form fields with secret ones marked, and for an OAuth Adapter the redirect URL to register (`<OPENSHAPEFORGE_PUBLIC_ORIGIN>/api/entity-oauth/callback`); an incomplete Connection is named with its missing values. Shared vocabulary: `apps/api/src/mcp/connection-guidance.ts`. | the person is not an organization administrator, or no Adapter needs organization-level configuration |
 | `connections` | for every published Service this person can use whose provider needs a **personal** sign-in (`auth.connectionScope: user`, or an `oauth2AuthorizationCode` profile), a Connection row owned by this person exists. The `howTo` names `connect_service` with the tool that binds the widest set of that provider's capabilities — the natural entry point, since one consent covers the provider. | no such Service is published for this person (a fresh tenant, or a person outside the Services' audience) |
 | `preferences` | at least one PersonalInstruction of this person exists (`set_my_preferences`), or the person skipped the step (`complete_onboarding { skip: true }`) | the deployment offers no personal instructions to this person |
 | `guide` | every role guide the session is shown (`pentest_guide` for pentest roles, `provider_setup_guide` for integration administrators) was read — in this session, or recorded at an earlier completion | no guide applies to the person's roles |
@@ -470,12 +517,23 @@ row-level policy) and answers the final checklist. Calling it again answers
 walk the `todo` steps in order; ask the preferences in one batched question,
 never one item at a time; never ask for secrets in chat (sign-ins go through
 the URL `connect_service` returns, organization credentials through the
-secure form); confirm with `complete_onboarding`; afterwards never mention
-onboarding again. Its wording follows the caller's role: an organization
-administrator is also told about the organization's side (shared connections
-through `create_connection` with a client that supports elicitation, linking
-colleagues with `link_identity`), an employee is told to ask an administrator
-for what they cannot do themselves.
+secure form or the `configurationUrl` a create tool answers with); confirm
+with `complete_onboarding`; afterwards never mention onboarding again. Its
+wording follows the caller's role: an organization administrator gets an
+administrator section — organization connections first (`create_connection`,
+the secure form or the `configurationUrl` for clients without one, the
+redirect URL for OAuth providers, then `test_connection`), then their own
+personal sign-in, then preferences; linking colleagues with `link_identity`;
+`provider_setup_guide` for adding a provider — while an employee is told to
+ask an administrator for what they cannot do themselves.
+
+**Service descriptions say what they need.** A derived Service tool whose
+Adapter needs an organization connection, or a personal sign-in, carries one
+generated sentence per need under its authored description — *Requires the
+organization's Google connection; administrators set it up with
+create_connection. Sign in once with connect_service.* — derived from the
+Adapter's auth block and configuration contract at listing time
+(`derivedToolsForSession`), never authored.
 
 ## Errors
 
@@ -491,6 +549,25 @@ platform could classify adds the normalized provider outcome — `retryable`,
 calls keep their existing text-only shape until one unified output contract is
 defined. See
 [connectors.md](connectors.md#provider-failures).
+
+**Connection failures are actionable.** Every "connection required / missing"
+answer names the Adapter, the tool to use and who may use it, through one
+helper (`apps/api/src/mcp/connection-guidance.ts`) so descriptions, errors
+and the onboarding checklist cannot disagree:
+
+| code | who | message |
+| --- | --- | --- |
+| `CONNECTION_MISSING` (400) | employee | *The organization's Google connection is not set up. Ask an organization administrator to set up the Google connection (create_connection).* |
+| `CONNECTION_MISSING` (400) | organization administrator | the same, plus *set it up with create_connection { adapterId: "…" }, or open `<configurationUrl>` in a browser …* — a fresh 30-minute browser handoff to the same secure form is minted for administrators when no Connection row exists yet |
+| `CONNECTION_REQUIRED` (403) | personal sign-in missing | *This tool needs your personal Google sign-in. Call connect_service { tool: "inbox_doorzoeken" } and open the returned URL to approve at Google.* |
+| `CONNECTION_REQUIRED` (403) | tenant-wide sign-in missing | *… needs a one-time sign-in for the whole organization. Ask an organization administrator to call connect_service { tool: "…" } …* |
+| `REAUTHORIZATION_REQUIRED` (403) | token expired / unreadable / scopes missing | *Your Google sign-in does not cover the required scopes: …. Call connect_service { tool: "…" } again and approve at Google.* |
+
+The same text rides on the coordination surface: an unavailable invocation
+source (`ModuleUnavailableInvocationSource`, `modules/contract.ts`) carries
+it as `guidance` next to its `outcome`, and an optional binding a derived
+tool skipped reports it as `unavailable[].outcome.guidance`, so a coordinating
+module can surface the platform's own next step instead of a generic line.
 
 Transport-level problems — no credentials, no database — are still HTTP status
 codes (`401`, `503`) with the REST error body shape.

@@ -173,6 +173,11 @@ export function createApiApp(options: {
     },
     trustProxy: limits.trustProxy,
     requestTimeout: limits.requestTimeoutMs,
+    // Browser handoff tokens (`/api/entity-configuration/<token>`,
+    // mcp/handoff-store.ts) are `<tenant>.<handoff>.<secret>` — 117
+    // characters — and the router's default of 100 answered them with 414
+    // before the route ever ran (found live). Generous but bounded.
+    maxParamLength: 512,
   });
 
   // Request-rate boundary, before GraphQL/REST execution — that ordering is

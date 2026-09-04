@@ -12,6 +12,9 @@ import {
   buildSessionInfo,
   describeExpiry,
   describeRelation,
+  RELATION_EXPLANATION,
+  sessionIdleDaysFromEnv,
+  SIGN_OUT_INSTRUCTION,
   humanizeDuration,
   identityFromBearerClaims,
   identityFromSession,
@@ -119,11 +122,18 @@ describe("buildSessionInfo", () => {
     expect(info.signedInVia).toBe("Codex");
     expect(info.signInExpiresAt).toBe("2026-09-04T10:12:00.000Z");
     expect(info.signInExpiresIn).toBe("in 12 minutes");
+    expect(info.sessionEndsAfterInactivity).toBe("14 days");
+    expect(info.signOut).toBe(SIGN_OUT_INSTRUCTION);
     expect(info.access).toEqual({ tools: 68, resources: 13 });
-    expect(info.relation).toEqual({ status: "Not linked", name: null, kind: null });
+    expect(info.relation).toEqual({
+      status: "Not linked",
+      name: null,
+      kind: null,
+      explanation: RELATION_EXPLANATION,
+    });
     expect(info.summary).toBe(
       "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. " +
-        "Your sign-in expires in 12 minutes. You can use 68 tools and 13 resources.",
+        "Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You can use 68 tools and 13 resources.",
     );
     expectNoIdentifiers(info);
   });
@@ -162,7 +172,8 @@ describe("buildSessionInfo", () => {
     expect(info.signedInVia).toBe("MCP Inspector");
     expect(info.summary).toBe(
       "You are Hans Eilers, a member of Hubble with the roles CaseFile.All.ReadWrite, " +
-        "Relations.All.Read, signed in via MCP Inspector. Your sign-in expires in 12 minutes. " +
+        "Relations.All.Read, signed in via MCP Inspector. " +
+        "Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. " +
         "You can use 1 tool and 1 resource.",
     );
   });
@@ -213,10 +224,15 @@ describe("buildSessionInfo", () => {
       access: { tools: 5, resources: 2 },
       nowMs: NOW,
     });
-    expect(info.relation).toEqual({ status: "Linked", name: "Zerocopter Admin", kind: "person" });
+    expect(info.relation).toEqual({
+      status: "Linked",
+      name: "Zerocopter Admin",
+      kind: "person",
+      explanation: RELATION_EXPLANATION,
+    });
     expect(info.summary).toBe(
       "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. " +
-        "Your sign-in expires in 12 minutes. You act as the record Zerocopter Admin. " +
+        "Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You act as the record Zerocopter Admin. " +
         "You can use 5 tools and 2 resources.",
     );
     expectNoIdentifiers(info);
@@ -243,6 +259,7 @@ describe("buildSessionInfo", () => {
       status: "Pending confirmation",
       name: "Hans Dev (HR record)",
       kind: "employee",
+      explanation: RELATION_EXPLANATION,
     });
     expect(info.summary).toContain(
       "A record with your e-mail exists — run confirm_my_link to use it.",
@@ -260,8 +277,13 @@ describe("buildSessionInfo", () => {
         displayName: null,
         relationType: null,
       }),
-    ).toEqual({ status: "Not linked", name: null, kind: null });
-    expect(describeRelation(null)).toEqual({ status: "Not linked", name: null, kind: null });
+    ).toEqual({ status: "Not linked", name: null, kind: null, explanation: RELATION_EXPLANATION });
+    expect(describeRelation(null)).toEqual({
+      status: "Not linked",
+      name: null,
+      kind: null,
+      explanation: RELATION_EXPLANATION,
+    });
   });
 
   it("makes the bound organization the active group and names the endpoint", () => {
@@ -288,7 +310,7 @@ describe("buildSessionInfo", () => {
     expect(info.summary).toBe(
       "You are Hans Eilers, organization administrator of Zerocopter, signed in via Hubble " +
         "on the Zerocopter endpoint. You belong to 2 groups; Zerocopter is the active one. " +
-        "Your sign-in expires in 12 minutes. You act as the record Zerocopter Admin. " +
+        "Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You act as the record Zerocopter Admin. " +
         "You can use 5 tools and 2 resources.",
     );
     expectNoIdentifiers(info);
@@ -319,6 +341,8 @@ describe("buildSessionInfo", () => {
     expect(info.signedInVia).toBe("Development identity");
     expect("signInExpiresAt" in info).toBe(false);
     expect("signInExpiresIn" in info).toBe(false);
+    expect("sessionEndsAfterInactivity" in info).toBe(false);
+    expect("signOut" in info).toBe(false);
     expect(info.groups).toEqual([{ name: "Zerocopter", active: true }]);
     expect(info.summary).toBe(
       "You are the development identity, a member of Zerocopter with the roles " +
@@ -351,7 +375,26 @@ describe("buildSessionInfo", () => {
       nowMs: NOW,
     });
     expect(info.signInExpiresIn).toBe("3 minutes ago");
-    expect(info.summary).toContain("Your sign-in expired 3 minutes ago.");
+    expect(info.summary).toContain(
+      "Your access token expired 3 minutes ago; if the client does not refresh it, sign in again.",
+    );
+  });
+
+  it("states the deployment's idle limit, from the argument, the env, or the 14-day default", () => {
+    const custom = buildSessionInfo({
+      identity: bearer(),
+      roles: ["org_admin"],
+      organization: { name: "Zerocopter" },
+      access: { tools: 1, resources: 1 },
+      sessionIdleDays: 30,
+      nowMs: NOW,
+    });
+    expect(custom.sessionEndsAfterInactivity).toBe("30 days");
+    expect(custom.summary).toContain("stays signed in for 30 days after your last activity");
+    expect(sessionIdleDaysFromEnv({})).toBe(14);
+    expect(sessionIdleDaysFromEnv({ OPENSHAPEFORGE_SESSION_IDLE_DAYS: "7" })).toBe(7);
+    expect(sessionIdleDaysFromEnv({ OPENSHAPEFORGE_SESSION_IDLE_DAYS: "soon" })).toBe(14);
+    expect(sessionIdleDaysFromEnv({ OPENSHAPEFORGE_SESSION_IDLE_DAYS: "0" })).toBe(14);
   });
 });
 

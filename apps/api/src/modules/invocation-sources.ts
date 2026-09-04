@@ -212,6 +212,7 @@ function exposedUnavailable(
     binding: source.binding,
     definition: immutableDefinition(source.definition),
     outcome: source.outcome,
+    ...(source.guidance !== undefined ? { guidance: source.guidance } : {}),
   };
 }
 

@@ -180,6 +180,25 @@ describe("invocation source capabilities", () => {
     expect(Object.isFrozen(resolution.unavailable[0]!.definition)).toBe(true);
   });
 
+  it("passes the platform's connection guidance through, and nothing else", async () => {
+    const guidance =
+      "The organization's Google connection is not set up. Ask an organization " +
+      "administrator to set up the Google connection (create_connection).";
+    const resolution = await new InvocationSourceVault().resolve(
+      session(),
+      "read_item",
+      { mode: "all-authorized" },
+      async () => ({ sources: [source()], unavailable: [unavailable({ guidance })] }),
+      {},
+    );
+    expect(resolution.unavailable).toEqual([{
+      binding: 2,
+      definition: { kind: "definition", id: "definition-1", version: 1 },
+      outcome: "connection_required",
+      guidance,
+    }]);
+  });
+
   it("fails closed when no authorized source or unavailable binding matches", async () => {
     await expect(new InvocationSourceVault().resolve(
       session(),

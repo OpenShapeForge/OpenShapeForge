@@ -23,6 +23,7 @@ import {
   type OnboardingEnvironment,
   type OnboardingFacts,
   type OnboardingRecord,
+  type OrganizationConnectionFact,
 } from "../onboarding.js";
 
 const TENANT_ID = "33333333-3333-4333-8333-333333333333";
@@ -56,6 +57,7 @@ const session = (overrides: Partial<TrustedSessionContext> = {}): TrustedSession
 
 const facts = (overrides: Partial<OnboardingFacts> = {}): OnboardingFacts => ({
   relation: { status: "linked", candidateRelationId: null },
+  organizationConnections: null,
   personalSignIns: null,
   preferences: { offered: true, count: 0 },
   guides: [],
@@ -211,7 +213,13 @@ describe("guide text and instructions", () => {
     expect(administrator).toContain("link_identity yourself");
     expect(administrator).toContain("create_connection");
     expect(administrator).toContain("elicitation");
+    expect(administrator).toContain("configurationUrl");
+    expect(administrator).toContain("organization connections first");
+    expect(administrator).toContain("test_connection");
     expect(administrator).toContain("provider_setup_guide");
+    expect(administrator.indexOf("organization connections first")).toBeLessThan(
+      administrator.indexOf("then your own personal sign-in"),
+    );
     for (const text of [employee, administrator]) {
       expect(text).toContain("Call whoami first");
       expect(text).toContain("ONE batched question");
@@ -306,10 +314,30 @@ function tenantRows(overrides: Partial<Rows> = {}): Rows {
       { id: "cap-slack", adapterId: SLACK },
     ],
     "integration.adapters": [
-      { id: GOOGLE, name: "Google Workspace", auth: { profile: "oauth2AuthorizationCode" } },
-      { id: SLACK, name: "Slack", auth: { profile: "apiKey" } },
+      {
+        id: GOOGLE,
+        name: "Google Workspace",
+        auth: { profile: "oauth2AuthorizationCode" },
+        configurationFields: [
+          { key: "clientId", label: { en: "OAuth client ID" }, required: true },
+          {
+            key: "clientSecret",
+            label: { en: "OAuth client secret" },
+            required: true,
+            classification: { sensitivity: "confidential" },
+          },
+        ],
+      },
+      { id: SLACK, name: "Slack", auth: { profile: "apiKey", scheme: "bearer", tokenFrom: "token" } },
     ],
-    "integration.connections": [{ id: "conn-slack", adapterId: SLACK, ownerUserId: null }],
+    "integration.connections": [
+      {
+        id: "conn-slack",
+        adapterId: SLACK,
+        ownerUserId: null,
+        configurationValues: { token: { ciphertext: "x", keyId: "k", algorithm: "a" } },
+      },
+    ],
     "integration.personal_instructions": [],
     ...overrides,
   };
@@ -369,11 +397,153 @@ function environment(input: {
     guideTools: () => (input.guides ?? []).map((name) => ({ name })),
     guidesCalled: new Set(input.guidesCalled ?? []),
     store: memory.store,
+    connectionContract: (connectionTable) =>
+      connectionTable === "integration.connections"
+        ? {
+            elicit: {
+              sourceField: "adapterId",
+              sourceEntity: "Adapter",
+              sourceTable: "integration.adapters",
+              definitionsField: "configurationFields",
+              into: "configurationValues",
+            },
+            createTool: "create_connection",
+          }
+        : null,
+    tenantConnection: async (table, providerRef, providerId) =>
+      (rows[table] ?? []).find(
+        (row) => row[providerRef] === providerId && !row.ownerUserId,
+      ) ?? null,
+    redirectUri: () => "https://api.example.test/api/entity-oauth/callback",
   };
   return { env, memory };
 }
 
+describe("the organization_connections step", () => {
+  const google = (overrides: Partial<OrganizationConnectionFact> = {}): OrganizationConnectionFact => ({
+    adapter: "Google",
+    adapterId: "adapter-google",
+    createTool: "create_connection",
+    adapterArgument: "adapterId",
+    configured: false,
+    missingValues: [],
+    fields: [
+      { key: "clientId", label: "OAuth client ID", required: true, secret: false },
+      { key: "clientSecret", label: "OAuth client secret", required: true, secret: true },
+    ],
+    redirectUri: "https://api.example.test/api/entity-oauth/callback",
+    ...overrides,
+  });
+
+  it("is not applicable for non-administrators and when nothing needs configuration", () => {
+    const employee = step(computeOnboarding(facts({ organizationConnections: null })), "organization_connections");
+    expect(employee.status).toBe("not_applicable");
+    expect(employee.howTo).toContain("Only an organization administrator");
+    const nothing = step(computeOnboarding(facts({ organizationConnections: [] })), "organization_connections");
+    expect(nothing.status).toBe("not_applicable");
+    expect(nothing.howTo).toContain("No Adapter");
+  });
+
+  it("is done when every Adapter that needs configuration has a working Connection", () => {
+    const done = step(
+      computeOnboarding(facts({ organizationConnections: [google({ configured: true })] })),
+      "organization_connections",
+    );
+    expect(done.status).toBe("done");
+    expect(done.howTo).toBe("Configured: Google.");
+  });
+
+  it("tells an administrator exactly what to create, which fields are secret, and the redirect URL", () => {
+    const summary = computeOnboarding(facts({ organizationConnections: [google()] }));
+    const todo = step(summary, "organization_connections");
+    expect(todo.status).toBe("todo");
+    expect(todo.howTo).toContain(
+      'Run create_connection { adapterId: "adapter-google", key, name } for Google.',
+    );
+    expect(todo.howTo).toContain(
+      "The secure form asks for: OAuth client ID, OAuth client secret (secret).",
+    );
+    expect(todo.howTo).toContain(
+      "Register this redirect URL on the provider's OAuth client first: " +
+        "https://api.example.test/api/entity-oauth/callback.",
+    );
+    expect(todo.howTo).toContain("configurationUrl");
+    expect(summary.steps.map((entry) => entry.key)).toEqual([
+      "identity",
+      "organization_connections",
+      "connections",
+      "preferences",
+      "guide",
+    ]);
+    expect(summary.summary).toContain("organization_connections");
+  });
+
+  it("names the missing values of an incomplete Connection", () => {
+    const todo = step(
+      computeOnboarding(
+        facts({ organizationConnections: [google({ missingValues: ["clientSecret"], redirectUri: null })] }),
+      ),
+      "organization_connections",
+    );
+    expect(todo.howTo).toContain(
+      "The Google connection is incomplete (missing: clientSecret); delete it and run " +
+        'create_connection { adapterId: "adapter-google", key, name } again.',
+    );
+    expect(todo.howTo).not.toContain("redirect URL");
+  });
+});
+
 describe("gatherOnboardingFacts", () => {
+  it("lists organization connections for an administrator only, judged by required values", async () => {
+    const employee = environment({});
+    expect((await gatherOnboardingFacts(employee.env)).organizationConnections).toBeNull();
+
+    const admin = environment({ session: session({ roles: ["org_admin", "integration_admin"] }) });
+    const gathered = await gatherOnboardingFacts(admin.env);
+    expect(gathered.organizationConnections).toEqual([
+      {
+        adapter: "Google Workspace",
+        adapterId: GOOGLE,
+        createTool: "create_connection",
+        adapterArgument: "adapterId",
+        configured: false,
+        missingValues: [],
+        fields: [
+          { key: "clientId", label: "OAuth client ID", required: true, secret: false },
+          { key: "clientSecret", label: "OAuth client secret", required: true, secret: true },
+        ],
+        redirectUri: "https://api.example.test/api/entity-oauth/callback",
+      },
+      {
+        adapter: "Slack",
+        adapterId: SLACK,
+        createTool: "create_connection",
+        adapterArgument: "adapterId",
+        configured: true,
+        missingValues: [],
+        fields: [],
+        redirectUri: null,
+      },
+    ]);
+
+    const incomplete = environment({
+      session: session({ roles: ["org_admin", "integration_admin"] }),
+      rows: tenantRows({
+        "integration.connections": [
+          { id: "conn-slack", adapterId: SLACK, ownerUserId: null, configurationValues: {} },
+          { id: "conn-google", adapterId: GOOGLE, ownerUserId: null, configurationValues: { clientId: "id" } },
+        ],
+      }),
+    });
+    const facts2 = await gatherOnboardingFacts(incomplete.env);
+    expect(facts2.organizationConnections?.map((entry) => [entry.adapter, entry.configured, entry.missingValues])).toEqual([
+      ["Google Workspace", false, ["clientSecret"]],
+      ["Slack", false, ["token"]],
+    ]);
+    const status = computeOnboarding(facts2);
+    expect(step(status, "organization_connections").status).toBe("todo");
+  });
+
   it("finds the personal-sign-in providers behind the visible Services and this person's connections", async () => {
     const { env } = environment({});
     const gathered = await gatherOnboardingFacts(env);
@@ -482,6 +652,7 @@ describe("the onboarding tools", () => {
     expect(payload.onboarding.status).toBe("Completed");
     expect(payload.onboarding.steps.map((entry) => entry.status)).toEqual([
       "done",
+      "not_applicable",
       "done",
       "done",
       "done",
@@ -504,7 +675,7 @@ describe("the onboarding tools", () => {
     const status = await callOnboardingTool(ONBOARDING_STATUS_TOOL, {}, later.env);
     const summary = status!.structuredContent as ReturnType<typeof computeOnboarding>;
     expect(summary.status).toBe("Completed");
-    expect(summary.steps.every((entry) => entry.status === "done")).toBe(true);
+    expect(summary.steps.every((entry) => entry.status !== "todo")).toBe(true);
     const again = await callOnboardingTool(COMPLETE_ONBOARDING_TOOL, {}, later.env);
     expect((again!.structuredContent as { alreadyCompleted?: boolean }).alreadyCompleted).toBe(true);
   });

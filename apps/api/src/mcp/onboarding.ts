@@ -15,9 +15,11 @@
  *                          employee).
  *
  * The checklist is COMPUTED from what the server already knows, never stored
- * as text: the identity link (auth/identity-link.ts), the published Services
- * whose provider needs a personal sign-in and whether this person has one,
- * the person's stored PersonalInstructions, and the role guides read. What IS
+ * as text: the identity link (auth/identity-link.ts), for an organization
+ * administrator the Adapters whose organization-level Connection is missing
+ * or incomplete (mcp/connection-guidance.ts), the published Services whose
+ * provider needs a personal sign-in and whether this person has one, the
+ * person's stored PersonalInstructions, and the role guides read. What IS
  * stored, per (identity, tenant) on platform.identity_relations
  * (db/migrations/onboarding.ts): when onboarding completed, under which
  * ONBOARDING_VERSION, whether the preferences step was skipped, and which
@@ -40,18 +42,25 @@ import {
   listGeneratedEntitiesForTable,
 } from "../graphql/generated-crud.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
+import {
+  connectionFieldsOf,
+  connectionNeedsOf,
+  missingRequiredConnectionValues,
+  type ConnectionField,
+} from "./connection-guidance.js";
 import { orderedBindings } from "./declarative-execution.js";
 import {
   sessionInAudience,
   type DerivedTool,
   type DerivedToolsCatalogEntry,
 } from "./derived-tools.js";
+import type { ElicitOnCreateEntry } from "./elicitation.js";
 
 /**
  * Bump when a step is added or changes meaning so that everyone who completed
  * an older onboarding is asked to finish the new one. Recorded on completion.
  */
-export const ONBOARDING_VERSION = 1;
+export const ONBOARDING_VERSION = 2;
 
 export const ONBOARDING_STATUS_TOOL = "onboarding_status";
 export const COMPLETE_ONBOARDING_TOOL = "complete_onboarding";
@@ -72,7 +81,7 @@ export const ONBOARDING_INSTRUCTION =
 export type OnboardingStepStatus = "done" | "todo" | "not_applicable";
 
 export type OnboardingStep = {
-  key: "identity" | "connections" | "preferences" | "guide";
+  key: "identity" | "organization_connections" | "connections" | "preferences" | "guide";
   title: string;
   status: OnboardingStepStatus;
   /** What to do when the step is `todo`; a short note otherwise. */
@@ -100,10 +109,38 @@ export type OnboardingRecord = {
   guidesRead: string[];
 };
 
+/**
+ * One Adapter whose auth requires organization-level configuration, and the
+ * state of the tenant Connection that should hold it. Administrators only.
+ */
+export type OrganizationConnectionFact = {
+  /** Display name of the Adapter. */
+  adapter: string;
+  adapterId: string;
+  /** The tool that creates the Connection, e.g. create_connection. */
+  createTool: string;
+  /** The create tool's argument naming the Adapter, e.g. adapterId. */
+  adapterArgument: string;
+  /** A tenant Connection exists and every required value is set. */
+  configured: boolean;
+  /** Required values the existing Connection lacks; empty when none exists. */
+  missingValues: string[];
+  /** What the secure form asks for, secret fields marked. */
+  fields: ConnectionField[];
+  /** The redirect URL to register on the provider's OAuth client; null unless OAuth. */
+  redirectUri: string | null;
+};
+
 /** Everything the checklist is computed from. Gathered by `gatherOnboardingFacts`. */
 export type OnboardingFacts = {
   /** The session's identity link; null when the session carries no person. */
   relation: Pick<IdentityLinkState, "status" | "candidateRelationId"> | null;
+  /**
+   * For an organization administrator: every Adapter in the organization
+   * that needs an organization-level Connection, with whether it has a
+   * working one. Null for everyone else.
+   */
+  organizationConnections: OrganizationConnectionFact[] | null;
   /**
    * Providers behind the Services this person can use that need a personal
    * sign-in, with whether this person has one. Null when no such Service is
@@ -141,6 +178,62 @@ function stepIdentity(facts: OnboardingFacts): OnboardingStep {
     howTo: facts.relation.candidateRelationId
       ? "Run confirm_my_link to confirm you are the Relation this organization already has under your e-mail address."
       : "Ask an organization administrator to run link_identity with your e-mail address and your Relation.",
+  };
+}
+
+function describeOrganizationConnection(entry: OrganizationConnectionFact): string {
+  const fields = entry.fields
+    .map((field) => `${field.label}${field.secret ? " (secret)" : ""}`)
+    .join(", ");
+  const parts = [
+    entry.missingValues.length > 0
+      ? `The ${entry.adapter} connection is incomplete (missing: ${entry.missingValues.join(", ")}); ` +
+        `delete it and run ${entry.createTool} { ${entry.adapterArgument}: ${JSON.stringify(entry.adapterId)}, key, name } again.`
+      : `Run ${entry.createTool} { ${entry.adapterArgument}: ${JSON.stringify(entry.adapterId)}, key, name } for ${entry.adapter}.`,
+  ];
+  if (fields) parts.push(`The secure form asks for: ${fields}.`);
+  if (entry.redirectUri) {
+    parts.push(`Register this redirect URL on the provider's OAuth client first: ${entry.redirectUri}.`);
+  }
+  return parts.join(" ");
+}
+
+function stepOrganizationConnections(facts: OnboardingFacts): OnboardingStep {
+  const key = "organization_connections" as const;
+  const title = "Organization connections to providers";
+  if (facts.organizationConnections === null) {
+    return {
+      key,
+      title,
+      status: "not_applicable",
+      howTo: "Only an organization administrator sets up the organization's provider connections.",
+    };
+  }
+  if (facts.organizationConnections.length === 0) {
+    return {
+      key,
+      title,
+      status: "not_applicable",
+      howTo: "No Adapter in this organization needs organization-level configuration.",
+    };
+  }
+  const missing = facts.organizationConnections.filter((entry) => !entry.configured);
+  if (missing.length === 0) {
+    return {
+      key,
+      title,
+      status: "done",
+      howTo: `Configured: ${facts.organizationConnections.map((entry) => entry.adapter).join(", ")}.`,
+    };
+  }
+  return {
+    key,
+    title,
+    status: "todo",
+    howTo:
+      missing.map(describeOrganizationConnection).join(" ") +
+      " Never ask for the values in chat: a capable client shows a secure form, any other " +
+      "client receives a configurationUrl to open in a browser.",
   };
 }
 
@@ -267,6 +360,7 @@ export function computeOnboarding(
   const skipped = Boolean(options.skipPreferences) || Boolean(facts.record?.preferencesSkipped);
   const steps = [
     stepIdentity(facts),
+    stepOrganizationConnections(facts),
     stepConnections(facts),
     stepPreferences(facts, skipped),
     stepGuide(facts),
@@ -351,19 +445,21 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
     administrator
       ? "   as organization administrator you can run link_identity yourself (e-mail + Relation)."
       : "   ask an organization administrator to run link_identity; you cannot do this for them.",
-    "2. connections — for every provider listed as not connected, run connect_service with the",
+    "2. organization_connections — administrators only; see the administrator section below.",
+    "3. connections — for every provider listed as not connected, run connect_service with the",
     "   tool name from the step, hand the person the returned URL, and wait by checking (call",
     "   onboarding_status every ten seconds or so, for up to about three minutes) rather than",
     "   asking them to say when they are done.",
-    "3. preferences — ask ONE batched question covering working hours, priorities and house",
+    "4. preferences — ask ONE batched question covering working hours, priorities and house",
     "   style (language, tone, how formal), never one item at a time. Save the answer in their",
     "   own words with set_my_preferences (omit `tool` so it applies to all tools). If they",
     "   would rather not, that is fine: complete with skip: true.",
-    "4. guide — read every role guide the step names (pentest_guide, provider_setup_guide) and",
+    "5. guide — read every role guide the step names (pentest_guide, provider_setup_guide) and",
     "   follow it from then on.",
     "",
     "Never ask for secrets, tokens, passwords or keys in chat: sign-ins go through the URL",
-    "connect_service returns, organization credentials through the secure form.",
+    "connect_service returns, organization credentials through the secure form or the",
+    "configurationUrl a create tool answers with.",
     "When every step is done, call complete_onboarding once (with skip: true only if the person",
     "skipped preferences) and confirm to them in one sentence that they are set up. Afterwards",
     "do not mention onboarding again; if a later whoami reports it re-opened, a new step was",
@@ -372,11 +468,18 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
   if (administrator) {
     lines.push(
       "",
-      "As organization administrator you also own the organization's side: the shared",
-      "provider connections (create_connection, through a client that supports elicitation so",
-      "the credentials go into the secure form), linking colleagues' logins (link_identity),",
-      "and assigning roles. Personal sign-ins remain each employee's own; you cannot connect on",
-      "their behalf.",
+      "Administrator section — you also own the organization's side, in this order:",
+      "a. organization connections first: for every Adapter the organization_connections step",
+      "   lists as not configured, run create_connection with that adapterId (plus key and name).",
+      "   The Adapter's configuration values are never typed in chat: a client that supports",
+      "   elicitation shows a secure form; any other client (Codex, ChatGPT) gets a result with",
+      "   pending: true and a configurationUrl — give the person that link to open in a browser.",
+      "   For an OAuth provider, register the redirect URL from the step on the provider's OAuth",
+      "   client before entering the values. Then verify with test_connection.",
+      "b. then your own personal sign-in (connections), c. then preferences.",
+      "You also link colleagues' logins (link_identity) and assign roles. Personal sign-ins",
+      "remain each employee's own; you cannot connect on their behalf. To add a provider that",
+      "does not exist yet, follow provider_setup_guide.",
     );
   }
   if (integrationAdministrator) {
@@ -396,10 +499,11 @@ const ONBOARDING_STATUS: Tool = {
   name: ONBOARDING_STATUS_TOOL,
   title: "Onboarding status",
   description:
-    "The signed-in person's first-use checklist: whether their login is linked, which " +
-    "personal provider sign-ins they still need, whether they stored working preferences, " +
-    "and whether they read their role guide. Computed from the server's own state; takes no " +
-    "arguments. The same checklist is embedded in whoami as `onboarding`.",
+    "The signed-in person's first-use checklist: whether their login is linked, for an " +
+    "organization administrator which organization-level provider connections are still " +
+    "missing, which personal provider sign-ins they still need, whether they stored working " +
+    "preferences, and whether they read their role guide. Computed from the server's own " +
+    "state; takes no arguments. The same checklist is embedded in whoami as `onboarding`.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   annotations: {
     title: "Onboarding status",
@@ -489,6 +593,25 @@ export type OnboardingEnvironment = {
   /** Guides read in THIS session (the server's per-session set). */
   guidesCalled: ReadonlySet<string>;
   store: OnboardingStore;
+  /**
+   * The connection entity's create contract: how its configuration is
+   * elicited and which tool creates the row. Null when the table has none.
+   */
+  connectionContract: (
+    connectionTable: string,
+  ) => { elicit: ElicitOnCreateEntry; createTool: string } | null;
+  /**
+   * The tenant-owned Connection row for one provider, as stored (values with
+   * their secret markers, so required-value presence can be judged); null
+   * when none exists.
+   */
+  tenantConnection: (
+    connectionTable: string,
+    providerRef: string,
+    providerId: string,
+  ) => Promise<Record<string, unknown> | null>;
+  /** The OAuth redirect URL to register at providers; null when no public origin is configured. */
+  redirectUri: () => string | null;
 };
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
@@ -571,6 +694,9 @@ export function onboardingEnvironment(input: {
   projectedTools: () => Promise<Array<Pick<DerivedTool, "name" | "table" | "rowId">>>;
   guideTools: () => ReadonlyArray<{ name: string }>;
   guidesCalled: ReadonlySet<string>;
+  connectionContract: OnboardingEnvironment["connectionContract"];
+  tenantConnection: OnboardingEnvironment["tenantConnection"];
+  redirectUri: OnboardingEnvironment["redirectUri"];
 }): OnboardingEnvironment {
   const { db, session, tables } = input;
   return {
@@ -579,6 +705,9 @@ export function onboardingEnvironment(input: {
     projectedTools: input.projectedTools,
     guideTools: input.guideTools,
     guidesCalled: input.guidesCalled,
+    connectionContract: input.connectionContract,
+    tenantConnection: input.tenantConnection,
+    redirectUri: input.redirectUri,
     async rowsByFilter(tableName, filter, limit = 100) {
       const table = tables.get(tableName);
       if (!table) return [];
@@ -688,6 +817,59 @@ async function personalSignInsFor(
   );
 }
 
+/**
+ * For an organization administrator: every Adapter (provider row) in the
+ * organization whose auth needs organization-level configuration, and
+ * whether a tenant Connection with every required value exists. Judged by
+ * the same required-values rule test_connection applies. Null for everyone
+ * else — the step is theirs alone.
+ */
+async function organizationConnectionsFor(
+  env: OnboardingEnvironment,
+): Promise<OnboardingFacts["organizationConnections"]> {
+  if (!isOrganizationAdministrator(env.session.roles)) return null;
+  const seen = new Set<string>();
+  const facts: OrganizationConnectionFact[] = [];
+  for (const entry of env.derivedEntries) {
+    const execution = entry.execution;
+    if (!execution || seen.has(execution.providerTable)) continue;
+    seen.add(execution.providerTable);
+    const contract = env.connectionContract(execution.connectionTable);
+    if (!contract) continue;
+    const providers = await env.rowsByFilter(execution.providerTable, {});
+    for (const provider of providers) {
+      const providerId = typeof provider.id === "string" ? provider.id : null;
+      if (!providerId) continue;
+      const definitions = provider[contract.elicit.definitionsField];
+      const needs = connectionNeedsOf(provider.auth, definitions);
+      if (!needs.organization) continue;
+      const connection = await env.tenantConnection(
+        execution.connectionTable,
+        execution.connectionProviderRef,
+        providerId,
+      );
+      const missingValues = connection
+        ? missingRequiredConnectionValues(
+            definitions,
+            provider.auth,
+            connection[execution.connectionValuesField],
+          )
+        : [];
+      facts.push({
+        adapter: typeof provider.name === "string" ? provider.name : providerId,
+        adapterId: providerId,
+        createTool: contract.createTool,
+        adapterArgument: contract.elicit.sourceField,
+        configured: connection !== null && missingValues.length === 0,
+        missingValues,
+        fields: connectionFieldsOf(definitions),
+        redirectUri: needs.oauthClient ? env.redirectUri() : null,
+      });
+    }
+  }
+  return facts.sort((left, right) => left.adapter.localeCompare(right.adapter));
+}
+
 async function preferencesFor(env: OnboardingEnvironment): Promise<OnboardingFacts["preferences"]> {
   const entries = env.derivedEntries.filter(
     (entry) => entry.personalization && sessionInAudience(entry, env.session.roles),
@@ -705,7 +887,8 @@ export async function gatherOnboardingFacts(env: OnboardingEnvironment): Promise
   const relation = env.session.relation ?? null;
   const record = await env.store.read();
   const guidesRead = new Set([...(record?.guidesRead ?? []), ...env.guidesCalled]);
-  const [personalSignIns, preferences] = await Promise.all([
+  const [organizationConnections, personalSignIns, preferences] = await Promise.all([
+    organizationConnectionsFor(env),
     personalSignInsFor(env),
     preferencesFor(env),
   ]);
@@ -713,6 +896,7 @@ export async function gatherOnboardingFacts(env: OnboardingEnvironment): Promise
     relation: relation
       ? { status: relation.status, candidateRelationId: relation.candidateRelationId }
       : null,
+    organizationConnections,
     personalSignIns,
     preferences,
     guides: env.guideTools().map((guide) => ({ name: guide.name, read: guidesRead.has(guide.name) })),

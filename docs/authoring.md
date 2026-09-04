@@ -315,6 +315,78 @@ Keeping operators out of the tenant realm is the point of the split: an
 identity that can create and suspend tenants has no business existing in the
 realm those tenants log into.
 
+### Overlaying a realm: `kind: authorizationPatch`
+
+A host that consumes the compiler as a package inherits these realm files and
+usually wants to change a few things in one of them — the audience client's
+name, an extra client, one more composite on a realm role — without forking
+the whole file. Shipping a plain `authorization.yaml` in a later layer is a
+layer collision, and a second `authorization.<x>.yaml` naming the same realm
+is refused by the generator; the supported way is a **patch at the same
+path** as the realm file it targets:
+
+```yaml
+# host-layer/authorization.yaml   (patches the base authorization.yaml;
+#                                   authorization.control.yaml patches that realm)
+kind: authorizationPatch
+
+# 1. Optional. Moves one client id everywhere the base refers to it:
+#    keycloak.entityRoleClient, keycloak.clients[].id, the client keys of
+#    realmRoles.*.composites, clientRoles, users[].clientRoles and
+#    serviceAccountClientRoles. Only the id moves; the client's own fields
+#    are set below, under the NEW id.
+renameClient: { from: erp-provider, to: hubble-api }
+
+# 2. Everything else strategic-merges onto the (renamed) base.
+keycloak:
+  clients:
+    - id: hubble-api                      # merges by id into the renamed client
+      name: Hubble API
+      devSecret: hubble-api-secret
+      secret: ${env:KEYCLOAK_CLIENT_SECRET_HUBBLE_API}
+    - id: hubble-reporting                # unknown id: appended
+      kind: bearerOnly
+    - id: openshapeforge-knowledge-base
+      $delete: true                       # keyed-array delete
+realmRoles:
+  directie:
+    composites:
+      hubble-api: [Pentest.All.ReadWrite] # role lists UNION: added, base kept
+  pentester:                              # new realm role
+    description: Pentester
+    composites:
+      hubble-api: [Pentest.All.ReadWrite, Pentest.All.Read]
+clientRoles:
+  hubble-api: [Pentest.All.ReadWrite, Pentest.All.Read]
+```
+
+Rules, in the order they apply:
+
+1. **`renameClient: { from, to }`** rewrites references only. `from` must be
+   a client of the realm being patched (or its `entityRoleClient`); `to` must
+   not already exist. Nothing else in the client changes — so after a rename
+   the base's `secret: ${env:KEYCLOAK_CLIENT_SECRET_ERP_PROVIDER}` is still
+   there until the patch sets a new one. Anything else that named the old id
+   outside authoring (runtime `aud` pins, setup scripts) is yours to move.
+2. **Strategic merge** of the rest ([layers.md](layers.md#kind-entitypatch--strategic-merge-semantics)):
+   objects deep-merge, `null` deletes a property, `keycloak.clients[]` merges
+   by `id` with `$delete: true`, other arrays (`users`, `groups`,
+   `redirectUris`, …) replace wholesale.
+3. **Role-name lists union** instead of replacing: `clientRoles.<client>`,
+   `realmRoles.<role>.composites.<client>` and `realmRoles.<role>.includes`
+   keep the base's grants in base order and append the patch's. A grant list
+   is a set, and "add one composite" restating fifteen others is how a grant
+   silently goes missing. To take a grant away, set the client key to `null`
+   or change the owning layer.
+4. The merged document is **validated as an `authorizationConfig`** and the
+   error names the patch file, not the merged file nobody wrote.
+
+A patch may carry `renameClient`, `realm`, `keycloak`, `realmRoles`,
+`clientRoles`, `groups` and `users`; `schemaVersion` is the base's and cannot
+be patched. Patching a realm no earlier layer defines is an error (a new
+realm is an `authorizationConfig` under its own filename), as is a patch
+filed anywhere but the layer root. Patches stack across layers in order.
+
 ## `appShell.yaml`
 
 Shell component + sidebar navigation (labels, icons, `entity:` references).

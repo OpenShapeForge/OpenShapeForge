@@ -83,6 +83,10 @@ const manifestTables = manifest.tables as unknown as ManifestTable[];
 export const nonManifestManagedTables = new Set<string>([
   "platform.schema_migrations",
   "platform.system_bypass_audit",
+  // Keycloak identity ↔ Relation link: created by migrations/identity-link.ts
+  // after the generated step (its FKs point at generated tables).
+  "platform.identities",
+  "platform.identity_relations",
 ]);
 
 /**

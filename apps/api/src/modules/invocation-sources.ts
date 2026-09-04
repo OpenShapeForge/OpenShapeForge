@@ -42,14 +42,47 @@ export type AuthorizedInvocationSourceResolution = {
   unavailable: readonly AuthorizedUnavailableInvocationSource[];
 };
 
+/**
+ * A `default`-mode selection stands for the WHOLE call, not one binding: one
+ * lead handle is handed out, and beside it the vault keeps the one source it
+ * chose for every other selected binding (each binding's preferred provider)
+ * plus the bindings that had no usable source at all. Execution runs the
+ * bindings in order, one provider each; the fan-out of one binding across
+ * several providers stays what `all-authorized` is for.
+ */
+type HeldComposition = {
+  steps: readonly AuthorizedInvocationSource[];
+  unavailable: readonly AuthorizedUnavailableInvocationSource[];
+};
+
 type HeldSource = AuthorizedInvocationSource & {
   sourceHandle: string;
   invocationToken: object;
+  composition?: HeldComposition;
+};
+
+/** One companion binding of a composed call, revalidated with the lead. */
+export type ResolvedInvocationStep = {
+  binding: number;
+  sourceReference: string;
+  scope: "tenant" | "personal";
+  definition: ModuleDefinitionReference;
+  internal?: unknown;
+  authorityFingerprint?: string;
+};
+
+export type ResolvedInvocationComposition = {
+  /** The other selected bindings, ascending by binding, one source each. */
+  steps: readonly ResolvedInvocationStep[];
+  /** Selected bindings that had no usable source when the call was resolved. */
+  unavailable: readonly ModuleUnavailableInvocationSource[];
 };
 
 export type ResolvedInvocationSource = ModuleInvocationSource & {
   internal?: unknown;
   authorityFingerprint?: string;
+  /** Present only for a `default`-mode selection (the composed call). */
+  composition?: ResolvedInvocationComposition;
 };
 
 /**
@@ -58,7 +91,9 @@ export type ResolvedInvocationSource = ModuleInvocationSource & {
  * never enter this constructor.
  */
 export function egressSourceFromResolvedInvocation(
-  source: ResolvedInvocationSource | undefined,
+  source:
+    | Pick<ResolvedInvocationSource, "sourceReference" | "scope">
+    | undefined,
 ): ModuleEgressInvocationSource | undefined {
   if (!source) return undefined;
   return Object.freeze({
@@ -184,8 +219,24 @@ function unavailableMatchesSession(
   );
 }
 
+function exposedStep(source: AuthorizedInvocationSource): ResolvedInvocationStep {
+  return {
+    binding: source.binding,
+    sourceReference: source.sourceReference,
+    scope: source.scope,
+    definition: immutableDefinition(source.definition),
+    ...(source.internal !== undefined ? { internal: source.internal } : {}),
+    ...(source.authorityFingerprint
+      ? { authorityFingerprint: source.authorityFingerprint }
+      : {}),
+  };
+}
+
 function exposed(
-  source: AuthorizedInvocationSource & { sourceHandle: string },
+  source: AuthorizedInvocationSource & {
+    sourceHandle: string;
+    composition?: HeldComposition;
+  },
   includeInternal = false,
 ): ResolvedInvocationSource {
   return {
@@ -202,7 +253,38 @@ function exposed(
             : {}),
         }
       : {}),
+    // The companions are core-private execution state, like `internal`:
+    // a module sees one handle for the call and nothing of its bindings.
+    ...(includeInternal && source.composition
+      ? {
+          composition: {
+            steps: source.composition.steps.map(exposedStep),
+            unavailable: source.composition.unavailable.map(exposedUnavailable),
+          },
+        }
+      : {}),
   };
+}
+
+/**
+ * One source per selected binding for a composed (default-mode) call. The
+ * lead is the first preferred source — exactly the single source this mode
+ * used to hand out — and every other binding gets its first preferred source,
+ * or its first authorized one when the preference names another provider.
+ */
+function composeDefaultSelection(
+  lead: AuthorizedInvocationSource,
+  preferred: readonly AuthorizedInvocationSource[],
+  authorized: readonly AuthorizedInvocationSource[],
+): AuthorizedInvocationSource[] {
+  const bindings = [...new Set(authorized.map((source) => source.binding))]
+    .filter((binding) => binding !== lead.binding)
+    .sort((left, right) => left - right);
+  return bindings.map(
+    (binding) =>
+      preferred.find((source) => source.binding === binding) ??
+      authorized.find((source) => source.binding === binding)!,
+  );
 }
 
 function exposedUnavailable(
@@ -315,9 +397,21 @@ export class InvocationSourceVault {
     if (preferredSourceReference !== undefined && preferred.length === 0) {
       throw unavailable();
     }
+    // Default mode: ONE handle for the call. The one-provider rule holds per
+    // binding, not per call — the lead's companions (one per other selected
+    // binding) travel inside the handle, so a two-step mutation service runs
+    // both steps while no single binding ever fans out to several providers.
+    const lead = preferred[0];
     const selected = selector.mode === "default"
-      ? preferred.slice(0, 1)
+      ? lead ? [lead] : []
       : authorized;
+    const composition: HeldComposition | undefined =
+      selector.mode === "default" && lead
+        ? {
+            steps: composeDefaultSelection(lead, preferred, authorized),
+            unavailable: unavailableSources,
+          }
+        : undefined;
     const handles = this.#handlesByInvocation.get(invocationToken) ?? new Map();
     this.#handlesByInvocation.set(invocationToken, handles);
     const consumed = this.#consumedByInvocation.get(invocationToken) ?? new Set();
@@ -335,6 +429,7 @@ export class InvocationSourceVault {
         definition: immutableDefinition(source.definition),
         sourceHandle: randomUUID(),
         invocationToken,
+        ...(composition ? { composition } : {}),
       };
       this.#held.set(held.sourceHandle, held);
       handles.set(sourceKey, held.sourceHandle);
@@ -383,6 +478,18 @@ export class InvocationSourceVault {
       current.authorityFingerprint !== held.authorityFingerprint ||
       !sameDefinition(current.definition, expected)
     ) throw unavailable();
+    // A composed call is only as authoritative as its weakest step: every
+    // companion binding is revalidated against the same definition before
+    // any of them may execute.
+    for (const step of held.composition?.steps ?? []) {
+      const currentStep = await revalidate(() => step.validate(signal), signal);
+      if (
+        !currentStep ||
+        !matchesSession(currentStep, session) ||
+        currentStep.authorityFingerprint !== step.authorityFingerprint ||
+        !sameDefinition(currentStep.definition, expected)
+      ) throw unavailable();
+    }
     // Revalidation proves the held graph is still authoritative; execution
     // uses the original capture so a mutable row cannot silently swap the
     // operation/provider/credentials between selection and dispatch.

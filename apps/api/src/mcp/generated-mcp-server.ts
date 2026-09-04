@@ -209,6 +209,7 @@ import type {
   ModuleToolExecutionOptions,
   ModuleToolExecutionResult,
   ModuleInvocationSource,
+  ModuleUnavailableInvocationSource,
 } from "../modules/contract.js";
 import {
   assertUniqueToolNames,
@@ -1942,6 +1943,131 @@ function unavailableOutcome(error: unknown): {
 
 export const __unavailableOutcomeForTests = unavailableOutcome;
 
+type CompletedStep = {
+  binding: number;
+  operation: string;
+  kind: "mutation" | "query";
+  outputs: Record<string, unknown>;
+};
+
+/** The name a person knows a step by: its native operation, else its key. */
+function operationDisplayKey(operationRow: Record<string, unknown>): string {
+  const operation = operationRow.operation as Record<string, unknown> | undefined;
+  const native = operation?.nativeOperation;
+  if (typeof native === "string" && native.length > 0) return native;
+  return String(operationRow.key ?? operationRow.id ?? "operation");
+}
+
+/**
+ * A required step of a composed call has no usable source. Raised BEFORE the
+ * first step runs, so the call refuses whole rather than writing half; the
+ * guidance is the same server-authored next step the resolution reported.
+ */
+function compositionGapError(
+  toolName: string,
+  binding: number,
+  gap: ModuleUnavailableInvocationSource | undefined,
+): HttpError {
+  const outcome = gap?.outcome ?? "unavailable";
+  const status = outcome === "unavailable" ? 400 : 403;
+  const code =
+    outcome === "reauthorization_required"
+      ? "REAUTHORIZATION_REQUIRED"
+      : outcome === "connection_required"
+        ? "CONNECTION_REQUIRED"
+        : "SERVICE_MISCONFIGURED";
+  const reason = gap?.guidance ??
+    (outcome === "unavailable"
+      ? "its Capability or Adapter is missing"
+      : "no usable connection is configured for its Adapter");
+  return new HttpError(
+    status,
+    code,
+    `${toolName} was not run: step ${binding} cannot execute — ${reason}` +
+      ` Nothing was written.`,
+  );
+}
+
+function describeOutputs(outputs: Record<string, unknown>): string {
+  const scalars = Object.entries(outputs).filter(
+    ([, value]) => value !== null && typeof value !== "object",
+  );
+  return scalars.length > 0
+    ? scalars.map(([key, value]) => `${key}=${JSON.stringify(value)}`).join(", ")
+    : "no scalar outputs";
+}
+
+/**
+ * A composed call that stopped after an earlier step had already written.
+ * It is an error — the call did not do what was asked — that still reports
+ * every effect: each step is its own transaction and nothing is rolled back,
+ * so silence here would let an agent retry and write step 1 twice.
+ */
+function partial(input: {
+  tool: string;
+  total: number;
+  completed: CompletedStep[];
+  failed: { binding: number; operation: string; error: unknown };
+  notRun: { binding: number; operation?: string }[];
+  outputs: Record<string, unknown>;
+  unavailable: { binding: number; outcome: ReturnType<typeof unavailableOutcome> }[];
+}): ToolResult {
+  const cause = toHttpError(input.failed.error).body.error;
+  const position = input.completed.length + 1;
+  const written = input.completed
+    .map(
+      (step) =>
+        `step ${step.binding} (${step.operation}) wrote ${describeOutputs(step.outputs)}`,
+    )
+    .join("; ");
+  const remaining = [
+    `step ${input.failed.binding} (${input.failed.operation})`,
+    ...input.notRun.map(
+      (step) => `step ${step.binding}${step.operation ? ` (${step.operation})` : ""}`,
+    ),
+  ].join(", ");
+  const message =
+    `${input.tool} stopped at step ${position} of ${input.total} ` +
+    `(${input.failed.operation}): ${cause.code}: ${cause.message} ` +
+    `The earlier step${input.completed.length === 1 ? "" : "s"} had already completed and ` +
+    `${input.completed.length === 1 ? "was" : "were"} NOT rolled back — each step is its own ` +
+    `transaction: ${written}. Still to do: ${remaining}. Finish the remaining step(s) with ` +
+    `their own tools, or remove what was written, before retrying; do not repeat this call ` +
+    `as-is — it would run the completed step${input.completed.length === 1 ? "" : "s"} again.`;
+  const body = {
+    error: {
+      code: "SERVICE_PARTIAL",
+      message,
+      retryable: false,
+      requiredAction: "change_input" as const,
+    },
+    status: "partial",
+    completed: input.completed.map((step) => ({
+      binding: step.binding,
+      operation: step.operation,
+      outputs: step.outputs,
+    })),
+    failed: {
+      binding: input.failed.binding,
+      operation: input.failed.operation,
+      outcome: { ...unavailableOutcome(input.failed.error), message: cause.message },
+    },
+    notRun: input.notRun,
+    outputs: input.outputs,
+    ...(input.unavailable.length > 0 ? { unavailable: input.unavailable } : {}),
+  };
+  return {
+    content: [
+      { type: "text", text: `SERVICE_PARTIAL: ${message}` },
+      { type: "text", text: JSON.stringify(body, null, 2) },
+    ],
+    structuredContent: body,
+    isError: true,
+  };
+}
+
+export const __partialForTests = partial;
+
 function requireArguments(args: unknown): Record<string, unknown> {
   if (args === undefined || args === null) return {};
   if (typeof args !== "object" || Array.isArray(args)) {
@@ -3258,7 +3384,7 @@ function buildServer(
     assertInterceptorActive?.();
     const selectedReference = selected?.sourceReference;
     const egressSource = egressSourceFromResolvedInvocation(selected);
-    const captured = selected?.internal as CapturedDerivedExecution | undefined;
+    const leadCapture = selected?.internal as CapturedDerivedExecution | undefined;
     // --- session-info (whoami / osf://session): no arguments, no roles ---
     if (name === SESSION_INFO_TOOL_NAME) {
       try {
@@ -4307,8 +4433,8 @@ function buildServer(
         let derived = (
           await derivedToolsForSession(db, session, tables)
         ).find((tool) => tool.name === name);
-        if (captured) {
-          const hidden = captured;
+        if (leadCapture) {
+          const hidden = leadCapture;
           if (deriveToolName(hidden.serviceRow[hidden.entry.keyField]) === name) {
             derived = {
               name,
@@ -4325,7 +4451,7 @@ function buildServer(
         }
         if (derived) {
           const entry =
-            captured?.entry ??
+            leadCapture?.entry ??
             catalogDerivedTools.find(
               (candidate) => candidate.table === derived.table,
             );
@@ -4349,7 +4475,7 @@ function buildServer(
             assertSchemaValid(derived.inputSchema, args, "arguments");
 
             const serviceRow =
-              captured?.serviceRow ??
+              leadCapture?.serviceRow ??
               (await runtimeRowByFilter(
                 db,
                 session,
@@ -4371,21 +4497,94 @@ function buildServer(
               binding: number;
               outcome: ReturnType<typeof unavailableOutcome>;
             }[] = [];
-            for (const binding of orderedBindings(
+            const selectedBindings = orderedBindings(
               serviceRow,
               execution.bindingsField,
-            )) {
-              if (
-                selected &&
-                Number(binding.order ?? 0) !== selected.binding
-              ) {
-                continue;
-              }
               // A binding the call's selector input does not choose is not
               // part of this call at all — deliberate routing, not an
               // outage, so it does not surface in `unavailable`.
-              if (!bindingSelected(binding, args as Record<string, unknown>))
+            ).filter((binding) =>
+              bindingSelected(binding, args as Record<string, unknown>),
+            );
+            // Which bindings this handle stands for. Two selection modes,
+            // two meanings: `all-authorized` hands out one handle per
+            // (binding, provider) and the caller composes the union — a
+            // handle runs ONLY its binding, or a read would fan out N times.
+            // A `default` handle stands for the composed call: every
+            // selected binding runs in order, each with the one provider the
+            // vault chose for it (`composition.steps`). That composition is
+            // what makes a two-step mutation service actually take both
+            // steps; a query-only definition keeps the one-binding contract
+            // so an existing union read is not run twice.
+            const composition = selected?.composition;
+            const stepCaptures = new Map<
+              number,
+              {
+                capture: CapturedDerivedExecution;
+                source: { sourceReference: string; scope: "tenant" | "personal" };
+              }
+            >();
+            if (selected && leadCapture) {
+              stepCaptures.set(selected.binding, {
+                capture: leadCapture,
+                source: selected,
+              });
+            }
+            const composedCall =
+              composition !== undefined &&
+              [
+                leadCapture,
+                ...composition.steps.map(
+                  (step) => step.internal as CapturedDerivedExecution | undefined,
+                ),
+              ].some((capture) => capture?.operationRow.kind === "mutation");
+            if (composedCall) {
+              for (const step of composition.steps) {
+                const capture = step.internal as CapturedDerivedExecution | undefined;
+                if (capture) stepCaptures.set(step.binding, { capture, source: step });
+              }
+              // Fail before the first write when a required step has no
+              // usable source: a gap known up front must never become a
+              // half-done call.
+              for (const binding of selectedBindings) {
+                const order = Number(binding.order ?? 0);
+                if (stepCaptures.has(order) || binding.optional === true) continue;
+                throw compositionGapError(
+                  name,
+                  order,
+                  composition.unavailable.find((gap) => gap.binding === order),
+                );
+              }
+            }
+            const completed: CompletedStep[] = [];
+            const bindingsToRun = composedCall || !selected
+              ? selectedBindings
+              : selectedBindings.filter(
+                  (binding) => Number(binding.order ?? 0) === selected.binding,
+                );
+            for (const [position, binding] of bindingsToRun.entries()) {
+              const order = Number(binding.order ?? 0);
+              const step = stepCaptures.get(order);
+              const captured = step?.capture;
+              const stepEgressSource = step
+                ? egressSourceFromResolvedInvocation(step.source)
+                : egressSource;
+              if (composedCall && !step) {
+                // Optional and without a source: skipped, and said so — the
+                // required case was refused above.
+                unavailable.push({
+                  binding: order,
+                  outcome: unavailableOutcome(
+                    compositionGapError(
+                      name,
+                      order,
+                      composition.unavailable.find((gap) => gap.binding === order),
+                    ),
+                  ),
+                });
                 continue;
+              }
+              let operationLabel = `binding ${order}`;
               try {
                 const operationId = binding[execution.operationRef];
                 const operationRow = captured
@@ -4408,6 +4607,7 @@ function buildServer(
                     `A binding references a missing ${execution.operationEntity}.`,
                   );
                 }
+                operationLabel = operationDisplayKey(operationRow);
                 const providerId = operationRow[execution.providerRef];
                 const providerRow = captured
                   ? captured.providerRow
@@ -4916,7 +5116,7 @@ function buildServer(
                         operation: String(operationRow.id ?? operationRow.key ?? "operation"),
                         kind: operationRow.kind === "mutation" ? "mutation" : "query",
                       },
-                      ...(egressSource ? { source: egressSource } : {}),
+                      ...(stepEgressSource ? { source: stepEgressSource } : {}),
                     },
                     ...(signal ? { signal } : {}),
                   });
@@ -4944,12 +5144,44 @@ function buildServer(
                   throw error;
                 }
                 mergeOutputs(accumulated, outputs);
-              } catch (error) {
-                if (binding.optional !== true) throw error;
-                unavailable.push({
-                  binding: Number(binding.order ?? 0),
-                  outcome: unavailableOutcome(error),
+                completed.push({
+                  binding: order,
+                  operation: operationLabel,
+                  kind: operationRow.kind === "mutation" ? "mutation" : "query",
+                  outputs,
                 });
+              } catch (error) {
+                if (binding.optional === true) {
+                  unavailable.push({
+                    binding: order,
+                    outcome: unavailableOutcome(error),
+                  });
+                  continue;
+                }
+                // A required step failed after an earlier step already
+                // wrote: the steps are separate transactions, so nothing is
+                // undone — and nothing is hidden either.
+                if (completed.some((done) => done.kind === "mutation")) {
+                  return partial({
+                    tool: name,
+                    total: bindingsToRun.length,
+                    completed,
+                    failed: { binding: order, operation: operationLabel, error },
+                    notRun: bindingsToRun.slice(position + 1).map((later) => {
+                      const laterOrder = Number(later.order ?? 0);
+                      const laterCapture = stepCaptures.get(laterOrder)?.capture;
+                      return {
+                        binding: laterOrder,
+                        ...(laterCapture
+                          ? { operation: operationDisplayKey(laterCapture.operationRow) }
+                          : {}),
+                      };
+                    }),
+                    outputs: accumulated,
+                    unavailable,
+                  });
+                }
+                throw error;
               }
             }
             return ok(

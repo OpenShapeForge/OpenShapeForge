@@ -539,3 +539,172 @@ describe("invocation source capabilities", () => {
     ).rejects.toMatchObject({ status: 404 });
   });
 });
+
+describe("composed default-mode selection (one provider per binding, every binding)", () => {
+  const consume = async (
+    vault: InvocationSourceVault,
+    held: { sourceHandle: string; definition: AuthorizedInvocationSource["definition"] },
+    invocation: object,
+  ) =>
+    vault.consumeHandle(
+      session(),
+      "record_item",
+      { sourceHandle: held.sourceHandle, expectedDefinition: held.definition },
+      invocation,
+    );
+
+  it("hands out ONE handle for a two-binding mutation and carries the second binding inside it", async () => {
+    const vault = new InvocationSourceVault();
+    const invocation = {};
+    const first = source({ toolName: "record_item", binding: 1, internal: { step: 1 }, authorityFingerprint: "f1" });
+    const second = source({
+      toolName: "record_item",
+      binding: 2,
+      sourceReference: "msr1.second",
+      internal: { step: 2 },
+      authorityFingerprint: "f2",
+    });
+    const resolved = await vault.resolve(
+      session(),
+      "record_item",
+      { mode: "default" },
+      async () => available(first, second),
+      invocation,
+    );
+    // The interceptor contract is unchanged: a mutation call gets one source.
+    expect(resolved.sources).toHaveLength(1);
+    expect(resolved.sources[0]!.binding).toBe(1);
+    // ... and a module never sees the companions.
+    expect((resolved.sources[0] as unknown as { composition?: unknown }).composition).toBeUndefined();
+
+    const consumed = await consume(vault, resolved.sources[0]!, invocation);
+    expect(consumed?.composition?.steps.map((step) => step.binding)).toEqual([2]);
+    expect(consumed?.composition?.steps[0]).toMatchObject({
+      sourceReference: "msr1.second",
+      scope: "personal",
+      internal: { step: 2 },
+      authorityFingerprint: "f2",
+    });
+    expect(consumed?.composition?.unavailable).toEqual([]);
+  });
+
+  it("keeps one provider per binding: two providers for the same binding yield one source and no companion", async () => {
+    const vault = new InvocationSourceVault();
+    const invocation = {};
+    const providerA = source({ toolName: "record_item", binding: 1, sourceReference: "msr1.a" });
+    const providerB = source({ toolName: "record_item", binding: 1, sourceReference: "msr1.b" });
+    const resolved = await vault.resolve(
+      session(),
+      "record_item",
+      { mode: "default" },
+      async () => available(providerA, providerB),
+      invocation,
+    );
+    expect(resolved.sources.map((candidate) => candidate.sourceReference)).toEqual(["msr1.a"]);
+    const consumed = await consume(vault, resolved.sources[0]!, invocation);
+    expect(consumed?.composition?.steps).toEqual([]);
+  });
+
+  it("applies a preferred provider per binding and falls back to the binding's first source", async () => {
+    const vault = new InvocationSourceVault();
+    const invocation = {};
+    const oneA = source({ toolName: "record_item", binding: 1, sourceReference: "msr1.a" });
+    const oneB = source({ toolName: "record_item", binding: 1, sourceReference: "msr1.b" });
+    const twoA = source({ toolName: "record_item", binding: 2, sourceReference: "msr1.a" });
+    const twoB = source({ toolName: "record_item", binding: 2, sourceReference: "msr1.b" });
+    const threeOnlyC = source({ toolName: "record_item", binding: 3, sourceReference: "msr1.c" });
+    const resolved = await vault.resolve(
+      session(),
+      "record_item",
+      { mode: "default", preferredSourceReference: "msr1.b" },
+      async () => available(oneA, oneB, twoA, twoB, threeOnlyC),
+      invocation,
+    );
+    expect(resolved.sources.map((candidate) => [candidate.binding, candidate.sourceReference]))
+      .toEqual([[1, "msr1.b"]]);
+    const consumed = await consume(vault, resolved.sources[0]!, invocation);
+    expect(consumed?.composition?.steps.map((step) => [step.binding, step.sourceReference]))
+      .toEqual([[2, "msr1.b"], [3, "msr1.c"]]);
+  });
+
+  it("reports the bindings that had no usable source alongside the handle", async () => {
+    const vault = new InvocationSourceVault();
+    const invocation = {};
+    const resolved = await vault.resolve(
+      session(),
+      "record_item",
+      { mode: "default" },
+      async () => ({
+        sources: [source({ toolName: "record_item", binding: 1 })],
+        unavailable: [
+          unavailable({ toolName: "record_item", binding: 2, guidance: "Connect the adapter first." }),
+        ],
+      }),
+      invocation,
+    );
+    expect(resolved.unavailable.map((gap) => gap.binding)).toEqual([2]);
+    const consumed = await consume(vault, resolved.sources[0]!, invocation);
+    expect(consumed?.composition?.unavailable).toEqual([
+      {
+        binding: 2,
+        definition: { kind: "definition", id: "definition-1", version: 1 },
+        outcome: "connection_required",
+        guidance: "Connect the adapter first.",
+      },
+    ]);
+  });
+
+  it("refuses the whole call when a companion binding no longer revalidates", async () => {
+    const vault = new InvocationSourceVault();
+    const invocation = {};
+    let secondValid = true;
+    const first = source({ toolName: "record_item", binding: 1, authorityFingerprint: "f1" });
+    const second: AuthorizedInvocationSource = {
+      ...source({ toolName: "record_item", binding: 2, sourceReference: "msr1.second", authorityFingerprint: "f2" }),
+      validate: async () => (secondValid ? second : undefined),
+    };
+    const resolved = await vault.resolve(
+      session(),
+      "record_item",
+      { mode: "default" },
+      async () => available(first, second),
+      invocation,
+    );
+    secondValid = false;
+    await expect(consume(vault, resolved.sources[0]!, invocation))
+      .rejects.toMatchObject({ status: 404, code: "NOT_FOUND" });
+
+    const drifted = await vault.resolve(
+      session(),
+      "record_item",
+      { mode: "default" },
+      async () => available(first, {
+        ...second,
+        validate: async () => ({ ...second, authorityFingerprint: "f2-changed" }),
+      }),
+      {},
+    );
+    await expect(consume(vault, drifted.sources[0]!, {}))
+      .rejects.toMatchObject({ status: 404, code: "NOT_FOUND" });
+  });
+
+  it("gives all-authorized handles no composition: each stands for its own binding only", async () => {
+    const vault = new InvocationSourceVault();
+    const invocation = {};
+    const resolved = await vault.resolve(
+      session(),
+      "record_item",
+      { mode: "all-authorized" },
+      async () => available(
+        source({ toolName: "record_item", binding: 1 }),
+        source({ toolName: "record_item", binding: 2, sourceReference: "msr1.second" }),
+      ),
+      invocation,
+    );
+    expect(resolved.sources).toHaveLength(2);
+    for (const held of resolved.sources) {
+      const consumed = await consume(vault, held, invocation);
+      expect(consumed?.composition).toBeUndefined();
+    }
+  });
+});

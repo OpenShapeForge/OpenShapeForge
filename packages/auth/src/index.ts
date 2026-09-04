@@ -3,6 +3,7 @@ export type {
   AuthIdentity,
   AuthProfile,
   HeadersLike,
+  OrganizationAccess,
   ReadonlyHeadersLike,
   TrustedContextHeaderNames,
 } from "./types.js";
@@ -11,6 +12,7 @@ export {
   parseAuthIdentity,
   parseClientRoles,
   parseGroups,
+  parseOrganizations,
   parseRoles,
   parseScopes,
   parseTenantContext,

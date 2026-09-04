@@ -72,5 +72,39 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
     language sql stable parallel safe as $$
       select nullif(current_setting('app.worker_role', true), '')
     $$;
+
+    -- The one registry read that happens BEFORE a session has a tenant: turning
+    -- a verified Keycloak Organization membership into the tenant it belongs
+    -- to (apps/api src/auth/identity.ts). platform.tenants is fenced by
+    -- app.bypass_rls() OR id = app.current_tenant(), and a session that is
+    -- still resolving its tenant satisfies neither, so this function carries
+    -- the bypass GUC as a function-scoped SET: it is true inside this body only
+    -- and restored on return, nothing else in the transaction inherits it.
+    --
+    -- Deliberately a point lookup and not a registry read: it answers ONE
+    -- tenant id for ONE (realm, organization id) pair the caller already
+    -- proved membership of through a signed token, never a list. It is not an
+    -- operator bypass session and writes no system_bypass_audit row for the
+    -- same reason withCredentialResolutionSession does not — it grants no
+    -- cross-tenant reach. plpgsql rather than sql so the body is not resolved
+    -- against platform.tenants at definition time: this helper step runs
+    -- before the generated schema step on a fresh database.
+    create or replace function app.tenant_for_keycloak_organization(
+      realm text,
+      organization_id text
+    ) returns uuid
+    language plpgsql stable parallel safe
+    set app.bypass_rls = 'true'
+    as $$
+    begin
+      return (
+        select t.id
+          from platform.tenants t
+         where t.keycloak_realm = realm
+           and t.keycloak_organization_id = organization_id
+         limit 1
+      );
+    end
+    $$;
   `.execute(db);
 }

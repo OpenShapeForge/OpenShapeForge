@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { decodeJwt } from "jose";
-import type { AuthIdentity, AuthProfile } from "./types.js";
+import type { AuthIdentity, AuthProfile, OrganizationAccess } from "./types.js";
 
 type JwtClaims = Record<string, unknown>;
 type JsonObject = Record<string, unknown>;
@@ -82,6 +82,43 @@ export function parseScopes(claims: JwtClaims | undefined): string[] {
 /** Tenant id from the `tid` claim. */
 export function parseTenantId(claims: JwtClaims | undefined): string | undefined {
   return getString(claims, "tid");
+}
+
+/**
+ * Keycloak Organization memberships from the `organization` claim, keyed by
+ * organization alias, as the built-in Organization Membership mapper emits
+ * them (`{"organization": {"<alias>": {"id": "<uuid>", ...}}}`; `id` only when
+ * the mapper is configured with "add organization id"). Roles the Organization
+ * Group Membership mapper nests under a membership stay nested: they are
+ * organization-local authority and are not merged into the top-level role
+ * lists here.
+ *
+ * Fail-closed on shape: a non-object claim (the legacy `tid`-attribute mapper
+ * emits a string array under the same name) yields no memberships, so a token
+ * from a realm that still carries that mapper resolves through `tid` alone.
+ */
+export function parseOrganizations(
+  claims: JwtClaims | undefined,
+): Record<string, OrganizationAccess> {
+  const organization = asJsonObject(claims?.organization);
+  if (!organization) return {};
+
+  const result: Record<string, OrganizationAccess> = {};
+  for (const [alias, rawMembership] of Object.entries(organization)) {
+    const membership = asJsonObject(rawMembership);
+    if (!membership) continue;
+    const realmAccess = asJsonObject(membership.realm_access);
+    const roles = Array.isArray(realmAccess?.roles)
+      ? realmAccess.roles.filter((role): role is string => typeof role === "string")
+      : [];
+    result[alias] = {
+      id: getString(membership, "id") ?? null,
+      groups: getStringArray(membership, "groups") ?? [],
+      roles,
+      clientRoles: parseClientRoles(membership),
+    };
+  }
+  return result;
 }
 
 /**
@@ -227,6 +264,7 @@ export function parseAuthIdentity(claims: JwtClaims): AuthIdentity {
   const profile = parseUserProfile({ accessTokenClaims: claims, sub: userId ?? undefined });
 
   const groups = parseGroups(claims);
+  const organizations = parseOrganizations(claims);
   const identity: AuthIdentity = {
     tenantId,
     userId,
@@ -235,6 +273,7 @@ export function parseAuthIdentity(claims: JwtClaims): AuthIdentity {
     clientRoles: parseClientRoles(claims),
   };
   if (groups.length > 0) identity.groups = groups;
+  if (Object.keys(organizations).length > 0) identity.organizations = organizations;
   if (Object.keys(profile).length > 0) {
     identity.profile = profile;
   }

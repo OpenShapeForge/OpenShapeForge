@@ -471,6 +471,23 @@ composites like `directie` into per-client entity roles under
 `resource_access`, so realm roles alone would never match the entity role
 lists), and `groups` (requires the group-membership protocol mapper).
 
+**Tenant from Organization membership.** A token with no `tid` names its
+tenant through Keycloak's own `organization` claim instead — the Organization
+Membership mapper of the built-in `organization` client scope, configured with
+"add organization id", emits `organization.<alias>.id`. The Organization id is
+not the tenant id; the link is the registry row the control plane stamps
+(`platform.tenants.keycloak_organization_id`, matched together with
+`keycloak_realm` against the token's `iss`). That one lookup happens before
+the session has a tenant to scope by, so it goes through
+`app.tenant_for_keycloak_organization(realm, organization_id)` — a point
+lookup with a function-scoped RLS bypass, answering one id for one pair. It is
+fail-closed: no membership id, no linked row, several memberships without an
+`organization:<alias>` scope selecting one, or a surface that resolves sessions
+without a database (`db` not passed) all leave the tenant unresolved. When both
+are present `tid` wins, so a realm that still maps the attribute is unchanged.
+Organization-local roles nested under a membership are parsed
+(`identity.organizations`) but never merged into the effective role set.
+
 **2. Customer-provisioned API keys** — `Authorization: Bearer osf_live_…`.
 Routed by prefix BEFORE the JWKS path and never falling through, for the same
 non-downgradable reason. A key is not a second source of roles: it names an

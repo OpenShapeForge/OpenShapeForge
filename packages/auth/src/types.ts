@@ -8,6 +8,22 @@ export type AuthProfile = {
 };
 
 /**
+ * One Keycloak Organization membership as the Organization Membership mapper
+ * (and, when configured, the Organization Group Membership mapper) emits it
+ * under `organization.<alias>`. `id` is the Organization's immutable Keycloak
+ * id — present only when the mapper is configured with "add organization id"
+ * — and is the value `platform.tenants.keycloak_organization_id` links to.
+ * Roles stay nested per organization: they are organization-local authority
+ * and are deliberately NOT merged into `roles` / `clientRoles`.
+ */
+export type OrganizationAccess = {
+  id: string | null;
+  groups: string[];
+  roles: string[];
+  clientRoles: Record<string, string[]>;
+};
+
+/**
  * Canonical identity shape produced by every verifier in this package.
  *
  * `tenantId` / `userId` / `roles` are the trusted-context floor — they are
@@ -28,6 +44,13 @@ export type AuthIdentity = {
   groups?: string[];
   scopes?: string[];
   clientRoles?: Record<string, string[]>;
+  /**
+   * Keycloak Organization memberships keyed by organization alias, from the
+   * `organization` claim. Absent when the token carries none. The session
+   * layer resolves the tenant from these when the token has no `tid` claim
+   * (apps/api `src/auth/identity.ts`).
+   */
+  organizations?: Record<string, OrganizationAccess>;
   profile?: AuthProfile;
 };
 

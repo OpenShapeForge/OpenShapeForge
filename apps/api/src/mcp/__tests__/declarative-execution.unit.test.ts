@@ -408,6 +408,114 @@ describe("mapping helpers", () => {
   });
 });
 
+describe("native transport", () => {
+  const nativeProvider = {
+    transport: "native",
+    auth: { scheme: "none" },
+    egressHosts: [],
+    baseUrlTemplates: {},
+  };
+  const nativeOperation = {
+    key: "finding-create",
+    operation: { nativeOperation: "finding_create" },
+    responseMapping: {
+      fieldPaths: [
+        { field: "id", path: "id" },
+        { field: "title", path: "title" },
+      ],
+    },
+  };
+  const binding = {
+    inputMapping: [
+      { from: "title", to: "title" },
+      { from: "severity", to: "severity" },
+    ],
+    outputMapping: [
+      { from: "id", to: "id" },
+      { from: "title", to: "title" },
+    ],
+  };
+  const serviceInputs = { target: "this-platform", title: "Native", severity: "low" };
+
+  it("composes a NATIVE descriptor naming the generated operation and the mapped inputs", async () => {
+    const request = await composeBindingRequest({
+      binding,
+      operationRow: nativeOperation,
+      providerRow: nativeProvider,
+      connectionValues: {},
+      serviceInputs,
+      keyring: KEYRING,
+      secretScope: "erp.providers",
+      mode: "describe",
+    });
+    expect(request.method).toBe("NATIVE");
+    expect(request.url.href).toBe("osf-native:/finding_create");
+    expect(request.headers).toEqual({});
+    expect(JSON.parse(request.body ?? "{}")).toEqual({ title: "Native", severity: "low" });
+  });
+
+  it("runs the injected native executor instead of fetching and maps its output", async () => {
+    const calls: { operationKey: string; inputs: Record<string, unknown> }[] = [];
+    const spy = fetchSpyThatMustNotBeCalled();
+    const outputs = await executeBinding({
+      binding,
+      operationRow: nativeOperation,
+      providerRow: nativeProvider,
+      connectionValues: {},
+      serviceInputs,
+      keyring: KEYRING,
+      secretScope: "erp.providers",
+      fetchImpl: spy.impl,
+      native: async (operationKey, inputs) => {
+        calls.push({ operationKey, inputs });
+        return { id: "f-1", title: inputs.title, severity: inputs.severity, extra: 1 };
+      },
+    });
+    expect(calls).toEqual([
+      { operationKey: "finding_create", inputs: { title: "Native", severity: "low" } },
+    ]);
+    expect(outputs).toEqual({ id: "f-1", title: "Native" });
+    expect(spy.calls).toBe(0);
+  });
+
+  it("refuses a native Capability without a generated operation key", async () => {
+    await expect(
+      executeBinding({
+        binding,
+        operationRow: { key: "broken", operation: { nativeOperation: "Not A Key" } },
+        providerRow: nativeProvider,
+        connectionValues: {},
+        serviceInputs,
+        keyring: KEYRING,
+        secretScope: "erp.providers",
+        native: async () => ({}),
+      }),
+    ).rejects.toThrow(/nativeOperation/);
+  });
+
+  it("fails closed when no native executor is supplied", async () => {
+    await expect(
+      executeBinding({
+        binding,
+        operationRow: nativeOperation,
+        providerRow: nativeProvider,
+        connectionValues: {},
+        serviceInputs,
+        keyring: KEYRING,
+        secretScope: "erp.providers",
+      }),
+    ).rejects.toThrow(/Native execution is not available/);
+  });
+
+  function fetchSpyThatMustNotBeCalled(): { calls: number; impl: typeof fetch } {
+    const spy = { calls: 0, impl: (async () => {
+      spy.calls += 1;
+      return new Response("{}");
+    }) as unknown as typeof fetch };
+    return spy;
+  }
+});
+
 describe("executeBinding", () => {
   const providerRow = {
     transport: "rest",

@@ -1514,17 +1514,6 @@ function ok(payload: unknown): ToolResult {
 
 export const __okForTests = ok;
 
-/** The virtual tenant connection every native provider is reachable through. */
-function nativeConnectionRow(execution: {
-  connectionValuesField: string;
-}): Record<string, unknown> & { id: string } {
-  return {
-    id: "osf-native",
-    ownerUserId: null,
-    [execution.connectionValuesField]: {},
-  };
-}
-
 /**
  * Shape a native Capability's mapped inputs the way the entity tool expects
  * them: create takes the values directly, get/delete an id, update an id
@@ -2289,14 +2278,7 @@ function buildServer(
               continue;
             }
           }
-          // The platform-owned native provider has nothing to connect to:
-          // no credentials, no URL, no egress. It is always available to the
-          // tenant through one virtual connection, which is what lets the
-          // ordinary source, fingerprint and execute paths treat it like any
-          // other provider without a Connection row anyone has to author.
-          const eligible = providerRow.transport === "native"
-            ? [nativeConnectionRow(execution)]
-            : personalCapture
+          const eligible = personalCapture
             ? personalCapture.personal
             : connectionRows
                 .filter((row) =>
@@ -3676,6 +3658,30 @@ function buildServer(
         });
         if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
         const serialized = serializeRow(table, row);
+        // The platform-owned native provider has no schema document to
+        // fetch: its "API" is this deployment's own generated operation
+        // catalog, listed the way a Capability's operation.nativeOperation
+        // names them and filtered to what this session may invoke.
+        if (serialized.transport === "native") {
+          const operations = catalog.tools
+            .filter((tool) => {
+              const toolTable = tables.get(tool.table);
+              return toolTable
+                ? sessionMayInvoke(toolTable, tool.operation, session)
+                : false;
+            })
+            .map((tool) => ({
+              nativeOperation: tool.name,
+              operation: tool.operation,
+              entity: tool.entity,
+              description: tool.description,
+            }));
+          return ok({
+            discovery: "native",
+            operationCount: operations.length,
+            operations,
+          });
+        }
         return ok(
           await discoverProviderSchema(serialized, fetch, {
             owner: egressOwner,

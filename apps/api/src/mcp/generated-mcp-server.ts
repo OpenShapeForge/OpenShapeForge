@@ -1514,6 +1514,59 @@ function ok(payload: unknown): ToolResult {
 
 export const __okForTests = ok;
 
+/** The virtual tenant connection every native provider is reachable through. */
+function nativeConnectionRow(execution: {
+  connectionValuesField: string;
+}): Record<string, unknown> & { id: string } {
+  return {
+    id: "osf-native",
+    ownerUserId: null,
+    [execution.connectionValuesField]: {},
+  };
+}
+
+/**
+ * Shape a native Capability's mapped inputs the way the entity tool expects
+ * them: create takes the values directly, get/delete an id, update an id
+ * plus values, list a filter.
+ */
+function nativeToolArguments(
+  operation: McpOperation,
+  inputs: Record<string, unknown>,
+): Record<string, unknown> {
+  switch (operation) {
+    case "create":
+      return inputs;
+    case "get":
+    case "delete":
+      return { id: inputs.id };
+    case "update": {
+      const { id, ...values } = inputs;
+      return { id, values };
+    }
+    case "list":
+      return { filter: inputs };
+  }
+}
+
+/** The JSON an entity tool produced, as the native executor's output record. */
+function nativeToolOutput(result: ToolResult): Record<string, unknown> {
+  if (result.isError) {
+    const text = result.content.find((item) => item.type === "text");
+    throw new HttpError(
+      502,
+      "PROVIDER_ERROR",
+      text && "text" in text ? String(text.text) : "Native operation failed.",
+    );
+  }
+  const text = result.content.find((item) => item.type === "text");
+  const parsed: unknown =
+    text && "text" in text ? JSON.parse(String(text.text)) : null;
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+    ? (parsed as Record<string, unknown>)
+    : { value: parsed };
+}
+
 function configurationAppResult(
   payload: unknown,
   token: string,
@@ -2236,7 +2289,14 @@ function buildServer(
               continue;
             }
           }
-          const eligible = personalCapture
+          // The platform-owned native provider has nothing to connect to:
+          // no credentials, no URL, no egress. It is always available to the
+          // tenant through one virtual connection, which is what lets the
+          // ordinary source, fingerprint and execute paths treat it like any
+          // other provider without a Connection row anyone has to author.
+          const eligible = providerRow.transport === "native"
+            ? [nativeConnectionRow(execution)]
+            : personalCapture
             ? personalCapture.personal
             : connectionRows
                 .filter((row) =>
@@ -4224,6 +4284,39 @@ function buildServer(
                     providerRow: providerForExecution,
                     connectionValues,
                     serviceInputs: { ...args, ...accumulated },
+                    // The platform-owned native provider: run the generated
+                    // operation in-process through the same executor an
+                    // entity tool call uses, under the caller's own session —
+                    // roles, tenant and row-level identity all preserved.
+                    native: async (operationKey, inputs) => {
+                      const nativeTool = catalog.tools.find(
+                        (candidate) => candidate.name === operationKey,
+                      );
+                      const nativeTable = nativeTool
+                        ? tables.get(nativeTool.table)
+                        : undefined;
+                      if (!nativeTool || !nativeTable) {
+                        throw new HttpError(
+                          400,
+                          "OPERATION_MISCONFIGURED",
+                          `Native operation "${operationKey}" is not a generated operation of this deployment.`,
+                        );
+                      }
+                      const nativeArgs = nativeToolArguments(
+                        nativeTool.operation,
+                        inputs,
+                      );
+                      const produced = await invokeTool(
+                        nativeTool,
+                        entityForTable(nativeTool.table),
+                        nativeTable,
+                        tables,
+                        db,
+                        session,
+                        nativeArgs,
+                      );
+                      return nativeToolOutput(produced);
+                    },
                     secretScope,
                     providerDefinitions:
                       providerRow[

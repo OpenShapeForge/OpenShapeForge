@@ -22,7 +22,7 @@ import {
 } from "./types";
 
 /**
- * Habeon 1.3 `Inbox \ Message \ Handeling` side-panel product component.
+ * `Inbox \ Message \ Handeling` side-panel product component.
  *
  * @figma file-key=CbKdajB2p4lAW3bBGcHBYd
  * @figma name="Inbox \ Message \ Handeling"

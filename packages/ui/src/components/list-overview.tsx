@@ -18,7 +18,7 @@ export type ListOverviewProps = ComponentPropsWithoutRef<"section"> & {
 };
 
 /**
- * @figma component — https://www.figma.com/design/CbKdajB2p4lAW3bBGcHBYd/Habe%C5%8Dn-1.3?node-id=389-8328
+ * @figma component — file-key=CbKdajB2p4lAW3bBGcHBYd node-id=389-8328
  * @figma node-id=389:8328
  *
  * Figma `List \ Variant 1`: row-header 48px, title row 64px, table area

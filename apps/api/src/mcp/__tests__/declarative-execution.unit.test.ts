@@ -16,6 +16,7 @@ import {
   buildAuthHeaders,
   executeBinding,
   fetchWithAllowedRedirects,
+  mapOperationResponse,
   mergeOutputs,
   operationBaseUrlTemplate,
   extractPath,
@@ -1717,7 +1718,7 @@ describe("mapping honesty", () => {
     });
   });
 
-  it("rejects a collection field path absent from every element", async () => {
+  it("rejects a collection mapping whose field paths are all absent from every element", async () => {
     const fetchImpl = (async () =>
       Response.json({
         items: [
@@ -1735,8 +1736,8 @@ describe("mapping honesty", () => {
           responseMapping: {
             rootPath: "items",
             fieldPaths: [
-              { field: "ids", path: "id" },
               { field: "titles", path: "title" },
+              { field: "locations", path: "location" },
             ],
           },
         },
@@ -1950,5 +1951,31 @@ describe("declarative provider failures", () => {
       code: "CONNECTOR_UPSTREAM_ERROR",
       message: expect.not.stringContaining("must-not-leak"),
     });
+  });
+});
+
+describe("mapOperationResponse over collections", () => {
+  const binding = {} as Record<string, unknown>;
+  const operationRow = {
+    responseMapping: {
+      rootPath: "items",
+      fieldPaths: [
+        { path: "id", field: "ids" },
+        { path: "location", field: "locations" },
+      ],
+    },
+  } as Record<string, unknown>;
+
+  it("a field no item carries projects to nulls instead of failing", () => {
+    const outputs = mapOperationResponse(binding, operationRow, {
+      items: [{ id: "a" }, { id: "b" }],
+    });
+    expect(outputs).toEqual({ ids: ["a", "b"], locations: [null, null] });
+  });
+
+  it("a mapping in which nothing resolves is still a misconfiguration", () => {
+    expect(() =>
+      mapOperationResponse(binding, operationRow, { items: [{ summary: "x" }] }),
+    ).toThrow(/none of its field paths/);
   });
 });

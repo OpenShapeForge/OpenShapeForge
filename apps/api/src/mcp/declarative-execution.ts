@@ -966,29 +966,37 @@ export function mapOperationResponse(
   ) {
     operationOutputs = {};
     if (Array.isArray(extracted)) {
+      // A field that no item carries is an OPTIONAL attribute (a calendar
+      // week without a single `location`), not a broken mapping: it projects
+      // to nulls. Only a mapping in which NOTHING resolves across the whole
+      // collection is a definition mistake — seen live as
+      // SERVICE_MISCONFIGURED on a perfectly good week of events.
+      let anyFieldResolved = false;
+      let projectedFields = 0;
       for (const entry of fieldPaths) {
         if (typeof entry.field !== "string") continue;
         if (entry.path === "$") {
           operationOutputs[entry.field] = extracted;
+          anyFieldResolved = true;
           continue;
         }
-        let anyResolved = false;
+        projectedFields += 1;
         const projected = extracted.map((item) => {
           const value = extractPath(item, entry.path);
-          if (value !== undefined) anyResolved = true;
+          if (value !== undefined) anyFieldResolved = true;
           return value === undefined ? null : value;
         });
-        if (!anyResolved && extracted.length > 0) {
-          throw new HttpError(
-            502,
-            "SERVICE_MISCONFIGURED",
-            `The response mapping produced no outputs: field path ` +
-              `(${String(entry.path)}) does not exist in the provider response, ` +
-              `which holds a collection of ${extracted.length} items — use path "$" ` +
-              "to pass it through.",
-          );
-        }
         operationOutputs[entry.field] = projected;
+      }
+      if (!anyFieldResolved && projectedFields > 0 && extracted.length > 0) {
+        throw new HttpError(
+          502,
+          "SERVICE_MISCONFIGURED",
+          `The response mapping produced no outputs: none of its field paths ` +
+            `(${fieldPaths.map((entry) => String(entry.path)).join(", ")}) exist in the ` +
+            `provider response, which holds a collection of ${extracted.length} items — ` +
+            `use path "$" to pass it through.`,
+        );
       }
     } else {
       for (const entry of fieldPaths) {

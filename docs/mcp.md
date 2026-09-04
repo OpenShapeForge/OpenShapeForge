@@ -321,6 +321,69 @@ Field-level classification is enforced on the call path too:
 - writes to a classified field are refused for a caller who could not read the
   value back.
 
+## Identities and Relations
+
+A bearer token proves an **identity**: who, at which identity provider
+(`iss` + `sub`). What an organization works with is the **party** that identity
+acts as — a Relation of the tenant: the employee, the supplier contact, the
+customer contact. Which of those the person is, is a RelationRole on that
+Relation; the link itself only says "this login is that Relation".
+
+Identity is platform-level (one Keycloak account signs in to several tenants),
+the party is per tenant, so the link is per (identity, tenant):
+
+| table | one row per | columns |
+| --- | --- | --- |
+| `platform.identities` | (`issuer`, `subject`) | `email`, `display_name` as the token last reported them |
+| `platform.identity_relations` | (`identity_id`, `tenant_id`) | `status` (`linked` / `pending_confirmation`), `relation_id`, `candidate_relation_id`, `linked_at`, `linked_by` (`jit` or the identity id of whoever linked) |
+
+Both are runtime-owned (`apps/api/src/db/migrations/identity-link.ts`,
+applied on every migrate like the bypass audit table) and row-level secured
+like the rest of `platform.*`: a link made in tenant A does not exist from a
+session in tenant B; an administrator only sees identities that have signed in
+to their own organization.
+
+**How a link comes about** (`apps/api/src/auth/identity-link.ts`):
+
+1. **Just in time.** On a person's first bearer session in a tenant:
+   - no Relation in the tenant carries the token's e-mail → a Relation of type
+     `person` is created through the generated CRUD path (plus a NaturalPerson
+     when the token gives first and last name, and an `email` ContactDetail),
+     and linked with `linked_by = 'jit'`;
+   - exactly one Relation carries the e-mail → nothing is linked silently. The
+     row is recorded as `pending_confirmation` with that Relation as
+     `candidate_relation_id`;
+   - several carry it, or the token has no e-mail → `pending_confirmation`
+     without a candidate; an administrator decides.
+   No RelationRole is assigned: the platform knows the person signed in, not
+   whether they are staff, a supplier or a customer.
+2. **`confirm_my_link`** — shown to the person while they have a pending
+   candidate. No arguments; it links their own identity to that one candidate.
+3. **`link_identity`** — for organization administrators
+   (`Organization.All.ReadWrite`): `identityEmail` (or `identityId`) +
+   `relationId`. The identity must have signed in to this organization at
+   least once. Re-linking is allowed and audited; the previous Relation is left
+   as it is.
+
+Both tools answer the resulting state and record who linked. Calling one the
+session was not shown gets the same `NOT_FOUND` an unknown tool gets.
+
+**Reading it.** The state rides on the session as `session.relation`; read it
+through the accessor rather than the field:
+
+```ts
+import { sessionRelation } from "../auth/identity-link.js";
+const party = sessionRelation(session); // { relationId, displayName } | null
+```
+
+`null` means "not linked": pending, never resolved, or a session that carries
+no person at all (trusted-context and API key sessions never link). Resolution
+is cached per (identity, tenant) for a minute inside a process; a link made
+through the tools invalidates it there and shows up elsewhere within the TTL.
+
+Not part of this: Keycloak user attributes as a data source, relation ids in
+tokens, and RelationRoles — the administrator assigns those.
+
 ## Errors
 
 A failed tool call returns an MCP tool result with `isError: true` rather than

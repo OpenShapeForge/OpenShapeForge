@@ -4,6 +4,7 @@ import {
   readTrustedContext,
   type ReadTrustedContextOptions,
 } from "@openshapeforge/auth";
+import type { IdentityLinkState } from "./identity-link.js";
 
 export type SessionScope = "tenant" | "group" | "self";
 
@@ -40,6 +41,14 @@ export type TrustedSessionContext = {
   scope: SessionScope;
   /** Which credential authenticated this session. */
   credential: SessionCredential;
+  // ---- identity ↔ Relation link (auth/identity-link.ts) ----
+  /**
+   * The party this login acts as in the tenant: the link state resolved on
+   * the bearer path. Read it through `sessionRelation(session)`; absent on
+   * trusted-context and API key sessions, which carry no person.
+   */
+  relation?: IdentityLinkState | null;
+  // ---- end identity ↔ Relation link ----
 };
 
 type AppOptions = {

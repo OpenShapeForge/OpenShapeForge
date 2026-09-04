@@ -150,6 +150,12 @@ import {
 import { canReadClassifiedColumns } from "../graphql/generated-authz.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
+// ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
+import {
+  callIdentityLinkTool,
+  identityLinkToolsForSession,
+} from "./identity-link-tools.js";
+// ---- end identity ↔ Relation link ----
 import {
   ProviderOutcomeError,
   classifyModuleEgressOutcome,
@@ -2718,6 +2724,9 @@ function buildServer(
             idempotentHint: true,
           },
         })),
+      // ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
+      ...identityLinkToolsForSession(session),
+      // ---- end identity ↔ Relation link ----
       ...guideToolsForSession(session).map((tool) => ({
         name: tool.name,
         description: tool.description,
@@ -3679,6 +3688,16 @@ function buildServer(
         return failed(error);
       }
     }
+
+    // ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
+    const identityLinkOutcome = await callIdentityLinkTool(
+      name,
+      (request.params.arguments ?? {}) as Record<string, unknown>,
+      db,
+      session,
+    );
+    if (identityLinkOutcome) return identityLinkOutcome as ToolResult;
+    // ---- end identity ↔ Relation link ----
 
     const guideTool = catalogGuideTools.find((tool) => tool.name === name);
     if (guideTool) {

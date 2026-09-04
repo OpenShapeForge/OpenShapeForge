@@ -9,6 +9,9 @@ import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { keyringFromEnv, type SecretKeyring } from "../platform/secrets.js";
 import { looksLikeApiKey } from "./api-key/format.js";
+// ---- identity ↔ Relation link (auth/identity-link.ts) ----
+import { identityClaimsFromToken, resolveIdentityLink } from "./identity-link.js";
+// ---- end identity ↔ Relation link ----
 import { resolveApiKeySession } from "./api-key/resolve.js";
 import {
   bindOrganizationResource,
@@ -520,14 +523,29 @@ export async function resolveSessionContext(
             claims as Record<string, unknown>,
             options.db,
           ));
+      const scope = resolveScope(roles, groups);
+      // ---- identity ↔ Relation link (auth/identity-link.ts) ----
+      // A person's first session in a tenant links (or records) the Relation
+      // they act as; later sessions read it back. Never blocks authentication.
+      const personClaims = identityClaimsFromToken(claims as Record<string, unknown>);
+      const relation =
+        tenantId && identity.userId && options.db && personClaims
+          ? await resolveIdentityLink(
+              options.db,
+              { tenantId, userId: identity.userId, roles, groups, scope },
+              personClaims,
+            )
+          : null;
+      // ---- end identity ↔ Relation link ----
       return {
         tenantId,
         userId: identity.userId,
         roles,
         oauthScopes: identity.scopes ?? [],
         groups,
-        scope: resolveScope(roles, groups),
+        scope,
         credential: "bearer",
+        relation,
       };
     } catch (error) {
       if (error instanceof OrganizationBindingError) {

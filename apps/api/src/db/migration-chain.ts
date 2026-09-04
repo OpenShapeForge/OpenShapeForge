@@ -22,6 +22,10 @@
  *   4. generated roll-forward — manifest-driven schema apply/diff.
  *   4b. plugin invariants     — immutable compiler-plugin constraints,
  *      functions, triggers, and other DDL, after contributed tables exist.
+ *   4c. identity link         — runtime-owned platform.identities /
+ *      platform.identity_relations (idempotent DDL, like step 2); after the
+ *      generated step because they reference platform.tenants and
+ *      erp.relations.
  *   5. app role grants        — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically,
  *      re-apply the `app` schema USAGE/EXECUTE grants that step 0 had to skip
@@ -46,6 +50,7 @@ import { applyAppRoleMigration, applyAppRoleGrants } from "./migrations/app-role
 import { applyWorkerRoleMigration, applyWorkerRoleGrants } from "./migrations/worker-role.js";
 import { applyAppHelpersMigration } from "./migrations/app-helpers.js";
 import { applySystemBypassAuditMigration } from "./migrations/system-bypass-audit.js";
+import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
 import {
   applyVersionedMigrations,
   type VersionedMigration,
@@ -112,6 +117,7 @@ export async function runMigrationChain(
     options.pluginMigrations ?? (await loadGeneratedPluginMigrations()),
     options.appliedBy,
   );
+  await applyIdentityLinkMigration(db);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
   // The worker role's grants are enumerated from the manifest rather than

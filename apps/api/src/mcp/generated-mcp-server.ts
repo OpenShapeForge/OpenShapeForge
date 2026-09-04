@@ -100,12 +100,15 @@ import {
   mintConfiguration,
   parseSubmission,
   peekConfiguration,
+  renderConfigurationExpiredPage,
+  renderConfigurationFailedPage,
   renderConfigurationForm,
   renderConfigurationApp,
-  renderMessagePage,
+  renderConfigurationSavedPage,
   storeSubmission,
   type PendingConfiguration,
 } from "./configuration-handoff.js";
+import { renderEntityOAuthCallbackPage } from "./browser-pages.js";
 import {
   bindingSelected,
   composeBindingRequest,
@@ -5261,10 +5264,7 @@ export function registerGeneratedMcpServer(
     // browser navigation. It trusts nothing in its query beyond looking up
     // the single-use state minted by the connect tool; tenant, user, token
     // endpoint and credentials all come from that pending record.
-    const html = (message: string) =>
-      `<!doctype html><meta charset="utf-8"><title>Connection</title>` +
-      `<body style="font-family:system-ui;margin:4rem auto;max-width:28rem">` +
-      `<p>${message}</p></body>`;
+    const html = renderEntityOAuthCallbackPage;
     instance.get(ENTITY_OAUTH_CALLBACK_PATH, async (request, reply) => {
       const query = (request.query ?? {}) as Record<string, unknown>;
       const pending = await redeemState(query.state, options.db);
@@ -5272,26 +5272,25 @@ export function registerGeneratedMcpServer(
         return reply
           .status(400)
           .type("text/html")
-          .send(
-            html(
-              "This sign-in link is invalid or expired. Start again from your chat.",
-            ),
-          );
+          .send(html({ outcome: "invalid_state" }));
       }
       if (typeof query.error === "string" && query.error) {
         return reply
           .status(400)
           .type("text/html")
-          .send(html("The provider refused the sign-in. Nothing was stored."));
+          .send(
+            html({
+              outcome: "provider_refused",
+              providerName: pending.providerName,
+            }),
+          );
       }
       if (typeof query.code !== "string" || query.code.length === 0) {
         return reply
           .status(400)
           .type("text/html")
           .send(
-            html(
-              "The provider sent no authorization code. Nothing was stored.",
-            ),
+            html({ outcome: "no_code", providerName: pending.providerName }),
           );
       }
       try {
@@ -5357,9 +5356,11 @@ export function registerGeneratedMcpServer(
           .status(200)
           .type("text/html")
           .send(
-            html(
-              "Connected. You can close this window and return to your chat.",
-            ),
+            html({
+              outcome: "connected",
+              providerName: pending.providerName,
+              connectionScope: pending.connectionScope,
+            }),
           );
       } catch (error) {
         request.log.error(
@@ -5370,7 +5371,10 @@ export function registerGeneratedMcpServer(
           .status(500)
           .type("text/html")
           .send(
-            html("Storing the connection failed. Start again from your chat."),
+            html({
+              outcome: "store_failed",
+              providerName: pending.providerName,
+            }),
           );
       }
     });
@@ -5538,11 +5542,7 @@ export function registerGeneratedMcpServer(
           return reply
             .status(404)
             .type("text/html")
-            .send(
-              renderMessagePage(
-                "This configuration link is invalid or expired. Ask your assistant to start again.",
-              ),
-            );
+            .send(renderConfigurationExpiredPage());
         }
         return reply
           .type("text/html")
@@ -5565,11 +5565,7 @@ export function registerGeneratedMcpServer(
           return reply
             .status(404)
             .type("text/html")
-            .send(
-              renderMessagePage(
-                "This configuration link is invalid or expired. Ask your assistant to start again.",
-              ),
-            );
+            .send(renderConfigurationExpiredPage());
         }
         const body = typeof request.body === "string" ? request.body : "";
         try {
@@ -5606,25 +5602,16 @@ export function registerGeneratedMcpServer(
           await consumeConfiguration(pending.token, options.db);
           return reply
             .type("text/html")
-            .send(
-              renderMessagePage(
-                "Saved. You can close this window and return to your chat.",
-              ),
-            );
+            .send(renderConfigurationSavedPage(pending.displayName));
         } catch (error) {
           request.log.error(
             { err: error },
             "Configuration handoff submission failed.",
           );
-          const { body: errorBody } = toHttpError(error);
           return reply
             .status(400)
             .type("text/html")
-            .send(
-              renderMessagePage(
-                `Saving failed: ${errorBody.error.message} Return to your chat and try again.`,
-              ),
-            );
+            .send(renderConfigurationFailedPage(pending.displayName));
         }
       },
     );

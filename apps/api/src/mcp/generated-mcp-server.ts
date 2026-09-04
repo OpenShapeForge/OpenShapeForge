@@ -5154,13 +5154,14 @@ export function registerGeneratedMcpServer(
       throw new HttpError(404, "NOT_FOUND", "Unknown MCP resource.");
     }
     const resource = resourcePathOf(request, alias ?? null);
+    const binding = alias
+      ? { alias, resource: canonicalResourceUri(request, alias) }
+      : null;
     let resolved: TrustedSessionContext;
     try {
       resolved = await resolveSessionContext(headersFromFastify(request.headers), {
         db: options.db,
-        ...(alias
-          ? { organization: { alias, resource: canonicalResourceUri(request, alias) } }
-          : {}),
+        ...(binding ? { organization: binding } : {}),
       });
     } catch (error) {
       if (error instanceof OrganizationBindingError) {
@@ -5183,8 +5184,9 @@ export function registerGeneratedMcpServer(
       );
     }
     // session-info (whoami / osf://session): keep the credential's display
-    // facts (name, client, expiry, memberships) beside the verified session.
-    rememberSessionIdentity(resolved, headersFromFastify(request.headers));
+    // facts (name, client, expiry, memberships) beside the verified session,
+    // and the organization this endpoint bound it to, when it did.
+    rememberSessionIdentity(resolved, headersFromFastify(request.headers), binding);
     return {
       db: options.db,
       session: resolved,

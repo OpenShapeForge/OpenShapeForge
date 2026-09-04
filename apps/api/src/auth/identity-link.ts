@@ -68,6 +68,12 @@ export type IdentityLinkState = {
   relationId: string | null;
   /** Display name of the linked Relation (or of the candidate while pending). */
   displayName: string | null;
+  /**
+   * `relation_type` of the linked Relation (or of the candidate while
+   * pending): "person" for a just-in-time link, whatever an administrator
+   * linked otherwise. Null when neither exists.
+   */
+  relationType: string | null;
   /** Set while pending, when the e-mail matched exactly one Relation. */
   candidateRelationId: string | null;
   linkedBy: string | null;
@@ -500,6 +506,7 @@ type LinkRow = {
   candidate_relation_id: string | null;
   linked_by: string | null;
   display_name: string | null;
+  relation_type: string | null;
 };
 
 async function upsertIdentity(
@@ -530,7 +537,8 @@ async function readLinkRow(
   const result = await sql<LinkRow>`
     select ir.identity_id, i.issuer, i.subject, ir.status, ir.relation_id,
            ir.candidate_relation_id, ir.linked_by,
-           coalesce(linked.display_name, candidate.display_name) as display_name
+           coalesce(linked.display_name, candidate.display_name) as display_name,
+           coalesce(linked.relation_type, candidate.relation_type) as relation_type
       from platform.identity_relations ir
       join platform.identities i on i.id = ir.identity_id
       left join erp.relations linked
@@ -592,6 +600,7 @@ function toState(row: LinkRow, identity: { issuer: string; subject: string }): I
     status: row.status,
     relationId: row.relation_id,
     displayName: row.display_name,
+    relationType: row.relation_type,
     candidateRelationId: row.candidate_relation_id,
     linkedBy: row.linked_by,
   };

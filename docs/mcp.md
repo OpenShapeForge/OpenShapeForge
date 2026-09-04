@@ -212,8 +212,8 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   "signInExpiresAt": "2026-09-04T10:12:00.000Z",
   "signInExpiresIn": "in 12 minutes",
   "access": { "tools": 68, "resources": 13 },
-  "employeeRecord": { "status": "Not linked yet", "name": null, "relation": null },
-  "summary": "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. Your sign-in expires in 12 minutes. You can use 68 tools and 13 resources."
+  "relation": { "status": "Linked", "name": "Hans Eilers", "kind": "person" },
+  "summary": "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. Your sign-in expires in 12 minutes. You act as the record Hans Eilers. You can use 68 tools and 13 resources."
 }
 ```
 
@@ -225,17 +225,29 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   falls back to the raw role list. `permissions` lists the remaining role names
   (Keycloak's own bookkeeping roles such as `offline_access` are dropped).
 - `groups` are the Keycloak Organization memberships the token carries, with
-  the one the session acts for marked `active`. Only the active group can be
-  named from the registry; other memberships show their alias.
+  the one the session acts for marked `active`. On a per-organization endpoint
+  (`/api/mcp/organizations/<alias>`) that is the bound organization, whatever
+  `organization:<alias>` scope the token also carries. Only the active group
+  can be named from the registry; other memberships show their alias (naming
+  them would take a registry read outside the session's own row, which
+  row-level security fences — left open on purpose).
 - `signedInVia` names the client the token was issued to (`codex` → "Codex",
   `openshapeforge-inspector` → "MCP Inspector", `openshapeforge-gateway` →
   "Hubble", any other `azp` as is). A trusted-context session reports
-  "Development identity" and has no expiry.
+  "Development identity" and has no expiry. On a per-organization endpoint the
+  summary adds "on the Zerocopter endpoint" (the organization's display name).
 - `access` counts what THIS session sees, through the same per-session
   builders `tools/list` and `resources/list` use — it is not a deployment-wide
   number.
-- `employeeRecord` is a placeholder: nothing links a sign-in to an employee
-  yet. A later link fills `name` and `relation` and flips `status`.
+- `relation` is the record (Relation) the person acts as in the organization,
+  through the identity ↔ Relation link (`auth/identity-link.ts`, read with
+  `sessionRelation(session)`). `status` is "Linked" (`name` and `kind` — the
+  Relation's `relation_type`, "person" for a just-in-time link — describe the
+  record), "Pending confirmation" (a Relation carrying the person's e-mail
+  exists; `name`/`kind` describe that candidate and the summary says "A record
+  with your e-mail exists — run confirm_my_link to use it.") or "Not linked"
+  (no record, or a session that carries no person: API key, development
+  identity). No ids leave the answer.
 
 The tool result carries the JSON both as text content and as
 `structuredContent`. The implementation is `apps/api/src/mcp/session-info.ts`;

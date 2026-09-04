@@ -34,6 +34,8 @@
  */
 import { sql } from "kysely";
 import { selectOrganizationMembership } from "../auth/identity.js";
+import { sessionRelation, type IdentityLinkState } from "../auth/identity-link.js";
+import type { OrganizationResourceBinding } from "../auth/organization-binding.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession } from "../db/session.js";
@@ -49,10 +51,10 @@ export const SESSION_INFO_TOOL = {
   title: "Who am I",
   description:
     "Describes the signed-in person in plain language: name, organization, " +
-    "role and permissions, the groups they belong to, how they signed in, when " +
-    "the sign-in expires, and how many tools and resources this session can " +
-    "use. Takes no arguments. Call it when you need to know who you are acting " +
-    "for or what you are allowed to do.",
+    "role and permissions, the groups they belong to, the record (Relation) " +
+    "they act as, how they signed in, when the sign-in expires, and how many " +
+    "tools and resources this session can use. Takes no arguments. Call it " +
+    "when you need to know who you are acting for or what you are allowed to do.",
   inputSchema: {
     type: "object",
     properties: {},
@@ -74,8 +76,8 @@ export const SESSION_RESOURCE = {
   title: "Who am I",
   description:
     "The signed-in person in plain language: name, organization, role, " +
-    "permissions, groups, sign-in method and expiry, and what this session " +
-    "can use. Same content as the whoami tool.",
+    "permissions, groups, the record they act as, sign-in method and expiry, " +
+    "and what this session can use. Same content as the whoami tool.",
   mimeType: JSON_MIME_TYPE,
 } as const;
 
@@ -103,6 +105,13 @@ export type SessionIdentity = {
    * in as the only group.
    */
   organizations: Array<{ alias: string; active: boolean }>;
+  /**
+   * Alias of the organization whose per-organization endpoint
+   * (`/api/mcp/organizations/<alias>`) the session was opened on; null on the
+   * shared `/api/mcp` path. When set it is the active membership, whatever
+   * scope the token also carries: the binding pinned the tenant.
+   */
+  boundOrganization: string | null;
 };
 
 const BEARER_AUTHORIZATION = /^Bearer\s+(.+)$/i;
@@ -136,6 +145,7 @@ function stringClaim(claims: Record<string, unknown>, key: string): string | nul
  */
 export function identityFromBearerClaims(
   claims: Record<string, unknown>,
+  binding: Pick<OrganizationResourceBinding, "alias"> | null = null,
 ): SessionIdentity {
   const rawOrganizations = claims.organization;
   const memberships: Record<
@@ -159,7 +169,9 @@ export function identityFromBearerClaims(
     }
   }
   const scopes = (stringClaim(claims, "scope") ?? "").split(/\s+/).filter(Boolean);
-  const active = selectOrganizationMembership({ organizations: memberships, scopes });
+  const active = binding
+    ? { alias: binding.alias }
+    : selectOrganizationMembership({ organizations: memberships, scopes });
   const exp = claims.exp;
   return {
     credential: "bearer",
@@ -171,6 +183,7 @@ export function identityFromBearerClaims(
       alias,
       active: active?.alias === alias,
     })),
+    boundOrganization: binding?.alias ?? null,
   };
 }
 
@@ -183,6 +196,7 @@ export function identityFromSession(session: TrustedSessionContext): SessionIden
     authorizedParty: null,
     expiresAtMs: null,
     organizations: [],
+    boundOrganization: null,
   };
 }
 
@@ -194,12 +208,13 @@ export function identityFromSession(session: TrustedSessionContext): SessionIden
 export function readSessionIdentity(
   session: TrustedSessionContext,
   headers: Headers,
+  binding: Pick<OrganizationResourceBinding, "alias"> | null = null,
 ): SessionIdentity {
   if (session.credential !== "bearer") return identityFromSession(session);
   const authorization = headers.get("authorization") ?? "";
   const token = BEARER_AUTHORIZATION.exec(authorization)?.[1];
   const claims = token ? decodeJwtPayload(token) : null;
-  return claims ? identityFromBearerClaims(claims) : identityFromSession(session);
+  return claims ? identityFromBearerClaims(claims, binding) : identityFromSession(session);
 }
 
 // The session context object is created once per request and, for a stateful
@@ -208,12 +223,17 @@ export function readSessionIdentity(
 // registry to sweep: the entry goes when the session context does.
 const identities = new WeakMap<TrustedSessionContext, SessionIdentity>();
 
-/** Attach the credential's display facts to a resolved session. */
+/**
+ * Attach the credential's display facts to a resolved session. `binding` is
+ * the per-organization resource the request was addressed to, when it was
+ * (the same value `resolveSessionContext` bound the session with).
+ */
 export function rememberSessionIdentity(
   session: TrustedSessionContext,
   headers: Headers,
+  binding: Pick<OrganizationResourceBinding, "alias"> | null = null,
 ): void {
-  identities.set(session, readSessionIdentity(session, headers));
+  identities.set(session, readSessionIdentity(session, headers, binding));
 }
 
 /** The facts attached by `rememberSessionIdentity`, or the credential-only floor. */
@@ -244,14 +264,17 @@ export type SessionInfo = {
   /** What this session currently sees, after the server's per-session filtering. */
   access: { tools: number; resources: number };
   /**
-   * The employee record behind the person. Nothing links a sign-in to an
-   * employee yet, so this reports the absence; a later link fills `name` and
-   * `relation` and changes `status`.
+   * The Relation the person acts as in the organization (auth/identity-link.ts).
+   * "Linked": `name` and `kind` describe that record. "Pending confirmation":
+   * a record carrying the person's e-mail exists and `name`/`kind` describe
+   * the candidate, which `confirm_my_link` adopts. "Not linked": no record,
+   * or a session that carries no person (API key, development identity).
    */
-  employeeRecord: {
-    status: "Not linked yet" | "Linked";
+  relation: {
+    status: "Linked" | "Pending confirmation" | "Not linked";
     name: string | null;
-    relation: string | null;
+    /** `relation_type` of the record: "person" for a just-in-time link. */
+    kind: string | null;
   };
   /** One or two English sentences saying the same thing. */
   summary: string;
@@ -263,6 +286,8 @@ export type SessionInfoInput = {
   roles: readonly string[];
   /** The session's own tenant row, or null when the registry has none. */
   organization: { name: string } | null;
+  /** `session.relation`: the identity ↔ Relation link state, when any. */
+  relation?: IdentityLinkState | null;
   access: { tools: number; resources: number };
   /** Test seam; defaults to the wall clock. */
   nowMs?: number;
@@ -376,10 +401,15 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
     : permissions.length > 0
       ? `a member of ${of} with the roles ${permissions.join(", ")}`
       : `a member of ${of} without any roles`;
+  // On a per-organization endpoint the endpoint itself chose the tenant;
+  // name it by display name (the alias is an identifier and stays inside).
+  const endpoint = identity.boundOrganization
+    ? ` on the ${organizationName ?? "organization"} endpoint`
+    : "";
   const via =
     identity.credential === "trusted-context"
       ? "using the development identity"
-      : `via ${signedInVia}`;
+      : `via ${signedInVia}${endpoint}`;
   const sentences = [`You are ${who}, ${rolePhrase}, signed in ${via}.`];
   if (groups.length > 1) {
     const active = groups.find((group) => group.active)!;
@@ -391,6 +421,12 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
         ? `Your sign-in expires ${expiry.relative}.`
         : `Your sign-in expired ${expiry.relative}.`,
     );
+  }
+  const relation = describeRelation(input.relation ?? null);
+  if (relation.status === "Linked" && relation.name) {
+    sentences.push(`You act as the record ${relation.name}.`);
+  } else if (relation.status === "Pending confirmation") {
+    sentences.push("A record with your e-mail exists — run confirm_my_link to use it.");
   }
   sentences.push(
     `You can use ${plural(access.tools, "tool")} and ${plural(access.resources, "resource")}.`,
@@ -406,9 +442,28 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
     signedInVia,
     ...(expiry ? { signInExpiresAt: expiry.at, signInExpiresIn: expiry.relative } : {}),
     access: { tools: access.tools, resources: access.resources },
-    employeeRecord: { status: "Not linked yet", name: null, relation: null },
+    relation,
     summary: sentences.join(" "),
   };
+}
+
+/**
+ * The link state as a person reads it. `sessionRelation` is the one accessor
+ * the rest of the server uses to learn who a session acts as, so "Linked" here
+ * means exactly what it means there; the pending candidate is read from the
+ * state itself, which is the only place it lives.
+ */
+export function describeRelation(
+  link: IdentityLinkState | null,
+): SessionInfo["relation"] {
+  const linked = sessionRelation({ relation: link });
+  if (linked) {
+    return { status: "Linked", name: linked.displayName, kind: link?.relationType ?? null };
+  }
+  if (link?.status === "pending_confirmation" && link.candidateRelationId) {
+    return { status: "Pending confirmation", name: link.displayName, kind: link.relationType };
+  }
+  return { status: "Not linked", name: null, kind: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -456,6 +511,7 @@ export async function describeSession(input: {
     identity: sessionIdentityOf(input.session),
     roles: input.session.roles ?? [],
     organization,
+    relation: input.session.relation ?? null,
     access,
     ...(input.nowMs !== undefined ? { nowMs: input.nowMs } : {}),
   });

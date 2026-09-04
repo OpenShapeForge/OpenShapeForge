@@ -6,10 +6,12 @@
  * slugs and raw claims.
  */
 import { describe, expect, it } from "bun:test";
+import type { IdentityLinkState } from "../../auth/identity-link.js";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import {
   buildSessionInfo,
   describeExpiry,
+  describeRelation,
   humanizeDuration,
   identityFromBearerClaims,
   identityFromSession,
@@ -40,8 +42,24 @@ const bearer = (overrides: Partial<SessionIdentity> = {}): SessionIdentity => ({
   authorizedParty: "codex",
   expiresAtMs: NOW + 12 * 60_000,
   organizations: [{ alias: "zerocopter-dev", active: true }],
+  boundOrganization: null,
   ...overrides,
 });
+
+const IDENTITY_ID = "44444444-4444-4444-8444-444444444444";
+const RELATION_ID = "55555555-5555-4555-8555-555555555555";
+
+const linked: IdentityLinkState = {
+  identityId: IDENTITY_ID,
+  issuer: "http://localhost:8181/realms/openshapeforge",
+  subject: USER_ID,
+  status: "linked",
+  relationId: RELATION_ID,
+  displayName: "Zerocopter Admin",
+  relationType: "person",
+  candidateRelationId: null,
+  linkedBy: "jit",
+};
 
 const session = (
   overrides: Partial<TrustedSessionContext> = {},
@@ -65,6 +83,8 @@ const expectNoIdentifiers = (info: unknown) => {
   expect(text).not.toContain(TENANT_ID);
   expect(text).not.toContain(USER_ID);
   expect(text).not.toContain(ORGANIZATION_ID);
+  expect(text).not.toContain(IDENTITY_ID);
+  expect(text).not.toContain(RELATION_ID);
   expect(text).not.toContain("zerocopter-dev");
   expect(text).not.toContain("resource_access");
   expect(text).not.toContain("azp");
@@ -100,11 +120,7 @@ describe("buildSessionInfo", () => {
     expect(info.signInExpiresAt).toBe("2026-09-04T10:12:00.000Z");
     expect(info.signInExpiresIn).toBe("in 12 minutes");
     expect(info.access).toEqual({ tools: 68, resources: 13 });
-    expect(info.employeeRecord).toEqual({
-      status: "Not linked yet",
-      name: null,
-      relation: null,
-    });
+    expect(info.relation).toEqual({ status: "Not linked", name: null, kind: null });
     expect(info.summary).toBe(
       "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. " +
         "Your sign-in expires in 12 minutes. You can use 68 tools and 13 resources.",
@@ -186,6 +202,96 @@ describe("buildSessionInfo", () => {
     expect(info.summary).toContain(
       "You belong to 2 groups; Zerocopter is the active one.",
     );
+  });
+
+  it("reports the linked Relation by name and kind, never by id", () => {
+    const info = buildSessionInfo({
+      identity: bearer(),
+      roles: ["org_admin"],
+      organization: { name: "Zerocopter" },
+      relation: linked,
+      access: { tools: 5, resources: 2 },
+      nowMs: NOW,
+    });
+    expect(info.relation).toEqual({ status: "Linked", name: "Zerocopter Admin", kind: "person" });
+    expect(info.summary).toBe(
+      "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. " +
+        "Your sign-in expires in 12 minutes. You act as the record Zerocopter Admin. " +
+        "You can use 5 tools and 2 resources.",
+    );
+    expectNoIdentifiers(info);
+  });
+
+  it("names the candidate and points at confirm_my_link while the link is pending", () => {
+    const info = buildSessionInfo({
+      identity: bearer(),
+      roles: ["org_employee"],
+      organization: { name: "Zerocopter" },
+      relation: {
+        ...linked,
+        status: "pending_confirmation",
+        relationId: null,
+        candidateRelationId: RELATION_ID,
+        displayName: "Hans Dev (HR record)",
+        relationType: "employee",
+        linkedBy: null,
+      },
+      access: { tools: 5, resources: 2 },
+      nowMs: NOW,
+    });
+    expect(info.relation).toEqual({
+      status: "Pending confirmation",
+      name: "Hans Dev (HR record)",
+      kind: "employee",
+    });
+    expect(info.summary).toContain(
+      "A record with your e-mail exists — run confirm_my_link to use it.",
+    );
+    expectNoIdentifiers(info);
+  });
+
+  it("treats a pending link without a candidate as not linked", () => {
+    expect(
+      describeRelation({
+        ...linked,
+        status: "pending_confirmation",
+        relationId: null,
+        candidateRelationId: null,
+        displayName: null,
+        relationType: null,
+      }),
+    ).toEqual({ status: "Not linked", name: null, kind: null });
+    expect(describeRelation(null)).toEqual({ status: "Not linked", name: null, kind: null });
+  });
+
+  it("makes the bound organization the active group and names the endpoint", () => {
+    const info = buildSessionInfo({
+      identity: bearer({
+        authorizedParty: "openshapeforge-gateway",
+        organizations: [
+          { alias: "hubble", active: false },
+          { alias: "zerocopter-dev", active: true },
+        ],
+        boundOrganization: "zerocopter-dev",
+      }),
+      roles: ["org_admin"],
+      organization: { name: "Zerocopter" },
+      relation: linked,
+      access: { tools: 5, resources: 2 },
+      nowMs: NOW,
+    });
+    expect(info.groups).toEqual([
+      { name: "hubble", active: false },
+      { name: "Zerocopter", active: true },
+    ]);
+    expect(info.signedInVia).toBe("Hubble");
+    expect(info.summary).toBe(
+      "You are Hans Eilers, organization administrator of Zerocopter, signed in via Hubble " +
+        "on the Zerocopter endpoint. You belong to 2 groups; Zerocopter is the active one. " +
+        "Your sign-in expires in 12 minutes. You act as the record Zerocopter Admin. " +
+        "You can use 5 tools and 2 resources.",
+    );
+    expectNoIdentifiers(info);
   });
 
   it("makes the tenant row the only group when the token names no organization", () => {
@@ -290,7 +396,27 @@ describe("identity from the credential", () => {
       authorizedParty: "codex",
       expiresAtMs: NOW + 12 * 60_000,
       organizations: [{ alias: "zerocopter-dev", active: true }],
+      boundOrganization: null,
     });
+  });
+
+  it("lets the endpoint binding pick the active membership over the token's scope", () => {
+    const identity = identityFromBearerClaims(
+      {
+        ...claims,
+        organization: {
+          hubble: { id: "11111111-1111-4111-8111-111111111111" },
+          "zerocopter-dev": { id: ORGANIZATION_ID },
+        },
+        scope: "openid organization:hubble organization:zerocopter-dev",
+      },
+      { alias: "zerocopter-dev" },
+    );
+    expect(identity.boundOrganization).toBe("zerocopter-dev");
+    expect(identity.organizations).toEqual([
+      { alias: "hubble", active: false },
+      { alias: "zerocopter-dev", active: true },
+    ]);
   });
 
   it("falls back to the username and marks the selected membership when several exist", () => {
@@ -344,6 +470,15 @@ describe("identity from the credential", () => {
       new Headers({ authorization: `Bearer ${unsignedJwt(claims)}` }),
     );
     expect(sessionIdentityOf(first).authorizedParty).toBe("codex");
+    expect(sessionIdentityOf(first).boundOrganization).toBeNull();
     expect(sessionIdentityOf(second)).toEqual(identityFromSession(second));
+
+    const bound = session();
+    rememberSessionIdentity(
+      bound,
+      new Headers({ authorization: `Bearer ${unsignedJwt(claims)}` }),
+      { alias: "zerocopter-dev" },
+    );
+    expect(sessionIdentityOf(bound).boundOrganization).toBe("zerocopter-dev");
   });
 });

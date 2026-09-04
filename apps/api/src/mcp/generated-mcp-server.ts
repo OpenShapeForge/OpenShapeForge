@@ -216,6 +216,18 @@ import {
   sameInvocationSourceReference,
 } from "../modules/source-reference.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
+// --- session-info (whoami / osf://session) — see ./session-info.ts ---
+import {
+  SESSION_INFO_TOOL,
+  SESSION_INFO_TOOL_NAME,
+  SESSION_RESOURCE,
+  SESSION_RESOURCE_URI,
+  describeSession,
+  rememberSessionIdentity,
+  sessionInfoResourceResult,
+  sessionInfoToolResult,
+} from "./session-info.js";
+// --- end session-info ---
 import {
   bindOperationHandlers,
   DeclaredOperationError,
@@ -605,6 +617,7 @@ function coreOwnsStaticToolName(name: string): boolean {
     ...catalogDiscoveryTools.map((tool) => tool.name),
     ...catalogTestTools.map((tool) => tool.name),
     ...connectorMcpTools(listConnectorContracts()).map((tool) => tool.name),
+    SESSION_INFO_TOOL_NAME, // session-info (whoami / osf://session)
   ].includes(name);
 }
 
@@ -2425,11 +2438,14 @@ function buildServer(
     return matching.length === 1 ? matching[0] : undefined;
   };
 
-  server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  // --- session-info: the list is a named builder so `whoami` can count
+  // resources through the same per-session filtering `resources/list` uses. ---
+  const listedResources = async () => {
     const entries = entitiesForSession(session, tables);
     const authoredResources = resourcesForSession(session, tables);
     return {
       resources: [
+        SESSION_RESOURCE,
         {
           uri: ENTITY_CATALOG_URI,
           name: "entity-catalog",
@@ -2470,7 +2486,18 @@ function buildServer(
         )),
       ],
     };
-  });
+  };
+  server.setRequestHandler(ListResourcesRequestSchema, listedResources);
+  const sessionInfo = () =>
+    describeSession({
+      db,
+      session,
+      access: async () => ({
+        tools: (await listedTools()).length,
+        resources: (await listedResources()).resources.length,
+      }),
+    });
+  // --- end session-info ---
 
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
     resourceTemplates: [
@@ -2508,6 +2535,11 @@ function buildServer(
       if (result !== undefined) return result;
       throw new McpError(ErrorCode.InvalidParams, "Resource not found.");
     };
+    // --- session-info (whoami / osf://session) ---
+    if (request.params.uri === SESSION_RESOURCE_URI) {
+      return sessionInfoResourceResult(await sessionInfo());
+    }
+    // --- end session-info ---
     if (request.params.uri === ENTITY_CONFIGURATION_APP_URI) {
       return {
         contents: [
@@ -2590,6 +2622,7 @@ function buildServer(
 
   const listedTools = async (): Promise<SourcedTool[]> => {
     const coreTools = [
+      SESSION_INFO_TOOL, // session-info (whoami / osf://session): every authenticated session
       ...toolsForSession(session, tables).map(({ tool, entity }) =>
         describeTool(tool, entity, tables.get(tool.table), session),
       ),
@@ -2781,6 +2814,7 @@ function buildServer(
         })),
     ] as Tool[];
     const sourceOf = (name: string): McpToolCallSource => {
+      if (name === SESSION_INFO_TOOL_NAME) return "operation"; // session-info
       if (catalog.tools.some((tool) => tool.name === name)) return "crud";
       if (catalog.operationTools.some((tool) => tool.name === name))
         return "operation";
@@ -2840,6 +2874,15 @@ function buildServer(
     const selectedReference = selected?.sourceReference;
     const egressSource = egressSourceFromResolvedInvocation(selected);
     const captured = selected?.internal as CapturedDerivedExecution | undefined;
+    // --- session-info (whoami / osf://session): no arguments, no roles ---
+    if (name === SESSION_INFO_TOOL_NAME) {
+      try {
+        return sessionInfoToolResult(await sessionInfo());
+      } catch (error) {
+        return failed(error);
+      }
+    }
+    // --- end session-info ---
     const operationTool = catalog.operationTools.find(
       (tool) => tool.name === name,
     );
@@ -5120,6 +5163,9 @@ export function registerGeneratedMcpServer(
         "Database is not configured for MCP access.",
       );
     }
+    // session-info (whoami / osf://session): keep the credential's display
+    // facts (name, client, expiry, memberships) beside the verified session.
+    rememberSessionIdentity(resolved, headersFromFastify(request.headers));
     return {
       db: options.db,
       session: resolved,

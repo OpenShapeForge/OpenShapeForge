@@ -47,10 +47,20 @@ import {
   ReadResourceRequestSchema,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import rawCatalog from "../generated/mcp/tools.json" with { type: "json" };
 import { resolveSessionContext } from "../auth/identity.js";
-import { buildAuthenticateChallenge } from "./protected-resource-metadata.js";
+import { OrganizationBindingError } from "../auth/organization-binding.js";
+import {
+  buildAuthenticateChallenge,
+  canonicalResourceUri,
+  resourcePathOf,
+} from "./protected-resource-metadata.js";
+import {
+  isOrganizationAlias,
+  MCP_MOUNT_PATH,
+  ORGANIZATION_MCP_PATH_PREFIX,
+} from "./organization-resource.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import type { DbSessionInput } from "../db/session.js";
@@ -209,7 +219,7 @@ import {
   invokeOperation,
 } from "../operations/runtime.js";
 
-export const MCP_MOUNT_PATH = "/api/mcp";
+export { MCP_MOUNT_PATH, ORGANIZATION_MCP_PATH_PREFIX } from "./organization-resource.js";
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
@@ -5061,14 +5071,38 @@ export function registerGeneratedMcpServer(
     return;
   }
 
+  /**
+   * The resource a request is addressed to. `/api/mcp` resolves the tenant
+   * from the token alone (legacy). `/api/mcp/organizations/<alias>` binds the
+   * session to that organization: the token must be a member of it, carry
+   * this resource's URL in `aud` and link to a tenant through the registry
+   * (auth/organization-binding.ts). A refusal there is a 403 with the same
+   * body for every cause, so the path cannot enumerate organizations.
+   */
   async function requireMcpSession(request: FastifyRequest): Promise<{
     db: OpenShapeForgeDatabase;
     session: TrustedSessionContext;
+    resource: string;
   }> {
-    const resolved = await resolveSessionContext(
-      headersFromFastify(request.headers),
-      { db: options.db },
-    );
+    const alias = (request.params as { alias?: unknown } | undefined)?.alias;
+    if (alias !== undefined && !isOrganizationAlias(alias)) {
+      throw new HttpError(404, "NOT_FOUND", "Unknown MCP resource.");
+    }
+    const resource = resourcePathOf(request, alias ?? null);
+    let resolved: TrustedSessionContext;
+    try {
+      resolved = await resolveSessionContext(headersFromFastify(request.headers), {
+        db: options.db,
+        ...(alias
+          ? { organization: { alias, resource: canonicalResourceUri(request, alias) } }
+          : {}),
+      });
+    } catch (error) {
+      if (error instanceof OrganizationBindingError) {
+        throw new HttpError(error.status, error.code, error.message);
+      }
+      throw error;
+    }
     if (!resolved.tenantId || !resolved.userId) {
       throw new HttpError(
         401,
@@ -5086,6 +5120,7 @@ export function registerGeneratedMcpServer(
     return {
       db: options.db,
       session: resolved,
+      resource,
     };
   }
 
@@ -5130,6 +5165,13 @@ export function registerGeneratedMcpServer(
           "www-authenticate",
           buildAuthenticateChallenge(request),
         );
+      } else if (status === 403 && body.error.code === "ORGANIZATION_RESOURCE_FORBIDDEN") {
+        // RFC 6750 §3.1: the token verified but is not bound to this
+        // resource; the challenge names the scopes that would be.
+        void reply.header(
+          "www-authenticate",
+          buildAuthenticateChallenge(request, { insufficientScope: true }),
+        );
       }
       void reply.status(status).send(body);
     });
@@ -5144,6 +5186,8 @@ export function registerGeneratedMcpServer(
     type McpSessionEntry = {
       transport: StreamableHTTPServerTransport;
       server: Server;
+      /** Resource path the session was initialized on; it is not portable. */
+      resource: string;
       tenantId: string;
       userId: string;
       roles: string[];
@@ -5585,113 +5629,77 @@ export function registerGeneratedMcpServer(
       },
     );
 
-    instance.route({
-      url: MCP_MOUNT_PATH,
-      method: ["GET", "POST", "DELETE"],
-      handler: async (request, reply) => {
-        const { db, session } = await requireMcpSession(request);
+    const handleMcpRequest = async (
+      request: FastifyRequest,
+      reply: FastifyReply,
+    ): Promise<void> => {
+      const { db, session, resource } = await requireMcpSession(request);
 
-        const sessionHeader = request.headers["mcp-session-id"];
-        const sessionId = Array.isArray(sessionHeader)
-          ? sessionHeader[0]
-          : sessionHeader;
+      const sessionHeader = request.headers["mcp-session-id"];
+      const sessionId = Array.isArray(sessionHeader)
+        ? sessionHeader[0]
+        : sessionHeader;
 
-        if (sessionId) {
-          const existing = mcpSessions.get(sessionId);
-          if (!existing) {
-            // Per spec: an unknown session id answers 404 so the client
-            // reinitializes, rather than being silently handled statelessly.
-            throw new HttpError(
-              404,
-              "SESSION_NOT_FOUND",
-              "Unknown MCP session; reinitialize.",
-            );
-          }
-          // The session is a credential: it was initialized by one identity
-          // and stays bound to it.
-          if (
-            existing.tenantId !== session.tenantId ||
-            existing.userId !== session.userId
-          ) {
-            throw new HttpError(
-              403,
-              "FORBIDDEN",
-              "MCP session belongs to another identity.",
-            );
-          }
-          if (
-            !sameClaims(existing.roles, session.roles ?? []) ||
-            !sameClaims(existing.oauthScopes, session.oauthScopes ?? []) ||
-            !sameClaims(existing.groups, session.groups ?? []) ||
-            existing.scope !== session.scope ||
-            existing.credential !== session.credential
-          ) {
-            mcpSessions.delete(sessionId);
-            options.modulePlatform?.unregisterServer(existing.server);
-            void existing.transport.close();
-            void existing.server.close();
-            throw new HttpError(
-              404,
-              "SESSION_NOT_FOUND",
-              "Authorization changed; reinitialize the MCP session.",
-            );
-          }
-          existing.lastSeenMs = Date.now();
-          reply.hijack();
-          await existing.transport.handleRequest(
-            request.raw,
-            reply.raw,
-            request.body,
+      if (sessionId) {
+        const existing = mcpSessions.get(sessionId);
+        if (!existing) {
+          // Per spec: an unknown session id answers 404 so the client
+          // reinitializes, rather than being silently handled statelessly.
+          throw new HttpError(
+            404,
+            "SESSION_NOT_FOUND",
+            "Unknown MCP session; reinitialize.",
           );
-          return;
         }
-
-        if (request.method === "POST" && isInitializeBody(request.body)) {
-          const server = buildServer(
-            db,
-            session,
-            options.modules,
-            options.modulePlatform,
-            options.egressOwner,
-            notifyDerivedDefinitionChanged,
-            true,
+        // The session is a credential: it was initialized by one identity
+        // on one resource and stays bound to both. A session id minted on
+        // one organization's resource is not a ticket to another's, nor to
+        // the legacy mount.
+        if (existing.resource !== resource) {
+          throw new HttpError(
+            403,
+            "FORBIDDEN",
+            "MCP session was initialized on another MCP resource.",
           );
-          const transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => randomUUID(),
-            onsessioninitialized: (id) => {
-              mcpSessions.set(id, {
-                transport,
-                server,
-                tenantId: session.tenantId as string,
-                userId: session.userId as string,
-                roles: [...(session.roles ?? [])],
-                oauthScopes: [...(session.oauthScopes ?? [])],
-                groups: [...(session.groups ?? [])],
-                scope: session.scope,
-                credential: session.credential,
-                lastSeenMs: Date.now(),
-              });
-            },
-          });
-          transport.onclose = () => {
-            if (transport.sessionId) mcpSessions.delete(transport.sessionId);
-            options.modulePlatform?.unregisterServer(server);
-          };
-          reply.hijack();
-          // The SDK declares Transport's optional callbacks as required-when-present,
-          // which collides with this repo's exactOptionalPropertyTypes. The cast is
-          // to the SDK's own Transport shape and changes no behaviour.
-          await server.connect(
-            transport as unknown as Parameters<Server["connect"]>[0],
-          );
-          await transport.handleRequest(request.raw, reply.raw, request.body);
-          return;
         }
+        if (
+          existing.tenantId !== session.tenantId ||
+          existing.userId !== session.userId
+        ) {
+          throw new HttpError(
+            403,
+            "FORBIDDEN",
+            "MCP session belongs to another identity.",
+          );
+        }
+        if (
+          !sameClaims(existing.roles, session.roles ?? []) ||
+          !sameClaims(existing.oauthScopes, session.oauthScopes ?? []) ||
+          !sameClaims(existing.groups, session.groups ?? []) ||
+          existing.scope !== session.scope ||
+          existing.credential !== session.credential
+        ) {
+          mcpSessions.delete(sessionId);
+          options.modulePlatform?.unregisterServer(existing.server);
+          void existing.transport.close();
+          void existing.server.close();
+          throw new HttpError(
+            404,
+            "SESSION_NOT_FOUND",
+            "Authorization changed; reinitialize the MCP session.",
+          );
+        }
+        existing.lastSeenMs = Date.now();
+        reply.hijack();
+        await existing.transport.handleRequest(
+          request.raw,
+          reply.raw,
+          request.body,
+        );
+        return;
+      }
 
-        // Sessionless non-initialize request: the pre-session stateless
-        // single-shot behaviour, kept for probes and legacy callers. No
-        // server-initiated exchange is possible on this path, but a mutation
-        // made through it still nudges the live sessions.
+      if (request.method === "POST" && isInitializeBody(request.body)) {
         const server = buildServer(
           db,
           session,
@@ -5699,24 +5707,82 @@ export function registerGeneratedMcpServer(
           options.modulePlatform,
           options.egressOwner,
           notifyDerivedDefinitionChanged,
+          true,
         );
-        // `sessionIdGenerator` is omitted rather than set to undefined: the SDK
-        // reads it as `=== undefined` to mean stateless, and omitting keeps
-        // exactOptionalPropertyTypes happy.
         const transport = new StreamableHTTPServerTransport({
-          enableJsonResponse: true,
+          sessionIdGenerator: () => randomUUID(),
+          onsessioninitialized: (id) => {
+            mcpSessions.set(id, {
+              transport,
+              server,
+              resource,
+              tenantId: session.tenantId as string,
+              userId: session.userId as string,
+              roles: [...(session.roles ?? [])],
+              oauthScopes: [...(session.oauthScopes ?? [])],
+              groups: [...(session.groups ?? [])],
+              scope: session.scope,
+              credential: session.credential,
+              lastSeenMs: Date.now(),
+            });
+          },
         });
-        reply.raw.on("close", () => {
+        transport.onclose = () => {
+          if (transport.sessionId) mcpSessions.delete(transport.sessionId);
           options.modulePlatform?.unregisterServer(server);
-          void transport.close();
-          void server.close();
-        });
+        };
         reply.hijack();
+        // The SDK declares Transport's optional callbacks as required-when-present,
+        // which collides with this repo's exactOptionalPropertyTypes. The cast is
+        // to the SDK's own Transport shape and changes no behaviour.
         await server.connect(
           transport as unknown as Parameters<Server["connect"]>[0],
         );
         await transport.handleRequest(request.raw, reply.raw, request.body);
-      },
+        return;
+      }
+
+      // Sessionless non-initialize request: the pre-session stateless
+      // single-shot behaviour, kept for probes and legacy callers. No
+      // server-initiated exchange is possible on this path, but a mutation
+      // made through it still nudges the live sessions.
+      const server = buildServer(
+        db,
+        session,
+        options.modules,
+        options.modulePlatform,
+        options.egressOwner,
+        notifyDerivedDefinitionChanged,
+      );
+      // `sessionIdGenerator` is omitted rather than set to undefined: the SDK
+      // reads it as `=== undefined` to mean stateless, and omitting keeps
+      // exactOptionalPropertyTypes happy.
+      const transport = new StreamableHTTPServerTransport({
+        enableJsonResponse: true,
+      });
+      reply.raw.on("close", () => {
+        options.modulePlatform?.unregisterServer(server);
+        void transport.close();
+        void server.close();
+      });
+      reply.hijack();
+      await server.connect(
+        transport as unknown as Parameters<Server["connect"]>[0],
+      );
+      await transport.handleRequest(request.raw, reply.raw, request.body);
+    };
+
+    instance.route({
+      url: MCP_MOUNT_PATH,
+      method: ["GET", "POST", "DELETE"],
+      handler: handleMcpRequest,
+    });
+    // One resource per Keycloak Organization, same server, same handler;
+    // what differs is how the session is admitted (requireMcpSession).
+    instance.route({
+      url: `${ORGANIZATION_MCP_PATH_PREFIX}/:alias`,
+      method: ["GET", "POST", "DELETE"],
+      handler: handleMcpRequest,
     });
   });
 }

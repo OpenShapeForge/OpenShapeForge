@@ -21,6 +21,7 @@ import type { GraphqlCorsPolicy } from "@openshapeforge/observability/yoga";
 import Fastify from "fastify";
 import { readApiLimits } from "../config/limits.js";
 import { readGraphqlCorsPolicy } from "../config/graphql-cors.js";
+import { rewriteShortAddress } from "../mcp/organization-resource.js";
 import { assertProductionEnv } from "../config/production-guard.js";
 import {
   createDatabaseRuntime,
@@ -180,6 +181,24 @@ export function createApiApp(options: {
     // characters — and the router's default of 100 answered them with 414
     // before the route ever ran (found live). Generous but bounded.
     maxParamLength: 512,
+    // Short addresses: `https://hubble.com/zerocopter/...`.
+    //
+    // One organization, one prefix, every surface underneath it —
+    // `/<alias>` and `/<alias>/mcp` are the MCP resource, `/<alias>/api/...`
+    // is REST and `/<alias>/graphql` is GraphQL. They are rewritten onto the
+    // routes this server already has rather than registered a second time, so
+    // there is exactly one handler per surface and no pair of routes that can
+    // drift apart. What a client is TOLD the resource is called is the short
+    // form and comes from `organizationMcpPath` (mcp/organization-resource.ts);
+    // this is the inverse of that function, and the only place that knows both
+    // spellings.
+    //
+    // Platform administration rides along: `/admin/mcp` is the operator MCP
+    // resource `/api/control/mcp`.
+    //
+    // A first segment that is one of the server's own names, or not a
+    // well-formed alias, is left alone — see RESERVED_ROOT_SEGMENTS.
+    rewriteUrl: (request) => rewriteShortAddress(request.url) ?? request.url ?? "/",
   });
 
   // Request-rate boundary, before GraphQL/REST execution — that ordering is

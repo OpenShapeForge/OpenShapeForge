@@ -72,7 +72,18 @@ import {
   requestOrigin,
 } from "./protected-resource-metadata.js";
 
-export const CONTROL_MCP_PATH = "/api/control/mcp";
+/** The route this server mounts the control MCP on. */
+export const CONTROL_MCP_ROUTE_PATH = "/api/control/mcp";
+
+/**
+ * The PUBLISHED name of the platform administrator resource: `/admin/mcp`,
+ * beside `/admin` itself, in the same short address space as
+ * `/<organization>/mcp`. `/api/control/mcp` is rewritten to it on the way in
+ * (roles/api.ts) and stays reachable; this constant is what appears in the
+ * metadata document, in the `WWW-Authenticate` challenge and in `aud`, so it is
+ * the one that has to be short.
+ */
+export const CONTROL_MCP_PATH = "/admin/mcp";
 
 /** The control resource's own metadata document (RFC 9728 path-suffixed form). */
 export const CONTROL_MCP_METADATA_PATH = `${PROTECTED_RESOURCE_METADATA_PATH}${CONTROL_MCP_PATH}`;
@@ -219,7 +230,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
   if (!configResult.ok) {
     app.log.warn(
       { missing: configResult.missing },
-      `Platform administrator MCP is not configured; ${CONTROL_MCP_PATH} will refuse every request.`,
+      `Platform administrator MCP is not configured; ${CONTROL_MCP_ROUTE_PATH} will refuse every request.`,
     );
   }
 
@@ -395,6 +406,6 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
       await transport.handleRequest(request.raw, reply.raw, request.body);
     };
 
-    instance.route({ url: CONTROL_MCP_PATH, method: ["GET", "POST", "DELETE"], handler: handle });
+    instance.route({ url: CONTROL_MCP_ROUTE_PATH, method: ["GET", "POST", "DELETE"], handler: handle });
   });
 }

@@ -12,8 +12,11 @@ import {
 } from "../organization-binding.js";
 import {
   isOrganizationAlias,
+  legacyOrganizationMcpPath,
   organizationAliasFromPath,
+  organizationMcpExplicitPath,
   organizationMcpPath,
+  rewriteShortAddress,
   organizationResourceScopeNames,
   organizationResourceScopes,
 } from "../../mcp/organization-resource.js";
@@ -259,7 +262,29 @@ describe("organization resource paths", () => {
     expect(organizationAliasFromPath("/api/mcp/organizations/")).toBeNull();
     expect(organizationAliasFromPath("/api/mcp/organizations/a/b")).toBeNull();
     expect(organizationAliasFromPath("/api/mcp/organizations")).toBeNull();
-    expect(organizationMcpPath("hubble")).toBe("/api/mcp/organizations/hubble");
+    // The short spelling, which is the canonical one: the alias IS the path.
+    expect(organizationAliasFromPath("/hubble")).toBe("hubble");
+    expect(organizationAliasFromPath("/hubble/mcp")).toBe("hubble");
+    expect(organizationAliasFromPath("/hubble/api/rest/v1/quotes")).toBe("hubble");
+    expect(organizationAliasFromPath("/hubble?org=zerocopter")).toBe("hubble");
+    expect(organizationAliasFromPath("/")).toBeNull();
+    // The server's own names are never an organization, whatever Keycloak
+    // would accept as an alias.
+    for (const reserved of ["/api/rest/v1", "/graphql", "/admin", "/admin/mcp", "/assets/main.js", "/.well-known/x"]) {
+      expect(organizationAliasFromPath(reserved)).toBeNull();
+    }
+    expect(organizationMcpPath("hubble")).toBe("/hubble");
+    expect(organizationMcpExplicitPath("hubble")).toBe("/hubble/mcp");
+    expect(legacyOrganizationMcpPath("hubble")).toBe("/api/mcp/organizations/hubble");
+    // The rewrite: one function, and the only place that knows both spellings.
+    expect(rewriteShortAddress("/hubble")).toBe("/api/mcp/organizations/hubble");
+    expect(rewriteShortAddress("/hubble/mcp")).toBe("/api/mcp/organizations/hubble");
+    expect(rewriteShortAddress("/hubble/api/rest/v1/quotes?a=1")).toBe("/api/rest/v1/quotes?a=1");
+    expect(rewriteShortAddress("/hubble/graphql")).toBe("/api/graphql");
+    expect(rewriteShortAddress("/admin/mcp")).toBe("/api/control/mcp");
+    expect(rewriteShortAddress("/api/rest/v1/quotes")).toBeNull();
+    expect(rewriteShortAddress("/graphql")).toBeNull();
+    expect(rewriteShortAddress("/hubble/nonsense")).toBeNull();
     expect(organizationResourceScopes("hubble")).toEqual(["organization", "mcp-resource:hubble"]);
     // Every advertised scope must be a client scope a realm can allow-list,
     // or a self-registering client is refused before it ever authorizes.

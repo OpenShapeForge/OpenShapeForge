@@ -28,6 +28,7 @@ import {
   organizationAliasFromPath,
   organizationMcpPath,
   organizationResourceScopes,
+  RESERVED_ROOT_SEGMENTS,
 } from "./organization-resource.js";
 
 export const PROTECTED_RESOURCE_METADATA_PATH = "/.well-known/oauth-protected-resource";
@@ -186,18 +187,31 @@ export function registerProtectedResourceMetadata(app: FastifyInstance): void {
   // not an oracle for which organizations exist; that is settled by the
   // token checks on the resource itself. A malformed alias is a 404 because
   // no resource can have that path.
+  //
+  // RFC 9728 §3.1 spells the document's URL by inserting the well-known
+  // segment before the resource's path, so the CANONICAL resource
+  // `https://hubble.com/zerocopter` is described at
+  // `/.well-known/oauth-protected-resource/zerocopter`. That is the one a
+  // client derives on its own; the long spelling below it stays answerable
+  // for anything still holding the pre-rename URL.
+  const organizationMetadata = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ) => {
+    const alias = (request.params as { alias?: unknown }).alias;
+    if (!isOrganizationAlias(alias) || RESERVED_ROOT_SEGMENTS.has(alias.toLowerCase())) {
+      return reply.code(404).send({ error: "unknown resource" });
+    }
+    const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER?.trim();
+    return reply
+      .header("cache-control", "public, max-age=3600")
+      .send(buildProtectedResourceMetadata(request, issuer || undefined, alias));
+  };
+
+  app.get(`${PROTECTED_RESOURCE_METADATA_PATH}/:alias`, organizationMetadata);
   app.get(
     `${PROTECTED_RESOURCE_METADATA_PATH}${ORGANIZATION_MCP_PATH_PREFIX}/:alias`,
-    async (request: FastifyRequest, reply: FastifyReply) => {
-      const alias = (request.params as { alias?: unknown }).alias;
-      if (!isOrganizationAlias(alias)) {
-        return reply.code(404).send({ error: "unknown resource" });
-      }
-      const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER?.trim();
-      return reply
-        .header("cache-control", "public, max-age=3600")
-        .send(buildProtectedResourceMetadata(request, issuer || undefined, alias));
-    },
+    organizationMetadata,
   );
 }
 

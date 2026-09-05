@@ -87,6 +87,9 @@ export const nonManifestManagedTables = new Set<string>([
   // after the generated step (its FKs point at generated tables).
   "platform.identities",
   "platform.identity_relations",
+  // Pending employee invitations: created by migrations/employee-invitations.ts
+  // after the generated step.
+  "platform.employee_invitations",
 ]);
 
 /**

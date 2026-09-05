@@ -212,7 +212,10 @@ describe("failure mapping", () => {
 });
 
 describe("per-organization identity provider linking", () => {
-  it("links an alias with the bare string body, not JSON, on the native endpoint", async () => {
+  it("links an alias with a JSON-quoted string body on the native endpoint", async () => {
+    // Verified against a running Keycloak 26.5.3: a bare unquoted alias with
+    // text/plain answers 415; the JSON-quoted string with application/json
+    // (the request() default) is what actually links it (204).
     const { fetch, calls } = stubFetch({ admin: [() => new Response(null, { status: 204 })] });
     await createKeycloakOrganizationAdminClient(config, { fetch }).linkIdentityProvider(
       "acme",
@@ -224,8 +227,8 @@ describe("per-organization identity provider linking", () => {
       "http://keycloak.test:8080/admin/realms/openshapeforge/organizations/acme/identity-providers",
     );
     expect(call.init.method).toBe("POST");
-    expect(call.init.body).toBe("google-workspace");
-    expect((call.init.headers as Record<string, string>)["content-type"]).toBe("text/plain");
+    expect(call.init.body).toBe(JSON.stringify("google-workspace"));
+    expect((call.init.headers as Record<string, string>)["content-type"]).toBe("application/json");
   });
 
   it("lists the identity providers linked to one organization", async () => {

@@ -419,13 +419,15 @@ export function createKeycloakOrganizationAdminClient(
     },
 
     async linkIdentityProvider(organizationId, alias) {
-      // The native endpoint's body is the bare alias string, not JSON — verified
-      // against Keycloak 26.5.3, where a JSON-quoted body ("alias") is rejected
-      // with 400 and the plain string succeeds.
+      // The native endpoint's body is the alias as a JSON string (i.e. the
+      // literal bytes `"alias"`), Content-Type application/json — verified
+      // against a running Keycloak 26.5.3: a bare unquoted string with
+      // text/plain is rejected with 415, and a JSON-quoted string succeeds
+      // with 204.
       await request(`${organizationUrl(organizationId)}/identity-providers`, {
         method: "POST",
-        body: alias,
-      }, "text/plain");
+        body: JSON.stringify(alias),
+      });
     },
 
     async listIdentityProviders(organizationId) {

@@ -261,6 +261,37 @@ export function parseSubmission(
   return { content, errors };
 }
 
+/**
+ * The already-stored row a submission belongs to, if any: the row in the
+ * target table whose `key` equals the key the model supplied when it minted
+ * the handoff. A second submission for that key - a retried form, a rotated
+ * secret - must update this row, never create a duplicate beside it.
+ */
+export function findExistingConfiguration(
+  rows: readonly JsonRecord[],
+  pending: Pick<PendingConfiguration, "modelValues">,
+): JsonRecord | undefined {
+  const wanted = pending.modelValues.key;
+  if (typeof wanted !== "string" || wanted.length === 0) return undefined;
+  return rows.find((row) => row.key === wanted);
+}
+
+/**
+ * Merge a submission into the values a row already holds: every submitted
+ * key replaces the stored value under that key (a secret submitted again is
+ * the new secret, once), keys the form did not carry stay as they were.
+ */
+export function mergeConfigurationValues(
+  existing: unknown,
+  submitted: JsonRecord,
+): JsonRecord {
+  const base =
+    existing && typeof existing === "object" && !Array.isArray(existing)
+      ? (existing as JsonRecord)
+      : {};
+  return { ...base, ...submitted };
+}
+
 /** Encrypt-and-shape the parsed values exactly as the in-band form would. */
 export function storeSubmission(
   pending: PendingConfiguration,

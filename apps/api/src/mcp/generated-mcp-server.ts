@@ -158,6 +158,14 @@ import {
   callIdentityLinkTool,
   identityLinkToolsForSession,
 } from "./identity-link-tools.js";
+// ---- organization profile (mcp/organization-profile-tools.ts) ----
+import {
+  callOrganizationProfileTool,
+  ORGANIZATION_PROFILE_RESOURCE,
+  ORGANIZATION_PROFILE_RESOURCE_URI,
+  organizationProfileToolsForSession,
+  readOrganizationProfileResource,
+} from "./organization-profile-tools.js";
 // ---- employee invitations (mcp/employee-invitation-tools.ts) ----
 import {
   callEmployeeInvitationTool,
@@ -3138,6 +3146,7 @@ function buildServer(
     return {
       resources: [
         SESSION_RESOURCE,
+        ORGANIZATION_PROFILE_RESOURCE,
         {
           uri: ENTITY_CATALOG_URI,
           name: "entity-catalog",
@@ -3268,6 +3277,11 @@ function buildServer(
       return sessionInfoResourceResult(await sessionInfo());
     }
     // --- end session-info ---
+    // ---- organization profile (mcp/organization-profile-tools.ts) ----
+    if (request.params.uri === ORGANIZATION_PROFILE_RESOURCE_URI) {
+      return readOrganizationProfileResource(db, session);
+    }
+    // ---- end organization profile ----
     if (request.params.uri === ENTITY_CONFIGURATION_APP_URI) {
       return {
         contents: [
@@ -3449,6 +3463,9 @@ function buildServer(
       // ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
       ...identityLinkToolsForSession(session),
       // ---- end identity ↔ Relation link ----
+      // ---- organization profile (mcp/organization-profile-tools.ts) ----
+      ...organizationProfileToolsForSession(session),
+      // ---- end organization profile ----
       // ---- employee invitations (mcp/employee-invitation-tools.ts) ----
       ...employeeInvitationToolsForSession(session),
       // ---- end employee invitations ----
@@ -4459,6 +4476,16 @@ function buildServer(
     );
     if (identityLinkOutcome) return identityLinkOutcome as ToolResult;
     // ---- end identity ↔ Relation link ----
+
+    // ---- organization profile (mcp/organization-profile-tools.ts) ----
+    const organizationProfileOutcome = await callOrganizationProfileTool(
+      name,
+      (request.params.arguments ?? {}) as Record<string, unknown>,
+      db,
+      session,
+    );
+    if (organizationProfileOutcome) return organizationProfileOutcome as ToolResult;
+    // ---- end organization profile ----
 
     // ---- employee invitations (mcp/employee-invitation-tools.ts) ----
     const employeeInvitationOutcome = await callEmployeeInvitationTool(

@@ -50,7 +50,27 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
 export async function applyOrganizationRelationLinkMigration(db: OpenShapeForgeDatabase) {
   await sql`
     alter table platform.tenants
-      add column if not exists relation_id uuid references erp.relations (id) on delete set null;
+      add column if not exists relation_id uuid;
+
+    -- Tenant-consistent since OSF #509. erp.relations is keyed on
+    -- (tenant_id, id), and platform.tenants IS the tenant registry, so this
+    -- row's own id is the tenant half of the key. The pair therefore says
+    -- exactly what the link means: a tenant may only point at a Relation that
+    -- lives in itself. A single-column key could not — a foreign-key check
+    -- runs as the table owner with row level security bypassed.
+    -- SET NULL names its column so unlinking cannot null the tenant's own id.
+    do $organization_relation_link_fk$
+    begin
+      if not exists (
+        select 1 from pg_constraint where conname = 'tenants_relation_id_fkey'
+      ) then
+        alter table platform.tenants
+          add constraint tenants_relation_id_fkey
+          foreign key (id, relation_id) references erp.relations (tenant_id, id)
+          on delete set null (relation_id);
+      end if;
+    end
+    $organization_relation_link_fk$;
 
     drop policy if exists tenants_relation_link_write on platform.tenants;
     create policy tenants_relation_link_write on platform.tenants

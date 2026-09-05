@@ -1214,10 +1214,20 @@ export async function composeBindingRequest(
     };
   }
   if (transport !== "rest" && transport !== "graphql") {
+    // A transport this executor does not speak is not automatically a mistake.
+    // An Adapter may exist to be a CONNECTION POINT rather than an HTTP
+    // provider: it declares the configuration fields a person fills in, the
+    // scope those values are held at, and — through egressHosts entries that
+    // name a port — where the module owning that protocol may connect. Its
+    // Capabilities run in-process (transport "native", operation.nativeOperation)
+    // and reach the connection through platform.secrets/platform.egress. What
+    // must never happen is this executor guessing an HTTP request for it.
     throw new HttpError(
       501,
       "NOT_IMPLEMENTED",
-      `Transport "${String(transport)}" is not executable; rest and graphql are.`,
+      `Transport "${String(transport)}" is not an HTTP transport, so no request can be ` +
+        "composed for it. This executor speaks rest and graphql; a Capability on a " +
+        "non-HTTP Adapter runs in-process and must declare operation.nativeOperation.",
     );
   }
 

@@ -26,6 +26,7 @@
  * fields inside it. Handing us a second `type Query` would be a schema error
  * that only surfaced at boot.
  */
+import type { Duplex } from "node:stream";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Kysely, Transaction } from "kysely";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -187,6 +188,75 @@ export type ModuleEgressRequest = {
 
 export type ModuleEgressFailureKind = "policy_blocked" | "timeout";
 
+/**
+ * Which Connection a module wants. `adapterKey` is the ordinary case — "the
+ * caller's own connection to this Adapter" — and deliberately needs no
+ * identifier from tool input, which would be untrusted anyway. `connectionId`
+ * is for a module that already holds one from its own stored state.
+ */
+export type ModuleConnectionSelector =
+  | { connectionId: string; adapterKey?: never }
+  | { adapterKey: string; connectionId?: never };
+
+/**
+ * Permission to open outbound connections, minted by core alongside a resolved
+ * Connection. Opaque on purpose: a module cannot read the allow-list off it,
+ * cannot widen it, and cannot construct one. It is handed straight back to
+ * `platform.egress.connect`, which looks the real policy up again.
+ */
+export type ModuleSocketGrant = { readonly __brand: unique symbol };
+
+export type ModuleSocketRequest = {
+  host: string;
+  port: number;
+  /** Implicit TLS from the first byte (an IMAPS port, say). */
+  tls: boolean;
+  /** SNI name; defaults to `host`. */
+  servername?: string;
+  /** Only a test server against a self-signed certificate sets this false. */
+  rejectUnauthorized?: boolean;
+  /** Deadline for establishing the connection. */
+  timeoutMs?: number;
+};
+
+/** One Connection's values, opened for the module core decided may see them. */
+export type ModuleConnectionValues = {
+  connectionId: string;
+  connectionKey: string;
+  adapterKey: string;
+  /** The Adapter's declared transport, e.g. "rest" or "socket". */
+  transport: string;
+  /** Whether this Adapter's Connections are per employee or per organization. */
+  connectionScope: "tenant" | "user";
+  /** The employee this Connection belongs to; null for an organization one. */
+  ownerUserId: string | null;
+  /**
+   * Every configuration value, decrypted: the plain ones and the ones stored
+   * as ciphertext, keyed by the Adapter's configuration field keys. Any OAuth
+   * tokens stored against the Connection appear as `accessToken` /
+   * `refreshToken` — a socket koppeling authenticates with the token the same
+   * way an HTTP one puts it in a header.
+   */
+  values: Readonly<Record<string, string>>;
+  /** Which of those keys the Adapter classifies as secret, for a module's own logging. */
+  secretKeys: readonly string[];
+  /** Permission to connect where this Adapter says it may. */
+  egressGrant: ModuleSocketGrant;
+};
+
+export type ModuleConnectionResolution =
+  | { ok: true; connection: ModuleConnectionValues }
+  | {
+      ok: false;
+      code:
+        | "NOT_FOUND"
+        | "FORBIDDEN"
+        | "CONNECTION_REQUIRED"
+        | "SECRET_KEYRING_MISSING";
+      /** A sentence for the person who has to fix it. */
+      message: string;
+    };
+
 export type ModulePlatformServices = {
   db: {
     withSession<T>(
@@ -204,6 +274,32 @@ export type ModulePlatformServices = {
         payload: Record<string, unknown>;
       },
     ): Promise<void>;
+  };
+  /**
+   * The plaintext of a Connection's configuration — the seam a koppeling that
+   * is not HTTP needs and had no way to reach. Core resolves the row under the
+   * caller's session, enforces the Adapter's connection scope, and only then
+   * decrypts; the keyring itself never leaves core. See
+   * `modules/connection-secrets.ts` for the three gates.
+   */
+  secrets: {
+    resolveConnectionValues(
+      session: TrustedSessionContext,
+      selector: ModuleConnectionSelector,
+    ): Promise<ModuleConnectionResolution>;
+  };
+  /**
+   * Outbound connections that are not requests. `egressHosts` entries naming a
+   * port (`mail.example.com:993`) grant a socket to exactly that host and
+   * port; a bare hostname stays an HTTP grant and grants no socket. See
+   * `modules/socket-egress.ts`.
+   */
+  egress: {
+    connect(
+      session: TrustedSessionContext,
+      grant: ModuleSocketGrant,
+      request: ModuleSocketRequest,
+    ): Promise<Duplex>;
   };
   mcp: {
     notifyToolsChanged(scope: { tenantId: string | null }): void;

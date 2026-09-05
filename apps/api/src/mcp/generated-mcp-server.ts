@@ -206,6 +206,7 @@ import type {
   McpProjectionContext,
   McpToolCallSource,
   ModuleDefinitionReference,
+  ModuleOperationSuccessResult,
   ModuleToolExecutionOptions,
   ModuleToolExecutionResult,
   ModuleInvocationSource,
@@ -265,6 +266,8 @@ import {
   bindOperationHandlers,
   DeclaredOperationError,
   invokeOperation,
+  isMcpProjection,
+  requireOperationAuthorization,
 } from "../operations/runtime.js";
 
 export { MCP_MOUNT_PATH, ORGANIZATION_MCP_PATH_PREFIX } from "./organization-resource.js";
@@ -1748,7 +1751,7 @@ export const __describeToolForTests = describeTool;
 export const __resourcesForSessionForTests = resourcesForSession;
 
 type ToolResult = {
-  content: { type: "text"; text: string }[];
+  content: CallToolResult["content"];
   structuredContent?: Record<string, unknown>;
   isError?: boolean;
   _meta?: Record<string, unknown>;
@@ -1761,6 +1764,64 @@ function ok(payload: unknown): ToolResult {
 }
 
 export const __okForTests = ok;
+
+/**
+ * An operation's MCP answer: the canonical JSON value as one text block, or —
+ * when the handler supplied an MCP projection — its content blocks verbatim
+ * (an image next to its metadata, say) with the value as structuredContent.
+ */
+function operationToolResult(
+  result: ModuleOperationSuccessResult,
+): ToolResult {
+  if (!result.mcp) return ok(result.value);
+  const structured =
+    result.mcp.structuredContent ??
+    (result.value && typeof result.value === "object" && !Array.isArray(result.value)
+      ? (result.value as Record<string, unknown>)
+      : undefined);
+  return {
+    content: result.mcp.content,
+    ...(structured ? { structuredContent: structured } : {}),
+  };
+}
+
+export const __operationToolResultForTests = operationToolResult;
+
+/**
+ * A plugin operation run as a native binding: its canonical value, plus —
+ * when the handler supplied an MCP projection — those content blocks under
+ * the reserved output `content`, so the binding's output mapping can carry
+ * them onto the Service and `derivedToolResult` can hand them to the model.
+ */
+function nativeOperationOutput(
+  result: ModuleOperationSuccessResult,
+): Record<string, unknown> {
+  const value = result.value;
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : { result: value };
+  return result.mcp ? { ...record, content: result.mcp.content } : record;
+}
+
+/**
+ * A derived (Service) tool's answer. Outputs are JSON, so by default they go
+ * out as one text block. A Service whose merged outputs carry `content` as a
+ * list of well-formed MCP content blocks (an image, extracted text — produced
+ * by a native plugin operation's MCP projection) answers with those blocks
+ * instead, and the remaining outputs as structuredContent: the generic
+ * passthrough that keeps binary content out of the JSON text block.
+ */
+function derivedToolResult(payload: Record<string, unknown>): ToolResult {
+  const { content, ...rest } = payload;
+  if (content === undefined || !isMcpProjection({ content })) return ok(payload);
+  return {
+    content: content as CallToolResult["content"],
+    structuredContent: rest,
+  };
+}
+
+export const __derivedToolResultForTests = derivedToolResult;
 
 /**
  * Shape a native Capability's mapped inputs the way the entity tool expects
@@ -3419,7 +3480,7 @@ function buildServer(
             ...(modulePlatform ? { platform: modulePlatform.services } : {}),
           },
         );
-        return ok(result.value);
+        return operationToolResult(result);
       } catch (error) {
         return failed(error);
       }
@@ -5079,11 +5140,31 @@ function buildServer(
                         ? tables.get(nativeTool.table)
                         : undefined;
                       if (!nativeTool || !nativeTable) {
-                        throw new HttpError(
-                          400,
-                          "OPERATION_MISCONFIGURED",
-                          `Native operation "${operationKey}" is not a generated operation of this deployment.`,
-                        );
+                        // Not an entity tool: a plugin operation by key. It
+                        // runs through the operation runtime exactly as its
+                        // own transports would (roles, tenancy, contract
+                        // validation), whether or not it carries a dedicated
+                        // MCP tool — that is what lets a Service hand the
+                        // model an operation's content blocks without
+                        // spending a slot of the dedicated-tool budget.
+                        const bound = operations.get(operationKey);
+                        if (!bound) {
+                          throw new HttpError(
+                            400,
+                            "OPERATION_MISCONFIGURED",
+                            `Native operation "${operationKey}" is not a generated operation of this deployment.`,
+                          );
+                        }
+                        requireOperationAuthorization(bound.operation, moduleSession);
+                        const produced = await invokeOperation(bound, inputs, {
+                          db,
+                          session: moduleSession,
+                          transport: "mcp",
+                          ...(modulePlatform
+                            ? { platform: modulePlatform.services }
+                            : {}),
+                        });
+                        return nativeOperationOutput(produced);
                       }
                       const nativeArgs = nativeToolArguments(
                         nativeTool.operation,
@@ -5184,7 +5265,7 @@ function buildServer(
                 throw error;
               }
             }
-            return ok(
+            return derivedToolResult(
               unavailable.length > 0
                 ? { ...accumulated, unavailable }
                 : accumulated,

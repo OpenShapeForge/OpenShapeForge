@@ -18,6 +18,9 @@ import {
   __unavailableOutcomeForTests as unavailableOutcome,
 } from "../generated-mcp-server.js";
 
+/** Tool content is a union of block kinds; the envelope's blocks are text. */
+const textOf = (block: unknown): string => (block as { text: string }).text;
+
 const OUTCOME: ConnectorProviderOutcome = {
   code: "CONNECTOR_PROVIDER_RATE_LIMITED",
   category: "rate_limit",
@@ -64,11 +67,11 @@ describe("a classified connector failure", () => {
         correlationId: "corr-1",
       },
     });
-    expect(JSON.parse(result.content[1]!.text)).toEqual(result.structuredContent);
+    expect(JSON.parse(textOf(result.content[1]))).toEqual(result.structuredContent);
   });
 
   it("leads with a summary that agrees with the structured retry meaning", () => {
-    const summary = result.content[0]!.text;
+    const summary = textOf(result.content[0]);
     expect(summary).toBe(
       "CONNECTOR_PROVIDER_RATE_LIMITED: Connector \"object-store\" operation \"listObjects\" " +
         "was rate limited by its provider. Retry after 2026-01-01T00:00:30.000Z.",
@@ -105,7 +108,7 @@ describe("a non-retryable classified failure", () => {
       'Operation "getTicket" was denied permission by its provider.',
       403,
     ));
-    expect(denied.content[0]!.text).toBe(
+    expect(textOf(denied.content[0])).toBe(
       'CONNECTOR_PROVIDER_PERMISSION_DENIED: Operation "getTicket" was ' +
         "denied permission by its provider. Not retryable; contact an administrator.",
     );
@@ -136,10 +139,10 @@ describe("an unclassified failure", () => {
   it("keeps the plain envelope and the CODE: message summary", () => {
     const result = failed(new HttpError(404, "NOT_FOUND", 'Unknown tool "x".'));
     expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toBe('NOT_FOUND: Unknown tool "x".');
+    expect(textOf(result.content[0])).toBe('NOT_FOUND: Unknown tool "x".');
     expect(result.structuredContent).toEqual({
       error: { code: "NOT_FOUND", message: 'Unknown tool "x".' },
     });
-    expect(JSON.parse(result.content[1]!.text)).toEqual(result.structuredContent);
+    expect(JSON.parse(textOf(result.content[1]))).toEqual(result.structuredContent);
   });
 });

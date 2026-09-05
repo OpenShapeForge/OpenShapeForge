@@ -15,7 +15,8 @@
  *                   { scheme: basic|bearer|header, usernameTemplate,
  *                     passwordFrom, headerName, tokenFrom }, egressHosts
  *   operation row:  kind, operation { method, pathTemplate },
- *                   inputFields, responseMapping { rootPath, fieldPaths }
+ *                   inputFields, responseMapping { rootPath, fieldPaths,
+ *                   transforms }
  *   binding:        <operationRef>, order, inputMapping [{from,to}],
  *                   outputMapping [{from,to}]
  *   connection row: <connectionValuesField> — plain values and encrypted
@@ -32,6 +33,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../rest/http-error.js";
+import { applyResponseTransforms } from "./response-transforms.js";
 import { hostAllowed } from "../connectors/executor.js";
 import {
   boundedAbortSignal,
@@ -1030,6 +1032,20 @@ export function mapOperationResponse(
         : { result: extracted };
   }
 
+  // Declarative transforms (see response-transforms.ts) reshape what the
+  // field paths could only reach, not decode — header lists, MIME trees,
+  // base64url bodies. They run after the "produced no outputs" checks and
+  // before the binding's output mapping, so the mapping sees final names.
+  if (
+    Array.isArray(responseMapping.transforms) &&
+    responseMapping.transforms.length > 0
+  ) {
+    operationOutputs = applyResponseTransforms(
+      operationOutputs,
+      responseMapping.transforms,
+    );
+  }
+
   const mapped = applyMapping(operationOutputs, binding.outputMapping);
   if (
     Array.isArray(binding.outputMapping) &&
@@ -1134,15 +1150,27 @@ export function describeAuthHeaders(auth: unknown): Record<string, string> {
   }
 }
 
-/** The generated operation a native Capability binds to, validated. */
+/** A generated entity tool (finding_create) or a plugin operation key. */
+const NATIVE_OPERATION_KEY =
+  /^(?:[a-z][a-z0-9_]*|[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+)$/;
+
+/**
+ * The in-process operation a native Capability binds to, validated: either a
+ * generated entity tool name (`finding_create`) or a plugin operation's key
+ * (`osf-integration.mail.read-attachment`), which the native executor runs
+ * through the operation runtime under the caller's session — so a plugin
+ * operation that carries no dedicated MCP tool is still reachable as a
+ * building block of a Service.
+ */
 export function nativeOperationKey(operationRow: JsonRecord): string {
   const operation = (operationRow.operation ?? {}) as JsonRecord;
   const key = operation.nativeOperation;
-  if (typeof key !== "string" || !/^[a-z][a-z0-9_]*$/.test(key)) {
+  if (typeof key !== "string" || !NATIVE_OPERATION_KEY.test(key)) {
     throw new HttpError(
       400,
       "OPERATION_MISCONFIGURED",
-      "A native Capability must name operation.nativeOperation (a generated operation key such as finding_create).",
+      "A native Capability must name operation.nativeOperation (a generated operation key such as " +
+        "finding_create, or a plugin operation key such as osf-integration.mail.read-attachment).",
     );
   }
   return key;

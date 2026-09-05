@@ -208,6 +208,41 @@ function asInput(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+const BASE64_BLOCK = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/**
+ * The optional MCP projection of a success result: JSON-safe content blocks
+ * of the kinds the MCP tool result carries. Text needs `text`; image and
+ * audio need base64 `data` and a `mimeType`; resource links need a `uri`.
+ */
+export function isMcpProjection(projection: unknown): boolean {
+  if (!projection || typeof projection !== "object" || Array.isArray(projection)) return false;
+  const { content, structuredContent } = projection as { content?: unknown; structuredContent?: unknown };
+  if (!Array.isArray(content) || content.length === 0 || !isJsonValue(content)) return false;
+  if (
+    structuredContent !== undefined &&
+    (!structuredContent || typeof structuredContent !== "object" || Array.isArray(structuredContent) ||
+      !isJsonValue(structuredContent))
+  ) {
+    return false;
+  }
+  return content.every((block) => {
+    if (!block || typeof block !== "object") return false;
+    const { type, text, data, mimeType, uri } = block as Record<string, unknown>;
+    switch (type) {
+      case "text":
+        return typeof text === "string";
+      case "image":
+      case "audio":
+        return typeof data === "string" && BASE64_BLOCK.test(data) && typeof mimeType === "string";
+      case "resource_link":
+        return typeof uri === "string";
+      default:
+        return false;
+    }
+  });
+}
+
 function isJsonValue(value: unknown, seen = new Set<object>()): boolean {
   if (value === null || typeof value === "string" || typeof value === "boolean") return true;
   if (typeof value === "number") return Number.isFinite(value);
@@ -328,6 +363,13 @@ export async function invokeOperation(
     }
     if (bound.operation.transports.rest.response.kind === "json" && !validation.output(result.value)) {
       throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned a value outside its canonical output schema.");
+    }
+    if (result.mcp !== undefined && !isMcpProjection(result.mcp)) {
+      throw new HttpError(
+        500,
+        "HANDLER_CONTRACT_VIOLATION",
+        "Operation handler returned an MCP projection that is not a list of well-formed content blocks.",
+      );
     }
     return result;
   };

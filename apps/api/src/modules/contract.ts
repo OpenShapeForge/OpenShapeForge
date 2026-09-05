@@ -373,6 +373,18 @@ export type ModuleOperationSuccessResult = {
   status?: number;
   headers?: Record<string, string>;
   contentType?: string;
+  /**
+   * Optional MCP projection of the same result. `value` stays the canonical
+   * JSON answer every transport validates against the output schema; this
+   * lets a handler additionally hand the model non-JSON content blocks — an
+   * image, a rendered page — that REST and GraphQL cannot carry. Only the
+   * MCP tool call reads it: the blocks replace the default JSON text block,
+   * and `structuredContent` defaults to `value` when that is an object.
+   */
+  mcp?: {
+    content: CallToolResult["content"];
+    structuredContent?: Record<string, unknown>;
+  };
 };
 
 /** A non-success result must match one error declared by the compiler plugin. */

@@ -1018,6 +1018,80 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
   }
 });
 
+test("MCP projects a handler's content blocks next to the canonical value", async () => {
+  const value = {
+    status: "accepted",
+    instanceId: "11111111-1111-4111-8111-111111111111",
+    definitionId: "22222222-2222-4222-8222-222222222222",
+  };
+  const image = { type: "image" as const, data: "iVBORw0KGgo=", mimeType: "image/png" };
+  const module: RuntimeModule = {
+    name: "workflow",
+    operationHandlers: {
+      startWebhook: () => ({
+        value,
+        mcp: { content: [{ type: "text", text: "one image" }, image] },
+      }),
+    },
+  };
+  const input = { definitionId: value.definitionId, idempotencyKey: "content-blocks" };
+
+  // Other transports keep the canonical value; the projection is not validated
+  // against the output schema and does not leak into it.
+  const bound = bindOperationHandlers([module]).get("workflow.instance.webhook-start")!;
+  const direct = await invokeOperation(bound, input, { transport: "graphql", session });
+  expect(direct.value).toEqual(value);
+
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  const server = __buildGeneratedMcpServerForTests({
+    db,
+    session,
+    modules: [module],
+    modulePlatform: platform,
+  });
+  const client = new Client({ name: "content-blocks-test", version: "1" }, { capabilities: {} });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const result = await client.callTool({ name: "workflow_start_webhook", arguments: input });
+    expect(result.isError).toBeFalsy();
+    expect(result.content).toEqual([{ type: "text", text: "one image" }, image]);
+    expect(result.structuredContent).toEqual(value);
+  } finally {
+    await client.close();
+    await server.close();
+    await db.destroy();
+  }
+});
+
+test("rejects an MCP projection that is not well-formed content", async () => {
+  const value = {
+    status: "accepted",
+    instanceId: "11111111-1111-4111-8111-111111111111",
+    definitionId: "22222222-2222-4222-8222-222222222222",
+  };
+  const input = { definitionId: value.definitionId, idempotencyKey: "bad-blocks" };
+  for (const mcp of [
+    { content: [] },
+    { content: [{ type: "image", mimeType: "image/png" }] },
+    { content: [{ type: "image", data: "not base64!", mimeType: "image/png" }] },
+    { content: [{ type: "video", data: "AAAA", mimeType: "video/mp4" }] },
+    { content: [{ type: "text", text: "ok" }], structuredContent: ["not", "a", "record"] },
+  ]) {
+    const module: RuntimeModule = {
+      name: "workflow",
+      operationHandlers: { startWebhook: () => ({ value, mcp }) as ModuleOperationResult },
+    };
+    const bound = bindOperationHandlers([module]).get("workflow.instance.webhook-start")!;
+    await expect(invokeOperation(bound, input, { transport: "mcp", session })).rejects.toMatchObject({
+      status: 500,
+      code: "HANDLER_CONTRACT_VIOLATION",
+    });
+  }
+});
+
 test("binary and stream responses pass through canonical REST routes without buffering changes", async () => {
   const base = (input: {
     key: string;

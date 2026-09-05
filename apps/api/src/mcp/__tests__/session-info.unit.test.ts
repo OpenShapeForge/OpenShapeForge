@@ -62,6 +62,7 @@ const linked: IdentityLinkState = {
   relationType: "person",
   candidateRelationId: null,
   linkedBy: "jit",
+  needsRoleAssignment: false,
 };
 
 const session = (

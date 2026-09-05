@@ -210,3 +210,86 @@ describe("failure mapping", () => {
     expect(calls.filter((call) => call.url.includes("/token")).length).toBe(2);
   });
 });
+
+describe("per-organization identity provider linking", () => {
+  it("links an alias with the bare string body, not JSON, on the native endpoint", async () => {
+    const { fetch, calls } = stubFetch({ admin: [() => new Response(null, { status: 204 })] });
+    await createKeycloakOrganizationAdminClient(config, { fetch }).linkIdentityProvider(
+      "acme",
+      "google-workspace",
+    );
+
+    const call = calls[1]!;
+    expect(call.url).toBe(
+      "http://keycloak.test:8080/admin/realms/openshapeforge/organizations/acme/identity-providers",
+    );
+    expect(call.init.method).toBe("POST");
+    expect(call.init.body).toBe("google-workspace");
+    expect((call.init.headers as Record<string, string>)["content-type"]).toBe("text/plain");
+  });
+
+  it("lists the identity providers linked to one organization", async () => {
+    const { fetch, calls } = stubFetch({
+      admin: [
+        () =>
+          Response.json([
+            { alias: "google-workspace", providerId: "google", enabled: true },
+          ]),
+      ],
+    });
+    const idps = await createKeycloakOrganizationAdminClient(config, { fetch }).listIdentityProviders(
+      "acme",
+    );
+
+    expect(calls[1]!.url).toBe(
+      "http://keycloak.test:8080/admin/realms/openshapeforge/organizations/acme/identity-providers",
+    );
+    expect(idps).toEqual([{ alias: "google-workspace", providerId: "google", enabled: true }]);
+  });
+
+  it("does not confuse one organization's linked providers with another's", async () => {
+    // Two independent stubs standing in for two organizations; the point is
+    // that listIdentityProviders addresses each by its OWN organization id in
+    // the URL, so nothing here could accidentally return the other's aliases.
+    const acme = stubFetch({
+      admin: [() => Response.json([{ alias: "google-workspace", providerId: "google" }])],
+    });
+    const other = stubFetch({ admin: [() => Response.json([])] });
+
+    const acmeIdps = await createKeycloakOrganizationAdminClient(config, {
+      fetch: acme.fetch,
+    }).listIdentityProviders("acme");
+    const otherIdps = await createKeycloakOrganizationAdminClient(config, {
+      fetch: other.fetch,
+    }).listIdentityProviders("other-tenant");
+
+    expect(acmeIdps.map((idp) => idp.alias)).toEqual(["google-workspace"]);
+    expect(otherIdps).toEqual([]);
+  });
+
+  it("unlinks an alias with a DELETE to the aliased sub-resource", async () => {
+    const { fetch, calls } = stubFetch({ admin: [() => new Response(null, { status: 204 })] });
+    await createKeycloakOrganizationAdminClient(config, { fetch }).unlinkIdentityProvider(
+      "acme",
+      "google-workspace",
+    );
+
+    expect(calls[1]!.url).toBe(
+      "http://keycloak.test:8080/admin/realms/openshapeforge/organizations/acme/" +
+        "identity-providers/google-workspace",
+    );
+    expect(calls[1]!.init.method).toBe("DELETE");
+  });
+
+  it("treats unlinking an already-unlinked alias as a no-op, not an error", async () => {
+    const { fetch } = stubFetch({
+      admin: [() => Response.json({ error: "not found" }, { status: 404 })],
+    });
+    await expect(
+      createKeycloakOrganizationAdminClient(config, { fetch }).unlinkIdentityProvider(
+        "acme",
+        "never-linked",
+      ),
+    ).resolves.toBeUndefined();
+  });
+});

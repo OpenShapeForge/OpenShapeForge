@@ -42,6 +42,7 @@ const linked = {
   displayName: "Hans Dev",
   candidateRelationId: null,
   linkedBy: "jit",
+  needsRoleAssignment: false,
 };
 
 const session = (overrides: Partial<TrustedSessionContext> = {}): TrustedSessionContext => ({

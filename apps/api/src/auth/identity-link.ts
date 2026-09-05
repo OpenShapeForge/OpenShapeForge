@@ -77,6 +77,14 @@ export type IdentityLinkState = {
   /** Set while pending, when the e-mail matched exactly one Relation. */
   candidateRelationId: string | null;
   linkedBy: string | null;
+  /**
+   * True only for a Relation the just-in-time path CREATED (no existing
+   * Relation in this tenant carried the token's e-mail). See
+   * db/migrations/identity-link.ts for why this — and not a Keycloak
+   * admin-API role grant at creation time — is what a brand-new identity's
+   * very first session can act on.
+   */
+  needsRoleAssignment: boolean;
 };
 
 /** What a linked session resolves to: the party the login acts as. */
@@ -268,6 +276,11 @@ async function ensureIdentityLink(
       relationId,
       candidateRelationId: null,
       linkedBy: "jit",
+      // The only place this ever becomes true: a brand-new Relation, created
+      // because nobody in this tenant already carried the token's e-mail. The
+      // pending_confirmation path above (an existing Relation, unconfirmed)
+      // and the administrator/self-confirm paths below never pass this.
+      needsRoleAssignment: true,
     });
     if (inserted) {
       console.info(
@@ -507,6 +520,7 @@ type LinkRow = {
   linked_by: string | null;
   display_name: string | null;
   relation_type: string | null;
+  needs_role_assignment: boolean;
 };
 
 async function upsertIdentity(
@@ -536,7 +550,7 @@ async function readLinkRow(
 ): Promise<LinkRow | null> {
   const result = await sql<LinkRow>`
     select ir.identity_id, i.issuer, i.subject, ir.status, ir.relation_id,
-           ir.candidate_relation_id, ir.linked_by,
+           ir.candidate_relation_id, ir.linked_by, ir.needs_role_assignment,
            coalesce(linked.display_name, candidate.display_name) as display_name,
            coalesce(linked.relation_type, candidate.relation_type) as relation_type
       from platform.identity_relations ir
@@ -559,15 +573,18 @@ async function insertLinkRow(
     relationId: string | null;
     candidateRelationId: string | null;
     linkedBy: string | null;
+    needsRoleAssignment?: boolean;
   },
 ): Promise<LinkRow | null> {
   const inserted = await sql<{ identity_id: string }>`
     insert into platform.identity_relations
-      (identity_id, tenant_id, status, relation_id, candidate_relation_id, linked_at, linked_by)
+      (identity_id, tenant_id, status, relation_id, candidate_relation_id, linked_at, linked_by,
+       needs_role_assignment)
     values
       (${row.identityId}, ${row.tenantId}, ${row.status}, ${row.relationId},
        ${row.candidateRelationId},
-       ${row.status === "linked" ? sql`now()` : null}, ${row.linkedBy})
+       ${row.status === "linked" ? sql`now()` : null}, ${row.linkedBy},
+       ${row.needsRoleAssignment ?? false})
     on conflict (identity_id, tenant_id) do nothing
     returning identity_id
   `.execute(trx);
@@ -603,5 +620,124 @@ function toState(row: LinkRow, identity: { issuer: string; subject: string }): I
     relationType: row.relation_type,
     candidateRelationId: row.candidate_relation_id,
     linkedBy: row.linked_by,
+    needsRoleAssignment: row.needs_role_assignment,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Org-admin: pending role assignment
+
+export type PendingRoleAssignment = {
+  identityId: string;
+  relationId: string;
+  displayName: string | null;
+  email: string | null;
+  /** When this identity first signed in and got JIT-linked (linked_at). */
+  firstSignInAt: string;
+};
+
+/**
+ * Identities in this tenant awaiting a real role — `list_pending_members`.
+ * Gated the same way `linkIdentityToRelation` is: the caller must hold
+ * Organization.All.ReadWrite. Ordered oldest first, so the longest-waiting
+ * new hire surfaces first.
+ */
+export async function listPendingRoleAssignments(
+  db: OpenShapeForgeDatabase,
+  session: SessionInput,
+): Promise<PendingRoleAssignment[]> {
+  if (!(session.roles ?? []).includes(IDENTITY_LINK_ADMIN_ROLE)) {
+    throw new HttpError(
+      403,
+      "FORBIDDEN",
+      `Listing pending members requires the ${IDENTITY_LINK_ADMIN_ROLE} role.`,
+    );
+  }
+  return withDbSession(db, session, async (trx) => {
+    const result = await sql<{
+      identity_id: string;
+      relation_id: string;
+      display_name: string | null;
+      email: string | null;
+      linked_at: string;
+    }>`
+      select ir.identity_id, ir.relation_id, r.display_name, i.email, ir.linked_at
+        from platform.identity_relations ir
+        join platform.identities i on i.id = ir.identity_id
+        join erp.relations r on r.id = ir.relation_id and r.tenant_id = ir.tenant_id
+       where ir.tenant_id = ${session.tenantId}
+         and ir.needs_role_assignment
+         and ir.status = 'linked'
+       order by ir.linked_at asc
+    `.execute(trx);
+    return result.rows.map((row) => ({
+      identityId: row.identity_id,
+      relationId: row.relation_id,
+      displayName: row.display_name,
+      email: row.email,
+      firstSignInAt: row.linked_at,
+    }));
+  });
+}
+
+/**
+ * Clear `needs_role_assignment` once an administrator has assigned a real
+ * role (`set_member_role`). Idempotent, and scoped to this tenant by the same
+ * RLS every other write here relies on.
+ */
+export async function clearNeedsRoleAssignment(
+  db: OpenShapeForgeDatabase,
+  session: SessionInput,
+  identityId: string,
+): Promise<void> {
+  await withDbSession(db, session, async (trx) => {
+    await sql`
+      update platform.identity_relations
+         set needs_role_assignment = false,
+             updated_at = now()
+       where identity_id = ${identityId}
+         and tenant_id = ${session.tenantId}
+    `.execute(trx);
+  });
+  const row = await withDbSession(db, session, (trx) => readLinkRow(trx, identityId, session.tenantId));
+  if (row) invalidateIdentityLink(row.issuer, row.subject, session.tenantId);
+}
+
+/** Resolve a relationId to its linked identityId in this tenant, for `set_member_role`. */
+export async function identityIdForRelation(
+  db: OpenShapeForgeDatabase,
+  session: SessionInput,
+  relationId: string,
+): Promise<string | null> {
+  return withDbSession(db, session, async (trx) => {
+    const result = await sql<{ identity_id: string }>`
+      select identity_id from platform.identity_relations
+       where tenant_id = ${session.tenantId} and relation_id = ${relationId} and status = 'linked'
+    `.execute(trx);
+    return result.rows[0]?.identity_id ?? null;
+  });
+}
+
+/**
+ * The Keycloak (issuer, subject) behind an identityId that has a row in this
+ * tenant — `set_member_role` needs `subject` (Keycloak's own user id, the
+ * `sub` claim) to call the role-mappings admin endpoint. Scoped to the
+ * caller's tenant by the same join every other read here uses, so an
+ * administrator cannot probe an identity from outside their organization.
+ */
+export async function identityKeycloakSubject(
+  db: OpenShapeForgeDatabase,
+  session: SessionInput,
+  identityId: string,
+): Promise<{ issuer: string; subject: string } | null> {
+  return withDbSession(db, session, async (trx) => {
+    const result = await sql<{ issuer: string; subject: string }>`
+      select i.issuer, i.subject
+        from platform.identities i
+        join platform.identity_relations ir
+          on ir.identity_id = i.id and ir.tenant_id = ${session.tenantId}
+       where i.id = ${identityId}
+    `.execute(trx);
+    return result.rows[0] ?? null;
+  });
 }

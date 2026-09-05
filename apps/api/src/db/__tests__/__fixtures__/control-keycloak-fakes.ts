@@ -119,6 +119,19 @@ export function fakeAdmin(spi: FakeSpiClient): KeycloakOrganizationAdminClient {
     if (!found) throw new Error(`fake admin: no organization "${id}"`);
     return found;
   };
+  // organizationId -> aliases of identity providers linked to it. A realm-wide
+  // map, not per-organization state on FakeOrganization, so cross-tenant
+  // isolation is provable the same way the real Keycloak Organizations
+  // endpoint's per-id scoping is: two organizations never share a Set.
+  const identityProviders = new Map<string, Set<string>>();
+  const linkedAliases = (id: string): Set<string> => {
+    let aliases = identityProviders.get(id);
+    if (!aliases) {
+      aliases = new Set();
+      identityProviders.set(id, aliases);
+    }
+    return aliases;
+  };
   const state = (id: string) => {
     const org = require_(id);
     return {
@@ -158,6 +171,22 @@ export function fakeAdmin(spi: FakeSpiClient): KeycloakOrganizationAdminClient {
     async listOrganizations(limit) {
       const rows = [...spi.organizations.entries()].map(([id, org]) => snapshot(id, org));
       return { organizations: rows.slice(0, limit), truncated: rows.length > limit };
+    },
+    async linkIdentityProvider(id, alias) {
+      require_(id);
+      linkedAliases(id).add(alias);
+    },
+    async listIdentityProviders(id) {
+      require_(id);
+      return [...linkedAliases(id)].map((alias) => ({
+        alias,
+        providerId: "google",
+        enabled: true,
+      }));
+    },
+    async unlinkIdentityProvider(id, alias) {
+      require_(id);
+      linkedAliases(id).delete(alias);
     },
   };
 }

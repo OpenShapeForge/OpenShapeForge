@@ -64,6 +64,19 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
       -- 'jit' for the just-in-time path, otherwise the platform.identities id
       -- of whoever linked: the person (confirm_my_link) or an administrator.
       linked_by              text,
+      -- True only for a Relation the just-in-time path CREATED (the "no
+      -- existing Relation carries this e-mail" branch of resolveIdentityLink,
+      -- ensureIdentityLink's phase 2). Never set on the pending_confirmation
+      -- path for an existing Relation, and never set by link_identity or
+      -- confirm_my_link — those attach to a Relation someone already has, so
+      -- there is nothing to grant. Cleared by set_member_role once an
+      -- administrator has assigned a real role. See auth/identity.ts: while
+      -- true, the session's roles are overridden to a hardcoded minimal set
+      -- regardless of the JWT's resource_access — a JIT-created Relation's
+      -- very first session is issued before any admin API role grant could
+      -- reach that same token, so a code-level fallback is the only way that
+      -- first session already has minimal working access.
+      needs_role_assignment  boolean not null default false,
       created_at             timestamptz not null default now(),
       updated_at             timestamptz not null default now(),
       primary key (identity_id, tenant_id),
@@ -73,8 +86,15 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
       )
     );
 
+    alter table platform.identity_relations
+      add column if not exists needs_role_assignment boolean not null default false;
+
     create index if not exists identity_relations_tenant_relation_idx
       on platform.identity_relations (tenant_id, relation_id);
+
+    create index if not exists identity_relations_pending_role_idx
+      on platform.identity_relations (tenant_id)
+      where needs_role_assignment;
 
     -- The subject behind an identity id, for the write policy below. A
     -- function-scoped bypass (the same shape as app.tenant_for_keycloak_

@@ -16,8 +16,12 @@ import { APP_ROLE } from "../migrations/app-role.js";
 import { withDbSession } from "../session.js";
 import {
   __resetIdentityLinkForTests,
+  clearNeedsRoleAssignment,
   confirmPendingLink,
+  identityIdForRelation,
+  identityKeycloakSubject,
   linkIdentityToRelation,
+  listPendingRoleAssignments,
   resolveIdentityLink,
   sessionRelation,
   type IdentityClaims,
@@ -340,6 +344,8 @@ describe("identity ↔ Relation link", () => {
 
         expect(identityLinkToolsForSession(adminSignIn.session).map((tool) => tool.name)).toEqual([
           "link_identity",
+          "list_pending_members",
+          "set_member_role",
         ]);
         expect(identityLinkToolsForSession(employeeSignIn.session)).toEqual([]);
 
@@ -467,6 +473,123 @@ describe("identity ↔ Relation link", () => {
             relationId: target,
           }),
         ).rejects.toMatchObject({ code: "IDENTITY_NOT_FOUND" });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "needs_role_assignment is set only on the JIT-create path, listed for admins, and cleared by set_member_role",
+    async () => {
+      await withScratchDb(async (appDb, adminDb) => {
+        await seedTenants(adminDb);
+        const admin = person("admin", ADMIN_ROLES);
+
+        // 1. A brand-new identity: no existing Relation carries the e-mail, so
+        //    ensureIdentityLink creates one. needs_role_assignment must be true.
+        const ivy = person("ivy");
+        const first = await signIn(appDb, ivy, tenantA);
+        expect(first.state!.needsRoleAssignment).toBe(true);
+        expect(
+          (await linkRows(adminDb, tenantA)).find((row) => row.identity_id === first.state!.identityId),
+        ).toMatchObject({ status: "linked" });
+        const flagRow = (
+          await sql<{ needs_role_assignment: boolean }>`
+            select needs_role_assignment from platform.identity_relations
+             where identity_id = ${first.state!.identityId} and tenant_id = ${tenantA}
+          `.execute(adminDb)
+        ).rows[0]!;
+        expect(flagRow.needs_role_assignment).toBe(true);
+
+        // 2. A later session for the SAME identity reads the flag back as
+        //    still true (the cache was reset by signIn, so this is a fresh read).
+        const second = await signIn(appDb, ivy, tenantA);
+        expect(second.state!.needsRoleAssignment).toBe(true);
+
+        // 3. The pending_confirmation path (an existing Relation, e-mail
+        //    match, nobody confirmed) must NEVER set the flag — it attaches to
+        //    a Relation someone already has, so there is nothing to grant.
+        const existingEmail = "jack@example.com";
+        await existingRelation(adminDb, tenantA, "Jack Existing", existingEmail);
+        const jack = person("jack");
+        const jackFirst = await signIn(appDb, jack, tenantA);
+        expect(jackFirst.state!.status).toBe("pending_confirmation");
+        expect(jackFirst.state!.needsRoleAssignment).toBe(false);
+
+        // 4. link_identity (an administrator linking explicitly) must not set
+        //    it either. Reuse jack's identity from step 3 (pending_confirmation,
+        //    needs_role_assignment already false) so this exercises the
+        //    administrator-link write itself, not a JIT create beforehand.
+        const adminInA = await signIn(appDb, admin, tenantA);
+        const jackTarget = await existingRelation(adminDb, tenantA, "Jack Target", "jack-target@example.com");
+        const linked = await linkIdentityToRelation(appDb, adminInA.session, {
+          identityEmail: "jack@example.com",
+          relationId: jackTarget,
+        });
+        expect(linked.needsRoleAssignment).toBe(false);
+
+        // 5. list_pending_members (listPendingRoleAssignments): ivy shows up
+        //    (needs_role_assignment, linked) — note admin's OWN identity is
+        //    also JIT-created here and therefore also pending, since the flag
+        //    is about how the Relation came to exist, not about the JWT's
+        //    roles. Jack does not show up (still pending_confirmation, never
+        //    linked at all).
+        const pending = await listPendingRoleAssignments(appDb, adminInA.session);
+        expect(pending.map((row) => row.identityId)).not.toContain(jackFirst.state!.identityId);
+        const ivyPending = pending.find((row) => row.identityId === first.state!.identityId);
+        expect(ivyPending).toMatchObject({
+          identityId: first.state!.identityId,
+          relationId: first.state!.relationId,
+          email: "ivy@example.com",
+        });
+
+        // Gated the same way link_identity is: a non-admin session is refused.
+        const plainSession = sessionFor(person("plain"), tenantA);
+        await expect(listPendingRoleAssignments(appDb, plainSession)).rejects.toMatchObject({
+          code: "FORBIDDEN",
+        });
+
+        // 6. identityIdForRelation / identityKeycloakSubject: what
+        //    set_member_role resolves before calling the Keycloak admin API.
+        const resolvedIdentityId = await identityIdForRelation(
+          appDb,
+          adminInA.session,
+          first.state!.relationId!,
+        );
+        expect(resolvedIdentityId).toBe(first.state!.identityId);
+        const subject = await identityKeycloakSubject(appDb, adminInA.session, first.state!.identityId);
+        expect(subject).toEqual({ issuer: ISSUER, subject: ivy.claims.subject });
+
+        // 7. clearNeedsRoleAssignment: what set_member_role does after granting
+        //    the real Keycloak role. Idempotent, tenant-scoped, and it
+        //    invalidates the cache so the NEXT session re-reads the flag.
+        await clearNeedsRoleAssignment(appDb, adminInA.session, first.state!.identityId);
+        const clearedRow = (
+          await sql<{ needs_role_assignment: boolean }>`
+            select needs_role_assignment from platform.identity_relations
+             where identity_id = ${first.state!.identityId} and tenant_id = ${tenantA}
+          `.execute(adminDb)
+        ).rows[0]!;
+        expect(clearedRow.needs_role_assignment).toBe(false);
+
+        __resetIdentityLinkForTests();
+        const third = await signIn(appDb, ivy, tenantA);
+        expect(third.state!.needsRoleAssignment).toBe(false);
+        expect(
+          (await listPendingRoleAssignments(appDb, adminInA.session)).map((row) => row.identityId),
+        ).not.toContain(first.state!.identityId);
+
+        // Clearing again is a no-op, not an error.
+        await expect(
+          clearNeedsRoleAssignment(appDb, adminInA.session, first.state!.identityId),
+        ).resolves.toBeUndefined();
+
+        // Cross-tenant: an administrator of B never sees A's pending members
+        // (only their own tenant's — here, their own JIT-created identity).
+        const adminInB = await signIn(appDb, person("admin2", ADMIN_ROLES), tenantB);
+        const pendingInB = await listPendingRoleAssignments(appDb, adminInB.session);
+        expect(pendingInB.map((row) => row.identityId)).not.toContain(first.state!.identityId);
+        expect(pendingInB.every((row) => row.identityId !== jackFirst.state!.identityId)).toBe(true);
       });
     },
     TEST_TIMEOUT,

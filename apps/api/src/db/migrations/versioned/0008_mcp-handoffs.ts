@@ -8,7 +8,7 @@ const migration: VersionedMigration = {
   up: async (db) => {
     await sql`
       create table if not exists platform.mcp_handoffs (
-        id uuid primary key default gen_random_uuid(),
+        id uuid not null default gen_random_uuid(),
         tenant_id uuid not null,
         user_id uuid not null,
         kind text not null,
@@ -18,7 +18,12 @@ const migration: VersionedMigration = {
         payload_algorithm text not null,
         created_at timestamptz not null default now(),
         expires_at timestamptz not null,
-        consumed_at timestamptz
+        consumed_at timestamptz,
+      -- Issue #509: the generated shape keys every tenant-scoped table on
+      -- (tenant_id, id) so a foreign key cannot reach across tenants. This
+      -- pre-creation must mirror it exactly, or the generated roll-forward
+      -- no-ops on the table and its references find no key to attach to.
+        primary key (tenant_id, id)
       )
     `.execute(db);
     await sql`create unique index if not exists mcp_handoffs_token_hash_uidx on platform.mcp_handoffs (token_hash)`.execute(

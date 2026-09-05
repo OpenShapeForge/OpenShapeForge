@@ -26,7 +26,7 @@ const migration: VersionedMigration = {
       create schema if not exists erp;
 
       create table if not exists erp.documents (
-        id uuid primary key not null default gen_random_uuid(),
+        id uuid not null default gen_random_uuid(),
         tenant_id uuid not null,
         created_at timestamptz not null default now(),
         updated_at timestamptz not null default now(),
@@ -49,11 +49,16 @@ const migration: VersionedMigration = {
         case_file_id uuid,
         case_id uuid,
         relation_id uuid,
-        current_version_id uuid
+        current_version_id uuid,
+      -- Issue #509: the generated shape keys every tenant-scoped table on
+      -- (tenant_id, id) so a foreign key cannot reach across tenants. This
+      -- pre-creation must mirror it exactly, or the generated roll-forward
+      -- no-ops on the table and its references find no key to attach to.
+        primary key (tenant_id, id)
       );
 
       create table if not exists erp.document_versions (
-        id uuid primary key not null default gen_random_uuid(),
+        id uuid not null default gen_random_uuid(),
         tenant_id uuid not null,
         created_at timestamptz not null default now(),
         updated_at timestamptz not null default now(),
@@ -71,7 +76,8 @@ const migration: VersionedMigration = {
         is_major_version boolean not null default false,
         change_summary text,
         document_id uuid,
-        account_id uuid
+        account_id uuid,
+        primary key (tenant_id, id)
       );
 
       alter table erp.document_versions

@@ -22,6 +22,7 @@ import {
   createGeneratedEntity,
   deleteGeneratedEntity,
   isCallerWritableColumn,
+  isOperationWrittenColumn,
   listGeneratedEntities,
   listGeneratedEntityRelation,
   updateGeneratedEntity,
@@ -223,6 +224,28 @@ function appendDescription(
  * `generatedEntityTypeDefs` and asserting against it would be vacuous. Calling
  * this with a synthetic table exercises the real rendering path.
  */
+/**
+ * GraphQL rejects an unknown input field during validation, before any resolver
+ * runs, so the `writtenBy` refusal cannot be phrased there the way REST and MCP
+ * phrase theirs. The next best thing is that the schema itself says why the
+ * field is missing and what to call instead — an introspecting client reads
+ * this without having to be refused first.
+ */
+function operationWrittenNote(table: GeneratedTable): string | undefined {
+  const written = table.columns.filter(isOperationWrittenColumn);
+  if (written.length === 0) return undefined;
+  const parts = written.map(
+    (column) =>
+      `${fieldNameForColumn(column)} (${column
+        .writtenBy!.map((writer) => writer.operation)
+        .join(", ")})`,
+  );
+  return (
+    "Fields that record that a process took place are absent here and are " +
+    `written only by the operation named: ${parts.join("; ")}.`
+  );
+}
+
 export function renderTypeDefinition(
   table: GeneratedTable,
   documentationIndex: ReadonlyMap<string, GraphqlEntityDocumentation> =
@@ -343,10 +366,12 @@ ${queryableColumns
       direction: String
     }
 
+${renderDescription(operationWrittenNote(table), "    ")}
     input Create${graphql.typeName}Input {
 ${createInputBody}
     }
 
+${renderDescription(operationWrittenNote(table), "    ")}
     input Update${graphql.typeName}Input {
 ${updateInputBody}
     }

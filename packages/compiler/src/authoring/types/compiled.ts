@@ -83,6 +83,12 @@ export interface CompiledField {
    * `classification` does (#177).
    */
   immutable?: boolean;
+  /**
+   * API contract: written only by the named operations (contract keys), never
+   * through generated create/update. Reaches the runtime through the manifest
+   * column, the way `immutable` and `classification` do.
+   */
+  writtenBy?: string[];
   label: LocalizedText;
   description?: LocalizedText;
   help?: LocalizedText;

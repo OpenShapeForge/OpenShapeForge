@@ -193,6 +193,13 @@
           "type": "boolean",
           "description": "API contract: the field may be set when the record is created and is refused by every generated transport afterwards (REST 400; absent from the GraphQL update input and the MCP update schema). Use it for provenance links and other values that must not be re-pointed once written."
         },
+        "writtenBy": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "API contract: operation contract keys (e.g. `pentest.finding.review`) that are the only writers of this field. The field is absent from the generated create AND update schemas on every transport, and a caller sending it anyway is refused with a message naming these operations. Use it for fields that record that a process took place — a review signed off, a scope approved, a retest concluded — where the operation is the only place the preconditions are checked. Not to be confused with `readOnly`, which selects a display component and enforces nothing. A key no compiled operation answers to fails the build."
+        },
         "label": { "$ref": "#/$defs/localizedText" },
         "description": { "$ref": "#/$defs/localizedText" },
         "placeholder": { "$ref": "#/$defs/localizedText" },

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { createHash } from "node:crypto";
 import { renderOpenApiSpec, type OpenApiSpecOptions } from "./generate-openapi.js";
+import type { CompiledPluginOperation } from "./generate-operations.js";
 import type {
   ColumnDefinition,
   GeneratedArtifact,
@@ -30,6 +31,12 @@ export const WORKER_DATABASE_ROLE = "openshapeforge_worker";
 export type GenerateArtifactsOptions = {
   source?: string;
   openApi?: OpenApiSpecOptions;
+  /**
+   * Compiled plugin operations, used to resolve the operation keys authored in
+   * a field's `writtenBy` into the routes a caller can actually reach. Required
+   * as soon as any column carries `writtenBy`; see resolveColumnWriters.
+   */
+  operations?: CompiledPluginOperation[];
 };
 
 function sqlGeneratedHeader(source: string): string {
@@ -588,7 +595,62 @@ function isLegacyFullCrudCompatible(table: TableDefinition): boolean {
   );
 }
 
-function renderManifestJson(manifest: PlatformSchemaManifest, source: string): string {
+/**
+ * How a caller reaches an operation that writes a `writtenBy` column.
+ *
+ * The authored fact is a bare operation key. That is the right thing to author
+ * — it is the one stable identifier — and the wrong thing to put in a refusal:
+ * a caller that just had `reviewedAt` rejected needs the route it can call
+ * instead, not a key it has to look up. So the compiler resolves the key here,
+ * once, and the runtime message is complete without the runtime having to know
+ * the operation catalog.
+ */
+type ManifestColumnWriter = {
+  operation: string;
+  rest: string;
+  mcp?: string;
+};
+
+function resolveColumnWriters(
+  table: { name: string },
+  column: { name: string; writtenBy?: string[] },
+  operations: CompiledPluginOperation[] | undefined,
+): ManifestColumnWriter[] {
+  const keys = column.writtenBy ?? [];
+  if (keys.length === 0) return [];
+  if (!operations) {
+    throw new Error(
+      `Column ${table.name}.${column.name} is authored writtenBy: ` +
+        `[${keys.join(", ")}], but the compiled operations were not supplied to ` +
+        `generateArtifacts. Pass the operations so the refusal can name a route.`,
+    );
+  }
+  const byKey = new Map(operations.map((operation) => [operation.key, operation]));
+  return keys.map((key) => {
+    const operation = byKey.get(key);
+    if (!operation) {
+      throw new Error(
+        `Column ${table.name}.${column.name} is authored writtenBy: [${key}], but no ` +
+          `compiled operation has that key. A field nobody can write is worse than an ` +
+          `unprotected one — fix the key or drop the writtenBy entry.`,
+      );
+    }
+    const { method, path } = operation.transports.rest;
+    return {
+      operation: key,
+      rest: `${method} ${path}`,
+      ...(operation.transports.mcp.enabled === true
+        ? { mcp: operation.transports.mcp.name }
+        : {}),
+    };
+  });
+}
+
+function renderManifestJson(
+  manifest: PlatformSchemaManifest,
+  source: string,
+  operations?: CompiledPluginOperation[],
+): string {
   const checksum = createHash("sha256")
     .update(JSON.stringify(manifest))
     .digest("hex");
@@ -624,6 +686,11 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
       // Authored `immutable: true` — the runtime's writability rule refuses the
       // column on update on every transport (#177).
       ...(column.immutable === undefined ? {} : { immutable: column.immutable }),
+      // Authored `writtenBy: [...]` — no transport offers the column on create
+      // or update, and the CRUD layer refuses it while naming these routes.
+      ...(column.writtenBy === undefined
+        ? {}
+        : { writtenBy: resolveColumnWriters(table, column, operations) }),
     })),
     // The worker surface, republished so the migrate chain can derive the
     // worker role's grants from the same declarations the policy was emitted
@@ -674,6 +741,9 @@ function renderManifestJson(manifest: PlatformSchemaManifest, source: string): s
         primaryKey: column.primaryKey,
         ...(column.classification === undefined ? {} : { classification: column.classification }),
         ...(column.immutable === undefined ? {} : { immutable: column.immutable }),
+        // Already resolved on the rendered table above; republished here so the
+        // runtime's generated-entity view carries the same one fact.
+        ...(column.writtenBy === undefined ? {} : { writtenBy: column.writtenBy }),
       })),
     }))
     .sort((a, b) => a.slug.localeCompare(b.slug));
@@ -723,7 +793,7 @@ ${renderForeignKeySql(manifest)}
     },
     {
       path: "apps/api/src/generated/db/manifest.json",
-      contents: renderManifestJson(manifest, source),
+      contents: renderManifestJson(manifest, source, options.operations),
     },
     {
       path: "apps/api/src/generated/rest/openapi.json",

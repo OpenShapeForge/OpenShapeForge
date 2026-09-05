@@ -252,6 +252,14 @@ export type ColumnDefinition = {
    * keep byte-identical output.
    */
   immutable?: true;
+  /**
+   * Authored `writtenBy: [...]` on the field that backs this column: operation
+   * contract keys that are the only writers of the value. The column is absent
+   * from every generated create and update schema, and the CRUD layer refuses
+   * it with a message naming these operations. Omitted when unflagged, so
+   * unaffected columns keep byte-identical output.
+   */
+  writtenBy?: string[];
 };
 
 export type LocalizedTextManifest = {

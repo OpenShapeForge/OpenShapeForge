@@ -75,6 +75,8 @@ import { withDbSession } from "../db/session.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import {
   createGeneratedEntity,
+  isOperationWrittenColumn,
+  operationWrittenRefusal,
   createGeneratedEntityAfterElicitation,
   createGeneratedEntityForTable,
   deleteGeneratedEntity,
@@ -2535,6 +2537,30 @@ function assertDeclaredProperties(
   }
 }
 
+/**
+ * A field authored `writtenBy: [...]` is absent from the tool schema, so
+ * assertDeclaredProperties below would already refuse it — as "unknown or
+ * non-writable", which sends a model looking for a spelling mistake. Run this
+ * first so it hears the actual reason and the operation to call instead. The
+ * generated CRUD layer refuses it a second time; that is the backstop for any
+ * path that does not come through here.
+ */
+function assertOperationWrittenFields(
+  values: Record<string, unknown>,
+  table: GeneratedTable | undefined,
+): void {
+  for (const column of table?.columns ?? []) {
+    if (!isOperationWrittenColumn(column)) continue;
+    const field = fieldNameForColumn(column);
+    if (!Object.prototype.hasOwnProperty.call(values, field)) continue;
+    throw new HttpError(
+      400,
+      "BAD_USER_INPUT",
+      operationWrittenRefusal(field, column.writtenBy!),
+    );
+  }
+}
+
 function requireId(args: Record<string, unknown>): string {
   const id = args.id;
   if (typeof id !== "string" || id === "") {
@@ -2703,6 +2729,7 @@ async function invokeTool(
             Object.entries(values).filter(([key]) => key !== elicitField),
           )
         : values;
+      assertOperationWrittenFields(modelValues, table);
       assertDeclaredProperties(tool.inputSchema, modelValues, "field");
       assertWritableValues(modelValues, entity, table, session);
       await assertPublishableWrite(db, session, tables, table, values);
@@ -2733,6 +2760,7 @@ async function invokeTool(
         values,
         "field",
       );
+      assertOperationWrittenFields(values, table);
       assertWritableValues(values, entity, table, session);
       await assertPublishableWrite(db, session, tables, table, values, id);
       const row = await updateGeneratedEntity(db, session, {
@@ -5961,6 +5989,15 @@ function buildServer(
                 ),
               )
             : modelSent;
+        // Before the advertised schema does: a `writtenBy` field is absent from
+        // that schema, so ajv would call it an additional property and send the
+        // caller hunting for a typo instead of naming the operation.
+        assertOperationWrittenFields(
+          match.operation === "update"
+            ? ((toValidate.values ?? {}) as Record<string, unknown>)
+            : toValidate,
+          table,
+        );
         assertSchemaValid(match.inputSchema, toValidate, "arguments");
       }
       const outcome = await invokeTool(

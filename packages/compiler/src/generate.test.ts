@@ -1894,3 +1894,61 @@ describe("generated REST OpenAPI artifact", () => {
     expect(render()).toBe(render());
   });
 });
+
+describe("writtenBy columns", () => {
+  const writtenByManifest = (operationKey: string): PlatformSchemaManifest => ({
+    version: 1,
+    tables: [
+      {
+        schema: "pentest",
+        name: "findings",
+        tenantScoped: true,
+        columns: [
+          { name: "id", type: "uuid", primaryKey: true, default: "gen_random_uuid()" },
+          { name: "tenant_id", type: "uuid", required: true },
+          { name: "title", type: "text", required: true },
+          {
+            name: "reviewed_at",
+            type: "timestamptz",
+            sourceField: "reviewedAt",
+            writtenBy: [operationKey],
+          },
+        ],
+      },
+    ],
+  });
+
+  const reviewOperation = {
+    key: "pentest.finding.review",
+    transports: {
+      rest: { method: "POST", path: "/api/pentest/findings/:findingId/review" },
+      mcp: { enabled: false },
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: only the fields read here matter.
+  } as any;
+
+  it("resolves the authored operation key into a route a caller can use", () => {
+    const manifestJson = JSON.parse(
+      generateArtifacts(writtenByManifest("pentest.finding.review"), {
+        operations: [reviewOperation],
+      }).find((artifact) => artifact.path.endsWith("db/manifest.json"))!.contents,
+    );
+    const column = manifestJson.tables
+      .find((table: { name: string }) => table.name === "pentest.findings")
+      .columns.find((candidate: { name: string }) => candidate.name === "reviewed_at");
+    expect(column.writtenBy).toEqual([
+      {
+        operation: "pentest.finding.review",
+        rest: "POST /api/pentest/findings/:findingId/review",
+      },
+    ]);
+  });
+
+  it("fails the build when the named operation does not exist", () => {
+    expect(() =>
+      generateArtifacts(writtenByManifest("pentest.finding.reviw"), {
+        operations: [reviewOperation],
+      }),
+    ).toThrow(/no.*compiled operation has that key/i);
+  });
+});

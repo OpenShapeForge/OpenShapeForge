@@ -410,6 +410,29 @@ function collectImmutableFieldKeys(
   return result;
 }
 
+/**
+ * Flatten compiled fields into field key → the operation keys authored in
+ * `writtenBy`. Stamped onto the backing column so the transports can leave the
+ * field out of their create/update schemas and refuse it when a caller sends
+ * it anyway. Same route as `immutable`, for the same reason: an authored flag
+ * is worth nothing until the manifest carries it to the transports.
+ */
+function collectFieldWriters(
+  fields: CompiledField[] | undefined,
+  result = new Map<string, string[]>(),
+): Map<string, string[]> {
+  for (const field of fields ?? []) {
+    if (field.writtenBy && field.writtenBy.length > 0 && !result.has(field.key)) {
+      result.set(field.key, [...field.writtenBy]);
+    }
+    collectFieldWriters(field.children, result);
+    if (field.item) {
+      collectFieldWriters([field.item], result);
+    }
+  }
+  return result;
+}
+
 function sortTablesByDependencies(tables: TableDefinition[]): TableDefinition[] {
   const pending = new Map(tables.map((table) => [tableKey(table), table]));
   const sorted: TableDefinition[] = [];
@@ -968,6 +991,10 @@ export function compileAuthoringBackendManifest(
     // Field keys authored `immutable: true`, stamped onto their backing column
     // so the transports can refuse them on update (#177).
     const immutableFields = collectImmutableFieldKeys(candidate.contract.model.fields);
+    // Field keys authored `writtenBy: [...]`, stamped onto their backing column
+    // so no transport offers them on create/update and the CRUD layer can name
+    // the operation that may set them.
+    const fieldWriters = collectFieldWriters(candidate.contract.model.fields);
 
     for (const storageColumn of candidate.contract.storage.columns) {
       const field = candidate.fieldsByKey.get(storageColumn.field);
@@ -981,6 +1008,9 @@ export function compileAuthoringBackendManifest(
         sourceField: storageColumn.field,
         ...(sensitivity ? { classification: sensitivity } : {}),
         ...(immutableFields.has(storageColumn.field) ? { immutable: true as const } : {}),
+        ...(fieldWriters.has(storageColumn.field)
+          ? { writtenBy: fieldWriters.get(storageColumn.field)! }
+          : {}),
       };
       const defaultValue = defaultSql(field, column);
       if (defaultValue !== undefined) {

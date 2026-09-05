@@ -127,9 +127,11 @@ jobs:
         run: bun run test:layout
 
       # API unit tests that need no database: config (limits, production guard),
-      # the Fastify rate-limit boundary (driven with app.inject), and the
-      # authorization guards that reject before any transaction opens. The
-      # database-backed suites run in the db-tests job below.
+      # the Fastify rate-limit boundary (driven with app.inject), the
+      # authorization guards that reject before any transaction opens, and the
+      # milestone billing engine's pure halves — request-body parsing and the
+      # percentage-to-amount computation, neither of which opens a connection.
+      # The database-backed suites run in the db-tests job below.
       - name: API unit tests (no database)
         # TEST_REDIS_URL points at the service below, so the shared-store rate
         # limit (#161) is PROVEN here rather than skipped — a skipped test is
@@ -137,7 +139,7 @@ jobs:
         env:
           TEST_REDIS_URL: redis://127.0.0.1:6399
         run: >-
-          cd apps/api && bun test src/config src/roles src/control
+          cd apps/api && bun test src/config src/roles src/control src/billing
           src/graphql/__tests__/introspection.test.ts
           src/graphql/__tests__/observability-readiness.test.ts
           src/graphql/__tests__/root-ordering.test.ts

@@ -361,11 +361,20 @@ function buildToolsForEntity(
       : `osf_${operation}`;
 
   // Authored description wins outright: an author writing one is correcting
-  // the composed default, so nothing is appended to it.
+  // the composed default, so nothing is appended to it — except the writtenBy
+  // note, which is not prose about the entity but a fact about the schema this
+  // very tool advertises. An author who overrides the description has not
+  // thereby decided that `reviewedAt` may be attempted.
   const described = (
     operation: McpToolDefinition["operation"],
     fallback: string,
-  ) => mcp.toolOverrides?.[operation]?.description ?? fallback;
+  ) => {
+    const authored = mcp.toolOverrides?.[operation]?.description;
+    if (authored === undefined) return fallback;
+    return operation === "create" || operation === "update"
+      ? `${authored}${writerNote}`
+      : authored;
+  };
 
   if (mcp.operations.list) {
     const filterProperties: JsonObject = {};

@@ -36,6 +36,14 @@
  *   3. The merged document is validated as an `authorizationConfig`, so a
  *      patch that produces an unusable realm fails here, naming the patch,
  *      rather than in the generator naming the merged file nobody wrote.
+ *
+ * A role-name list may only narrow relative to what an earlier layer already
+ * declared at that exact path — `assertAuthorizationGrantsOnlyNarrow`, called
+ * from the layer resolver right after each patch is applied, the same point
+ * `assertCrudPolicyOnlyNarrows` checks `entityPatch`'s CRUD exposure. Adding
+ * to a list an earlier layer already has is refused; adding to a path no
+ * earlier layer declared (a brand-new grant) is not. See that function for
+ * the null-then-readd escape hatch.
  */
 import { authoringValidator } from "./schema-validation.js";
 
@@ -249,6 +257,82 @@ function isRoleList(path: string[]): boolean {
   if (segments[0] !== "realmRoles") return false;
   if (segments.length === 3 && segments[2] === "includes") return true;
   return segments.length === 4 && segments[2] === "composites";
+}
+
+// ---------------------------------------------------------------------------
+// Monotonic narrowing across layers
+// ---------------------------------------------------------------------------
+
+/**
+ * Every role-name list already declared in `doc`, keyed by its exact path
+ * (`clientRoles.<client>`, `realmRoles.<role>.composites.<client>`,
+ * `realmRoles.<role>.includes`) so a later patch's result can be compared
+ * against the same path in an earlier one.
+ */
+function roleListsByPath(doc: JsonValue): Map<string, string[]> {
+  const result = new Map<string, string[]>();
+  if (!isPlainObject(doc)) return result;
+  const clientRoles = isPlainObject(doc.clientRoles) ? doc.clientRoles : {};
+  for (const [client, list] of Object.entries(clientRoles)) {
+    if (isStringList(list)) result.set(`clientRoles.${client}`, list);
+  }
+  const realmRoles = isPlainObject(doc.realmRoles) ? doc.realmRoles : {};
+  for (const [role, def] of Object.entries(realmRoles)) {
+    if (!isPlainObject(def)) continue;
+    if (isStringList(def.includes)) result.set(`realmRoles.${role}.includes`, def.includes);
+    const composites = isPlainObject(def.composites) ? def.composites : {};
+    for (const [client, list] of Object.entries(composites)) {
+      if (isStringList(list)) result.set(`realmRoles.${role}.composites.${client}`, list);
+    }
+  }
+  return result;
+}
+
+/**
+ * Authorization grants are a monotonic security policy across layers, the
+ * same invariant `assertCrudPolicyOnlyNarrows` (layers.ts) already enforces
+ * for `entityPatch`'s CRUD exposure: a later `authorizationPatch` may drop a
+ * grant an earlier layer already declared at an exact path, or leave it
+ * alone, but it may not add to a grant list an earlier layer already
+ * declared there — that is restoring or widening access a single-file review
+ * of the later patch cannot see, since the base list it is unioning onto
+ * lives in a different file entirely.
+ *
+ * A path with NO prior declaration (a brand-new client's grants, a brand-new
+ * realm role, a composite target a role never named before) is not a
+ * restore or a widen of anything — it is unrestricted.
+ *
+ * The escape hatch: set the key to `null` in one layer (deleting it, so the
+ * path has no prior declaration as far as this check is concerned) and give
+ * the full desired list in a later layer. That later assignment takes the
+ * plain-replacement branch of `mergeValue`, not the union branch, so it is
+ * an explicit, single-file-visible declaration of the whole grant set rather
+ * than an invisible append — the same "state the whole thing" discipline
+ * `docs/authoring.md` already asks for when taking a grant away.
+ */
+export function assertAuthorizationGrantsOnlyNarrow(
+  base: JsonValue,
+  merged: JsonValue,
+  origin: string,
+): void {
+  const before = roleListsByPath(base);
+  const after = roleListsByPath(merged);
+  const widened: string[] = [];
+  for (const [path, afterList] of after) {
+    const beforeList = before.get(path);
+    if (beforeList === undefined) continue; // no prior declaration: not a widen
+    const added = afterList.filter((name) => !beforeList.includes(name));
+    if (added.length > 0) {
+      widened.push(`${path} (+${added.join(", ")})`);
+    }
+  }
+  if (widened.length > 0) {
+    throw new Error(
+      `${origin} widens authorization grants an earlier layer already declared: ${widened.join("; ")}. ` +
+        "An authorizationPatch may only narrow a grant list an earlier layer already declared; " +
+        "set the key to null in one layer and give the full desired list in a later one to widen intentionally.",
+    );
+  }
 }
 
 export type ApplyAuthorizationPatchOptions = {

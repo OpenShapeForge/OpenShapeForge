@@ -59,6 +59,7 @@ import { packagedConfigFallback } from "../packaged-config.js";
 import {
   AUTHORIZATION_PATCH_KIND,
   applyAuthorizationPatch,
+  assertAuthorizationGrantsOnlyNarrow,
   isAuthorizationFilePath,
 } from "./authorization-patch.js";
 
@@ -730,10 +731,12 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
           const baseDoc = YAML.parse(
             readFileSync(join(target.layer, target.path), "utf8"),
           ) as JsonValue;
+          const patchOrigin = `${AUTHORIZATION_PATCH_KIND} ${layerDir}/${relativePath}`;
           const merged = applyAuthorizationPatch(baseDoc, parsed as JsonValue, {
             strategicMerge,
-            origin: `${AUTHORIZATION_PATCH_KIND} ${layerDir}/${relativePath}`,
+            origin: patchOrigin,
           });
+          assertAuthorizationGrantsOnlyNarrow(baseDoc, merged, patchOrigin);
           const mergedPath = join(buildDir, relativePath);
           mkdirSync(join(mergedPath, ".."), { recursive: true });
           writeFileSync(mergedPath, YAML.stringify(merged), "utf8");

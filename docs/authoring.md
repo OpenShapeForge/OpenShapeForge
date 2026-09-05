@@ -382,7 +382,17 @@ Rules, in the order they apply:
    is a set, and "add one composite" restating fifteen others is how a grant
    silently goes missing. To take a grant away, set the client key to `null`
    or change the owning layer.
-4. The merged document is **validated as an `authorizationConfig`** and the
+4. **Grants are monotonic across layers**, the same way generated CRUD
+   exposure is ([layers.md](layers.md#kind-entitypatch--strategic-merge-semantics)):
+   a later layer may union onto a grant list no earlier layer declared at
+   that exact path, or narrow one it did, but it cannot add to a list an
+   earlier layer already declared there — that append would union onto a
+   base living in a different file, invisible to a review of the later patch
+   alone. Widening one of those lists on purpose takes two steps: set the key
+   to `null` in one layer (an explicit narrow), then declare the full desired
+   list in a later one — a plain assignment, not a union, so the whole grant
+   set is visible in that one file.
+5. The merged document is **validated as an `authorizationConfig`** and the
    error names the patch file, not the merged file nobody wrote.
 
 A patch may carry `renameClient`, `realm`, `keycloak`, `realmRoles`,

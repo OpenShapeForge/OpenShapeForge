@@ -385,15 +385,40 @@ describe("resolveAuthoringLayers — authorizationPatch", () => {
   });
 
   test("patches stack in layer order, each seeing the previous result", () => {
+    // Widening a grant list an earlier layer already declared at the same
+    // path is refused by assertAuthorizationGrantsOnlyNarrow (see the
+    // "monotonic narrowing" describe block below) — so a later layer that
+    // wants to add to it goes through the null-then-readd escape hatch:
+    // one layer clears the path, the next declares the full desired list.
+    // That still demonstrates each layer seeing the previous result, one
+    // step removed.
     const root = makeRepo();
     writeYaml(root, "base/authorization.yaml", baseRealm());
     writeYaml(root, "host/authorization.yaml", hostPatch);
-    writeYaml(root, "plugin/authorization.yaml", {
+    writeYaml(root, "plugin-narrow/authorization.yaml", {
       kind: "authorizationPatch",
-      realmRoles: { directie: { composites: { "acme-api": ["Pentest.All.ReadWrite"] } } },
-      clientRoles: { "acme-api": ["Pentest.All.ReadWrite"] },
+      realmRoles: { directie: { composites: { "acme-api": null } } },
+      clientRoles: { "acme-api": null },
     });
-    configureLayers(root, ["base", "host", "plugin"]);
+    writeYaml(root, "plugin-widen/authorization.yaml", {
+      kind: "authorizationPatch",
+      realmRoles: {
+        directie: {
+          composites: {
+            "acme-api": ["General.All.ReadWrite", "Relations.All.ReadWrite", "Pentest.All.ReadWrite"],
+          },
+        },
+      },
+      clientRoles: {
+        "acme-api": [
+          "General.All.ReadWrite",
+          "Relations.All.ReadWrite",
+          "Finance.All.ReadWrite",
+          "Pentest.All.ReadWrite",
+        ],
+      },
+    });
+    configureLayers(root, ["base", "host", "plugin-narrow", "plugin-widen"]);
 
     const merged = YAML.parse(readFileSync(join(resolveAuthoringLayers(root), "authorization.yaml"), "utf8"));
     expect(merged.realmRoles.directie!.composites["acme-api"]).toEqual([
@@ -476,5 +501,109 @@ describe("resolveAuthoringLayers — authorizationPatch", () => {
     expect(() => resolveAuthoringLayers(root)).toThrow(
       /authorizationPatch .*host\/authorization\.yaml: renameClient\.from "missing-client" is not a client/,
     );
+  });
+});
+
+describe("resolveAuthoringLayers — authorizationPatch monotonic narrowing", () => {
+  const roots: string[] = [];
+
+  function makeRepo(): string {
+    const root = mkdtempSync(join(tmpdir(), "openshapeforge-authz-narrow-"));
+    roots.push(root);
+    return root;
+  }
+
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  function writeYaml(root: string, relativePath: string, doc: unknown) {
+    const full = join(root, relativePath);
+    mkdirSync(join(full, ".."), { recursive: true });
+    writeFileSync(full, YAML.stringify(doc), "utf8");
+  }
+
+  function configureLayers(root: string, layers: string[]) {
+    writeFileSync(join(root, "authoring.config.yaml"), YAML.stringify({ layers }), "utf8");
+  }
+
+  test("a plugin layer may narrow role grants an earlier layer declared", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/authorization.yaml", baseRealm());
+    writeYaml(root, "plugin/authorization.yaml", {
+      kind: "authorizationPatch",
+      realmRoles: { directie: { composites: { "erp-provider": null } } },
+      clientRoles: { "openshapeforge-support": null },
+    });
+    configureLayers(root, ["base", "plugin"]);
+
+    const merged = YAML.parse(readFileSync(join(resolveAuthoringLayers(root), "authorization.yaml"), "utf8"));
+    expect(Object.keys(merged.realmRoles.directie!.composites)).toEqual(["openshapeforge-support"]);
+    expect(Object.keys(merged.clientRoles)).toEqual(["erp-provider"]);
+  });
+
+  test("a plugin layer that widens a grant list an earlier layer declared is refused", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/authorization.yaml", baseRealm());
+    writeYaml(root, "plugin/authorization.yaml", {
+      kind: "authorizationPatch",
+      realmRoles: {
+        directie: { composites: { "erp-provider": ["Pentest.All.ReadWrite"] } },
+      },
+    });
+    configureLayers(root, ["base", "plugin"]);
+
+    expect(() => resolveAuthoringLayers(root)).toThrow(
+      /authorizationPatch .*plugin\/authorization\.yaml widens authorization grants an earlier layer already declared: realmRoles\.directie\.composites\.erp-provider \(\+Pentest\.All\.ReadWrite\)/,
+    );
+  });
+
+  test("the null-then-readd escape hatch still allows an explicit widen", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/authorization.yaml", baseRealm());
+    writeYaml(root, "plugin-narrow/authorization.yaml", {
+      kind: "authorizationPatch",
+      realmRoles: { directie: { composites: { "erp-provider": null } } },
+    });
+    writeYaml(root, "plugin-widen/authorization.yaml", {
+      kind: "authorizationPatch",
+      realmRoles: {
+        directie: {
+          composites: {
+            "erp-provider": ["General.All.ReadWrite", "Relations.All.ReadWrite", "Pentest.All.ReadWrite"],
+          },
+        },
+      },
+    });
+    configureLayers(root, ["base", "plugin-narrow", "plugin-widen"]);
+
+    const merged = YAML.parse(readFileSync(join(resolveAuthoringLayers(root), "authorization.yaml"), "utf8"));
+    expect(merged.realmRoles.directie!.composites["erp-provider"]).toEqual([
+      "General.All.ReadWrite",
+      "Relations.All.ReadWrite",
+      "Pentest.All.ReadWrite",
+    ]);
+  });
+
+  test("adding a grant list at a path no earlier layer declared is not a widen", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/authorization.yaml", baseRealm());
+    writeYaml(root, "plugin/authorization.yaml", {
+      kind: "authorizationPatch",
+      realmRoles: {
+        pentester: {
+          description: "Pentester",
+          composites: { "erp-provider": ["Pentest.All.ReadWrite"] },
+        },
+      },
+      clientRoles: { "openshapeforge-audit": ["Audit.Logs.All"] },
+    });
+    configureLayers(root, ["base", "plugin"]);
+
+    const merged = YAML.parse(readFileSync(join(resolveAuthoringLayers(root), "authorization.yaml"), "utf8"));
+    expect(merged.realmRoles.pentester.composites["erp-provider"]).toEqual(["Pentest.All.ReadWrite"]);
+    expect(merged.clientRoles["openshapeforge-audit"]).toEqual(["Audit.Logs.All"]);
   });
 });

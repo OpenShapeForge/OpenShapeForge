@@ -50,8 +50,25 @@ export function organizationMcpPath(alias: string): string {
 }
 
 /**
- * The built-in Keycloak scope that selects one Organization membership for
- * the token (`organization.<alias>.id` in the claim, echoed in `scope`).
+ * The REALM CLIENT SCOPE that `organization:<alias>` is an instance of.
+ *
+ * Keycloak 26 does not store `organization:<alias>` anywhere: the alias is a
+ * parameter resolved per authorization request against the one built-in
+ * `organization` client scope. So wherever a *stored* configuration has to name
+ * the organization scope — a client's optional scopes, the realm defaults, the
+ * client-registration allow-list — the name is this one, never the instance.
+ */
+export const ORGANIZATION_CLIENT_SCOPE = "organization";
+
+/**
+ * The built-in Keycloak scope VALUE that selects one Organization membership
+ * for the token (`organization.<alias>.id` in the claim, echoed in `scope`).
+ *
+ * NOT what this server advertises — see {@link organizationResourceScopes}.
+ * Kept because it is still the narrowest thing a client that already knows
+ * the alias may request at the AUTHORIZATION endpoint, and because the
+ * distinction between the value and {@link ORGANIZATION_CLIENT_SCOPE} is the
+ * whole reason the advertised list looks the way it does.
  */
 export function organizationScope(alias: string): string {
   return `organization:${alias}`;
@@ -68,35 +85,105 @@ export function organizationResourceScope(alias: string): string {
   return `mcp-resource:${alias}`;
 }
 
-/** The scopes a client should request for `/api/mcp/organizations/<alias>`. */
-export function organizationResourceScopes(alias: string): string[] {
-  return [organizationScope(alias), organizationResourceScope(alias)];
+/**
+ * Client scopes this DEPLOYMENT's tokens need that are not implied by the
+ * resource: the realm scope carrying the API audience, the role mappings and
+ * the person claims. Comma-separated, empty by default.
+ *
+ * It has to be advertised, not merely configured in the realm, because of a
+ * second Keycloak 26 behaviour that a preregistered client hides. A realm
+ * applies its DEFAULT client scopes to a newly registered client only when
+ * the RFC 7591 request carries no `scope` member at all; the moment it names
+ * one, the request is treated as exhaustive and the new client is left with
+ * `basic` plus exactly what it asked for. Measured on 26.5:
+ *
+ *   registration without `scope` -> default: acr basic email hubble-mcp-claims
+ *                                            organization profile roles web-origins
+ *   registration with any `scope` -> default: basic
+ *
+ * A client that discovers this server therefore MUST ask for these by name or
+ * it authorizes successfully and then holds a token with no audience and no
+ * roles — a 401 at the MCP endpoint after a login that looked like it worked.
+ *
+ * Deployment-specific by nature (Hubble's is `hubble-mcp-claims`), so it is
+ * configuration rather than a constant, and the same value belongs on the
+ * realm's client-registration allow-list — see organization-scopes.ts.
+ */
+export const MCP_CLIENT_SCOPES_ENV = "OPENSHAPEFORGE_MCP_CLIENT_SCOPES";
+
+export function deploymentMcpScopes(
+  env: Pick<NodeJS.ProcessEnv, string> = process.env,
+): string[] {
+  const seen = new Set<string>();
+  for (const raw of (env[MCP_CLIENT_SCOPES_ENV] ?? "").split(",")) {
+    const name = raw.trim();
+    if (name.length > 0) seen.add(name);
+  }
+  return [...seen];
 }
 
 /**
- * The REALM CLIENT SCOPE that `organization:<alias>` is an instance of.
+ * The scopes a client should request for `/api/mcp/organizations/<alias>` —
+ * and, because a client that discovers this server registers ITSELF first,
+ * the scopes it will put in its RFC 7591 registration request.
  *
- * Keycloak 26 does not store `organization:<alias>` anywhere: the alias is a
- * parameter resolved per authorization request against the one built-in
- * `organization` client scope. So wherever a *stored* configuration has to name
- * the organization scope — a client's optional scopes, the realm defaults, the
- * client-registration allow-list — the name is this one, never the instance.
+ * That second use is why the membership member is the plain client scope
+ * `organization` and not `organization:<alias>`. Keycloak's `Allowed Client
+ * Scopes` client-registration policy compares the registration request's
+ * scope tokens LITERALLY against the names of client scopes in the realm,
+ * before any of them are resolved. `organization:<alias>` is not a name: it
+ * is a value resolved per authorization request against the one built-in
+ * `organization` client scope (see {@link ORGANIZATION_CLIENT_SCOPE}), so no
+ * allow-list can ever hold it and no realm can be configured to accept it.
+ * Advertising it made every self-registering client — Claude Code among them
+ * — fail at the first step with
+ *
+ *   403 insufficient_scope, Policy 'Allowed Client Scopes' rejected request
+ *
+ * leaving `--client-id` on a preregistered client as the only way in. So the
+ * advertised list names what a realm can actually allow.
+ *
+ * Nothing is given up by that. `organization` yields the same Organization
+ * Membership claim, keyed by alias, for every organization the caller belongs
+ * to; `organization:<alias>` merely narrows it to one. What binds a token to
+ * one resource is not the membership claim but `aud`, minted by
+ * {@link organizationResourceScope} and checked in auth/organization-binding.ts
+ * — which reads the membership of the alias IN THE PATH and never trusts the
+ * scope to pick. A multi-organization caller therefore gets a wider claim and
+ * exactly the same authority: a token minted for another organization's
+ * resource is still refused here, by audience.
  */
-export const ORGANIZATION_CLIENT_SCOPE = "organization";
+export function organizationResourceScopes(
+  alias: string,
+  env: Pick<NodeJS.ProcessEnv, string> = process.env,
+): string[] {
+  return [
+    ...deploymentMcpScopes(env),
+    ORGANIZATION_CLIENT_SCOPE,
+    organizationResourceScope(alias),
+  ];
+}
 
 /**
  * {@link organizationResourceScopes}, as the names of the client scopes those
- * requested scopes resolve to in the realm.
+ * requested scopes resolve to in the realm — what the control plane puts on
+ * the client-registration allow-list and on the realm's optional scopes.
  *
- * Derived from the advertised list rather than written out again, so a scope
- * added to what the protected-resource metadata advertises is automatically
- * one the registration allow-list has to carry. Only the dynamic member is
- * rewritten; a literal scope IS its own client scope and passes through.
+ * The two lists are now IDENTICAL, and that is the invariant rather than a
+ * coincidence: a scope this server advertises must be one a realm can allow,
+ * or a client that registers with the advertised list is refused before it
+ * ever reaches the authorization endpoint. The mapping is kept as the place
+ * that would have to translate a dynamic scope value if one were ever
+ * advertised again, and asserts the invariant in the meantime.
  */
-export function organizationResourceScopeNames(alias: string): string[] {
-  return organizationResourceScopes(alias).map((scope) =>
-    scope === organizationScope(alias) ? ORGANIZATION_CLIENT_SCOPE : scope,
-  );
+export function organizationResourceScopeNames(
+  alias: string,
+  env: Pick<NodeJS.ProcessEnv, string> = process.env,
+): string[] {
+  return organizationResourceScopes(alias, env).map((scope) => {
+    if (scope === organizationScope(alias)) return ORGANIZATION_CLIENT_SCOPE;
+    return scope;
+  });
 }
 
 /**

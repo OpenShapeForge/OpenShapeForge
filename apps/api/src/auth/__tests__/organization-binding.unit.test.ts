@@ -14,6 +14,7 @@ import {
   isOrganizationAlias,
   organizationAliasFromPath,
   organizationMcpPath,
+  organizationResourceScopeNames,
   organizationResourceScopes,
 } from "../../mcp/organization-resource.js";
 
@@ -90,8 +91,12 @@ describe("selectBoundOrganization (membership + audience)", () => {
         resource: ZEROCOPTER,
       }),
     );
-    expect(error.scopes).toEqual(["organization:zerocopter-dev", "mcp-resource:zerocopter-dev"]);
-    expect(error.message).toContain("`organization:zerocopter-dev`");
+    // `organization`, not `organization:zerocopter-dev`: the refusal tells a
+    // client what to request, and a client that has to REGISTER first can only
+    // ask for scopes the realm can name. See organization-resource.ts.
+    expect(error.scopes).toEqual(["organization", "mcp-resource:zerocopter-dev"]);
+    expect(error.message).toContain("`organization`");
+    expect(error.message).not.toContain("`organization:zerocopter-dev`");
     expect(error.message).toContain("`mcp-resource:zerocopter-dev`");
     expect(error.message).toBe(
       organizationBindingRefusalMessage({ alias: "zerocopter-dev", resource: ZEROCOPTER }),
@@ -255,6 +260,9 @@ describe("organization resource paths", () => {
     expect(organizationAliasFromPath("/api/mcp/organizations/a/b")).toBeNull();
     expect(organizationAliasFromPath("/api/mcp/organizations")).toBeNull();
     expect(organizationMcpPath("hubble")).toBe("/api/mcp/organizations/hubble");
-    expect(organizationResourceScopes("hubble")).toEqual(["organization:hubble", "mcp-resource:hubble"]);
+    expect(organizationResourceScopes("hubble")).toEqual(["organization", "mcp-resource:hubble"]);
+    // Every advertised scope must be a client scope a realm can allow-list,
+    // or a self-registering client is refused before it ever authorizes.
+    expect(organizationResourceScopeNames("hubble")).toEqual(organizationResourceScopes("hubble"));
   });
 });

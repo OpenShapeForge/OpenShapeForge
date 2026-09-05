@@ -89,10 +89,16 @@ export type AuthenticateChallengeOptions = {
  * make the failure harder to read, not easier.
  *
  * On a per-organization resource the scopes ARE known and are not authority:
- * `organization:<alias>` makes Keycloak select the membership and
- * `mcp-resource:<alias>` mints the resource audience. They are named here and
- * in the metadata's `scopes_supported` so a client that follows the pointer
- * requests a token that will actually be accepted on this path.
+ * `organization` carries the membership claim and `mcp-resource:<alias>`
+ * mints the resource audience. They are named here and in the metadata's
+ * `scopes_supported` so a client that follows the pointer requests a token
+ * that will actually be accepted on this path.
+ *
+ * Both places take the list from `organizationResourceScopes` rather than
+ * spelling it out, so the challenge, the metadata document and the
+ * registration request a client derives from them cannot drift apart — a
+ * client whose registered scopes are narrower than the challenge it is
+ * answering abandons the authorization, which is how this last broke.
  */
 export function buildAuthenticateChallenge(
   request: FastifyRequest,

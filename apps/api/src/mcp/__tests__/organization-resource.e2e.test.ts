@@ -150,7 +150,7 @@ describe("per-organization MCP resource admission", () => {
     expect(challenge).toContain(
       `resource_metadata="${ORIGIN}${PROTECTED_RESOURCE_METADATA_PATH}/api/mcp/organizations/zerocopter-dev"`,
     );
-    expect(challenge).toContain('scope="organization:zerocopter-dev mcp-resource:zerocopter-dev"');
+    expect(challenge).toContain('scope="organization mcp-resource:zerocopter-dev"');
     expect(challenge).not.toContain("insufficient_scope");
   });
 
@@ -176,7 +176,7 @@ describe("per-organization MCP resource admission", () => {
     );
     const challenge = String(onHubble.headers["www-authenticate"]);
     expect(challenge).toContain('error="insufficient_scope"');
-    expect(challenge).toContain('scope="organization:hubble mcp-resource:hubble"');
+    expect(challenge).toContain('scope="organization mcp-resource:hubble"');
     expect(challenge).toContain(
       `resource_metadata="${ORIGIN}${PROTECTED_RESOURCE_METADATA_PATH}/api/mcp/organizations/hubble"`,
     );
@@ -193,7 +193,7 @@ describe("per-organization MCP resource admission", () => {
     expect(response.statusCode).toBe(403);
     const body = JSON.parse(response.body);
     expect(body.error.code).toBe("ORGANIZATION_RESOURCE_FORBIDDEN");
-    expect(body.error.message).toContain("`organization:zerocopter-dev`");
+    expect(body.error.message).toContain("`organization`");
     expect(body.error.message).toContain("`mcp-resource:zerocopter-dev`");
     expect(body.error.message).toContain(resource("zerocopter-dev"));
     // ...and the legacy mount still takes it (tenant from the membership).
@@ -273,7 +273,7 @@ describe("per-organization protected resource metadata", () => {
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body);
     expect(body.resource).toBe(resource("hubble"));
-    expect(body.scopes_supported).toEqual(["organization:hubble", "mcp-resource:hubble"]);
+    expect(body.scopes_supported).toEqual(["organization", "mcp-resource:hubble"]);
     expect(body.authorization_servers).toEqual([ISSUER]);
     expect(body.bearer_methods_supported).toEqual(["header"]);
   });

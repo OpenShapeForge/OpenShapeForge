@@ -54,6 +54,22 @@ export type PlatformAdministrator = {
   expiresAtMs: number | null;
 };
 
+/**
+ * {@link ResolveOperatorOptions} plus the canonical URL of the resource being
+ * called, so a token bound to it by `aud` can be admitted on that binding.
+ * Absent means "no audience binding available", and only the `azp` allow-list
+ * applies — which is what the REST control surface wants.
+ */
+export type PlatformAdministratorOptions = ResolveOperatorOptions & {
+  resource?: string | undefined;
+};
+
+function audienceList(aud: unknown): string[] {
+  if (typeof aud === "string") return [aud];
+  if (Array.isArray(aud)) return aud.filter((v): v is string => typeof v === "string");
+  return [];
+}
+
 function stringClaim(claims: Record<string, unknown>, key: string): string | null {
   const value = claims[key];
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
@@ -74,12 +90,28 @@ function stringClaim(claims: Record<string, unknown>, key: string): string | nul
 export async function resolvePlatformAdministrator(
   headers: Headers,
   config: ControlPlaneConfig,
-  options: ResolveOperatorOptions = {},
+  options: PlatformAdministratorOptions = {},
 ): Promise<PlatformAdministrator> {
   const claims = await verifyControlBearer(headers, config, options);
 
+  // Admitted two ways, and the second is the stronger one.
+  //
+  // A NAME on the `azp` allow-list is how the preregistered clients get in
+  // (the admin gateway, the platform's public PKCE client). It cannot admit
+  // a client that registered itself: RFC 7591 mints the client id at
+  // registration time, so no list written in advance can hold it.
+  //
+  // A RESOURCE AUDIENCE is the alternative: `aud` names this exact endpoint,
+  // which a token only carries when it was requested with the control
+  // resource scope (mcp/control-mcp-server.ts). That is a per-resource
+  // capability rather than a client name, and it closes the same hazard the
+  // pin was written for — `admin-cli` and the console clients of the control
+  // realm do not carry that scope, so their tokens are still refused here.
   const authorizedParty = stringClaim(claims, "azp") ?? "";
-  if (!platformMcpAuthorizedParties(config).includes(authorizedParty)) {
+  const admittedByParty = platformMcpAuthorizedParties(config).includes(authorizedParty);
+  const admittedByAudience =
+    options.resource !== undefined && audienceList(claims.aud).includes(options.resource);
+  if (!admittedByParty && !admittedByAudience) {
     throw new ControlAuthorizationError(
       "UNAUTHENTICATED",
       "The presented token was not issued for the platform administrator MCP.",

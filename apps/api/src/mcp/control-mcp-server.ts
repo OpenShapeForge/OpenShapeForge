@@ -81,9 +81,60 @@ export function controlResourceUri(request: FastifyRequest): string {
   return `${requestOrigin(request)}${CONTROL_MCP_PATH}`;
 }
 
-/** `Bearer resource_metadata="…/api/control/mcp"`; no scope, the realm authorizes by role. */
+/**
+ * The client scope whose audience mapper puts this resource's URL into `aud`.
+ *
+ * The same device the per-organization resources use (organization-resource.ts),
+ * for the same reason and one more. A client that registers ITSELF gets a
+ * client id Keycloak mints on the spot, so the `azp` allow-list below cannot
+ * name it in advance — an allow-list of client ids and RFC 7591 are mutually
+ * exclusive by construction. This scope replaces it with a stronger claim:
+ * the token was minted FOR `/api/control/mcp` (RFC 8707), which no other
+ * client of the control realm can obtain without being granted this scope.
+ */
+export const CONTROL_RESOURCE_SCOPE = "mcp-resource:control";
+
+/**
+ * Client scopes of the CONTROL realm a client must ask for by name.
+ *
+ * Comma-separated, default `roles,profile,email`. `roles` is not decoration
+ * here: it is the scope carrying the realm-role mapper, so
+ * `realm_access.roles` — and with it `platform_admin`, the only authority this
+ * surface recognises — is absent without it. `profile` and `email` carry
+ * `preferred_username`, `name` and `email`, which become the audit actor on
+ * every `Platform.SystemBypass` elevation this surface makes. It has to be ADVERTISED because Keycloak 26 applies a realm's
+ * default client scopes to a newly registered client only when the RFC 7591
+ * request names no `scope`; naming one makes the request exhaustive. See
+ * organization-resource.ts, where the tenant realm hits the same wall.
+ */
+export const CONTROL_MCP_CLIENT_SCOPES_ENV = "OPENSHAPEFORGE_CONTROL_MCP_CLIENT_SCOPES";
+
+export function controlMcpScopes(
+  env: Pick<NodeJS.ProcessEnv, string> = process.env,
+): string[] {
+  const raw = env[CONTROL_MCP_CLIENT_SCOPES_ENV];
+  const configured = (raw === undefined ? "roles,profile,email" : raw)
+    .split(",")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+  return [...new Set([...configured, CONTROL_RESOURCE_SCOPE])];
+}
+
+/**
+ * `Bearer resource_metadata="…/api/control/mcp", scope="…"`.
+ *
+ * The scope used to be omitted, on the grounds that this realm authorizes by
+ * ROLE rather than by scope. That is still true of the authority, but a
+ * client that has to register itself first has no other way to learn which
+ * scopes to ask for, and a registration that names none is refused the role
+ * mapper it needs. The challenge and the metadata document take the list from
+ * one place so they cannot disagree.
+ */
 export function buildControlAuthenticateChallenge(request: FastifyRequest): string {
-  return `Bearer resource_metadata="${requestOrigin(request)}${CONTROL_MCP_METADATA_PATH}"`;
+  return (
+    `Bearer resource_metadata="${requestOrigin(request)}${CONTROL_MCP_METADATA_PATH}", ` +
+    `scope="${controlMcpScopes().join(" ")}"`
+  );
 }
 
 export function buildControlResourceMetadata(
@@ -93,12 +144,14 @@ export function buildControlResourceMetadata(
   resource: string;
   authorization_servers?: string[];
   bearer_methods_supported: string[];
+  scopes_supported?: string[];
   resource_documentation?: string;
 } {
   return {
     resource: controlResourceUri(request),
     ...(controlIssuer ? { authorization_servers: [controlIssuer] } : {}),
     bearer_methods_supported: ["header"],
+    scopes_supported: controlMcpScopes(),
   };
 }
 
@@ -219,6 +272,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
       administrator = await resolvePlatformAdministrator(
         headersFromFastify(request.headers),
         configResult.config,
+        { resource: controlResourceUri(request) },
       );
     } catch (error) {
       if (error instanceof ControlAuthorizationError) {

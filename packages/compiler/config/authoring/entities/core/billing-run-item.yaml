@@ -66,13 +66,13 @@ fields:
         clearable: false
   - key: periodStart
     valueType: date
-    required: true
+    required: false
     label:
       en: Period start
       nl: Periode start
     description:
-      en: Inclusive start of the billing period covered by this item.
-      nl: Inclusieve startdatum van de facturatieperiode van dit item.
+      en: Inclusive start of the billing period covered by this item. Null for mode = milestone, which bills a single event rather than a period.
+      nl: Inclusieve startdatum van de facturatieperiode van dit item. Leeg bij modus = mijlpaal, die een eenmalige gebeurtenis factureert in plaats van een periode.
     persisted:
       column: period_start
       storageClass: core
@@ -81,13 +81,13 @@ fields:
       props: {}
   - key: periodEnd
     valueType: date
-    required: true
+    required: false
     label:
       en: Period end
       nl: Periode einde
     description:
-      en: Inclusive end of the billing period covered by this item.
-      nl: Inclusieve einddatum van de facturatieperiode van dit item.
+      en: Inclusive end of the billing period covered by this item. Null for mode = milestone, which bills a single event rather than a period.
+      nl: Inclusieve einddatum van de facturatieperiode van dit item. Leeg bij modus = mijlpaal, die een eenmalige gebeurtenis factureert in plaats van een periode.
     persisted:
       column: period_end
       storageClass: core
@@ -203,6 +203,13 @@ relationships:
     label:
       en: Billing schedule
       nl: Facturatieschema
+  - key: agreementMilestone
+    kind: belongsTo
+    target: AgreementMilestone
+    foreignKey: agreement_milestone_id
+    label:
+      en: Agreement milestone
+      nl: Overeenkomstmijlpaal
   - key: producedInvoice
     kind: belongsTo
     target: Invoice

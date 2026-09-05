@@ -991,6 +991,20 @@ groepen:
         label: { nl: Storneren, en: Void }
       - value: reissue
         label: { nl: Hercreatie (TWK), en: Reissue (TWK) }
+      - value: milestone
+        label: { nl: Mijlpaal, en: Milestone }
+
+  AGREEMENTMILESTONESTATUS:
+    description: Lifecycle status of an agreement milestone.
+    items:
+      - value: pending
+        label: { nl: In afwachting, en: Pending }
+      - value: triggered
+        label: { nl: Getriggerd, en: Triggered }
+      - value: invoiced
+        label: { nl: Gefactureerd, en: Invoiced }
+      - value: cancelled
+        label: { nl: Geannuleerd, en: Cancelled }
 
   BILLINGRUNITEMSTATUS:
     description: Per-agreement/per-period idempotency ledger status inside a BillingRun.

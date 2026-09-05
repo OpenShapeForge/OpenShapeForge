@@ -14,7 +14,7 @@ import {
 
 const repoRoot = process.cwd();
 const webPresent = existsSync(join(repoRoot, "apps/web"));
-const expectedGeneratedCrudEntityCount = 116;
+const expectedGeneratedCrudEntityCount = 117;
 
 /**
  * The realms this repository authors, by name.

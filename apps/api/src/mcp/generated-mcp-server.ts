@@ -5837,7 +5837,7 @@ function buildServer(
           // — the credential of one employee, readable by the next. The owner
           // comes from the verified session, never from tool input.
           if (
-            connectionScopeOf(sourceRow?.auth) === "user" &&
+            connectionScopeOf(sourceAuth) === "user" &&
             session.userId &&
             table.columns.some(
               (column) => fieldNameForColumn(column) === "ownerUserId",
@@ -6852,7 +6852,9 @@ export function registerGeneratedMcpServer(
           // Same rule as the in-band elicitation path: a Connection to a
           // personal provider belongs to the person who filled the form in.
           if (
-            connectionScopeOf(sourceRow.auth) === "user" &&
+            connectionScopeOf(
+              sourceRow.auth as Record<string, unknown> | null | undefined,
+            ) === "user" &&
             pending.userId &&
             tableDef.columns.some(
               (column) => fieldNameForColumn(column) === "ownerUserId",

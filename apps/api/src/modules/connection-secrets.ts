@@ -168,7 +168,7 @@ function tokenSecretScope(connectionTable: string): string {
 const TOKEN_FIELDS = new Set(["accessToken", "refreshToken"]);
 
 function refuse(
-  code: ModuleConnectionResolution extends { ok: false; code: infer C } ? C : never,
+  code: Extract<ModuleConnectionResolution, { ok: false }>["code"],
   message: string,
 ): ModuleConnectionResolution {
   return { ok: false, code, message };
@@ -221,12 +221,19 @@ export async function resolveConnectionValues(
     egress: columnFor(providerTable, "egressHosts"),
     definitions: columnFor(providerTable, "configurationFields"),
   };
+  const {
+    key: providerKeyColumn,
+    auth: providerAuthColumn,
+    transport: providerTransportColumn,
+    egress: providerEgressColumn,
+    definitions: providerDefinitionsColumn,
+  } = providerColumns;
   if (
-    !providerColumns.key ||
-    !providerColumns.auth ||
-    !providerColumns.transport ||
-    !providerColumns.egress ||
-    !providerColumns.definitions
+    !providerKeyColumn ||
+    !providerAuthColumn ||
+    !providerTransportColumn ||
+    !providerEgressColumn ||
+    !providerDefinitionsColumn
   ) {
     return refuse(
       "CONNECTION_REQUIRED",
@@ -257,11 +264,11 @@ export async function resolveConnectionValues(
     const providerRef = sql.ref(providerRefColumn);
     const projection = sql`
       c.id as id, c.key as key, c.${values} as values, c.${owner} as owner,
-      a.${sql.ref(providerColumns.key)} as adapter_key,
-      a.${sql.ref(providerColumns.auth)} as adapter_auth,
-      a.${sql.ref(providerColumns.transport)} as adapter_transport,
-      a.${sql.ref(providerColumns.egress)} as adapter_egress,
-      a.${sql.ref(providerColumns.definitions)} as adapter_definitions
+      a.${sql.ref(providerKeyColumn)} as adapter_key,
+      a.${sql.ref(providerAuthColumn)} as adapter_auth,
+      a.${sql.ref(providerTransportColumn)} as adapter_transport,
+      a.${sql.ref(providerEgressColumn)} as adapter_egress,
+      a.${sql.ref(providerDefinitionsColumn)} as adapter_definitions
     `;
     if ("connectionId" in selector) {
       const result = await sql<ConnectionRow>`
@@ -277,7 +284,7 @@ export async function resolveConnectionValues(
       select ${projection}
         from ${connections} c
         join ${providers} a on a.id = c.${providerRef}
-       where a.${sql.ref(providerColumns.key)} = ${selector.adapterKey}
+       where a.${sql.ref(providerKeyColumn)} = ${selector.adapterKey}
        order by (c.${owner} is null), c.id
        limit 2
     `.execute(trx);

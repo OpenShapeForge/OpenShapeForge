@@ -13,6 +13,20 @@ labels:
 domains:
   - finance
   - contracts
+# Creation computes and freezes `amount` from basisAmount/percentOfBasis
+# (when a percentage is used) — logic the generic entity-CRUD create path
+# does not, and should not, know about. The generic `create` mutation is
+# withheld the same way DocumentVersion's is; POST /api/agreement-milestones
+# (apps/api/src/billing/rest-routes.ts) is the only creation path. Generic
+# `update`/`delete` stay enabled so the `immutable: true` fields below are
+# still refused on update by the ordinary generated transports.
+crud:
+  operations:
+    list: true
+    get: true
+    create: false
+    update: true
+    delete: true
 fields:
   - key: description
     valueType: string

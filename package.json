@@ -44,6 +44,8 @@
     "check:authoring-local": "bun scripts/check-authoring-local.mjs",
     "check:authoring-schemas": "bun scripts/check-authoring-schemas.mjs",
     "check:generated": "bun scripts/check-generated-artifacts.mjs",
+    "//check:file-sizes": "The readability gate plus a regression test of the gate itself. Runs in its own CI workflow (.github/workflows/file-sizes.yml) because it is the only check that needs full git history.",
+    "check:file-sizes": "bash scripts/validate-pr-file-sizes.sh && bash scripts/test-file-size-gate.sh",
     "check:ts-nocheck": "bun scripts/check-ts-nocheck-baseline.mjs",
     "check:notices": "bun scripts/gen-third-party-notices.ts --check",
     "check:license": "bun scripts/check-license-headers.mjs",

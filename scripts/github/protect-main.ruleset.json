@@ -25,6 +25,7 @@
         "do_not_enforce_on_create": false,
         "required_status_checks": [
           { "context": "Generate, typecheck, unit tests, notices" },
+          { "context": "File size gate" },
           { "context": "Build Keycloak SPI (Maven)" },
           { "context": "Lint and template Helm chart" },
           { "context": "Database migration tests" },

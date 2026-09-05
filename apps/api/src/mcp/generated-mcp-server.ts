@@ -303,8 +303,12 @@ import {
   rememberSessionIdentity,
   sessionInfoResourceResult,
   sessionInfoToolResult,
+  sessionLocale,
 } from "./session-info.js";
 // --- end session-info ---
+// --- the person's language (mcp/locale.ts) ---
+import { localizedText, type ResolvedLocale } from "./locale.js";
+// --- end the person's language ---
 import {
   bindOperationHandlers,
   DeclaredOperationError,
@@ -348,6 +352,13 @@ type CatalogEntity = {
    */
   tools?: "dedicated" | "generic";
   title: string;
+  /**
+   * The authored label per language, when the entity has one. The compiler
+   * also collapses it into `title` for tool names; this keeps the map so a
+   * session reading Dutch can be shown "Testdoel" where an English one reads
+   * "Test target" (generate-mcp.ts).
+   */
+  labels?: Record<string, string>;
   description: string;
   domains: string[];
   displayTemplate?: string;
@@ -550,6 +561,85 @@ const DATA_ACQUISITION_TOOL_FOOTER =
 
 const ENTITY_CATALOG_URI = "osf://schema/entities";
 const JSON_MIME_TYPE = "application/json";
+
+/**
+ * Talking to a person — the audience rule this server had no way to state,
+ * and the two mistakes it kept producing. A pentester asked for an
+ * explanation and got the server's own vocabulary back ("Relation",
+ * "Assessment", `assessment_create`), with a guide written for the assistant
+ * read out to them verbatim.
+ *
+ * Both are the same boundary, the one that already holds elsewhere on this
+ * transport: an instruction is FOR the model; material passes THROUGH the
+ * model to a person. A guide is an instruction, so it is never quoted. This
+ * text is one too.
+ *
+ * The room here is deliberately spent on what a model cannot work out for
+ * itself — that this deployment's word for a record is not the word in its
+ * table — and not on what it already knows, such as what makes a chart
+ * readable. The presentation rules (5-7) are here rather than in a client's
+ * own prompt because they are the same rules: they say what may leave you and
+ * in what shape, and rule 6 is what keeps a client that cannot draw from
+ * losing half the answer.
+ *
+ * Appended to every session's server `instructions`, next to the data
+ * acquisition guidance above; the one part of it that varies per session (the
+ * person's language) is added by `languageInstruction` at build time.
+ */
+const AUDIENCE_AND_PRESENTATION_GUIDANCE =
+  " Talking to a person — these rules are about what leaves you, not about " +
+  "what you read. (1) Use their words for the subject, never this server's " +
+  "storage names: a Relation is the party the record describes (a client, a " +
+  "supplier, a colleague), an Assessment is the engagement you are doing for " +
+  "them, a TestTarget is a system in scope, a Finding is something you found. " +
+  "Each entity carries an authored label in the person's own language — the " +
+  `${ENTITY_CATALOG_URI} resource and a Service's own field labels have it — ` +
+  "and that label is the word their colleagues use; prefer it over anything " +
+  "you would translate yourself. (2) Never say a tool name, an entity name " +
+  "or a field name to a person: `assessment_create`, `relationId` and " +
+  "`deliveryMode` are your tooling, not their subject. If a sentence only " +
+  "makes sense to someone who knows this API, rewrite it. (3) A guide is " +
+  "written for you. Read it, follow it, and do not read it out: quoting its " +
+  "steps, its order or its field names hands the person your job instead of " +
+  "doing it. (4) Report what a service did, not the calls you made to do it " +
+  "— what now stands recorded, what it means for them, and what is still " +
+  "missing. Showing it — (5) think about the form that reads fastest: a " +
+  "comparison, a distribution or a development over time lands quicker as a " +
+  "picture than as a paragraph. Use whatever the client in front of you can " +
+  "render, and do not name a particular drawing tool: every client has a " +
+  "different one. (6) The text must stand on its own. A picture is an " +
+  "addition and never the carrier of a number — a client that can draw " +
+  "nothing must still receive the whole answer. (7) Number your lists (1, 2, " +
+  "3) rather than lettering them, so a person can say \"the second one\" and " +
+  "be understood.";
+
+/**
+ * The one part of the rule above that cannot be a constant: which language
+ * this person reads. It varies per session, is resolved by the fallback order
+ * in `mcp/locale.ts` (their setting, this deployment's default, the host's),
+ * and is a display fact only — it decides what an answer looks like, never
+ * what a session may do.
+ *
+ * Naming the source in the instruction is deliberate: an assistant that is
+ * answering in a fallback language should be able to say so if asked, instead
+ * of implying the person chose it.
+ */
+function languageInstruction(locale: ResolvedLocale): string {
+  const source =
+    locale.source === "user"
+      ? "their own setting in the identity provider"
+      : locale.source === "realm"
+        ? "this deployment's default — they have not set one of their own"
+        : "this server's host default — neither they nor this deployment set one";
+  return (
+    ` Language — this person reads ${locale.englishName} (${locale.tag}), from ` +
+    `${source}. Write everything they see in ${locale.englishName}, including the ` +
+    "sentences you compose yourself. Where a record, a field or a Service carries an " +
+    "authored label in that language, use it as it stands instead of translating the " +
+    "English one back — the authored word is the one their colleagues use. Leave " +
+    "identifiers, codes and stored values alone: those are searched on, not read."
+  );
+}
 
 function tablesByName(): Map<string, GeneratedTable> {
   return new Map(getGeneratedCrudTables().map((table) => [table.name, table]));
@@ -814,6 +904,8 @@ async function derivedToolsForSession(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   tables: Map<string, GeneratedTable>,
+  /** The language the projected titles and field labels are shown in. */
+  locale?: ResolvedLocale,
 ): Promise<DerivedTool[]> {
   const reserved = new Set(catalog.tools.map((tool) => tool.name));
   const tools: DerivedTool[] = [];
@@ -830,6 +922,7 @@ async function derivedToolsForSession(
       rows,
       reserved,
       session.roles ?? [],
+      locale,
     );
     // Honest annotations, derived from the chain instead of assumed: a tool
     // whose every bound operation is a query is read-only, and hosts treat
@@ -1995,6 +2088,7 @@ function describeEntityResource(
   sessionEntities: SessionEntity[],
   tables: Map<string, GeneratedTable>,
   session: DbSessionInput,
+  locale?: ResolvedLocale,
 ) {
   const { entity, tools } = entry;
   const resourceByEntity = new Map(
@@ -2020,7 +2114,8 @@ function describeEntityResource(
   return {
     entity: entity.entity,
     slug: entity.slug,
-    title: entity.title,
+    title: localizedText(entity.labels, locale) ?? entity.title,
+    language: locale?.tag,
     description: entity.description,
     domains: entity.domains,
     ...(entity.displayTemplate && templateVisible
@@ -2061,15 +2156,26 @@ function describeEntityResource(
   };
 }
 
-function describeCatalogResource(entries: SessionEntity[]) {
+/**
+ * `locale` picks which authored label each entity is named by. It changes only
+ * the reading — `entity`, `slug` and every field key are identifiers and are
+ * the same in every language, which is what keeps this safe to vary per
+ * session: two people looking at the same deployment see the same catalog,
+ * spelled in their own language.
+ */
+function describeCatalogResource(
+  entries: SessionEntity[],
+  locale?: ResolvedLocale,
+) {
   return {
     catalogId: "openshapeforge.entity-schemas",
     generatedBy: catalog.generatedBy,
     source: catalog.source,
+    language: locale?.tag,
     entities: entries.map(({ entity, tools }) => ({
       entity: entity.entity,
       slug: entity.slug,
-      title: entity.title,
+      title: localizedText(entity.labels, locale) ?? entity.title,
       description: entity.description,
       domains: entity.domains,
       resourceUri: entityResourceUri(entity),
@@ -2861,6 +2967,10 @@ function buildServer(
   tableOverride?: Map<string, GeneratedTable>,
 ): Server {
   const runtimeModules = modules ?? [];
+  // Resolved once, here: the server's `instructions` are written at build time
+  // and every authored label this session projects is read through the same
+  // answer, so a second resolution could only disagree with the first.
+  const locale = sessionLocale(session);
   const moduleSession = createModuleSessionCapability(session);
   const hasDynamicModuleTools = hasDynamicModuleToolProjection(runtimeModules);
   const hasDynamicModuleResources = runtimeModules.some(
@@ -2903,6 +3013,12 @@ function buildServer(
       // ---- first-use onboarding (mcp/onboarding.ts) ----
       ONBOARDING_INSTRUCTION +
       // ---- end first-use onboarding ----
+      // ---- audience, vocabulary and presentation (the constant above) ----
+      AUDIENCE_AND_PRESENTATION_GUIDANCE +
+      // ---- end audience, vocabulary and presentation ----
+      // ---- the person's language (mcp/locale.ts, mcp/session-info.ts) ----
+      languageInstruction(locale) +
+      // ---- end the person's language ----
       // ---- update notices (mcp/update-notices.ts) ----
       UPDATE_INSTRUCTION,
       // ---- end update notices ----
@@ -3075,7 +3191,7 @@ function buildServer(
     | undefined
   > => {
     if (projectedOnly) {
-      const projected = (await derivedToolsForSession(db, session, tables)).find(
+      const projected = (await derivedToolsForSession(db, session, tables, locale)).find(
         (tool) => tool.name === toolName,
       );
       if (!projected) return undefined;
@@ -3128,6 +3244,7 @@ function buildServer(
               [serviceRow],
               new Set<string>(),
               session.roles,
+              locale,
             ).some((tool) => tool.name === toolName)
           : isAuthorizedInternalDerivedRow(entry, serviceRow, session.roles);
         if (!authorized) continue;
@@ -3469,7 +3586,7 @@ function buildServer(
     session,
     tables,
     derivedEntries: catalogDerivedTools,
-    projectedTools: () => derivedToolsForSession(db, session, tables),
+    projectedTools: () => derivedToolsForSession(db, session, tables, locale),
     guideTools: () => guideToolsForSession(session),
     guidesCalled,
     // The administrator step reads the same contract the create tool and
@@ -3591,13 +3708,13 @@ function buildServer(
     const entries = entitiesForSession(session, tables);
     let payload: unknown;
     if (request.params.uri === ENTITY_CATALOG_URI) {
-      payload = describeCatalogResource(entries);
+      payload = describeCatalogResource(entries, locale);
     } else if (request.params.uri.startsWith(`${ENTITY_CATALOG_URI}/`)) {
       const entry = entries.find(
         ({ entity }) => entityResourceUri(entity) === request.params.uri,
       );
       if (!entry) return fallbackOrNotFound();
-      payload = describeEntityResource(entry, entries, tables, session);
+      payload = describeEntityResource(entry, entries, tables, session, locale);
     } else {
       const uri = request.params.uri;
       const readable = resourcesForSession(session, tables);
@@ -3821,7 +3938,7 @@ function buildServer(
         },
       })),
       // Derived tools: definition rows projected per session and per tenant.
-      ...(await derivedToolsForSession(db, session, tables)).map((tool) => ({
+      ...(await derivedToolsForSession(db, session, tables, locale)).map((tool) => ({
         name: tool.name,
         ...(tool.title ? { title: tool.title } : {}),
         description: tool.description,
@@ -4026,6 +4143,7 @@ function buildServer(
           db,
           session,
           tables,
+          locale,
         );
         const target = projectedTools.find(
           (tool) =>
@@ -4451,7 +4569,7 @@ function buildServer(
         if (typeof args.tool === "string" && args.tool.length > 0) {
           const wanted = deriveToolName(args.tool) ?? args.tool;
           const projected = (
-            await derivedToolsForSession(db, session, tables)
+            await derivedToolsForSession(db, session, tables, locale)
           ).find(
             (tool) =>
               tool.name === wanted && tool.table === personalizationEntry.table,
@@ -4585,6 +4703,7 @@ function buildServer(
           rows,
           new Set(catalog.tools.map((tool) => tool.name)),
           session.roles ?? [],
+          locale,
         ).find((tool) => tool.name === wantedName);
         const definitionRow = target
           ? rows.find((row) => String(row.id ?? "") === target.rowId)
@@ -5013,7 +5132,7 @@ function buildServer(
       // success an agent would act on.
       if (catalogDerivedTools.length > 0) {
         let derived = (
-          await derivedToolsForSession(db, session, tables)
+          await derivedToolsForSession(db, session, tables, locale)
         ).find((tool) => tool.name === name);
         if (leadCapture) {
           const hidden = leadCapture;
@@ -5024,6 +5143,7 @@ function buildServer(
                 String(hidden.serviceRow[hidden.entry.descriptionField] ?? ""),
               inputSchema: inputSchemaFromStoredFields(
                 hidden.serviceRow[hidden.entry.inputFieldsField],
+                locale,
               ),
               entity: hidden.entry.entity,
               table: hidden.entry.table,
@@ -5897,6 +6017,7 @@ function buildServer(
             sourceRow,
             values: modelArguments,
             relatedRequestId: extra.requestId,
+            locale,
             ...(messagePrefix ? { messagePrefix } : {}),
           });
           elicitationCompleted = true;
@@ -6127,6 +6248,7 @@ function buildServer(
               ),
               inputSchema: inputSchemaFromStoredFields(
                 hidden.serviceRow[hidden.entry.inputFieldsField],
+                locale,
               ) as Tool["inputSchema"],
             },
           };

@@ -14,7 +14,9 @@
  *
  *   1. `rememberSessionIdentity` / `sessionIdentityOf` — the display facts a
  *      bearer token carries beyond what `TrustedSessionContext` keeps (name,
- *      email, client, expiry, organization memberships). The session context is
+ *      email, language, client, expiry, organization memberships), plus
+ *      `sessionLocale`, which runs the language fallback order in
+ *      `mcp/locale.ts` over that claim. The session context is
  *      shared with GraphQL and REST and is kept minimal on purpose; rather than
  *      widening it, the MCP entry point hands the already-verified request
  *      headers to this module, which reads the token payload for display
@@ -38,6 +40,7 @@ import { sessionRelation, type IdentityLinkState } from "../auth/identity-link.j
 import type { OrganizationResourceBinding } from "../auth/organization-binding.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import { LOCALE_CLAIM, resolveLocale, type ResolvedLocale } from "./locale.js";
 import { withDbSession } from "../db/session.js";
 
 export const SESSION_INFO_TOOL_NAME = "whoami";
@@ -80,9 +83,10 @@ export const SESSION_INFO_TOOL = {
   description:
     "Describes the signed-in person in plain language: name, organization, " +
     "role and permissions, the groups they belong to, the record (Relation) " +
-    "they act as, how they signed in, when the sign-in expires, and how many " +
-    "tools and resources this session can use. Takes no arguments. Call it " +
-    "when you need to know who you are acting for or what you are allowed to do.",
+    "they act as, the language they read, how they signed in, when the " +
+    "sign-in expires, and how many tools and resources this session can use. " +
+    "Takes no arguments. Call it when you need to know who you are acting " +
+    "for, what you are allowed to do, or which language to answer in.",
   inputSchema: {
     type: "object",
     properties: {},
@@ -104,8 +108,9 @@ export const SESSION_RESOURCE = {
   title: "Who am I",
   description:
     "The signed-in person in plain language: name, organization, role, " +
-    "permissions, groups, the record they act as, sign-in method and expiry, " +
-    "and what this session can use. Same content as the whoami tool.",
+    "permissions, groups, the record they act as, the language they read, " +
+    "sign-in method and expiry, and what this session can use. Same content " +
+    "as the whoami tool.",
   mimeType: JSON_MIME_TYPE,
 } as const;
 
@@ -124,6 +129,13 @@ export type SessionIdentity = {
   email: string | null;
   /** The OAuth client the token was issued to (`azp`); null when unknown. */
   authorizedParty: string | null;
+  /**
+   * The `locale` claim, exactly as the realm issued it (`nl`, `nl-NL`, …), or
+   * null when the credential carries none. A display fact like `name` and
+   * `email` beside it: `mcp/locale.ts` turns it into the language this session
+   * is answered in, and nothing decides a permission by it.
+   */
+  locale: string | null;
   /** Token expiry in epoch milliseconds; null when the credential does not expire. */
   expiresAtMs: number | null;
   /**
@@ -206,6 +218,7 @@ export function identityFromBearerClaims(
     name: stringClaim(claims, "name") ?? stringClaim(claims, "preferred_username"),
     email: stringClaim(claims, "email"),
     authorizedParty: stringClaim(claims, "azp"),
+    locale: stringClaim(claims, LOCALE_CLAIM),
     expiresAtMs: typeof exp === "number" && Number.isFinite(exp) ? exp * 1000 : null,
     organizations: Object.keys(memberships).map((alias) => ({
       alias,
@@ -222,6 +235,7 @@ export function identityFromSession(session: TrustedSessionContext): SessionIden
     name: null,
     email: null,
     authorizedParty: null,
+    locale: null,
     expiresAtMs: null,
     organizations: [],
     boundOrganization: null,
@@ -269,6 +283,16 @@ export function sessionIdentityOf(session: TrustedSessionContext): SessionIdenti
   return identities.get(session) ?? identityFromSession(session);
 }
 
+/**
+ * The language this session reads: the person's own, else the realm's default,
+ * else the host's — the order is written out in `mcp/locale.ts`. Every caller
+ * that shows a person an authored text, or tells an assistant which language to
+ * answer in, resolves it through here rather than reaching for the claim.
+ */
+export function sessionLocale(session: TrustedSessionContext): ResolvedLocale {
+  return resolveLocale({ user: sessionIdentityOf(session).locale });
+}
+
 // ---------------------------------------------------------------------------
 // Pure projection
 
@@ -283,6 +307,21 @@ export type SessionInfo = {
   permissions: string[];
   /** The organizations (groups) the person belongs to; exactly one is active. */
   groups: Array<{ name: string; active: boolean }>;
+  /**
+   * The language this person reads, and where it was decided. `source` is
+   * "user" when their own identity-provider setting said so, "realm" when the
+   * deployment's default stood in, "host" when neither existed — a person
+   * seeing "realm" or "host" can go and set their language once, in the
+   * identity provider, and have every client follow.
+   *
+   * Deliberately not repeated in `summary`: that line is read out to a person
+   * on every `whoami`, and "your language is Dutch" is not news to someone
+   * reading Dutch. The assistant is told the language AND its source in the
+   * server's own instructions (generated-mcp-server.ts), which is where it can
+   * act on it — by answering in that language, and by mentioning the identity
+   * provider only when the person asks why they are being addressed this way.
+   */
+  language: { tag: string; name: string; source: "user" | "realm" | "host" };
   /** Friendly name of the client the person signed in with. */
   signedInVia: string;
   /** ISO 8601. Absent when the sign-in does not expire (development identity). */
@@ -329,6 +368,8 @@ export type SessionInfoInput = {
   access: { tools: number; resources: number };
   /** Days of inactivity after which the sign-in ends; defaults to the env / 14. */
   sessionIdleDays?: number;
+  /** The resolved language; defaults to running the order over the identity. */
+  locale?: ResolvedLocale;
   /** Test seam; defaults to the wall clock. */
   nowMs?: number;
 };
@@ -352,7 +393,15 @@ const CLIENT_NAMES: Readonly<Record<string, string>> = {
   "openshapeforge-admin-gateway": "Hubble control plane",
 };
 
-export function signedInViaLabel(identity: SessionIdentity): string {
+/**
+ * Only the two fields it actually reads, so a caller that has a credential but
+ * not a whole `SessionIdentity` — the platform control plane builds one from
+ * its own administrator record — does not have to invent the rest. Widening
+ * `SessionIdentity` is otherwise a breaking change for every such caller.
+ */
+export function signedInViaLabel(
+  identity: Pick<SessionIdentity, "credential" | "authorizedParty">,
+): string {
   switch (identity.credential) {
     case "trusted-context":
       return "Development identity";
@@ -427,6 +476,7 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
   }
 
   const signedInVia = signedInViaLabel(identity);
+  const locale = input.locale ?? resolveLocale({ user: identity.locale });
   const expiry =
     identity.expiresAtMs === null
       ? null
@@ -487,6 +537,7 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
     role,
     permissions,
     groups,
+    language: { tag: locale.tag, name: locale.name, source: locale.source },
     signedInVia,
     ...(expiry
       ? {

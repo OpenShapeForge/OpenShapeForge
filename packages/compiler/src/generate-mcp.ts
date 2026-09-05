@@ -554,7 +554,15 @@ export type McpEntityCatalogEntry = {
   table: string;
   toolPrefix: string;
   tools: "dedicated" | "generic";
+  /** The entity's name in the deployment's primary language (English first). */
   title: string;
+  /**
+   * The authored `{ en, nl, … }` label, carried through unresolved so the
+   * runtime can show a person the name in THEIR language. `title` above is one
+   * language chosen at build time, which is the right answer for a tool name
+   * and the wrong one for a sentence addressed to a reader.
+   */
+  labels?: Record<string, string>;
   description: string;
   domains: string[];
   displayTemplate?: string;
@@ -827,6 +835,10 @@ export function buildMcpCatalog(
       toolPrefix: mcp.toolPrefix,
       tools: mcp.tools,
       title: entityLabel(contract),
+      ...(contract.entity.labels &&
+      Object.keys(contract.entity.labels).length > 0
+        ? { labels: { ...(contract.entity.labels as Record<string, string>) } }
+        : {}),
       description: entityDescription(contract),
       domains: [...contract.entity.domains],
       ...(contract.entity.displayTemplate

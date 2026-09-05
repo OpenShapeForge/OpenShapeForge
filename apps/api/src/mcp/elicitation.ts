@@ -23,6 +23,7 @@
  *     fails the create cleanly. There is no fallback to tool arguments; that
  *     would silently reopen the channel this exists to close.
  */
+import { localizedText, type ResolvedLocale } from "./locale.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { HttpError } from "../rest/http-error.js";
 import {
@@ -55,17 +56,16 @@ type StoredFieldDefinition = {
   classification?: { sensitivity?: unknown };
 };
 
-function localized(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object") {
-    const first = (value as Record<string, unknown>).en;
-    if (typeof first === "string") return first;
-    const any = Object.values(value as Record<string, unknown>).find(
-      (entry) => typeof entry === "string",
-    );
-    if (typeof any === "string") return any;
-  }
-  return undefined;
+/**
+ * The form a person actually reads, so it is resolved in THEIR language rather
+ * than English-first (`mcp/locale.ts`). `locale` is optional because the two
+ * non-MCP callers of `elicitationSchemaFromDefinitions` — the browser
+ * configuration form and the handoff bookkeeping — carry a request context of
+ * their own and have not been given one yet; they keep the English-first
+ * fallback the resolver ends with.
+ */
+function localized(value: unknown, locale?: ResolvedLocale): string | undefined {
+  return localizedText(value, locale);
 }
 
 const ELICITABLE_TYPES: Record<string, string> = {
@@ -85,7 +85,10 @@ export function isSecretDefinition(definition: StoredFieldDefinition): boolean {
  * cannot express (objects, collections) are reported back so the caller can
  * say so instead of silently dropping contract.
  */
-export function elicitationSchemaFromDefinitions(definitions: unknown): {
+export function elicitationSchemaFromDefinitions(
+  definitions: unknown,
+  locale?: ResolvedLocale,
+): {
   schema: { type: "object"; properties: Record<string, unknown>; required?: string[] };
   elicitable: StoredFieldDefinition[];
   skipped: string[];
@@ -106,9 +109,9 @@ export function elicitationSchemaFromDefinitions(definitions: unknown): {
       continue;
     }
     const property: Record<string, unknown> = { type: schemaType };
-    const title = localized(definition.label);
+    const title = localized(definition.label, locale);
     if (title) property.title = title;
-    const description = localized(definition.description);
+    const description = localized(definition.description, locale);
     if (description) property.description = description;
     const optionValues = (definition.options?.items ?? [])
       .map((item) => item?.value)
@@ -198,6 +201,8 @@ export async function collectElicitedValues(input: {
   relatedRequestId: string | number;
   /** Server-known context shown above the form, e.g. the redirect URL to register first. */
   messagePrefix?: string;
+  /** The language the form's labels and descriptions are shown in. */
+  locale?: ResolvedLocale;
 }): Promise<Record<string, unknown>> {
   const { server, elicit, sourceRow, values, relatedRequestId } = input;
   if (!sourceRow) {
@@ -210,6 +215,7 @@ export async function collectElicitedValues(input: {
 
   const { schema, elicitable, skipped } = elicitationSchemaFromDefinitions(
     sourceRow[elicit.definitionsField],
+    input.locale,
   );
   // Nothing to ask is not an error: a source without configuration fields
   // simply creates without a form.

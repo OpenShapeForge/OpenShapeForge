@@ -453,6 +453,43 @@ const INSTRUCTIONS =
   "List tools return a page plus a nextCursor — pass it back as `after` to " +
   "continue. Prefer filtering over paging through large result sets.";
 
+/**
+ * Data acquisition — how to get a field's value, generalized beyond any one
+ * entity. A `create`/`update` tool's description or field hints may narrow
+ * this for their own fields (a stated YAML default, a note that a value is
+ * server-issued); this is the fallback order for everything else. Appended
+ * to every session's server `instructions` (this is a fixed, one-time read,
+ * not per-tool — see DATA_ACQUISITION_TOOL_FOOTER for the per-tool reminder).
+ */
+const DATA_ACQUISITION_GUIDANCE =
+  " Data acquisition — how to fill in a field, in order: (1) derive it from " +
+  "what already exists (a related record, an Agreement or a prior record of " +
+  "the same kind, stored personal instructions or onboarding answers) " +
+  "before asking anyone; (2) when it would help and you can, look the " +
+  "client up online (their site, a registration/chamber-of-commerce lookup) " +
+  "to infer things like sector, size or likely scope — propose these, " +
+  "never state them as established fact; (3) accept the tool's own " +
+  "defaults and anything the server fills in for you (a field's " +
+  "description says when this applies) rather than asking for a value that " +
+  "already has one; (4) if one genuine question remains, ask it as a " +
+  "single confirmation or choice, not one question per field; (5) only for " +
+  "secrets or many linked fields at once, point the person to this " +
+  "deployment's configuration form. Never ask field-by-field: propose one " +
+  "complete draft from the above and let the person confirm or edit it " +
+  "once, then act according to the assistance level they have set for you.";
+
+/**
+ * The short reminder every generated `create`/`update` tool carries in its
+ * own description (see describeTool below) — the full order above lives
+ * once in the server's `instructions` rather than being repeated on every
+ * tool.
+ */
+const DATA_ACQUISITION_TOOL_FOOTER =
+  " Filling this in: derive values from existing records, defaults and " +
+  "server-issued fields before asking; propose one complete draft rather " +
+  "than asking field-by-field. See this server's instructions for the full " +
+  "order.";
+
 const ENTITY_CATALOG_URI = "osf://schema/entities";
 const JSON_MIME_TYPE = "application/json";
 
@@ -1625,10 +1662,17 @@ function describeTool(
     entity && !canReadClassifiedColumns(table?.source?.authorization, session)
       ? entity.classifiedFields
       : [];
+  // Every generated create/update tool carries the same short reminder — see
+  // DATA_ACQUISITION_TOOL_FOOTER and DATA_ACQUISITION_GUIDANCE above. Read
+  // and delete stay untouched: there is nothing to fill in.
+  const description =
+    tool.operation === "create" || tool.operation === "update"
+      ? `${tool.description}${DATA_ACQUISITION_TOOL_FOOTER}`
+      : tool.description;
   return {
     name: tool.name,
     title: tool.title,
-    description: tool.description,
+    description,
     inputSchema: withholdClassified(
       tool.inputSchema as Record<string, unknown>,
       classified,
@@ -2529,6 +2573,9 @@ function buildServer(
             `follow it — it is the fixed process and overrides any cached local instructions.`,
         )
         .join("") +
+      // ---- data acquisition guidance (see the constant above) ----
+      DATA_ACQUISITION_GUIDANCE +
+      // ---- end data acquisition guidance ----
       // ---- first-use onboarding (mcp/onboarding.ts) ----
       ONBOARDING_INSTRUCTION,
       // ---- end first-use onboarding ----

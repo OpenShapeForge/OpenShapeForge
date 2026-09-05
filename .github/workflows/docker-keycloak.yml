@@ -106,13 +106,19 @@ jobs:
       # Cheap structural check first: if the Maven stage silently produced
       # nothing, the jar would be missing and Keycloak would still start fine
       # without the SPI — a failure mode the health probe alone cannot catch.
-      - name: Verify the SPI provider jar is present
+      # The same goes for the Apple provider jar (#488): a realm that authors
+      # `providerId: apple` would import fine and only fail at first login.
+      - name: Verify both provider jars are present
         run: |
           docker run --rm --entrypoint ls openshapeforge-keycloak:ci \
             /opt/keycloak/providers/openshapeforge-keycloak-spi.jar
+          docker run --rm --entrypoint sh openshapeforge-keycloak:ci -c \
+            'ls /opt/keycloak/providers/apple-identity-provider-*.jar'
 
       # Prove the image actually reaches a ready state against Postgres. Host
       # networking lets the container reach the service container on localhost.
+      # scripts/wait-for-keycloak-ready.sh polls the health endpoint and, on
+      # timeout, prints the logs and removes the container before failing.
       - name: Smoke test the image
         run: |
           docker run -d --name kc-smoke --network host \
@@ -126,19 +132,73 @@ jobs:
             -e KC_HTTP_ENABLED=true \
             -e KC_HOSTNAME_STRICT=false \
             openshapeforge-keycloak:ci start-dev
-          # Keycloak serves health on the management port (9000), not 8080.
-          for i in $(seq 1 90); do
-            if curl -fsS http://127.0.0.1:9000/health/ready 2>/dev/null | grep -q '"status": *"UP"'; then
-              echo "keycloak ready after ${i}s"
+          scripts/wait-for-keycloak-ready.sh kc-smoke
+
+          # Prove the provider FACTORIES loaded, not just that the jars sit on
+          # disk: /admin/serverinfo lists every identity-provider factory the
+          # running server registered. `apple` comes from the third-party jar;
+          # `oidc` is a built-in and doubles as a sanity check on the query.
+          # The bootstrap admin is a throwaway credential local to this runner.
+          token=$(curl -fsS -X POST \
+            http://127.0.0.1:8080/realms/master/protocol/openid-connect/token \
+            -d grant_type=password -d client_id=admin-cli \
+            -d username=admin -d password=admin \
+            | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+          if [ -z "$token" ]; then
+            echo "::error::could not obtain a master-realm admin token for the serverinfo check"
+            docker logs kc-smoke
+            docker rm -f kc-smoke >/dev/null
+            exit 1
+          fi
+          if ! serverinfo=$(curl -fsS -H "Authorization: Bearer $token" http://127.0.0.1:8080/admin/serverinfo); then
+            echo "::error::could not read /admin/serverinfo from the running image"
+            docker logs kc-smoke
+            docker rm -f kc-smoke >/dev/null
+            exit 1
+          fi
+          for provider in apple oidc; do
+            if ! printf '%s' "$serverinfo" | grep -Eq "\"id\" *: *\"$provider\""; then
+              echo "::error::identity provider factory '$provider' is not registered in the running image"
+              printf '%s' "$serverinfo" | grep -o '"identityProviders":\[[^]]*\]' || true
               docker rm -f kc-smoke >/dev/null
-              exit 0
+              exit 1
             fi
-            sleep 1
+            echo "identity provider factory '$provider' registered"
           done
-          echo "::error::keycloak did not become ready within 90s"
-          docker logs kc-smoke
           docker rm -f kc-smoke >/dev/null
-          exit 1
+
+      # Functional acceptance for #488 against the SAME image and Postgres:
+      # import compiler-GENERATED realms through the admin API and drive real
+      # broker logins (dedicated OIDC provider with mapper, generic SAML
+      # provider with mappers, repeat login, and the no-silent-e-mail-linking
+      # rule). See scripts/keycloak-broker-acceptance.ts for what is proven.
+      # Apple is not exercised here — it needs real Apple credentials.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.4
+      - name: Install workspace dependencies (compiler generator for the acceptance run)
+        run: bun install --frozen-lockfile
+      - name: Broker login acceptance against generated realms
+        run: |
+          docker run -d --name kc-broker --network host \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            -e KC_DB=postgres \
+            -e KC_DB_URL=jdbc:postgresql://localhost:5432/keycloak \
+            -e KC_DB_USERNAME=keycloak \
+            -e KC_DB_PASSWORD=keycloak \
+            -e KC_HEALTH_ENABLED=true \
+            -e KC_HTTP_ENABLED=true \
+            -e KC_HOSTNAME_STRICT=false \
+            openshapeforge-keycloak:ci start --optimized
+          scripts/wait-for-keycloak-ready.sh kc-broker
+          if ! KC_URL=http://127.0.0.1:8080 bun scripts/keycloak-broker-acceptance.ts; then
+            echo "::error::broker login acceptance failed"
+            docker logs kc-broker | tail -100
+            docker rm -f kc-broker >/dev/null
+            exit 1
+          fi
+          docker rm -f kc-broker >/dev/null
 
       # The chart runs the container with securityContext.readOnlyRootFilesystem
       # (issue #24), writable emptyDirs mounted only at /opt/keycloak/data and
@@ -165,18 +225,8 @@ jobs:
             -e KC_HTTP_ENABLED=true \
             -e KC_HOSTNAME_STRICT=false \
             openshapeforge-keycloak:ci start --optimized
-          for i in $(seq 1 90); do
-            if curl -fsS http://127.0.0.1:9000/health/ready 2>/dev/null | grep -q '"status": *"UP"'; then
-              echo "keycloak ready on a read-only rootfs after ${i}s"
-              docker rm -f kc-rofs >/dev/null
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "::error::keycloak did not become ready on a read-only rootfs within 90s"
-          docker logs kc-rofs
+          scripts/wait-for-keycloak-ready.sh kc-rofs
           docker rm -f kc-rofs >/dev/null
-          exit 1
 
       - name: Log in to GHCR
         if: env.PUBLISH == 'true'

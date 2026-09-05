@@ -1,0 +1,17 @@
+{
+  "$comment": "Supply-chain record for third-party provider jars layered into the OSF Keycloak image (Dockerfile). `keycloak` is the base-image version these pins were reviewed against; scripts/check-keycloak-lockstep.mjs fails when the Dockerfile or pom.xml moves Keycloak without this record being updated, or when a Dockerfile pin disagrees with the record. Bumping Keycloak therefore forces a review of every provider's compatibility statement and checksum in the same change.",
+  "keycloak": "26.5.3",
+  "providers": {
+    "apple-identity-provider": {
+      "version": "1.17.0",
+      "sha512": "04949c18bd2819f6134f7a8fdf446e471036241c537d451e7bf1c627d8eefb1f72374d238bf0037155e725531c587065cfabf1c3f0b7f0df86fb7138effd6bba",
+      "artifact": "apple-identity-provider-1.17.0.jar",
+      "source": "https://github.com/klausbetz/apple-identity-provider-keycloak",
+      "release": "https://github.com/klausbetz/apple-identity-provider-keycloak/releases/tag/1.17.0",
+      "license": "Apache-2.0",
+      "minimumKeycloak": "26.5.0",
+      "compatibilityNote": "Extension releases >= 1.17.0 target Keycloak >= 26.5.0. Reviewed against Keycloak 26.5.3 on 2026-09-03.",
+      "dockerfileArgs": { "version": "APPLE_IDP_VERSION", "sha512": "APPLE_IDP_SHA512" }
+    }
+  }
+}

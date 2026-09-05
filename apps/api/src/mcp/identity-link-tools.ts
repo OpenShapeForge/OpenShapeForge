@@ -158,8 +158,11 @@ const SET_MEMBER_ROLE: Tool = {
   title: "Assign a member's role",
   description:
     "Grant a member their real role — organization administrator or employee — replacing " +
-    "the read-only access their first sign-in started with. Takes effect on their NEXT " +
-    "session, not the current one. For organization administrators.",
+    "the read-only access their first sign-in started with. Ends their current sign-in so " +
+    "the new role takes effect immediately: they will need to sign in again. (A long-lived " +
+    "offline session, such as a CLI tool that stays signed in for months, is not force-" +
+    "ended by this and keeps its old access until it happens to refresh or is revoked " +
+    "separately.) For organization administrators.",
   inputSchema: {
     type: "object",
     properties: {
@@ -361,12 +364,33 @@ export async function callIdentityLinkTool(
       await admin.grantClientRoles(subject.subject, memberRoleClientId(), MEMBER_ROLE_GRANTS[role]);
       await clearNeedsRoleAssignment(db, scoped, identityId);
 
+      // Best-effort: the role grant above already succeeded and is durable
+      // (the flag is cleared), so a hiccup ending this person's CURRENT
+      // session must not turn a successful grant into a reported failure —
+      // worst case they keep their old access for up to the access token's
+      // natural 15-minute lifetime, same as if this call did not exist.
+      let forcedReauthentication = true;
+      try {
+        await admin.forceReauthentication(subject.subject);
+      } catch (error) {
+        forcedReauthentication = false;
+        console.warn(
+          "[identity-link] set_member_role granted the role but could not force " +
+            `re-authentication for identity ${identityId}:`,
+          error instanceof Error ? error.stack ?? error.message : String(error),
+        );
+      }
+
       return succeeded({
         granted: true,
         identityId,
         role,
         clientRoles: MEMBER_ROLE_GRANTS[role],
-        note: "Takes effect on this person's next session.",
+        forcedReauthentication,
+        note: forcedReauthentication
+          ? "Their current sign-in was ended; they need to sign in again for the new role to take effect."
+          : "The role was granted, but ending their current sign-in failed. It will still take " +
+            "effect once their session naturally expires or they sign in again.",
       });
     } catch (error) {
       return failed(error);

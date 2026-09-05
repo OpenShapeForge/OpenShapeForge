@@ -594,4 +594,205 @@ describe("identity ↔ Relation link", () => {
     },
     TEST_TIMEOUT,
   );
+
+  test(
+    "set_member_role grants the Keycloak role, then forces the person to sign in again",
+    async () => {
+      const previousEnv = {
+        OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL: process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL,
+        KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API:
+          process.env.KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API,
+        OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER:
+          process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER,
+        OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI:
+          process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI,
+        OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID:
+          process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID,
+        OPENSHAPEFORGE_PUBLIC_ORIGIN: process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN,
+      };
+      const originalFetch = globalThis.fetch;
+      process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL = "http://keycloak.test:8080";
+      process.env.KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API = "test-secret";
+      process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER = "http://keycloak.test:8080/realms/control";
+      process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI =
+        "http://keycloak.test:8080/realms/control/protocol/openid-connect/certs";
+      process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID = "operator-gateway";
+      process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = "https://tenant.example.com";
+
+      // Records every admin-API call so the test can assert BOTH that the
+      // logout happens (not just that it doesn't blow up) AND that it happens
+      // strictly after the role-mapping POST, not before or instead of it.
+      const calls: Array<{ url: string; method: string }> = [];
+      globalThis.fetch = (async (input: unknown, init: RequestInit = {}) => {
+        const url = String(input);
+        const method = init.method ?? "GET";
+        if (url.includes("/protocol/openid-connect/token")) {
+          return Response.json({ access_token: "service-account-token", expires_in: 900 });
+        }
+        calls.push({ url, method });
+        if (url.endsWith("/clients?clientId=erp-provider")) {
+          return Response.json([{ id: "erp-provider-uuid", clientId: "erp-provider" }]);
+        }
+        if (url.endsWith("/clients/erp-provider-uuid/roles")) {
+          return Response.json([{ id: "role-1", name: "General.All.Read" }]);
+        }
+        if (url.includes("/role-mappings/clients/erp-provider-uuid") && method === "POST") {
+          return new Response(null, { status: 204 });
+        }
+        if (url.endsWith("/logout") && method === "POST") {
+          return new Response(null, { status: 204 });
+        }
+        throw new Error(`Unexpected admin call in test: ${method} ${url}`);
+      }) as unknown as typeof globalThis.fetch;
+
+      try {
+        await withScratchDb(async (appDb, adminDb) => {
+          await seedTenants(adminDb);
+          const admin = person("mallory-admin", ADMIN_ROLES);
+          const nora = person("nora");
+
+          const adminSignIn = await signIn(appDb, admin, tenantA);
+          const noraSignIn = await signIn(appDb, nora, tenantA);
+          expect(noraSignIn.state!.needsRoleAssignment).toBe(true);
+
+          const result = await callIdentityLinkTool(
+            "set_member_role",
+            { identityId: noraSignIn.state!.identityId, role: "org_employee" },
+            appDb,
+            adminSignIn.session,
+          );
+
+          expect(result?.isError).not.toBe(true);
+          expect(result?.structuredContent).toMatchObject({
+            granted: true,
+            role: "org_employee",
+            forcedReauthentication: true,
+          });
+
+          // The role-mapping POST and the logout POST both happened, and the
+          // logout came strictly after the grant — set_member_role must not
+          // end the person's session before their new role is actually on it.
+          const roleMappingIndex = calls.findIndex(
+            (call) =>
+              call.url.includes("/role-mappings/clients/erp-provider-uuid") &&
+              call.method === "POST",
+          );
+          const logoutIndex = calls.findIndex(
+            (call) => call.url.endsWith("/logout") && call.method === "POST",
+          );
+          expect(roleMappingIndex).toBeGreaterThanOrEqual(0);
+          expect(logoutIndex).toBeGreaterThan(roleMappingIndex);
+          expect(calls[logoutIndex]!.url).toBe(
+            `http://keycloak.test:8080/admin/realms/openshapeforge/users/${nora.claims.subject}/logout`,
+          );
+
+          // And the durable side effect (the flag) is cleared regardless of
+          // the logout outcome, since it is not part of the same transaction.
+          const clearedRow = (
+            await sql<{ needs_role_assignment: boolean }>`
+              select needs_role_assignment from platform.identity_relations
+               where identity_id = ${noraSignIn.state!.identityId} and tenant_id = ${tenantA}
+            `.execute(adminDb)
+          ).rows[0]!;
+          expect(clearedRow.needs_role_assignment).toBe(false);
+        });
+      } finally {
+        globalThis.fetch = originalFetch;
+        for (const [key, value] of Object.entries(previousEnv)) {
+          if (value === undefined) delete (process.env as Record<string, string | undefined>)[key];
+          else process.env[key] = value;
+        }
+      }
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "set_member_role still reports the grant as successful when forcing re-authentication fails",
+    async () => {
+      const previousEnv = {
+        OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL: process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL,
+        KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API:
+          process.env.KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API,
+        OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER:
+          process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER,
+        OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI:
+          process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI,
+        OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID:
+          process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID,
+        OPENSHAPEFORGE_PUBLIC_ORIGIN: process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN,
+      };
+      const originalFetch = globalThis.fetch;
+      process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL = "http://keycloak.test:8080";
+      process.env.KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API = "test-secret";
+      process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER = "http://keycloak.test:8080/realms/control";
+      process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI =
+        "http://keycloak.test:8080/realms/control/protocol/openid-connect/certs";
+      process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID = "operator-gateway";
+      process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = "https://tenant.example.com";
+
+      globalThis.fetch = (async (input: unknown, init: RequestInit = {}) => {
+        const url = String(input);
+        const method = init.method ?? "GET";
+        if (url.includes("/protocol/openid-connect/token")) {
+          return Response.json({ access_token: "service-account-token", expires_in: 900 });
+        }
+        if (url.endsWith("/clients?clientId=erp-provider")) {
+          return Response.json([{ id: "erp-provider-uuid", clientId: "erp-provider" }]);
+        }
+        if (url.endsWith("/clients/erp-provider-uuid/roles")) {
+          return Response.json([{ id: "role-1", name: "General.All.Read" }]);
+        }
+        if (url.includes("/role-mappings/clients/erp-provider-uuid") && method === "POST") {
+          return new Response(null, { status: 204 });
+        }
+        if (url.endsWith("/logout") && method === "POST") {
+          // Simulate a Keycloak hiccup on the logout call specifically.
+          return Response.json({ error: "server_error" }, { status: 500 });
+        }
+        throw new Error(`Unexpected admin call in test: ${method} ${url}`);
+      }) as unknown as typeof globalThis.fetch;
+
+      try {
+        await withScratchDb(async (appDb, adminDb) => {
+          await seedTenants(adminDb);
+          const admin = person("oswald-admin", ADMIN_ROLES);
+          const paula = person("paula");
+
+          const adminSignIn = await signIn(appDb, admin, tenantA);
+          const paulaSignIn = await signIn(appDb, paula, tenantA);
+
+          const result = await callIdentityLinkTool(
+            "set_member_role",
+            { identityId: paulaSignIn.state!.identityId, role: "org_employee" },
+            appDb,
+            adminSignIn.session,
+          );
+
+          // The role grant itself succeeded, so the tool call is NOT an
+          // error — a failed best-effort logout must never roll this back.
+          expect(result?.isError).not.toBe(true);
+          expect(result?.structuredContent).toMatchObject({
+            granted: true,
+            forcedReauthentication: false,
+          });
+
+          const clearedRow = (
+            await sql<{ needs_role_assignment: boolean }>`
+              select needs_role_assignment from platform.identity_relations
+               where identity_id = ${paulaSignIn.state!.identityId} and tenant_id = ${tenantA}
+            `.execute(adminDb)
+          ).rows[0]!;
+          expect(clearedRow.needs_role_assignment).toBe(false);
+        });
+      } finally {
+        globalThis.fetch = originalFetch;
+        for (const [key, value] of Object.entries(previousEnv)) {
+          if (value === undefined) delete (process.env as Record<string, string | undefined>)[key];
+          else process.env[key] = value;
+        }
+      }
+    },
+    TEST_TIMEOUT,
+  );
 });

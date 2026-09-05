@@ -116,3 +116,41 @@ describe("granting a client role onto a person's user", () => {
     expect(error.message).toContain("no-such-client");
   });
 });
+
+describe("forcing a person to sign in again after a role grant", () => {
+  it("POSTs /users/{id}/logout", async () => {
+    const { fetch, calls } = stubFetch([() => new Response(null, { status: 204 })]);
+
+    await createMemberRoleAdminClient(config, { fetch }).forceReauthentication("user-sub-123");
+
+    // calls[0] is the service-account token request; the logout call is next.
+    const logoutCall = calls[1]!;
+    expect(logoutCall.url).toBe(
+      "http://keycloak.test:8080/admin/realms/openshapeforge/users/user-sub-123/logout",
+    );
+    expect(logoutCall.init.method).toBe("POST");
+  });
+
+  it("throws when Keycloak refuses the logout, leaving the caller to decide it is non-fatal", async () => {
+    const { fetch } = stubFetch([() => Response.json({ error: "server_error" }, { status: 500 })]);
+
+    const error = (await createMemberRoleAdminClient(config, { fetch })
+      .forceReauthentication("user-sub-123")
+      .catch((caught: unknown) => caught)) as KeycloakAdminError;
+
+    expect(error).toBeInstanceOf(KeycloakAdminError);
+    expect(error.code).toBe("KEYCLOAK_ADMIN_UNAVAILABLE");
+  });
+
+  it("reports 403 the same manage-users-specific way grantClientRoles does", async () => {
+    const { fetch } = stubFetch([
+      () => Response.json({ error: "access_denied" }, { status: 403 }),
+    ]);
+
+    const error = (await createMemberRoleAdminClient(config, { fetch })
+      .forceReauthentication("user-sub-123")
+      .catch((caught: unknown) => caught)) as KeycloakAdminError;
+
+    expect(error.code).toBe("KEYCLOAK_ADMIN_UNAUTHORIZED");
+  });
+});

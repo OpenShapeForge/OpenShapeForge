@@ -37,6 +37,44 @@
  * already the identity-configuration credential this runtime authenticates
  * as for organization-scoped fixed operations, and a role grant that
  * originates from a Hubble MCP tool an org_admin calls is exactly that.
+ *
+ * FORCING RE-AUTHENTICATION AFTER A ROLE GRANT
+ * ---------------------------------------------
+ * `forceReauthentication` is `POST /users/{id}/logout`, verified by hand
+ * against a running Keycloak 26.5.3 (`localhost:8181`, realm `openshapeforge`)
+ * rather than assumed from the docs:
+ *
+ *   - it ends the user's regular ("online") SSO sessions: afterwards
+ *     `GET /users/{id}/sessions` returns `[]`;
+ *   - it revokes the refresh token(s) that came from THOSE sessions: replaying
+ *     one at `/protocol/openid-connect/token` answers
+ *     `invalid_grant: Session not active`; and a bearer minted before the call
+ *     is rejected by Keycloak's OWN `/userinfo` (which checks the session, not
+ *     just the signature) — but NOT by a resource server that only verifies
+ *     the JWT's signature and claims, which is what this Hubble deployment's
+ *     bearer verification does (`packages/auth/src/bearer.ts`,
+ *     `createBearerVerifier` — `jose`'s `jwtVerify` against a JWKS, no
+ *     Keycloak call). So the access token itself keeps validating on Hubble's
+ *     own API until it naturally expires (15 minutes here); this call cannot
+ *     shorten that window, only make sure nothing REFRESHES a still-minimal
+ *     token past it.
+ *   - it does NOT touch offline sessions: a token requested with
+ *     `scope=offline_access` (the shape a long-lived CLI client such as Codex
+ *     uses to avoid re-prompting for months) keeps its offline session and its
+ *     offline refresh token — `GET /users/{id}/offline-sessions/{clientUuid}`
+ *     still lists it after the call, and refreshing with it still succeeds.
+ *     There is no single admin-API call that revokes an offline session for
+ *     one user without a client id; doing that would need
+ *     `DELETE /users/{id}/offline-sessions/{clientUuid}` for every client the
+ *     person might hold one from, which this function does not attempt.
+ *
+ * Given that, this is best-effort defense in depth, not a guarantee: it forces
+ * an immediate re-login for anyone whose session is an ordinary browser SSO
+ * session (closes the up-to-90-day drift the offline/refresh path would
+ * otherwise leave open for THAT session), narrows the window for everyone else
+ * to the access token's own 15-minute lifetime, and — because it is a distinct
+ * call from the role grant — is never allowed to turn a successful role grant
+ * into a reported failure.
  */
 import {
   createServiceAccountTokenProvider,
@@ -68,6 +106,19 @@ export type MemberRoleAdminClient = {
    * grant that did not fully happen.
    */
   grantClientRoles(userId: string, clientId: string, roleNames: readonly string[]): Promise<void>;
+
+  /**
+   * End the user's regular SSO sessions and the refresh tokens issued under
+   * them, so a role change takes effect on their very next request rather
+   * than waiting for a refresh or the access token's natural expiry. See the
+   * module doc comment for exactly what this does and does not cover
+   * (notably: offline sessions/tokens are untouched, and an already-issued
+   * access token keeps validating against a resource server — like this one —
+   * that verifies it statelessly). Throws `KeycloakAdminError` on failure;
+   * callers that must not fail an otherwise-successful operation over this
+   * (e.g. `set_member_role`) should catch it themselves.
+   */
+  forceReauthentication(userId: string): Promise<void>;
 };
 
 export function createMemberRoleAdminClient(
@@ -189,6 +240,10 @@ export function createMemberRoleAdminClient(
           body: JSON.stringify(roleNames.map((name) => byName.get(name))),
         },
       );
+    },
+
+    async forceReauthentication(userId) {
+      await request(`/users/${encodeURIComponent(userId)}/logout`, { method: "POST" });
     },
   };
 }

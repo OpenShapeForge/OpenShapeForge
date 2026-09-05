@@ -347,6 +347,9 @@ const CLIENT_NAMES: Readonly<Record<string, string>> = {
   codex: "Codex",
   "openshapeforge-inspector": "MCP Inspector",
   "openshapeforge-gateway": "Hubble",
+  // The control realm's clients (platform administrator MCP, control/platform-tools.ts).
+  "codex-platform": "Codex",
+  "openshapeforge-admin-gateway": "Hubble control plane",
 };
 
 export function signedInViaLabel(identity: SessionIdentity): string {

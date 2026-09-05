@@ -36,6 +36,7 @@ import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
 import { registerConnectorOAuthRoutes } from "../connectors/oauth-routes.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import { registerControlRestRoutes } from "../control/rest-routes.js";
+import { registerControlMcpServer } from "../mcp/control-mcp-server.js";
 import { registerDocumentRestRoutes } from "../documents/rest-routes.js";
 import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
 import {
@@ -455,6 +456,10 @@ export function createApiApp(options: {
     // unconditionally so an unconfigured deployment answers 503 naming what is
     // missing rather than 404, which reads like a version mismatch.
     registerControlRestRoutes(routes, dbOptions);
+    // The platform administrator MCP (`/api/control/mcp`): same realm as the
+    // control plane, its own small server (mcp/control-mcp-server.ts), and the
+    // loaded modules so the one that administers a catalog can be found.
+    registerControlMcpServer(routes, { ...dbOptions, modules: initialised.loaded });
 
     for (const module of initialised.loaded) {
       module.restRoutes?.(routes, moduleContext);

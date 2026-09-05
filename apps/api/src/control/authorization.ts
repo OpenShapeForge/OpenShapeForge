@@ -105,20 +105,24 @@ export type ResolveOperatorOptions = {
 };
 
 /**
- * Authenticate and authorize the caller as a platform operator.
+ * The first precondition, shared by every control-realm surface: a bearer
+ * token that verifies against the CONTROL realm. Returns the verified claims
+ * for the caller's own party and role checks; throws UNAUTHENTICATED with a
+ * non-enumerating message otherwise.
  *
  * Bearer only, and only against the control realm. There is deliberately no
  * trusted-context fallback: `readTrustedSessionContext` accepts HMAC-signed
  * headers carrying arbitrary roles, which on the tenant surface is a considered
  * trade-off between two tenant-scoped mechanisms, and on a cross-tenant control
  * surface would mean anything holding the shared context secret could claim to
- * be an operator.
+ * be an operator. An API key is refused for the same reason: it names a
+ * tenant, and nothing on a cross-tenant surface may.
  */
-export async function resolveControlOperator(
+export async function verifyControlBearer(
   headers: Headers,
   config: ControlPlaneConfig,
   options: ResolveOperatorOptions = {},
-): Promise<ControlOperator> {
+): Promise<Record<string, unknown>> {
   const authorization = headers.get("authorization");
   const match = authorization ? BEARER_AUTHORIZATION.exec(authorization) : null;
   if (!match) {
@@ -129,11 +133,11 @@ export async function resolveControlOperator(
   }
 
   const verifier = options.verifier ?? verifierFor(config);
-  let claims: Record<string, unknown>;
   try {
-    ({ claims } = (await verifier(match[1]!)) as unknown as {
+    const { claims } = (await verifier(match[1]!)) as unknown as {
       claims: Record<string, unknown>;
-    });
+    };
+    return claims;
   } catch (error) {
     // The reason is logged, not returned: signature/issuer/audience/expiry
     // failures are an oracle for an attacker probing which realm this endpoint
@@ -148,6 +152,38 @@ export async function resolveControlOperator(
       "The presented token is not a valid control-realm operator token.",
     );
   }
+}
+
+/**
+ * Realm roles only. `resource_access` client roles are deliberately NOT
+ * merged the way identity.ts merges them for tenant sessions: there, entity
+ * roles only exist per-client so merging is required to authorize anything at
+ * all. Here there are marker roles on one realm, and widening the search to
+ * every client's role list would let any client that happens to define a role
+ * with the same name mint control-plane access.
+ */
+export function realmRolesOf(claims: Record<string, unknown>): string[] {
+  const realmAccess = claims.realm_access;
+  const realmRoles =
+    realmAccess && typeof realmAccess === "object" && !Array.isArray(realmAccess)
+      ? (realmAccess as { roles?: unknown }).roles
+      : undefined;
+  return Array.isArray(realmRoles)
+    ? realmRoles.filter((role): role is string => typeof role === "string")
+    : [];
+}
+
+/**
+ * Authenticate and authorize the caller as a platform operator: a verified
+ * control-realm bearer, minted for the one gateway client, holding the
+ * `platform-operator` realm role.
+ */
+export async function resolveControlOperator(
+  headers: Headers,
+  config: ControlPlaneConfig,
+  options: ResolveOperatorOptions = {},
+): Promise<ControlOperator> {
+  const claims = await verifyControlBearer(headers, config, options);
 
   // The authorized-party check. Without it a valid issuer alone would let in a
   // token minted by Keycloak's built-in PUBLIC `admin-cli` client — obtainable
@@ -174,19 +210,8 @@ export async function resolveControlOperator(
     );
   }
 
-  // Realm roles only. `resource_access` client roles are deliberately NOT
-  // merged the way identity.ts merges them for tenant sessions: there, entity
-  // roles only exist per-client so merging is required to authorize anything at
-  // all. Here there is one marker role on one realm, and widening the search to
-  // every client's role list would let any client that happens to define a role
-  // named `platform-operator` mint control-plane access.
-  const realmAccess = claims.realm_access;
-  const realmRoles =
-    realmAccess && typeof realmAccess === "object" && !Array.isArray(realmAccess)
-      ? (realmAccess as { roles?: unknown }).roles
-      : undefined;
-  const holdsOperatorRole =
-    Array.isArray(realmRoles) && realmRoles.includes(PLATFORM_OPERATOR_ROLE);
+  // Realm roles only; see realmRolesOf for why client roles never count.
+  const holdsOperatorRole = realmRolesOf(claims).includes(PLATFORM_OPERATOR_ROLE);
   if (!holdsOperatorRole) {
     throw new ControlAuthorizationError(
       "FORBIDDEN",

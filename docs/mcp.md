@@ -202,6 +202,15 @@ not an oracle for which Organizations exist. An MCP session id is bound to the
 resource it was initialized on as well as to the identity; replaying it on
 another path is `403`.
 
+### The platform administrator resource
+
+`/api/control/mcp` is a different server on the same transport plumbing: the
+control plane's MCP for a platform administrator, who has no tenant. It
+authenticates against the **control** realm (its metadata document names that
+realm as authorization server), requires the realm role `platform_admin`, and
+offers nine tools that manage a runtime module's integration catalog for every
+tenant at once. See [api.md, "The platform administrator MCP"](api.md#the-platform-administrator-mcp).
+
 ## Tool surface
 
 Two catalog styles, chosen per entity:

@@ -218,6 +218,17 @@ export function sessionInAudience(
 }
 
 /**
+ * The exact separator the personal layer hangs under. Named rather than
+ * inlined because a runtime plugin that composes further tiers on top of a
+ * projected description (osf-integration's organization instruction and its
+ * per-Service personal-instruction policy) has to find the boundary between
+ * what was authored and what this person added, and cannot import this
+ * module. Changing this string changes that contract.
+ */
+export const PERSONAL_NOTES_MARKER =
+  "\n\nPersonal notes from this user (everything above always takes precedence): ";
+
+/**
  * Append one person's standing instructions to their projected tool
  * descriptions. The authored description always comes first and untouched;
  * the personal layer hangs underneath with an explicit precedence label, so
@@ -251,9 +262,7 @@ export function applyPersonalNotes(
     if (notes.length === 0) return tool;
     return {
       ...tool,
-      description:
-        `${tool.description}\n\nPersonal notes from this user (everything above always ` +
-        `takes precedence): ${notes.join(" ")}`,
+      description: `${tool.description}${PERSONAL_NOTES_MARKER}${notes.join(" ")}`,
     };
   });
 }

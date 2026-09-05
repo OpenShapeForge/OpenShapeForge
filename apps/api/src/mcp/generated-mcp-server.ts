@@ -496,7 +496,17 @@ const DATA_ACQUISITION_GUIDANCE =
   "secrets or many linked fields at once, point the person to this " +
   "deployment's configuration form. Never ask field-by-field: propose one " +
   "complete draft from the above and let the person confirm or edit it " +
-  "once, then act according to the assistance level they have set for you.";
+  "once, then act according to the assistance level they have set for you." +
+  " Learning loop — when the same person corrects the same thing more than " +
+  "once in a session (the same field changed the same way, the same " +
+  "ordering, the same thing left out), offer ONCE, at a natural pause, to " +
+  "store that as their standing instruction with set_my_preferences, and " +
+  "say what you would store. Offer it once, not on every repetition, and " +
+  "not again in that session if they decline; and only where the tool's " +
+  "own description says personal instructions are allowed on it — a tool " +
+  "whose organization forbids them refuses the write, so never offer there. " +
+  "This is about acting on what you already noticed in this conversation; " +
+  "nothing records it for you.";
 
 /**
  * The short reminder every generated `create`/`update` tool carries in its

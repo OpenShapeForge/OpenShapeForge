@@ -233,6 +233,47 @@ The human-readable name stays in `platform.tenants` / `platform.org_unit`, which
 are the system of record for it. Slugs are lowercase alphanumerics in
 single-hyphen groups, which is what makes `--` an unambiguous separator.
 
+### The platform administrator MCP
+
+The control plane has one more surface, for a different job: `/api/control/mcp`
+(Streamable HTTP, `src/mcp/control-mcp-server.ts`) lets a **platform
+administrator** — a control-realm person, not a tenant member — manage the
+integration catalog of a runtime module for *every* tenant at once. It is a
+separate small MCP server beside the generated one rather than a mode of it,
+for the reason the REST control plane is not on the GraphQL schema: the
+generated server is per-tenant by construction and a platform session names
+no tenant.
+
+- **Same realm, its own gate.** A verified control-realm bearer, minted for
+  a party on `OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES` (default: the
+  operator client; the reference realm setup adds a public PKCE client
+  `codex-platform` for interactive sign-in from an MCP client), holding the
+  realm role `platform_admin` — looked for in `realm_access` only. API keys
+  and trusted-context headers name a tenant and are refused; a tenant-realm
+  token fails verification and is refused with the same 401 as no token.
+  Its metadata document,
+  `/.well-known/oauth-protected-resource/api/control/mcp`, names the
+  **control** realm as authorization server, so a client that follows the
+  challenge signs the person in against the right realm.
+- **Audited per call.** Every tool runs inside `withSystemSession` with the
+  reason `platform-mcp: <tool> <kind>/<key>`, so
+  `platform.system_bypass_audit` reads as a log of what the administrator did.
+- **The catalog is a module's.** Core has no integration catalog; the module
+  that owns one supplies `RuntimeModule.platformCatalog` (a small API: list,
+  get, publish, retire, apply for one tenant, installation counts) and
+  `src/control/platform-catalog.ts` calls it with the cross-tenant session,
+  mapping tenant ids to slugs so no id reaches a client.
+- **Tools** (`src/control/platform-tools.ts`): `whoami` (role "Platform
+  administrator", scope `platform`, tenant count), `platform_guide`,
+  `list_tenants`, `get_tenant`, `list_catalog_entries`, `get_catalog_entry`,
+  `publish_catalog_entry` (version N+1 from a whole definition; tenants
+  without overrides updated in place, overridden ones flagged),
+  `retire_catalog_entry`, `apply_catalog_update_for_tenant` (forces one
+  tenant, discarding its overrides). A refusal is a tool result with a code
+  (`CATALOG_INVALID_DEFINITION` with `problems`, `CATALOG_ENTRY_NOT_FOUND`,
+  `CATALOG_UNCHANGED`, `CATALOG_NOT_INSTALLED`, `CATALOG_UPDATE_FAILED`,
+  `PLATFORM_CATALOG_UNAVAILABLE` when no loaded module administers a catalog).
+
 ### Moving a sub-organisation
 
 A reparent is atomic in the registry — one `UPDATE platform.org_unit SET
@@ -633,6 +674,7 @@ compose stack):
 | `OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER` / `_JWKS_URI` / `_CLIENT_ID` | control-realm operator verification; `_CLIENT_ID` pins `azp`, not `aud` |
 | `OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL` + `KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API` | how provisioning reaches the SPI in the tenant realm; the secret shares its name with the realm generator's |
 | `OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM` / `_CLIENT_ID` | optional overrides (default `openshapeforge` / `openshapeforge-auth-api`) |
+| `OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES` | comma-separated `azp` allow-list of the platform administrator MCP (`/api/control/mcp`); default: the operator client |
 | `API_RATE_LIMIT_MAX` / `_WINDOW_MS` | anonymous budget per window (default 600 / 60s) |
 | `API_RATE_LIMIT_MAX_TRUSTED` | budget for a signed trusted-context caller (default 5× the anonymous budget) |
 | `API_RATE_LIMIT_REDIS_URL` | shared limiter store; unset ⇒ in-memory, budget enforced per instance |

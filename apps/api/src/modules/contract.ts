@@ -40,6 +40,7 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import type { CatalogSeedResult } from "../db/migrations/catalog-seed.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
+import type { PlatformCatalogProvider } from "../control/platform-catalog.js";
 
 /** What a module may read when building its surfaces. */
 export type ModuleRuntimeContext = {
@@ -449,4 +450,11 @@ export type RuntimeModule = {
   mcp?: RuntimeMcpContribution;
   /** At most one loaded module may own final outbound request execution. */
   egress?: { fetch(request: ModuleEgressRequest): Promise<Response> };
+  /**
+   * A platform-level (cross-tenant) catalog this module administers, used
+   * ONLY by the control plane's platform administrator MCP
+   * (`control/platform-catalog.ts`) on an audited system session. Never
+   * reached from a tenant session. At most one loaded module may supply it.
+   */
+  platformCatalog?: PlatformCatalogProvider;
 };

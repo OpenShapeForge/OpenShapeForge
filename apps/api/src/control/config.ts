@@ -76,6 +76,17 @@ export type ControlPlaneEnv = {
    * becomes the better pin and this should move.
    */
   OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID?: string | undefined;
+  /**
+   * The clients whose tokens the platform administrator MCP
+   * (`/api/control/mcp`, `mcp/control-mcp-server.ts`) accepts, matched
+   * against `azp`, comma-separated. Optional; defaults to the operator client
+   * above. An MCP client signs in interactively with a public PKCE client of
+   * the control realm (`codex-platform` in the reference realm setup), which
+   * is a different party from the admin gateway, so the allow-list is a list.
+   * The `admin-cli` hazard the CLIENT_ID pin closes applies unchanged: a name
+   * that is not on this list is refused before any role is looked at.
+   */
+  OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES?: string | undefined;
 };
 
 export type ControlPlaneConfig = {
@@ -91,7 +102,22 @@ export type ControlPlaneConfig = {
     /** Matched against the token's `azp`. See ControlPlaneEnv for why not `aud`. */
     clientId: string;
   };
+  /**
+   * The platform administrator MCP's `azp` allow-list. Absent means "the
+   * operator client only" (`platformMcpAuthorizedParties` applies that
+   * default), so a configuration literal built before this field existed
+   * keeps its meaning.
+   */
+  platformMcp?: {
+    authorizedParties: readonly string[];
+  };
 };
+
+/** The `azp` values `/api/control/mcp` admits, with the default applied. */
+export function platformMcpAuthorizedParties(config: ControlPlaneConfig): readonly string[] {
+  const configured = config.platformMcp?.authorizedParties ?? [];
+  return configured.length > 0 ? configured : [config.operator.clientId];
+}
 
 export type ControlPlaneConfigResult =
   | { ok: true; config: ControlPlaneConfig }
@@ -141,6 +167,12 @@ export function readControlPlaneConfig(
         clientSecret: clientSecret!,
       },
       operator: { issuer: issuer!, jwksUri: jwksUri!, clientId: operatorClientId! },
+      platformMcp: {
+        authorizedParties: (env.OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES ?? "")
+          .split(",")
+          .map((party) => party.trim())
+          .filter((party) => party.length > 0),
+      },
     },
   };
 }

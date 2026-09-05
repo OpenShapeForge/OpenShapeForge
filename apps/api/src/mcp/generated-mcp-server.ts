@@ -1005,6 +1005,35 @@ function refreshLeewaySeconds(auth: Record<string, unknown> | null): number {
     : 60;
 }
 
+/**
+ * Read connection rows with their values as the object they encode.
+ *
+ * A values column written through a parameter the driver typed as jsonb was
+ * JSON-encoded twice (`"{\"accessToken\":…}"`): jsonb_typeof = string, and
+ * every field read (`grantedScopes`, `accessToken`, expiry) came back
+ * undefined, which source selection reported as "authorize again" although
+ * the stored tokens were valid. The writer no longer does that; rows persisted
+ * before the fix are read through this normalization until their next
+ * refresh rewrites them as an object.
+ */
+export function normalizeConnectionValueRows(
+  rows: readonly Record<string, unknown>[],
+  valuesField: string,
+): Record<string, unknown>[] {
+  return rows.map((row) => {
+    const stored = row[valuesField];
+    if (typeof stored !== "string") return row;
+    try {
+      const parsed: unknown = JSON.parse(stored);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? { ...row, [valuesField]: parsed }
+        : row;
+    } catch {
+      return row;
+    }
+  });
+}
+
 /** The only OAuth connection-row selector used by derived execution. */
 export function selectOAuthConnectionRow(
   rows: readonly Record<string, unknown>[],
@@ -1233,9 +1262,12 @@ export async function refreshConnectionRowLocked(input: {
               : {}),
             accessTokenExpiresAt: new Date(tokens.expiresAt * 1000).toISOString(),
           };
+          // `::text::jsonb`: the parameter must reach Postgres as text. Typed
+          // straight as jsonb, the driver JSON-encodes the already-serialized
+          // string once more and the column becomes a jsonb *string*.
           await sql`
             update ${sql.id(input.table.schema, input.table.table)}
-               set ${sql.id(valuesColumn.name)} = ${JSON.stringify(result)}::jsonb
+               set ${sql.id(valuesColumn.name)} = ${JSON.stringify(result)}::text::jsonb
              where ${sql.id(input.table.primaryKey!)}::text = ${input.rowId}
                and ${sql.id(providerColumn.name)}::text = ${input.expectedProviderId}
                and ${sql.id(ownerColumn.name)}::text is not distinct from ${input.expectedOwnerUserId}
@@ -2826,10 +2858,13 @@ function buildServer(
             definitionUnavailable(binding, "unavailable");
             continue;
           }
-          const connectionRows = await snapshotRowsByFilter(
-            trx,
-            execution.connectionTable,
-            { [execution.connectionProviderRef]: providerId },
+          const connectionRows = normalizeConnectionValueRows(
+            await snapshotRowsByFilter(
+              trx,
+              execution.connectionTable,
+              { [execution.connectionProviderRef]: providerId },
+            ),
+            execution.connectionValuesField,
           );
           const providerAuth = (providerRow.auth ?? null) as Record<
             string,
@@ -3812,12 +3847,15 @@ function buildServer(
             );
           }
 
-          const connectionRows = await runtimeRowsByFilter(
-            db,
-            session,
-            tables,
-            execution.connectionTable,
-            { [execution.connectionProviderRef]: providerRowId },
+          const connectionRows = normalizeConnectionValueRows(
+            await runtimeRowsByFilter(
+              db,
+              session,
+              tables,
+              execution.connectionTable,
+              { [execution.connectionProviderRef]: providerRowId },
+            ),
+            execution.connectionValuesField,
           );
           const existingForScope =
             scope_ === "user"
@@ -4225,12 +4263,15 @@ function buildServer(
             });
             continue;
           }
-          const connectionRows = await runtimeRowsByFilter(
-            db,
-            session,
-            tables,
-            execution.connectionTable,
-            { [execution.connectionProviderRef]: providerId },
+          const connectionRows = normalizeConnectionValueRows(
+            await runtimeRowsByFilter(
+              db,
+              session,
+              tables,
+              execution.connectionTable,
+              { [execution.connectionProviderRef]: providerId },
+            ),
+            execution.connectionValuesField,
           );
           const tenantConnection = connectionRows.find(
             (row) => !row.ownerUserId,
@@ -4726,12 +4767,15 @@ function buildServer(
                 }
                 let connectionRows = captured
                   ? captured.connectionRows
-                  : await runtimeRowsByFilter(
-                      db,
-                      session,
-                      tables,
-                      execution.connectionTable,
-                      { [execution.connectionProviderRef]: providerId },
+                  : normalizeConnectionValueRows(
+                      await runtimeRowsByFilter(
+                        db,
+                        session,
+                        tables,
+                        execution.connectionTable,
+                        { [execution.connectionProviderRef]: providerId },
+                      ),
+                      execution.connectionValuesField,
                     );
                 const providerAuth = (providerRow.auth ?? null) as Record<
                   string,

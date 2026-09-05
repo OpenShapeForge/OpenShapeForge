@@ -141,6 +141,15 @@ const pluginMigrationOwnedColumns: {
       "update_available_version",
     ],
   },
+  {
+    // The tenant's own organization Relation, linked by a core migration
+    // after the generated step (it points at a generated table, so it cannot
+    // be part of the manifest that creates that table).
+    plugin: "core",
+    migration: "organization-relation-link",
+    tables: ["platform.tenants"],
+    columns: ["relation_id"],
+  },
 ];
 
 export const nonManifestManagedColumns = new Set<string>(

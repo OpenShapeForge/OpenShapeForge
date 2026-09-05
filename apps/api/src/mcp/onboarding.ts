@@ -484,9 +484,14 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
       "   For an OAuth provider, register the redirect URL from the step on the provider's OAuth",
       "   client before entering the values. Then verify with test_connection.",
       "b. then your own personal sign-in (connections), c. then preferences.",
-      "You also link colleagues' logins (link_identity) and assign roles. Personal sign-ins",
-      "remain each employee's own; you cannot connect on their behalf. To add a provider that",
-      "does not exist yet, follow provider_setup_guide.",
+      "To add a new employee or colleague, run invite_employee {email, role}: it sends them a",
+      "Keycloak invitation and the role you pick is applied automatically the moment they accept",
+      "and sign in for the first time. list_invitations shows who is still pending;",
+      "revoke_invitation cancels one that has not been accepted yet. For someone who has ALREADY",
+      "signed in without being invited first (they show up unlinked or pending), use",
+      "link_identity instead to link their login to a Relation and assign roles by hand.",
+      "Personal sign-ins remain each employee's own; you cannot connect on their behalf. To add a",
+      "provider that does not exist yet, follow provider_setup_guide.",
     );
   }
   if (integrationAdministrator) {

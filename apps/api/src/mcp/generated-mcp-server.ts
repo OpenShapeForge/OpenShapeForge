@@ -158,6 +158,18 @@ import {
   callIdentityLinkTool,
   identityLinkToolsForSession,
 } from "./identity-link-tools.js";
+// ---- employee invitations (mcp/employee-invitation-tools.ts) ----
+import {
+  callEmployeeInvitationTool,
+  employeeInvitationToolsForSession,
+} from "./employee-invitation-tools.js";
+import { readControlPlaneConfig } from "../control/config.js";
+import { createServiceAccountTokenProvider } from "../control/keycloak-service-account.js";
+import {
+  createKeycloakOrganizationMembersClient,
+  type KeycloakOrganizationMembersClient,
+} from "../control/keycloak-organization-members.js";
+import { KeycloakAdminError } from "../control/keycloak-organization-admin.js";
 // ---- first-use onboarding (mcp/onboarding.ts) ----
 import {
   callOnboardingTool,
@@ -2521,6 +2533,40 @@ function operationMayInvoke(
   );
 }
 
+// ---- employee invitations: lazy Keycloak client ----
+// Built once, from the tenant control plane's own configuration
+// (control/config.ts) — the SAME service account and realm `invite_employee`
+// needs is already required for tenant provisioning, so this reads no new
+// environment. `undefined` when that configuration is absent (an existing
+// deployment that never set it up), in which case the tool answers
+// CONTROL_PLANE_NOT_CONFIGURED rather than throwing at server-build time —
+// consistent with how registerControlRestRoutes stays registered and answers
+// 503 by name instead of refusing to start.
+let cachedEmployeeInvitationKeycloak: KeycloakOrganizationMembersClient | undefined | null = null;
+function employeeInvitationKeycloakClient(): KeycloakOrganizationMembersClient | undefined {
+  if (cachedEmployeeInvitationKeycloak !== null) return cachedEmployeeInvitationKeycloak;
+  const configResult = readControlPlaneConfig();
+  if (!configResult.ok) {
+    cachedEmployeeInvitationKeycloak = undefined;
+    return undefined;
+  }
+  const tokens = createServiceAccountTokenProvider(configResult.config.keycloak, {
+    unauthorized: (message, status) =>
+      new KeycloakAdminError("KEYCLOAK_ADMIN_UNAUTHORIZED", message, status),
+    unavailable: (message, status) =>
+      new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", message, status),
+  });
+  cachedEmployeeInvitationKeycloak = createKeycloakOrganizationMembersClient(
+    configResult.config.keycloak,
+    { tokens },
+  );
+  return cachedEmployeeInvitationKeycloak;
+}
+/** Test-only: force the next call to re-read configuration. */
+export function __resetEmployeeInvitationKeycloakClientForTests(): void {
+  cachedEmployeeInvitationKeycloak = null;
+}
+
 function buildServer(
   db: OpenShapeForgeDatabase,
   session: TrustedSessionContext,
@@ -3403,6 +3449,9 @@ function buildServer(
       // ---- identity ↔ Relation link (mcp/identity-link-tools.ts) ----
       ...identityLinkToolsForSession(session),
       // ---- end identity ↔ Relation link ----
+      // ---- employee invitations (mcp/employee-invitation-tools.ts) ----
+      ...employeeInvitationToolsForSession(session),
+      // ---- end employee invitations ----
       // ---- first-use onboarding (mcp/onboarding.ts) ----
       ...onboardingToolsForSession(session),
       // ---- end first-use onboarding ----
@@ -4410,6 +4459,17 @@ function buildServer(
     );
     if (identityLinkOutcome) return identityLinkOutcome as ToolResult;
     // ---- end identity ↔ Relation link ----
+
+    // ---- employee invitations (mcp/employee-invitation-tools.ts) ----
+    const employeeInvitationOutcome = await callEmployeeInvitationTool(
+      name,
+      (request.params.arguments ?? {}) as Record<string, unknown>,
+      db,
+      session,
+      employeeInvitationKeycloakClient(),
+    );
+    if (employeeInvitationOutcome) return employeeInvitationOutcome as ToolResult;
+    // ---- end employee invitations ----
 
     // ---- first-use onboarding (mcp/onboarding.ts) ----
     const onboardingOutcome = await callOnboardingTool(

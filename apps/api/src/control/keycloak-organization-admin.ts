@@ -180,6 +180,13 @@ export type ListOrganizationsResult = {
   truncated: boolean;
 };
 
+/** One identity provider linked to an Organization, as the native endpoint reports it. */
+export type OrganizationIdentityProvider = {
+  alias: string;
+  providerId: string;
+  enabled: boolean;
+};
+
 export type KeycloakOrganizationAdminClient = {
   /** The organization's current state, or a named error if it is not there. */
   getOrganization(organizationId: string): Promise<KeycloakOrganizationState>;
@@ -200,6 +207,21 @@ export type KeycloakOrganizationAdminClient = {
    * realm side. There is no per-tenant question that answers it.
    */
   listOrganizations(limit: number): Promise<ListOrganizationsResult>;
+  /**
+   * Link an identity provider — already authored in the realm (see
+   * docs/identity-providers.md) — to this Organization, via Keycloak's native
+   * `POST /organizations/{id}/identity-providers`. Realm-wide
+   * `identityProviders[]` authors WHAT a provider is; this is the ONLY thing
+   * that decides WHICH Organization brokers through it. Idempotent: linking
+   * an alias already linked to this Organization is a no-op (Keycloak answers
+   * 204 either way; verified there is no distinguishable "already linked"
+   * error on 26.5.3, so no such re-signal is invented here).
+   */
+  linkIdentityProvider(organizationId: string, alias: string): Promise<void>;
+  /** Identity providers currently linked to this Organization. */
+  listIdentityProviders(organizationId: string): Promise<OrganizationIdentityProvider[]>;
+  /** Unlink an identity provider from this Organization. Idempotent. */
+  unlinkIdentityProvider(organizationId: string, alias: string): Promise<void>;
 };
 
 export type KeycloakOrganizationAdminOptions = {
@@ -243,6 +265,7 @@ export function createKeycloakOrganizationAdminClient(
   async function request(
     url: string,
     init: RequestInit,
+    contentType: string = "application/json",
   ): Promise<{ status: number; body: unknown }> {
     const token = await tokens.get();
     let response: Response;
@@ -251,7 +274,7 @@ export function createKeycloakOrganizationAdminClient(
         ...init,
         headers: {
           authorization: `Bearer ${token}`,
-          "content-type": "application/json",
+          ...(init.body === undefined ? {} : { "content-type": contentType }),
           ...init.headers,
         },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -393,6 +416,58 @@ export function createKeycloakOrganizationAdminClient(
         // would collide with every other malformed row in the map built from this.
         .filter((organization) => organization.id.length > 0);
       return { organizations, truncated: rows.length > limit };
+    },
+
+    async linkIdentityProvider(organizationId, alias) {
+      // The native endpoint's body is the alias as a JSON string (i.e. the
+      // literal bytes `"alias"`), Content-Type application/json — verified
+      // against a running Keycloak 26.5.3: a bare unquoted string with
+      // text/plain is rejected with 415, and a JSON-quoted string succeeds
+      // with 204.
+      await request(`${organizationUrl(organizationId)}/identity-providers`, {
+        method: "POST",
+        body: JSON.stringify(alias),
+      });
+    },
+
+    async listIdentityProviders(organizationId) {
+      const { body } = await request(
+        `${organizationUrl(organizationId)}/identity-providers`,
+        { method: "GET" },
+      );
+      const rows = Array.isArray(body) ? body : [];
+      return rows
+        .map((row) => {
+          const record = (row ?? {}) as Record<string, unknown>;
+          return typeof record.alias === "string"
+            ? {
+                alias: record.alias,
+                providerId: typeof record.providerId === "string" ? record.providerId : "",
+                enabled: record.enabled !== false,
+              }
+            : null;
+        })
+        .filter((idp): idp is OrganizationIdentityProvider => idp !== null);
+    },
+
+    async unlinkIdentityProvider(organizationId, alias) {
+      try {
+        await request(
+          `${organizationUrl(organizationId)}/identity-providers/${encodeURIComponent(alias)}`,
+          { method: "DELETE" },
+        );
+      } catch (error) {
+        // Already unlinked (or never linked): idempotent, not an error. A
+        // missing ORGANIZATION is a real error and still throws.
+        if (
+          error instanceof KeycloakAdminError &&
+          error.code === "KEYCLOAK_ADMIN_ORGANIZATION_NOT_FOUND" &&
+          error.status === 404
+        ) {
+          return;
+        }
+        throw error;
+      }
     },
   };
 }

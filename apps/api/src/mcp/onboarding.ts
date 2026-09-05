@@ -492,6 +492,14 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
       "link_identity instead to link their login to a Relation and assign roles by hand.",
       "Personal sign-ins remain each employee's own; you cannot connect on their behalf. To add a",
       "provider that does not exist yet, follow provider_setup_guide.",
+      "d. Corporate single sign-on (e.g. Google Workspace) is linked per organization, not",
+      "   realm-wide: an administrator with Keycloak access links the identity provider to this",
+      "   organization's Keycloak Organization (control/keycloak-organization-admin.ts's",
+      "   linkIdentityProvider) so only this tenant's employees see it, never another tenant's.",
+      "e. Anyone who signs in without a matching invitation still gets a Relation automatically",
+      "   on their first session, but starts with read-only access only. Call list_pending_members",
+      "   regularly to see who is waiting, and set_member_role {identityId or relationId, role:",
+      "   \"org_admin\" | \"org_employee\"} to grant them their real role — their next session picks it up.",
     );
   }
   if (integrationAdministrator) {

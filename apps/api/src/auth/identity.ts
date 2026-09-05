@@ -136,6 +136,23 @@ function getTenantBypassRoles(): ReadonlySet<string> {
   return cachedTenantBypassRoles;
 }
 
+/**
+ * What a brand-new identity's session may do before an administrator has
+ * assigned it a real role — see `platform.identity_relations
+ * .needs_role_assignment` (db/migrations/identity-link.ts) for why this has
+ * to be a code-level override rather than a Keycloak admin-API role grant:
+ * `session.roles` below is computed from the JWT that is ALREADY ISSUED by
+ * the time `resolveIdentityLink` runs and could grant a role, so nothing
+ * short of overriding the session itself can affect that very first request.
+ *
+ * `General.All.Read` is read-only access to the generic entity surface
+ * (whatever the realm's "read everything" composite grants) — enough to look
+ * around — deliberately not `Organization.All.ReadWrite` (org admin) or any
+ * `Pentest.*` role. `whoami`/`day_start` need no role at all, so they keep
+ * working regardless of this override.
+ */
+export const NEEDS_ROLE_ASSIGNMENT_ROLES: readonly string[] = ["General.All.Read"];
+
 function resolveScope(roles: readonly string[], groups: readonly string[]): SessionScope {
   const bypass = getTenantBypassRoles();
   if (bypass.size > 0 && roles.some((role) => bypass.has(role))) return "tenant";
@@ -536,14 +553,23 @@ export async function resolveSessionContext(
               personClaims,
             )
           : null;
+      // A brand-new identity (needs_role_assignment) never gets the JWT's
+      // resource_access roles: those were computed above from a token issued
+      // before this Relation existed, so a Keycloak admin-API grant made just
+      // now cannot be in it. Recompute scope too, so a bypass role the JWT
+      // happened to carry cannot smuggle tenant-wide access past the override.
+      const effectiveRoles = relation?.needsRoleAssignment ? [...NEEDS_ROLE_ASSIGNMENT_ROLES] : roles;
+      const effectiveScope = relation?.needsRoleAssignment
+        ? resolveScope(effectiveRoles, groups)
+        : scope;
       // ---- end identity ↔ Relation link ----
       return {
         tenantId,
         userId: identity.userId,
-        roles,
+        roles: effectiveRoles,
         oauthScopes: identity.scopes ?? [],
         groups,
-        scope,
+        scope: effectiveScope,
         credential: "bearer",
         relation,
       };

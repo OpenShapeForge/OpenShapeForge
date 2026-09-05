@@ -13,6 +13,7 @@ journal, and manifest-derived e2e + load tests. Start with
 | [layers.md](layers.md) | `authoring.config.yaml`, overlays, `kind: entityPatch` strategic merge, catalog merging, `.authoring-build/` |
 | [plugins.md](plugins.md) | The `CompilerPlugin` contract, `ownedPaths`, determinism rules, and both shipped examples (entity-docs, workflow) |
 | [connectors.md](connectors.md) | Connector contracts, licensing and entitlement, configuration and secrets, the execution trust model |
+| [identity-providers.md](identity-providers.md) | External identity providers: what OSF ships vs. what a host authors, the `keycloak.identityProviders` contract, Apple, validation rules, reconciling an existing realm, Keycloak/provider lockstep |
 | [api.md](api.md) | The generic CRUD engine, multi-tenancy + RLS, auth (Keycloak bearer / trusted-context HMAC), the entity-event journal, env + local stack |
 | [operations.md](operations.md) | CORS ownership, persisted web operations, metrics/error privacy, readiness, OpenTelemetry, and GraphiQL |
 | [mcp.md](mcp.md) | The generated MCP server: opting in, the tool catalog built from field definitions, per-session tool listing, classification handling |

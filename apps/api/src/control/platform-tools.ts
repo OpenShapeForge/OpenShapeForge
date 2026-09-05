@@ -27,6 +27,14 @@ import { ControlAuthorizationError } from "./authorization.js";
 import { ControlServiceError } from "./errors.js";
 import { ControlInputError } from "./organization-naming.js";
 import type { PlatformAdministrator } from "./platform-admin.js";
+// ---- update notices (control/update-notices-admin.ts) ----
+import {
+  listUpdateNotices,
+  publishUpdateNotice,
+  validateUpdateNotice,
+  withdrawUpdateNotice,
+} from "./update-notices-admin.js";
+// ---- end update notices ----
 import {
   applyCatalogUpdateForTenant,
   type CatalogAuthority,
@@ -96,6 +104,11 @@ export const PLATFORM_GUIDE = [
   "3. Show the administrator the exact change and which tenants will be updated versus flagged; get confirmation.",
   "4. publish_catalog_entry; report the per-tenant outcomes. A tenant reported 'failed' kept its previous version (a publication check refused the new graph there) — say so.",
   "5. For a flagged tenant, tell the administrator; only apply_catalog_update_for_tenant on request.",
+  "",
+  "## Telling people what changed",
+  "A catalog publish changes an employee's tools without them noticing. publish_update_notice writes ONE platform-wide notice; every person's next session sees it in whoami's `updates` and their assistant walks them through it, once, and records that it did (acknowledge_update on the tenant MCP). Nobody can acknowledge on someone else's behalf, and a notice a person has not been told about stays pending forever.",
+  "Fill it in for the assistant that will read it, not for a changelog: `changed` is what happened, `assistantChanges` is what an assistant now does differently, `userActions` is the steps ONLY the person can take (re-registering a connection, approving something in a browser) — a separate field precisely so an assistant passes them on rather than attempting them — and `serviceChanges` maps each changed Service's catalog key to what changed on it. That last field is the one that earns the notice: it makes every employee's OWN stored personal instruction on that Service come up for review with them, in their own session, and nothing about the instruction changes without their word.",
+  "Provenance is taken from your token, not from what you write; there is no argument for it. Nothing filters what a notice says — the role you hold is the restraint, and what this platform tells people is the product owner's call. Republishing a key re-opens it only for people not yet told; to say something again to everyone, publish a NEW key.",
   "",
   "## Retiring",
   "retire_catalog_entry publishes a version marked retired. A Service is set to draft (unpublished) for every tenant that did not override it; overridden tenants are flagged and keep the Service until the update is applied. Adapters and Capabilities keep their rows and only carry the marker.",
@@ -256,6 +269,106 @@ export const PLATFORM_TOOLS: readonly Tool[] = [
       openWorldHint: false,
     },
   },
+  // ---- update notices (control/update-notices-admin.ts) ----
+  {
+    name: "publish_update_notice",
+    title: "Publish update notice",
+    description:
+      "Publishes ONE notice telling everyone on this deployment what changed. " +
+      "Every person's assistant sees it in whoami's `updates` on their next " +
+      "session, walks them through it once, and records that it did; a person " +
+      "who was never told keeps seeing it. Separate the three kinds: " +
+      "assistantChanges (what an assistant now does differently), userActions " +
+      "(steps ONLY the person can take — an assistant passes these on and never " +
+      "attempts them), and serviceChanges (Service catalog key → what changed " +
+      "on it, which puts each employee's own stored personal instruction on " +
+      "that Service up for review with them). Who published it is taken from " +
+      "your token, not from what you write. Reaches all tenants; confirm the " +
+      "text with the administrator first. Republishing a key re-opens it only " +
+      "for people not yet told — use a new key to say something again.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: {
+          type: "string",
+          description: "Stable notice key, kebab-case (e.g. day-start-v3). Republishing the same key replaces it.",
+        },
+        title: { type: "string", description: "Short title, e.g. 'Day start now reads your calendar'." },
+        changed: {
+          type: "string",
+          description: "What changed, for the assistant to put in the person's own words.",
+        },
+        assistantChanges: {
+          type: "array",
+          items: { type: "string" },
+          description: "What an assistant now does differently. One sentence per entry.",
+        },
+        userActions: {
+          type: "array",
+          description:
+            "Steps only the person themselves can take. An assistant passes these on and never performs them.",
+          items: {
+            type: "object",
+            properties: {
+              action: { type: "string", description: "What they have to do." },
+              why: { type: "string", description: "Why it matters, so it can be said in their words." },
+            },
+            required: ["action"],
+            additionalProperties: false,
+          },
+        },
+        serviceChanges: {
+          type: "object",
+          description:
+            "Service catalog key → what changed on that Service. Each employee's own personal instructions on these Services are put up for review with them.",
+          additionalProperties: { type: "string" },
+        },
+      },
+      required: ["key", "title", "changed"],
+      additionalProperties: false,
+    },
+    annotations: {
+      title: "Publish update notice",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: "list_update_notices",
+    title: "List update notices",
+    description:
+      "Every update notice ever published on this deployment, newest first, " +
+      "with who published it, when, whether it was withdrawn, and how many " +
+      "people have been told so far. Read it before publishing so you do not " +
+      "repeat or contradict a notice that is still going out.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { title: "List update notices", ...readOnly },
+  },
+  {
+    name: "withdraw_update_notice",
+    title: "Withdraw update notice",
+    description:
+      "Stops showing one notice to people who have not been told yet. The " +
+      "notice and every acknowledgement already recorded are kept, so nobody's " +
+      "history is rewritten. Use it for a notice published in error; a notice " +
+      "that is merely out of date is better replaced by publishing a new key.",
+    inputSchema: {
+      type: "object",
+      properties: { key: keyProperty },
+      required: ["key"],
+      additionalProperties: false,
+    },
+    annotations: {
+      title: "Withdraw update notice",
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  // ---- end update notices ----
   {
     name: "apply_catalog_update_for_tenant",
     title: "Apply catalog update for tenant",
@@ -555,6 +668,33 @@ export async function callPlatformTool(
           }),
         );
       }
+      // ---- update notices (control/update-notices-admin.ts) ----
+      case "publish_update_notice": {
+        rejectUnknown(args, [
+          "key",
+          "title",
+          "changed",
+          "assistantChanges",
+          "userActions",
+          "serviceChanges",
+        ]);
+        // Shape only. Nothing here reads what the notice SAYS: the write
+        // right is the restraint, not a filter on the text.
+        return ok(await publishUpdateNotice(context, validateUpdateNotice(args)));
+      }
+      case "list_update_notices":
+        rejectUnknown(args, []);
+        return ok({ notices: await listUpdateNotices(context) });
+      case "withdraw_update_notice": {
+        rejectUnknown(args, ["key"]);
+        const key = requireKey(args);
+        const withdrawn = await withdrawUpdateNotice(context, key);
+        if (!withdrawn) {
+          throw new ControlInputError(`No update notice with key "${key}".`);
+        }
+        return ok(withdrawn);
+      }
+      // ---- end update notices ----
       case "retire_catalog_entry":
         rejectUnknown(args, ["kind", "key"]);
         return ok(await retireCatalogEntry(context, requireKind(args), requireKey(args)));

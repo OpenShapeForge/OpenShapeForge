@@ -195,6 +195,17 @@ import {
   onboardingToolsForSession,
   withOnboarding,
 } from "./onboarding.js";
+// ---- update notices (mcp/update-notices.ts) ----
+import {
+  callUpdateTool,
+  describeUpdates,
+  UPDATE_INSTRUCTION,
+  UPDATE_TOOL_NAMES,
+  updateNoticesStore,
+  updateToolsForSession,
+  withUpdates,
+} from "./update-notices.js";
+// ---- end update notices ----
 // ---- connection guidance (mcp/connection-guidance.ts): one vocabulary for
 // "a connection is needed" across descriptions, errors and onboarding ----
 import {
@@ -740,6 +751,7 @@ function coreOwnsStaticToolName(name: string): boolean {
     ...connectorMcpTools(listConnectorContracts()).map((tool) => tool.name),
     SESSION_INFO_TOOL_NAME, // session-info (whoami / osf://session)
     ...ONBOARDING_TOOL_NAMES, // first-use onboarding (mcp/onboarding.ts)
+    ...UPDATE_TOOL_NAMES, // update notices (mcp/update-notices.ts)
   ].includes(name);
 }
 
@@ -2861,8 +2873,11 @@ function buildServer(
       DATA_ACQUISITION_GUIDANCE +
       // ---- end data acquisition guidance ----
       // ---- first-use onboarding (mcp/onboarding.ts) ----
-      ONBOARDING_INSTRUCTION,
+      ONBOARDING_INSTRUCTION +
       // ---- end first-use onboarding ----
+      // ---- update notices (mcp/update-notices.ts) ----
+      UPDATE_INSTRUCTION,
+      // ---- end update notices ----
   });
   const tables = tableOverride ?? tablesByName();
   const operations =
@@ -3451,19 +3466,35 @@ function buildServer(
       }
     },
   });
-  const sessionInfo = async () =>
-    withOnboarding(
-      await describeSession({
-        db,
-        session,
-        access: async () => ({
-          tools: (await listedTools()).length,
-          resources: (await listedResources()).resources.length,
-        }),
-      }),
-      await describeOnboarding(onboarding),
-    );
   // ---- end first-use onboarding ----
+  // ---- update notices (mcp/update-notices.ts): the same per-session view of
+  // the person's own stored instructions, joined with the platform's notices. ----
+  const updateNotices = {
+    session,
+    derivedEntries: catalogDerivedTools,
+    rowsByFilter: (
+      table: string,
+      filter: Record<string, unknown>,
+      limit = 200,
+    ) => runtimeRowsByFilter(db, session, tables, table, filter, limit),
+    store: updateNoticesStore(db, session),
+  };
+  // ---- end update notices ----
+  const sessionInfo = async () =>
+    withUpdates(
+      withOnboarding(
+        await describeSession({
+          db,
+          session,
+          access: async () => ({
+            tools: (await listedTools()).length,
+            resources: (await listedResources()).resources.length,
+          }),
+        }),
+        await describeOnboarding(onboarding),
+      ),
+      await describeUpdates(updateNotices),
+    );
   // --- end session-info ---
 
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
@@ -3700,6 +3731,9 @@ function buildServer(
       // ---- first-use onboarding (mcp/onboarding.ts) ----
       ...onboardingToolsForSession(session),
       // ---- end first-use onboarding ----
+      // ---- update notices (mcp/update-notices.ts) ----
+      ...updateToolsForSession(session),
+      // ---- end update notices ----
       ...guideToolsForSession(session).map((tool) => ({
         name: tool.name,
         description: tool.description,
@@ -4734,6 +4768,15 @@ function buildServer(
     );
     if (onboardingOutcome) return onboardingOutcome as ToolResult;
     // ---- end first-use onboarding ----
+
+    // ---- update notices (mcp/update-notices.ts) ----
+    const updateOutcome = await callUpdateTool(
+      name,
+      (request.params.arguments ?? {}) as Record<string, unknown>,
+      updateNotices,
+    );
+    if (updateOutcome) return updateOutcome as ToolResult;
+    // ---- end update notices ----
 
     const guideTool = catalogGuideTools.find((tool) => tool.name === name);
     if (guideTool) {

@@ -186,6 +186,7 @@ import {
   ProviderOutcomeError,
   classifyModuleEgressOutcome,
   failureSummary,
+  httpStatusForCode,
   providerOutcomeMessage,
 } from "../connectors/provider-outcome.js";
 import { listConnectorContracts } from "../connectors/catalog.js";
@@ -1754,9 +1755,18 @@ type ToolResult = {
   _meta?: Record<string, unknown>;
 };
 
+/**
+ * A success carries its payload as `structuredContent` too when it is a
+ * plain object: a Service that aggregates several query bindings reads the
+ * typed field only, and a text-only success would reach it as `{}`.
+ * Arrays and scalars have no structured form and stay text-only.
+ */
 function ok(payload: unknown): ToolResult {
   return {
     content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    ...(payload && typeof payload === "object" && !Array.isArray(payload)
+      ? { structuredContent: payload as Record<string, unknown> }
+      : {}),
   };
 }
 
@@ -1789,6 +1799,26 @@ function nativeToolArguments(
 /** The JSON an entity tool produced, as the native executor's output record. */
 function nativeToolOutput(result: ToolResult): Record<string, unknown> {
   if (result.isError) {
+    // The entity tool already failed through the shared envelope, so its
+    // structured body is the platform's own answer (a role gate, a database
+    // rule's refusal, a missing row): rethrow it with the same code and
+    // status rather than folding it into a generic provider fault, so the
+    // Service's caller learns the reason the way a direct tool call would.
+    const failure = (result.structuredContent as { error?: unknown } | undefined)?.error;
+    if (failure && typeof failure === "object") {
+      const { code, message, detail, hint } = failure as {
+        code?: unknown;
+        message?: unknown;
+        detail?: unknown;
+        hint?: unknown;
+      };
+      if (typeof code === "string" && typeof message === "string") {
+        throw new HttpError(httpStatusForCode(code) ?? 502, code, message, {
+          ...(typeof detail === "string" ? { detail } : {}),
+          ...(typeof hint === "string" ? { hint } : {}),
+        });
+      }
+    }
     const text = result.content.find((item) => item.type === "text");
     throw new HttpError(
       502,
@@ -1803,6 +1833,8 @@ function nativeToolOutput(result: ToolResult): Record<string, unknown> {
     ? (parsed as Record<string, unknown>)
     : { value: parsed };
 }
+
+export const __nativeToolOutputForTests = nativeToolOutput;
 
 function configurationAppResult(
   payload: unknown,

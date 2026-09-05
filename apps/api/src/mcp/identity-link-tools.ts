@@ -26,8 +26,9 @@
  */
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
-  NEEDS_ROLE_ASSIGNMENT_ROLES,
-} from "../auth/identity.js";
+  EMPLOYEE_INVITATION_ROLE_GRANTS,
+  memberRoleClientId,
+} from "../auth/employee-invitations.js";
 import {
   clearNeedsRoleAssignment,
   confirmPendingLink,
@@ -50,31 +51,15 @@ export const LIST_PENDING_MEMBERS_TOOL = "list_pending_members";
 export const SET_MEMBER_ROLE_TOOL = "set_member_role";
 
 /**
- * `org_admin` grants exactly the role that gates every organization-admin
- * surface here (`IDENTITY_LINK_ADMIN_ROLE`, i.e. `Organization.All.ReadWrite`);
- * `org_employee` grants exactly the minimal read-only set a JIT-created
- * identity's session already runs on (`NEEDS_ROLE_ASSIGNMENT_ROLES`), so
- * granting it changes nothing but the flag — the person keeps the access they
- * already had, now durable across the flag being cleared. The Keycloak client
- * roles these carry are the audience client, `hubble-api` (the runtime pins
- * `aud` to it; see `scripts/runtime-config.ts` in the host and
+ * What each role grants, and on which client, both from
+ * auth/employee-invitations.ts. This tool applies the same table the
+ * invitation path applies automatically on first sign-in; the two must never
+ * be able to disagree about what `org_admin` means, so there is one table.
+ * The client is the audience client, `hubble-api` (the runtime pins `aud` to
+ * it; see `scripts/runtime-config.ts` in the host and
  * `authoring/hubble-demo/authorization.yaml`'s `renameClient`).
  */
-const MEMBER_ROLE_GRANTS: Readonly<Record<"org_admin" | "org_employee", readonly string[]>> = {
-  org_admin: [IDENTITY_LINK_ADMIN_ROLE],
-  org_employee: NEEDS_ROLE_ASSIGNMENT_ROLES,
-};
-
-/**
- * The client entity roles live on. Reuses the same env var the API key path
- * already reads for the identical question (auth/api-key/runtime-config.ts)
- * rather than inventing a second name for "which client is the audience
- * client" — defaults to the base layer's `erp-provider`; Hubble's runtime
- * config sets it to `hubble-api` (the renamed audience client).
- */
-function memberRoleClientId(): string {
-  return process.env.OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID?.trim() || "erp-provider";
-}
+const MEMBER_ROLE_GRANTS = EMPLOYEE_INVITATION_ROLE_GRANTS;
 
 const LINK_IDENTITY: Tool = {
   name: LINK_IDENTITY_TOOL,

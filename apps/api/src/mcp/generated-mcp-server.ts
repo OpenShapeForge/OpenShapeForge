@@ -319,6 +319,14 @@ type CatalogEntity = {
   slug: string;
   table: string;
   toolPrefix: string;
+  /**
+   * `generic` entities share one set of `osf_*` tools instead of spending a
+   * slot of the dedicated-tool budget each — see MAX_DEDICATED_TOOLS in the
+   * compiler. The catalog still carries ONE entry per entity per operation
+   * (same name, entity-specific schema); projecting those into a session is
+   * this file's job (see genericToolForSession).
+   */
+  tools?: "dedicated" | "generic";
   title: string;
   description: string;
   domains: string[];
@@ -1718,6 +1726,211 @@ function describeTool(
       ? { _meta: { ui: { resourceUri: ENTITY_CONFIGURATION_APP_URI } } }
       : {}),
   };
+}
+
+/**
+ * Entities that share the `osf_*` tools rather than owning a prefixed set.
+ * The compiler stamps this on the entity, not on the tool: a tool entry is
+ * per-entity either way, and only the entity knows which style it opted into.
+ */
+function entityIsGeneric(entity: CatalogEntity | undefined): boolean {
+  return entity?.tools === "generic";
+}
+
+const GENERIC_OPERATION_SUMMARY: Record<McpOperation, string> = {
+  list: "Return a page of records of one shared-catalog entity.",
+  get: "Read one record of one shared-catalog entity by id.",
+  create: "Create one record of one shared-catalog entity.",
+  update: "Update one record of one shared-catalog entity by id.",
+  delete: "Delete one record of one shared-catalog entity by id.",
+};
+
+const GENERIC_OPERATION_TITLE: Record<McpOperation, string> = {
+  list: "List records",
+  get: "Read record",
+  create: "Create record",
+  update: "Update record",
+  delete: "Delete record",
+};
+
+/**
+ * Project the per-entity catalog entries that share one `osf_*` name into the
+ * single tool a session actually sees.
+ *
+ * The merge happens AFTER the session filter on purpose: `entity` is the
+ * parameter that picks the table, so its enum is the authorization boundary
+ * the model is shown. Deduplicating on name instead would keep whichever
+ * entry came first and either narrow the surface arbitrarily or advertise an
+ * entity this session may not touch.
+ *
+ * Each entity keeps its own argument schema in an `anyOf` branch discriminated
+ * by `entity`, so nothing about the per-entity shape is lost in the merge —
+ * and the call path validates against that same per-entity schema.
+ */
+function describeGenericTool(
+  entries: { tool: CatalogTool; entity: CatalogEntity | undefined }[],
+  tables: Map<string, GeneratedTable>,
+  session: DbSessionInput,
+): Tool {
+  const first = entries[0]!.tool;
+  const operation = first.operation;
+  const branches = entries.map(({ tool, entity }) => {
+    const described = describeTool(tool, entity, tables.get(tool.table), session);
+    const schema = described.inputSchema as Record<string, unknown>;
+    const properties = {
+      entity: { const: tool.entity },
+      ...((schema.properties as Record<string, unknown> | undefined) ?? {}),
+    };
+    const required = [
+      "entity",
+      ...(Array.isArray(schema.required) ? (schema.required as string[]) : []),
+    ];
+    return {
+      ...schema,
+      title: `${tool.entity} arguments`,
+      description: described.description,
+      properties,
+      required,
+    };
+  });
+  const names = entries.map(({ tool }) => tool.entity);
+  const catalogue = entries
+    .map(({ tool, entity }) => `${tool.entity} (${entity?.title ?? tool.entity})`)
+    .join(", ");
+  const elicits = entries.find(
+    ({ entity }) => entity?.elicitOnCreate !== undefined,
+  );
+  return {
+    name: first.name,
+    title: GENERIC_OPERATION_TITLE[operation],
+    description:
+      `${GENERIC_OPERATION_SUMMARY[operation]} Set \`entity\` to the record type ` +
+      `you mean; the remaining arguments are that entity's own — the matching ` +
+      `\`anyOf\` branch below carries them, and the entity's ` +
+      `${ENTITY_CATALOG_URI} resource describes its fields. ` +
+      `Available to you here: ${catalogue}.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity: {
+          type: "string",
+          enum: names,
+          title: "Entity",
+          description:
+            "Which record type this call is about. Only the values listed here " +
+            "are addressable by this session; anything else is refused.",
+        },
+      },
+      required: ["entity"],
+      anyOf: branches,
+    } as Tool["inputSchema"],
+    annotations: {
+      title: GENERIC_OPERATION_TITLE[operation],
+      ...first.annotations,
+    },
+    ...(operation === "create" && elicits && publicOriginIsHttps()
+      ? { _meta: { ui: { resourceUri: ENTITY_CONFIGURATION_APP_URI } } }
+      : {}),
+  } as Tool;
+}
+
+/**
+ * The CRUD half of a session's tool list: dedicated entities keep one tool per
+ * entity per operation, generic entities collapse into one tool per operation.
+ */
+function crudToolsForSession(
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+): Tool[] {
+  const entries = toolsForSession(session, tables);
+  const generic = new Map<
+    string,
+    { tool: CatalogTool; entity: CatalogEntity | undefined }[]
+  >();
+  const listed: (Tool | { generic: string })[] = [];
+  for (const entry of entries) {
+    if (!entityIsGeneric(entry.entity)) {
+      listed.push(
+        describeTool(
+          entry.tool,
+          entry.entity,
+          tables.get(entry.tool.table),
+          session,
+        ) as unknown as Tool,
+      );
+      continue;
+    }
+    const current = generic.get(entry.tool.name);
+    if (current) {
+      current.push(entry);
+      continue;
+    }
+    // The merged tool takes the position of its first contributing entry, so
+    // an existing listing order does not shuffle when an entity is added.
+    generic.set(entry.tool.name, [entry]);
+    listed.push({ generic: entry.tool.name });
+  }
+  return listed.map((item) =>
+    "generic" in item
+      ? describeGenericTool(generic.get(item.generic)!, tables, session)
+      : item,
+  );
+}
+
+/**
+ * Resolve which catalog entry a call means. A dedicated name identifies one
+ * entry outright; a generic name needs the `entity` argument, which is checked
+ * against the entities THIS session may invoke the operation on — the same set
+ * the listing advertised.
+ */
+function resolveCrudTool(
+  name: string,
+  args: Record<string, unknown>,
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+): CatalogTool | undefined {
+  const candidates = catalog.tools.filter((tool) => tool.name === name);
+  if (candidates.length === 0) return undefined;
+  const generic = candidates.filter((tool) =>
+    entityIsGeneric(catalog.entities.find((item) => item.entity === tool.entity)),
+  );
+  if (generic.length === 0) return candidates[0];
+  const allowed = generic.filter((tool) =>
+    sessionMayInvoke(tables.get(tool.table), tool.operation, session),
+  );
+  // Nothing allowed reads as an unknown tool, exactly like an unauthorized
+  // dedicated tool: the listing omitted it, so saying more would leak which
+  // entities exist.
+  if (allowed.length === 0) return undefined;
+  const wanted = args.entity;
+  const match = allowed.find((tool) => tool.entity === wanted);
+  if (match) return match;
+  throw new HttpError(
+    400,
+    "BAD_USER_INPUT",
+    typeof wanted === "string" && wanted.length > 0
+      ? `"${wanted}" is not one of the entities "${name}" can address in this ` +
+          `session: ${allowed.map((tool) => tool.entity).join(", ")}.`
+      : `"${name}" needs an "entity" argument naming the record type. ` +
+          `Available here: ${allowed.map((tool) => tool.entity).join(", ")}.`,
+  );
+}
+
+/**
+ * `entity` selects the catalog entry; it is not a column, so it is dropped
+ * before the per-entity schema validates the call and before the executor
+ * sees it. A dedicated tool keeps whatever it was sent — a stray `entity`
+ * there is an invalid argument and its own schema says so.
+ */
+function withoutEntitySelector(
+  tool: CatalogTool,
+  args: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!args || !("entity" in args)) return args;
+  const entity = catalog.entities.find((item) => item.entity === tool.entity);
+  if (!entityIsGeneric(entity)) return args;
+  const { entity: _selector, ...rest } = args;
+  return rest;
 }
 
 type SessionEntity = {
@@ -3375,9 +3588,7 @@ function buildServer(
   const listedTools = async (): Promise<SourcedTool[]> => {
     const coreTools = [
       SESSION_INFO_TOOL, // session-info (whoami / osf://session): every authenticated session
-      ...toolsForSession(session, tables).map(({ tool, entity }) =>
-        describeTool(tool, entity, tables.get(tool.table), session),
-      ),
+      ...crudToolsForSession(session, tables),
       ...catalogDerivedTools
         .filter(
           (entry) => entry.connect && sessionInAudience(entry, session.roles),
@@ -4694,7 +4905,20 @@ function buildServer(
       }
     }
 
-    const match = catalog.tools.find((tool) => tool.name === name);
+    // A generic (`osf_*`) name is carried by one catalog entry per entity, so
+    // the `entity` argument is what picks the entry — bounded to the entities
+    // this session may invoke the operation on.
+    let match: CatalogTool | undefined;
+    try {
+      match = resolveCrudTool(
+        name,
+        (request.params.arguments ?? {}) as Record<string, unknown>,
+        session,
+        tables,
+      );
+    } catch (error) {
+      return failed(error);
+    }
     const table = match ? tables.get(match.table) : undefined;
     // An unknown tool and one the caller may not invoke get the same answer:
     // the listing already omitted both, so distinguishing them would leak
@@ -5526,8 +5750,12 @@ function buildServer(
         );
       }
     }
+    const crudArguments = withoutEntitySelector(
+      match,
+      request.params.arguments as Record<string, unknown> | undefined,
+    );
     try {
-      let callArguments = request.params.arguments;
+      let callArguments: Record<string, unknown> | undefined = crudArguments;
       let elicitationCompleted = false;
       if (match.operation === "create" && entity?.elicitOnCreate) {
         const elicit = entity.elicitOnCreate;
@@ -5697,10 +5925,7 @@ function buildServer(
       {
         // Validate what the MODEL sent against the advertised schema — before
         // elicited values join, since those are server-set and outside it.
-        const modelSent = (request.params.arguments ?? {}) as Record<
-          string,
-          unknown
-        >;
+        const modelSent = (crudArguments ?? {}) as Record<string, unknown>;
         const elicitField = entity?.elicitOnCreate?.into;
         const toValidate =
           match.operation === "create" && elicitField

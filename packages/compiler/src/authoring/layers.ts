@@ -26,6 +26,10 @@
  *     without restating anyone else's. Without it a plugin could emit a route
  *     file and have nothing in the app link to it, because shipping
  *     `appShell.yaml` outright collides.
+ *   - patch a realm file with `kind: authorizationPatch` at the SAME path as
+ *     the `authorization*.yaml` it targets: rename a client (`renameClient`),
+ *     add or amend clients, widen realm-role composites — without forking the
+ *     base realm. See ./authorization-patch.ts for the exact rules.
  *
  * Catalog files (`catalogs/*.yaml`) merge across layers automatically: a
  * later layer's file with the same path strategically merges into the earlier
@@ -52,6 +56,12 @@ import {
 import { isAbsolute, join, relative, resolve } from "node:path";
 import YAML from "yaml";
 import { packagedConfigFallback } from "../packaged-config.js";
+import {
+  AUTHORIZATION_PATCH_KIND,
+  applyAuthorizationPatch,
+  assertAuthorizationGrantsOnlyNarrow,
+  isAuthorizationFilePath,
+} from "./authorization-patch.js";
 
 export type AuthoringConfig = {
   layers: string[];
@@ -696,6 +706,43 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
           files.set(APP_SHELL_FILENAME, { layer: buildDir, path: APP_SHELL_FILENAME });
           continue;
         }
+
+        if (parsed?.kind === AUTHORIZATION_PATCH_KIND) {
+          // Path-targeted like the app shell: realm files are found by their
+          // filename at the tree root, so the patch names its target by
+          // sitting at that same path. A patch filed elsewhere is refused
+          // rather than copied through — the generator would then reject it
+          // as a realm file of the wrong kind, one step removed from the
+          // mistake.
+          if (!isAuthorizationFilePath(relativePath)) {
+            throw new Error(
+              `${AUTHORIZATION_PATCH_KIND} ${layerDir}/${relativePath} must sit at the path of the ` +
+                "realm file it patches (authorization.yaml or authorization.<realm>.yaml at the layer root).",
+            );
+          }
+          const target = files.get(relativePath);
+          if (!target) {
+            throw new Error(
+              `${AUTHORIZATION_PATCH_KIND} ${layerDir}/${relativePath} cannot be applied: ` +
+                `no earlier layer defines ${relativePath}. A patch overlays a realm; ` +
+                "to author a new realm, ship an authorizationConfig under its own filename.",
+            );
+          }
+          const baseDoc = YAML.parse(
+            readFileSync(join(target.layer, target.path), "utf8"),
+          ) as JsonValue;
+          const patchOrigin = `${AUTHORIZATION_PATCH_KIND} ${layerDir}/${relativePath}`;
+          const merged = applyAuthorizationPatch(baseDoc, parsed as JsonValue, {
+            strategicMerge,
+            origin: patchOrigin,
+          });
+          assertAuthorizationGrantsOnlyNarrow(baseDoc, merged, patchOrigin);
+          const mergedPath = join(buildDir, relativePath);
+          mkdirSync(join(mergedPath, ".."), { recursive: true });
+          writeFileSync(mergedPath, YAML.stringify(merged), "utf8");
+          files.set(relativePath, { layer: buildDir, path: relativePath });
+          continue;
+        }
       }
 
       if (files.has(relativePath)) {
@@ -718,7 +765,8 @@ export function resolveAuthoringLayers(repoRoot: string, config?: AuthoringConfi
           `Layer collision on ${relativePath}: ${files.get(relativePath)!.layer} ` +
             `already provides it and ${layerDir} ships a plain replacement. ` +
             "Entities can be modified with kind: entityPatch; the app shell with " +
-            "kind: appShellPatch; catalogs/*.yaml merge automatically.",
+            "kind: appShellPatch; realm files (authorization*.yaml) with " +
+            "kind: authorizationPatch; catalogs/*.yaml merge automatically.",
         );
       }
       if (isEntityFile(relativePath)) {

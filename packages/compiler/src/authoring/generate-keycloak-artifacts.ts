@@ -25,6 +25,7 @@ import {
 } from "./generators/keycloak.js";
 import type { CompiledEntityContract } from "./types/compiled.js";
 import type { AuthorizationConfigFile } from "./types/authoring.js";
+import { AUTHORIZATION_FILENAME_RE } from "./authorization-patch.js";
 
 /**
  * Filenames read as realm authoring: `authorization.yaml` and any
@@ -37,8 +38,11 @@ import type { AuthorizationConfigFile } from "./types/authoring.js";
  * filename is one an overlay author can predict. `authorization.yaml` keeps its
  * exact name: it is the tenant realm, cited by that name across docs, the web
  * generator's runtime metadata, and the e2e setup.
+ *
+ * The pattern itself lives in authorization-patch.ts (imported above) so a
+ * patch's `isAuthorizationFilePath` and this generator's discovery can never
+ * drift apart — they used to be two copies of the same regex.
  */
-const AUTHORIZATION_FILENAME_RE = /^authorization(\.[^.]+)*\.yaml$/;
 
 /**
  * Every authored realm config, in filename order.

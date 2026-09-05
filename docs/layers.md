@@ -127,11 +127,24 @@ host set a maximum exposure policy that an installed package/plugin cannot
 widen.
    Patching a slug no earlier layer defines is an error. Later layers may
    patch the same entity again — patches stack.
-2. **`catalogs/*.yaml` with a path that already exists** — strategic-merged
+2. **`kind: appShellPatch`** — strategic-merged into `appShell.yaml` from an
+   earlier layer (path-targeted; there is exactly one app shell).
+3. **`kind: authorizationPatch`** — merged into the realm file at the **same
+   path** (`authorization.yaml`, `authorization.<realm>.yaml`) from an
+   earlier layer: an optional `renameClient` rewrites a client id
+   everywhere, then a strategic merge in which role-name lists union rather
+   than replace. Role-name lists are monotonic too, the same way
+   `crud.operations` is: a later layer may add to a grant list at a path no
+   earlier layer declared, or narrow one it did, but it cannot add to a grant
+   list an earlier layer already declared at that exact path — set the key to
+   `null` in one layer and give the full desired list in a later one to widen
+   intentionally. See [authoring.md](authoring.md#overlaying-a-realm-kind-authorizationpatch)
+   for the full rules. Patching a realm no earlier layer defines is an error.
+4. **`catalogs/*.yaml` with a path that already exists** — strategic-merged
    into the earlier catalog file (see below).
-3. **Any other same-path collision** — hard error. Plain wholesale
+5. **Any other same-path collision** — hard error. Plain wholesale
    replacement across layers is rejected by design; patch instead.
-4. **New files** — added as-is (entities in new folders, contexts, mappings,
+6. **New files** — added as-is (entities in new folders, contexts, mappings,
    views, catalogs — anything).
 
 Two different layers defining the same entity **slug** at *different* paths
@@ -204,6 +217,9 @@ overlay-added groups flow into `core-by-groep.json` automatically.
 | Same path, plain file, non-catalog | Error ("Layer collision") |
 | Same path, `catalogs/*.yaml` | Strategic merge |
 | Same slug via `kind: entityPatch` | Strategic merge (patch) |
+| `appShell.yaml` via `kind: appShellPatch` | Strategic merge (patch) |
+| `authorization*.yaml` via `kind: authorizationPatch` | Rename + strategic merge, role lists union (monotonic: cannot add to a list an earlier layer already declared) |
+| `authorizationPatch` for a realm file no earlier layer has, or off the layer root | Error |
 | Same slug, plain entity file, different path | Error ("Duplicate entity slug") |
 | `entityPatch` for unknown slug | Error |
 | New path | Added |

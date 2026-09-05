@@ -1388,6 +1388,19 @@ types:
     listUrl: /api/workflow/designer/core-entity-options?entity=employee-role
     displayTemplate: "{{roleKind}}"
 
+  agreementMilestoneId:
+    kind: entityId
+    label: { en: "Agreement Milestone ID", nl: "Overeenkomstmijlpaal ID" }
+    pluralLabel: { en: "Agreement Milestone IDs", nl: "Overeenkomstmijlpaal IDs" }
+    valueType: string
+    icon: Database
+    classification:
+      sensitivity: internal
+      category: workflow
+    entity: agreement-milestone
+    listUrl: /api/workflow/designer/core-entity-options?entity=agreement-milestone
+    displayTemplate: "{{description}}"
+
   billingScheduleId:
     kind: entityId
     label: { en: "Billing Schedule ID", nl: "Facturatieschema ID" }

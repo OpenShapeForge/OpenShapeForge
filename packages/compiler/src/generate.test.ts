@@ -140,8 +140,147 @@ describe("platform schema generator", () => {
     expect(sql.indexOf('CREATE TABLE IF NOT EXISTS "erp"."relation_groups"')).toBeLessThan(
       sql.indexOf("-- OpenShapeForge generated foreign keys"),
     );
-    expect(sql).toContain('ADD CONSTRAINT "relations_primary_group_id_fkey" FOREIGN KEY ("primary_group_id")');
-    expect(sql).toContain('ADD CONSTRAINT "relation_groups_relation_id_fkey" FOREIGN KEY ("relation_id")');
+    expect(sql).toContain(
+      'ADD CONSTRAINT "relations_primary_group_id_fkey" FOREIGN KEY ("tenant_id", "primary_group_id")',
+    );
+    expect(sql).toContain(
+      'ADD CONSTRAINT "relation_groups_relation_id_fkey" FOREIGN KEY ("tenant_id", "relation_id")',
+    );
+  });
+
+  // Issue #509. A foreign-key check runs as the table owner and is exempt from
+  // row level security, so `REFERENCES parent(id)` accepts a parent row in a
+  // different tenant — the policy never sees the lookup. The key is therefore
+  // (tenant_id, id) and every reference into it reuses the referencing row's
+  // OWN tenant_id, which leaves no column a foreign tenant can be written into.
+  describe("tenant-consistent keys", () => {
+    const scoped = (
+      name: string,
+      extra: PlatformSchemaManifest["tables"][number]["columns"] = [],
+    ): PlatformSchemaManifest["tables"][number] => ({
+      schema: "erp",
+      name,
+      tenantScoped: true,
+      columns: [
+        { name: "id", type: "uuid", primaryKey: true },
+        { name: "tenant_id", type: "uuid", required: true },
+        ...extra,
+      ],
+    });
+
+    const schemaSqlFor = (manifest: PlatformSchemaManifest): string =>
+      generateArtifacts(manifest).find((artifact) => artifact.path.endsWith("schema.sql"))
+        ?.contents ?? "";
+
+    it("keys a tenant-scoped table on (tenant_id, id) and leaves id alone non-unique", () => {
+      const sql = schemaSqlFor({ version: 1, tables: [scoped("cases")] });
+
+      expect(sql).toContain('PRIMARY KEY ("tenant_id", "id")');
+      expect(sql).not.toContain('"id" uuid PRIMARY KEY');
+      // NOT NULL survives the move off the column.
+      expect(sql).toContain('"id" uuid NOT NULL');
+    });
+
+    it("keys a global table on its column exactly as before", () => {
+      const sql = schemaSqlFor({
+        version: 1,
+        tables: [
+          {
+            schema: "platform",
+            name: "reference_data",
+            tenantScoped: false,
+            columns: [{ name: "id", type: "text", primaryKey: true }],
+          },
+        ],
+      });
+
+      expect(sql).toContain('"id" text PRIMARY KEY NOT NULL');
+      expect(sql).not.toContain("PRIMARY KEY (");
+    });
+
+    it("keeps a reference into a global table single-column", () => {
+      const sql = schemaSqlFor({
+        version: 1,
+        tables: [
+          {
+            schema: "platform",
+            name: "countries",
+            tenantScoped: false,
+            columns: [{ name: "id", type: "text", primaryKey: true }],
+          },
+          scoped("addresses", [
+            {
+              name: "country_id",
+              type: "text",
+              references: { schema: "platform", table: "countries", column: "id" },
+            },
+          ]),
+        ],
+      });
+
+      expect(sql).toContain(
+        'FOREIGN KEY ("country_id")\n      REFERENCES "platform"."countries"("id")',
+      );
+    });
+
+    it("restricts ON DELETE SET NULL to the referencing column", () => {
+      const sql = schemaSqlFor({
+        version: 1,
+        tables: [
+          scoped("cases"),
+          scoped("notes", [
+            {
+              name: "case_id",
+              type: "uuid",
+              references: { schema: "erp", table: "cases", column: "id", onDelete: "SET NULL" },
+            },
+          ]),
+        ],
+      });
+
+      // Without the column list Postgres would null tenant_id too, moving the
+      // row out of its own tenant.
+      expect(sql).toContain('ON DELETE SET NULL ("case_id")');
+      expect(sql).not.toContain("ON DELETE SET NULL;");
+    });
+
+    it("refuses a reference into tenant-scoped data from a table with no tenant_id", () => {
+      expect(() =>
+        schemaSqlFor({
+          version: 1,
+          tables: [
+            scoped("cases"),
+            {
+              schema: "platform",
+              name: "case_pointers",
+              tenantScoped: false,
+              columns: [
+                { name: "id", type: "uuid", primaryKey: true },
+                {
+                  name: "case_id",
+                  type: "uuid",
+                  references: { schema: "erp", table: "cases", column: "id" },
+                },
+              ],
+            },
+          ],
+        }),
+      ).toThrow(/no tenant_id column of its own/);
+    });
+
+    it("refuses a unique index on the identity column alone", () => {
+      expect(() =>
+        schemaSqlFor({
+          version: 1,
+          tables: [
+            {
+              ...scoped("cases"),
+              indexes: [{ name: "cases_id_uidx", columns: ["id"], unique: true }],
+            },
+          ],
+        }),
+      ).toThrow(/on "id" alone/);
+    });
   });
 
   it("emits multi-axis rowScope policy with OR-combined predicates and supporting indexes", () => {

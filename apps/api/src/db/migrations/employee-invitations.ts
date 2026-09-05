@@ -62,7 +62,7 @@ export async function applyEmployeeInvitationsMigration(db: OpenShapeForgeDataba
     create schema if not exists platform;
 
     create table if not exists platform.employee_invitations (
-      id            uuid primary key default gen_random_uuid(),
+      id            uuid not null default gen_random_uuid(),
       tenant_id     uuid not null references platform.tenants (id) on delete cascade,
       email         text not null,
       role          text not null check (role in ('org_admin', 'org_employee')),
@@ -81,6 +81,11 @@ export async function applyEmployeeInvitationsMigration(db: OpenShapeForgeDataba
       accepted_at   timestamptz,
       created_at    timestamptz not null default now(),
       updated_at    timestamptz not null default now(),
+      -- Keyed on (tenant_id, id) like every other tenant-scoped table since
+      -- issue #509: while id alone is unique it is a key a single-column
+      -- foreign key can attach to, and a foreign-key check runs as the table
+      -- owner with row level security bypassed.
+      primary key (tenant_id, id),
       constraint employee_invitations_status_shape check (
         (status = 'pending' and revoked_at is null and accepted_at is null)
         or (status = 'revoked' and revoked_at is not null and accepted_at is null)

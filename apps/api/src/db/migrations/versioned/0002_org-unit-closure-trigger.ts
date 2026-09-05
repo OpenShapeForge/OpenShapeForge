@@ -44,21 +44,27 @@ const migration: VersionedMigration = {
     // ── Tables (IF NOT EXISTS; generated roll-forward re-declares identically) ──
     await sql`
       create table if not exists platform.org_unit (
-        "id" uuid primary key not null default gen_random_uuid(),
+        "id" uuid not null default gen_random_uuid(),
         "tenant_id" uuid not null,
         "parent_id" uuid,
         "name" text not null,
         "created_at" timestamptz not null default now(),
-        "updated_at" timestamptz not null default now()
+        "updated_at" timestamptz not null default now(),
+      -- Issue #509: the generated shape keys every tenant-scoped table on
+      -- (tenant_id, id) so a foreign key cannot reach across tenants. This
+      -- pre-creation must mirror it exactly, or the generated roll-forward
+      -- no-ops on the table and its references find no key to attach to.
+        primary key ("tenant_id", "id")
       )
     `.execute(db);
     await sql`
       create table if not exists platform.org_unit_closure (
-        "id" uuid primary key not null default gen_random_uuid(),
+        "id" uuid not null default gen_random_uuid(),
         "tenant_id" uuid not null,
         "ancestor_id" uuid not null,
         "descendant_id" uuid not null,
-        "depth" integer not null
+        "depth" integer not null,
+        primary key ("tenant_id", "id")
       )
     `.execute(db);
 

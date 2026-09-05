@@ -294,3 +294,63 @@ describe("plugin schema migrations", () => {
     ]);
   });
 });
+
+// Issue #509. The compiler keys a tenant-scoped table on (tenant_id, id), so
+// `id` alone is no longer a key. A hand-written plugin constraint that names it
+// alone therefore has nothing to attach to, and must be refused here rather
+// than reintroducing an RLS-bypassing cross-tenant reference at migrate time.
+describe("plugin foreign keys into tenant-scoped tables", () => {
+  const parent = (tenantScoped: boolean): TableDefinition =>
+    table("products", {
+      tenantScoped,
+      columns: [
+        { name: "id", type: "uuid", primaryKey: true, required: true },
+        { name: "tenant_id", type: "uuid", required: true },
+      ],
+    });
+
+  const child = (columns: string[], references: string[]): TableDefinition =>
+    table("product_lines", {
+      columns: [
+        { name: "id", type: "uuid", primaryKey: true, required: true },
+        { name: "tenant_id", type: "uuid", required: true },
+        { name: "product_id", type: "uuid", required: true },
+      ],
+      constraints: [
+        {
+          version: "0002_product-lines-product-fkey",
+          name: "product_lines_product_id_fkey",
+          kind: "foreignKey",
+          columns,
+          references: { schema: "cpq", table: "products", columns: references },
+        },
+      ],
+    });
+
+  test("refuses a single-column reference to a tenant-scoped identity", () => {
+    expect(() => registry([parent(true), child(["product_id"], ["id"])])).toThrow(
+      /no matching primary key or unique constraint/,
+    );
+  });
+
+  test("accepts the tenant-consistent pair", () => {
+    const result = registry([
+      parent(true),
+      child(["tenant_id", "product_id"], ["tenant_id", "id"]),
+    ]);
+    expect(
+      result.migrations.some((migration) =>
+        migration.sql.includes('FOREIGN KEY ("tenant_id", "product_id")'),
+      ),
+    ).toBe(true);
+  });
+
+  test("still accepts a single-column reference into a global table", () => {
+    const result = registry([parent(false), child(["product_id"], ["id"])]);
+    expect(
+      result.migrations.some((migration) =>
+        migration.sql.includes('FOREIGN KEY ("product_id")'),
+      ),
+    ).toBe(true);
+  });
+});

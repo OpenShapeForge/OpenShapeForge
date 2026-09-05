@@ -57,9 +57,9 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
     create table if not exists platform.identity_relations (
       identity_id            uuid not null references platform.identities (id) on delete cascade,
       tenant_id              uuid not null references platform.tenants (id) on delete cascade,
-      relation_id            uuid references erp.relations (id) on delete cascade,
+      relation_id            uuid,
       status                 text not null check (status in ('linked', 'pending_confirmation')),
-      candidate_relation_id  uuid references erp.relations (id) on delete set null,
+      candidate_relation_id  uuid,
       linked_at              timestamptz,
       -- 'jit' for the just-in-time path, otherwise the platform.identities id
       -- of whoever linked: the person (confirm_my_link) or an administrator.
@@ -80,6 +80,16 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
       created_at             timestamptz not null default now(),
       updated_at             timestamptz not null default now(),
       primary key (identity_id, tenant_id),
+      -- Issue #509: erp.relations is keyed on (tenant_id, id), so a reference
+      -- into it travels through THIS row's own tenant_id. That is what makes a
+      -- cross-tenant link unspeakable rather than merely forbidden — a
+      -- foreign-key check runs as the table owner and never sees RLS. SET NULL
+      -- names its column so the cascade cannot null tenant_id as well.
+      foreign key (tenant_id, relation_id)
+        references erp.relations (tenant_id, id) on delete cascade,
+      foreign key (tenant_id, candidate_relation_id)
+        references erp.relations (tenant_id, id)
+        on delete set null (candidate_relation_id),
       constraint identity_relations_status_shape check (
         (status = 'linked' and relation_id is not null and linked_at is not null and linked_by is not null)
         or (status = 'pending_confirmation' and relation_id is null)

@@ -276,11 +276,26 @@ function assertForeignKeyTargets(manifest: PlatformSchemaManifest): void {
           );
         }
       }
+      // A column-level primaryKey is only a single-column key when the table is
+      // global. On a tenant-scoped table the emitted key is (tenant_id, <id>)
+      // — see tenantScopedIdentityColumn in generate.ts — so a plugin FK that
+      // names the identity column alone has no key to attach to and must fail
+      // here rather than at migrate time. That refusal is the point: an
+      // RLS-bypassing single-column reference into another tenant's row is
+      // exactly what issue #509 closed.
       const immediatelyUnique =
         (constraint.references.columns.length === 1 &&
+          !target.tenantScoped &&
           target.columns.some(
             (column) =>
               column.name === constraint.references.columns[0] && column.primaryKey === true,
+          )) ||
+        (constraint.references.columns.length === 2 &&
+          constraint.references.columns[0] === "tenant_id" &&
+          target.tenantScoped === true &&
+          target.columns.some(
+            (column) =>
+              column.name === constraint.references.columns[1] && column.primaryKey === true,
           )) ||
         (target.indexes ?? []).some(
           (index) =>

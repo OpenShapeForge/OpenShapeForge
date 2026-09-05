@@ -30,6 +30,10 @@
  *      (idempotent DDL, same reasoning); references platform.tenants only, so
  *      it could run before 4c, but sits next to it because both are the
  *      "login ↔ party" story (db/migrations/employee-invitations.ts).
+ *   4e. organization relation link — platform.tenants.relation_id (idempotent
+ *      DDL, same reasoning); references erp.relations, so it must run after
+ *      the generated step like 4c/4d
+ *      (db/migrations/organization-relation-link.ts).
  *   5. app role grants        — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically,
  *      re-apply the `app` schema USAGE/EXECUTE grants that step 0 had to skip
@@ -56,6 +60,7 @@ import { applyAppHelpersMigration } from "./migrations/app-helpers.js";
 import { applySystemBypassAuditMigration } from "./migrations/system-bypass-audit.js";
 import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
 import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitations.js";
+import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
 import { applyOnboardingMigration } from "./migrations/onboarding.js";
 import {
   applyVersionedMigrations,
@@ -125,6 +130,7 @@ export async function runMigrationChain(
   );
   await applyIdentityLinkMigration(db);
   await applyEmployeeInvitationsMigration(db);
+  await applyOrganizationRelationLinkMigration(db);
   await applyOnboardingMigration(db);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);

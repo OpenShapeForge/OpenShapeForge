@@ -241,6 +241,14 @@ documentation, not a second field model:
 - `osf://schema/entities/{slug}` describes one entity with its authored title,
   description, domains, field semantics, relationships and the operations
   available to the current session.
+- `osf://organization/profile` is the tenant's own business context: `{ name,
+  businessContext }` for the Relation configured as this organization
+  (`platform.tenants.relation_id`, `set_organization_relation`), read from the
+  broadly-readable `Relation.businessContext` field — distinct from the
+  internal, `classification: confidential` `Relation.notes` field. Resolves
+  successfully with a "not configured yet" message rather than erroring when
+  nothing is linked, so a fresh tenant can still read the resource. See
+  "First use: onboarding" below for how an administrator sets it.
 
 `resources/list` is role-filtered just like `tools/list`. `resources/read`
 withholds classified fields for a caller who may not read them, using the same

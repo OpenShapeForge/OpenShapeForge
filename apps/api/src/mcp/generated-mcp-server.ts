@@ -5989,6 +5989,15 @@ function buildServer(
                 ),
               )
             : modelSent;
+        // Before the advertised schema does: a `writtenBy` field is absent from
+        // that schema, so ajv would call it an additional property and send the
+        // caller hunting for a typo instead of naming the operation.
+        assertOperationWrittenFields(
+          match.operation === "update"
+            ? ((toValidate.values ?? {}) as Record<string, unknown>)
+            : toValidate,
+          table,
+        );
         assertSchemaValid(match.inputSchema, toValidate, "arguments");
       }
       const outcome = await invokeTool(

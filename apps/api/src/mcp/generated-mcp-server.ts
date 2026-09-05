@@ -61,6 +61,13 @@ import {
   MCP_MOUNT_PATH,
   ORGANIZATION_MCP_PATH_PREFIX,
 } from "./organization-resource.js";
+import {
+  assertBearerCredential,
+  assertJsonRpcContentType,
+  McpTransportError,
+  SHORT_ADDRESS_VARY,
+  withoutCookieIdentity,
+} from "./address.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import type { DbSessionInput } from "../db/session.js";
@@ -6426,9 +6433,24 @@ export function registerGeneratedMcpServer(
     const binding = alias
       ? { alias, resource: canonicalResourceUri(request, alias) }
       : null;
+    // BOLT 2 (mcp/address.ts): a JSON-RPC body only under `application/json`.
+    // Checked before anything reads the body or the credential, so a refused
+    // media type never becomes an authenticated request.
+    assertJsonRpcContentType(request.method, request.headers["content-type"]);
+    // BOLT 1 (mcp/address.ts). The cookie header is dropped rather than
+    // ignored on every MCP path — the app shares this origin, so the browser
+    // sends its session cookie here whether or not the page meant to — and an
+    // organization resource additionally requires a bearer token, which is the
+    // one credential a page cannot obtain by merely being open.
+    // Order matters: the bearer check reads the ORIGINAL headers, because
+    // "you sent a cookie and no token" is the case worth naming in the answer
+    // and it is invisible once the cookie has been dropped.
+    if (binding) assertBearerCredential(request.headers);
+    const mcpHeaders = withoutCookieIdentity(request.headers);
+
     let resolved: TrustedSessionContext;
     try {
-      resolved = await resolveSessionContext(headersFromFastify(request.headers), {
+      resolved = await resolveSessionContext(headersFromFastify(mcpHeaders), {
         db: options.db,
         ...(binding ? { organization: binding } : {}),
       });
@@ -6455,7 +6477,7 @@ export function registerGeneratedMcpServer(
     // session-info (whoami / osf://session): keep the credential's display
     // facts (name, client, expiry, memberships) beside the verified session,
     // and the organization this endpoint bound it to, when it did.
-    rememberSessionIdentity(resolved, headersFromFastify(request.headers), binding);
+    rememberSessionIdentity(resolved, headersFromFastify(mcpHeaders), binding);
     return {
       db: options.db,
       session: resolved,
@@ -6492,7 +6514,14 @@ export function registerGeneratedMcpServer(
     );
 
     instance.setErrorHandler((error, request, reply) => {
-      const { status, body } = toHttpError(error);
+      const { status, body } = toHttpError(
+        error instanceof McpTransportError
+          ? new HttpError(error.status, error.code, error.message)
+          : error,
+      );
+      // One URL, two representations: say so on the failures too, or a cache
+      // that saw this answer serves it to the other kind of client.
+      void reply.header("vary", SHORT_ADDRESS_VARY);
       if (status >= 500) {
         instance.log.error({ err: error }, "MCP request failed.");
       }
@@ -6984,6 +7013,7 @@ export function registerGeneratedMcpServer(
       request: FastifyRequest,
       reply: FastifyReply,
     ): Promise<void> => {
+      void reply.header("vary", SHORT_ADDRESS_VARY);
       const { db, session, resource } = await requireMcpSession(request);
 
       const sessionHeader = request.headers["mcp-session-id"];
@@ -7135,6 +7165,12 @@ export function registerGeneratedMcpServer(
       method: ["GET", "POST", "DELETE"],
       handler: handleMcpRequest,
     });
+    // The short spellings `/<alias>` and `/<alias>/mcp` arrive here already
+    // rewritten to the long URL (roles/api.ts, rewriteUrl), so there is one
+    // handler, one set of routes and one parser for the alias. What a client
+    // is TOLD the resource is called comes from organizationMcpPath, which is
+    // the short form — the long URL is now an internal spelling that also
+    // happens to still be reachable from outside.
   });
 }
 

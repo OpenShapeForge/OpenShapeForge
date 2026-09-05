@@ -30,7 +30,59 @@
 
 export const MCP_MOUNT_PATH = "/api/mcp";
 
+/**
+ * The spelling this server used to publish: `/api/mcp/organizations/<alias>`.
+ * Still routed, still answered — see {@link organizationAliasFromPath} — but no
+ * longer the resource's NAME. Kept as a prefix constant because the routes, the
+ * tests and the metadata alias-suffix all have to agree on one string.
+ */
 export const ORGANIZATION_MCP_PATH_PREFIX = `${MCP_MOUNT_PATH}/organizations`;
+
+/**
+ * Root path segments that can never be an organization alias.
+ *
+ * The canonical resource is now the FIRST path segment of the deployment's
+ * domain (`https://hubble.com/zerocopter`), which puts organizations in the
+ * same namespace as the server's own surfaces. A Keycloak Organization may be
+ * called anything its administrator likes, so the collision is settled here
+ * rather than by route ordering: a request for one of these names is never
+ * read as an alias, no matter which route matched it.
+ *
+ * Everything this server mounts lives under `/api`, `/graphql` or
+ * `/.well-known`; the rest of the list is reserved for the surfaces that share
+ * the domain with it — the app's own paths and the platform administration
+ * mount — so that adding one later cannot silently shadow a tenant.
+ */
+export const RESERVED_ROOT_SEGMENTS: ReadonlySet<string> = new Set([
+  "api",
+  "graphql",
+  ".well-known",
+  "admin",
+  "assets",
+  "static",
+  "health",
+  "ready",
+  "metrics",
+  "login",
+  "logout",
+  "oauth",
+  "auth",
+  "mcp",
+  "favicon.ico",
+  "robots.txt",
+]);
+
+/** The explicit MCP suffix under a short address: `/<alias>/mcp`. */
+export const ORGANIZATION_MCP_SUFFIX = "/mcp";
+
+/**
+ * Platform administration lives beside the organizations rather than inside
+ * one: `/admin` is the operator's app and `/admin/mcp` its MCP resource. It is
+ * a reserved segment above, so no Organization can ever take the name.
+ */
+export const PLATFORM_ADMIN_PATH = "/admin";
+export const PLATFORM_ADMIN_MCP_PATH = `${PLATFORM_ADMIN_PATH}${ORGANIZATION_MCP_SUFFIX}`;
+export const CONTROL_MCP_MOUNT_PATH = "/api/control/mcp";
 
 /**
  * Keycloak Organization aliases are URL-safe by construction (the admin
@@ -45,7 +97,42 @@ export function isOrganizationAlias(value: unknown): value is string {
   return typeof value === "string" && ORGANIZATION_ALIAS.test(value);
 }
 
+/**
+ * The CANONICAL path of an organization's resource: the alias itself, at the
+ * root of the deployment's domain.
+ *
+ *   https://hubble.com/zerocopter
+ *
+ * Short on purpose. This string is not decoration: it is the RFC 8707
+ * `resource` a client asks Keycloak for, the value an audience mapper writes
+ * into `aud`, the path a `WWW-Authenticate` challenge points at and the name a
+ * person types into `claude mcp add`. All four come from here, so they cannot
+ * drift — and a person who has to retype one of them is retyping the shortest
+ * form that still says which organization it is.
+ *
+ * The alias comes from the Keycloak Organization, which is also the tenant's
+ * slug, so nothing extra had to be invented to make it short: the long spelling
+ * simply repeated `api/mcp/organizations` in front of the only part that varied.
+ */
 export function organizationMcpPath(alias: string): string {
+  return `/${alias}`;
+}
+
+/**
+ * The same resource, said explicitly. `/<alias>` alone serves the app to a
+ * browser and MCP to an MCP client (the request's `Accept` and content-type
+ * decide, see mcp/address.ts); `/<alias>/mcp` is MCP and nothing else, for a
+ * client whose configuration is easier to read when it says so.
+ *
+ * NOT the canonical name — one resource has exactly one canonical URI or the
+ * audience check has two things to compare against.
+ */
+export function organizationMcpExplicitPath(alias: string): string {
+  return `/${alias}${ORGANIZATION_MCP_SUFFIX}`;
+}
+
+/** The pre-rename spelling; still routed, never advertised. */
+export function legacyOrganizationMcpPath(alias: string): string {
   return `${ORGANIZATION_MCP_PATH_PREFIX}/${alias}`;
 }
 
@@ -194,8 +281,79 @@ export function organizationResourceScopeNames(
  */
 export function organizationAliasFromPath(url: string | undefined): string | null {
   const path = typeof url === "string" ? (url.split("?")[0] ?? "") : "";
-  if (!path.startsWith(`${ORGANIZATION_MCP_PATH_PREFIX}/`)) return null;
-  const rest = path.slice(ORGANIZATION_MCP_PATH_PREFIX.length + 1);
-  if (!isOrganizationAlias(rest)) return null;
-  return rest;
+
+  // The long spelling, first, because it is unambiguous.
+  if (path.startsWith(`${ORGANIZATION_MCP_PATH_PREFIX}/`)) {
+    const rest = path.slice(ORGANIZATION_MCP_PATH_PREFIX.length + 1);
+    return isOrganizationAlias(rest) ? rest : null;
+  }
+
+  // The short spelling: `/<alias>`, `/<alias>/mcp`, `/<alias>/api/...`,
+  // `/<alias>/graphql`. Everything below the alias belongs to the same
+  // organization, so one parser serves all four and there is no second place
+  // that could disagree about which organization a request is addressed to.
+  if (!path.startsWith("/")) return null;
+  const first = path.slice(1).split("/")[0] ?? "";
+  if (first.length === 0) return null;
+  if (RESERVED_ROOT_SEGMENTS.has(first.toLowerCase())) return null;
+  return isOrganizationAlias(first) ? first : null;
+}
+
+/**
+ * What the part of the path BELOW the alias addresses, for a short address.
+ *
+ * Returns the path as the server's own routes spell it — `/api/...`,
+ * `/graphql`, or `/api/mcp/organizations/<alias>` for the MCP resource itself —
+ * so `/<alias>/…` is a rewrite with one implementation rather than a set of
+ * duplicated routes. `null` means the path is not a short address at all.
+ */
+export function shortAddressTarget(url: string | undefined): {
+  alias: string;
+  target: string;
+} | null {
+  const raw = typeof url === "string" ? url : "";
+  const [pathOnly = "", query] = raw.split("?", 2);
+  if (!pathOnly.startsWith("/")) return null;
+  const segments = pathOnly.slice(1).split("/");
+  const alias = segments[0] ?? "";
+  if (alias.length === 0) return null;
+  if (RESERVED_ROOT_SEGMENTS.has(alias.toLowerCase())) return null;
+  if (!isOrganizationAlias(alias)) return null;
+
+  const rest = `/${segments.slice(1).join("/")}`;
+  const suffix = query === undefined ? "" : `?${query}`;
+
+  // `/<alias>` and `/<alias>/mcp` are the resource itself. They keep the long
+  // route's URL internally so ONE handler and one set of route registrations
+  // serve every spelling; what the client sees is decided by
+  // organizationMcpPath, never by which URL got matched.
+  if (rest === "/" || rest === ORGANIZATION_MCP_SUFFIX) {
+    return { alias, target: `${legacyOrganizationMcpPath(alias)}${suffix}` };
+  }
+  // GraphQL is published one segment shorter than it is mounted: the address
+  // people type is `/<alias>/graphql`, the route is `/api/graphql`.
+  if (rest === "/graphql" || rest.startsWith("/graphql/")) {
+    return { alias, target: `/api${rest}${suffix}` };
+  }
+  if (rest.startsWith("/api/")) {
+    return { alias, target: `${rest}${suffix}` };
+  }
+  return null;
+}
+
+/**
+ * The whole short-address rewrite, as one function: what the server should
+ * route a request to, given the URL a client actually asked for.
+ *
+ * `null` means "leave it alone" — the URL already names one of this server's
+ * own routes, or names nothing at all and should 404 as itself.
+ */
+export function rewriteShortAddress(url: string | undefined): string | null {
+  const raw = typeof url === "string" ? url : "";
+  const [pathOnly = "", query] = raw.split("?", 2);
+  const suffix = query === undefined ? "" : `?${query}`;
+  if (pathOnly === PLATFORM_ADMIN_MCP_PATH) {
+    return `${CONTROL_MCP_MOUNT_PATH}${suffix}`;
+  }
+  return shortAddressTarget(raw)?.target ?? null;
 }

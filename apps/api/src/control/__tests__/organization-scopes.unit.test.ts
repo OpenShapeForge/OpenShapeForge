@@ -58,8 +58,8 @@ describe("ensureOrganizationScope", () => {
 
     expect(state.scope).toBe("mcp-resource:acme");
     expect(state.audiences).toEqual([
-      "http://127.0.0.1:3361/api/mcp/organizations/acme",
-      "https://api.example.com/api/mcp/organizations/acme",
+      "http://127.0.0.1:3361/acme",
+      "https://api.example.com/acme",
     ]);
     expect(state.actions.map((action) => action.kind)).toEqual([
       "SCOPE_CREATED",
@@ -113,17 +113,17 @@ describe("ensureOrganizationScope", () => {
       {
         kind: "AUDIENCE_REMOVED",
         scope: "mcp-resource:acme",
-        subject: "http://127.0.0.1:3361/api/mcp/organizations/acme",
+        subject: "http://127.0.0.1:3361/acme",
       },
       {
         kind: "AUDIENCE_ADDED",
         scope: "mcp-resource:acme",
-        subject: "https://ingress-2.example.com/api/mcp/organizations/acme",
+        subject: "https://ingress-2.example.com/acme",
       },
     ]);
     expect(keycloak.audiencesOf("mcp-resource:acme")).toEqual([
-      "https://api.example.com/api/mcp/organizations/acme",
-      "https://ingress-2.example.com/api/mcp/organizations/acme",
+      "https://api.example.com/acme",
+      "https://ingress-2.example.com/acme",
     ]);
   });
 
@@ -253,7 +253,7 @@ describe("compareOrganizationScopes", () => {
     ]);
     expect(drift[1]!.actual).toBe("codex");
     expect(drift[3]!.expected).toBe(audiences("stale").join(" "));
-    expect(drift[3]!.actual).toBe("http://127.0.0.1:3121/api/mcp/organizations/stale");
+    expect(drift[3]!.actual).toBe("http://127.0.0.1:3121/stale");
 
     await reconcileOrganizationScopes(
       keycloak,
@@ -301,7 +301,7 @@ describe("the client-registration allow-list", () => {
     // name — the client scope it instantiates — because a registration policy
     // entry has to name a client scope that exists.
     expect(organizationResourceScopes("acme")).toEqual([
-      "organization:acme",
+      "organization",
       "mcp-resource:acme",
     ]);
     expect(organizationResourceScopeNames("acme")).toEqual(["organization", "mcp-resource:acme"]);
@@ -545,7 +545,7 @@ describe("the admin client", () => {
           id: "m1",
           protocolMapper: "oidc-audience-mapper",
           config: {
-            "included.custom.audience": "http://127.0.0.1:3361/api/mcp/organizations/acme",
+            "included.custom.audience": "http://127.0.0.1:3361/acme",
             "access.token.claim": "true",
           },
         },
@@ -565,7 +565,7 @@ describe("the admin client", () => {
     expect(mappers).toEqual([
       {
         id: "m1",
-        audience: "http://127.0.0.1:3361/api/mcp/organizations/acme",
+        audience: "http://127.0.0.1:3361/acme",
         accessTokenClaim: true,
       },
       { id: "m3", audience: null, accessTokenClaim: false },

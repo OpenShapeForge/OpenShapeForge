@@ -115,7 +115,10 @@ async function mint(shape: TokenShape): Promise<string> {
   });
 }
 
-const resource = (alias: string) => `${ORIGIN}/api/mcp/organizations/${alias}`;
+// The resource NAME is the short address (`https://host/<alias>`), whichever
+// spelling the request used to reach it — that is the whole point of one
+// canonical URI, and it is what `aud` has to hold.
+const resource = (alias: string) => `${ORIGIN}/${alias}`;
 
 /** As Keycloak mints it for `openid organization:<alias> mcp-resource:<alias>`. */
 async function boundToken(alias: string, organizationId: string, sub?: string) {
@@ -148,7 +151,7 @@ describe("per-organization MCP resource admission", () => {
     expect(response.statusCode).toBe(401);
     const challenge = String(response.headers["www-authenticate"]);
     expect(challenge).toContain(
-      `resource_metadata="${ORIGIN}${PROTECTED_RESOURCE_METADATA_PATH}/api/mcp/organizations/zerocopter-dev"`,
+      `resource_metadata="${ORIGIN}${PROTECTED_RESOURCE_METADATA_PATH}/zerocopter-dev"`,
     );
     expect(challenge).toContain('scope="organization mcp-resource:zerocopter-dev"');
     expect(challenge).not.toContain("insufficient_scope");
@@ -178,7 +181,7 @@ describe("per-organization MCP resource admission", () => {
     expect(challenge).toContain('error="insufficient_scope"');
     expect(challenge).toContain('scope="organization mcp-resource:hubble"');
     expect(challenge).toContain(
-      `resource_metadata="${ORIGIN}${PROTECTED_RESOURCE_METADATA_PATH}/api/mcp/organizations/hubble"`,
+      `resource_metadata="${ORIGIN}${PROTECTED_RESOURCE_METADATA_PATH}/hubble"`,
     );
   });
 
@@ -214,7 +217,7 @@ describe("per-organization MCP resource admission", () => {
 
   test("a token for the same alias on another origin is refused (audience is the exact resource URL)", async () => {
     const token = await mint({
-      aud: ["hubble-api", "http://127.0.0.1:3121/api/mcp/organizations/zerocopter-dev"],
+      aud: ["hubble-api", "http://127.0.0.1:3121/zerocopter-dev"],
       organization: { "zerocopter-dev": { id: ZEROCOPTER_ORG } },
       scope: "openid organization:zerocopter-dev mcp-resource:zerocopter-dev",
     });
@@ -267,7 +270,7 @@ describe("per-organization protected resource metadata", () => {
   test("names the exact resource and the scopes to request", async () => {
     const response = await app.inject({
       method: "GET",
-      url: `${PROTECTED_RESOURCE_METADATA_PATH}/api/mcp/organizations/hubble`,
+      url: `${PROTECTED_RESOURCE_METADATA_PATH}/hubble`,
       headers: { host: HOST },
     });
     expect(response.statusCode).toBe(200);
@@ -292,7 +295,7 @@ describe("per-organization protected resource metadata", () => {
   test("a malformed alias has no document", async () => {
     const response = await app.inject({
       method: "GET",
-      url: `${PROTECTED_RESOURCE_METADATA_PATH}/api/mcp/organizations/-nope`,
+      url: `${PROTECTED_RESOURCE_METADATA_PATH}/-nope`,
       headers: { host: HOST },
     });
     expect(response.statusCode).toBe(404);

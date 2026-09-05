@@ -36,6 +36,59 @@
  *     default optional scopes, so dynamically registered MCP clients can
  *     request it too. A scope a client already holds as DEFAULT is left alone:
  *     that is a stronger binding someone chose, not drift.
+ *   - it is listed in the realm's anonymous `Allowed Client Scopes`
+ *     client-registration policy, so a client that registers itself may ask
+ *     for it at all — see below.
+ *
+ * ── THE CLIENT-REGISTRATION ALLOW-LIST ──────────────────────────────────────
+ *
+ * Attaching the scope is not enough for a client that arrives through Dynamic
+ * Client Registration (RFC 7591) rather than pre-registered in the realm export
+ * — Claude Code does, Codex does not. Keycloak runs the requested `scope`
+ * string of a registration through the `allowed-client-templates` policy
+ * component (`subType: anonymous`), which admits only the names in its
+ * `allowed-client-scopes` config. A default realm ships that list with `openid`
+ * and `offline_access`, so every tenant the control plane provisions used to
+ * create a scope that self-registering clients were then forbidden to request:
+ * `403 insufficient_scope, Policy 'Allowed Client Scopes' rejected request`.
+ * Provisioning therefore owns that list too, for the scopes it creates.
+ *
+ * Three things about that component decide the shape of the code here, all
+ * verified against Keycloak 26.5.3 (`ClientScopesClientRegistrationPolicy`,
+ * `…PolicyFactory` and `oidc/DescriptionConverter`):
+ *
+ *   1. The list is EDITED, never replaced: whatever else a deployment allows —
+ *      `openid`, `offline_access`, another product's scope — is not this
+ *      module's to drop. Only entries this module owns (`mcp-resource:*`) are
+ *      ever removed, and only as orphans.
+ *   2. An entry must NAME AN EXISTING CLIENT SCOPE in the realm (plus the
+ *      literal `openid`). `validateConfiguration` refuses the whole list
+ *      otherwise, so a wanted entry with no client scope behind it is skipped
+ *      rather than written — that is what makes a realm without the
+ *      organizations feature a no-op instead of a failed provision.
+ *   3. The registration request's scope tokens are compared LITERALLY, before
+ *      Keycloak resolves them. `organization:<alias>` is therefore not a name
+ *      this list can hold (rule 2 refuses it) and not one it can match; the
+ *      entry is the client scope it instantiates, `organization`. See
+ *      {@link organizationResourceScopeNames} — and the caveat below.
+ *
+ * If the realm has NO such component at all — a deployment that never
+ * configured client registration — this module does nothing and says so
+ * (`registrationPolicyPresent: false`, no drift finding). Creating one would be
+ * inventing a client-registration security policy for a deployment that never
+ * asked for one, and a realm with no policy already permits every scope.
+ *
+ * ── CAVEAT: `organization:<alias>` AT REGISTRATION TIME ─────────────────────
+ *
+ * Rule 3 has a consequence this module cannot fix: a client that puts the
+ * per-organization metadata's `scopes_supported` verbatim into its REGISTRATION
+ * request asks for `organization:<alias>`, which no allow-list entry can match.
+ * Nothing is broken about the token flow — the registered client gets
+ * `organization` as a realm default scope and may request `organization:<alias>`
+ * at the authorization endpoint — but the registration itself is refused while
+ * the policy is enabled. Closing that is a decision about what
+ * `scopes_supported` advertises, or about whether the anonymous policy belongs
+ * in this realm at all; both belong to whoever owns the realm, not here.
  *
  * Realm-wide reconciliation additionally REMOVES `mcp-resource:*` scopes whose
  * alias names no Organization in the realm. That is the one deletion the
@@ -54,7 +107,10 @@
  * Organization endpoints and the SPI require, does not cover them (verified on
  * 26.5.3: every `/client-scopes` call answers 403 with `manage-realm` alone).
  * So `openshapeforge-auth-api` holds both, and the error a missing grant
- * produces names the role rather than presenting as the operator's 403.
+ * produces names the role rather than presenting as the operator's 403. The
+ * `/components` calls the registration allow-list needs go the other way —
+ * they are REALM configuration, gated by `manage-realm` — which is why holding
+ * both is what makes this module work at all.
  *
  * Nothing here reads a database: every function takes the client and the
  * settings explicitly, so the pure parts are testable against an in-memory
@@ -64,6 +120,7 @@ import {
   isOrganizationAlias,
   organizationMcpPath,
   organizationResourceScope,
+  organizationResourceScopeNames,
 } from "../mcp/organization-resource.js";
 import { KeycloakAdminError } from "./keycloak-organization-admin.js";
 import {
@@ -79,6 +136,24 @@ import {
 export const ORGANIZATION_SCOPE_PREFIX = organizationResourceScope("");
 
 export const AUDIENCE_MAPPER_TYPE = "oidc-audience-mapper";
+
+/** The realm component the client-registration policies are stored as. */
+export const CLIENT_REGISTRATION_POLICY_TYPE =
+  "org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy";
+
+/** `Allowed Client Scopes` — the one policy provider this module edits. */
+export const ALLOWED_CLIENT_SCOPES_PROVIDER = "allowed-client-templates";
+
+/**
+ * Anonymous registration only. The `authenticated` policy of the same provider
+ * governs updates made with a registration access token, which is a different
+ * and already-authenticated party; a client that registers itself with no
+ * credential at all is the one that needs the scope allowed up front.
+ */
+export const ANONYMOUS_POLICY_SUBTYPE = "anonymous";
+
+/** The config key holding the allow-list, inside that component. */
+export const ALLOWED_CLIENT_SCOPES_CONFIG = "allowed-client-scopes";
 
 /**
  * The clients the scope is attached to when `OPENSHAPEFORGE_MCP_CLIENTS` is
@@ -136,6 +211,14 @@ export type RealmDefaultScopes = {
   optionalScopes: string[];
 };
 
+/** The realm's anonymous `Allowed Client Scopes` policy, narrowed to its list. */
+export type RegistrationPolicySnapshot = {
+  /** The component's id, which the update is addressed by. */
+  id: string;
+  /** `allowed-client-scopes`, in the order the realm holds it. */
+  allowedScopes: string[];
+};
+
 export type OrganizationScopeAdminClient = {
   listClientScopes(): Promise<ClientScopeSummary[]>;
   createClientScope(input: { name: string; description: string }): Promise<ClientScopeSummary>;
@@ -148,6 +231,13 @@ export type OrganizationScopeAdminClient = {
   addOptionalClientScope(clientUuid: string, scopeId: string): Promise<void>;
   getRealmDefaultScopes(): Promise<RealmDefaultScopes>;
   addRealmOptionalScope(scopeId: string): Promise<void>;
+  /** Null when the realm has no anonymous `allowed-client-templates` component. */
+  findRegistrationPolicy(): Promise<RegistrationPolicySnapshot | null>;
+  /**
+   * Replace ONLY the `allowed-client-scopes` config of that component, leaving
+   * `allow-default-scopes` and every other key it carries untouched.
+   */
+  setRegistrationPolicyScopes(policyId: string, scopes: readonly string[]): Promise<void>;
 };
 
 // ---------------------------------------------------------------------------
@@ -159,12 +249,19 @@ export type OrganizationScopeActionKind =
   | "AUDIENCE_ADDED"
   | "AUDIENCE_REMOVED"
   | "CLIENT_ATTACHED"
-  | "REALM_ATTACHED";
+  | "REALM_ATTACHED"
+  /** A name added to the anonymous `Allowed Client Scopes` policy. */
+  | "POLICY_ALLOWED"
+  /** An orphan `mcp-resource:*` name removed from that policy. */
+  | "POLICY_REVOKED";
 
 export type OrganizationScopeAction = {
   kind: OrganizationScopeActionKind;
   scope: string;
-  /** The audience, the clientId, or null when the scope itself is the subject. */
+  /**
+   * The audience, the clientId, the allow-list entry, or null when the scope
+   * itself is the subject.
+   */
   subject: string | null;
 };
 
@@ -173,6 +270,13 @@ export type OrganizationScopeState = {
   /** The audiences the scope carries after the call, sorted. */
   audiences: string[];
   actions: OrganizationScopeAction[];
+  /**
+   * Whether the realm has an anonymous `Allowed Client Scopes` policy at all.
+   * False means the allow-list step was a deliberate no-op, not a failure: this
+   * module never CREATES that component (see the module header), and a realm
+   * without one already lets a self-registering client ask for any scope.
+   */
+  registrationPolicyPresent: boolean;
 };
 
 export type OrganizationScopeDriftCode =
@@ -182,13 +286,20 @@ export type OrganizationScopeDriftCode =
   | "ORGANIZATION_SCOPE_AUDIENCE_MISMATCH"
   /** The scope is not an optional scope of a configured client or of the realm defaults. */
   | "ORGANIZATION_SCOPE_NOT_ATTACHED"
-  /** A `mcp-resource:*` scope whose alias names no Organization in the realm. */
+  /**
+   * The scope exists but the realm's anonymous `Allowed Client Scopes`
+   * client-registration policy does not list it, so a dynamically registering
+   * MCP client is refused when it asks for it.
+   */
+  | "ORGANIZATION_SCOPE_NOT_REGISTRABLE"
+  /** A `mcp-resource:*` scope, or allow-list entry, whose alias names no Organization. */
   | "ORGANIZATION_SCOPE_ORPHANED";
 
 export const ORGANIZATION_SCOPE_DRIFT_CODES: readonly OrganizationScopeDriftCode[] = [
   "ORGANIZATION_SCOPE_MISSING",
   "ORGANIZATION_SCOPE_AUDIENCE_MISMATCH",
   "ORGANIZATION_SCOPE_NOT_ATTACHED",
+  "ORGANIZATION_SCOPE_NOT_REGISTRABLE",
   "ORGANIZATION_SCOPE_ORPHANED",
 ];
 
@@ -211,6 +322,8 @@ type RealmScopeSnapshot = {
   /** Keyed by clientId; null when the realm has no such client. */
   clients: Map<string, ClientScopeAttachment | null>;
   realm: RealmDefaultScopes;
+  /** Null when the realm has no anonymous `Allowed Client Scopes` policy. */
+  policy: RegistrationPolicySnapshot | null;
 };
 
 function normaliseSettings(settings: OrganizationScopeSettings): {
@@ -236,11 +349,35 @@ async function readSnapshot(
   for (const clientId of clients) {
     attachments.set(clientId, await client.findClient(clientId));
   }
-  return { scopes, clients: attachments, realm: await client.getRealmDefaultScopes() };
+  return {
+    scopes,
+    clients: attachments,
+    realm: await client.getRealmDefaultScopes(),
+    policy: await client.findRegistrationPolicy(),
+  };
 }
 
 function wantedAudiences(alias: string, origins: readonly string[]): string[] {
   return [...new Set(origins.map((origin) => resourceAudience(origin, alias)))].sort();
+}
+
+/**
+ * The allow-list entries one Organization's resource needs, restricted to the
+ * ones the realm can actually hold.
+ *
+ * The wanted set is {@link organizationResourceScopeNames}, which is derived
+ * from what the protected-resource metadata advertises rather than written out
+ * again here. The filter is Keycloak's own rule (rule 2 in the module header):
+ * a name with no client scope behind it makes `validateConfiguration` refuse
+ * the WHOLE list, so it is skipped instead — a realm without the organizations
+ * feature simply gets `mcp-resource:<alias>` allowed and no error.
+ */
+function wantedPolicyEntries(
+  alias: string,
+  scopes: readonly ClientScopeSummary[],
+): string[] {
+  const realmScopes = new Set(scopes.map((scope) => scope.name));
+  return organizationResourceScopeNames(alias).filter((name) => realmScopes.has(name));
 }
 
 /**
@@ -323,7 +460,32 @@ async function ensureWithSnapshot(
     actions.push({ kind: "REALM_ATTACHED", scope: name, subject: null });
   }
 
-  return { scope: name, audiences: wanted, actions };
+  // ── the client-registration allow-list ───────────────────────────────────
+  // Append-only: the entries already there are somebody's policy, and one of
+  // them (`organization`) is shared with every other alias. A realm with no
+  // such component is left alone entirely — that is the documented no-op, and
+  // `registrationPolicyPresent` is how a caller sees it happened.
+  const policy = snapshot.policy;
+  if (policy) {
+    const missing = wantedPolicyEntries(alias, snapshot.scopes).filter(
+      (entry) => !policy.allowedScopes.includes(entry),
+    );
+    if (missing.length > 0) {
+      const next = [...policy.allowedScopes, ...missing];
+      await client.setRegistrationPolicyScopes(policy.id, next);
+      policy.allowedScopes = next;
+      for (const entry of missing) {
+        actions.push({ kind: "POLICY_ALLOWED", scope: name, subject: entry });
+      }
+    }
+  }
+
+  return {
+    scope: name,
+    audiences: wanted,
+    actions,
+    registrationPolicyPresent: policy !== null,
+  };
 }
 
 /**
@@ -357,6 +519,8 @@ export type ReconcileOrganizationScopesResult = {
   /** Scope names removed because their Organization is gone. */
   removed: string[];
   actions: OrganizationScopeAction[];
+  /** See {@link OrganizationScopeState.registrationPolicyPresent}. */
+  registrationPolicyPresent: boolean;
 };
 
 /**
@@ -387,6 +551,28 @@ export async function reconcileOrganizationScopes(
       removed.push(scope.name);
       actions.push({ kind: "SCOPE_REMOVED", scope: scope.name, subject: null });
     }
+    // The allow-list is NOT unwound by the scope delete — Keycloak keeps the
+    // configured name, which then also blocks a later `validateConfiguration`
+    // on that component. Swept separately, and independently of whether the
+    // scope was still there: an entry left behind by an earlier deletion is
+    // the same orphan. Only `mcp-resource:*` names are considered; every other
+    // entry, `organization` included, belongs to the deployment.
+    const policy = snapshot.policy;
+    if (policy) {
+      const orphans = policy.allowedScopes.filter(
+        (entry) =>
+          entry.startsWith(ORGANIZATION_SCOPE_PREFIX) &&
+          !known.has(entry.slice(ORGANIZATION_SCOPE_PREFIX.length)),
+      );
+      if (orphans.length > 0) {
+        const next = policy.allowedScopes.filter((entry) => !orphans.includes(entry));
+        await client.setRegistrationPolicyScopes(policy.id, next);
+        policy.allowedScopes = next;
+        for (const entry of orphans) {
+          actions.push({ kind: "POLICY_REVOKED", scope: entry, subject: null });
+        }
+      }
+    }
   }
 
   const states: OrganizationScopeState[] = [];
@@ -395,7 +581,7 @@ export async function reconcileOrganizationScopes(
     states.push(state);
     actions.push(...state.actions);
   }
-  return { states, removed, actions };
+  return { states, removed, actions, registrationPolicyPresent: snapshot.policy !== null };
 }
 
 /**
@@ -414,17 +600,33 @@ export async function compareOrganizationScopes(
   const findings: OrganizationScopeDrift[] = [];
 
   if (input.removeOrphans) {
-    for (const scope of snapshot.scopes) {
-      if (!scope.name.startsWith(ORGANIZATION_SCOPE_PREFIX)) continue;
-      const alias = scope.name.slice(ORGANIZATION_SCOPE_PREFIX.length);
-      if (known.has(alias)) continue;
+    // One finding per orphan NAME, wherever it lives, so a scope that is both
+    // present and still allow-listed is not reported twice.
+    const orphans = new Map<string, { scope: boolean; policy: boolean }>();
+    const note = (name: string, where: "scope" | "policy") => {
+      if (!name.startsWith(ORGANIZATION_SCOPE_PREFIX)) return;
+      if (known.has(name.slice(ORGANIZATION_SCOPE_PREFIX.length))) return;
+      const seen = orphans.get(name) ?? { scope: false, policy: false };
+      seen[where] = true;
+      orphans.set(name, seen);
+    };
+    for (const scope of snapshot.scopes) note(scope.name, "scope");
+    for (const entry of snapshot.policy?.allowedScopes ?? []) note(entry, "policy");
+
+    for (const [name, where] of orphans) {
+      const places = [
+        ...(where.scope ? ["the realm's client scopes"] : []),
+        ...(where.policy ? ['the anonymous "Allowed Client Scopes" policy'] : []),
+      ];
       findings.push({
         code: "ORGANIZATION_SCOPE_ORPHANED",
-        alias: organizationAliasOfScope(scope.name),
-        scope: scope.name,
+        alias: organizationAliasOfScope(name),
+        scope: name,
         expected: null,
-        actual: scope.name,
-        message: `Client scope "${scope.name}" names an Organization the realm no longer has; a re-apply removes it.`,
+        actual: name,
+        message:
+          `"${name}" names an Organization the realm no longer has and is still in ` +
+          `${places.join(" and ")}; a re-apply removes it.`,
       });
     }
   }
@@ -490,6 +692,28 @@ export async function compareOrganizationScopes(
         actual: detached.join(" "),
         message: `Client scope "${name}" is not an optional scope of: ${detached.join(", ")}.`,
       });
+    }
+
+    // A realm with no such policy is not drift: nothing to repair, and the
+    // module would not write there anyway. See the header.
+    if (snapshot.policy) {
+      const wantedEntries = wantedPolicyEntries(alias, snapshot.scopes);
+      const missing = wantedEntries.filter(
+        (entry) => !snapshot.policy!.allowedScopes.includes(entry),
+      );
+      if (missing.length > 0) {
+        findings.push({
+          code: "ORGANIZATION_SCOPE_NOT_REGISTRABLE",
+          alias,
+          scope: name,
+          expected: wantedEntries.join(" "),
+          actual: missing.join(" "),
+          message:
+            `The anonymous "Allowed Client Scopes" client-registration policy does not allow ` +
+            `[${missing.join(", ")}], so a dynamically registered MCP client for Organization ` +
+            `"${alias}" is refused with insufficient_scope.`,
+        });
+      }
     }
   }
   return findings;
@@ -723,6 +947,43 @@ export function createOrganizationScopeAdminClient(
     async addRealmOptionalScope(scopeId) {
       await request(`/default-optional-client-scopes/${encodeURIComponent(scopeId)}`, {
         method: "PUT",
+      });
+    },
+
+    async findRegistrationPolicy() {
+      const search = new URLSearchParams({ type: CLIENT_REGISTRATION_POLICY_TYPE });
+      const { body } = await request(`/components?${search.toString()}`, { method: "GET" });
+      // `?type=` narrows to the policies; the provider and the subType are what
+      // pick the ONE of them this module edits, and both are matched here
+      // rather than trusted from the query.
+      for (const row of Array.isArray(body) ? body : []) {
+        const record = (row ?? {}) as Record<string, unknown>;
+        if (
+          record.providerId !== ALLOWED_CLIENT_SCOPES_PROVIDER ||
+          record.subType !== ANONYMOUS_POLICY_SUBTYPE ||
+          typeof record.id !== "string"
+        ) {
+          continue;
+        }
+        const policyConfig = (record.config ?? {}) as Record<string, unknown>;
+        return { id: record.id, allowedScopes: strings(policyConfig[ALLOWED_CLIENT_SCOPES_CONFIG]) };
+      }
+      return null;
+    },
+
+    async setRegistrationPolicyScopes(policyId, scopes) {
+      // Read-modify-write of the WHOLE component: the update endpoint replaces
+      // it, and `allow-default-scopes` — plus anything a future Keycloak adds —
+      // has to survive. Re-read rather than reuse the snapshot so the write
+      // carries the component as it is now, not as the pass first saw it.
+      const path = `/components/${encodeURIComponent(policyId)}`;
+      const { body } = await request(path, { method: "GET" });
+      const component = (body ?? {}) as Record<string, unknown>;
+      const policyConfig = { ...((component.config ?? {}) as Record<string, unknown>) };
+      policyConfig[ALLOWED_CLIENT_SCOPES_CONFIG] = [...scopes];
+      await request(path, {
+        method: "PUT",
+        body: JSON.stringify({ ...component, config: policyConfig }),
       });
     },
   };

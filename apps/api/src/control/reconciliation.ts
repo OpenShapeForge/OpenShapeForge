@@ -97,8 +97,10 @@
  *
  * Every Organization in the realm — root or sub, registry-known or not — is
  * expected to carry the `mcp-resource:<alias>` client scope that
- * `organization-scopes.ts` provisions, and no such scope may name an
- * Organization the realm no longer has. Those four findings
+ * `organization-scopes.ts` provisions, to have that scope allowed by the
+ * realm's anonymous `Allowed Client Scopes` client-registration policy (without
+ * which a self-registering MCP client cannot ask for it), and no such scope may
+ * name an Organization the realm no longer has. Those five findings
  * (`ORGANIZATION_SCOPE_*`) are computed against the SAME realm listing the
  * hierarchy comparison uses, and they are repaired by ONE realm-wide scope pass
  * rather than by replaying tenants: a scope is derived configuration keyed by
@@ -178,8 +180,9 @@ export type DriftCode =
   | "TARGET_NOT_PROJECTABLE"
   /**
    * The per-organization MCP audience scope is missing, carries the wrong
-   * audiences, is not attached, or names an Organization that is gone. All
-   * repairable, by the realm-wide scope pass of {@link reapplyProjection}.
+   * audiences, is not attached, is not allowed to dynamically registering
+   * clients, or names an Organization that is gone. All repairable, by the
+   * realm-wide scope pass of {@link reapplyProjection}.
    */
   | OrganizationScopeDriftCode;
 

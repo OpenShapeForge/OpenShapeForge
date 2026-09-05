@@ -74,6 +74,32 @@ export function organizationResourceScopes(alias: string): string[] {
 }
 
 /**
+ * The REALM CLIENT SCOPE that `organization:<alias>` is an instance of.
+ *
+ * Keycloak 26 does not store `organization:<alias>` anywhere: the alias is a
+ * parameter resolved per authorization request against the one built-in
+ * `organization` client scope. So wherever a *stored* configuration has to name
+ * the organization scope — a client's optional scopes, the realm defaults, the
+ * client-registration allow-list — the name is this one, never the instance.
+ */
+export const ORGANIZATION_CLIENT_SCOPE = "organization";
+
+/**
+ * {@link organizationResourceScopes}, as the names of the client scopes those
+ * requested scopes resolve to in the realm.
+ *
+ * Derived from the advertised list rather than written out again, so a scope
+ * added to what the protected-resource metadata advertises is automatically
+ * one the registration allow-list has to carry. Only the dynamic member is
+ * rewritten; a literal scope IS its own client scope and passes through.
+ */
+export function organizationResourceScopeNames(alias: string): string[] {
+  return organizationResourceScopes(alias).map((scope) =>
+    scope === organizationScope(alias) ? ORGANIZATION_CLIENT_SCOPE : scope,
+  );
+}
+
+/**
  * The organization a request path names, or null for the legacy mount and
  * anything else. Fastify already split the alias into `params`; it is read
  * from the URL here so the metadata route, the challenge builder and the MCP

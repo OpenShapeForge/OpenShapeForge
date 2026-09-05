@@ -198,6 +198,13 @@ export type FakeClientScope = {
   mappers: Map<string, { audience: string | null; accessTokenClaim: boolean }>;
 };
 
+/**
+ * The realm's anonymous `Allowed Client Scopes` policy as the fake holds it:
+ * the whole component config, so a test can assert that only the one key this
+ * module owns is touched. `null` reproduces a realm that has no such component.
+ */
+export type FakeRegistrationPolicy = { id: string; config: Record<string, string[]> };
+
 export type FakeScopeClient = OrganizationScopeAdminClient & {
   scopes: Map<string, FakeClientScope>;
   /** Keyed by clientId; the realm's clients and their attached scope NAMES. */
@@ -207,6 +214,22 @@ export type FakeScopeClient = OrganizationScopeAdminClient & {
   writes: string[];
   scopeNamed: (name: string) => FakeClientScope | undefined;
   audiencesOf: (name: string) => string[];
+  /** The component as the fake realm holds it; null when the realm has none. */
+  policy: FakeRegistrationPolicy | null;
+  /** `allowed-client-scopes`, in realm order. */
+  allowedClientScopes: () => string[];
+};
+
+export type FakeOrganizationScopesOptions = {
+  clientIds?: readonly string[];
+  /**
+   * The realm's client scopes, beyond the `mcp-resource:*` ones the module
+   * creates. The default is the two the allow-list refers to out of the box —
+   * an entry naming no client scope makes Keycloak refuse the whole write.
+   */
+  realmScopes?: readonly string[];
+  /** `null` for a realm with no client-registration policy at all. */
+  policy?: FakeRegistrationPolicy | null;
 };
 
 /**
@@ -215,11 +238,25 @@ export type FakeScopeClient = OrganizationScopeAdminClient & {
  * client and from the realm defaults (Keycloak does this as part of the
  * delete), `?clientId=` is an exact match, and an attach is addressed by the
  * client's uuid rather than its clientId.
+ *
+ * It also reproduces the client-registration policy component: its update
+ * REPLACES the component (so a test can catch a config key being dropped), and
+ * a name that is not a realm client scope is refused exactly as Keycloak's
+ * `validateConfiguration` refuses it — the whole write, not just the entry.
  */
 export function fakeOrganizationScopes(
-  clientIds: readonly string[] = ["codex", "openshapeforge-gateway", "openshapeforge-inspector"],
+  options: FakeOrganizationScopesOptions = {},
 ): FakeScopeClient {
+  const clientIds = options.clientIds ?? [
+    "codex",
+    "openshapeforge-gateway",
+    "openshapeforge-inspector",
+  ];
   const scopes = new Map<string, FakeClientScope>();
+  for (const name of options.realmScopes ?? ["organization", "offline_access"]) {
+    const id = randomUUID();
+    scopes.set(id, { id, name, mappers: new Map() });
+  }
   const clients = new Map<
     string,
     { id: string; defaultScopes: string[]; optionalScopes: string[] }
@@ -229,6 +266,16 @@ export function fakeOrganizationScopes(
   }
   const realm = { defaultScopes: [] as string[], optionalScopes: [] as string[] };
   const writes: string[] = [];
+  const policy: FakeRegistrationPolicy | null =
+    options.policy === undefined
+      ? {
+          id: "allowed-client-scopes-anonymous",
+          config: {
+            "allow-default-scopes": ["true"],
+            "allowed-client-scopes": ["openid", "offline_access"],
+          },
+        }
+      : options.policy;
 
   const requireScope = (scopeId: string): FakeClientScope => {
     const scope = scopes.get(scopeId);
@@ -244,6 +291,10 @@ export function fakeOrganizationScopes(
     realm,
     writes,
     scopeNamed,
+    policy,
+    allowedClientScopes() {
+      return [...(policy?.config["allowed-client-scopes"] ?? [])];
+    },
     audiencesOf(name) {
       const scope = scopeNamed(name);
       return scope
@@ -321,6 +372,25 @@ export function fakeOrganizationScopes(
       const scope = requireScope(scopeId);
       if (!realm.optionalScopes.includes(scope.name)) realm.optionalScopes.push(scope.name);
       writes.push(`attach-realm ${scope.name}`);
+    },
+    async findRegistrationPolicy() {
+      return policy
+        ? { id: policy.id, allowedScopes: [...(policy.config["allowed-client-scopes"] ?? [])] }
+        : null;
+    },
+    async setRegistrationPolicyScopes(policyId, next) {
+      if (!policy || policy.id !== policyId) {
+        throw new Error(`fake scopes: no client-registration policy "${policyId}"`);
+      }
+      // Keycloak's own `validateConfiguration`: every entry must name a realm
+      // client scope, or the literal `openid`. It refuses the whole list.
+      const allowed = new Set([...[...scopes.values()].map((scope) => scope.name), "openid"]);
+      const rejected = next.filter((entry) => !allowed.has(entry));
+      if (rejected.length > 0) {
+        throw new Error(`fake scopes: client scopes not allowed: [${next.join(", ")}]`);
+      }
+      policy.config = { ...policy.config, "allowed-client-scopes": [...next] };
+      writes.push(`set-registration-policy ${next.join(",")}`);
     },
   };
 }

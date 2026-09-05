@@ -383,6 +383,38 @@ carries the API contract, and it reaches the CRUD layer through the manifest
 column, so the advertised update schema and the server's `400` come from one
 authored fact rather than two rules that can drift (#177).
 
+Authored `writtenBy` **is** consulted, on create and on update: the field is
+absent from both schemas, and a caller that sends it anyway is refused with a
+message naming the operation that may set it. It takes a list of operation
+contract keys:
+
+```yaml
+  - key: reviewedAt
+    writtenBy: [pentest.finding.review]
+```
+
+Use it for a field that records that a process took place — a review signed
+off, a scope approved, a retest concluded — where an operation is the one place
+the preconditions are checked. `review_finding` refuses a reviewer who is the
+finding's own author; while `reviewedAt` is writable through the update tool,
+that refusal is advice. The flag is what makes it a rule, and it makes the same
+rule on REST and GraphQL, because a hole in one transport is the whole hole.
+
+It is not `readOnly` with teeth. `readOnly` stays a rendering choice; a field
+may be both, or either, and they answer different questions. Nor is it
+`immutable`: these values are no more settable at insert than afterwards.
+
+The named operations are unaffected — they write through the runtime-owned
+path, the way the secure elicitation target does. A key that no compiled
+operation answers to **fails the build**: a field nobody can write is worse
+than an unprotected one. The compiler resolves each key into the route a caller
+can use and puts it on the manifest column, so the refusal names something
+callable without the CRUD layer having to know the operation catalog.
+
+GraphQL is the one transport that cannot phrase its own refusal — an unknown
+input field dies in validation before a resolver runs — so its create and
+update input types carry the explanation in their description instead.
+
 ### Enumerations
 
 `options.type: referentiedata` expands to concrete values at compile time from

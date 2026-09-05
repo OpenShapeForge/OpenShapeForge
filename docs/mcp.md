@@ -142,7 +142,11 @@ from treating an intentionally empty optional surface as a protocol failure.
 
 The catalog is generated from the compiled contracts (`model.fields`), not the
 runtime manifest — the manifest carries storage columns, which is everything
-SQL needs and almost nothing a model needs.
+SQL needs and almost nothing a model needs. The one exception is the storage
+column behind a `belongsTo` foreign key (see "Relationship keys" below): the
+generator reads `contract.storage.columns` to name and type that one property,
+because REST and GraphQL already accept it under that exact name and the MCP
+schema would otherwise lie about what the server writes.
 
 | Authored                                       | Becomes                                                  |
 | ---------------------------------------------- | -------------------------------------------------------- |
@@ -175,6 +179,37 @@ the create schema and is absent from the update schema. That is the flag which
 carries the API contract, and it reaches the CRUD layer through the manifest
 column, so the advertised update schema and the server's `400` come from one
 authored fact rather than two rules that can drift (#177).
+
+### Relationship keys
+
+A `belongsTo` relationship with a `foreignKey` persists as a `<key>Id` uuid
+column that REST and GraphQL already accept on create, update and list
+filters. The generator adds that same key to the MCP `create`, `update.values`
+and `list.filter` schemas — the storage column's own field key, so all three
+transports agree on one name. It is required on `create` exactly when the
+column is `NOT NULL`, and never required on `update` (omitting it means
+"leave it alone", the same rule as every other field). The description names
+the target entity and, when that entity is in the same catalog with a `list`
+tool, points at it (`assessment_list`); otherwise it names only the
+entity. A foreign key that an authored field already owns (the field's own
+`persisted.column` matches the relationship's `foreignKey`) is not duplicated
+— that field's own schema, including its own `required`, is the one property
+for that column.
+
+Today every `belongsTo` foreign key column is nullable at the storage layer
+(`resolveStorageColumns` always emits `nullable: true` for a relationship-only
+column), so this required-on-`NOT NULL` rule only takes effect once an
+authored field owns the column instead — and an owned column is exactly the
+case this generator does *not* add a second property for. In other words, a
+bare relationship key is never advertised as required today; the branch exists
+so the schema stays correct if that storage invariant ever changes.
+
+Advertising this key does not add new authorization: `assertDeclaredProperties`
+already validates writes against whatever the schema declares, so this is a
+matter of the schema catching up with what the CRUD layer has always accepted.
+It does, however, make an existing gap easier to reach — the referential check
+runs as the table owner and does not enforce that a foreign key stays within
+the caller's tenant (#509), and now an MCP client can set that key directly.
 
 ### Enumerations
 

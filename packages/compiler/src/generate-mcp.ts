@@ -94,6 +94,108 @@ function writableFields(
   );
 }
 
+/**
+ * What a `belongsTo` relationship contributes to the tool schemas.
+ *
+ * A `belongsTo` with a `foreignKey` is stored as a uuid column that the
+ * storage layer names `<key>Id` (authoring/compiler/storage.ts), and REST and
+ * GraphQL already accept that key on create, update and list filters. Before
+ * this the MCP schemas were built from `model.fields` alone, so
+ * `finding_create` advertised `additionalProperties: false` without
+ * `assessmentId` — no MCP client could attach a finding to its assessment,
+ * while the same body succeeded over REST. The key is derived from the
+ * compiled storage column so all three transports agree on one name.
+ */
+type RelationshipKey = {
+  key: string;
+  relationship: string;
+  target: string;
+  required: boolean;
+  schema: JsonObject;
+};
+
+/** How a relationship target is named and listed, resolved catalog-wide. */
+type RelationshipTarget = { label: string; listTool?: string };
+
+/**
+ * The storage column a `belongsTo` foreign key lands in, and the field key
+ * every transport addresses it by. Undefined for relationships that carry no
+ * foreign key (`hasMany`, `manyToMany`, or a `belongsTo` resolved elsewhere).
+ */
+function relationshipColumn(
+  contract: CompiledEntityContract,
+  relationship: CompiledRelationship,
+): { key: string; nullable: boolean } | undefined {
+  if (relationship.kind !== "belongsTo" || !relationship.foreignKey)
+    return undefined;
+  const column = contract.storage.columns.find(
+    (candidate) => candidate.column === relationship.foreignKey,
+  );
+  return {
+    key: column?.field ?? `${relationship.key}Id`,
+    nullable: column ? column.nullable : true,
+  };
+}
+
+function relationshipKeys(
+  contract: CompiledEntityContract,
+  targets: ReadonlyMap<string, RelationshipTarget>,
+): RelationshipKey[] {
+  const ownedByField = new Set(contract.model.fields.map((field) => field.key));
+  const keys: RelationshipKey[] = [];
+  for (const relationship of contract.model.relationships) {
+    const column = relationshipColumn(contract, relationship);
+    if (!column) continue;
+    // An authored field may own the foreign-key column itself
+    // (PaymentDetail.relationId persists at relation_id). Its own schema is
+    // already in the tool; a second property for the same column would be a
+    // lie about what the server accepts.
+    if (ownedByField.has(column.key)) continue;
+    // A target outside the catalog has no tool to point at: naming a list tool
+    // that does not exist would send the model on a fruitless call.
+    const target = targets.get(relationship.target);
+    const targetLabel = target?.label ?? relationship.target;
+    const description =
+      `Identifier of the ${targetLabel} this ${entityLabel(contract)} belongs to` +
+      (target?.listTool ? `, as returned by \`${target.listTool}\`.` : ".");
+    keys.push({
+      key: column.key,
+      relationship: relationship.key,
+      target: relationship.target,
+      // The storage column decides: it is nullable unless something made it
+      // NOT NULL, so this is "required iff the column refuses null" — the
+      // same fact the database enforces on the insert.
+      required: !column.nullable,
+      schema: { type: "string", format: "uuid", description },
+    });
+  }
+  return keys;
+}
+
+/** Add relationship keys to an object schema, after the authored fields. */
+function withRelationshipKeys(
+  schema: JsonObject,
+  keys: RelationshipKey[],
+  requireRequired: boolean,
+): JsonObject {
+  if (keys.length === 0) return schema;
+  const properties = {
+    ...((schema.properties as JsonObject | undefined) ?? {}),
+  };
+  const required = [
+    ...((schema.required as string[] | undefined) ?? []),
+  ];
+  for (const entry of keys) {
+    properties[entry.key] = entry.schema;
+    if (requireRequired && entry.required) required.push(entry.key);
+  }
+  return {
+    ...schema,
+    properties,
+    ...(required.length > 0 ? { required } : {}),
+  };
+}
+
 function sortableFieldKeys(
   fields: CompiledField[],
   excludedField?: string,
@@ -186,11 +288,13 @@ function buildToolsForEntity(
   contract: CompiledEntityContract,
   table: string,
   referentiedata: CoreReferentiedataSnapshot,
+  relationshipTargets: ReadonlyMap<string, RelationshipTarget>,
 ): McpToolDefinition[] {
   const mcp = contract.mcp;
   if (!mcp) return [];
 
   const fields = contract.model.fields;
+  const relationships = relationshipKeys(contract, relationshipTargets);
   // The elicited target field never appears in the create schema: its values
   // come from the person at the client via elicitation, not from the model.
   const creatable = writableFields(fields, "create").filter(
@@ -249,6 +353,10 @@ function buildToolsForEntity(
       // silently narrow a caller's result set.
       delete schema.default;
       filterProperties[field.key] = schema;
+    }
+    // Relationship keys filter by exact uuid, like every non-text field.
+    for (const entry of relationships) {
+      filterProperties[entry.key] = entry.schema;
     }
     tools.push({
       name: named("list"),
@@ -321,11 +429,15 @@ function buildToolsForEntity(
       table,
       title: `Create ${label}`,
       description: described("create", `${description} Creates a new record.`),
-      inputSchema: compiledObjectSchema(creatable, referentiedata, {
-        requireRequired: true,
-        defaultsAreMaterialized: true,
-        ...MCP_FIELD_SCHEMA_OPTIONS,
-      }),
+      inputSchema: withRelationshipKeys(
+        compiledObjectSchema(creatable, referentiedata, {
+          requireRequired: true,
+          defaultsAreMaterialized: true,
+          ...MCP_FIELD_SCHEMA_OPTIONS,
+        }),
+        relationships,
+        true,
+      ),
       annotations: annotationsFor("create"),
     });
   }
@@ -334,11 +446,15 @@ function buildToolsForEntity(
     // Update is a partial: nothing is required beyond the id, because omitting
     // a field means "leave it alone", not "clear it".
     const { schema: patch, definitions } = splitBundledDefinitions(
-      compiledObjectSchema(updatable, referentiedata, {
-        requireRequired: false,
-        ...MCP_FIELD_SCHEMA_OPTIONS,
-        includeDefault: false,
-      }),
+      withRelationshipKeys(
+        compiledObjectSchema(updatable, referentiedata, {
+          requireRequired: false,
+          ...MCP_FIELD_SCHEMA_OPTIONS,
+          includeDefault: false,
+        }),
+        relationships,
+        false,
+      ),
     );
     tools.push({
       name: named("update"),
@@ -426,6 +542,12 @@ export type McpEntityCatalogEntry = {
     kind: CompiledRelationship["kind"];
     target: string;
     foreignKey?: string;
+    /**
+     * The field key every transport addresses the foreign key by (`<key>Id`,
+     * or the authored field that owns the column). Set for every `belongsTo`
+     * with a `foreignKey`.
+     */
+    field?: string;
     via?: string;
     label?: string;
   }[];
@@ -629,6 +751,25 @@ export function buildMcpCatalog(
   const testTools: McpTestToolDefinition[] = [];
   const guideTools: McpGuideToolDefinition[] = [];
 
+  // Every entity in the input set is a possible relationship target, whether
+  // or not it is MCP-exposed itself; only an exposed one has a list tool to
+  // point the model at.
+  const relationshipTargets = new Map<string, RelationshipTarget>();
+  for (const input of inputs) {
+    const targetMcp = input.contract.mcp;
+    const listTool =
+      targetMcp && targetMcp.operations.list
+        ? targetMcp.tools === "dedicated"
+          ? (targetMcp.toolOverrides?.list?.name ??
+            `${targetMcp.toolPrefix}_list`)
+          : "osf_list"
+        : undefined;
+    relationshipTargets.set(input.contract.entity.name, {
+      label: entityLabel(input.contract),
+      ...(listTool ? { listTool } : {}),
+    });
+  }
+
   for (const input of opted) {
     const { contract } = input;
     const mcp = contract.mcp!;
@@ -700,6 +841,7 @@ export function buildMcpCatalog(
       }),
       relationships: contract.model.relationships.map((relationship) => {
         const label = localizedText(relationship.label);
+        const column = relationshipColumn(contract, relationship);
         return {
           key: relationship.key,
           kind: relationship.kind,
@@ -707,13 +849,21 @@ export function buildMcpCatalog(
           ...(relationship.foreignKey
             ? { foreignKey: relationship.foreignKey }
             : {}),
+          ...(column ? { field: column.key } : {}),
           ...(relationship.via ? { via: relationship.via } : {}),
           ...(label ? { label } : {}),
         };
       }),
     });
 
-    tools.push(...buildToolsForEntity(contract, input.table, referentiedata));
+    tools.push(
+      ...buildToolsForEntity(
+        contract,
+        input.table,
+        referentiedata,
+        relationshipTargets,
+      ),
+    );
 
     if (mcp.resource) {
       const pluralLabel = pluralize(entityLabel(contract));

@@ -29,6 +29,7 @@
  * of it must keep starting exactly as before, with the control routes answering
  * 503 and saying why.
  */
+import { DEFAULT_MCP_CLIENTS } from "./organization-scopes.js";
 
 /** Environment variables the control plane reads. */
 export type ControlPlaneEnv = {
@@ -76,6 +77,30 @@ export type ControlPlaneEnv = {
    * becomes the better pin and this should move.
    */
   OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID?: string | undefined;
+  /**
+   * The runtime's own public origin, e.g. `https://api.example.com`. Required:
+   * it is the first audience every per-organization MCP scope carries
+   * (`<origin>/api/mcp/organizations/<alias>`), and a scope with no audience
+   * would let provisioning "succeed" while every token for the resource is
+   * refused. The same variable the MCP server reads for its callback URL, so
+   * one deployment has one answer to "where am I served".
+   */
+  OPENSHAPEFORGE_PUBLIC_ORIGIN?: string | undefined;
+  /**
+   * Optional comma-separated list of ADDITIONAL origins the MCP resources are
+   * reachable on (a second ingress, a local port beside the public one). Each
+   * one gets its own audience mapper on every organization scope; origins
+   * removed from the list are removed from Keycloak on the next reconcile.
+   */
+  OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS?: string | undefined;
+  /**
+   * Optional comma-separated `clientId`s the scope is attached to as an
+   * optional client scope. Defaults to `codex`, `openshapeforge-gateway`,
+   * `openshapeforge-inspector`; a listed client the realm does not have is
+   * skipped. The realm's default optional scopes are always extended, so
+   * dynamically registered MCP clients need no entry here.
+   */
+  OPENSHAPEFORGE_MCP_CLIENTS?: string | undefined;
 };
 
 export type ControlPlaneConfig = {
@@ -91,6 +116,12 @@ export type ControlPlaneConfig = {
     /** Matched against the token's `azp`. See ControlPlaneEnv for why not `aud`. */
     clientId: string;
   };
+  /** What `organization-scopes.ts` provisions per Organization. */
+  mcpResource: {
+    /** Public origin first, then the additional ones; deduplicated, no trailing slash. */
+    origins: string[];
+    clients: string[];
+  };
 };
 
 export type ControlPlaneConfigResult =
@@ -105,6 +136,30 @@ function trimmed(value: string | undefined): string | undefined {
   return text ? text : undefined;
 }
 
+function commaList(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+/**
+ * An origin as the audience needs it: scheme + host (+ port), nothing after.
+ * Returns null for anything `new URL` cannot parse or that carries a path,
+ * because `https://api.example.com/v1` would produce an audience the resource
+ * never derives for itself (`canonicalResourceUri` builds it from the request
+ * origin) and every token would be refused with no hint why.
+ */
+function asOrigin(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.pathname !== "/" || url.search !== "" || url.hash !== "") return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
 export function readControlPlaneConfig(
   env: ControlPlaneEnv = process.env as ControlPlaneEnv,
 ): ControlPlaneConfigResult {
@@ -113,6 +168,7 @@ export function readControlPlaneConfig(
   const issuer = trimmed(env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER);
   const jwksUri = trimmed(env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI);
   const operatorClientId = trimmed(env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID);
+  const publicOrigin = trimmed(env.OPENSHAPEFORGE_PUBLIC_ORIGIN);
 
   // Reported together, never one at a time: an operator fixing a control-plane
   // rollout should learn everything that is missing from one 503, not discover
@@ -123,9 +179,28 @@ export function readControlPlaneConfig(
   if (!issuer) missing.push("OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER");
   if (!jwksUri) missing.push("OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI");
   if (!operatorClientId) missing.push("OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID");
+  if (!publicOrigin) missing.push("OPENSHAPEFORGE_PUBLIC_ORIGIN");
+
+  // A malformed origin is reported in the same list as an absent one: both mean
+  // "no audience can be minted", and an operator reads one 503 either way.
+  const origins: string[] = [];
+  for (const [name, values] of [
+    ["OPENSHAPEFORGE_PUBLIC_ORIGIN", publicOrigin ? [publicOrigin] : []],
+    ["OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS", commaList(env.OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS)],
+  ] as const) {
+    for (const value of values) {
+      const origin = asOrigin(value);
+      if (!origin) {
+        missing.push(`${name} (not an origin: "${value}")`);
+      } else if (!origins.includes(origin)) {
+        origins.push(origin);
+      }
+    }
+  }
   if (missing.length > 0) {
     return { ok: false, missing };
   }
+  const clients = commaList(env.OPENSHAPEFORGE_MCP_CLIENTS);
 
   return {
     ok: true,
@@ -141,6 +216,10 @@ export function readControlPlaneConfig(
         clientSecret: clientSecret!,
       },
       operator: { issuer: issuer!, jwksUri: jwksUri!, clientId: operatorClientId! },
+      mcpResource: {
+        origins,
+        clients: clients.length > 0 ? clients : [...DEFAULT_MCP_CLIENTS],
+      },
     },
   };
 }

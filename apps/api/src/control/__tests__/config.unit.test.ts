@@ -18,6 +18,7 @@ const complete: ControlPlaneEnv = {
   OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI:
     "http://localhost:8181/realms/openshapeforge-control/protocol/openid-connect/certs",
   OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID: "openshapeforge-admin-gateway",
+  OPENSHAPEFORGE_PUBLIC_ORIGIN: "http://127.0.0.1:3001",
 };
 
 describe("readControlPlaneConfig", () => {
@@ -29,6 +30,10 @@ describe("readControlPlaneConfig", () => {
     expect(result.config.keycloak.tenantRealm).toBe("openshapeforge");
     expect(result.config.keycloak.clientId).toBe("openshapeforge-auth-api");
     expect(result.config.operator.clientId).toBe("openshapeforge-admin-gateway");
+    expect(result.config.mcpResource).toEqual({
+      origins: ["http://127.0.0.1:3001"],
+      clients: ["codex", "openshapeforge-gateway", "openshapeforge-inspector"],
+    });
   });
 
   it("reports every missing variable at once", () => {
@@ -42,6 +47,40 @@ describe("readControlPlaneConfig", () => {
       "OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER",
       "OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI",
       "OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID",
+      "OPENSHAPEFORGE_PUBLIC_ORIGIN",
+    ]);
+  });
+
+  it("collects the MCP resource origins and clients, normalised and deduplicated", () => {
+    const result = readControlPlaneConfig({
+      ...complete,
+      OPENSHAPEFORGE_PUBLIC_ORIGIN: "https://api.example.com/",
+      OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS:
+        " http://127.0.0.1:3361 , https://api.example.com, http://127.0.0.1:3361/ ",
+      OPENSHAPEFORGE_MCP_CLIENTS: "codex, my-client ,",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.mcpResource).toEqual({
+      origins: ["https://api.example.com", "http://127.0.0.1:3361"],
+      clients: ["codex", "my-client"],
+    });
+  });
+
+  it("refuses an origin that carries a path", () => {
+    // `https://api.example.com/v1` would mint an audience the resource never
+    // derives for itself, so every token would be refused with no hint why.
+    const result = readControlPlaneConfig({
+      ...complete,
+      OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS: "https://api.example.com/v1,not a url",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.missing).toEqual([
+      'OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS (not an origin: "https://api.example.com/v1")',
+      'OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS (not an origin: "not a url")',
     ]);
   });
 

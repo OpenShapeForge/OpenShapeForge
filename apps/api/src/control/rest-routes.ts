@@ -51,6 +51,10 @@ import {
 } from "./keycloak-spi-client.js";
 import { ControlInputError } from "./organization-naming.js";
 import {
+  createOrganizationScopeAdminClient,
+  type OrganizationScopeAdminClient,
+} from "./organization-scopes.js";
+import {
   provisionSubOrganization,
   provisionTenant,
   type ProvisioningDeps,
@@ -195,6 +199,8 @@ export type ControlRestOptions = {
   keycloak?: KeycloakSpiClient;
   /** Injected by tests; defaults to a real client built from the config. */
   keycloakAdmin?: KeycloakOrganizationAdminClient;
+  /** Injected by tests; defaults to a real client built from the config. */
+  organizationScopes?: OrganizationScopeAdminClient;
 };
 
 export function registerControlRestRoutes(
@@ -237,6 +243,13 @@ export function registerControlRestRoutes(
     (configResult.ok && tokens
       ? createKeycloakOrganizationAdminClient(configResult.config.keycloak, { tokens })
       : undefined);
+  // The third surface on the same credential: client scopes. Same token, same
+  // cache, same invalidation — see the comment above.
+  const organizationScopes =
+    options.organizationScopes ??
+    (configResult.ok && tokens
+      ? createOrganizationScopeAdminClient(configResult.config.keycloak, { tokens })
+      : undefined);
 
   async function depsFor(request: FastifyRequest): Promise<ProvisioningDeps> {
     if (!configResult.ok) {
@@ -246,7 +259,7 @@ export function registerControlRestRoutes(
           `${configResult.missing.join(", ")}.`,
       );
     }
-    if (!options.db || !keycloak || !keycloakAdmin) {
+    if (!options.db || !keycloak || !keycloakAdmin || !organizationScopes) {
       throw new ControlAuthorizationError(
         "CONTROL_PLANE_NOT_CONFIGURED",
         "The tenant control plane has no database connection.",
@@ -263,6 +276,8 @@ export function registerControlRestRoutes(
       db: options.db,
       keycloak,
       keycloakAdmin,
+      organizationScopes,
+      mcpResource: configResult.config.mcpResource,
       tenantRealm: configResult.config.keycloak.tenantRealm,
       operator,
     };

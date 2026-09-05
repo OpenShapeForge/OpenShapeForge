@@ -162,12 +162,40 @@ a client must request:
 
 - `organization:<alias>` — Keycloak's built-in dynamic scope; selects the
   membership and emits `organization.<alias>.id`;
-- `mcp-resource:<alias>` — a deployment-managed client scope with one
-  `oidc-audience-mapper` per public origin, value
-  `<origin>/api/mcp/organizations/<alias>`. It deliberately does not share the
-  `organization:` prefix: a static client scope named `organization:<alias>`
-  shadows the dynamic one, and the token then carries the audience but no
-  membership claim.
+- `mcp-resource:<alias>` — a client scope with one `oidc-audience-mapper` per
+  public origin, value `<origin>/api/mcp/organizations/<alias>`. It
+  deliberately does not share the `organization:` prefix: a static client
+  scope named `organization:<alias>` shadows the dynamic one, and the token
+  then carries the audience but no membership claim.
+
+The `mcp-resource:<alias>` scope is **provisioned by the tenant control plane**
+(`apps/api/src/control/organization-scopes.ts`), not by hand: `POST
+/api/control/v1/tenants` and `POST /api/control/v1/tenants/{slug}/organizations`
+create it right after the Organization is linked, the drift report
+(`GET /api/control/v1/reconciliation`) names a scope that is missing, carries
+the wrong audiences, is not attached, or belongs to an Organization that no
+longer exists (`ORGANIZATION_SCOPE_*`), and a re-apply
+(`POST /api/control/v1/reconciliation/reapply`) repairs all four in one
+realm-wide pass — the only place the control plane deletes anything in
+Keycloak, because a scope is derived configuration with no members behind it.
+The scope is hidden from consent and from the provider metadata, and is
+attached as an *optional* scope to the configured clients and to the realm's
+default optional scopes, so dynamically registered MCP clients can request it
+too. What it is provisioned for comes from the control plane's environment:
+
+| variable | meaning |
+| --- | --- |
+| `OPENSHAPEFORGE_PUBLIC_ORIGIN` | **required** — the first audience on every scope, `<origin>/api/mcp/organizations/<alias>`; the same variable the MCP server reads for its callback URL |
+| `OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS` | optional comma-separated *additional* origins (a second ingress, a local port beside the public one); each gets its own mapper, and an origin removed from the list is removed from Keycloak on the next re-apply |
+| `OPENSHAPEFORGE_MCP_CLIENTS` | optional comma-separated `clientId`s the scope is attached to; default `codex,openshapeforge-gateway,openshapeforge-inspector`; a listed client the realm does not have is skipped |
+
+An origin must be scheme + host (+ port) with no path — `https://api.example.com/v1`
+is refused at startup, because it would mint an audience the resource never
+derives for itself and every token would be refused with no hint why. The
+`openshapeforge-auth-api` service account needs realm-management
+`manage-clients` beside `manage-realm` for this: client scopes are client
+configuration in Keycloak's admin permission model, and the realm generator
+grants both.
 
 The document echoes the alias it was asked about without any lookup, so it is
 not an oracle for which Organizations exist. An MCP session id is bound to the

@@ -633,6 +633,7 @@ compose stack):
 | `OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER` / `_JWKS_URI` / `_CLIENT_ID` | control-realm operator verification; `_CLIENT_ID` pins `azp`, not `aud` |
 | `OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL` + `KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API` | how provisioning reaches the SPI in the tenant realm; the secret shares its name with the realm generator's |
 | `OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM` / `_CLIENT_ID` | optional overrides (default `openshapeforge` / `openshapeforge-auth-api`) |
+| `OPENSHAPEFORGE_PUBLIC_ORIGIN` + `OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS` / `OPENSHAPEFORGE_MCP_CLIENTS` | the audiences and clients of the per-organization `mcp-resource:<alias>` scope the control plane provisions with every Organization; the public origin is required for the control plane, the other two optional — see [mcp.md](mcp.md#per-organization-resources) |
 | `API_RATE_LIMIT_MAX` / `_WINDOW_MS` | anonymous budget per window (default 600 / 60s) |
 | `API_RATE_LIMIT_MAX_TRUSTED` | budget for a signed trusted-context caller (default 5× the anonymous budget) |
 | `API_RATE_LIMIT_REDIS_URL` | shared limiter store; unset ⇒ in-memory, budget enforced per instance |

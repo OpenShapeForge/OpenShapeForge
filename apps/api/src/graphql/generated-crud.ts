@@ -125,6 +125,18 @@ export type GeneratedCrudColumn = {
    * does, so all three transports inherit it from one authored fact.
    */
   immutable?: boolean;
+  /**
+   * Authored `writtenBy: [...]` on the backing field: the value records that a
+   * process took place and is written only by the listed operations, never
+   * through generated create/update. Each entry carries the routes a caller can
+   * use instead, resolved by the compiler, so the refusal below is complete
+   * without this layer knowing the operation catalog.
+   */
+  writtenBy?: {
+    operation: string;
+    rest: string;
+    mcp?: string;
+  }[];
 };
 
 export type GeneratedCrudRelationship = {
@@ -858,8 +870,71 @@ export function isCallerWritableColumn(
 ) {
   return (
     isWritableColumn(column, operation) &&
-    !isElicitedOutputColumn(table, column)
+    !isElicitedOutputColumn(table, column) &&
+    !isOperationWrittenColumn(column)
   );
+}
+
+/**
+ * Authored `writtenBy: [...]`: the column records that a process took place —
+ * a finding reviewed, a scope approved, a retest concluded — and the named
+ * operation is the one place the preconditions for saying so are checked.
+ * `review_finding` refuses a reviewer who is the finding's own assignee; a
+ * writable `reviewedAt` hands that check straight back to the caller, and the
+ * four-eyes rule becomes decoration.
+ *
+ * Caller-facing only, exactly like the elicitation target above: the operations
+ * themselves write through the runtime-owned path, which uses
+ * isWritableColumn. Both create and update, because "reviewed" is no more
+ * settable at insert than it is afterwards.
+ */
+export function isOperationWrittenColumn(column: GeneratedCrudColumn): boolean {
+  return column.writtenBy !== undefined && column.writtenBy.length > 0;
+}
+
+/** The refusal, phrased so the caller knows what to call instead. */
+export function operationWrittenRefusal(
+  field: string,
+  writers: NonNullable<GeneratedCrudColumn["writtenBy"]>,
+): string {
+  const routes = writers
+    .map((writer) =>
+      writer.mcp
+        ? `${writer.operation} (MCP tool ${writer.mcp}, REST ${writer.rest})`
+        : `${writer.operation} (REST ${writer.rest})`,
+    )
+    .join("; ");
+  return (
+    `"${field}" records that a process took place and cannot be set through ` +
+    `create or update. Use ${routes}, which checks what may be checked before ` +
+    `writing it.`
+  );
+}
+
+/**
+ * Refuse a body that carries a `writtenBy` field. normalizeWritableValues would
+ * otherwise drop it silently, and a silently dropped review reads as a review
+ * that happened.
+ */
+function assertNoOperationWrittenValues(
+  table: GeneratedCrudTable,
+  input: Record<string, unknown>,
+): void {
+  for (const column of table.columns) {
+    if (!isOperationWrittenColumn(column)) continue;
+    const field = fieldNameForColumn(column);
+    if (
+      !Object.prototype.hasOwnProperty.call(input, field) &&
+      !Object.prototype.hasOwnProperty.call(input, column.name)
+    ) {
+      continue;
+    }
+    throw generatedCrudError(
+      operationWrittenRefusal(field, column.writtenBy!),
+      "BAD_USER_INPUT",
+      400,
+    );
+  }
 }
 
 function assertNoCallerElicitedOutput(
@@ -1011,6 +1086,7 @@ export async function createGeneratedEntity(
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
   assertNoCallerElicitedOutput(table, input.values);
+  assertNoOperationWrittenValues(table, input.values);
   const values = normalizeWritableValues(table, input.values, "create");
   return insertGeneratedRow(db, session, table, values);
 }
@@ -1063,6 +1139,7 @@ export async function updateGeneratedEntity(
 ): Promise<GeneratedEntityRow | null> {
   const table = readGeneratedCrudTable(input.table, "update", session);
   assertNoCallerElicitedOutput(table, input.values);
+  assertNoOperationWrittenValues(table, input.values);
   const values = normalizeWritableValues(table, input.values, "update");
   return applyGeneratedRowUpdate(db, session, table, input.id, values);
 }

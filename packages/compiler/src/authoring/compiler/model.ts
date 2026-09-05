@@ -44,6 +44,7 @@ export function resolveModelFields(
     };
     if (field.readOnly) compiled.readOnly = true;
     if (field.immutable) compiled.immutable = true;
+    if (field.writtenBy && field.writtenBy.length > 0) compiled.writtenBy = [...field.writtenBy];
     if (field.description) compiled.description = field.description;
     if (field.help) compiled.help = field.help;
     // Validation: field-level overrides semantic type defaults

@@ -155,6 +155,10 @@ function schemaForScalar(type: ScalarType): JsonObject {
 // Mirrors the storage-writable predicate of generated CRUD. Request schema
 // construction additionally removes the secure elicitation target, matching
 // isCallerWritableColumn in the API runtime.
+//
+// `writtenBy` bites on create AND update: the column records that a process
+// took place, and the operation named on it is the only place the preconditions
+// for that are checked.
 function isWritableColumn(
   column: TableDefinition["columns"][number],
   operation: "create" | "update",
@@ -165,7 +169,28 @@ function isWritableColumn(
     column.name !== "tenant_id" &&
     column.name !== "created_at" &&
     column.name !== "updated_at" &&
+    (column.writtenBy === undefined || column.writtenBy.length === 0) &&
     !(operation === "update" && column.immutable === true)
+  );
+}
+
+/**
+ * One sentence naming the columns a body may not carry and the operations that
+ * write them, appended to the Input/Update schema descriptions so a reader of
+ * the spec never has to discover the rule by being refused.
+ */
+function operationWrittenNote(table: TableDefinition): string {
+  const written = table.columns.filter(
+    (column) => column.writtenBy !== undefined && column.writtenBy.length > 0,
+  );
+  if (written.length === 0) return "";
+  const parts = written.map(
+    (column) => `${fieldNameForColumn(column)} (${column.writtenBy!.join(", ")})`,
+  );
+  return (
+    ` Fields that record that a process took place are absent here and are ` +
+    `written only by the operation named: ${parts.join("; ")}. A body carrying ` +
+    `one is rejected with 400.`
   );
 }
 
@@ -548,9 +573,10 @@ export function renderOpenApiSpec(
       properties: read.properties,
       ...(read.required.length > 0 ? { required: read.required } : {}),
     };
+    const writerNote = operationWrittenNote(table);
     schemas[`${name}Input`] = {
       type: "object",
-      description: `Create body for ${label}.`,
+      description: `Create body for ${label}.${writerNote}`,
       additionalProperties: false,
       properties: creatable.properties,
       ...(creatable.required.length > 0
@@ -563,7 +589,8 @@ export function renderOpenApiSpec(
       properties: updatable.properties,
       description:
         "PATCH body; omitted fields are left unchanged. Fields authored " +
-        "immutable are settable at create only and are rejected here.",
+        "immutable are settable at create only and are rejected here." +
+        writerNote,
     };
     schemas[`${name}List`] = {
       type: "object",

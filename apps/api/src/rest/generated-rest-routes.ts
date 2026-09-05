@@ -28,6 +28,8 @@ import {
   getGeneratedEntity,
   getGeneratedCrudTables,
   isCallerWritableColumn,
+  isOperationWrittenColumn,
+  operationWrittenRefusal,
   listGeneratedEntities,
   updateGeneratedEntity,
 } from "../graphql/generated-crud.js";
@@ -82,12 +84,23 @@ function assertWritableBody(
       .filter((column) => isCallerWritableColumn(table, column, operation))
       .map(fieldNameForColumn),
   );
+  // A field written only by an operation gets its own message: "unknown field"
+  // would send the caller looking for a typo, when the field exists and the
+  // answer is to call the operation that guards it.
+  const operationWritten = new Map(
+    table.columns
+      .filter(isOperationWrittenColumn)
+      .map((column) => [fieldNameForColumn(column), column.writtenBy!] as const),
+  );
   for (const key of Object.keys(body)) {
     if (!writable.has(key)) {
+      const writers = operationWritten.get(key);
       throw new HttpError(
         400,
         "BAD_USER_INPUT",
-        `Unknown or read-only field "${key}" in request body.`,
+        writers
+          ? operationWrittenRefusal(key, writers)
+          : `Unknown or read-only field "${key}" in request body.`,
       );
     }
   }

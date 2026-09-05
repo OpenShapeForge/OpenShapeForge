@@ -425,6 +425,40 @@ describe("buildMcpCatalog", () => {
       ]);
     });
 
+    it("withholds a writtenBy field from create AND update, and says who writes it", () => {
+      const catalog = buildMcpCatalog(
+        [
+          input(
+            contract({
+              fields: [
+                field({ key: "name" }),
+                field({
+                  key: "reviewedAt",
+                  writtenBy: ["pentest.finding.review"],
+                }),
+              ],
+            }),
+          ),
+        ],
+        "test",
+      );
+      const create = catalog.tools.find((tool) => tool.operation === "create")!;
+      const update = catalog.tools.find((tool) => tool.operation === "update")!;
+      const values = (
+        update.inputSchema.properties as Record<string, Record<string, unknown>>
+      ).values!;
+
+      expect(Object.keys(create.inputSchema.properties as object)).toEqual([
+        "name",
+      ]);
+      expect(Object.keys(values.properties as object)).toEqual(["name"]);
+      // A model that only sees the field missing tries anyway; both tool
+      // descriptions name the operation that does write it.
+      for (const tool of [create, update]) {
+        expect(tool.description).toContain("reviewedAt (pentest.finding.review)");
+      }
+    });
+
     it("leaves an entity with no immutable field identical across create and update", () => {
       const catalog = buildMcpCatalog(
         [

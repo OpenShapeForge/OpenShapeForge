@@ -81,6 +81,13 @@ const SERVER_MANAGED_FIELDS = new Set([
  * create, fixed afterwards" (#177). The CRUD layer reads the same flag off the
  * manifest column, so the advertised update schema and the server's refusal
  * come from one authored fact.
+ *
+ * Authored `writtenBy` IS consulted, on create AND update: it means "written
+ * only by these operations". A field that records that a process took place —
+ * a review signed off, a scope approved — is worth exactly as much as the
+ * check the operation runs before writing it, so create/update must not offer
+ * a way around that check. Same shape as `immutable`: the advertised schema
+ * and the server's refusal both come from the one authored fact.
  */
 function writableFields(
   fields: CompiledField[],
@@ -90,6 +97,7 @@ function writableFields(
     (field) =>
       !SERVER_MANAGED_FIELDS.has(field.key) &&
       field.computed === undefined &&
+      !(field.writtenBy !== undefined && field.writtenBy.length > 0) &&
       !(operation === "update" && field.immutable === true),
   );
 }
@@ -284,6 +292,24 @@ function entityDescription(contract: CompiledEntityContract): string {
   );
 }
 
+/**
+ * One sentence listing the fields this entity keeps out of create/update and
+ * the operations that do write them, or "" when the entity has none.
+ */
+function operationWrittenNote(fields: CompiledField[]): string {
+  const written = fields.filter(
+    (field) => field.writtenBy !== undefined && field.writtenBy.length > 0,
+  );
+  if (written.length === 0) return "";
+  const parts = written.map(
+    (field) => `${field.key} (${field.writtenBy!.join(", ")})`,
+  );
+  return (
+    ` Not settable here — these record that a process took place and are written ` +
+    `only by the operation named: ${parts.join("; ")}. Sending one anyway is refused.`
+  );
+}
+
 function buildToolsForEntity(
   contract: CompiledEntityContract,
   table: string,
@@ -305,6 +331,12 @@ function buildToolsForEntity(
   );
   const label = entityLabel(contract);
   const description = entityDescription(contract);
+  // Fields that create/update deliberately do not offer, and who does write
+  // them. A model that reads "reviewedAt is missing" concludes the schema is
+  // incomplete and tries anyway; a model that reads "reviewedAt is written by
+  // pentest.finding.review" calls that instead. The sentence is worth more
+  // than the refusal it prevents.
+  const writerNote = operationWrittenNote(fields);
   const sortable = sortableFieldKeys(fields, mcp.elicitOnCreate?.into);
   const filterField = contract.entity.filterField;
   const tools: McpToolDefinition[] = [];
@@ -428,7 +460,10 @@ function buildToolsForEntity(
       entity: contract.entity.name,
       table,
       title: `Create ${label}`,
-      description: described("create", `${description} Creates a new record.`),
+      description: described(
+        "create",
+        `${description} Creates a new record.${writerNote}`,
+      ),
       inputSchema: withRelationshipKeys(
         compiledObjectSchema(creatable, referentiedata, {
           requireRequired: true,
@@ -464,7 +499,8 @@ function buildToolsForEntity(
       title: `Update ${label}`,
       description: described(
         "update",
-        `${description} Partially updates a record; omitted fields are left unchanged.`,
+        `${description} Partially updates a record; omitted fields are left unchanged.` +
+          writerNote,
       ),
       inputSchema: {
         type: "object",
@@ -821,6 +857,9 @@ export function buildMcpCatalog(
           required: field.required === true,
           readOnly: field.readOnly === true,
           immutable: field.immutable === true,
+          ...(field.writtenBy && field.writtenBy.length > 0
+            ? { writtenBy: [...field.writtenBy] }
+            : {}),
           schema: compiledFieldSchema(
             field,
             referentiedata,

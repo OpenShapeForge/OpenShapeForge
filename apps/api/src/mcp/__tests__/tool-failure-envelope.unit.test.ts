@@ -14,6 +14,7 @@ import {
 import { HttpError, toHttpError } from "../../rest/http-error.js";
 import {
   __failedForTests as failed,
+  __nativeToolOutputForTests as nativeToolOutput,
   __okForTests as ok,
   __unavailableOutcomeForTests as unavailableOutcome,
 } from "../generated-mcp-server.js";
@@ -39,12 +40,23 @@ const RATE_LIMITED = new ConnectorExecutionError(
 );
 
 describe("a successful tool result", () => {
-  it("retains the existing text-only shape without a success envelope", () => {
-    const result = ok({ id: "example" });
+  it("carries an object payload as structuredContent too, without a success envelope", () => {
+    // A Service aggregating several query bindings reads structuredContent
+    // only; a text-only success reached it as `{}`.
+    const result = ok({ id: "example", openFindingsTotal: 3 });
     expect(result).toEqual({
-      content: [{ type: "text", text: '{\n  "id": "example"\n}' }],
+      content: [{ type: "text", text: '{\n  "id": "example",\n  "openFindingsTotal": 3\n}' }],
+      structuredContent: { id: "example", openFindingsTotal: 3 },
     });
-    expect(result).not.toHaveProperty("structuredContent");
+    expect(result).not.toHaveProperty("isError");
+  });
+
+  it("keeps arrays and scalars text-only, since they have no structured form", () => {
+    expect(ok([{ id: "a" }])).toEqual({
+      content: [{ type: "text", text: '[\n  {\n    "id": "a"\n  }\n]' }],
+    });
+    expect(ok(true)).toEqual({ content: [{ type: "text", text: "true" }] });
+    expect(ok(null)).toEqual({ content: [{ type: "text", text: "null" }] });
   });
 });
 
@@ -144,5 +156,67 @@ describe("an unclassified failure", () => {
       error: { code: "NOT_FOUND", message: 'Unknown tool "x".' },
     });
     expect(JSON.parse(textOf(result.content[1]))).toEqual(result.structuredContent);
+  });
+});
+
+/** A refusal RAISEd by a PL/pgSQL trigger, as Bun's SQL driver throws it. */
+function raisedRefusal(message: string, hint: string): Error {
+  const error = new Error(message);
+  error.name = "PostgresError";
+  Object.assign(error, {
+    code: "ERR_POSTGRES_SERVER_ERROR",
+    errno: "P0001",
+    hint,
+    routine: "exec_stmt_raise",
+    where: "PL/pgSQL function pentest.assert_status_transition() line 9 at RAISE",
+  });
+  return error;
+}
+
+describe("a database rule's refusal", () => {
+  const result = failed(
+    raisedRefusal("A finding cannot move from closed back to open.", "Create a new finding instead."),
+  );
+
+  it("is rendered as the same readable body REST answers with, with the trigger's hint", () => {
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      error: {
+        code: "OPERATION_REFUSED",
+        message: "A finding cannot move from closed back to open.",
+        hint: "Create a new finding instead.",
+      },
+    });
+    expect(result.content[0]).toEqual({
+      type: "text",
+      text: "OPERATION_REFUSED: A finding cannot move from closed back to open.",
+    });
+  });
+
+  it("reaches a Service running the entity tool natively with its own code, not a provider fault", () => {
+    let thrown: unknown;
+    try {
+      nativeToolOutput(result);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(HttpError);
+    expect(thrown).toMatchObject({
+      status: 409,
+      code: "OPERATION_REFUSED",
+      message: "A finding cannot move from closed back to open.",
+      hint: "Create a new finding instead.",
+    });
+    expect(toHttpError(thrown).body).toEqual(result.structuredContent);
+  });
+
+  it("still folds a failure without a structured body into a provider fault", () => {
+    let thrown: unknown;
+    try {
+      nativeToolOutput({ content: [{ type: "text" as const, text: "boom" }], isError: true });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ status: 502, code: "PROVIDER_ERROR", message: "boom" });
   });
 });

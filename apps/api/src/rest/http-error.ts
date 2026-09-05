@@ -6,6 +6,7 @@
  * CRUD functions as the GraphQL resolvers without duplicating error policy.
  */
 import { GraphQLError } from "graphql";
+import { classifyDatabaseError } from "../db/database-refusals.js";
 import {
   failureBody,
   httpStatusForCode,
@@ -19,11 +20,21 @@ export type HttpErrorBody = FailureBody;
 export class HttpError extends Error {
   readonly status: number;
   readonly code: string;
+  /** Authored detail/hint carried along when the error relays a database rule's refusal. */
+  readonly detail: string | undefined;
+  readonly hint: string | undefined;
 
-  constructor(status: number, code: string, message: string) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    authored?: { detail?: string; hint?: string },
+  ) {
     super(message);
     this.status = status;
     this.code = code;
+    this.detail = authored?.detail;
+    this.hint = authored?.hint;
   }
 }
 
@@ -90,7 +101,14 @@ export function toHttpError(error: unknown): {
   if (error instanceof HttpError) {
     return {
       status: error.status,
-      body: { error: { code: error.code, message: error.message } },
+      body: {
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.detail !== undefined ? { detail: error.detail } : {}),
+          ...(error.hint !== undefined ? { hint: error.hint } : {}),
+        },
+      },
     };
   }
 
@@ -115,8 +133,39 @@ export function toHttpError(error: unknown): {
         ? error.extensions.status
         : httpStatusForCode(code);
     if (status !== undefined) {
-      return { status, body: { error: { code, message: error.message } } };
+      // A database refusal translated by the generated CRUD layer carries the
+      // rule's authored detail and hint in its extensions; nothing else does.
+      const { detail, hint } = error.extensions ?? {};
+      return {
+        status,
+        body: {
+          error: {
+            code,
+            message: error.message,
+            ...(typeof detail === "string" ? { detail } : {}),
+            ...(typeof hint === "string" ? { hint } : {}),
+          },
+        },
+      };
     }
+  }
+
+  // A database refusal that did not pass through the generated CRUD layer
+  // (a module or derived tool writing on its own): the same narrow classifier
+  // decides, without table context, so constraint answers are generic here.
+  const refusal = classifyDatabaseError(error);
+  if (refusal !== undefined) {
+    return {
+      status: refusal.status,
+      body: {
+        error: {
+          code: refusal.code,
+          message: refusal.message,
+          ...(refusal.detail !== undefined ? { detail: refusal.detail } : {}),
+          ...(refusal.hint !== undefined ? { hint: refusal.hint } : {}),
+        },
+      },
+    };
   }
 
   // Anything else (driver errors, bugs) is redacted — parity with the

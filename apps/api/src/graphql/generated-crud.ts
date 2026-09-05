@@ -5,6 +5,10 @@ import { sql } from "kysely";
 import { redactElicitedValues } from "../connectors/secrets.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
+import {
+  classifyDatabaseError,
+  type DatabaseErrorTableContext,
+} from "../db/database-refusals.js";
 import { jsonbLiteral } from "../db/sql-helpers.js";
 import { appendScopedEntityEventInTransaction } from "../platform/entity-events.js";
 import {
@@ -382,10 +386,55 @@ export function getGeneratedCrudTables() {
   return [...generatedCrudTables.values()];
 }
 
-function generatedCrudError(message: string, code: string, status?: number) {
+function generatedCrudError(
+  message: string,
+  code: string,
+  status?: number,
+  authored?: { detail?: string; hint?: string },
+) {
   return new GraphQLError(message, {
-    extensions: { code, ...(status === undefined ? {} : { status }) },
+    extensions: {
+      code,
+      ...(status === undefined ? {} : { status }),
+      ...(authored?.detail === undefined ? {} : { detail: authored.detail }),
+      ...(authored?.hint === undefined ? {} : { hint: authored.hint }),
+    },
   });
+}
+
+/**
+ * A database refusal on a generated write becomes a GraphQLError carrying the
+ * public code and status, so all three transports answer alike: GraphQL passes
+ * it through unmasked (no originalError), REST and MCP map it via toHttpError.
+ * Anything the classifier declines stays the original driver error and is
+ * redacted downstream exactly as before.
+ */
+function translateDatabaseError(table: GeneratedCrudTable, error: unknown): unknown {
+  const refusal = classifyDatabaseError(error, databaseErrorContext(table));
+  return refusal
+    ? generatedCrudError(refusal.message, refusal.code, refusal.status, {
+        ...(refusal.detail === undefined ? {} : { detail: refusal.detail }),
+        ...(refusal.hint === undefined ? {} : { hint: refusal.hint }),
+      })
+    : error;
+}
+
+function databaseErrorContext(table: GeneratedCrudTable): DatabaseErrorTableContext {
+  const columns = tableColumnMap(table);
+  const belongsTo = new Set<string>();
+  for (const relationship of table.source?.graphql?.relationships ?? []) {
+    if (relationship.resolve === "belongsTo" && relationship.foreignKey) {
+      belongsTo.add(relationship.foreignKey);
+    }
+  }
+  return {
+    table: table.table,
+    belongsTo,
+    fieldName: (column) => {
+      const known = columns.get(column);
+      return known ? fieldNameForColumn(known) : undefined;
+    },
+  };
 }
 
 /**
@@ -998,6 +1047,8 @@ function insertGeneratedRow(
       eventType: "created",
     });
     return projectGeneratedEntityRow(table, session, row);
+  }).catch((error) => {
+    throw translateDatabaseError(table, error);
   });
 }
 
@@ -1059,6 +1110,8 @@ async function applyGeneratedRowUpdate(
       eventType: "updated",
     });
     return projectGeneratedEntityRow(table, session, row);
+  }).catch((error) => {
+    throw translateDatabaseError(table, error);
   });
 }
 
@@ -1091,6 +1144,8 @@ export async function deleteGeneratedEntity(
       eventType: "deleted",
     });
     return true;
+  }).catch((error) => {
+    throw translateDatabaseError(table, error);
   });
 }
 

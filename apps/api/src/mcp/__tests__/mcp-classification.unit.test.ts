@@ -151,7 +151,9 @@ describe("MCP App capability negotiation", () => {
         "private-token",
         "Provider",
       );
-      expect(result.content[0]?.text).not.toContain("private-token");
+      const first = result.content[0];
+      expect(first?.type).toBe("text");
+      expect(first?.type === "text" ? first.text : "").not.toContain("private-token");
       expect(JSON.stringify(result._meta)).toContain("private-token");
       expect(result._meta).toEqual({
         configurationUrl:

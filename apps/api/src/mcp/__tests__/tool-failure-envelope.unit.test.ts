@@ -207,7 +207,7 @@ describe("a database rule's refusal", () => {
       message: "A finding cannot move from closed back to open.",
       hint: "Create a new finding instead.",
     });
-    expect(toHttpError(thrown).body).toEqual(result.structuredContent);
+    expect(result.structuredContent).toEqual(toHttpError(thrown).body);
   });
 
   it("still folds a failure without a structured body into a provider fault", () => {

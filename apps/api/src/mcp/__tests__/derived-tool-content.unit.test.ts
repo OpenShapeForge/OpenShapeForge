@@ -38,7 +38,7 @@ describe("derivedToolResult", () => {
     expect(result.structuredContent).toEqual({ findings: [], totalCount: 0 });
   });
   it("hands well-formed content blocks to the model and keeps the rest structured", () => {
-    const image = { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" };
+    const image = { type: "image" as const, data: "iVBORw0KGgo=", mimeType: "image/png" };
     const result = derivedToolResult({
       filename: "site.png",
       delivery: "image",

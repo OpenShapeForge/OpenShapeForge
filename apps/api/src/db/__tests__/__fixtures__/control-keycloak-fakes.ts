@@ -41,6 +41,7 @@ import type {
   KeycloakOrganization,
   KeycloakSpiClient,
 } from "../../../control/keycloak-spi-client.js";
+import type { OrganizationScopeAdminClient } from "../../../control/organization-scopes.js";
 
 /**
  * One organization as the fake realm holds it: the last create request that
@@ -157,6 +158,140 @@ export function fakeAdmin(spi: FakeSpiClient): KeycloakOrganizationAdminClient {
     async listOrganizations(limit) {
       const rows = [...spi.organizations.entries()].map(([id, org]) => snapshot(id, org));
       return { organizations: rows.slice(0, limit), truncated: rows.length > limit };
+    },
+  };
+}
+
+/** One client scope as the fake realm holds it: its mappers, by mapper id. */
+export type FakeClientScope = {
+  id: string;
+  name: string;
+  mappers: Map<string, { audience: string | null; accessTokenClaim: boolean }>;
+};
+
+export type FakeScopeClient = OrganizationScopeAdminClient & {
+  scopes: Map<string, FakeClientScope>;
+  /** Keyed by clientId; the realm's clients and their attached scope NAMES. */
+  clients: Map<string, { id: string; defaultScopes: string[]; optionalScopes: string[] }>;
+  realm: { defaultScopes: string[]; optionalScopes: string[] };
+  /** Every write, in order, as `"<op> <subject>"` — what idempotency is asserted on. */
+  writes: string[];
+  scopeNamed: (name: string) => FakeClientScope | undefined;
+  audiencesOf: (name: string) => string[];
+};
+
+/**
+ * The client-scope half of the admin API. It reproduces exactly the behaviours
+ * `organization-scopes.ts` relies on: deleting a scope detaches it from every
+ * client and from the realm defaults (Keycloak does this as part of the
+ * delete), `?clientId=` is an exact match, and an attach is addressed by the
+ * client's uuid rather than its clientId.
+ */
+export function fakeOrganizationScopes(
+  clientIds: readonly string[] = ["codex", "openshapeforge-gateway", "openshapeforge-inspector"],
+): FakeScopeClient {
+  const scopes = new Map<string, FakeClientScope>();
+  const clients = new Map<
+    string,
+    { id: string; defaultScopes: string[]; optionalScopes: string[] }
+  >();
+  for (const clientId of clientIds) {
+    clients.set(clientId, { id: randomUUID(), defaultScopes: [], optionalScopes: [] });
+  }
+  const realm = { defaultScopes: [] as string[], optionalScopes: [] as string[] };
+  const writes: string[] = [];
+
+  const requireScope = (scopeId: string): FakeClientScope => {
+    const scope = scopes.get(scopeId);
+    if (!scope) throw new Error(`fake scopes: no client scope "${scopeId}"`);
+    return scope;
+  };
+  const scopeNamed = (name: string) =>
+    [...scopes.values()].find((scope) => scope.name === name);
+
+  return {
+    scopes,
+    clients,
+    realm,
+    writes,
+    scopeNamed,
+    audiencesOf(name) {
+      const scope = scopeNamed(name);
+      return scope
+        ? [...scope.mappers.values()]
+            .filter((mapper) => mapper.accessTokenClaim && mapper.audience !== null)
+            .map((mapper) => mapper.audience!)
+            .sort()
+        : [];
+    },
+    async listClientScopes() {
+      return [...scopes.values()].map(({ id, name }) => ({ id, name }));
+    },
+    async createClientScope(input) {
+      if (scopeNamed(input.name)) {
+        throw new Error(`fake scopes: client scope "${input.name}" already exists`);
+      }
+      const id = randomUUID();
+      scopes.set(id, { id, name: input.name, mappers: new Map() });
+      writes.push(`create-scope ${input.name}`);
+      return { id, name: input.name };
+    },
+    async deleteClientScope(scopeId) {
+      const scope = requireScope(scopeId);
+      scopes.delete(scopeId);
+      for (const client of clients.values()) {
+        client.defaultScopes = client.defaultScopes.filter((name) => name !== scope.name);
+        client.optionalScopes = client.optionalScopes.filter((name) => name !== scope.name);
+      }
+      realm.defaultScopes = realm.defaultScopes.filter((name) => name !== scope.name);
+      realm.optionalScopes = realm.optionalScopes.filter((name) => name !== scope.name);
+      writes.push(`delete-scope ${scope.name}`);
+    },
+    async listAudienceMappers(scopeId) {
+      return [...requireScope(scopeId).mappers.entries()].map(([id, mapper]) => ({
+        id,
+        ...mapper,
+      }));
+    },
+    async createAudienceMapper(scopeId, audience) {
+      const scope = requireScope(scopeId);
+      scope.mappers.set(randomUUID(), { audience, accessTokenClaim: true });
+      writes.push(`add-audience ${scope.name} ${audience}`);
+    },
+    async deleteProtocolMapper(scopeId, mapperId) {
+      const scope = requireScope(scopeId);
+      const mapper = scope.mappers.get(mapperId);
+      if (!mapper) throw new Error(`fake scopes: no mapper "${mapperId}"`);
+      scope.mappers.delete(mapperId);
+      writes.push(`remove-audience ${scope.name} ${mapper.audience ?? "<none>"}`);
+    },
+    async findClient(clientId) {
+      const client = clients.get(clientId);
+      return client
+        ? {
+            id: client.id,
+            clientId,
+            defaultClientScopes: [...client.defaultScopes],
+            optionalClientScopes: [...client.optionalScopes],
+          }
+        : null;
+    },
+    async addOptionalClientScope(clientUuid, scopeId) {
+      const client = [...clients.entries()].find(([, value]) => value.id === clientUuid);
+      if (!client) throw new Error(`fake scopes: no client with uuid "${clientUuid}"`);
+      const scope = requireScope(scopeId);
+      if (!client[1].optionalScopes.includes(scope.name)) {
+        client[1].optionalScopes.push(scope.name);
+      }
+      writes.push(`attach-client ${client[0]} ${scope.name}`);
+    },
+    async getRealmDefaultScopes() {
+      return { defaultScopes: [...realm.defaultScopes], optionalScopes: [...realm.optionalScopes] };
+    },
+    async addRealmOptionalScope(scopeId) {
+      const scope = requireScope(scopeId);
+      if (!realm.optionalScopes.includes(scope.name)) realm.optionalScopes.push(scope.name);
+      writes.push(`attach-realm ${scope.name}`);
     },
   };
 }

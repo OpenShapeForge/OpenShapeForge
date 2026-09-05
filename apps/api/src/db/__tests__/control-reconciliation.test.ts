@@ -46,7 +46,12 @@ import {
 import { updateTenant } from "../../control/tenant-registry.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
-import { fakeAdmin, fakeSpi, type FakeSpiClient } from "./__fixtures__/control-keycloak-fakes.js";
+import {
+  fakeAdmin,
+  fakeOrganizationScopes,
+  fakeSpi,
+  type FakeSpiClient,
+} from "./__fixtures__/control-keycloak-fakes.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -107,6 +112,8 @@ const depsFor = (db: Kysely<DB>, keycloak: FakeSpiClient): ProvisioningDeps => (
   db: db as never,
   keycloak,
   keycloakAdmin: fakeAdmin(keycloak),
+  organizationScopes: fakeOrganizationScopes(),
+  mcpResource: { origins: ["http://127.0.0.1:3001"], clients: ["codex"] },
   tenantRealm: TENANT_REALM,
   operator,
 });

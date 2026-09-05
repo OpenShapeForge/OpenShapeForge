@@ -136,9 +136,18 @@ keycloak:
       # (Keycloak's realm-admin capability). Grant that role to this service
       # account so its client-credentials token passes the SPI's authorization
       # check instead of being rejected with 403.
+      #
+      # `manage-clients` as well: the control plane provisions one
+      # `mcp-resource:<alias>` client scope per Organization (the audience of
+      # its MCP resource, apps/api/src/control/organization-scopes.ts), and
+      # client scopes, their protocol mappers, a client's optional scopes and
+      # the realm default scopes are CLIENT configuration in Keycloak's admin
+      # permission model — `manage-realm` does not cover them (every
+      # /client-scopes call answers 403 with it alone; verified on 26.5.3).
       serviceAccountClientRoles:
         realm-management:
           - manage-realm
+          - manage-clients
 
 # Realm-level roles. `composites` is an explicit per-client role list;
 # `includes` is a wildcard-expansion pattern over entity-derived composite roles

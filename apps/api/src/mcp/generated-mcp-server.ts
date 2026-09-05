@@ -107,6 +107,8 @@ import {
   renderConfigurationSavedPage,
   storeSubmission,
   type PendingConfiguration,
+  findExistingConfiguration,
+  mergeConfigurationValues,
 } from "./configuration-handoff.js";
 import { renderEntityOAuthCallbackPage } from "./browser-pages.js";
 import {
@@ -6387,6 +6389,34 @@ export function registerGeneratedMcpServer(
             };
           }
         }
+      }
+      // A key that already exists (the form submitted twice, a rotated
+      // secret) updates that row's values in place; submitted keys replace,
+      // untouched keys stay. Only a new key creates a row.
+      const existingRows =
+        typeof pending.modelValues.key === "string"
+          ? (
+              await listGeneratedEntitiesForTable(db, writeSession, tableDef, {
+                limit: 5,
+                fixedWhere: [{ column: "key", value: pending.modelValues.key }],
+              })
+            ).rows.map((row) => serializeRow(tableDef, row))
+          : [];
+      const existing = findExistingConfiguration(existingRows, pending);
+      if (existing) {
+        await updateGeneratedEntityForTable(
+          db,
+          writeSession,
+          tableDef,
+          String(existing.id),
+          {
+            [pending.elicit.into]: mergeConfigurationValues(
+              existing[pending.elicit.into],
+              values[pending.elicit.into] as Record<string, unknown>,
+            ),
+          },
+        );
+        return { ok: true };
       }
       await createGeneratedEntityForTable(db, writeSession, tableDef, values);
       return { ok: true };

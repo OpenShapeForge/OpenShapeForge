@@ -298,7 +298,10 @@ function stepPreferences(facts: OnboardingFacts, skipped: boolean): OnboardingSt
     howTo:
       "Ask the person, in one batched question, about working hours, priorities and house style, " +
       "then save the answer with set_my_preferences (omit `tool` to apply it to all tools). " +
-      "They may skip this: complete_onboarding { skip: true }.",
+      "They may skip this: complete_onboarding { skip: true }. Per-tool onboarding (the assistance " +
+      "level Melden / Voorbereiden / Routine doen and a tool's own choices) is not asked here: " +
+      "a tool with onboarding asks at its first call, when its result carries the questions; " +
+      "whoami lists those tools as pendingOnboarding and get_my_preferences shows what is stored.",
   };
 }
 
@@ -453,7 +456,11 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
     "4. preferences — ask ONE batched question covering working hours, priorities and house",
     "   style (language, tone, how formal), never one item at a time. Save the answer in their",
     "   own words with set_my_preferences (omit `tool` so it applies to all tools). If they",
-    "   would rather not, that is fine: complete with skip: true.",
+    "   would rather not, that is fine: complete with skip: true. Do NOT ask the per-tool",
+    "   onboarding here (assistance level Melden / Voorbereiden / Routine doen, a tool's own",
+    "   choices): each tool with onboarding asks at its first call - its result carries the",
+    "   questions and set_my_preferences {tool, assistanceLevel, choices} stores the answers;",
+    "   whoami lists the tools still pending as pendingOnboarding.",
     "5. guide — read every role guide the step names (pentest_guide, provider_setup_guide) and",
     "   follow it from then on.",
     "",
@@ -485,6 +492,8 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
   if (integrationAdministrator) {
     lines.push(
       "",
+      "Each Adapter's `setup` field says what the organization must configure for it (OAuth",
+      "client, secrets, scopes) and where the values go: the secure form of create_connection.",
       "Before creating any provider definition, read provider_setup_guide — it is the fixed",
       "process and overrides this text where they overlap.",
     );

@@ -23,6 +23,7 @@ describe("buildServerInstructions", () => {
     const opening = "Je assisteert Hans Dev bij Zerocopter; Hans Dev is medewerker. Antwoord in het Nederlands.";
     const text = buildServerInstructions({
       opening,
+      hasConnectors: false,
       oauthCallbackUrl: null,
       guidesBeforeCreate: [{ name: "pentest_guide", entity: "Assessment" }],
       locale: nl,
@@ -48,6 +49,7 @@ describe("buildServerInstructions", () => {
   it("leaves the opening out entirely when the session has no person", () => {
     const text = buildServerInstructions({
       opening: null,
+      hasConnectors: false,
       oauthCallbackUrl: null,
       guidesBeforeCreate: [],
       locale: nl,
@@ -62,6 +64,7 @@ describe("buildServerInstructions", () => {
   it("states the OAuth redirect URL only when an Adapter can connect", () => {
     const withUrl = buildServerInstructions({
       opening: null,
+      hasConnectors: true,
       oauthCallbackUrl: "https://hubble.localhost/api/entity-oauth/callback",
       guidesBeforeCreate: [],
       locale: nl,
@@ -70,6 +73,29 @@ describe("buildServerInstructions", () => {
     expect(withUrl).toContain(
       "OAuth redirect (callback) URL is https://hubble.localhost/api/entity-oauth/callback",
     );
+
+    const withoutConnector = buildServerInstructions({
+      opening: null,
+      hasConnectors: false,
+      oauthCallbackUrl: "https://hubble.localhost/api/entity-oauth/callback",
+      guidesBeforeCreate: [],
+      locale: nl,
+      client: null,
+    });
+    expect(withoutConnector).not.toContain("OAuth redirect");
+  });
+
+  it("says an Adapter has no redirect URL yet rather than failing the session", () => {
+    const text = buildServerInstructions({
+      opening: null,
+      hasConnectors: true,
+      oauthCallbackUrl: null,
+      guidesBeforeCreate: [],
+      locale: nl,
+      client: null,
+    });
+    expect(text).toContain("has no public origin configured");
+    expect(text).toContain("OPENSHAPEFORGE_PUBLIC_ORIGIN is set on the deployment");
   });
 });
 

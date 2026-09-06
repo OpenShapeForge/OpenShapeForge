@@ -70,6 +70,7 @@ import {
 } from "./api-readiness.js";
 import {
   bindOperationHandlers,
+  operationModulesConfigured,
   listOperationContracts,
   registerOperationRestRoutes,
   type OperationContract,
@@ -329,19 +330,26 @@ export function createApiApp(options: {
     const initialised = await initRuntimeModules(modules, moduleContext);
     initialisedModules = initialised.loaded;
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
-    const operationPlugins = new Set(operationContracts.map((operation) => operation.plugin));
-    const operationModulesConfigured = modules.loaded.some((module) => operationPlugins.has(module.name)) ||
-      modules.failures.some((failure) => operationPlugins.has(failure.name));
     // Ordinary runtime modules remain fail-soft. A canonical operation is a
     // stronger promise: every generated transport points at its handler, so a
     // load/init failure must stop boot instead of silently deleting the API.
-    if (operationModulesConfigured) bindOperationHandlers(initialised.loaded, operationContracts);
+    // A failed module counts as configured for exactly that reason.
+    const operationsConfigured = operationModulesConfigured(
+      [...modules.loaded, ...modules.failures],
+      operationContracts,
+    );
+    if (operationsConfigured) bindOperationHandlers(initialised.loaded, operationContracts);
+    // Read once, served twice: REST and GraphQL answer from the same
+    // configuration, so a deployment cannot mint keys on one transport and
+    // say NOT_CONFIGURED on the other.
+    const apiKeyConfig = readApiKeyProvisioningConfig();
     ready = {
       yoga: createGraphqlYoga({
         ...dbOptions,
         cors: options.cors,
         modules: initialised.loaded,
         moduleContext,
+        surfaces: { apiKeyConfig },
         ...(options.persistedOperations
           ? { persistedOperations: options.persistedOperations }
           : {}),
@@ -471,7 +479,7 @@ export function createApiApp(options: {
     registerAuthorizationServerMetadataAliases(routes);
     registerApiKeyRestRoutes(routes, {
       ...dbOptions,
-      config: readApiKeyProvisioningConfig(),
+      config: apiKeyConfig,
     });
     // The tenant control plane, on its own mount and its own realm. Registered
     // unconditionally so an unconfigured deployment answers 503 naming what is
@@ -485,7 +493,7 @@ export function createApiApp(options: {
     for (const module of initialised.loaded) {
       module.restRoutes?.(routes, moduleContext);
     }
-    if (operationModulesConfigured) {
+    if (operationsConfigured) {
       registerOperationRestRoutes(routes, initialised.loaded, moduleContext, operationContracts);
     }
   });

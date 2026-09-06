@@ -327,6 +327,7 @@ import { localizedText, type ResolvedLocale } from "./locale.js";
 // --- end the person's language ---
 import {
   bindOperationHandlers,
+  operationModulesConfigured,
   DeclaredOperationError,
   invokeOperation,
   isMcpProjection,
@@ -1022,6 +1023,21 @@ export const __configurationFallbackLeadForTests = configurationFallbackLead;
 
 function elicitedKeyring() {
   return keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
+}
+
+/**
+ * The OAuth redirect URL the server instructions state, or null when this
+ * deployment has no public origin. Null rather than thrown: the origin is
+ * optional everywhere else on this surface (the onboarding step answers
+ * `null`, the configuration handoff is skipped), so its absence must not turn
+ * every MCP request into a 503. buildServerInstructions says so in words.
+ */
+function oauthCallbackUrlForInstructions(): string | null {
+  try {
+    return `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`;
+  } catch {
+    return null;
+  }
 }
 
 function callbackOrigin(): string {
@@ -2951,11 +2967,13 @@ function buildServer(
     // Written once, here, from the fixed guidance and this session's own
     // parts: who the person is, which client is in front of the model and
     // which language they read. See mcp/server-instructions.ts for the order.
+    // The server owns the OAuth redirect URL, so it states it rather than
+    // leaving assistants to ask the person for a value only this process
+    // knows; without a public origin it says that, instead of failing.
     instructions: buildServerInstructions({
       opening,
-      oauthCallbackUrl: catalogDerivedTools.some((entry) => entry.connect)
-        ? `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`
-        : null,
+      hasConnectors: catalogDerivedTools.some((entry) => entry.connect),
+      oauthCallbackUrl: oauthCallbackUrlForInstructions(),
       guidesBeforeCreate: catalogGuideTools
         .filter((guide) => guide.requireBeforeCreate)
         .map((guide) => ({ name: guide.name, entity: guide.entity ?? null })),
@@ -2964,8 +2982,12 @@ function buildServer(
     }),
   });
   const tables = tableOverride ?? tablesByName();
-  const operations =
-    modules === undefined ? new Map() : bindOperationHandlers(modules);
+  // The same rule REST boot applies (roles/api.ts): with no operation module
+  // in the process there are no operation tools, rather than a 500 on every
+  // request because the catalog names a handler nothing loaded.
+  const operations = operationModulesConfigured(runtimeModules)
+    ? bindOperationHandlers(runtimeModules)
+    : new Map();
   const sourceVault = new InvocationSourceVault();
 
   const projectionContext = (): McpProjectionContext => {

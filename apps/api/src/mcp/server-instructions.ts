@@ -174,9 +174,20 @@ export type ServerInstructionsInput = {
   /** The per-session opening sentence (`session-opening.ts`); null when the session has no person. */
   opening: string | null;
   /**
-   * The OAuth redirect (callback) URL, when the catalog has an Adapter that
-   * connects: the server owns it, so it states it rather than leaving
-   * assistants to ask the person for a value only this process knows.
+   * Whether this catalog has an Adapter that connects, i.e. whether an OAuth
+   * redirect URL is worth a sentence at all. Separate from the URL itself so
+   * that "no Adapter" and "an Adapter but no public origin" stay two
+   * different answers rather than the same silence.
+   */
+  hasConnectors: boolean;
+  /**
+   * The OAuth redirect (callback) URL: the server owns it, so it states it
+   * rather than leaving assistants to ask the person for a value only this
+   * process knows. Null when the deployment has no public origin — a state
+   * this text names out loud rather than hiding, because the origin is
+   * optional everywhere else on this surface (the onboarding step answers
+   * `null`, the configuration handoff is skipped) and its absence must not
+   * turn every MCP request into a 503.
    */
   oauthCallbackUrl: string | null;
   /** Guides that must be called before creating their entity. */
@@ -185,17 +196,38 @@ export type ServerInstructionsInput = {
   client: McpClientInfo | null;
 };
 
+/**
+ * What this server says about its OAuth redirect URL: nothing when no Adapter
+ * connects, the URL to register when there is one, and otherwise the plain
+ * fact that the deployment has no public origin yet — so an assistant that
+ * cannot be handed a URL is told why, instead of asking the person for a
+ * value only this process could know.
+ */
+function oauthRedirectSentence(input: ServerInstructionsInput): string {
+  if (!input.hasConnectors) return "";
+  if (input.oauthCallbackUrl) {
+    return (
+      ` This server's OAuth redirect (callback) URL is ` +
+      `${input.oauthCallbackUrl} — when setting up a provider ` +
+      `OAuth client, give the person this exact URL to register; never ask them what it is.`
+    );
+  }
+  return (
+    " This server has no public origin configured, so it has no OAuth redirect " +
+    "(callback) URL yet; a provider OAuth client cannot be registered until " +
+    "OPENSHAPEFORGE_PUBLIC_ORIGIN is set on the deployment. Say so; never ask the " +
+    "person for the URL."
+  );
+}
+
 /** The whole `instructions` text for one session, in the order above. */
 export function buildServerInstructions(input: ServerInstructionsInput): string {
   return (
     // ---- the opening sentence (mcp/session-opening.ts) ----
     (input.opening ? `${input.opening} ` : "") +
     // ---- end the opening sentence ----
-    (input.oauthCallbackUrl
-      ? `${INSTRUCTIONS} This server's OAuth redirect (callback) URL is ` +
-        `${input.oauthCallbackUrl} — when setting up a provider ` +
-        `OAuth client, give the person this exact URL to register; never ask them what it is.`
-      : INSTRUCTIONS) +
+    INSTRUCTIONS +
+    oauthRedirectSentence(input) +
     input.guidesBeforeCreate
       .map(
         (guide) =>

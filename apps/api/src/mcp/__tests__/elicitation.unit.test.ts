@@ -13,6 +13,7 @@ import {
   storeElicitedValues,
 } from "../elicitation.js";
 import { decryptSecret, keyringFromEnv, type StoredSecret } from "../../connectors/secrets.js";
+import { resolveLocale } from "../locale.js";
 
 const KEYRING = keyringFromEnv(`test:${Buffer.alloc(32, 7).toString("base64")}`);
 
@@ -180,5 +181,35 @@ describe("redactElicitedValues", () => {
 
   it("leaves rows without the field untouched", () => {
     expect(redactElicitedValues({ id: "1" }, "configurationValues")).toEqual({ id: "1" });
+  });
+});
+
+describe("the language the form is asked in", () => {
+  const definitions = [
+    {
+      key: "host",
+      valueType: "string",
+      required: true,
+      label: { en: "IMAP server", nl: "IMAP-server" },
+      description: { en: "Hostname of the mail server.", nl: "Hostnaam van de mailserver." },
+    },
+  ];
+
+  it("labels the form in the person's own language", () => {
+    const { schema } = elicitationSchemaFromDefinitions(
+      definitions,
+      resolveLocale({ user: "nl", realmDefault: "en", hostDefault: "en" }),
+    );
+    const host = schema.properties.host as Record<string, unknown>;
+    expect(host.title).toBe("IMAP-server");
+    expect(host.description).toBe("Hostnaam van de mailserver.");
+  });
+
+  it("keeps the same keys, types and required list in either language", () => {
+    const dutch = elicitationSchemaFromDefinitions(definitions, resolveLocale({ user: "nl" }));
+    const english = elicitationSchemaFromDefinitions(definitions, resolveLocale({ user: "en" }));
+    expect(dutch.schema.required).toEqual(english.schema.required);
+    expect(Object.keys(dutch.schema.properties)).toEqual(Object.keys(english.schema.properties));
+    expect((english.schema.properties.host as Record<string, unknown>).title).toBe("IMAP server");
   });
 });

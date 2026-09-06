@@ -23,6 +23,7 @@ import {
   sessionIdentityOf,
   type SessionIdentity,
 } from "../session-info.js";
+import { resolveLocale } from "../locale.js";
 
 const TENANT_ID = "33333333-3333-4333-8333-333333333333";
 const USER_ID = "22222222-2222-4222-8222-222222222222";
@@ -44,6 +45,7 @@ const bearer = (overrides: Partial<SessionIdentity> = {}): SessionIdentity => ({
   email: "hans@example.com",
   authorizedParty: "codex",
   expiresAtMs: NOW + 12 * 60_000,
+  locale: null,
   organizations: [{ alias: "zerocopter-dev", active: true }],
   boundOrganization: null,
   ...overrides,
@@ -438,6 +440,9 @@ describe("identity from the credential", () => {
       name: "Zerocopter Admin",
       email: "zerocopter-admin@example.com",
       authorizedParty: "codex",
+      // No `locale` on this token: the claim exists only once the realm has
+      // internationalisation on and the person has chosen a language.
+      locale: null,
       expiresAtMs: NOW + 12 * 60_000,
       organizations: [{ alias: "zerocopter-dev", active: true }],
       boundOrganization: null,
@@ -524,5 +529,73 @@ describe("identity from the credential", () => {
       { alias: "zerocopter-dev" },
     );
     expect(sessionIdentityOf(bound).boundOrganization).toBe("zerocopter-dev");
+  });
+});
+
+/**
+ * The language is a DISPLAY fact: it changes how a person is addressed and
+ * nothing else. These cases pin the two halves a reader depends on — which
+ * language, and which step of the order decided it, since a person whose own
+ * setting is missing is told to go and set it.
+ */
+describe("the language a person reads", () => {
+  const base = {
+    roles: ["org_employee"],
+    organization: { name: "Zerocopter" },
+    access: { tools: 9, resources: 3 },
+    nowMs: NOW,
+  };
+
+  it("takes the `locale` claim as the person's own setting", () => {
+    const info = buildSessionInfo({ ...base, identity: bearer({ locale: "nl-NL" }) });
+    expect(info.language).toEqual({ tag: "nl", name: "Nederlands", source: "user" });
+    // The language stays out of the prose summary entirely — see the field's
+    // own note in session-info.ts.
+    expect(info.summary).not.toContain("Dutch");
+  });
+
+  it("falls back to the stated default and says the person has not set one", () => {
+    const info = buildSessionInfo({
+      ...base,
+      identity: bearer({ locale: null }),
+      locale: resolveLocale({ user: null, realmDefault: "nl", hostDefault: "en" }),
+    });
+    expect(info.language).toEqual({ tag: "nl", name: "Nederlands", source: "realm" });
+    expect(info.summary).not.toContain("Dutch");
+  });
+
+  it("gives a credential that carries no language the same fallback", () => {
+    const info = buildSessionInfo({
+      ...base,
+      identity: identityFromSession({
+        credential: "trusted-context",
+        tenantId: TENANT_ID,
+        userId: USER_ID,
+        roles: ["org_employee"],
+      } as unknown as TrustedSessionContext),
+      locale: resolveLocale({ user: null, realmDefault: "en", hostDefault: "en" }),
+    });
+    expect(info.language).toEqual({ tag: "en", name: "English", source: "realm" });
+  });
+
+  it("reads the claim off a token without letting it decide anything else", () => {
+    const identity = identityFromBearerClaims({
+      name: "Zoë Pentester",
+      email: "zc-pentester@example.com",
+      azp: "openshapeforge-gateway",
+      locale: "nl",
+      exp: Math.floor(NOW / 1000) + 900,
+    });
+    expect(identity.locale).toBe("nl");
+    const info = buildSessionInfo({ ...base, identity });
+    expect(info.language.tag).toBe("nl");
+    // The language is not a permission: it appears nowhere near roles.
+    expect(info.permissions).not.toContain("nl");
+    expect(info.role).not.toContain("nl");
+  });
+
+  it("says nothing about the language when the token carries none", () => {
+    const identity = identityFromBearerClaims({ name: "Hans", exp: 1 });
+    expect(identity.locale).toBeNull();
   });
 });

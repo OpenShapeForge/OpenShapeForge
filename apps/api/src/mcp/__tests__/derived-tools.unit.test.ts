@@ -13,6 +13,7 @@ import {
   inputSchemaFromStoredFields,
   sessionInAudience,
 } from "../derived-tools.js";
+import { resolveLocale } from "../locale.js";
 
 describe("deriveToolName", () => {
   it("snake_cases stored keys and refuses unsafe ones", () => {
@@ -157,5 +158,100 @@ describe("applyPersonalNotes", () => {
   it("passes through untouched without personalization or rows", () => {
     expect(applyPersonalNotes(tools, {}, [{ instruction: "x" }])).toBe(tools);
     expect(applyPersonalNotes(tools, entry, [])).toBe(tools);
+  });
+});
+
+/**
+ * A Service and its field definitions are stored rows, so unlike the compiled
+ * entity catalog they still carry the authored `{ en, nl }` map at run time.
+ * This is therefore the one projection on this transport that can put a
+ * person's own language in front of them — and the one place where getting the
+ * order wrong is invisible, because either answer is a fluent sentence.
+ */
+describe("the language a Service is projected in", () => {
+  const nl = resolveLocale({ user: "nl", realmDefault: "en", hostDefault: "en" });
+  const en = resolveLocale({ user: "en", realmDefault: "nl", hostDefault: "nl" });
+  const entry = {
+    entity: "Service",
+    table: "integration.services",
+    roles: ["viewer"],
+    keyField: "key",
+    titleField: "name",
+    descriptionField: "description",
+    inputFieldsField: "inputFields",
+  };
+  const row = {
+    id: "a",
+    key: "approve-scope",
+    name: { en: "Record the client's scope approval", nl: "Scope-akkoord van de klant vastleggen" },
+    description: { en: "Records that the client agreed.", nl: "Legt vast dat de klant akkoord is." },
+    inputFields: [
+      {
+        key: "decision",
+        valueType: "string",
+        required: true,
+        label: { en: "Decision", nl: "Besluit" },
+        description: { en: "What the client said.", nl: "Wat de klant heeft gezegd." },
+      },
+    ],
+  };
+
+  it("gives a Dutch reader the Dutch title, description and field label", () => {
+    const [tool] = derivedToolsFromRows(entry, [row], new Set(), ["viewer"], nl);
+    expect(tool!.title).toBe("Scope-akkoord van de klant vastleggen");
+    expect(tool!.description).toBe("Legt vast dat de klant akkoord is.");
+    const decision = (tool!.inputSchema.properties as Record<string, Record<string, unknown>>)
+      .decision!;
+    expect(decision.title).toBe("Besluit");
+    expect(decision.description).toBe("Wat de klant heeft gezegd.");
+  });
+
+  it("gives an English reader the English ones, from the same row", () => {
+    const [tool] = derivedToolsFromRows(entry, [row], new Set(), ["viewer"], en);
+    expect(tool!.title).toBe("Record the client's scope approval");
+    const decision = (tool!.inputSchema.properties as Record<string, Record<string, unknown>>)
+      .decision!;
+    expect(decision.title).toBe("Decision");
+  });
+
+  it("keeps keys, types and required-ness identical in both languages", () => {
+    const dutch = derivedToolsFromRows(entry, [row], new Set(), ["viewer"], nl)[0]!;
+    const english = derivedToolsFromRows(entry, [row], new Set(), ["viewer"], en)[0]!;
+    expect(dutch.name).toBe(english.name);
+    const strip = (schema: Record<string, unknown>) =>
+      JSON.parse(
+        JSON.stringify(schema, (key, value) =>
+          key === "title" || key === "description" ? undefined : value,
+        ),
+      );
+    expect(strip(dutch.inputSchema)).toEqual(strip(english.inputSchema));
+  });
+
+  it("without a session language, falls back to English then to what exists", () => {
+    const [tool] = derivedToolsFromRows(entry, [row], new Set(), ["viewer"]);
+    expect(tool!.title).toBe("Record the client's scope approval");
+    const onlyDutch = derivedToolsFromRows(
+      entry,
+      [{ ...row, name: { nl: "Alleen Nederlands" } }],
+      new Set(),
+      ["viewer"],
+    )[0]!;
+    expect(onlyDutch.title).toBe("Alleen Nederlands");
+  });
+
+  it("passes the language into a nested object's field labels too", () => {
+    const schema = inputSchemaFromStoredFields(
+      [
+        {
+          key: "client",
+          valueType: "object",
+          children: [{ key: "name", valueType: "string", label: { en: "Name", nl: "Naam" } }],
+        },
+      ],
+      nl,
+    );
+    const client = (schema.properties as Record<string, Record<string, unknown>>).client!;
+    const name = (client.properties as Record<string, Record<string, unknown>>).name!;
+    expect(name.title).toBe("Naam");
   });
 });

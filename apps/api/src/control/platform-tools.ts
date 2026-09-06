@@ -436,14 +436,11 @@ export function buildPlatformSessionInfo(input: {
 }): PlatformSessionInfo {
   const { administrator, tenants, access } = input;
   const nowMs = input.nowMs ?? Date.now();
+  // Only what the label is derived from; the rest of the administrator's facts
+  // are read straight from `administrator` below.
   const signedInVia = signedInViaLabel({
     credential: "bearer",
-    name: administrator.name,
-    email: administrator.email,
     authorizedParty: administrator.authorizedParty,
-    expiresAtMs: administrator.expiresAtMs,
-    organizations: [],
-    boundOrganization: null,
   });
   const expiry =
     administrator.expiresAtMs === null

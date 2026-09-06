@@ -323,17 +323,27 @@ workflow:
       list: true
       update: true
       delete: true
+# Finance.Quotes.Read / Finance.Quotes.ReadWrite are the per-entity roles the realm already
+# emits (procurement holds them); listing them here is what makes them mean
+# something. A caller that writes quotes without being all of Finance — a sales
+# composite, a plugin operation such as cpq-catalog's win_deal — holds the
+# ReadWrite one.
 authorization:
   roles:
     read:
       - Finance.All.Read
       - Finance.All.ReadWrite
+      - Finance.Quotes.Read
+      - Finance.Quotes.ReadWrite
     create:
       - Finance.All.ReadWrite
+      - Finance.Quotes.ReadWrite
     update:
       - Finance.All.ReadWrite
+      - Finance.Quotes.ReadWrite
     delete:
       - Finance.All.ReadWrite
+      - Finance.Quotes.ReadWrite
   rowAccess:
     enabled: true
     empty: public

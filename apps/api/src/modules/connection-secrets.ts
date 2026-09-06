@@ -52,6 +52,7 @@ import type {
   ModuleConnectionValues,
 } from "./contract.js";
 import { mintSocketGrant } from "./socket-egress.js";
+import { liveConnectionValues, secretKeysOf } from "./connection-oauth-liveness.js";
 
 const KEYRING_ENV = "OPENSHAPEFORGE_ELICITED_SECRET_KEYS";
 
@@ -88,8 +89,11 @@ function executionShape(): ExecutionShape | undefined {
 }
 
 type ManifestTable = {
-  name?: string;
-  columns?: { name?: string; sourceField?: string }[];
+  name: string;
+  schema: string;
+  table: string;
+  primaryKey?: string;
+  columns?: { name: string; sourceField?: string }[];
   source?: {
     authorization?: { rowAccess?: { owner?: { column?: string } } };
   };
@@ -133,28 +137,6 @@ function looksLikeStoredSecret(value: unknown): value is StoredSecret {
   );
 }
 
-const SECRET_SENSITIVITY = new Set(["confidential", "pii", "bsn"]);
-
-/** Field keys the Adapter classifies as secret, by its configuration fields. */
-function secretKeysOf(definitions: unknown): Set<string> {
-  const keys = new Set<string>();
-  if (!Array.isArray(definitions)) return keys;
-  for (const definition of definitions as {
-    key?: unknown;
-    classification?: { sensitivity?: unknown };
-  }[]) {
-    const sensitivity = definition?.classification?.sensitivity;
-    if (
-      typeof definition?.key === "string" &&
-      typeof sensitivity === "string" &&
-      SECRET_SENSITIVITY.has(sensitivity)
-    ) {
-      keys.add(definition.key);
-    }
-  }
-  return keys;
-}
-
 /**
  * OAuth tokens live in the same values object as the elicited configuration,
  * but under their own AAD scope — the connection table with `:personal`. The
@@ -179,6 +161,8 @@ export type ResolveConnectionInput = {
   session: TrustedSessionContext;
   selector: ModuleConnectionSelector;
   keyring?: SecretKeyring | undefined;
+  /** Test seam for the token endpoint an expired OAuth sign-in is renewed at. */
+  fetchImpl?: typeof fetch | undefined;
 };
 
 /**
@@ -203,7 +187,7 @@ export async function resolveConnectionValues(
   const providerRefColumn = columnFor(connectionTable, execution.connectionProviderRef);
   const ownerColumn =
     connectionTable?.source?.authorization?.rowAccess?.owner?.column ?? "owner_user_id";
-  if (!valuesColumn || !providerRefColumn || !providerTable) {
+  if (!connectionTable || !valuesColumn || !providerRefColumn || !providerTable) {
     return refuse(
       "CONNECTION_REQUIRED",
       "The Connection catalog is incomplete in this build, so no connection can be resolved.",
@@ -246,6 +230,7 @@ export async function resolveConnectionValues(
     key: string;
     values: unknown;
     owner: string | null;
+    adapter_id: string;
     adapter_key: string;
     adapter_auth: unknown;
     adapter_transport: string | null;
@@ -264,6 +249,7 @@ export async function resolveConnectionValues(
     const providerRef = sql.ref(providerRefColumn);
     const projection = sql`
       c.id as id, c.key as key, c.${values} as values, c.${owner} as owner,
+      a.id as adapter_id,
       a.${sql.ref(providerKeyColumn)} as adapter_key,
       a.${sql.ref(providerAuthColumn)} as adapter_auth,
       a.${sql.ref(providerTransportColumn)} as adapter_transport,
@@ -331,8 +317,39 @@ export async function resolveConnectionValues(
     (catalog.entities ?? []).find((entity) => entity.table === execution.connectionTable)
       ?.elicitOnCreate?.sourceTable ?? execution.providerTable;
   const tokenScope = tokenSecretScope(execution.connectionTable);
+  const egress = Array.isArray(row.adapter_egress)
+    ? (row.adapter_egress as unknown[]).filter(
+        (entry): entry is string => typeof entry === "string",
+      )
+    : [];
 
-  const stored = (row.values ?? {}) as JsonRecord;
+  // An OAuth access token is renewed BEFORE it is handed over, by the same
+  // code the HTTP path refreshes with; every other Adapter passes through.
+  const live = await liveConnectionValues({
+    db: input.db,
+    session: input.session,
+    keyring,
+    row: {
+      id: row.id,
+      owner: row.owner,
+      adapterId: row.adapter_id,
+      auth: (row.adapter_auth ?? null) as JsonRecord | null,
+      egress,
+      definitions: row.adapter_definitions,
+      values: (row.values ?? {}) as JsonRecord,
+    },
+    table: { ...connectionTable, columns: connectionTable.columns ?? [] },
+    providerTable: execution.providerTable,
+    valuesField: execution.connectionValuesField,
+    providerRefField: execution.connectionProviderRef,
+    columns: { values: valuesColumn, owner: ownerColumn, providerRef: providerRefColumn },
+    elicitScope,
+    tokenScope,
+    fetchImpl: input.fetchImpl,
+  });
+  if (!live.ok) return refuse(live.code, live.message);
+
+  const stored = live.values;
   const values: Record<string, string> = {};
   try {
     for (const [key, value] of Object.entries(stored)) {
@@ -361,12 +378,6 @@ export async function resolveConnectionValues(
       }).`,
     );
   }
-
-  const egress = Array.isArray(row.adapter_egress)
-    ? (row.adapter_egress as unknown[]).filter(
-        (entry): entry is string => typeof entry === "string",
-      )
-    : [];
 
   const connection: ModuleConnectionValues = {
     connectionId: row.id,

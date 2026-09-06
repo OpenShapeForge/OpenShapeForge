@@ -45,10 +45,8 @@ import {
 import { readSecrets } from "../../connectors/store.js";
 import type { ConnectorContract } from "../../connectors/catalog.js";
 import type { FetchLike } from "../../connectors/executor.js";
-import {
-  refreshConnectionRowLocked,
-  selectOAuthConnectionRow,
-} from "../../mcp/generated-mcp-server.js";
+import { refreshConnectionRowLocked } from "../../mcp/connection-token-refresh.js";
+import { selectOAuthConnectionRow } from "../../mcp/generated-mcp-server.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??

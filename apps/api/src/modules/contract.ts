@@ -252,7 +252,11 @@ export type ModuleConnectionResolution =
         | "NOT_FOUND"
         | "FORBIDDEN"
         | "CONNECTION_REQUIRED"
-        | "SECRET_KEYRING_MISSING";
+        | "SECRET_KEYRING_MISSING"
+        /** The stored OAuth sign-in expired and could not be renewed: the person signs in again. */
+        | "REAUTHORIZATION_REQUIRED"
+        /** The provider's token endpoint or the Adapter's OAuth configuration failed; nothing was handed over. */
+        | "TOKEN_REFRESH_FAILED";
       /** A sentence for the person who has to fix it. */
       message: string;
     };

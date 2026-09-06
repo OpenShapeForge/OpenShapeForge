@@ -84,6 +84,17 @@ describe("storeElicitedValues", () => {
       storeElicitedValues("erp.connections", elicitable, { apiToken: "x" }, KEYRING),
     ).toThrow(/"subdomain" is required/);
   });
+
+  it("refuses a secret that is not a primitive instead of encrypting its toString", () => {
+    const withObject = { ...content, apiToken: { token: "s3cret" } };
+    expect(() => storeElicitedValues("erp.connections", elicitable, withObject, KEYRING)).toThrow(
+      /"apiToken" must be a string, number or boolean/,
+    );
+    const withArray = { ...content, apiToken: ["s3cret"] };
+    expect(() => storeElicitedValues("erp.connections", elicitable, withArray, KEYRING)).toThrow(
+      /"apiToken" must be a string, number or boolean/,
+    );
+  });
 });
 
 describe("redactElicitedValues", () => {

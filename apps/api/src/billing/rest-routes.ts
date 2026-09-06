@@ -39,7 +39,7 @@ function parseBody(body: unknown): Record<string, unknown> {
 
 export function parseAgreementMilestoneBody(body: unknown): AgreementMilestoneInput {
   const parsed = parseBody(body);
-  const allowed = new Set(["agreementId", "description", "basisAmount", "percentOfBasis", "amount"]);
+  const allowed = new Set(["agreementId", "description", "basisAmount", "percentOfBasis", "amount", "expectedAt"]);
   const unknown = Object.keys(parsed).find((key) => !allowed.has(key));
   if (unknown) throw new HttpError(400, "BAD_USER_INPUT", `Unknown request field "${unknown}".`);
   return parsed as unknown as AgreementMilestoneInput;

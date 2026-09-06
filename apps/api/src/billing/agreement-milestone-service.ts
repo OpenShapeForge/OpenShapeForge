@@ -52,6 +52,8 @@ export type AgreementMilestoneInput = {
   basisAmount?: number;
   percentOfBasis?: number;
   amount?: number;
+  /** YYYY-MM-DD: when the milestone is expected to be triggered. Optional; a plan, not an event. */
+  expectedAt?: string | null;
 };
 
 export type AgreementMilestoneRecord = {
@@ -62,6 +64,7 @@ export type AgreementMilestoneRecord = {
   percentOfBasis: number | null;
   amount: number;
   status: string;
+  expectedAt: string | null;
   triggeredAt: string | null;
   triggeredBy: string | null;
   producedInvoiceId: string | null;
@@ -122,6 +125,22 @@ export function resolveMilestoneAmounts(
   };
 }
 
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * `expectedAt` is a calendar date (the column is `date`), so it is validated
+ * as YYYY-MM-DD here rather than parsed: a timestamp would lose its time zone
+ * on the way into the column and land on the wrong day for callers east or
+ * west of UTC. Absent or null means "not planned", which is a valid answer.
+ */
+export function resolveExpectedAt(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !DATE_PATTERN.test(value) || Number.isNaN(Date.parse(value))) {
+    throw new HttpError(400, "BAD_USER_INPUT", "expectedAt must be a date in YYYY-MM-DD form.");
+  }
+  return value;
+}
+
 export async function createAgreementMilestone(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
@@ -134,6 +153,7 @@ export async function createAgreementMilestone(
   }
 
   const { basisAmount, percentOfBasis, amount } = resolveMilestoneAmounts(input);
+  const expectedAt = resolveExpectedAt(input.expectedAt);
 
   const table = tableByName("erp.agreement_milestones");
   const row = await createGeneratedEntityForTable(db, session, table, {
@@ -143,6 +163,7 @@ export async function createAgreementMilestone(
     percentOfBasis,
     amount,
     status: "pending",
+    expectedAt,
   });
 
   return {
@@ -153,6 +174,7 @@ export async function createAgreementMilestone(
     percentOfBasis: (row.percentOfBasis as number | null) ?? null,
     amount: row.amount as number,
     status: row.status as string,
+    expectedAt: (row.expectedAt as string | null) ?? null,
     triggeredAt: (row.triggeredAt as string | null) ?? null,
     triggeredBy: (row.triggeredBy as string | null) ?? null,
     producedInvoiceId: (row.producedInvoiceId as string | null) ?? null,
@@ -217,6 +239,7 @@ function projectMilestoneRow(row: Record<string, unknown>): AgreementMilestoneRe
     percentOfBasis: (row.percent_of_basis as number | null) ?? null,
     amount: row.amount as number,
     status: row.status as string,
+    expectedAt: (row.expected_at as string | null) ?? null,
     triggeredAt: (row.triggered_at as string | null) ?? null,
     triggeredBy: (row.triggered_by as string | null) ?? null,
     producedInvoiceId: (row.produced_invoice_id as string | null) ?? null,

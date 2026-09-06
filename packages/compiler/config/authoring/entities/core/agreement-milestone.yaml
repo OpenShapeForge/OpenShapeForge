@@ -113,6 +113,21 @@ fields:
       props:
         referentieGroep: AGREEMENTMILESTONESTATUS
         clearable: false
+  - key: expectedAt
+    valueType: date
+    required: false
+    label:
+      en: Expected on
+      nl: Verwacht op
+    description:
+      en: The date on which this milestone is expected to be triggered, as planned when the milestone was created. Forecasts and planning read this field to place the milestone's amount on a calendar; it is a plan, not an event. Triggering the milestone does not set it — that moment is recorded in triggeredAt.
+      nl: De datum waarop deze mijlpaal naar verwachting getriggerd wordt, zoals gepland bij het aanmaken van de mijlpaal. Forecast en planning lezen dit veld om het bedrag van de mijlpaal op een kalender te zetten; het is een plan, geen gebeurtenis. Het activeren van de mijlpaal zet dit veld niet — dat moment staat in triggeredAt.
+    persisted:
+      column: expected_at
+      storageClass: core
+    render:
+      component: DatePicker
+      props: {}
   - key: triggeredAt
     valueType: datetime
     required: false
@@ -186,6 +201,8 @@ ui:
           sortable: true
         - key: amount
           sortable: true
+        - key: expectedAt
+          sortable: true
         - key: triggeredAt
           sortable: true
       defaultSort:
@@ -226,6 +243,11 @@ ui:
                 - percentOfBasis
                 - amount
             - title:
+                en: Planning
+                nl: Planning
+              fields:
+                - expectedAt
+            - title:
                 en: Trigger
                 nl: Trigger
               fields:
@@ -251,6 +273,11 @@ ui:
                 - basisAmount
                 - percentOfBasis
                 - amount
+            - title:
+                en: Planning
+                nl: Planning
+              fields:
+                - expectedAt
             - title:
                 en: Trigger
                 nl: Trigger

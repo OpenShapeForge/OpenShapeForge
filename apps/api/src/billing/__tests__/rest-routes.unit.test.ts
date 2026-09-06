@@ -17,6 +17,16 @@ describe("agreement milestone command input", () => {
     expect(parseAgreementMilestoneBody(Buffer.from(JSON.stringify(input)))).toEqual(input);
   });
 
+  test("accepts an expected date beside the amounts", () => {
+    const input = {
+      agreementId: "0d3f6b6a-1c1e-4a7a-9d6a-9e7b6d0a1234",
+      description: "Go-live milestone",
+      amount: 5000,
+      expectedAt: "2026-12-01",
+    };
+    expect(parseAgreementMilestoneBody(input)).toEqual(input);
+  });
+
   test("rejects unknown fields before hitting the service", () => {
     expect(() =>
       parseAgreementMilestoneBody({

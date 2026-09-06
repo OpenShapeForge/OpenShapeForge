@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { getGeneratedCrudTables, isWritableColumn } from "../../graphql/generated-crud.js";
 import { generatedEntityTypeDefs } from "../../graphql/generated-entity-schema.js";
-import { resolveMilestoneAmounts } from "../agreement-milestone-service.js";
+import { resolveExpectedAt, resolveMilestoneAmounts } from "../agreement-milestone-service.js";
 
 describe("resolveMilestoneAmounts", () => {
   test("computes amount from basisAmount * percentOfBasis / 100", () => {
@@ -93,5 +93,24 @@ describe("AgreementMilestone immutability in the shipped manifest", () => {
     expect(updateInput?.[1]).not.toContain("amount:");
     expect(updateInput?.[1]).not.toContain("basisAmount:");
     expect(updateInput?.[1]).not.toContain("percentOfBasis:");
+  });
+});
+
+describe("resolveExpectedAt", () => {
+  test("passes a calendar date through unchanged", () => {
+    expect(resolveExpectedAt("2026-12-01")).toBe("2026-12-01");
+  });
+
+  test("treats absent and null as not planned", () => {
+    expect(resolveExpectedAt(undefined)).toBeNull();
+    expect(resolveExpectedAt(null)).toBeNull();
+  });
+
+  test("refuses a timestamp, so a time zone cannot move the day", () => {
+    expect(() => resolveExpectedAt("2026-12-01T00:00:00Z")).toThrow(/YYYY-MM-DD/);
+  });
+
+  test("refuses a date that does not exist", () => {
+    expect(() => resolveExpectedAt("2026-13-01")).toThrow(/YYYY-MM-DD/);
   });
 });

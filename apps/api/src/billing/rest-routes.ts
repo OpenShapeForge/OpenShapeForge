@@ -7,11 +7,10 @@ import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import {
   createAgreementMilestone,
-  runMilestoneBillingRun,
   triggerAgreementMilestone,
   type AgreementMilestoneInput,
-  type MilestoneBillingRunInput,
 } from "./agreement-milestone-service.js";
+import { runMilestoneBillingRun, type MilestoneBillingRunInput } from "./milestone-billing-run.js";
 
 export const AGREEMENT_MILESTONE_PATH = "/api/agreement-milestones";
 export const MILESTONE_BILLING_RUN_PATH = "/api/billing-runs/milestone";

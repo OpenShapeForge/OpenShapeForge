@@ -22,6 +22,13 @@ export {
 } from "./claims.js";
 
 export {
+  ORGANIZATION_TENANT_CACHE_TTL_MS,
+  organizationTenantCacheKey,
+  realmFromIssuer,
+  selectOrganizationMembership,
+} from "./organization-tenant.js";
+
+export {
   TRUSTED_CONTEXT_HEADERS,
   TRUSTED_CONTEXT_MAX_AGE_MS,
   TRUSTED_CONTEXT_MAX_CLOCK_SKEW_MS,

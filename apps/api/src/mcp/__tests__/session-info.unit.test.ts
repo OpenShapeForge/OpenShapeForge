@@ -121,8 +121,8 @@ describe("buildSessionInfo", () => {
     ]);
     expect(info.groups).toEqual([{ name: "Zerocopter", active: true }]);
     expect(info.signedInVia).toBe("Codex");
-    expect(info.signInExpiresAt).toBe("2026-09-04T10:12:00.000Z");
-    expect(info.signInExpiresIn).toBe("in 12 minutes");
+    expect(info.accessTokenExpiresAt).toBe("2026-09-04T10:12:00.000Z");
+    expect(info.accessTokenExpiresIn).toBe("in 12 minutes");
     expect(info.sessionEndsAfterInactivity).toBe("14 days");
     expect(info.signOut).toBe(SIGN_OUT_INSTRUCTION);
     expect(info.access).toEqual({ tools: 68, resources: 13 });
@@ -340,8 +340,8 @@ describe("buildSessionInfo", () => {
     expect(info.name).toBeNull();
     expect(info.email).toBeNull();
     expect(info.signedInVia).toBe("Development identity");
-    expect("signInExpiresAt" in info).toBe(false);
-    expect("signInExpiresIn" in info).toBe(false);
+    expect("accessTokenExpiresAt" in info).toBe(false);
+    expect("accessTokenExpiresIn" in info).toBe(false);
     expect("sessionEndsAfterInactivity" in info).toBe(false);
     expect("signOut" in info).toBe(false);
     expect(info.groups).toEqual([{ name: "Zerocopter", active: true }]);
@@ -375,7 +375,7 @@ describe("buildSessionInfo", () => {
       access: { tools: 1, resources: 1 },
       nowMs: NOW,
     });
-    expect(info.signInExpiresIn).toBe("3 minutes ago");
+    expect(info.accessTokenExpiresIn).toBe("3 minutes ago");
     expect(info.summary).toContain(
       "Your access token expired 3 minutes ago; if the client does not refresh it, sign in again.",
     );

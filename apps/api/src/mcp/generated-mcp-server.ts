@@ -299,6 +299,7 @@ import {
   SESSION_INFO_TOOL_NAME,
   SESSION_RESOURCE,
   SESSION_RESOURCE_URI,
+  carrySessionIdentity,
   describeSession,
   rememberSessionIdentity,
   sessionInfoResourceResult,
@@ -641,6 +642,39 @@ function sessionMayInvoke(
   if (!required || required.length === 0) return false;
   const granted = new Set(session.roles ?? []);
   return required.some((role) => granted.has(role));
+}
+
+/**
+ * The catalog entries advertised under one tool name.
+ *
+ * A dedicated name has exactly one. A generic `osf_*` name has ONE PER ENTITY
+ * that opted into `mcp: { tools: generic }`: the compiler emits a tool entry
+ * per entity either way and skips `osf_`-prefixed names in its duplicate check
+ * (packages/compiler/src/generate-mcp.ts), so `osf_list` legitimately appears
+ * once for every generic entity in the deployment.
+ *
+ * That makes `catalog.tools.find((tool) => tool.name === name)` wrong for a
+ * generic name: it answers with whichever entity sorts first in the catalog,
+ * silently and regardless of who is asking. Every lookup by name goes through
+ * one of these two instead, and then says which entity it means.
+ */
+function crudToolsNamed(name: string): CatalogTool[] {
+  return catalog.tools.filter((tool) => tool.name === name);
+}
+
+/**
+ * The entries of `name` this session may invoke — exactly the set the tool
+ * listing merged into one `osf_*` tool, so "may I call this name at all" has
+ * the same answer here as the advertised catalogue gives.
+ */
+function invocableCrudToolsNamed(
+  name: string,
+  session: DbSessionInput,
+  tables: Map<string, GeneratedTable>,
+): CatalogTool[] {
+  return crudToolsNamed(name).filter((tool) =>
+    sessionMayInvoke(tables.get(tool.table), tool.operation, session),
+  );
 }
 
 /**
@@ -1910,7 +1944,7 @@ function resolveCrudTool(
   session: DbSessionInput,
   tables: Map<string, GeneratedTable>,
 ): CatalogTool | undefined {
-  const candidates = catalog.tools.filter((tool) => tool.name === name);
+  const candidates = crudToolsNamed(name);
   if (candidates.length === 0) return undefined;
   const generic = candidates.filter((tool) =>
     entityIsGeneric(catalog.entities.find((item) => item.entity === tool.entity)),
@@ -1952,6 +1986,38 @@ function withoutEntitySelector(
   if (!entityIsGeneric(entity)) return args;
   const { entity: _selector, ...rest } = args;
   return rest;
+}
+
+/**
+ * The generated entity tool a native Service binding means, or undefined when
+ * the key names no entity tool at all (the caller then resolves it against the
+ * deployment's plugin operations by key).
+ *
+ * A dedicated name identifies one entry. A generic `osf_*` name is emitted per
+ * entity, so the binding has to carry an `entity` input the same way an
+ * `osf_*` tool call carries the `entity` argument. Taking the first entry
+ * instead ran the binding against whichever generic entity sorts first —
+ * which is why plugins/cpq-catalog documents entity CRUD as unbindable and
+ * why a pentest Service cannot maintain its VulnerabilityType catalogue.
+ * Ambiguity is refused, loudly and at the binding, rather than guessed.
+ */
+function resolveNativeCrudTool(
+  operationKey: string,
+  inputs: Record<string, unknown>,
+): CatalogTool | undefined {
+  const candidates = crudToolsNamed(operationKey);
+  if (candidates.length <= 1) return candidates[0];
+  const wanted = inputs.entity;
+  const match = candidates.find((tool) => tool.entity === wanted);
+  if (match) return match;
+  throw new HttpError(
+    400,
+    "OPERATION_MISCONFIGURED",
+    `Native operation "${operationKey}" is shared by the entities ` +
+      `${candidates.map((tool) => tool.entity).join(", ")}. The binding must ` +
+      `supply an "entity" input naming the one it means, exactly as a direct ` +
+      `"${operationKey}" call does.`,
+  );
 }
 
 type SessionEntity = {
@@ -5657,8 +5723,9 @@ function buildServer(
                     // entity tool call uses, under the caller's own session —
                     // roles, tenant and row-level identity all preserved.
                     native: async (operationKey, inputs) => {
-                      const nativeTool = catalog.tools.find(
-                        (candidate) => candidate.name === operationKey,
+                      const nativeTool = resolveNativeCrudTool(
+                        operationKey,
+                        inputs,
                       );
                       const nativeTable = nativeTool
                         ? tables.get(nativeTool.table)
@@ -5690,9 +5757,12 @@ function buildServer(
                         });
                         return nativeOperationOutput(produced);
                       }
+                      // `entity` picked the catalog entry; it is not a
+                      // column, so it is dropped before the per-entity shape
+                      // is built — the same split a direct call makes.
                       const nativeArgs = nativeToolArguments(
                         nativeTool.operation,
-                        inputs,
+                        withoutEntitySelector(nativeTool, inputs) ?? {},
                       );
                       const produced = await invokeTool(
                         nativeTool,
@@ -6298,15 +6368,17 @@ function buildServer(
           if (action !== "call" && action !== "invoke") {
             return { allowed: false, code: "NOT_FOUND" };
           }
-          const entityTool = catalog.tools.find(
-            (tool) => tool.name === subject.name,
-          );
-          if (entityTool) {
-            return sessionMayInvoke(
-              tables.get(entityTool.table),
-              entityTool.operation,
-              session,
-            )
+          // A generic `osf_*` name covers several entities, so "may this
+          // session call it" is "may it call the operation on ANY of them" —
+          // the same question the listing answered when it merged them into
+          // one tool. Resolving the name to its first entry instead would
+          // authorize every caller against whichever entity sorts first:
+          // a pentest-only session asking about `osf_list` was measured
+          // against Deal and told NOT_FOUND for a tool it can use.
+          const named = crudToolsNamed(subject.name);
+          if (named.length > 0) {
+            return invocableCrudToolsNamed(subject.name, session, tables)
+              .length > 0
               ? { allowed: true }
               : { allowed: false, code: "NOT_FOUND" };
           }
@@ -6655,6 +6727,13 @@ export function registerGeneratedMcpServer(
       server: Server;
       /** Resource path the session was initialized on; it is not portable. */
       resource: string;
+      /**
+       * The session context `buildServer` captured at `initialize`. Held so a
+       * later request can refresh the display facts hanging off it — see
+       * carrySessionIdentity — rather than leaving `whoami` answering with the
+       * expiry of the very first access token forever.
+       */
+      session: TrustedSessionContext;
       tenantId: string;
       userId: string;
       roles: string[];
@@ -7183,6 +7262,11 @@ export function registerGeneratedMcpServer(
           );
         }
         existing.lastSeenMs = Date.now();
+        // The credential this request carried is newer than the one the
+        // session was initialized with — the client refreshes silently — so
+        // the display facts move over to the captured context before the
+        // server answers from it.
+        carrySessionIdentity(existing.session, session);
         reply.hijack();
         await existing.transport.handleRequest(
           request.raw,
@@ -7209,6 +7293,7 @@ export function registerGeneratedMcpServer(
               transport,
               server,
               resource,
+              session,
               tenantId: session.tenantId as string,
               userId: session.userId as string,
               roles: [...(session.roles ?? [])],

@@ -252,6 +252,27 @@ export function selectOrganizationMembership(
 }
 
 /**
+ * The cache key for one (realm, organization id) pair.
+ *
+ * Both halves are text this process does not control. `realm` is a decoded
+ * path segment of `iss` (realmFromIssuer percent-decodes it), so no character
+ * can be ruled out of it, and the organization id is a token claim. A plain
+ * separator is therefore not provably absent from either half — which is why
+ * this key used to be joined on a literal NUL. That made the one file about
+ * identity and authorization binary: `file` called it data and `grep` answered
+ * "binary file matches" instead of showing the line.
+ *
+ * Length-prefixing the first half keeps the key unambiguous while staying
+ * text. The digits before the first ":" say how long the realm is, so the key
+ * parses back to exactly one pair: ("a:b", "c") yields "3:a:b:c" and
+ * ("a", "b:c") yields "1:a:b:c" — the two pairs that collide under any plain
+ * separator stay apart here. Exported for tests.
+ */
+export function organizationTenantCacheKey(realm: string, organizationId: string): string {
+  return `${realm.length}:${realm}:${organizationId}`;
+}
+
+/**
  * The registry read behind both organization paths: which tenant is linked to
  * (realm, organization id). Cached briefly; null when no row links them.
  */
@@ -264,7 +285,7 @@ async function lookupTenantForOrganization(
     return tenantForOrganizationOverride(realm, organizationId);
   }
   if (!db) return null;
-  const cacheKey = `${realm} ${organizationId}`;
+  const cacheKey = organizationTenantCacheKey(realm, organizationId);
   const cached = organizationTenantCache.get(cacheKey);
   if (cached && cached.expiresAtMs > Date.now()) return cached.tenantId;
 

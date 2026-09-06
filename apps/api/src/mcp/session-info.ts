@@ -80,7 +80,7 @@ export const SESSION_INFO_TOOL = {
   description:
     "Describes the signed-in person in plain language: name, organization, " +
     "role and permissions, the groups they belong to, the record (Relation) " +
-    "they act as, how they signed in, when the sign-in expires, and how many " +
+    "they act as, how they signed in, how long the sign-in lasts, and how many " +
     "tools and resources this session can use. Takes no arguments. Call it " +
     "when you need to know who you are acting for or what you are allowed to do.",
   inputSchema: {
@@ -104,8 +104,8 @@ export const SESSION_RESOURCE = {
   title: "Who am I",
   description:
     "The signed-in person in plain language: name, organization, role, " +
-    "permissions, groups, the record they act as, sign-in method and expiry, " +
-    "and what this session can use. Same content as the whoami tool.",
+    "permissions, groups, the record they act as, how they signed in and for " +
+    "how long, and what this session can use. Same content as the whoami tool.",
   mimeType: JSON_MIME_TYPE,
 } as const;
 
@@ -269,6 +269,27 @@ export function sessionIdentityOf(session: TrustedSessionContext): SessionIdenti
   return identities.get(session) ?? identityFromSession(session);
 }
 
+/**
+ * Move the display facts read for one request onto the session object a
+ * stateful MCP server captured at `initialize`.
+ *
+ * A stateful session outlives many access tokens: the client refreshes
+ * silently, so every later request carries a newer `exp`, but the server built
+ * at `initialize` keeps answering `whoami` from the context object of that
+ * first request. `rememberSessionIdentity` did run per request — under the new
+ * request's own context, which nothing reads — so the reported expiry stayed
+ * the first token's and went stale within minutes. Calling this on every reuse
+ * keeps the answer as fresh as the credential the caller just presented.
+ */
+export function carrySessionIdentity(
+  captured: TrustedSessionContext,
+  current: TrustedSessionContext,
+): void {
+  if (captured === current) return;
+  const identity = identities.get(current);
+  if (identity) identities.set(captured, identity);
+}
+
 // ---------------------------------------------------------------------------
 // Pure projection
 
@@ -285,10 +306,19 @@ export type SessionInfo = {
   groups: Array<{ name: string; active: boolean }>;
   /** Friendly name of the client the person signed in with. */
   signedInVia: string;
-  /** ISO 8601. Absent when the sign-in does not expire (development identity). */
-  signInExpiresAt?: string;
-  /** "in 12 minutes". Absent when the sign-in does not expire. */
-  signInExpiresIn?: string;
+  /**
+   * ISO 8601 expiry of the ACCESS TOKEN, which is not the end of the sign-in:
+   * it is minutes away and the client refreshes it silently. Absent for a
+   * credential that does not expire (development identity, API key).
+   *
+   * It used to be published as `signInExpiresAt`, which read as the end of the
+   * sign-in and regularly showed a moment in the past while every call in the
+   * same turn succeeded — an assistant reading that sent the person to sign in
+   * again for nothing. `sessionEndsAfterInactivity` below is the sign-in.
+   */
+  accessTokenExpiresAt?: string;
+  /** "in 12 minutes", or "12 minutes ago" for a token the client stopped refreshing. */
+  accessTokenExpiresIn?: string;
   /**
    * "14 days": the sign-in ends only after this long without activity; the
    * access token above refreshes automatically before then. Absent for a
@@ -490,8 +520,8 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
     signedInVia,
     ...(expiry
       ? {
-          signInExpiresAt: expiry.at,
-          signInExpiresIn: expiry.relative,
+          accessTokenExpiresAt: expiry.at,
+          accessTokenExpiresIn: expiry.relative,
           sessionEndsAfterInactivity: idle,
           signOut: SIGN_OUT_INSTRUCTION,
         }

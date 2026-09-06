@@ -285,8 +285,8 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   "permissions": ["Pentest.All.ReadWrite", "Relations.All.ReadWrite"],
   "groups": [{ "name": "Zerocopter", "active": true }],
   "signedInVia": "Codex",
-  "signInExpiresAt": "2026-09-04T10:12:00.000Z",
-  "signInExpiresIn": "in 12 minutes",
+  "accessTokenExpiresAt": "2026-09-04T10:12:00.000Z",
+  "accessTokenExpiresIn": "in 12 minutes",
   "sessionEndsAfterInactivity": "14 days",
   "signOut": "Sign out in your client (Codex: codex mcp logout <entry>; ChatGPT: the connector's menu).",
   "access": { "tools": 68, "resources": 13 },
@@ -317,9 +317,11 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   "Hubble", any other `azp` as is). A trusted-context session reports
   "Development identity" and has no expiry. On a per-organization endpoint the
   summary adds "on the Zerocopter endpoint" (the organization's display name).
-- `signInExpiresAt` / `signInExpiresIn` are the access token's own expiry,
-  which a client refreshes silently; `sessionEndsAfterInactivity` is what the
-  person experiences — the identity provider's SSO / offline session, which
+- `accessTokenExpiresAt` / `accessTokenExpiresIn` are the access token's own
+  expiry, which a client refreshes silently, and are named for it: published as
+  `signInExpiresAt` they read as the end of the sign-in and regularly showed a
+  moment in the past while every call in the same turn succeeded.
+  `sessionEndsAfterInactivity` is what the person experiences — the identity provider's SSO / offline session, which
   idles out after `OPENSHAPEFORGE_SESSION_IDLE_DAYS` days (default 14, the
   value the reference realm setup configures; the realm's own value is not
   cheaply readable from the API). The summary states the latter and mentions

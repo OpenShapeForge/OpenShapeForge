@@ -413,8 +413,9 @@ export type PlatformSessionInfo = {
   /** How many tenants the platform currently has; null when the registry is unreachable. */
   tenants: number | null;
   signedInVia: string;
-  signInExpiresAt?: string;
-  signInExpiresIn?: string;
+  /** Expiry of the ACCESS TOKEN, not of the sign-in; see mcp/session-info.ts. */
+  accessTokenExpiresAt?: string;
+  accessTokenExpiresIn?: string;
   sessionEndsAfterInactivity?: string;
   signOut?: string;
   access: { tools: number; resources: number };
@@ -478,8 +479,8 @@ export function buildPlatformSessionInfo(input: {
     signedInVia,
     ...(expiry
       ? {
-          signInExpiresAt: expiry.at,
-          signInExpiresIn: expiry.relative,
+          accessTokenExpiresAt: expiry.at,
+          accessTokenExpiresIn: expiry.relative,
           sessionEndsAfterInactivity: idle,
           signOut: SIGN_OUT_INSTRUCTION,
         }

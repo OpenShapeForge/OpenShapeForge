@@ -170,7 +170,7 @@ describe("buildPlatformSessionInfo", () => {
     expect(info.scope).toBe("platform");
     expect(info.tenants).toBe(3);
     expect(info.signedInVia).toBe("Codex");
-    expect(info.signInExpiresIn).toBe("in 12 minutes");
+    expect(info.accessTokenExpiresIn).toBe("in 12 minutes");
     expect(info.sessionEndsAfterInactivity).toBe("14 days");
     expect(info.summary).toBe(
       "You are Hubble Platform admin, a platform administrator of this deployment, signed in via Codex. " +
@@ -191,7 +191,7 @@ describe("buildPlatformSessionInfo", () => {
       nowMs: NOW,
     });
     expect(info.signedInVia).toBe("Hubble control plane");
-    expect(info.signInExpiresAt).toBeUndefined();
+    expect(info.accessTokenExpiresAt).toBeUndefined();
     expect(info.summary).toContain("could not be counted");
   });
 });

@@ -10,7 +10,12 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { keyringFromEnv, type SecretKeyring } from "../platform/secrets.js";
 import { looksLikeApiKey } from "./api-key/format.js";
 // ---- identity ↔ Relation link (auth/identity-link.ts) ----
-import { identityClaimsFromToken, resolveIdentityLink } from "./identity-link.js";
+import {
+  NEEDS_ROLE_ASSIGNMENT_ROLES,
+  NotInvitedError,
+  identityClaimsFromToken,
+  resolveIdentityLink,
+} from "./identity-link.js";
 // ---- end identity ↔ Relation link ----
 import { resolveApiKeySession } from "./api-key/resolve.js";
 import {
@@ -137,21 +142,13 @@ function getTenantBypassRoles(): ReadonlySet<string> {
 }
 
 /**
- * What a brand-new identity's session may do before an administrator has
- * assigned it a real role — see `platform.identity_relations
- * .needs_role_assignment` (db/migrations/identity-link.ts) for why this has
- * to be a code-level override rather than a Keycloak admin-API role grant:
- * `session.roles` below is computed from the JWT that is ALREADY ISSUED by
- * the time `resolveIdentityLink` runs and could grant a role, so nothing
- * short of overriding the session itself can affect that very first request.
- *
- * `General.All.Read` is read-only access to the generic entity surface
- * (whatever the realm's "read everything" composite grants) — enough to look
- * around — deliberately not `Organization.All.ReadWrite` (org admin) or any
- * `Pentest.*` role. `whoami`/`day_start` need no role at all, so they keep
- * working regardless of this override.
+ * Re-exported from ./identity-link.js, which now owns it: the invitation
+ * admission path in that module needs the same constant to say what
+ * `org_employee` grants, and importing it back from here would make the
+ * cycle between the two modules load-order sensitive. Kept exported from this
+ * module so anything that imported it from here still resolves.
  */
-export const NEEDS_ROLE_ASSIGNMENT_ROLES: readonly string[] = ["General.All.Read"];
+export { NEEDS_ROLE_ASSIGNMENT_ROLES };
 
 function resolveScope(roles: readonly string[], groups: readonly string[]): SessionScope {
   const bypass = getTenantBypassRoles();
@@ -579,10 +576,20 @@ export async function resolveSessionContext(
       // before this Relation existed, so a Keycloak admin-API grant made just
       // now cannot be in it. Recompute scope too, so a bypass role the JWT
       // happened to carry cannot smuggle tenant-wide access past the override.
-      const effectiveRoles = relation?.needsRoleAssignment ? [...NEEDS_ROLE_ASSIGNMENT_ROLES] : roles;
-      const effectiveScope = relation?.needsRoleAssignment
-        ? resolveScope(effectiveRoles, groups)
-        : scope;
+      //
+      // `invitedRoles` is the other side of that same timing problem: the role
+      // an administrator INVITED this person as has just been granted in
+      // Keycloak, and their token — minted moments ago — cannot carry it yet.
+      // Unioned rather than substituted, and only inside the short window
+      // auth/employee-invitations.ts anchors on the acceptance itself.
+      const invitedRoles = relation?.invitedRoles ?? [];
+      const baseRoles = relation?.needsRoleAssignment ? [...NEEDS_ROLE_ASSIGNMENT_ROLES] : roles;
+      const effectiveRoles =
+        invitedRoles.length > 0 ? [...new Set([...baseRoles, ...invitedRoles])] : baseRoles;
+      const effectiveScope =
+        relation?.needsRoleAssignment || invitedRoles.length > 0
+          ? resolveScope(effectiveRoles, groups)
+          : scope;
       // ---- end identity ↔ Relation link ----
       return {
         tenantId,
@@ -595,6 +602,16 @@ export async function resolveSessionContext(
         relation,
       };
     } catch (error) {
+      if (error instanceof NotInvitedError) {
+        // The token verified and names a real person; this organization has
+        // simply never been told to expect them. Answering EMPTY_SESSION here
+        // would authenticate them into a tenant nobody admitted them to, which
+        // is the hole this closes, and a bare 401 would tell them nothing they
+        // could act on. Let it through as the 403 it is — the message names
+        // the way in.
+        console.warn(`[auth] ${error.message}`);
+        throw error;
+      }
       if (error instanceof OrganizationBindingError) {
         // The token verified; it is just not a token for this resource. The
         // caller answers with the scopes to request rather than a bare 401,

@@ -123,10 +123,15 @@ function sessionFor(who: Person, tenantId: string, relation?: IdentityLinkState 
 }
 
 /** Resolve like identity.ts does on a bearer session, bypassing the cache. */
-async function signIn(db: Kysely<DB>, who: Person, tenantId: string) {
+async function signIn(
+  db: Kysely<DB>,
+  who: Person,
+  tenantId: string,
+  deps: Parameters<typeof resolveIdentityLink>[3] = {},
+) {
   __resetIdentityLinkForTests();
   const session = sessionFor(who, tenantId);
-  const state = await resolveIdentityLink(db, session, who.claims);
+  const state = await resolveIdentityLink(db, session, who.claims, deps);
   session.relation = state;
   return { session, state };
 }
@@ -150,6 +155,62 @@ async function existingRelation(
   return id;
 }
 
+/**
+ * A pending invitation, as `invite_employee` would have left it. Written
+ * without RLS (the owner connection) for the same reason `existingRelation`
+ * is: this is the state an administrator's earlier call produced, not the
+ * thing under test.
+ */
+async function invite(
+  adminDb: Kysely<DB>,
+  tenantId: string,
+  email: string,
+  role: "org_admin" | "org_employee" = "org_employee",
+) {
+  await sql`
+    insert into platform.employee_invitations (tenant_id, email, role, invited_by)
+    values (${tenantId}, ${email}, ${role}, 'test-admin')
+    on conflict do nothing
+  `.execute(adminDb);
+}
+
+/**
+ * Sign in somebody the organization has invited. Admission is a precondition
+ * for every test below that is about something else — the confirmation step,
+ * role assignment, tenant isolation — so it is said once, here, instead of
+ * being repeated in each of them.
+ */
+async function invitedSignIn(
+  appDb: Kysely<DB>,
+  adminDb: Kysely<DB>,
+  who: Person,
+  tenantId: string,
+  deps: Parameters<typeof resolveIdentityLink>[3] = {},
+) {
+  await invite(adminDb, tenantId, who.claims.email!);
+  return signIn(appDb, who, tenantId, deps);
+}
+
+async function invitationRows(adminDb: Kysely<DB>, tenantId: string) {
+  return (
+    await sql<{ email: string; role: string; status: string; accepted_at: Date | null }>`
+      select email, role, status, accepted_at from platform.employee_invitations
+       where tenant_id = ${tenantId} order by invited_at
+    `.execute(adminDb)
+  ).rows;
+}
+
+/** Records what the admission path asked Keycloak to grant, granting nothing. */
+function recordingGrant() {
+  const grants: Array<{ subject: string; clientId: string; roles: readonly string[] }> = [];
+  return {
+    grants,
+    grantInvitedRole: async (subject: string, clientId: string, roles: readonly string[]) => {
+      grants.push({ subject, clientId, roles });
+    },
+  };
+}
+
 async function linkRows(adminDb: Kysely<DB>, tenantId: string) {
   return (
     await sql<{
@@ -170,11 +231,12 @@ describe("identity ↔ Relation link", () => {
   beforeEach(() => __resetIdentityLinkForTests());
 
   test(
-    "first session creates a person Relation just in time; later sessions reuse it",
+    "an invited first session creates a person Relation just in time; later sessions reuse it",
     async () => {
       await withScratchDb(async (appDb, adminDb) => {
         await seedTenants(adminDb);
         const alice = person("alice");
+        await invite(adminDb, tenantA, "alice@example.com");
 
         const first = await signIn(appDb, alice, tenantA);
         expect(first.state).toMatchObject({
@@ -238,12 +300,136 @@ describe("identity ↔ Relation link", () => {
 
         // Concurrent first sessions of ONE person share one resolution.
         const bob = person("bob");
+        await invite(adminDb, tenantA, "bob@example.com");
         const session = sessionFor(bob, tenantA);
         const [x, y] = await Promise.all([
           resolveIdentityLink(appDb, session, bob.claims),
           resolveIdentityLink(appDb, session, bob.claims),
         ]);
         expect(x!.relationId).toBe(y!.relationId);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "without an invitation nobody gets in, and nothing is created for them",
+    async () => {
+      await withScratchDb(async (appDb, adminDb) => {
+        await seedTenants(adminDb);
+        const stranger = person("stranger");
+
+        // A perfectly valid token for the realm, for somebody this
+        // organization has never been told about.
+        await expect(signIn(appDb, stranger, tenantA)).rejects.toMatchObject({
+          status: 403,
+          code: "NOT_INVITED",
+        });
+
+        // The refusal says what has to happen, not just "no".
+        await expect(signIn(appDb, stranger, tenantA)).rejects.toThrow(
+          /invite_employee|administrator/i,
+        );
+
+        // Nothing was created on their way past: no Relation, no link row.
+        const relations = (
+          await sql<{ n: string }>`select count(*)::text as n from erp.relations`.execute(adminDb)
+        ).rows[0]!.n;
+        expect(relations).toBe("0");
+        expect(await linkRows(adminDb, tenantA)).toEqual([]);
+
+        // Being invited SOMEWHERE ELSE is not being invited here.
+        await invite(adminDb, tenantB, "stranger@example.com");
+        await expect(signIn(appDb, stranger, tenantA)).rejects.toMatchObject({
+          code: "NOT_INVITED",
+        });
+
+        // Neither is a revoked invitation.
+        await invite(adminDb, tenantA, "stranger@example.com");
+        await sql`
+          update platform.employee_invitations
+             set status = 'revoked', revoked_at = now()
+           where tenant_id = ${tenantA}
+        `.execute(adminDb);
+        await expect(signIn(appDb, stranger, tenantA)).rejects.toMatchObject({
+          code: "NOT_INVITED",
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "an invited person is admitted with the invited role, without an administrator",
+    async () => {
+      await withScratchDb(async (appDb, adminDb) => {
+        await seedTenants(adminDb);
+        const dave = person("dave");
+        await invite(adminDb, tenantA, "Dave@Example.com", "org_admin");
+        const keycloak = recordingGrant();
+
+        const { state } = await signIn(appDb, dave, tenantA, {
+          grantInvitedRole: keycloak.grantInvitedRole,
+        });
+
+        expect(state).toMatchObject({ status: "linked", linkedBy: "jit" });
+        // The invited role was granted on the audience client, against the
+        // token's own subject — the address matched case-insensitively.
+        expect(keycloak.grants).toEqual([
+          {
+            subject: dave.claims.subject,
+            clientId: "erp-provider",
+            roles: ["Organization.All.ReadWrite"],
+          },
+        ]);
+        // No administrator has to finish this: the flag is already cleared,
+        // and the role rides on this very session because the token that
+        // admitted them predates the grant.
+        expect(state!.needsRoleAssignment).toBe(false);
+        expect(state!.invitedRoles).toEqual(["Organization.All.ReadWrite"]);
+        expect(
+          await listPendingRoleAssignments(
+            appDb,
+            sessionFor(person("admin-y", ADMIN_ROLES), tenantA),
+          ),
+        ).toEqual([]);
+
+        // And the invitation is spent, so it cannot admit a second person.
+        expect(await invitationRows(adminDb, tenantA)).toMatchObject([
+          { email: "Dave@Example.com", role: "org_admin", status: "accepted" },
+        ]);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "when the role cannot be granted the person still gets in, for an administrator to finish",
+    async () => {
+      await withScratchDb(async (appDb, adminDb) => {
+        await seedTenants(adminDb);
+        const erin = person("erin");
+        await invite(adminDb, tenantA, "erin@example.com", "org_admin");
+
+        const { state } = await signIn(appDb, erin, tenantA, {
+          grantInvitedRole: async () => {
+            throw new Error("Keycloak is having a day");
+          },
+        });
+
+        // Admission was decided by the invitation, so a Keycloak that cannot
+        // be reached costs the role, not the session.
+        expect(state).toMatchObject({ status: "linked", needsRoleAssignment: true });
+        expect(state!.invitedRoles).toEqual([]);
+        // The invitation stays pending — it was not spent on a role that
+        // never landed — and the person shows up for `set_member_role`, which
+        // is exactly what an administrator would have had to do anyway.
+        expect(await invitationRows(adminDb, tenantA)).toMatchObject([{ status: "pending" }]);
+        const waiting = await listPendingRoleAssignments(
+          appDb,
+          sessionFor(person("admin-x", ADMIN_ROLES), tenantA),
+        );
+        expect(waiting.map((row) => row.email)).toEqual(["erin@example.com"]);
       });
     },
     TEST_TIMEOUT,
@@ -314,7 +500,7 @@ describe("identity ↔ Relation link", () => {
         const dave = person("dave");
         await existingRelation(adminDb, tenantA, "Dave One", "dave@example.com");
         await existingRelation(adminDb, tenantA, "Dave Two", "dave@example.com");
-        const daves = await signIn(appDb, dave, tenantA);
+        const daves = await invitedSignIn(appDb, adminDb, dave, tenantA);
         expect(daves.state).toMatchObject({
           status: "pending_confirmation",
           candidateRelationId: null,
@@ -337,10 +523,10 @@ describe("identity ↔ Relation link", () => {
         const erin = person("erin");
         const employee = person("frank", ["Relations.All.ReadWrite"]);
         const erinsRelation = await existingRelation(adminDb, tenantA, "Erin Tester", "erin@example.com");
-        const adminSignIn = await signIn(appDb, admin, tenantA);
-        const erinSignIn = await signIn(appDb, erin, tenantA);
+        const adminSignIn = await invitedSignIn(appDb, adminDb, admin, tenantA);
+        const erinSignIn = await invitedSignIn(appDb, adminDb, erin, tenantA);
         expect(erinSignIn.state!.status).toBe("pending_confirmation");
-        const employeeSignIn = await signIn(appDb, employee, tenantA);
+        const employeeSignIn = await invitedSignIn(appDb, adminDb, employee, tenantA);
 
         expect(identityLinkToolsForSession(adminSignIn.session).map((tool) => tool.name)).toEqual([
           "link_identity",
@@ -431,8 +617,8 @@ describe("identity ↔ Relation link", () => {
         const grace = person("grace");
         const admin = person("admin", ADMIN_ROLES);
 
-        const inA = await signIn(appDb, grace, tenantA);
-        const inB = await signIn(appDb, grace, tenantB);
+        const inA = await invitedSignIn(appDb, adminDb, grace, tenantA);
+        const inB = await invitedSignIn(appDb, adminDb, grace, tenantB);
         expect(inA.state!.status).toBe("linked");
         expect(inB.state!.status).toBe("linked");
         expect(inA.state!.identityId).toBe(inB.state!.identityId);
@@ -464,8 +650,8 @@ describe("identity ↔ Relation link", () => {
         // An administrator of B cannot link an identity that only ever signed
         // in to A: it is not visible there.
         const heidi = person("heidi");
-        await signIn(appDb, heidi, tenantA);
-        const adminInB = await signIn(appDb, admin, tenantB);
+        await invitedSignIn(appDb, adminDb, heidi, tenantA);
+        const adminInB = await invitedSignIn(appDb, adminDb, admin, tenantB);
         const target = await existingRelation(adminDb, tenantB, "Heidi in B", "other@example.com");
         await expect(
           linkIdentityToRelation(appDb, adminInB.session, {
@@ -488,7 +674,7 @@ describe("identity ↔ Relation link", () => {
         // 1. A brand-new identity: no existing Relation carries the e-mail, so
         //    ensureIdentityLink creates one. needs_role_assignment must be true.
         const ivy = person("ivy");
-        const first = await signIn(appDb, ivy, tenantA);
+        const first = await invitedSignIn(appDb, adminDb, ivy, tenantA);
         expect(first.state!.needsRoleAssignment).toBe(true);
         expect(
           (await linkRows(adminDb, tenantA)).find((row) => row.identity_id === first.state!.identityId),
@@ -512,7 +698,7 @@ describe("identity ↔ Relation link", () => {
         const existingEmail = "jack@example.com";
         await existingRelation(adminDb, tenantA, "Jack Existing", existingEmail);
         const jack = person("jack");
-        const jackFirst = await signIn(appDb, jack, tenantA);
+        const jackFirst = await invitedSignIn(appDb, adminDb, jack, tenantA);
         expect(jackFirst.state!.status).toBe("pending_confirmation");
         expect(jackFirst.state!.needsRoleAssignment).toBe(false);
 
@@ -520,7 +706,7 @@ describe("identity ↔ Relation link", () => {
         //    it either. Reuse jack's identity from step 3 (pending_confirmation,
         //    needs_role_assignment already false) so this exercises the
         //    administrator-link write itself, not a JIT create beforehand.
-        const adminInA = await signIn(appDb, admin, tenantA);
+        const adminInA = await invitedSignIn(appDb, adminDb, admin, tenantA);
         const jackTarget = await existingRelation(adminDb, tenantA, "Jack Target", "jack-target@example.com");
         const linked = await linkIdentityToRelation(appDb, adminInA.session, {
           identityEmail: "jack@example.com",
@@ -586,7 +772,7 @@ describe("identity ↔ Relation link", () => {
 
         // Cross-tenant: an administrator of B never sees A's pending members
         // (only their own tenant's — here, their own JIT-created identity).
-        const adminInB = await signIn(appDb, person("admin2", ADMIN_ROLES), tenantB);
+        const adminInB = await invitedSignIn(appDb, adminDb, person("admin2", ADMIN_ROLES), tenantB);
         const pendingInB = await listPendingRoleAssignments(appDb, adminInB.session);
         expect(pendingInB.map((row) => row.identityId)).not.toContain(first.state!.identityId);
         expect(pendingInB.every((row) => row.identityId !== jackFirst.state!.identityId)).toBe(true);
@@ -651,8 +837,16 @@ describe("identity ↔ Relation link", () => {
           const admin = person("mallory-admin", ADMIN_ROLES);
           const nora = person("nora");
 
-          const adminSignIn = await signIn(appDb, admin, tenantA);
-          const noraSignIn = await signIn(appDb, nora, tenantA);
+          const adminSignIn = await invitedSignIn(appDb, adminDb, admin, tenantA);
+          // Nora's own admission could not reach Keycloak, so her invited role
+          // was never granted and she is still waiting for one. That is the
+          // only state `set_member_role` exists for now that admission grants
+          // the invited role by itself.
+          const noraSignIn = await invitedSignIn(appDb, adminDb, nora, tenantA, {
+            grantInvitedRole: async () => {
+              throw new Error("Keycloak was unreachable when she first signed in");
+            },
+          });
           expect(noraSignIn.state!.needsRoleAssignment).toBe(true);
 
           const result = await callIdentityLinkTool(
@@ -759,8 +953,14 @@ describe("identity ↔ Relation link", () => {
           const admin = person("oswald-admin", ADMIN_ROLES);
           const paula = person("paula");
 
-          const adminSignIn = await signIn(appDb, admin, tenantA);
-          const paulaSignIn = await signIn(appDb, paula, tenantA);
+          const adminSignIn = await invitedSignIn(appDb, adminDb, admin, tenantA);
+          // As above: she is only waiting for a role because her own admission
+          // could not reach Keycloak.
+          const paulaSignIn = await invitedSignIn(appDb, adminDb, paula, tenantA, {
+            grantInvitedRole: async () => {
+              throw new Error("Keycloak was unreachable when she first signed in");
+            },
+          });
 
           const result = await callIdentityLinkTool(
             "set_member_role",

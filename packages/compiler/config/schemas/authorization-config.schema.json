@@ -52,6 +52,18 @@
         "accessTokenLifespan": { "type": "integer", "minimum": 1 },
         "ssoSessionIdleTimeout": { "type": "integer", "minimum": 1 },
         "ssoSessionMaxLifespan": { "type": "integer", "minimum": 1 },
+        "webAuthn": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "WebAuthn / passkey settings. Every generated realm is passkey-only for humans (see generators/keycloak-passkeys.ts); the relying-party id is the one value the compiler cannot infer.",
+          "properties": {
+            "rpId": {
+              "type": "string",
+              "minLength": 1,
+              "description": "WebAuthn relying-party id: a bare hostname (no scheme, port or path) that is Keycloak's browser-facing host or a registrable parent it shares with the app. May be a ${env:VAR:-devDefault} reference. Required for a production realm."
+            }
+          }
+        },
         "events": {
           "type": "object",
           "additionalProperties": false,

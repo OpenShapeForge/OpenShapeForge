@@ -766,6 +766,23 @@ export interface AuthorizationRealmConfig {
     adminEnabled?: boolean;
     listeners?: string[];
   };
+  /**
+   * WebAuthn / passkey settings. Every generated realm is passkey-only for
+   * humans (see generators/keycloak-passkeys.ts); the one value the compiler
+   * cannot work out for itself is authored here.
+   */
+  webAuthn?: {
+    /**
+     * The WebAuthn relying-party id: a BARE HOSTNAME (no scheme, no port, no
+     * path) that must be Keycloak's browser-facing hostname or a registrable
+     * parent it shares with the app — e.g. `example.com` for a login page on
+     * `auth.example.com`. May be a `${env:VAR:-devDefault}` reference.
+     * Required for a production realm; a development realm falls back to
+     * `localhost`, which it never actually uses because local login is
+     * relaxed to passwords by scripts/keycloak/kc-dev-password-login.py.
+     */
+    rpId?: string;
+  };
 }
 
 export interface AuthorizationClient {

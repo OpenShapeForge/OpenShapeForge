@@ -81,15 +81,58 @@ function sessionFor(tenantId: string, roles: string[]) {
   return { tenantId, userId: randomUUID(), roles, groups: [], scope: "self" as const };
 }
 
-/** A fake Keycloak client recording every invite call; never touches a network. */
+/**
+ * A fake Keycloak client that keeps the invitation store the real one talks
+ * to, so a revoke can be observed to actually un-send something. Models the
+ * two behaviours measured on 26.5.3: an address may hold only one pending
+ * invitation, and deleting one frees the address again. Never touches a
+ * network.
+ */
 function fakeKeycloak(): KeycloakOrganizationMembersClient & {
   calls: Array<{ organizationId: string; email: string }>;
+  pending: Array<{ id: string; organizationId: string; email: string }>;
 } {
   const calls: Array<{ organizationId: string; email: string }> = [];
+  const pending: Array<{ id: string; organizationId: string; email: string }> = [];
+  const match = (organizationId: string, email: string) =>
+    pending.findIndex(
+      (row) =>
+        row.organizationId === organizationId &&
+        row.email.toLowerCase() === email.trim().toLowerCase(),
+    );
+  const asInvitation = (row: { id: string; email: string }) => ({
+    id: row.id,
+    email: row.email,
+    firstName: null,
+    lastName: null,
+    status: "PENDING",
+    sentDate: null,
+    expiresAt: null,
+  });
   return {
     calls,
+    pending,
     async inviteUser(organizationId, input) {
       calls.push({ organizationId, email: input.email });
+      if (match(organizationId, input.email) >= 0) {
+        throw new Error("User already has a pending invitation");
+      }
+      pending.push({ id: randomUUID(), organizationId, email: input.email });
+    },
+    async listInvitations(organizationId) {
+      return pending.filter((row) => row.organizationId === organizationId).map(asInvitation);
+    },
+    async findPendingInvitationByEmail(organizationId, email) {
+      const at = match(organizationId, email);
+      return at < 0 ? null : asInvitation(pending[at]!);
+    },
+    async deleteInvitation(organizationId, invitationId) {
+      const at = pending.findIndex(
+        (row) => row.organizationId === organizationId && row.id === invitationId,
+      );
+      if (at < 0) return false;
+      pending.splice(at, 1);
+      return true;
     },
   };
 }
@@ -134,13 +177,19 @@ describe("employee invitations", () => {
 
         await expect(listInvitations(appDb, employee)).rejects.toMatchObject({ status: 403 });
 
-        const revoked = await revokeInvitation(appDb, admin, { email: "colleague@example.com" });
+        const revoked = await revokeInvitation(appDb, admin, keycloak, {
+          email: "colleague@example.com",
+        });
         expect(revoked.status).toBe("revoked");
+        // The invitation was withdrawn at Keycloak too, not just here: the
+        // link in the delivered mail is dead and the address is free again.
+        expect(revoked.keycloakInvitationDeleted).toBe(true);
+        expect(keycloak.pending).toEqual([]);
         expect(await listInvitations(appDb, admin)).toEqual([]);
 
         // Revoking again finds nothing pending.
         await expect(
-          revokeInvitation(appDb, admin, { email: "colleague@example.com" }),
+          revokeInvitation(appDb, admin, keycloak, { email: "colleague@example.com" }),
         ).rejects.toMatchObject({ status: 404 });
 
         // Re-inviting the same address after a revoke is allowed (the partial
@@ -171,8 +220,13 @@ describe("employee invitations", () => {
         expect(seenFromB).toEqual([]);
 
         await expect(
-          revokeInvitation(appDb, sessionFor(tenantB, ADMIN_ROLES), { email: "a-only@example.com" }),
+          revokeInvitation(appDb, sessionFor(tenantB, ADMIN_ROLES), keycloak, {
+            email: "a-only@example.com",
+          }),
         ).rejects.toMatchObject({ status: 404 });
+        // And the Keycloak side is scoped by organization too, so B's attempt
+        // could not have withdrawn A's invitation even before RLS spoke.
+        expect(keycloak.pending).toHaveLength(1);
       });
     },
     TEST_TIMEOUT,

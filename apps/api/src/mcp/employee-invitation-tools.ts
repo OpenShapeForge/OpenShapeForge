@@ -214,8 +214,17 @@ export async function callEmployeeInvitationTool(
   if (name === REVOKE_INVITATION_TOOL) {
     try {
       const email = stringArgument(args, "email", true)!;
-      const invitation = await revokeInvitation(db, scoped, { email });
-      return succeeded({ revoked: true, ...publicInvitation(invitation) });
+      const invitation = await revokeInvitation(db, scoped, keycloak, { email });
+      return succeeded({
+        revoked: true,
+        ...publicInvitation(invitation),
+        keycloakInvitationDeleted: invitation.keycloakInvitationDeleted,
+        note: invitation.keycloakInvitationDeleted
+          ? "The invitation was withdrawn at Keycloak: the link in the mail no longer works, " +
+            "and the address can be invited again."
+          : "Keycloak no longer held this invitation (it was accepted, already withdrawn, or " +
+            "expired), so only this organization's own record changed.",
+      });
     } catch (error) {
       return failed(error);
     }

@@ -196,6 +196,13 @@ import {
   onboardingToolsForSession,
   withOnboarding,
 } from "./onboarding.js";
+// ---- the detail behind whoami's onboarding index (mcp/onboarding-resources.ts) ----
+import {
+  ONBOARDING_RESOURCE_URIS,
+  ONBOARDING_STEP_RESOURCE_TEMPLATE,
+  onboardingResourcesForSession,
+  readOnboardingStepResource,
+} from "./onboarding-resources.js";
 // ---- update notices (mcp/update-notices.ts) ----
 import {
   callUpdateTool,
@@ -2998,10 +3005,14 @@ function buildServer(
     exact: [
       ENTITY_CATALOG_URI,
       ENTITY_CONFIGURATION_APP_URI,
+      ...ONBOARDING_RESOURCE_URIS,
       ...catalog.entities.map(entityResourceUri),
       ...catalogResources.map((resource) => resource.uri),
     ],
-    templates: catalogResources.map((resource) => resource.templateUri),
+    templates: [
+      ONBOARDING_STEP_RESOURCE_TEMPLATE.uriTemplate,
+      ...catalogResources.map((resource) => resource.templateUri),
+    ],
   };
 
   const definitionFor = (
@@ -3477,6 +3488,10 @@ function buildServer(
       resources: [
         SESSION_RESOURCE,
         ORGANIZATION_PROFILE_RESOURCE,
+        // The detail behind whoami's onboarding index. Static per session:
+        // the five step keys are fixed, so listing them gathers no facts —
+        // which is what keeps whoami's own resource count cheap.
+        ...onboardingResourcesForSession(session),
         {
           uri: ENTITY_CATALOG_URI,
           name: "entity-catalog",
@@ -3584,6 +3599,9 @@ function buildServer(
 
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
     resourceTemplates: [
+      ...(onboardingResourcesForSession(session).length > 0
+        ? [ONBOARDING_STEP_RESOURCE_TEMPLATE]
+        : []),
       ...resourcesForSession(session, tables).map((resource) => ({
         uriTemplate: resource.templateUri,
         name: resource.templateName,
@@ -3628,6 +3646,15 @@ function buildServer(
       return readOrganizationProfileResource(db, session);
     }
     // ---- end organization profile ----
+    // ---- onboarding step detail (mcp/onboarding-resources.ts): the same
+    // per-session environment the onboarding TOOLS use, so a resource read is
+    // authorized exactly as onboarding_status is. ----
+    const onboardingStep = await readOnboardingStepResource(
+      request.params.uri,
+      onboarding,
+    );
+    if (onboardingStep) return onboardingStep;
+    // ---- end onboarding step detail ----
     if (request.params.uri === ENTITY_CONFIGURATION_APP_URI) {
       return {
         contents: [

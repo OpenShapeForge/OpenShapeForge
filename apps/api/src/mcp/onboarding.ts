@@ -71,17 +71,68 @@ export const ONBOARDING_TOOL_NAMES: readonly string[] = [
   ONBOARDING_GUIDE_TOOL,
 ];
 
+/**
+ * One resource per step, and the template they are instances of. The step's
+ * `howTo` — which can name every Adapter or every provider in the deployment —
+ * lives behind these rather than in `whoami`, which stays an index.
+ */
+export const ONBOARDING_STEP_URI_PREFIX = "osf://onboarding/step/";
+export const ONBOARDING_STEP_URI_TEMPLATE = `${ONBOARDING_STEP_URI_PREFIX}{step}`;
+
+export function onboardingStepUri(key: OnboardingStepKey): string {
+  return `${ONBOARDING_STEP_URI_PREFIX}${key}`;
+}
+
+/** The step a resource URI names, or null when the URI is not one of them. */
+export function onboardingStepKeyFromUri(uri: string): OnboardingStepKey | null {
+  if (!uri.startsWith(ONBOARDING_STEP_URI_PREFIX)) return null;
+  const rest = uri.slice(ONBOARDING_STEP_URI_PREFIX.length);
+  return (ONBOARDING_STEP_KEYS as readonly string[]).includes(rest)
+    ? (rest as OnboardingStepKey)
+    : null;
+}
+
 /** Appended to the server's `initialize` instructions: the one sentence every client shows the model. */
 export const ONBOARDING_INSTRUCTION =
-  " Call `whoami` first. If its `onboarding.status` is not Completed, follow `onboarding_guide`.";
+  " Call `whoami` first. Its `onboarding` field is an index: which steps are done and which" +
+  " are not, never how to do them. If `onboarding.status` is not Completed, follow" +
+  " `onboarding_guide`; for one step, read the resource `osf://onboarding/step/<key>`" +
+  " (or call `onboarding_status`, which returns every step with its how-to).";
 
 // ---------------------------------------------------------------------------
 // Shapes
 
 export type OnboardingStepStatus = "done" | "todo" | "not_applicable";
 
+/**
+ * The checklist's steps, in the order they are walked. Fixed and small: the
+ * list is what `resources/list` publishes one resource per (see
+ * mcp/onboarding-resources.ts), so it may not depend on the session.
+ */
+export const ONBOARDING_STEP_KEYS = [
+  "identity",
+  "organization_connections",
+  "connections",
+  "preferences",
+  "guide",
+] as const;
+
+export type OnboardingStepKey = (typeof ONBOARDING_STEP_KEYS)[number];
+
+/**
+ * One title per step. Kept here rather than inline in each step function
+ * because the resource list has to name the steps without computing them.
+ */
+export const ONBOARDING_STEP_TITLES: Record<OnboardingStepKey, string> = {
+  identity: "Linked to your Relation",
+  organization_connections: "Organization connections to providers",
+  connections: "Personal sign-ins at providers",
+  preferences: "Working preferences",
+  guide: "Role guide read",
+};
+
 export type OnboardingStep = {
-  key: "identity" | "organization_connections" | "connections" | "preferences" | "guide";
+  key: OnboardingStepKey;
   title: string;
   status: OnboardingStepStatus;
   /** What to do when the step is `todo`; a short note otherwise. */
@@ -98,6 +149,34 @@ export type OnboardingSummary = {
   completedAt: string | null;
   steps: OnboardingStep[];
   /** One or two English sentences saying the same thing. */
+  summary: string;
+};
+
+/**
+ * What `whoami` carries: the checklist WITHOUT its how-to.
+ *
+ * The full summary above is the right answer to "how do I finish onboarding";
+ * it is the wrong thing to put in the first answer every session reads. Two of
+ * the five steps grow with the deployment — the administrator step names every
+ * Adapter that still needs configuring, the connections step writes a sentence
+ * per provider the person has not signed in at — so in an organization with
+ * dozens of Services the `howTo` texts alone outweigh everything else `whoami`
+ * says about the person. What a model needs there is which steps are open; the
+ * how-to is one resource read away, per step, and `onboarding_status` still
+ * answers the whole thing in one call for a client that reads no resources.
+ */
+export type OnboardingStepIndexEntry = Pick<OnboardingStep, "key" | "title" | "status">;
+
+export type OnboardingIndex = {
+  status: OnboardingStatus;
+  version: number;
+  completedAt: string | null;
+  /** Steps done, out of the steps that apply to this person. */
+  done: number;
+  total: number;
+  steps: OnboardingStepIndexEntry[];
+  /** The one line telling the assistant where the how-to lives. */
+  detail: string;
   summary: string;
 };
 
@@ -159,7 +238,7 @@ export type OnboardingFacts = {
 // Pure checklist
 
 function stepIdentity(facts: OnboardingFacts): OnboardingStep {
-  const title = "Linked to your Relation";
+  const title = ONBOARDING_STEP_TITLES.identity;
   if (!facts.relation) {
     return {
       key: "identity",
@@ -200,7 +279,7 @@ function describeOrganizationConnection(entry: OrganizationConnectionFact): stri
 
 function stepOrganizationConnections(facts: OnboardingFacts): OnboardingStep {
   const key = "organization_connections" as const;
-  const title = "Organization connections to providers";
+  const title = ONBOARDING_STEP_TITLES.organization_connections;
   if (facts.organizationConnections === null) {
     return {
       key,
@@ -238,7 +317,7 @@ function stepOrganizationConnections(facts: OnboardingFacts): OnboardingStep {
 }
 
 function stepConnections(facts: OnboardingFacts): OnboardingStep {
-  const title = "Personal sign-ins at providers";
+  const title = ONBOARDING_STEP_TITLES.connections;
   if (facts.personalSignIns === null || facts.personalSignIns.length === 0) {
     return {
       key: "connections",
@@ -271,7 +350,7 @@ function stepConnections(facts: OnboardingFacts): OnboardingStep {
 }
 
 function stepPreferences(facts: OnboardingFacts, skipped: boolean): OnboardingStep {
-  const title = "Working preferences";
+  const title = ONBOARDING_STEP_TITLES.preferences;
   if (!facts.preferences.offered) {
     return {
       key: "preferences",
@@ -300,13 +379,13 @@ function stepPreferences(facts: OnboardingFacts, skipped: boolean): OnboardingSt
       "then save the answer with set_my_preferences (omit `tool` to apply it to all tools). " +
       "They may skip this: complete_onboarding { skip: true }. Per-tool onboarding (the assistance " +
       "level Melden / Voorbereiden / Routine doen and a tool's own choices) is not asked here: " +
-      "a tool with onboarding asks at its first call, when its result carries the questions; " +
-      "whoami lists those tools as pendingOnboarding and get_my_preferences shows what is stored.",
+      "a tool with onboarding asks at its first call, when its result carries the questions, " +
+      "and get_my_preferences shows what is already stored.",
   };
 }
 
 function stepGuide(facts: OnboardingFacts): OnboardingStep {
-  const title = "Role guide read";
+  const title = ONBOARDING_STEP_TITLES.guide;
   if (facts.guides.length === 0) {
     return {
       key: "guide",
@@ -439,9 +518,12 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
   const lines = [
     "First use — how to set this person up. Follow in order; do not narrate the process.",
     "",
-    "Call whoami first. Its `onboarding` field is the checklist: `status` and `steps`, each",
-    "done, todo or not_applicable with a `howTo`. If status is Completed, stop reading and never",
-    "mention onboarding again. Otherwise walk the todo steps in the order listed:",
+    "Call whoami first. Its `onboarding` field is the INDEX: `status`, a done/total count and",
+    "`steps`, each key + title + done, todo or not_applicable — it says WHAT is open, never how.",
+    "If status is Completed, stop reading and never mention onboarding again. Otherwise walk the",
+    "todo steps in the order listed, and for each one get the how-to first: read the resource",
+    "osf://onboarding/step/<key>, or call onboarding_status once for every step with its howTo",
+    "(that is the way in a client that cannot read resources). The steps:",
     "",
     "1. identity — the person's login must be linked to their Relation. Pending with a",
     "   candidate: run confirm_my_link after telling them who the candidate is. No candidate:",
@@ -451,8 +533,8 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
     "2. organization_connections — administrators only; see the administrator section below.",
     "3. connections — for every provider listed as not connected, run connect_service with the",
     "   tool name from the step, hand the person the returned URL, and wait by checking (call",
-    "   onboarding_status every ten seconds or so, for up to about three minutes) rather than",
-    "   asking them to say when they are done.",
+    "   onboarding_status or osf://onboarding/step/connections every ten seconds or so, for up",
+    "   to about three minutes) rather than asking them to say when they are done.",
     "4. preferences — ask ONE batched question covering working hours, priorities and house",
     "   style (language, tone, how formal), never one item at a time. Save the answer in their",
     "   own words with set_my_preferences (omit `tool` so it applies to all tools). If they",
@@ -460,7 +542,7 @@ export function onboardingGuideText(roles: readonly string[] | null | undefined)
     "   onboarding here (assistance level Melden / Voorbereiden / Routine doen, a tool's own",
     "   choices): each tool with onboarding asks at its first call - its result carries the",
     "   questions and set_my_preferences {tool, assistanceLevel, choices} stores the answers;",
-    "   whoami lists the tools still pending as pendingOnboarding.",
+    "   get_my_preferences shows what is stored for which tool.",
     "5. guide — read every role guide the step names (pentest_guide, provider_setup_guide) and",
     "   follow it from then on.",
     "",
@@ -530,7 +612,11 @@ const ONBOARDING_STATUS: Tool = {
     "organization administrator which organization-level provider connections are still " +
     "missing, which personal provider sign-ins they still need, whether they stored working " +
     "preferences, and whether they read their role guide. Computed from the server's own " +
-    "state; takes no arguments. The same checklist is embedded in whoami as `onboarding`.",
+    "state; takes no arguments. Every step comes back WITH its howTo, so this is the one " +
+    "call that gives you the whole picture: whoami's `onboarding` is only an index (key, " +
+    "title, status) and the per-step how-to otherwise lives behind the resources " +
+    "`osf://onboarding/step/<key>`. Call this instead of reading those resources when your " +
+    "client cannot read MCP resources, or when you want every step at once.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
   annotations: {
     title: "Onboarding status",
@@ -936,11 +1022,31 @@ export async function describeOnboarding(env: OnboardingEnvironment): Promise<On
   return computeOnboarding(await gatherOnboardingFacts(env));
 }
 
-/** `whoami` with the checklist embedded and one sentence added to its summary. */
+/** Where the how-to lives, said once, in the index itself. */
+export const ONBOARDING_DETAIL_LINE =
+  `What is open, not how. One step: read ${ONBOARDING_STEP_URI_PREFIX}<key>, ` +
+  `e.g. ${onboardingStepUri("connections")}. All of them with their howTo: ${ONBOARDING_STATUS_TOOL}.`;
+
+/** The checklist as an index: the same steps, without the how-to. */
+export function onboardingIndex(summary: OnboardingSummary): OnboardingIndex {
+  const applicable = summary.steps.filter((step) => step.status !== "not_applicable");
+  return {
+    status: summary.status,
+    version: summary.version,
+    completedAt: summary.completedAt,
+    done: applicable.filter((step) => step.status === "done").length,
+    total: applicable.length,
+    steps: summary.steps.map(({ key, title, status }) => ({ key, title, status })),
+    detail: ONBOARDING_DETAIL_LINE,
+    summary: summary.summary,
+  };
+}
+
+/** `whoami` with the checklist INDEX embedded and one sentence added to its summary. */
 export function withOnboarding<T extends { summary: string }>(
   info: T,
   onboarding: OnboardingSummary,
-): T & { onboarding: OnboardingSummary } {
+): T & { onboarding: OnboardingIndex } {
   const note =
     onboarding.status === "Completed"
       ? "Onboarding is completed."
@@ -949,7 +1055,7 @@ export function withOnboarding<T extends { summary: string }>(
         : `Onboarding is ${onboarding.status.toLowerCase()}; follow onboarding_guide.`;
   return {
     ...info,
-    onboarding,
+    onboarding: onboardingIndex(onboarding),
     summary: note ? `${info.summary} ${note}` : info.summary,
   };
 }

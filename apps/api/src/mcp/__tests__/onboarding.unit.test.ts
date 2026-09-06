@@ -17,6 +17,7 @@ import {
   ONBOARDING_STATUS_TOOL,
   ONBOARDING_VERSION,
   onboardingGuideText,
+  onboardingIndex,
   onboardingToolsForSession,
   providerNeedsPersonalSignIn,
   withOnboarding,
@@ -230,10 +231,21 @@ describe("guide text and instructions", () => {
     }
   });
 
-  it("adds one sentence to the server instructions", () => {
-    expect(ONBOARDING_INSTRUCTION).toBe(
-      " Call `whoami` first. If its `onboarding.status` is not Completed, follow `onboarding_guide`.",
-    );
+  it("names both ways to the detail in the server instructions", () => {
+    expect(ONBOARDING_INSTRUCTION).toContain("Call `whoami` first");
+    expect(ONBOARDING_INSTRUCTION).toContain("is an index");
+    expect(ONBOARDING_INSTRUCTION).toContain("osf://onboarding/step/<key>");
+    expect(ONBOARDING_INSTRUCTION).toContain("onboarding_status");
+    // It rides on every `initialize`, so it stays one paragraph.
+    expect(ONBOARDING_INSTRUCTION.length).toBeLessThan(400);
+  });
+
+  it("tells the guide reader that whoami says what, not how", () => {
+    for (const text of [onboardingGuideText(["org_employee"]), onboardingGuideText(["org_admin"])]) {
+      expect(text).toContain("`onboarding` field is the INDEX");
+      expect(text).toContain("osf://onboarding/step/<key>");
+      expect(text).toContain("cannot read resources");
+    }
   });
 
   it("embeds the checklist in whoami and appends to its summary", () => {
@@ -243,6 +255,63 @@ describe("guide text and instructions", () => {
     expect(inProgress.summary).toBe("You are Hans. Onboarding is in progress; follow onboarding_guide.");
     const none = withOnboarding(info, computeOnboarding(facts({ relation: null, record: null })));
     expect(none.summary).toBe("You are Hans.");
+  });
+
+  it("embeds an INDEX: key, title and status per step, never the howTo", () => {
+    const full = computeOnboarding(
+      facts({
+        organizationConnections: [],
+        personalSignIns: [{ provider: "Google Workspace", connected: false, tools: ["google_koppelen"] }],
+      }),
+    );
+    const { onboarding } = withOnboarding({ summary: "You are Hans." }, full);
+
+    expect(Object.keys(onboarding).sort()).toEqual([
+      "completedAt",
+      "detail",
+      "done",
+      "status",
+      "steps",
+      "summary",
+      "total",
+      "version",
+    ]);
+    for (const step of onboarding.steps) {
+      expect(Object.keys(step).sort()).toEqual(["key", "status", "title"]);
+    }
+    // The step whose howTo names every provider is in the index by name only.
+    expect(JSON.stringify(onboarding)).not.toContain("connect_service");
+    expect(JSON.stringify(onboarding)).not.toContain("Google Workspace");
+    expect(JSON.stringify(full)).toContain("connect_service");
+  });
+
+  it("counts only the steps that apply, and says where the how-to lives", () => {
+    const index = onboardingIndex(
+      computeOnboarding(
+        facts({
+          // identity done, preferences todo, the other three not applicable.
+          organizationConnections: null,
+          personalSignIns: null,
+          guides: [],
+        }),
+      ),
+    );
+    expect(index.steps).toHaveLength(5);
+    expect({ done: index.done, total: index.total }).toEqual({ done: 1, total: 2 });
+    expect(index.detail).toContain("osf://onboarding/step/<key>");
+    expect(index.detail).toContain("osf://onboarding/step/connections");
+    expect(index.detail).toContain("onboarding_status");
+    expect(index.version).toBe(ONBOARDING_VERSION);
+    expect(index.completedAt).toBeNull();
+  });
+
+  it("points a resource-less client at onboarding_status in the tool's own description", () => {
+    const description = onboardingToolsForSession(session()).find(
+      (tool) => tool.name === ONBOARDING_STATUS_TOOL,
+    )!.description!;
+    expect(description).toContain("howTo");
+    expect(description).toContain("only an index");
+    expect(description).toContain("cannot read MCP resources");
   });
 
   it("recognises personal sign-in providers the way the server does", () => {

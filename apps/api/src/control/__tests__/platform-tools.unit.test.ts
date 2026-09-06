@@ -183,6 +183,27 @@ describe("buildPlatformSessionInfo", () => {
     expect(serialized).not.toContain("openshapeforge-control");
   });
 
+  it("names the MCP client that opened the session, and stays silent without one", () => {
+    const info = buildPlatformSessionInfo({
+      administrator,
+      tenants: 3,
+      client: { name: "Claude Code", version: "2.1.0", capabilities: [] },
+      access: { tools: 9, resources: 1 },
+      nowMs: NOW,
+    });
+    expect(info.connectedVia).toBe("Claude Code 2.1.0");
+    expect(info.summary).toContain("signed in via Codex. Connected through Claude Code 2.1.0.");
+    const silent = buildPlatformSessionInfo({
+      administrator,
+      tenants: 3,
+      access: { tools: 9, resources: 1 },
+      nowMs: NOW,
+    });
+    expect(silent.client).toBeNull();
+    expect(silent.connectedVia).toBeNull();
+    expect(silent.summary).not.toContain("Connected through");
+  });
+
   it("names the admin gateway as the Hubble control plane and copes with an unreadable registry", () => {
     const info = buildPlatformSessionInfo({
       administrator: { ...administrator, authorizedParty: "openshapeforge-admin-gateway", expiresAtMs: null },

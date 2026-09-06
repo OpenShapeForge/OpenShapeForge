@@ -23,6 +23,7 @@ import {
   SIGN_OUT_INSTRUCTION,
   signedInViaLabel,
 } from "../mcp/session-info.js";
+import { connectedViaLabel, type McpClientInfo } from "../mcp/session-client.js";
 import { ControlAuthorizationError } from "./authorization.js";
 import { ControlServiceError } from "./errors.js";
 import { ControlInputError } from "./organization-naming.js";
@@ -413,6 +414,10 @@ export type PlatformSessionInfo = {
   /** How many tenants the platform currently has; null when the registry is unreachable. */
   tenants: number | null;
   signedInVia: string;
+  /** The MCP client as it introduced itself at `initialize`; see mcp/session-client.ts. */
+  client: McpClientInfo | null;
+  /** "Claude Desktop 1.2.3"; null with `client`. */
+  connectedVia: string | null;
   /** Expiry of the ACCESS TOKEN, not of the sign-in; see mcp/session-info.ts. */
   accessTokenExpiresAt?: string;
   accessTokenExpiresIn?: string;
@@ -430,6 +435,8 @@ function plural(count: number, noun: string): string {
 export function buildPlatformSessionInfo(input: {
   administrator: PlatformAdministrator;
   tenants: number | null;
+  /** What the MCP client said at `initialize`; defaults to none. */
+  client?: McpClientInfo | null;
   access: { tools: number; resources: number };
   sessionIdleDays?: number;
   nowMs?: number;
@@ -450,9 +457,12 @@ export function buildPlatformSessionInfo(input: {
           relative: describeExpiry(administrator.expiresAtMs, nowMs),
         };
   const idle = plural(input.sessionIdleDays ?? sessionIdleDaysFromEnv(), "day");
+  const client = input.client ?? null;
+  const connectedVia = connectedViaLabel(client);
   const who = administrator.name ?? "an unnamed administrator";
   const sentences = [
     `You are ${who}, a platform administrator of this deployment, signed in via ${signedInVia}.`,
+    ...(connectedVia ? [`Connected through ${connectedVia}.`] : []),
     tenants === null
       ? "You act for every tenant; the tenant registry could not be counted right now."
       : `You act for every tenant — there ${tenants === 1 ? "is" : "are"} ${plural(tenants, "tenant")} — and for none in particular.`,
@@ -474,6 +484,8 @@ export function buildPlatformSessionInfo(input: {
     scope: "platform",
     tenants,
     signedInVia,
+    client,
+    connectedVia,
     ...(expiry
       ? {
           accessTokenExpiresAt: expiry.at,
@@ -576,6 +588,8 @@ function rejectUnknown(args: Record<string, unknown>, allowed: readonly string[]
 export type PlatformToolContext = PlatformCatalogDeps & {
   /** The whoami counts, from the server's own lists. */
   access: () => { tools: number; resources: number };
+  /** The MCP client that opened this session, when one introduced itself. */
+  client?: McpClientInfo | null;
   log?: (error: unknown) => void;
 };
 
@@ -608,6 +622,7 @@ export async function callPlatformTool(
           buildPlatformSessionInfo({
             administrator: context.administrator,
             tenants,
+            client: context.client ?? null,
             access: context.access(),
           }),
         );

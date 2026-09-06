@@ -46,6 +46,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ControlAuthorizationError } from "../control/authorization.js";
+import { clientInfoFromInitializeBody, type McpClientInfo } from "./session-client.js";
 import { readControlPlaneConfig, type ControlPlaneConfigResult } from "../control/config.js";
 import {
   resolvePlatformAdministrator,
@@ -184,6 +185,8 @@ function buildPlatformServer(input: {
   db: OpenShapeForgeDatabase;
   administrator: PlatformAdministrator;
   provider: PlatformCatalogProvider | undefined;
+  /** What the client said at `initialize` (mcp/session-client.ts); null on a single shot. */
+  client: McpClientInfo | null;
   log: (error: unknown) => void;
 }): Server {
   const server = new Server(PLATFORM_SERVER_INFO, {
@@ -191,7 +194,14 @@ function buildPlatformServer(input: {
     instructions: PLATFORM_SERVER_INSTRUCTIONS,
   });
   const access = () => ({ tools: PLATFORM_TOOLS.length, resources: 1 });
-  const context = { db: input.db, administrator: input.administrator, provider: input.provider, access, log: input.log };
+  const context = {
+    db: input.db,
+    administrator: input.administrator,
+    provider: input.provider,
+    client: input.client,
+    access,
+    log: input.log,
+  };
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...PLATFORM_TOOLS] }));
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({
@@ -204,6 +214,7 @@ function buildPlatformServer(input: {
     const info = buildPlatformSessionInfo({
       administrator: input.administrator,
       tenants: await listPlatformTenantsCount(context),
+      client: input.client,
       access: access(),
     });
     return {
@@ -372,7 +383,8 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
       }
 
       if (request.method === "POST" && isInitializeBody(request.body)) {
-        const server = buildPlatformServer({ db, administrator, provider, log });
+        const client = clientInfoFromInitializeBody(request.body);
+        const server = buildPlatformServer({ db, administrator, provider, client, log });
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
@@ -395,7 +407,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
       }
 
       // Sessionless single shot, for probes and scripted proofs.
-      const server = buildPlatformServer({ db, administrator, provider, log });
+      const server = buildPlatformServer({ db, administrator, provider, client: null, log });
       const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
       reply.raw.on("close", () => {
         void transport.close();

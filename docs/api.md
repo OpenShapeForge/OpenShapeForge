@@ -112,7 +112,13 @@ REST-specific semantics:
   (`BAD_USER_INPUT` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403,
   `GENERATED_CRUD_NOT_ENABLED` / `GENERATED_CRUD_OPERATION_NOT_ENABLED` 404,
   `DATABASE_NOT_CONFIGURED` 503; anything
-  unexpected is a redacted 500).
+  unexpected is a redacted 500). A write the database itself refuses — an
+  authored trigger or guard function that RAISEs, or a system constraint —
+  is answered in the same vocabulary on every transport
+  (`src/db/database-refusals.ts`): `NOT_PUBLISHABLE` 400, `REFERENCE_NOT_FOUND`
+  404, `OPERATION_REFUSED` / `REFERENCE_IN_USE` / `ALREADY_EXISTS` 409, with the
+  authored message forwarded and the driver's text, constraint and table names
+  never.
 - **OpenAPI** — `bun run generate` also emits
   `apps/api/src/generated/rest/openapi.json` (always, empty `paths` when no
   entity opts in), served verbatim at `GET /api/rest/openapi.json`.

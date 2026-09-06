@@ -44,7 +44,10 @@ import {
   apiKeyTypeDefs,
   createApiKeyResolvers,
 } from "../auth/api-key/graphql-schema.js";
-import { readApiKeyProvisioningConfig } from "../auth/api-key/runtime-config.js";
+import {
+  readApiKeyProvisioningConfig,
+  type ApiKeyProvisioningConfig,
+} from "../auth/api-key/runtime-config.js";
 import type { GraphqlContext } from "./context.js";
 import type { ModuleRuntimeContext, RuntimeModule } from "../modules/contract.js";
 import { composeModuleGraphql, declaredFieldNames } from "../modules/graphql-composition.js";
@@ -54,13 +57,18 @@ import { assertSingleModuleEgressOwner } from "../modules/registry.js";
 // The connector catalog types are static — identical across deployments — so a
 // connector this deployment is not licensed for is a row with
 // status: NOT_LICENSED rather than a hole in the schema.
-// The fields stay in the schema whether or not provisioning is configured, so
-// the web client's queries do not change shape per environment; an
-// unconfigured deployment answers NOT_CONFIGURED.
-const apiKeyResolvers = createApiKeyResolvers({
-  config: readApiKeyProvisioningConfig(),
-});
 
+/**
+ * Surfaces whose runtime configuration the host resolves once and hands to
+ * every transport. `createApiApp` reads the API key provisioning configuration
+ * a single time and gives it to the REST routes and to this schema, so the
+ * two cannot disagree about whether provisioning exists; a caller that passes
+ * nothing gets the environment as it stands when the schema is BUILT, never
+ * as it stood when this module was first imported.
+ */
+export type GraphqlSurfaceOptions = {
+  apiKeyConfig?: ApiKeyProvisioningConfig | undefined;
+};
 /**
  * Build the executable schema, splicing in whatever the loaded runtime modules
  * contribute.
@@ -73,7 +81,14 @@ const apiKeyResolvers = createApiKeyResolvers({
 export function buildGraphqlSchema(
   modules: readonly RuntimeModule[] = [],
   context: ModuleRuntimeContext = {},
+  surfaces: GraphqlSurfaceOptions = {},
 ) {
+  // The fields stay in the schema whether or not provisioning is configured,
+  // so the web client's queries do not change shape per environment; an
+  // unconfigured deployment answers NOT_CONFIGURED.
+  const apiKeyResolvers = createApiKeyResolvers({
+    config: "apiKeyConfig" in surfaces ? surfaces.apiKeyConfig : readApiKeyProvisioningConfig(),
+  });
   const connectorResolvers = createConnectorResolvers({
     config: readConnectorRuntimeConfig(),
     egressOwner: assertSingleModuleEgressOwner(modules),

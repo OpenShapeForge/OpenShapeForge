@@ -145,6 +145,26 @@ export function listOperationContracts(): readonly OperationContract[] {
 type Bound = { operation: OperationContract; handler: ModuleOperationHandler };
 const bindingCache = new WeakMap<readonly RuntimeModule[], Map<string, Bound>>();
 
+/**
+ * Whether any module in this process claims a canonical operation.
+ *
+ * A build with no such module — a core-only deployment, or a test that
+ * resolves no modules — advertises no operation tools rather than failing
+ * every request over a handler nothing was ever going to provide. The moment
+ * one operation module is present, every operation has to bind, and
+ * `bindOperationHandlers` throws for the ones that cannot. REST boot
+ * (roles/api.ts) and the MCP server (mcp/generated-mcp-server.ts) read this
+ * one rule, so the two transports cannot disagree about whether operations
+ * exist.
+ */
+export function operationModulesConfigured(
+  modules: readonly Pick<RuntimeModule, "name">[],
+  operations: readonly OperationContract[] = catalog.operations,
+): boolean {
+  const plugins = new Set(operations.map((operation) => operation.plugin));
+  return modules.some((module) => plugins.has(module.name));
+}
+
 export function bindOperationHandlers(
   modules: readonly RuntimeModule[],
   operations: readonly OperationContract[] = catalog.operations,

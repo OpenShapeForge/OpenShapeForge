@@ -312,6 +312,7 @@ import { localizedText, type ResolvedLocale } from "./locale.js";
 // --- end the person's language ---
 import {
   bindOperationHandlers,
+  operationModulesConfigured,
   DeclaredOperationError,
   invokeOperation,
   isMcpProjection,
@@ -1137,6 +1138,30 @@ export const __configurationFallbackLeadForTests = configurationFallbackLead;
 
 function elicitedKeyring() {
   return keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
+}
+
+/**
+ * The sentence the server instructions carry about the OAuth redirect URL.
+ * Without a public origin there is no URL to state, and that is said plainly
+ * instead of thrown: the origin is optional everywhere else on this surface
+ * (the onboarding step answers `null`, the configuration handoff is skipped),
+ * so its absence must not turn every MCP request into a 503.
+ */
+function oauthRedirectInstruction(): string {
+  try {
+    return (
+      ` This server's OAuth redirect (callback) URL is ` +
+      `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH} — when setting up a provider ` +
+      `OAuth client, give the person this exact URL to register; never ask them what it is.`
+    );
+  } catch {
+    return (
+      " This server has no public origin configured, so it has no OAuth redirect " +
+      "(callback) URL yet; a provider OAuth client cannot be registered until " +
+      "OPENSHAPEFORGE_PUBLIC_ORIGIN is set on the deployment. Say so; never ask the " +
+      "person for the URL."
+    );
+  }
 }
 
 function callbackOrigin(): string {
@@ -3060,11 +3085,10 @@ function buildServer(
     // than leaving assistants to ask the person for a value only this
     // process knows. Providers register this exact URL.
     instructions:
+      INSTRUCTIONS +
       (catalogDerivedTools.some((entry) => entry.connect)
-        ? `${INSTRUCTIONS} This server's OAuth redirect (callback) URL is ` +
-          `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH} — when setting up a provider ` +
-          `OAuth client, give the person this exact URL to register; never ask them what it is.`
-        : INSTRUCTIONS) +
+        ? oauthRedirectInstruction()
+        : "") +
       catalogGuideTools
         .filter((guide) => guide.requireBeforeCreate)
         .map(
@@ -3090,8 +3114,12 @@ function buildServer(
       // ---- end update notices ----
   });
   const tables = tableOverride ?? tablesByName();
-  const operations =
-    modules === undefined ? new Map() : bindOperationHandlers(modules);
+  // The same rule REST boot applies (roles/api.ts): with no operation module
+  // in the process there are no operation tools, rather than a 500 on every
+  // request because the catalog names a handler nothing loaded.
+  const operations = operationModulesConfigured(runtimeModules)
+    ? bindOperationHandlers(runtimeModules)
+    : new Map();
   const sourceVault = new InvocationSourceVault();
 
   const projectionContext = (): McpProjectionContext => {

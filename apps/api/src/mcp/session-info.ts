@@ -6,42 +6,54 @@
  * A person driving an assistant against this server (and the assistant
  * itself) regularly needs to know who the server thinks they are: which
  * organization they act for, what they may do, how they signed in and for how
- * long. The answer is deliberately NOT the token: no claims, no ids, no
- * secrets, no tenant keys. Everything here is a display value, and every
- * identifier-shaped input is translated before it leaves this module.
+ * long, and through which client. The answer is deliberately NOT the token:
+ * no claims, no ids, no secrets, no tenant keys. Everything here is a display
+ * value, and every identifier-shaped input is translated before it leaves.
  *
- * The module owns three things:
+ * The module owns two things:
  *
- *   1. `rememberSessionIdentity` / `sessionIdentityOf` — the display facts a
- *      bearer token carries beyond what `TrustedSessionContext` keeps (name,
- *      email, language, client, expiry, organization memberships), plus
- *      `sessionLocale`, which runs the language fallback order in
- *      `mcp/locale.ts` over that claim. The session context is
- *      shared with GraphQL and REST and is kept minimal on purpose; rather than
- *      widening it, the MCP entry point hands the already-verified request
- *      headers to this module, which reads the token payload for display
- *      fields only. Verification happened in `resolveSessionContext`; this
- *      module never trusts a claim for authorization.
- *   2. `buildSessionInfo` — a pure function from those facts to the answer.
- *      Unit-tested without a database.
- *   3. `describeSession` — the orchestrator the server calls: reads the
+ *   1. `buildSessionInfo` — a pure function from the session's display facts
+ *      to the answer. Unit-tested without a database.
+ *   2. `describeSession` — the orchestrator the server calls: reads the
  *      tenant's display name from the registry (the session's own row, under
  *      the same row-level-security policy `currentTenant` relies on), asks the
  *      server how many tools and resources THIS session sees, and builds the
  *      answer.
  *
+ * The facts themselves live beside it: `session-identity.ts` reads and keeps
+ * the credential's display facts (name, language, expiry, memberships),
+ * `session-client.ts` what the MCP client said about itself at `initialize`,
+ * and `session-labels.ts` the words roles and clients are shown in; the
+ * database-touching orchestration is in `session-describe.ts`. The identity
+ * and label names are re-exported here so existing importers keep one entry.
+ *
  * Authorization: none beyond being authenticated. Every session that reaches
  * the MCP transport may ask who it is; the answer contains only facts the
  * caller already presented in its own credential.
  */
-import { sql } from "kysely";
-import { selectOrganizationMembership } from "../auth/identity.js";
 import { sessionRelation, type IdentityLinkState } from "../auth/identity-link.js";
-import type { OrganizationResourceBinding } from "../auth/organization-binding.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
-import type { OpenShapeForgeDatabase } from "../db/connection.js";
-import { LOCALE_CLAIM, resolveLocale, type ResolvedLocale } from "./locale.js";
-import { withDbSession } from "../db/session.js";
+import { resolveLocale, type ResolvedLocale } from "./locale.js";
+import { connectedViaLabel, type McpClientInfo } from "./session-client.js";
+import type { SessionIdentity } from "./session-identity.js";
+import {
+  classifyRoles,
+  describeExpiry,
+  plural,
+  signedInViaLabel,
+} from "./session-labels.js";
+
+export {
+  carrySessionIdentity,
+  identityFromBearerClaims,
+  identityFromSession,
+  readSessionIdentity,
+  rememberSessionIdentity,
+  sessionIdentityOf,
+  sessionLocale,
+  type SessionIdentity,
+} from "./session-identity.js";
+export { describeExpiry, humanizeDuration, signedInViaLabel } from "./session-labels.js";
 
 export const SESSION_INFO_TOOL_NAME = "whoami";
 export const SESSION_RESOURCE_URI = "osf://session";
@@ -74,7 +86,7 @@ export const SIGN_OUT_INSTRUCTION =
 export const RELATION_EXPLANATION =
   "The record you act as in this organization; roles like employee or supplier are assigned by an administrator.";
 
-const JSON_MIME_TYPE = "application/json";
+export const JSON_MIME_TYPE = "application/json";
 
 /** The `tools/list` entry. Static: it does not depend on the session. */
 export const SESSION_INFO_TOOL = {
@@ -115,206 +127,6 @@ export const SESSION_RESOURCE = {
 } as const;
 
 // ---------------------------------------------------------------------------
-// Display identity captured from the credential
-
-/**
- * The display facts of one session's credential. Present only what the
- * credential said about the person; the tenant and roles stay on the session
- * context, which is the authority for them.
- */
-export type SessionIdentity = {
-  credential: TrustedSessionContext["credential"];
-  /** `name`, else `preferred_username`; null when the credential carries neither. */
-  name: string | null;
-  email: string | null;
-  /** The OAuth client the token was issued to (`azp`); null when unknown. */
-  authorizedParty: string | null;
-  /**
-   * The `locale` claim, exactly as the realm issued it (`nl`, `nl-NL`, …), or
-   * null when the credential carries none. A display fact like `name` and
-   * `email` beside it: `mcp/locale.ts` turns it into the language this session
-   * is answered in, and nothing decides a permission by it.
-   */
-  locale: string | null;
-  /** Token expiry in epoch milliseconds; null when the credential does not expire. */
-  expiresAtMs: number | null;
-  /**
-   * Keycloak Organization memberships the token carries, by alias, with the
-   * one the session's tenant was resolved from marked active. Empty for a
-   * `tid`-style token or a non-bearer credential — the tenant row then stands
-   * in as the only group.
-   */
-  organizations: Array<{ alias: string; active: boolean }>;
-  /**
-   * Alias of the organization whose per-organization endpoint
-   * (`/api/mcp/organizations/<alias>`) the session was opened on; null on the
-   * shared `/api/mcp` path. When set it is the active membership, whatever
-   * scope the token also carries: the binding pinned the tenant.
-   */
-  boundOrganization: string | null;
-};
-
-const BEARER_AUTHORIZATION = /^Bearer\s+(.+)$/i;
-
-function decodeJwtPayload(token: string): Record<string, unknown> | null {
-  const parts = token.split(".");
-  if (parts.length !== 3 || !parts[1]) return null;
-  try {
-    const decoded = Buffer.from(parts[1], "base64url").toString("utf8");
-    const parsed: unknown = JSON.parse(decoded);
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function stringClaim(claims: Record<string, unknown>, key: string): string | null {
-  const value = claims[key];
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-/**
- * Display facts from a verified bearer token's payload.
- *
- * Exported for tests. The caller is responsible for having verified the token
- * first — `resolveSessionContext` did, for the same `Authorization` header —
- * which is why this reads the payload without re-checking the signature: the
- * fields are used for display, never for a decision.
- */
-export function identityFromBearerClaims(
-  claims: Record<string, unknown>,
-  binding: Pick<OrganizationResourceBinding, "alias"> | null = null,
-): SessionIdentity {
-  const rawOrganizations = claims.organization;
-  const memberships: Record<
-    string,
-    { id: string | null; groups: string[]; roles: string[]; clientRoles: Record<string, string[]> }
-  > = {};
-  if (rawOrganizations !== null && typeof rawOrganizations === "object") {
-    for (const [alias, membership] of Object.entries(
-      rawOrganizations as Record<string, unknown>,
-    )) {
-      const id =
-        membership !== null && typeof membership === "object"
-          ? (membership as { id?: unknown }).id
-          : undefined;
-      memberships[alias] = {
-        id: typeof id === "string" && id.length > 0 ? id : null,
-        groups: [],
-        roles: [],
-        clientRoles: {},
-      };
-    }
-  }
-  const scopes = (stringClaim(claims, "scope") ?? "").split(/\s+/).filter(Boolean);
-  const active = binding
-    ? { alias: binding.alias }
-    : selectOrganizationMembership({ organizations: memberships, scopes });
-  const exp = claims.exp;
-  return {
-    credential: "bearer",
-    name: stringClaim(claims, "name") ?? stringClaim(claims, "preferred_username"),
-    email: stringClaim(claims, "email"),
-    authorizedParty: stringClaim(claims, "azp"),
-    locale: stringClaim(claims, LOCALE_CLAIM),
-    expiresAtMs: typeof exp === "number" && Number.isFinite(exp) ? exp * 1000 : null,
-    organizations: Object.keys(memberships).map((alias) => ({
-      alias,
-      active: active?.alias === alias,
-    })),
-    boundOrganization: binding?.alias ?? null,
-  };
-}
-
-/** The identity of a session whose credential carries no display facts. */
-export function identityFromSession(session: TrustedSessionContext): SessionIdentity {
-  return {
-    credential: session.credential,
-    name: null,
-    email: null,
-    authorizedParty: null,
-    locale: null,
-    expiresAtMs: null,
-    organizations: [],
-    boundOrganization: null,
-  };
-}
-
-/**
- * The identity behind a resolved session, read from the request that produced
- * it. Only a bearer credential has a payload to read; an API key is opaque by
- * design, and a trusted-context session is the development identity.
- */
-export function readSessionIdentity(
-  session: TrustedSessionContext,
-  headers: Headers,
-  binding: Pick<OrganizationResourceBinding, "alias"> | null = null,
-): SessionIdentity {
-  if (session.credential !== "bearer") return identityFromSession(session);
-  const authorization = headers.get("authorization") ?? "";
-  const token = BEARER_AUTHORIZATION.exec(authorization)?.[1];
-  const claims = token ? decodeJwtPayload(token) : null;
-  return claims ? identityFromBearerClaims(claims, binding) : identityFromSession(session);
-}
-
-// The session context object is created once per request and, for a stateful
-// MCP session, captured by the server built at `initialize`. Keying by that
-// object ties the identity to exactly the session it was read for, with no
-// registry to sweep: the entry goes when the session context does.
-const identities = new WeakMap<TrustedSessionContext, SessionIdentity>();
-
-/**
- * Attach the credential's display facts to a resolved session. `binding` is
- * the per-organization resource the request was addressed to, when it was
- * (the same value `resolveSessionContext` bound the session with).
- */
-export function rememberSessionIdentity(
-  session: TrustedSessionContext,
-  headers: Headers,
-  binding: Pick<OrganizationResourceBinding, "alias"> | null = null,
-): void {
-  identities.set(session, readSessionIdentity(session, headers, binding));
-}
-
-/** The facts attached by `rememberSessionIdentity`, or the credential-only floor. */
-export function sessionIdentityOf(session: TrustedSessionContext): SessionIdentity {
-  return identities.get(session) ?? identityFromSession(session);
-}
-
-/**
- * Move the display facts read for one request onto the session object a
- * stateful MCP server captured at `initialize`.
- *
- * A stateful session outlives many access tokens: the client refreshes
- * silently, so every later request carries a newer `exp`, but the server built
- * at `initialize` keeps answering `whoami` from the context object of that
- * first request. `rememberSessionIdentity` did run per request — under the new
- * request's own context, which nothing reads — so the reported expiry stayed
- * the first token's and went stale within minutes. Calling this on every reuse
- * keeps the answer as fresh as the credential the caller just presented.
- */
-export function carrySessionIdentity(
-  captured: TrustedSessionContext,
-  current: TrustedSessionContext,
-): void {
-  if (captured === current) return;
-  const identity = identities.get(current);
-  if (identity) identities.set(captured, identity);
-}
-
-/**
- * The language this session reads: the person's own, else the realm's default,
- * else the host's — the order is written out in `mcp/locale.ts`. Every caller
- * that shows a person an authored text, or tells an assistant which language to
- * answer in, resolves it through here rather than reaching for the claim.
- */
-export function sessionLocale(session: TrustedSessionContext): ResolvedLocale {
-  return resolveLocale({ user: sessionIdentityOf(session).locale });
-}
-
-// ---------------------------------------------------------------------------
 // Pure projection
 
 export type SessionInfo = {
@@ -343,8 +155,16 @@ export type SessionInfo = {
    * provider only when the person asks why they are being addressed this way.
    */
   language: { tag: string; name: string; source: "user" | "realm" | "host" };
-  /** Friendly name of the client the person signed in with. */
+  /** Friendly name of the OAuth client the person signed in with (`azp`). */
   signedInVia: string;
+  /**
+   * The MCP client as it introduced itself at `initialize` — the program the
+   * person is talking through (Claude Desktop, Codex, an inspector), which is
+   * not always the OAuth client above. Null on a session no client opened.
+   */
+  client: McpClientInfo | null;
+  /** "Claude Desktop 1.2.3" — the same, as one label; null with `client`. */
+  connectedVia: string | null;
   /**
    * ISO 8601 expiry of the ACCESS TOKEN, which is not the end of the sign-in:
    * it is minutes away and the client refreshes it silently. Absent for a
@@ -393,6 +213,8 @@ export type SessionInfoInput = {
   roles: readonly string[];
   /** The session's own tenant row, or null when the registry has none. */
   organization: { name: string } | null;
+  /** What the MCP client said at `initialize`; defaults to none. */
+  client?: McpClientInfo | null;
   /** `session.relation`: the identity ↔ Relation link state, when any. */
   relation?: IdentityLinkState | null;
   access: { tools: number; resources: number };
@@ -404,89 +226,10 @@ export type SessionInfoInput = {
   nowMs?: number;
 };
 
-/** Composite roles the realm grants; the label is what a person reads. */
-const ROLE_LABELS: ReadonlyArray<{ role: string; label: string; phrase: string }> = [
-  { role: "org_admin", label: "Organization administrator", phrase: "organization administrator" },
-  { role: "org_employee", label: "Employee", phrase: "employee" },
-];
-
-/** Keycloak's own bookkeeping roles: present on every token, meaningless here. */
-const KEYCLOAK_BUILTIN_ROLE =
-  /^(default-roles-.+|offline_access|uma_authorization|manage-account|manage-account-links|manage-consent|view-profile|view-groups|view-applications|view-consent|delete-account)$/;
-
-const CLIENT_NAMES: Readonly<Record<string, string>> = {
-  codex: "Codex",
-  "openshapeforge-inspector": "MCP Inspector",
-  "openshapeforge-gateway": "Hubble",
-  // The control realm's clients (platform administrator MCP, control/platform-tools.ts).
-  "codex-platform": "Codex",
-  "openshapeforge-admin-gateway": "Hubble control plane",
-};
-
-/**
- * Only the two fields it actually reads, so a caller that has a credential but
- * not a whole `SessionIdentity` — the platform control plane builds one from
- * its own administrator record — does not have to invent the rest. Widening
- * `SessionIdentity` is otherwise a breaking change for every such caller.
- */
-export function signedInViaLabel(
-  identity: Pick<SessionIdentity, "credential" | "authorizedParty">,
-): string {
-  switch (identity.credential) {
-    case "trusted-context":
-      return "Development identity";
-    case "api-key":
-      return "API key";
-    case "bearer":
-      return identity.authorizedParty
-        ? (CLIENT_NAMES[identity.authorizedParty] ?? identity.authorizedParty)
-        : "Unknown client";
-    default:
-      return "Unknown";
-  }
-}
-
-function plural(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
-}
-
-/** "12 minutes", "1 hour 5 minutes", "2 days 3 hours", "45 seconds". */
-export function humanizeDuration(ms: number): string {
-  const totalSeconds = Math.max(0, Math.round(Math.abs(ms) / 1000));
-  if (totalSeconds < 60) return plural(totalSeconds, "second");
-  const totalMinutes = Math.floor(totalSeconds / 60);
-  if (totalMinutes < 60) return plural(totalMinutes, "minute");
-  const totalHours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  if (totalHours < 24) {
-    return plural(totalHours, "hour") + (minutes > 0 ? ` ${plural(minutes, "minute")}` : "");
-  }
-  const days = Math.floor(totalHours / 24);
-  const hours = totalHours % 24;
-  return plural(days, "day") + (hours > 0 ? ` ${plural(hours, "hour")}` : "");
-}
-
-/** "in 12 minutes", or "12 minutes ago" once the moment has passed. */
-export function describeExpiry(expiresAtMs: number, nowMs: number): string {
-  const remaining = expiresAtMs - nowMs;
-  return remaining >= 0
-    ? `in ${humanizeDuration(remaining)}`
-    : `${humanizeDuration(-remaining)} ago`;
-}
-
 export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
   const { identity, organization, access } = input;
   const nowMs = input.nowMs ?? Date.now();
-  const roles = [...new Set(input.roles)];
-
-  const composite = ROLE_LABELS.find((entry) => roles.includes(entry.role));
-  const permissions = roles
-    .filter(
-      (role) =>
-        !ROLE_LABELS.some((entry) => entry.role === role) &&
-        !KEYCLOAK_BUILTIN_ROLE.test(role),
-    )
-    .sort((left, right) => left.localeCompare(right));
+  const { composite, permissions } = classifyRoles(input.roles);
   const role = composite
     ? composite.label
     : permissions.length > 0
@@ -506,6 +249,8 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
   }
 
   const signedInVia = signedInViaLabel(identity);
+  const client = input.client ?? null;
+  const connectedVia = connectedViaLabel(client);
   const locale = input.locale ?? resolveLocale({ user: identity.locale });
   const expiry =
     identity.expiresAtMs === null
@@ -522,7 +267,7 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
     (identity.credential === "trusted-context" ? "the development identity" : "an unnamed user");
   const of = organizationName ?? "an unknown organization";
   const rolePhrase = composite
-    ? `${composite.phrase} of ${of}`
+    ? `${composite.phrase.en} of ${of}`
     : permissions.length > 0
       ? `a member of ${of} with the roles ${permissions.join(", ")}`
       : `a member of ${of} without any roles`;
@@ -536,6 +281,7 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
       ? "using the development identity"
       : `via ${signedInVia}${endpoint}`;
   const sentences = [`You are ${who}, ${rolePhrase}, signed in ${via}.`];
+  if (connectedVia) sentences.push(`Connected through ${connectedVia}.`);
   if (groups.length > 1) {
     const active = groups.find((group) => group.active)!;
     sentences.push(`You belong to ${plural(groups.length, "group")}; ${active.name} is the active one.`);
@@ -569,6 +315,8 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
     groups,
     language: { tag: locale.tag, name: locale.name, source: locale.source },
     signedInVia,
+    client,
+    connectedVia,
     ...(expiry
       ? {
           accessTokenExpiresAt: expiry.at,
@@ -611,76 +359,4 @@ export function describeRelation(
     };
   }
   return { status: "Not linked", name: null, kind: null, explanation };
-}
-
-// ---------------------------------------------------------------------------
-// Orchestration
-
-/**
- * The session's own tenant row, by display name only.
- *
- * Runs inside `withDbSession`, so the `tenants_tenant_registry` policy reduces
- * to `id = app.current_tenant()`; the bound predicate makes the query's scope a
- * property of the query as well (see graphql/current-tenant.ts for the full
- * argument). Null when the registry has no row for the tenant.
- */
-export async function readSessionOrganization(
-  db: OpenShapeForgeDatabase,
-  session: TrustedSessionContext,
-): Promise<{ name: string } | null> {
-  if (!session.tenantId || !session.userId) return null;
-  return withDbSession(db, session, async (trx, dbSession) => {
-    const result = await sql<{ name: string }>`
-      select name
-        from platform.tenants
-       where id = ${dbSession.tenantId}::uuid
-    `.execute(trx);
-    return result.rows[0] ?? null;
-  });
-}
-
-/**
- * Build the answer for one live session. `access` is supplied by the server
- * and must count through its own per-session list builders, so the numbers
- * are exactly what `tools/list` and `resources/list` would return.
- */
-export async function describeSession(input: {
-  db: OpenShapeForgeDatabase;
-  session: TrustedSessionContext;
-  access: () => Promise<{ tools: number; resources: number }>;
-  nowMs?: number;
-}): Promise<SessionInfo> {
-  const [organization, access] = await Promise.all([
-    readSessionOrganization(input.db, input.session),
-    input.access(),
-  ]);
-  return buildSessionInfo({
-    identity: sessionIdentityOf(input.session),
-    roles: input.session.roles ?? [],
-    organization,
-    relation: input.session.relation ?? null,
-    access,
-    ...(input.nowMs !== undefined ? { nowMs: input.nowMs } : {}),
-  });
-}
-
-/** `tools/call` result: the JSON as text for every client, structured for those that read it. */
-export function sessionInfoToolResult(info: SessionInfo) {
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(info, null, 2) }],
-    structuredContent: info as unknown as Record<string, unknown>,
-  };
-}
-
-/** `resources/read` result for `osf://session`. */
-export function sessionInfoResourceResult(info: SessionInfo) {
-  return {
-    contents: [
-      {
-        uri: SESSION_RESOURCE_URI,
-        mimeType: JSON_MIME_TYPE,
-        text: JSON.stringify(info, null, 2),
-      },
-    ],
-  };
 }

@@ -162,6 +162,43 @@ describe("buildSessionInfo", () => {
     expectNoIdentifiers(info);
   });
 
+  it("names the MCP client that opened the session beside the OAuth client", () => {
+    const info = buildSessionInfo({
+      identity: bearer({ authorizedParty: "openshapeforge-gateway" }),
+      roles: [...KEYCLOAK_NOISE, "org_employee"],
+      organization: { name: "Zerocopter" },
+      client: { name: "Claude Desktop", version: "1.2.3", capabilities: ["elicitation", "sampling"] },
+      access: { tools: 12, resources: 3 },
+      nowMs: NOW,
+    });
+
+    expect(info.signedInVia).toBe("Hubble");
+    expect(info.client).toEqual({
+      name: "Claude Desktop",
+      version: "1.2.3",
+      capabilities: ["elicitation", "sampling"],
+    });
+    expect(info.connectedVia).toBe("Claude Desktop 1.2.3");
+    expect(info.summary).toStartWith(
+      "You are Hans Eilers, employee of Zerocopter, signed in via Hubble. " +
+        "Connected through Claude Desktop 1.2.3.",
+    );
+    expectNoIdentifiers(info);
+  });
+
+  it("says nothing about a client when none introduced itself", () => {
+    const info = buildSessionInfo({
+      identity: bearer(),
+      roles: ["org_employee"],
+      organization: { name: "Zerocopter" },
+      access: { tools: 12, resources: 3 },
+      nowMs: NOW,
+    });
+    expect(info.client).toBeNull();
+    expect(info.connectedVia).toBeNull();
+    expect(info.summary).not.toContain("Connected through");
+  });
+
   it("falls back to the raw role list when no composite is present", () => {
     const info = buildSessionInfo({
       identity: bearer({ authorizedParty: "openshapeforge-inspector" }),

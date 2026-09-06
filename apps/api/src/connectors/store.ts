@@ -16,6 +16,7 @@
 import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
+import { jsonbLiteral } from "../db/sql-helpers.js";
 import type { DB } from "../generated/db/types.js";
 import {
   decryptSecret,
@@ -174,14 +175,13 @@ export async function upsertInstallation(
     `.execute(trx);
 
     const tenantId = session.tenantId;
-    const configJson = JSON.stringify(input.config);
     let installationId = existing.rows[0]?.id;
 
     if (installationId) {
       await sql`
         update platform.connector_installations
            set display_name = ${input.displayName ?? null},
-               config = ${configJson}::jsonb,
+               config = ${jsonbLiteral(input.config)},
                contract_version = ${input.contractVersion},
                contract_checksum = ${input.contractChecksum},
                updated_at = now()
@@ -193,7 +193,7 @@ export async function upsertInstallation(
           (tenant_id, connector_slug, instance_key, display_name, config, enabled,
            contract_version, contract_checksum)
         values (${tenantId}::uuid, ${input.connectorSlug}, ${input.instanceKey},
-                ${input.displayName ?? null}, ${configJson}::jsonb, false,
+                ${input.displayName ?? null}, ${jsonbLiteral(input.config)}, false,
                 ${input.contractVersion}, ${input.contractChecksum})
         returning id
       `.execute(trx);

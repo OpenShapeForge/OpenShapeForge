@@ -74,8 +74,13 @@ function asDate(value: Date | string | null): Date | null {
  * subset: an empty array would silently authorize nothing and read as a
  * mysterious 403, while the honest reading of corrupt data is that no narrowing
  * was expressed.
+ *
+ * Exported because the key-listing in `service.ts` must answer the same
+ * question as the key-check here: a subset stored by an older writer as a
+ * jsonb string has to read as the same narrowing in both places, or a key
+ * shows itself as unrestricted in the overview while being restricted in use.
  */
-function parseRoleSubset(value: unknown): string[] | null {
+export function parseRoleSubset(value: unknown): string[] | null {
   const raw = typeof value === "string" ? safeJsonParse(value) : value;
   if (!Array.isArray(raw)) return null;
   const roles = raw.filter(

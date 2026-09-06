@@ -14,14 +14,34 @@
  * platform.identities and platform.identity_relations
  * (db/migrations/identity-link.ts).
  *
+ * AN INVITATION IS THE ONLY WAY IN
+ * ---------------------------------------------------------------------------
+ * Holding a valid token for the realm is NOT enough. A Google Workspace
+ * account of the customer's is a token this realm will happily mint, and it
+ * used to be enough: the just-in-time path below created a Relation for
+ * anybody whose e-mail nobody in the tenant carried, so every colleague of
+ * every customer could walk in. That branch now refuses (`NotInvitedError`,
+ * 403 NOT_INVITED) unless `platform.employee_invitations` holds a PENDING row
+ * for `(tenant_id, lower(email))` — an organization administrator's
+ * deliberate `invite_employee`. The refusal says who can let them in, because
+ * a person who was simply forgotten needs to know what to ask for, and the
+ * alternative failure (an authenticated session with no Relation, where half
+ * the surface works) is worse than a clear no.
+ *
  * Three ways a link comes about:
  *
  *   1. Just in time, on the first session in a tenant (`resolveIdentityLink`,
  *      called from identity.ts on the bearer path). If NO Relation in the
- *      tenant carries the token's e-mail, a Relation of type person is created
- *      through the generated CRUD path and linked. If one DOES, nothing is
- *      linked silently: the row is recorded as `pending_confirmation` with the
- *      Relation as candidate, and stays that way until somebody confirms.
+ *      tenant carries the token's e-mail, there must be a pending invitation:
+ *      a Relation of type person is then created through the generated CRUD
+ *      path and linked, the invited role is granted on the audience client,
+ *      and the invitation row moves to `accepted`. Without one, nothing is
+ *      created and the request is refused. If a Relation DOES carry the
+ *      e-mail, nothing is linked silently and no invitation is needed: the
+ *      row is recorded as `pending_confirmation` with the Relation as
+ *      candidate, and stays that way until the person confirms. (Somebody
+ *      already put that person in the tenant's own records; the question
+ *      there is "is this you", not "may you be here".)
  *   2. The person confirms the pending candidate (`confirmPendingLink`, MCP
  *      tool confirm_my_link).
  *   3. An organization administrator links an identity to a Relation
@@ -42,8 +62,40 @@ import {
   getGeneratedCrudTables,
 } from "../graphql/generated-crud.js";
 import { HttpError } from "../rest/http-error.js";
+import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "./organization-roles.js";
+// This module and ./employee-invitations.ts import each other: an invitation
+// is what admits a person (here), and admission is what accepts an invitation
+// (there). The cycle is safe — every binding crossing it is read at call
+// time, never during module evaluation — and splitting the two halves apart
+// would put the admission rule and the table it reads in different files.
+import {
+  acceptInvitation,
+  findPendingInvitation,
+  invitedRoleWithinGrace,
+  EMPLOYEE_INVITATION_ROLE_GRANTS,
+  INVITED_ROLE_GRACE_MS,
+  type GrantInvitedRole,
+} from "./employee-invitations.js";
 
-export const IDENTITY_LINK_ADMIN_ROLE = "Organization.All.ReadWrite";
+// Both re-exported so every existing importer of this module keeps working;
+// they live in ./organization-roles.ts because a `const` may not cross the
+// cycle with ./employee-invitations.ts. See that file.
+export { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES };
+
+/**
+ * A verified token whose person this tenant has never heard of and nobody
+ * invited. Thrown out of `resolveIdentityLink` — the ONE failure this module
+ * does not swallow, because swallowing it is exactly the hole this class
+ * closes. identity.ts re-throws it so the request surfaces as 403 NOT_INVITED
+ * with the message below, rather than as a session that authenticates and
+ * then half-works.
+ */
+export class NotInvitedError extends HttpError {
+  constructor(message: string) {
+    super(403, "NOT_INVITED", message);
+    this.name = "NotInvitedError";
+  }
+}
 
 /** What the token says about the person. Shaped by `identityClaimsFromToken`. */
 export type IdentityClaims = {
@@ -85,6 +137,20 @@ export type IdentityLinkState = {
    * very first session can act on.
    */
   needsRoleAssignment: boolean;
+  /**
+   * Client roles an invitation this identity accepted grants, while that
+   * acceptance is still inside `INVITED_ROLE_GRACE_MS` — see that constant in
+   * ./employee-invitations.ts for why the window exists and why it closes.
+   * identity.ts unions these onto the session's roles; empty at every other
+   * moment, which is almost always.
+   */
+  invitedRoles: readonly string[];
+  /**
+   * `linked_at` as epoch milliseconds, or null while pending. Only used to
+   * decide, without a query, whether this link can still be inside
+   * `INVITED_ROLE_GRACE_MS`.
+   */
+  linkedAtMs: number | null;
 };
 
 /** What a linked session resolves to: the party the login acts as. */
@@ -186,15 +252,29 @@ export function __resetIdentityLinkForTests(): void {
 type SessionInput = DbSessionInput & { tenantId: string; userId: string };
 
 /**
+ * Test seams. Empty in production, where every default is the real thing.
+ */
+export type IdentityLinkDeps = {
+  /** How an accepted invitation's role reaches Keycloak. */
+  grantInvitedRole?: GrantInvitedRole;
+};
+
+/**
  * The link state for this session's identity in this tenant, creating it
- * just in time on the first session. Never throws: a failure here must not
- * turn a valid token into an unauthenticated request, so it is logged and the
- * session simply carries no link.
+ * just in time on the first session — but only for somebody this tenant
+ * invited or already knows.
+ *
+ * Throws {@link NotInvitedError} and nothing else. A FAILURE here (a database
+ * hiccup, a missing entity) must not turn a valid token into an
+ * unauthenticated request, so it is logged and the session simply carries no
+ * link. A REFUSAL is not a failure: it is the resolved answer, and it has to
+ * reach the caller.
  */
 export async function resolveIdentityLink(
   db: OpenShapeForgeDatabase,
   session: SessionInput,
   claims: IdentityClaims,
+  deps: IdentityLinkDeps = {},
 ): Promise<IdentityLinkState | null> {
   const key = cacheKey(claims.issuer, claims.subject, session.tenantId);
   const cached = linkCache.get(key);
@@ -205,12 +285,16 @@ export async function resolveIdentityLink(
 
   const work = (async () => {
     try {
-      const state = await ensureIdentityLink(db, session, claims);
+      const state = await ensureIdentityLink(db, session, claims, deps);
       if (state) {
         linkCache.set(key, { state, expiresAtMs: Date.now() + LINK_CACHE_TTL_MS });
       }
       return state;
     } catch (error) {
+      // The one exception to "never throws": a refusal is the ANSWER, not a
+      // failure to compute one. Swallowing it would hand out exactly the
+      // session this module exists to withhold.
+      if (error instanceof NotInvitedError) throw error;
       console.warn(
         "[auth] Resolving the identity ↔ Relation link failed; the session carries no Relation:",
         error instanceof Error ? error.message : String(error),
@@ -228,19 +312,25 @@ async function ensureIdentityLink(
   db: OpenShapeForgeDatabase,
   session: SessionInput,
   claims: IdentityClaims,
+  deps: IdentityLinkDeps,
 ): Promise<IdentityLinkState | null> {
   const displayName = displayNameFromClaims(claims);
 
   // Phase 1: the identity row, and the link if there is one.
   const found = await withDbSession(db, session, async (trx) => {
     const identityId = await upsertIdentity(trx, claims, displayName);
-    const existing = await readLinkRow(trx, identityId, session.tenantId);
-    if (existing) return { identityId, state: toState(existing, claims) };
-
-    // No row yet: is there a Relation in this tenant with the token's e-mail?
+    // Is there a Relation in this tenant with the token's e-mail? Asked even
+    // when a link row already exists, because it is also the admission
+    // question for an identity that only ever got an empty pending row.
     const candidates = claims.email
       ? await relationsWithEmail(trx, session.tenantId, claims.email)
       : [];
+
+    const existing = await readLinkRow(trx, identityId, session.tenantId);
+    if (existing) {
+      return { identityId, state: toState(existing, claims), knownToTenant: candidates.length > 0 };
+    }
+
     if (candidates.length > 0 || !claims.email) {
       // Somebody may already be this Relation — do not decide for them. And
       // without an e-mail there is nothing to match on, so an administrator
@@ -255,20 +345,54 @@ async function ensureIdentityLink(
         linkedBy: null,
       });
       const row = inserted ?? (await readLinkRow(trx, identityId, session.tenantId));
-      return { identityId, state: row ? toState(row, claims) : null };
+      return {
+        identityId,
+        state: row ? toState(row, claims) : null,
+        knownToTenant: candidates.length > 0,
+      };
     }
-    return { identityId, state: null };
+    return { identityId, state: null, knownToTenant: false };
   });
-  if (found.state) return found.state;
 
-  // Phase 2: nobody carries this e-mail — create the person as a Relation.
-  // Through the generated CRUD path (role-ungated variant: this is a runtime
-  // surface acting for a person who may hold no Relations role), so the rows
-  // get the same defaults, events and projections a REST create would.
+  if (found.state) {
+    // A pending row that names no Relation AND no candidate is not a person
+    // waiting to confirm something — it is the empty session this module now
+    // refuses to hand out. It happens for a token with no e-mail claim: the
+    // row is kept so `link_identity` can find the identity, but until an
+    // administrator links it, this is a no.
+    if (
+      found.state.status === "pending_confirmation" &&
+      !found.state.relationId &&
+      !found.state.candidateRelationId &&
+      !found.knownToTenant
+    ) {
+      throw notInvited(session, claims);
+    }
+    return {
+      ...found.state,
+      invitedRoles: await gracePeriodRoles(db, session, claims, found.state),
+    };
+  }
+
+  // Phase 2: nobody in this tenant carries this e-mail. Being able to sign in
+  // to the realm is NOT admission — see this module's header. An organization
+  // administrator must have invited this address, and that invitation is what
+  // gets created and linked below.
+  const invitation = claims.email
+    ? await withDbSession(db, session, (trx) =>
+        findPendingInvitation(trx, session.tenantId, claims.email!),
+      )
+    : null;
+  if (!invitation) throw notInvited(session, claims);
+
+  // Invited: create the person as a Relation. Through the generated CRUD path
+  // (role-ungated variant: this is a runtime surface acting for a person who
+  // may hold no Relations role), so the rows get the same defaults, events and
+  // projections a REST create would.
   const relationId = await createPersonRelation(db, session, claims, displayName);
   if (!relationId) return null;
 
-  return withDbSession(db, session, async (trx) => {
+  const linked = await withDbSession(db, session, async (trx) => {
     const inserted = await insertLinkRow(trx, {
       identityId: found.identityId,
       tenantId: session.tenantId,
@@ -276,16 +400,16 @@ async function ensureIdentityLink(
       relationId,
       candidateRelationId: null,
       linkedBy: "jit",
-      // The only place this ever becomes true: a brand-new Relation, created
-      // because nobody in this tenant already carried the token's e-mail. The
-      // pending_confirmation path above (an existing Relation, unconfirmed)
-      // and the administrator/self-confirm paths below never pass this.
+      // Set now, cleared below the moment the invited role actually lands in
+      // Keycloak. It stays true only when that grant could not be made, which
+      // is exactly when an administrator still has to run `set_member_role`.
       needsRoleAssignment: true,
     });
     if (inserted) {
       console.info(
         `[auth] Linked identity ${found.identityId} (${claims.subject}) to new Relation ` +
-          `${relationId} "${displayName}" in tenant ${session.tenantId} (just in time).`,
+          `${relationId} "${displayName}" in tenant ${session.tenantId} (just in time, on ` +
+          `invitation ${invitation.id}).`,
       );
     }
     // Lost a race with another replica: keep its link, ours stays an ordinary
@@ -293,6 +417,69 @@ async function ensureIdentityLink(
     const row = inserted ?? (await readLinkRow(trx, found.identityId, session.tenantId));
     return row ? toState(row, claims) : null;
   });
+  if (!linked) return null;
+
+  // The role they were invited as, granted now rather than waiting for an
+  // administrator to notice them in `list_pending_members`. `acceptInvitation`
+  // never throws: admission was already decided by the invitation, so a
+  // Keycloak that cannot be reached costs them the role, not the session.
+  const accepted = await acceptInvitation(
+    db,
+    session,
+    invitation,
+    claims.subject,
+    deps.grantInvitedRole,
+  );
+  if (!accepted.granted) return linked;
+
+  await clearNeedsRoleAssignment(db, session, found.identityId);
+  return {
+    ...linked,
+    needsRoleAssignment: false,
+    // Their token was minted before the grant above, so it cannot carry these
+    // roles. Carried on the session instead until the token catches up — see
+    // INVITED_ROLE_GRACE_MS.
+    invitedRoles: accepted.clientRoles,
+  };
+}
+
+/** The refusal, worded so the person knows what has to happen next. */
+function notInvited(session: SessionInput, claims: IdentityClaims): NotInvitedError {
+  console.warn(
+    `[auth] Refused ${claims.email ?? claims.subject} (${claims.issuer}) in tenant ` +
+      `${session.tenantId}: nobody in this organization carries that e-mail and no ` +
+      "invitation is pending.",
+  );
+  return new NotInvitedError(
+    claims.email
+      ? `${claims.email} has not been invited to this organization. Being able to sign in is ` +
+        "not enough on its own: an organization administrator invites you by e-mail " +
+        "(invite_employee), and you follow the link in that mail. Ask an administrator of " +
+        "this organization to invite this address, then sign in again."
+      : "This sign-in carries no e-mail address, so it cannot be matched to an invitation or " +
+        "to anybody in this organization. An organization administrator has to link it " +
+        "explicitly (link_identity) before it can be used here.",
+  );
+}
+
+/**
+ * The invited client roles to carry on a session whose token predates the
+ * grant. Only asked while the link itself is younger than the grace window —
+ * acceptance happens at link time, so an older link can never be inside it,
+ * and the overwhelmingly common case costs no query at all.
+ */
+async function gracePeriodRoles(
+  db: OpenShapeForgeDatabase,
+  session: SessionInput,
+  claims: IdentityClaims,
+  state: IdentityLinkState,
+): Promise<readonly string[]> {
+  if (!claims.email || state.status !== "linked") return [];
+  if (!state.linkedAtMs || Date.now() - state.linkedAtMs > INVITED_ROLE_GRACE_MS) return [];
+  const role = await withDbSession(db, session, (trx) =>
+    invitedRoleWithinGrace(trx, session.tenantId, claims.email!),
+  );
+  return role ? EMPLOYEE_INVITATION_ROLE_GRANTS[role] : [];
 }
 
 async function createPersonRelation(
@@ -521,6 +708,7 @@ type LinkRow = {
   display_name: string | null;
   relation_type: string | null;
   needs_role_assignment: boolean;
+  linked_at: Date | string | null;
 };
 
 async function upsertIdentity(
@@ -550,7 +738,7 @@ async function readLinkRow(
 ): Promise<LinkRow | null> {
   const result = await sql<LinkRow>`
     select ir.identity_id, i.issuer, i.subject, ir.status, ir.relation_id,
-           ir.candidate_relation_id, ir.linked_by, ir.needs_role_assignment,
+           ir.candidate_relation_id, ir.linked_by, ir.needs_role_assignment, ir.linked_at,
            coalesce(linked.display_name, candidate.display_name) as display_name,
            coalesce(linked.relation_type, candidate.relation_type) as relation_type
       from platform.identity_relations ir
@@ -621,6 +809,10 @@ function toState(row: LinkRow, identity: { issuer: string; subject: string }): I
     candidateRelationId: row.candidate_relation_id,
     linkedBy: row.linked_by,
     needsRoleAssignment: row.needs_role_assignment,
+    // Filled in by the callers that can afford the lookup; a state read
+    // straight from a row carries none, which is the honest default.
+    invitedRoles: [],
+    linkedAtMs: row.linked_at ? new Date(row.linked_at).getTime() : null,
   };
 }
 

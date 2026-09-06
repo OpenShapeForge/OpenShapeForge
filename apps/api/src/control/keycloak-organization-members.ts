@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Inviting a person into a Keycloak Organization,
- * `POST /admin/realms/{realm}/organizations/{orgId}/members/invite-user`.
+ * A person's invitation into a Keycloak Organization: sending one
+ * (`POST /admin/realms/{realm}/organizations/{orgId}/members/invite-user`),
+ * enumerating the ones still pending, and un-sending one
+ * (`GET`/`DELETE /admin/realms/{realm}/organizations/{orgId}/invitations`).
  *
- * ── VERIFIED AGAINST THE RUNNING KEYCLOAK 26.5.3 ─────────────────────────────
+ * ── SENDING: VERIFIED AGAINST THE RUNNING KEYCLOAK 26.5.3 ────────────────────
  *
  * The endpoint takes `application/x-www-form-urlencoded` (`email` required,
  * `firstName`/`lastName` optional), not JSON — confirmed by exercising it
@@ -19,31 +21,61 @@
  * `smtpServer` empty (the out-of-the-box local realm), the call answers
  * `500 {"errorMessage":"Failed to send invite email"}` and — this is the
  * important half — creates NEITHER a Keycloak user NOR any member/invitation
- * record. There is no partial state to clean up on that failure; the caller
- * just has to say plainly that the deployment's mail configuration is what
- * failed, not the invitation itself. Wiring a local SMTP relay (or a
- * catch-all like Mailpit) into the realm is what makes this endpoint usable
- * in a given environment at all; that is deployment configuration, not
- * something this module can route around.
+ * record: `GET /organizations/{id}/invitations` stays `[]` afterwards. There is
+ * no partial state to clean up on that failure; the caller just has to say
+ * plainly that the deployment's mail configuration is what failed, not the
+ * invitation itself. Wiring a local SMTP relay (or a catch-all like Mailpit)
+ * into the realm is what makes this endpoint usable in a given environment at
+ * all; that is deployment configuration, not something this module can route
+ * around.
  *
- * ── WHY THERE IS NO list/cancel HERE ─────────────────────────────────────────
+ * ── LISTING AND CANCELLING: ALSO VERIFIED AGAINST 26.5.3 ─────────────────────
  *
- * Keycloak exposes NO way to enumerate or cancel a pending invitation:
- * confirmed by inviting an address and then listing
- * `/organizations/{id}/members` and `/users?email=...`/`/users?search=...` —
- * none of them list it, and no user or member resource is created until the
- * person accepts. It DOES still dedupe internally — re-inviting the same
- * address to the same organization answers `409 {"errorMessage":"User
- * already has a pending invitation"}` — so some state exists server-side,
- * it is simply not addressable through any admin-API resource this module
- * could read or delete. Practically: there is nothing here to list or revoke
- * on the Keycloak side, and revoking on the Hubble side (below) cannot make
- * Keycloak itself forget it invited that address — a second `invite_employee`
- * call for the same e-mail before the original action token's own expiry will
- * still 409 upstream even though Hubble shows no pending row any more.
- * `auth/employee-invitations.ts` is the actual system of record for "who was
- * invited, with what role, by whom" (`platform.employee_invitations`); see
- * that module's header for how the gap is presented to an administrator.
+ * A pending invitation IS an addressable admin resource, and this module reads
+ * and deletes it. Measured by hand against the running realm, with a throwaway
+ * SMTP sink so `invite-user` actually succeeds:
+ *
+ *   - `GET /organizations/{id}/invitations` answers `200` with one row per
+ *     pending invitation — `{id, organizationId, email, firstName, lastName,
+ *     sentDate, expiresAt, status:"PENDING", inviteLink}`. `sentDate` and
+ *     `expiresAt` are epoch SECONDS, not milliseconds, and are carried through
+ *     as Keycloak reports them rather than silently rescaled.
+ *   - `DELETE /organizations/{id}/invitations/{invitationId}` answers `204`,
+ *     and the listing is `[]` immediately after.
+ *   - That DELETE really UN-SENDS. Opening the link that was already delivered
+ *     to the person's inbox afterwards answers HTTP `400` on Keycloak's own
+ *     login page: "The link you clicked is no longer valid. It may have expired
+ *     or already been used." So cancelling is not bookkeeping on this side —
+ *     the mail already out there stops working.
+ *   - The DELETE also FREES THE ADDRESS. `409 {"errorMessage":"User already
+ *     has a pending invitation"}` is raised only while an invitation is
+ *     pending; inviting the very same address again after the DELETE answers
+ *     `204` once more. A revoke followed by a fresh invite therefore works end
+ *     to end, with no waiting for the original action token to expire.
+ *   - A repeat DELETE — and an id the realm never issued — answers
+ *     `404 {"errorMessage":"Invitation not found"}`.
+ *     {@link KeycloakOrganizationMembersClient.deleteInvitation} reports that
+ *     as `false` rather than throwing: the invitation is gone, which is exactly
+ *     what the caller asked for, and only the wording of the answer differs.
+ *
+ * `inviteLink` is present in every listed row and is DELIBERATELY DROPPED by
+ * {@link KeycloakOrganizationInvitation}. It embeds a signed ORGIVT action
+ * token whose `jti` is the invitation id, and anyone who can read that URL can
+ * redeem it — accepting the invitation as that person. A log line, an MCP tool
+ * response and a GraphQL field are all places it must never reach, and the only
+ * way to guarantee that is to not carry it out of this module at all. The
+ * person who was invited already has the link, in their inbox.
+ *
+ * No Keycloak USER and no MEMBER resource exists until the person accepts:
+ * while an invitation was pending, `GET /users?email=...` answered `[]` and the
+ * organization's `/members` did not list it either. The invitations resource
+ * above is the only place a pending invitation is visible on the Keycloak side.
+ *
+ * `auth/employee-invitations.ts` remains the system of record for what Keycloak
+ * does not model — which role the person was invited into, and by whom
+ * (`platform.employee_invitations`). What it is no longer is the only place a
+ * revoke can act: it now cancels the Keycloak invitation as well, which is what
+ * makes the delivered link dead and the address invitable again.
  */
 import {
   createServiceAccountTokenProvider,
@@ -61,15 +93,59 @@ export type InviteOrganizationMemberInput = {
   lastName?: string | undefined;
 };
 
+/**
+ * One pending invitation as `GET /organizations/{id}/invitations` reports it.
+ *
+ * `inviteLink` is deliberately NOT part of this type — see the module header:
+ * it is a redeemable action token, and dropping it here is what keeps it out of
+ * logs and tool responses.
+ */
+export type KeycloakOrganizationInvitation = {
+  id: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  /** Keycloak's own status string; "PENDING" is the only one observed on 26.5.3. */
+  status: string | null;
+  /** Epoch SECONDS (not ms) as Keycloak reports them. */
+  sentDate: number | null;
+  expiresAt: number | null;
+};
+
 export type KeycloakOrganizationMembersClient = {
   /**
    * Invite `input.email` into the organization. Resolves on Keycloak's `204`;
    * throws {@link KeycloakAdminError} otherwise, including
-   * `KEYCLOAK_ADMIN_REJECTED` for the realm's own mail-delivery failure (the
-   * body names it explicitly, and the message here repeats that rather than
-   * inventing a different explanation).
+   * `KEYCLOAK_ADMIN_REJECTED` for the `409` raised while an invitation to the
+   * same address is still pending, and `KEYCLOAK_ADMIN_UNAVAILABLE` for the
+   * realm's own mail-delivery failure (the body names it explicitly, and the
+   * message here repeats that rather than inventing a different explanation).
    */
   inviteUser(organizationId: string, input: InviteOrganizationMemberInput): Promise<void>;
+  /**
+   * The invitations the organization still has outstanding. An organization
+   * with none answers an empty array, not an error.
+   */
+  listInvitations(organizationId: string): Promise<KeycloakOrganizationInvitation[]>;
+  /**
+   * Un-send one invitation. Resolves `true` when Keycloak actually cancelled
+   * it, `false` when there was nothing left to cancel (`404 Invitation not
+   * found` — already accepted, already cancelled, or never issued). Both are
+   * converged outcomes; the boolean exists so the caller can word its answer as
+   * "the invitation has been withdrawn" or "there was no invitation left to
+   * withdraw" instead of guessing.
+   */
+  deleteInvitation(organizationId: string, invitationId: string): Promise<boolean>;
+  /**
+   * The pending invitation for `email`, or `null`. Keycloak has no lookup by
+   * address, so this is the listing plus a case-insensitive compare — which is
+   * the right comparison, because the realm treats addresses case-insensitively
+   * and would answer `409` for an address that differs only in case.
+   */
+  findPendingInvitationByEmail(
+    organizationId: string,
+    email: string,
+  ): Promise<KeycloakOrganizationInvitation | null>;
 };
 
 export type KeycloakOrganizationMembersOptions = {
@@ -80,6 +156,18 @@ export type KeycloakOrganizationMembersOptions = {
   /** Shared with the other Keycloak admin clients so one token serves all. */
   tokens?: ServiceAccountTokenProvider;
 };
+
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function optionalNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
 
 export function createKeycloakOrganizationMembersClient(
   config: KeycloakServiceAccountConfig,
@@ -99,72 +187,165 @@ export function createKeycloakOrganizationMembersClient(
         new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", message, status),
     });
 
+  function invitationsUrl(organizationId: string): string {
+    return `${adminBase}/${encodeURIComponent(organizationId)}/invitations`;
+  }
+
+  /**
+   * One request shape for all three calls: the same token, the same timeout,
+   * and the same mapping of Keycloak's status onto {@link KeycloakAdminError}.
+   * `what` is the gerund that names the call in the operator-facing message
+   * ("inviting a member", "listing the pending invitations", …), so a failure
+   * says which of the three failed without three copies of the mapping drifting
+   * apart.
+   *
+   * `notFoundIsAnswer` is the one place they differ. Everywhere else a `404`
+   * means the organization this tenant is linked to is gone — real drift. On
+   * `DELETE .../invitations/{id}` it means the invitation is gone, which is the
+   * outcome the caller wanted, so that status is returned instead of thrown.
+   */
+  async function request(
+    url: string,
+    init: RequestInit,
+    what: string,
+    notFoundIsAnswer = false,
+  ): Promise<{ status: number; body: unknown }> {
+    const token = await tokens.get();
+    let response: Response;
+    try {
+      response = await doFetch(url, {
+        ...init,
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...init.headers,
+        },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+    } catch (error) {
+      throw new KeycloakAdminError(
+        "KEYCLOAK_ADMIN_UNAVAILABLE",
+        `Could not reach the Keycloak admin API at ${url}: ` +
+          (error instanceof Error ? error.message : String(error)),
+      );
+    }
+
+    const body = await readJson(response);
+    if (response.ok) return { status: response.status, body };
+
+    if (response.status === 401 || response.status === 403) {
+      tokens.invalidate();
+      throw new KeycloakAdminError(
+        "KEYCLOAK_ADMIN_UNAUTHORIZED",
+        `The Keycloak admin API refused "${config.clientId}" ${what}: ` +
+          `${describeError(body, response.statusText)}. The service account must hold ` +
+          "realm-management manage-realm.",
+        response.status,
+      );
+    }
+    if (response.status === 404) {
+      if (notFoundIsAnswer) return { status: response.status, body };
+      throw new KeycloakAdminError(
+        "KEYCLOAK_ADMIN_ORGANIZATION_NOT_FOUND",
+        "The Keycloak organization this tenant is linked to no longer exists.",
+        response.status,
+      );
+    }
+    if (response.status === 400 || response.status === 409) {
+      throw new KeycloakAdminError(
+        "KEYCLOAK_ADMIN_REJECTED",
+        `The Keycloak admin API rejected the request while ${what}: ` +
+          describeError(body, response.statusText),
+        response.status,
+      );
+    }
+    // Includes the realm's own 500 "Failed to send invite email" — a
+    // deployment fault (SMTP is not configured on this realm), not something
+    // the caller's input can fix, so it is classified the same way an
+    // unreachable Keycloak would be, with the realm's own message carried
+    // through rather than redacted.
+    throw new KeycloakAdminError(
+      "KEYCLOAK_ADMIN_UNAVAILABLE",
+      `The Keycloak admin API answered ${response.status} while ${what}: ` +
+        describeError(body, response.statusText),
+      response.status,
+    );
+  }
+
+  /**
+   * One listed row, minus `inviteLink`. Every optional field is `string | null`
+   * / `number | null` rather than an empty string or a zero, so "Keycloak did
+   * not report a surname" stays distinguishable from "the surname is blank".
+   */
+  function toInvitation(row: unknown): KeycloakOrganizationInvitation | null {
+    const record = (row ?? {}) as Record<string, unknown>;
+    const id = typeof record.id === "string" ? record.id : "";
+    // A row without an id cannot be cancelled and cannot be referred to; it is
+    // dropped rather than carried as an unusable handle.
+    if (id.length === 0) return null;
+    return {
+      id,
+      email: typeof record.email === "string" ? record.email : "",
+      firstName: optionalString(record.firstName),
+      lastName: optionalString(record.lastName),
+      status: optionalString(record.status),
+      sentDate: optionalNumber(record.sentDate),
+      expiresAt: optionalNumber(record.expiresAt),
+    };
+  }
+
+  async function listInvitations(
+    organizationId: string,
+  ): Promise<KeycloakOrganizationInvitation[]> {
+    const { body } = await request(
+      invitationsUrl(organizationId),
+      { method: "GET" },
+      "listing the pending invitations",
+    );
+    const rows = Array.isArray(body) ? body : [];
+    return rows
+      .map(toInvitation)
+      .filter((invitation): invitation is KeycloakOrganizationInvitation => invitation !== null);
+  }
+
   return {
     async inviteUser(organizationId, input) {
-      const url = `${adminBase}/${encodeURIComponent(organizationId)}/members/invite-user`;
       const body = new URLSearchParams({ email: input.email });
       if (input.firstName) body.set("firstName", input.firstName);
       if (input.lastName) body.set("lastName", input.lastName);
 
-      const token = await tokens.get();
-      let response: Response;
-      try {
-        response = await doFetch(url, {
+      await request(
+        `${adminBase}/${encodeURIComponent(organizationId)}/members/invite-user`,
+        {
           method: "POST",
-          headers: {
-            authorization: `Bearer ${token}`,
-            "content-type": "application/x-www-form-urlencoded",
-          },
+          headers: { "content-type": "application/x-www-form-urlencoded" },
           body: body.toString(),
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
-      } catch (error) {
-        throw new KeycloakAdminError(
-          "KEYCLOAK_ADMIN_UNAVAILABLE",
-          `Could not reach the Keycloak admin API at ${url}: ` +
-            (error instanceof Error ? error.message : String(error)),
-        );
-      }
-
-      if (response.status === 204 || response.ok) return;
-      const responseBody = await readJson(response);
-
-      if (response.status === 401 || response.status === 403) {
-        tokens.invalidate();
-        throw new KeycloakAdminError(
-          "KEYCLOAK_ADMIN_UNAUTHORIZED",
-          `The Keycloak admin API refused "${config.clientId}" inviting a member: ` +
-            `${describeError(responseBody, response.statusText)}. The service account must hold ` +
-            "realm-management manage-realm.",
-          response.status,
-        );
-      }
-      if (response.status === 404) {
-        throw new KeycloakAdminError(
-          "KEYCLOAK_ADMIN_ORGANIZATION_NOT_FOUND",
-          "The Keycloak organization this tenant is linked to no longer exists.",
-          response.status,
-        );
-      }
-      if (response.status === 400 || response.status === 409) {
-        throw new KeycloakAdminError(
-          "KEYCLOAK_ADMIN_REJECTED",
-          `The Keycloak admin API rejected the invitation: ` +
-            describeError(responseBody, response.statusText),
-          response.status,
-        );
-      }
-      // Includes the realm's own 500 "Failed to send invite email" — a
-      // deployment fault (SMTP is not configured on this realm), not
-      // something the caller's input can fix, so it is classified the same
-      // way an unreachable Keycloak would be, with the realm's own message
-      // carried through rather than redacted.
-      throw new KeycloakAdminError(
-        "KEYCLOAK_ADMIN_UNAVAILABLE",
-        `The Keycloak admin API could not send the invitation: ` +
-          describeError(responseBody, response.statusText),
-        response.status,
+        },
+        "inviting a member",
       );
+    },
+
+    listInvitations,
+
+    async deleteInvitation(organizationId, invitationId) {
+      const { status } = await request(
+        `${invitationsUrl(organizationId)}/${encodeURIComponent(invitationId)}`,
+        { method: "DELETE" },
+        "cancelling an invitation",
+        true,
+      );
+      return status !== 404;
+    },
+
+    async findPendingInvitationByEmail(organizationId, email) {
+      const wanted = normalizeEmail(email);
+      if (wanted.length === 0) return null;
+      // No status filter: on 26.5.3 this resource only ever listed PENDING
+      // rows, and filtering on a string whose other values have never been
+      // observed would silently hide an invitation the moment Keycloak adds one.
+      const found = (await listInvitations(organizationId)).find(
+        (invitation) => normalizeEmail(invitation.email) === wanted,
+      );
+      return found ?? null;
     },
   };
 }

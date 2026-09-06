@@ -197,6 +197,114 @@ bootstrap admin, e.g. a container with port 8080 mapped to 18080:
 KC_URL=http://127.0.0.1:18080 KC_INTERNAL_URL=http://127.0.0.1:8080 bun scripts/keycloak-broker-acceptance.ts
 ```
 
+## How a human signs in: passkeys, and how a federated login fits
+
+Every realm this compiler generates is **passkey-only for humans**. It is worth
+reading this section before authoring a provider, because a broker login is the
+one thing that gets somebody in without presenting a passkey.
+
+### What the generator emits, always
+
+`generators/keycloak-passkeys.ts` is added to every authored realm, in every
+mode. There is deliberately no switch:
+
+- **`browserFlow: passkey-browser`** — cookie, then identity-provider
+  redirector, then a sub-flow of *username form → WebAuthn Passwordless*. The
+  stock `auth-username-password-form` execution does not appear anywhere in it,
+  so there is no password box to type into.
+- **`directGrantFlow: passkey-direct-grant-denied`** — a single
+  `deny-access-authenticator`. `grant_type=password` is closed at the realm
+  rather than left to depend on no user happening to still have a password
+  credential. `client_credentials` is a different flow and is untouched, so
+  service accounts and confidential clients keep working exactly as before.
+- **`webAuthnPolicyPasswordless*`** — resident key required, user verification
+  required, ES256/RS256, attestation `none`, a 120 s ceremony timeout, no
+  AAGUID allow-list, and authenticator attachment left *unspecified*.
+- **required actions** — the complete registry, with
+  `webauthn-register-passwordless` on as a **default action** and
+  `UPDATE_PASSWORD`, `webauthn-register` (the second-factor variant),
+  `CONFIGURE_TOTP` and `CONFIGURE_RECOVERY_AUTHN_CODES` off. A realm import
+  *replaces* this list wholesale, so it is stated in full.
+- **`resetPasswordAllowed: false`**, forced. Self-service "forgot password" is
+  a self-service route to a password credential.
+
+The one value that must be authored is the relying-party id:
+
+```yaml
+realm:
+  webAuthn:
+    rpId: ${env:KEYCLOAK_WEBAUTHN_RP_ID:-example.test}
+```
+
+It is a **bare hostname** — no scheme, no port, no path — and it must be
+Keycloak's *own* browser-facing hostname or a registrable parent it shares with
+the app (`example.com` for a login page on `auth.example.com`). It cannot be
+derived from the gateway's `redirectUris`, because the ceremony runs on
+Keycloak's login page, not the app's. A production realm that authors none
+fails generation instead of shipping a guess.
+
+### Where development gets its passwords back
+
+Nowhere in the artifact. The relaxation is
+`scripts/keycloak/kc-dev-password-login.py` (in the consuming repository): it
+mutates a **running** Keycloak over the admin API, refuses any host that is not
+loopback, and writes no file. Nothing it does can be committed, imported by
+`--import-realm`, or handed to Helm — which is the point. The safe direction is
+what falls out of the build; the unsafe one costs a deliberate command on a
+laptop.
+
+### A federated login is an alternative to a passkey, on purpose
+
+`identity-provider-redirector` sits at `ALTERNATIVE` next to the passkey
+sub-flow, so a broker login admits the person on its own. For a provider linked
+to one tenant's Keycloak Organization — the Google Workspace case — that tenant
+*is* the identity authority for their domain, and their own Workspace MFA
+policy is what guards the account. Requiring a second, product-specific passkey
+on top would make the SSO they bought pointless.
+
+State the consequence plainly when you author a provider: **the passkey-only
+guarantee is then only as strong as that tenant's own policy.** A Workspace that
+still allows bare passwords re-opens a password path — at the provider, not
+here. Two things stop it happening by accident: `hideOnLogin: true` keeps the
+button off the realm login page so only members of a linked Organization are
+routed to it, and `webauthn-register-passwordless` being a default action means
+somebody who arrives over the provider is walked through enrolling a passkey
+and leaves with one.
+
+### Somebody whose device cannot make a passkey
+
+Offer these in order. All three are configuration that is already in place, not
+a plan.
+
+1. **Cross-device passkey.** The login page shows a QR code; the person scans it
+   with a phone that does have a passkey, which signs over the CTAP2 hybrid
+   transport. This is the answer for "this laptop has no fingerprint reader",
+   and it works only because the passwordless authenticator attachment is left
+   unspecified — pinning it to `platform` switches the QR option off.
+2. **A roaming security key** (USB/NFC). Enabled by the same unspecified
+   attachment plus the empty `acceptableAaguids`; an AAGUID allow-list is a
+   hardware allow-list and would exclude most keys and every phone.
+3. **An admin-issued enrolment link**, for somebody with neither. A realm
+   administrator holding `realm-management` `manage-users` — in the Hubble
+   deployment that is the `openshapeforge-auth-api` service account, the same
+   privilege the employee invitation runs on — calls:
+
+   ```
+   PUT /admin/realms/<realm>/users/<id>/execute-actions-email?lifespan=<seconds>
+   ["webauthn-register-passwordless"]
+   ```
+
+   Keycloak e-mails a Keycloak action token. It is **single use** and **time
+   boxed** — pass `lifespan` explicitly; the realm default is
+   `actionTokenGeneratedByAdminLifespan`, 12 hours. Redeeming it drops the
+   person straight into passkey enrolment, with no password anywhere in the
+   path. It **cannot be self-triggered**: `resetPasswordAllowed` is off, so
+   there is no "e-mail me a link" form on the login page. An administrator has
+   to do it, and the call lands in the admin event log.
+
+   This is also why `VERIFY_EMAIL` is left enabled: the whole recovery story
+   rests on the address being the person's.
+
 ## 3. Deployment and reconciliation
 
 `bun run generate` writes `keycloak/<realm>-realm.json`. The local compose

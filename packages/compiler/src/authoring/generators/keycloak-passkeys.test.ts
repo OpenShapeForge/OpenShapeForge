@@ -194,6 +194,7 @@ describe("the profile reaches the generated realm export, in every mode", () => 
   for (const mode of ["development", "production"] as const) {
     it(`emits the passkey browser flow in ${mode} mode`, () => {
       const [artifact] = generateKeycloakRealmArtifacts([], authConfig, mode);
+      if (!artifact) throw new Error("no realm artifact generated");
       const realm = JSON.parse(artifact.contents);
       // The whole point of the seam: no mode, no env var and no authoring key
       // turns the password flow back on in the artifact.

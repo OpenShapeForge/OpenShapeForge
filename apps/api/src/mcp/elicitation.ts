@@ -173,6 +173,16 @@ export function storeElicitedValues(
             `Set ${KEYRING_ENV} (<keyId>:<base64 32-byte key>) — secrets are never stored in plaintext.`,
         );
       }
+      // Elicitation only ever asks for primitives, so anything else here is a
+      // client that ignored the schema; `String(value)` would encrypt
+      // "[object Object]" and the person would never find out.
+      if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+        throw new HttpError(
+          400,
+          "VALIDATION",
+          `Elicited value for "${key}" must be a string, number or boolean.`,
+        );
+      }
       stored[key] = encryptSecret(keyring, table, key, String(value));
       continue;
     }

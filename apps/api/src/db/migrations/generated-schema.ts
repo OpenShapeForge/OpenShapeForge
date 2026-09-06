@@ -90,6 +90,12 @@ export const nonManifestManagedTables = new Set<string>([
   // Pending employee invitations: created by migrations/employee-invitations.ts
   // after the generated step.
   "platform.employee_invitations",
+  // Update notices and who has been told: created by migrations/update-notices.ts
+  // after the generated step, for the same reason as the two above — they are
+  // runtime bookkeeping, not authored entities, so no manifest describes them
+  // and drift detection would read them as foreign schema.
+  "platform.update_notices",
+  "platform.user_update_notices",
 ]);
 
 /**

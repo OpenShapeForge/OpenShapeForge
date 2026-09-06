@@ -210,6 +210,7 @@ interface KeycloakRealmExport {
    */
   browserFlow?: string;
   directGrantFlow?: string;
+  registrationFlow?: string;
   authenticationFlows?: KeycloakAuthenticationFlowExport[];
   requiredActions?: KeycloakRequiredActionExport[];
   webAuthnPolicyPasswordlessRpEntityName?: string;

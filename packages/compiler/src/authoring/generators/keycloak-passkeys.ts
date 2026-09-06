@@ -5,10 +5,11 @@
  * ── The rule ────────────────────────────────────────────────────────────────
  * A HUMAN signs in with a passkey (WebAuthn, resident credential, user
  * verification required). There is no password execution anywhere in the
- * browser flow, and the direct-grant (Resource Owner Password Credentials)
- * flow is wired to an authenticator that always denies, so there is no second
- * door either. Client secrets are untouched: a confidential client or a
- * service account is not a human and keeps using client_credentials.
+ * browser flow, none in the REGISTRATION flow an invited person meets either,
+ * and the direct-grant (Resource Owner Password Credentials) flow is wired to
+ * an authenticator that always denies, so there is no second door. Client
+ * secrets are untouched: a confidential client or a service account is not a
+ * human and keeps using client_credentials.
  *
  * ── Why this file has no development mode ───────────────────────────────────
  * `resolveRealmMode()` exists in keycloak.ts and DEFAULTS TO DEVELOPMENT, for
@@ -33,8 +34,8 @@
  *
  *  1. CROSS-DEVICE PASSKEY (the answer for most cases, including "this laptop
  *     has no fingerprint reader"). The login page shows a QR code; the person
- *     scans it with a phone that does have a passkey, and the phone signs over
- *     the CTAP2 hybrid transport. This works only because
+ *     scans it with a phone that has a passkey, and the phone signs over the
+ *     CTAP2 hybrid transport. This works only because
  *     `webAuthnPolicyPasswordlessAuthenticatorAttachment` is left at
  *     "not specified" below — pinning it to "platform" would switch the QR
  *     option off and is the single most common way to break this.
@@ -87,17 +88,24 @@
  * anyway and ends up with one.
  */
 
+import { PASSKEY_REQUIRED_ACTIONS } from "./keycloak-passkey-required-actions.js";
+import type { KeycloakRequiredActionExport } from "./keycloak-passkey-required-actions.js";
+export { WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION } from "./keycloak-passkey-required-actions.js";
+export type { KeycloakRequiredActionExport };
+
 /** Top-level browser flow alias. */
 export const PASSKEY_BROWSER_FLOW = "passkey-browser";
 /** Sub-flow holding the actual credential challenge. */
 const PASSKEY_FORMS_FLOW = "passkey-browser-forms";
 /** Top-level direct-grant flow alias — the one that always denies. */
 export const PASSKEY_DIRECT_GRANT_FLOW = "passkey-direct-grant-denied";
+/** Top-level registration flow alias — account creation without a password. */
+export const PASSKEY_REGISTRATION_FLOW = "passkey-registration";
+/** The form sub-flow the registration page renders. */
+const PASSKEY_REGISTRATION_FORM = "passkey-registration-form";
 
 /** Keycloak's provider id for the passwordless (passkey) authenticator. */
 const WEBAUTHN_PASSWORDLESS_AUTHENTICATOR = "webauthn-authenticator-passwordless";
-/** Keycloak's provider id for the passkey enrolment required action. */
-export const WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION = "webauthn-register-passwordless";
 
 export interface KeycloakAuthenticationExecutionExport {
   authenticator?: string;
@@ -118,19 +126,10 @@ export interface KeycloakAuthenticationFlowExport {
   authenticationExecutions: KeycloakAuthenticationExecutionExport[];
 }
 
-export interface KeycloakRequiredActionExport {
-  alias: string;
-  name: string;
-  providerId: string;
-  enabled: boolean;
-  defaultAction: boolean;
-  priority: number;
-  config: Record<string, string>;
-}
-
 export interface PasskeyProfile {
   browserFlow: string;
   directGrantFlow: string;
+  registrationFlow: string;
   authenticationFlows: KeycloakAuthenticationFlowExport[];
   requiredActions: KeycloakRequiredActionExport[];
   webAuthnPolicyPasswordlessRpEntityName: string;
@@ -213,6 +212,7 @@ export function buildPasskeyProfile(options: {
   return {
     browserFlow: PASSKEY_BROWSER_FLOW,
     directGrantFlow: PASSKEY_DIRECT_GRANT_FLOW,
+    registrationFlow: PASSKEY_REGISTRATION_FLOW,
     authenticationFlows: [
       {
         alias: PASSKEY_BROWSER_FLOW,
@@ -281,6 +281,57 @@ export function buildPasskeyProfile(options: {
         ],
       },
       {
+        // ── Account creation ────────────────────────────────────────────────
+        // `registrationAllowed` is off, so nobody reaches this by browsing to
+        // the login page and clicking "register": the only door is a Keycloak
+        // Organization INVITATION, which admits the invitee to the
+        // registration flow whatever `registrationAllowed` says (measured on
+        // 26.5.3 — that is exactly why closing the realm flag was not enough).
+        // What is closed here is the OTHER half. Keycloak's stock
+        // `registration` flow contains `registration-password-action`, so an
+        // invited person was handed a form asking for a username AND A
+        // PASSWORD — a credential the browser flow above will never accept.
+        // This flow is the stock one with that execution simply absent, and
+        // nothing replaces it: the account is created with no credential, and
+        // the `webauthn-register-passwordless` DEFAULT required action (see
+        // keycloak-passkey-required-actions.ts) is what the person meets next,
+        // in the same session, before any token is issued. Keycloak 26.5.3 has
+        // no registration-time WebAuthn form action — the required action IS
+        // the supported shape.
+        alias: PASSKEY_REGISTRATION_FLOW,
+        description: "Account creation for an invited person. Contains no password execution.",
+        providerId: "basic-flow",
+        topLevel: true,
+        builtIn: false,
+        authenticationExecutions: [
+          {
+            authenticator: "registration-page-form",
+            flowAlias: PASSKEY_REGISTRATION_FORM,
+            requirement: "REQUIRED",
+            priority: 10,
+            authenticatorFlow: true,
+            autheticatorFlow: true,
+            userSetupAllowed: false,
+          },
+        ],
+      },
+      {
+        alias: PASSKEY_REGISTRATION_FORM,
+        description: "Profile fields only. `registration-password-action` is absent on purpose.",
+        providerId: "form-flow",
+        topLevel: false,
+        builtIn: false,
+        authenticationExecutions: [
+          {
+            authenticator: "registration-user-creation",
+            requirement: "REQUIRED",
+            priority: 20,
+            authenticatorFlow: false,
+            userSetupAllowed: false,
+          },
+        ],
+      },
+      {
         // The Resource Owner Password Credentials grant. Leaving Keycloak's
         // stock `direct grant` flow in place would mean a human with a
         // leftover password credential could still POST
@@ -305,109 +356,7 @@ export function buildPasskeyProfile(options: {
         ],
       },
     ],
-    // The COMPLETE required-action registry, not a patch. A realm import
-    // REPLACES this list wholesale (measured on 26.5.3: importing two entries
-    // left the realm with two, and every other action Keycloak ships — verify
-    // e-mail, delete credential, IdP link — simply gone). So every action is
-    // named here with a deliberate value.
-    requiredActions: [
-      {
-        // Off. TOTP is a second factor and this browser flow has no OTP
-        // execution to consume one, so leaving it on only lets a person enrol
-        // a credential that can never be presented.
-        alias: "CONFIGURE_TOTP",
-        name: "Configure OTP",
-        providerId: "CONFIGURE_TOTP",
-        enabled: false,
-        defaultAction: false,
-        priority: 10,
-        config: {},
-      },
-      { alias: "TERMS_AND_CONDITIONS", name: "Terms and Conditions", providerId: "TERMS_AND_CONDITIONS", enabled: false, defaultAction: false, priority: 20, config: {} },
-      {
-        // Explicitly off rather than merely unused: with this enabled an
-        // administrator could push "update password" onto a person and hand
-        // them a credential the browser flow will never accept — a dead end
-        // that looks like a recovery route. The recovery route is the
-        // enrolment link described in this file's header.
-        alias: "UPDATE_PASSWORD",
-        name: "Update Password",
-        providerId: "UPDATE_PASSWORD",
-        enabled: false,
-        defaultAction: false,
-        priority: 30,
-        config: {},
-      },
-      { alias: "UPDATE_PROFILE", name: "Update Profile", providerId: "UPDATE_PROFILE", enabled: true, defaultAction: false, priority: 40, config: {} },
-      {
-        // On, and load-bearing: the escape-hatch enrolment link is delivered
-        // by e-mail, so a verified address is what the whole recovery story
-        // rests on.
-        alias: "VERIFY_EMAIL",
-        name: "Verify Email",
-        providerId: "VERIFY_EMAIL",
-        enabled: true,
-        defaultAction: false,
-        priority: 50,
-        config: {},
-      },
-      { alias: "delete_account", name: "Delete Account", providerId: "delete_account", enabled: false, defaultAction: false, priority: 60, config: {} },
-      { alias: "UPDATE_EMAIL", name: "Update Email", providerId: "UPDATE_EMAIL", enabled: false, defaultAction: false, priority: 70, config: {} },
-      {
-        // Off — and this one is a trap worth naming. `webauthn-register` is
-        // the SECOND-FACTOR registration: it enrols a credential under the
-        // non-passwordless policy, which does not require a resident key. It
-        // looks exactly like enrolling a passkey and produces a credential
-        // `webauthn-authenticator-passwordless` will refuse.
-        alias: "webauthn-register",
-        name: "Webauthn Register",
-        providerId: "webauthn-register",
-        enabled: false,
-        defaultAction: false,
-        priority: 80,
-        config: {},
-      },
-      {
-        // defaultAction: every new user carries it, so somebody who arrives
-        // over Google Workspace, or through an admin-issued enrolment link,
-        // is walked through creating a passkey and leaves with one.
-        alias: WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION,
-        name: "Webauthn Register Passwordless",
-        providerId: WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION,
-        enabled: true,
-        defaultAction: true,
-        priority: 90,
-        config: {},
-      },
-      { alias: "VERIFY_PROFILE", name: "Verify Profile", providerId: "VERIFY_PROFILE", enabled: true, defaultAction: false, priority: 100, config: {} },
-      {
-        // On. Somebody whose phone was lost has to be able to remove that
-        // passkey from the account console once they are back in on another
-        // one.
-        alias: "delete_credential",
-        name: "Delete Credential",
-        providerId: "delete_credential",
-        enabled: true,
-        defaultAction: false,
-        priority: 110,
-        config: {},
-      },
-      { alias: "idp_link", name: "Linking Identity Provider", providerId: "idp_link", enabled: true, defaultAction: false, priority: 120, config: {} },
-      {
-        // Off. Recovery codes are only a recovery route if some execution
-        // accepts them, and this browser flow has none. Enabling it would
-        // hand people a printed sheet that does not open the door. The
-        // recovery route is the admin-issued enrolment link.
-        alias: "CONFIGURE_RECOVERY_AUTHN_CODES",
-        name: "Recovery Authentication Codes",
-        providerId: "CONFIGURE_RECOVERY_AUTHN_CODES",
-        enabled: false,
-        defaultAction: false,
-        priority: 130,
-        config: {},
-      },
-      { alias: "update_user_locale", name: "Update User Locale", providerId: "update_user_locale", enabled: true, defaultAction: false, priority: 1000, config: {} },
-    ],
+    requiredActions: PASSKEY_REQUIRED_ACTIONS,
     // The name a browser shows in the system passkey prompt ("Sign in to
     // ..."). Left at Keycloak's shipped "keycloak" it would read as somebody
     // else's product.

@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import {
   PASSKEY_BROWSER_FLOW,
   PASSKEY_DIRECT_GRANT_FLOW,
+  PASSKEY_REGISTRATION_FLOW,
   WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION,
   buildPasskeyProfile,
   resolvePasskeyRpId,
@@ -96,6 +97,50 @@ describe("passkey profile — required actions", () => {
   });
 });
 
+describe("passkey profile — an invited person creates an account without a password", () => {
+  /** Every provider id reachable from the registration flow, sub-flows included. */
+  const registrationAuthenticators = () => {
+    const p = profile();
+    const byAlias = new Map(p.authenticationFlows.map((f) => [f.alias, f]));
+    const out: string[] = [];
+    const walk = (alias: string, seen = new Set<string>()) => {
+      if (seen.has(alias)) return;
+      seen.add(alias);
+      for (const e of byAlias.get(alias)?.authenticationExecutions ?? []) {
+        if (e.authenticator) out.push(e.authenticator);
+        if (e.flowAlias) walk(e.flowAlias, seen);
+      }
+    };
+    walk(p.registrationFlow);
+    return out;
+  };
+
+  it("owns the registration flow instead of leaving Keycloak's stock one in place", () => {
+    // The stock flow is the one that put a password box on the Organization
+    // invitation page: closing `registrationAllowed` never reached it, because
+    // an invitation admits the invitee whatever that flag says.
+    expect(profile().registrationFlow).toBe(PASSKEY_REGISTRATION_FLOW);
+  });
+
+  it("creates the account with no credential and no password execution", () => {
+    const reachable = registrationAuthenticators();
+    expect(reachable).toContain("registration-page-form");
+    expect(reachable).toContain("registration-user-creation");
+    expect(reachable).not.toContain("registration-password-action");
+    expect(reachable.filter((a) => a.includes("password") && !a.includes("passwordless"))).toEqual([]);
+  });
+
+  it("leaves the passkey to the default required action, which is the only supported shape", () => {
+    // Keycloak 26.5.3 ships no registration-time WebAuthn form action
+    // (measured: /authentication/form-action-providers lists five, none of
+    // them WebAuthn), so enrolment has to be the required action — and it has
+    // to be a DEFAULT one, or the account would exist with no way in at all.
+    const action = profile().requiredActions.find((a) => a.alias === WEBAUTHN_PASSWORDLESS_REQUIRED_ACTION);
+    expect(action?.enabled).toBe(true);
+    expect(action?.defaultAction).toBe(true);
+  });
+});
+
 describe("passkey profile — the WebAuthn policy is a decision, not a default", () => {
   const p = profile({ realmDisplayName: "Acme B.V." });
 
@@ -154,6 +199,12 @@ describe("the profile reaches the generated realm export, in every mode", () => 
       // turns the password flow back on in the artifact.
       expect(realm.browserFlow).toBe(PASSKEY_BROWSER_FLOW);
       expect(realm.directGrantFlow).toBe(PASSKEY_DIRECT_GRANT_FLOW);
+      expect(realm.registrationFlow).toBe(PASSKEY_REGISTRATION_FLOW);
+      expect(
+        realm.authenticationFlows.flatMap((f: { authenticationExecutions: { authenticator?: string }[] }) =>
+          f.authenticationExecutions.map((e) => e.authenticator),
+        ),
+      ).not.toContain("registration-password-action");
       expect(realm.webAuthnPolicyPasswordlessRpId).toBe("acme.example");
       expect(realm.resetPasswordAllowed).toBe(false);
       expect(JSON.stringify(realm.authenticationFlows)).not.toContain("auth-username-password-form");

@@ -149,7 +149,7 @@ async function seedInstallation(
         (id, tenant_id, connector_slug, instance_key, config, enabled,
          contract_version, contract_checksum)
       values (${installationId}::uuid, ${tenantId}::uuid, ${CONTRACT.slug}, 'default',
-              ${JSON.stringify({ clientId: "client-abc" })}::jsonb, true, 1, 'checksum')
+              ${JSON.stringify({ clientId: "client-abc" })}::text::jsonb, true, 1, 'checksum')
     `.execute(conn);
   });
   return installationId;
@@ -1009,7 +1009,7 @@ describe("authored connection token lifecycle", () => {
           }
           await withDbSession(db, session, (conn) => sql`
             update public.oauth_authored_connection_test
-               set values = ${JSON.stringify(initial)}::jsonb
+               set values = ${JSON.stringify(initial)}::text::jsonb
              where id = ${selectedId}::uuid
           `.execute(conn));
           const beforeFailure = await withDbSession(db, session, (conn) => sql<{ values: unknown }>`

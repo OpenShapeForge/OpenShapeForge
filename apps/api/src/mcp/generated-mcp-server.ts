@@ -31,6 +31,7 @@
  * they live in the shared CRUD core (#164), which every call below goes
  * through, so this transport inherits them by construction.
  */
+import { createToolDiscovery, readToolPins } from "./tool-discovery.js";
 import { createHash, randomUUID } from "node:crypto";
 import { sql, type Transaction } from "kysely";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -809,11 +810,10 @@ function testToolsForSession(
 }
 
 /**
- * Cap on rows a definition table contributes to the derived-tool projection.
- * A deployment authoring more definitions than this needs curation, not a
- * longer tool list — tool selection quality degrades well before the cap.
+ * Database page size, not a catalog size limit. Advertisement is curated
+ * independently from authorized discovery and execution.
  */
-const DERIVED_TOOLS_ROW_LIMIT = 100;
+const DERIVED_TOOLS_PAGE_SIZE = 100;
 
 function derivedToolOutputFieldAllowlist(
   entry: DerivedToolsCatalogEntry,
@@ -847,10 +847,16 @@ async function derivedToolsForSession(
     if (!sessionInAudience(entry, session.roles)) continue;
     const table = tables.get(entry.table);
     if (!table) continue;
-    const result = await listGeneratedEntitiesForTable(db, session, table, {
-      limit: DERIVED_TOOLS_ROW_LIMIT,
-    });
-    const rows = result.rows.map((row) => serializeRow(table, row));
+    const rows: Record<string, unknown>[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await listGeneratedEntitiesForTable(db, session, table, {
+        limit: DERIVED_TOOLS_PAGE_SIZE,
+        ...(cursor ? { cursor } : {}),
+      });
+      rows.push(...page.rows.map(row => serializeRow(table, row)));
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
     let entryTools = derivedToolsFromRows(
       entry,
       rows,
@@ -870,7 +876,7 @@ async function derivedToolsForSession(
           session,
           operationTable,
           {
-            limit: DERIVED_TOOLS_ROW_LIMIT,
+            limit: DERIVED_TOOLS_PAGE_SIZE,
           },
         );
         const operationTraits = new Map<
@@ -898,7 +904,7 @@ async function derivedToolsForSession(
             db,
             session,
             providerTable,
-            { limit: DERIVED_TOOLS_ROW_LIMIT },
+            { limit: DERIVED_TOOLS_PAGE_SIZE },
           );
           const definitionsField =
             entityForTable(entry.execution.connectionTable)?.elicitOnCreate
@@ -3735,8 +3741,15 @@ function buildServer(
     return decorated;
   };
 
+  const toolPins = readToolPins(process.env.OPENSHAPEFORGE_MCP_PINNED_TOOLS);
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: (await listedTools()).map((entry) => entry.tool),
+    tools: toolPins === undefined
+      ? (await listedTools()).map((entry) => entry.tool)
+      : await createToolDiscovery({
+          pins: toolPins,
+          available: async () => (await listedTools()).map(entry => entry.tool),
+          call: async () => { throw new Error("Listing cannot invoke tools."); },
+        }).listed(),
   }));
 
   const dispatchTool = async (
@@ -4420,7 +4433,7 @@ function buildServer(
           throw new HttpError(404, "NOT_FOUND", `Unknown tool "${toolArg}".`);
         const rows = (
           await listGeneratedEntitiesForTable(db, session, table, {
-            limit: DERIVED_TOOLS_ROW_LIMIT,
+            limit: DERIVED_TOOLS_PAGE_SIZE,
           })
         ).rows.map((row) => serializeRow(table, row));
         const { visibleWhen: _gate, ...ungated } = dryRunEntry;
@@ -6129,6 +6142,14 @@ function buildServer(
   };
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    if (toolPins !== undefined) {
+      const discovered = await createToolDiscovery({
+        pins: toolPins,
+        available: async () => (await listedTools()).map(entry => entry.tool),
+        call: async (name, args) => (await dispatchTool(name, args, extra.requestId, false)).result,
+      }).handle(request.params.name, (request.params.arguments ?? {}) as Record<string, unknown>);
+      if (discovered) return discovered;
+    }
     const outcome = await dispatchTool(
       request.params.name,
       (request.params.arguments ?? {}) as Record<string, unknown>,

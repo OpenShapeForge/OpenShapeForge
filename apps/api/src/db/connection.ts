@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { SQL } from "bun";
+import { readDatabasePoolSize } from "./pool-config.js";
 import { Kysely, type KyselyConfig } from "kysely";
 import { PostgresJSDialect } from "kysely-postgres-js";
 import type { DB } from "../generated/db/types.js";
@@ -67,7 +68,7 @@ export function createDatabaseRuntime(
   options: DatabaseRuntimeOptions = {},
 ): DatabaseRuntime {
   const postgres = new SQL(options.databaseUrl ?? readDatabaseUrl(), {
-    max: options.maxConnections ?? 10,
+    max: options.maxConnections ?? readDatabasePoolSize(),
   });
 
   const db = new Kysely<DB>({

@@ -37,7 +37,7 @@
   },
   "//devDependencies": "Root-level only so `examples/tsconfig.json` can resolve Bun's globals. @types/bun is otherwise hoisted under apps/api, which nothing outside apps/api can resolve from.",
   "devDependencies": {
-    "@types/bun": "^1.3.5"
+    "@types/bun": "^1.4.0"
   },
   "scripts": {
     "generate": "bun run --cwd packages/compiler generate",

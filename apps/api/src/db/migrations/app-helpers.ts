@@ -78,8 +78,11 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
     -- to (apps/api src/auth/identity.ts). platform.tenants is fenced by
     -- app.bypass_rls() OR id = app.current_tenant(), and a session that is
     -- still resolving its tenant satisfies neither, so this function carries
-    -- the bypass GUC as a function-scoped SET: it is true inside this body only
-    -- and restored on return, nothing else in the transaction inherits it.
+    -- the bypass GUC only for its lookup and restores the caller's value.
+    -- Function-level SET on a custom GUC requires superuser/parameter grants
+    -- unavailable to managed-database migrators. The exception block rolls
+    -- back the local setting if the lookup raises; normal return restores it
+    -- explicitly. Configuration mutation makes this VOLATILE/PARALLEL UNSAFE.
     --
     -- Deliberately a point lookup and not a registry read: it answers ONE
     -- tenant id for ONE (realm, organization id) pair the caller already
@@ -93,17 +96,24 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
       realm text,
       organization_id text
     ) returns uuid
-    language plpgsql stable parallel safe
-    set app.bypass_rls = 'true'
+    language plpgsql volatile parallel unsafe
     as $$
+    declare
+      previous_bypass text := current_setting('app.bypass_rls', true);
+      tenant_id uuid;
     begin
-      return (
+      perform set_config('app.bypass_rls', 'true', true);
+      tenant_id := (
         select t.id
           from platform.tenants t
          where t.keycloak_realm = realm
            and t.keycloak_organization_id = organization_id
          limit 1
       );
+      perform set_config('app.bypass_rls', coalesce(previous_bypass, ''), true);
+      return tenant_id;
+    exception when others then
+      raise;
     end
     $$;
   `.execute(db);

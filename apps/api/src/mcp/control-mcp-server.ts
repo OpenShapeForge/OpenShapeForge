@@ -48,6 +48,9 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ControlAuthorizationError } from "../control/authorization.js";
 import { clientInfoFromInitializeBody, type McpClientInfo } from "./session-client.js";
 import { readControlPlaneConfig, type ControlPlaneConfigResult } from "../control/config.js";
+import type { FirstAdministratorClients } from "../control/first-tenant-administrator.js";
+import { createKeycloakOrganizationMembersClient } from "../control/keycloak-organization-members.js";
+import { createKeycloakOrganizationAdminClient } from "../control/keycloak-organization-admin.js";
 import {
   resolvePlatformAdministrator,
   type PlatformAdministrator,
@@ -182,6 +185,7 @@ export type ControlMcpOptions = {
 };
 
 function buildPlatformServer(input: {
+  firstAdministrator: FirstAdministratorClients | undefined;
   db: OpenShapeForgeDatabase;
   administrator: PlatformAdministrator;
   provider: PlatformCatalogProvider | undefined;
@@ -195,6 +199,7 @@ function buildPlatformServer(input: {
   });
   const access = () => ({ tools: PLATFORM_TOOLS.length, resources: 1 });
   const context = {
+    ...(input.firstAdministrator ? { firstAdministrator: input.firstAdministrator } : {}),
     db: input.db,
     administrator: input.administrator,
     provider: input.provider,
@@ -237,6 +242,11 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
   const configResult = options.config ?? readControlPlaneConfig();
   const controlIssuer = configResult.ok ? configResult.config.operator.issuer : undefined;
   const provider = platformCatalogProviderOf(options.modules);
+  const firstAdministrator = configResult.ok ? {
+    tenantRealm: configResult.config.keycloak.tenantRealm,
+    members: createKeycloakOrganizationMembersClient(configResult.config.keycloak),
+    organizations: createKeycloakOrganizationAdminClient(configResult.config.keycloak),
+  } : undefined;
 
   if (!configResult.ok) {
     app.log.warn(
@@ -384,7 +394,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
 
       if (request.method === "POST" && isInitializeBody(request.body)) {
         const client = clientInfoFromInitializeBody(request.body);
-        const server = buildPlatformServer({ db, administrator, provider, client, log });
+        const server = buildPlatformServer({ db, administrator, provider, client, log, firstAdministrator });
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
@@ -407,7 +417,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
       }
 
       // Sessionless single shot, for probes and scripted proofs.
-      const server = buildPlatformServer({ db, administrator, provider, client: null, log });
+      const server = buildPlatformServer({ db, administrator, provider, client: null, log, firstAdministrator });
       const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
       reply.raw.on("close", () => {
         void transport.close();

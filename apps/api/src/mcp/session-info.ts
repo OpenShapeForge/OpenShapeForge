@@ -78,7 +78,7 @@ export function sessionIdleDaysFromEnv(
   return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_SESSION_IDLE_DAYS;
 }
 
-/** How to end the session; the server cannot do it for the client. */
+/** How to disconnect the client; `reauthenticate` separately renews its OAuth sign-in. */
 export const SIGN_OUT_INSTRUCTION =
   "Sign out in your client (Codex: codex mcp logout <entry>; ChatGPT: the connector's menu).";
 

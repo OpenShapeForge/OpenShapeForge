@@ -154,3 +154,37 @@ describe("forcing a person to sign in again after a role grant", () => {
     expect(error.code).toBe("KEYCLOAK_ADMIN_UNAUTHORIZED");
   });
 });
+
+describe("revoking one exact sign-in", () => {
+  it("deletes only the verified online session id", async () => {
+    const { fetch, calls } = stubFetch([() => new Response(null, { status: 204 })]);
+
+    const revoked = await createMemberRoleAdminClient(config, { fetch })
+      .revokeSession("session/current");
+
+    expect(revoked).toBe(true);
+    expect(calls[1]!.url).toBe(
+      "http://keycloak.test:8080/admin/realms/openshapeforge/sessions/session%2Fcurrent",
+    );
+    expect(calls[1]!.init.method).toBe("DELETE");
+  });
+
+  it("selects the offline store without enumerating another session", async () => {
+    const { fetch, calls } = stubFetch([() => new Response(null, { status: 204 })]);
+
+    await createMemberRoleAdminClient(config, { fetch })
+      .revokeSession("offline-session", true);
+
+    expect(calls[1]!.url).toBe(
+      "http://keycloak.test:8080/admin/realms/openshapeforge/sessions/offline-session?isOffline=true",
+    );
+  });
+
+  it("treats an already absent exact session as safely revoked", async () => {
+    const { fetch } = stubFetch([() => new Response(null, { status: 404 })]);
+
+    await expect(
+      createMemberRoleAdminClient(config, { fetch }).revokeSession("already-gone"),
+    ).resolves.toBe(false);
+  });
+});

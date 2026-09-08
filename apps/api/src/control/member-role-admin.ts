@@ -119,6 +119,15 @@ export type MemberRoleAdminClient = {
    * (e.g. `set_member_role`) should catch it themselves.
    */
   forceReauthentication(userId: string): Promise<void>;
+
+  /**
+   * Remove one exact Keycloak user session. Unlike `forceReauthentication`,
+   * this never signs the person out of their other browser or MCP sessions.
+   * `offline` selects Keycloak's offline-session store; a missing session is
+   * reported as `false` so callers can safely try the online and offline
+   * stores for the same verified `sid` without widening the target.
+   */
+  revokeSession(sessionId: string, offline?: boolean): Promise<boolean>;
 };
 
 export function createMemberRoleAdminClient(
@@ -244,6 +253,19 @@ export function createMemberRoleAdminClient(
 
     async forceReauthentication(userId) {
       await request(`/users/${encodeURIComponent(userId)}/logout`, { method: "POST" });
+    },
+
+    async revokeSession(sessionId, offline = false) {
+      try {
+        await request(
+          `/sessions/${encodeURIComponent(sessionId)}${offline ? "?isOffline=true" : ""}`,
+          { method: "DELETE" },
+        );
+        return true;
+      } catch (error) {
+        if (error instanceof KeycloakAdminError && error.status === 404) return false;
+        throw error;
+      }
     },
   };
 }

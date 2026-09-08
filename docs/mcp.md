@@ -326,7 +326,9 @@ never the token: no claims, no ids, no slugs, no tenant keys.
   value the reference realm setup configures; the realm's own value is not
   cheaply readable from the API). The summary states the latter and mentions
   the token only once it has actually lapsed. `signOut` says where to end the
-  session, since the client owns it, not this server.
+  connector from the client; `reauthenticate` below is the separate path for
+  ending only the current authorization and immediately asking OAuth to run
+  again.
 - `access` counts what THIS session sees, through the same per-session
   builders `tools/list` and `resources/list` use — it is not a deployment-wide
   number.
@@ -346,6 +348,24 @@ The tool result carries the JSON both as text content and as
 the display facts a token carries beyond the session context (name, client,
 expiry, memberships) are captured at the MCP entry point from the request that
 was already verified, so they reflect the token that initialised the session.
+
+## Reauthorize this MCP connection
+
+A bearer-authenticated session whose verified token carries a Keycloak `sid`
+also sees `reauthenticate`. It takes no input: the server removes only that
+exact session id from Keycloak's online store and, when the grant carries
+`offline_access`, the matching offline store. It never accepts a user or
+session id from the caller and never uses Keycloak's account-wide user logout.
+
+The answer is an MCP error result with `_meta["mcp/www_authenticate"]`, including
+`invalid_token` and an error description. The tool advertises its OAuth policy
+through `securitySchemes` (and the compatibility metadata mirror), which is the
+tool-level signal ChatGPT uses to open reauthorization. The existing HTTP
+`401` plus `WWW-Authenticate` remains the transport-level signal for a request
+that arrives without a valid credential. After `reauthenticate`, the next
+request on the old stateful MCP session is also refused with that HTTP `401`,
+so a client that did not act on the tool result cannot keep using the old MCP
+session.
 
 ## What the field definition contributes
 

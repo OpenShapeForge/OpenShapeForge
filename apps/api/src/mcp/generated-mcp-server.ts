@@ -317,6 +317,15 @@ import {
   sessionLocale,
 } from "./session-info.js";
 import {
+  REAUTHENTICATE_TOOL,
+  REAUTHENTICATE_TOOL_NAME,
+  canReauthenticate,
+  carryAuthenticationSession,
+  reauthenticate,
+  rememberAuthenticationSession,
+  type ReauthenticationDependencies,
+} from "./session-reauthentication.js";
+import {
   describeSession,
   sessionInfoResourceResult,
   sessionInfoToolResult,
@@ -777,6 +786,7 @@ function coreOwnsStaticToolName(name: string): boolean {
     ...catalogTestTools.map((tool) => tool.name),
     ...connectorMcpTools(listConnectorContracts()).map((tool) => tool.name),
     SESSION_INFO_TOOL_NAME, // session-info (whoami / osf://session)
+    REAUTHENTICATE_TOOL_NAME,
     ...ONBOARDING_TOOL_NAMES, // first-use onboarding (mcp/onboarding.ts)
     ...UPDATE_TOOL_NAMES, // update notices (mcp/update-notices.ts)
   ].includes(name);
@@ -2691,6 +2701,11 @@ function buildServer(
    * session has no person to name.
    */
   opening: string | null = null,
+  reauthentication: {
+    challenge: string;
+    onRequested: () => void;
+    dependencies?: ReauthenticationDependencies;
+  } | null = null,
 ): Server {
   const runtimeModules = modules ?? [];
   // Resolved once, here: the server's `instructions` are written at build time
@@ -3505,6 +3520,7 @@ function buildServer(
   const listedTools = async (): Promise<SourcedTool[]> => {
     const coreTools = [
       SESSION_INFO_TOOL, // session-info (whoami / osf://session): every authenticated session
+      ...(reauthentication && canReauthenticate(session) ? [REAUTHENTICATE_TOOL] : []),
       ...crudToolsForSession(session, tables),
       ...catalogDerivedTools
         .filter(
@@ -3710,6 +3726,7 @@ function buildServer(
     ] as Tool[];
     const sourceOf = (name: string): McpToolCallSource => {
       if (name === SESSION_INFO_TOOL_NAME) return "operation"; // session-info
+      if (name === REAUTHENTICATE_TOOL_NAME) return "operation";
       if (catalog.tools.some((tool) => tool.name === name)) return "crud";
       if (catalog.operationTools.some((tool) => tool.name === name))
         return "operation";
@@ -3785,6 +3802,18 @@ function buildServer(
       }
     }
     // --- end session-info ---
+    if (name === REAUTHENTICATE_TOOL_NAME && reauthentication) {
+      try {
+        return await reauthenticate(
+          session,
+          reauthentication.challenge,
+          reauthentication.onRequested,
+          reauthentication.dependencies,
+        );
+      } catch (error) {
+        return failed(error);
+      }
+    }
     const operationTool = catalog.operationTools.find(
       (tool) => tool.name === name,
     );
@@ -6360,6 +6389,11 @@ export function __buildGeneratedMcpServerForTests(input: {
   egressOwner?: RuntimeModule["egress"];
   stateful?: boolean;
   tables?: Map<string, GeneratedTable>;
+  reauthentication?: {
+    challenge: string;
+    onRequested: () => void;
+    dependencies?: ReauthenticationDependencies;
+  };
 }): Server {
   return buildServer(
     input.db,
@@ -6370,6 +6404,8 @@ export function __buildGeneratedMcpServerForTests(input: {
     undefined,
     input.stateful ?? true,
     input.tables,
+    null,
+    input.reauthentication ?? null,
   );
 }
 
@@ -6454,6 +6490,7 @@ export function registerGeneratedMcpServer(
     // facts (name, client, expiry, memberships) beside the verified session,
     // and the organization this endpoint bound it to, when it did.
     rememberSessionIdentity(resolved, headersFromFastify(mcpHeaders), binding);
+    rememberAuthenticationSession(resolved, headersFromFastify(mcpHeaders));
     return {
       db: options.db,
       session: resolved,
@@ -6547,6 +6584,7 @@ export function registerGeneratedMcpServer(
       scope: DbSessionInput["scope"];
       credential: TrustedSessionContext["credential"];
       lastSeenMs: number;
+      reauthenticationRequired: boolean;
     };
     const mcpSessions = new Map<string, McpSessionEntry>();
     const sameClaims = (
@@ -7028,6 +7066,17 @@ export function registerGeneratedMcpServer(
             "Unknown MCP session; reinitialize.",
           );
         }
+        if (existing.reauthenticationRequired) {
+          mcpSessions.delete(sessionId);
+          options.modulePlatform?.unregisterServer(existing.server);
+          void existing.transport.close();
+          void existing.server.close();
+          throw new HttpError(
+            401,
+            "UNAUTHENTICATED",
+            "This MCP session ended; sign in again.",
+          );
+        }
         // The session is a credential: it was initialized by one identity
         // on one resource and stays bound to both. A session id minted on
         // one organization's resource is not a ticket to another's, nor to
@@ -7072,6 +7121,7 @@ export function registerGeneratedMcpServer(
         // the display facts move over to the captured context before the
         // server answers from it.
         carrySessionIdentity(existing.session, session);
+        carryAuthenticationSession(existing.session, session);
         reply.hijack();
         await existing.transport.handleRequest(
           request.raw,
@@ -7086,6 +7136,14 @@ export function registerGeneratedMcpServer(
         // built next reads it for its instructions, and `whoami` for the
         // life of the session (mcp/session-client.ts).
         rememberSessionClient(session, clientInfoFromInitializeBody(request.body));
+        let reauthenticationRequested = false;
+        let transport: StreamableHTTPServerTransport;
+        const markReauthenticationRequested = () => {
+          reauthenticationRequested = true;
+          const id = transport.sessionId;
+          const entry = id ? mcpSessions.get(id) : undefined;
+          if (entry) entry.reauthenticationRequired = true;
+        };
         const server = buildServer(
           db,
           session,
@@ -7096,8 +7154,12 @@ export function registerGeneratedMcpServer(
           true,
           undefined,
           await sessionOpeningSentence({ db, session }),
+          {
+            challenge: buildAuthenticateChallenge(request),
+            onRequested: markReauthenticationRequested,
+          },
         );
-        const transport = new StreamableHTTPServerTransport({
+        transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
             mcpSessions.set(id, {
@@ -7113,6 +7175,7 @@ export function registerGeneratedMcpServer(
               scope: session.scope,
               credential: session.credential,
               lastSeenMs: Date.now(),
+              reauthenticationRequired: reauthenticationRequested,
             });
           },
         });
@@ -7142,6 +7205,13 @@ export function registerGeneratedMcpServer(
         options.modulePlatform,
         options.egressOwner,
         notifyDerivedDefinitionChanged,
+        false,
+        undefined,
+        null,
+        {
+          challenge: buildAuthenticateChallenge(request),
+          onRequested: () => {},
+        },
       );
       // `sessionIdGenerator` is omitted rather than set to undefined: the SDK
       // reads it as `=== undefined` to mean stateless, and omitting keeps

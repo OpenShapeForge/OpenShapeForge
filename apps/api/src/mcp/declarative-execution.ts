@@ -599,15 +599,11 @@ export function secretUrlPlaceholderError(
 }
 
 /**
- * Whether a call selects this binding. A binding may declare
- * `when: { field, equals }` against ONE service input: it runs when that
- * input equals the value OR was not provided (an omitted selector means
- * "all sources" — the combined read), and is skipped silently when the call
- * names a different value. This is what routes one canonical intent
- * (tasks, mail) to exactly one of several providers through a plain
- * `provider` input instead of per-provider employee tools. Write intents
- * should declare the selector input as required, so a change can never fan
- * out to every provider at once.
+ * Whether a call selects this binding. A binding may declare exactly one
+ * condition against one service input: `equals` retains the existing
+ * omitted-means-all-sources routing, while `present: true` selects only a
+ * populated value. Publication rejects malformed and ambiguous conditions;
+ * this boundary fails them closed as defence in depth.
  */
 export function bindingSelected(
   binding: JsonRecord,
@@ -616,8 +612,14 @@ export function bindingSelected(
   const when = binding.when as JsonRecord | null | undefined;
   if (!when || typeof when !== "object") return true;
   const field = typeof when.field === "string" ? when.field : "";
-  if (!field) return true;
+  if (!field) return false;
+  const hasEquals = Object.prototype.hasOwnProperty.call(when, "equals");
+  const hasPresent = Object.prototype.hasOwnProperty.call(when, "present");
+  if (hasEquals === hasPresent) return false;
   const value = args[field];
+  if (hasPresent) {
+    return when.present === true && value !== undefined && value !== null && value !== "";
+  }
   if (value === undefined || value === null) return true;
   if (value === "") return false;
   return String(value) === String(when.equals);

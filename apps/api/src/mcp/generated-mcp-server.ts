@@ -3438,11 +3438,13 @@ function buildServer(
             !bindingSelected(binding, toolArguments as Record<string, unknown>)
           ) {
             const when = binding.when as Record<string, unknown>;
+            const condition =
+              when?.present === true
+                ? `${String(when.field)} has a value.`
+                : `${String(when?.field)} is ${JSON.stringify(when?.equals)} or omitted.`;
             requests.push({
               order: index + 1,
-              skipped:
-                `Not selected by this call: it runs only when ` +
-                `${String(when?.field)} is ${JSON.stringify(when?.equals)} or omitted.`,
+              skipped: `Not selected by this call: it runs only when ${condition}`,
             });
             continue;
           }

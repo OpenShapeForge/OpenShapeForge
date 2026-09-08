@@ -780,6 +780,55 @@ describe("executeBinding", () => {
     expect(headers.authorization).toBe("Bearer tok-9");
   });
 
+  it("applies structured recurrence transforms before JSON body placement", async () => {
+    const spy = fetchSpy();
+    await executeBinding({
+      binding: {},
+      operationRow: {
+        key: "create-event",
+        operation: { method: "POST", pathTemplate: "/calendar/events" },
+        requestMapping: {
+          transforms: [
+            {
+              op: "ical-recurrence",
+              from: "repeat",
+              to: "recurrence",
+              timeZoneTo: ["startZone", "endZone"],
+              values: {
+                frequencies: { weekly: "WEEKLY" },
+                weekdays: { friday: "FR" },
+                endModes: { never: "NEVER" },
+              },
+            },
+          ],
+          bodyPaths: [
+            { field: "startZone", path: "start.timeZone" },
+            { field: "endZone", path: "end.timeZone" },
+            { field: "recurrence", path: "recurrence" },
+          ],
+        },
+      },
+      providerRow,
+      connectionValues,
+      serviceInputs: {
+        repeat: {
+          frequency: "weekly",
+          weekdays: ["friday"],
+          end: { mode: "never" },
+          timeZone: "Europe/Amsterdam",
+        },
+      },
+      keyring: KEYRING,
+      fetchImpl: spy.impl,
+      secretScope: "erp.providers",
+    });
+    expect(JSON.parse(String(spy.calls[0]?.init.body))).toEqual({
+      start: { timeZone: "Europe/Amsterdam" },
+      end: { timeZone: "Europe/Amsterdam" },
+      recurrence: ["RRULE:FREQ=WEEKLY;BYDAY=FR"],
+    });
+  });
+
   it("composes If-Match through conditional update and delete execution", async () => {
     const spy = fetchSpy();
     const inputFields = [

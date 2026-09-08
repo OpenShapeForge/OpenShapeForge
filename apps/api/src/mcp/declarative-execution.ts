@@ -34,6 +34,7 @@
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../rest/http-error.js";
 import { applyResponseTransforms } from "./response-transforms.js";
+import { applyRequestTransforms } from "./request-transforms.js";
 import { hostAllowed } from "../connectors/executor.js";
 import {
   boundedAbortSignal,
@@ -1257,7 +1258,7 @@ export async function composeBindingRequest(
     urlSafeKeys,
   );
 
-  const operationInputs = applyMapping(serviceInputs, binding.inputMapping);
+  let operationInputs = applyMapping(serviceInputs, binding.inputMapping);
   const operation = (operationRow.operation ?? {}) as JsonRecord;
   const isGraphql = transport === "graphql";
   const method = isGraphql
@@ -1266,6 +1267,15 @@ export async function composeBindingRequest(
       ? operation.method.toUpperCase()
       : "GET";
   const headerMappings = requestHeaderMappings(operationRow, providerRow.auth);
+  const requestMapping =
+    operationRow.requestMapping &&
+    typeof operationRow.requestMapping === "object" &&
+    !Array.isArray(operationRow.requestMapping)
+      ? (operationRow.requestMapping as JsonRecord)
+      : {};
+  if (Array.isArray(requestMapping.transforms) && requestMapping.transforms.length > 0) {
+    operationInputs = applyRequestTransforms(operationInputs, requestMapping.transforms);
+  }
   // GraphQL posts to the endpoint itself; a pathTemplate is optional there
   // (e.g. "/graphql") and required for REST.
   const pathTemplate =
@@ -1363,12 +1373,6 @@ export async function composeBindingRequest(
   // renamed into query parameters, or be placed at dot paths inside the JSON
   // body. Unmapped inputs keep the default placement (query for reads,
   // top-level body for writes).
-  const requestMapping =
-    operationRow.requestMapping &&
-    typeof operationRow.requestMapping === "object" &&
-    !Array.isArray(operationRow.requestMapping)
-      ? (operationRow.requestMapping as JsonRecord)
-      : {};
   const mappedBody: JsonRecord = {};
   const queryRenames = Array.isArray(requestMapping.queryParams)
     ? (requestMapping.queryParams as { field?: unknown; param?: unknown }[])

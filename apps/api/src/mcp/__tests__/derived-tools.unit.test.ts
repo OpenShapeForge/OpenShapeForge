@@ -45,6 +45,12 @@ describe("inputSchemaFromStoredFields", () => {
         valueType: "string",
         cardinality: "collection",
       },
+      {
+        key: "changes",
+        valueType: "object",
+        validation: { minProperties: 1 },
+        children: [{ key: "title", valueType: "string" }],
+      },
     ]);
     expect(schema).toEqual({
       type: "object",
@@ -58,6 +64,12 @@ describe("inputSchemaFromStoredFields", () => {
         },
         status: { type: "string", enum: ["open", "closed"] },
         tags: { type: "array", items: { type: "string" } },
+        changes: {
+          type: "object",
+          properties: { title: { type: "string" } },
+          additionalProperties: false,
+          minProperties: 1,
+        },
       },
       required: ["query"],
       additionalProperties: false,

@@ -146,6 +146,8 @@ function scalarSchema(
       ["maxLength", "maxLength"],
       ["min", "minimum"],
       ["max", "maximum"],
+      ["minProperties", "minProperties"],
+      ["maxProperties", "maxProperties"],
       ["pattern", "pattern"],
       ["format", "format"],
     ] as const) {

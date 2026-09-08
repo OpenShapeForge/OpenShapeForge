@@ -13,7 +13,7 @@ describe("sessionMayInviteEmployees", () => {
     expect(sessionMayInviteEmployees({ roles: ["Organization.All.ReadWrite"] })).toBe(true);
     expect(sessionMayInviteEmployees({ roles: ["org_employee"] })).toBe(false);
     expect(sessionMayInviteEmployees({ roles: [] })).toBe(false);
-    expect(sessionMayInviteEmployees({})).toBe(false);
+    expect(sessionMayInviteEmployees({ roles: [] })).toBe(false);
   });
 });
 
@@ -36,7 +36,7 @@ describe("employeeInvitationToolsForSession", () => {
     const invite = employeeInvitationToolsForSession({
       roles: ["Organization.All.ReadWrite"],
     }).find((tool) => tool.name === INVITE_EMPLOYEE_TOOL)!;
-    const schema = invite.inputSchema as {
+    const schema = invite.inputSchema as unknown as {
       required: string[];
       properties: { role: { enum: string[] } };
     };

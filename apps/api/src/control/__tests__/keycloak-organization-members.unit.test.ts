@@ -30,6 +30,37 @@ const config: KeycloakServiceAccountConfig = {
   clientSecret: "s3cret",
 };
 
+describe('first-administrator preflight reads', () => {
+  it('requires host and sender but exposes no SMTP credentials', async () => {
+    for (const smtpServer of [{}, { host: 'smtp.example' }, { host: 'smtp.example', from: 'invite@example.com', password: 'private' }]) {
+      const { fetch } = stubFetch(() => Response.json({ smtpServer }));
+      expect(await createKeycloakOrganizationMembersClient(config, { fetch }).hasInvitationMailConfiguration())
+        .toBe('from' in smtpServer);
+    }
+  });
+  it('reads only the exact organization members and their effective audience-client roles, including pagination', async () => {
+    const calls: string[] = [];
+    const fetch = (async (input: unknown) => {
+      const url = String(input); calls.push(url);
+      if (url.includes('/token')) return Response.json({ access_token: 'test', expires_in: 60 });
+      if (url.includes('/clients?')) return Response.json([{ id: 'role-client', clientId: 'api' }]);
+      if (url.includes('/members?first=0')) return Response.json(Array.from({ length: 100 }, (_, i) => ({ id: `user-${i}`, email: `user${i}@example.com` })));
+      if (url.includes('/members?first=100')) return Response.json([]);
+      if (url.includes('/users/user-99/')) return Response.json([{ name: 'Organization.All.ReadWrite' }]);
+      return Response.json([]);
+    }) as typeof globalThis.fetch;
+    expect(await createKeycloakOrganizationMembersClient(config, { fetch }).organizationAdministrators('org/acme', 'api', 'Organization.All.ReadWrite'))
+      .toEqual([{ email: 'user99@example.com' }]);
+    expect(calls.some(url => url.includes('/organizations/org%2Facme/members?first=100'))).toBe(true);
+    expect(calls.filter(url => url.includes('/role-mappings/')).every(url => url.endsWith('/clients/role-client/composite'))).toBe(true);
+  });
+  it('fails closed when the role client cannot be resolved', async () => {
+    const { fetch } = stubFetch(() => Response.json([]));
+    await expect(createKeycloakOrganizationMembersClient(config, { fetch }).organizationAdministrators('acme', 'api', 'Organization.All.ReadWrite'))
+      .rejects.toMatchObject({ code: 'KEYCLOAK_ADMIN_REJECTED' });
+  });
+});
+
 type Call = { url: string; init: RequestInit };
 
 function stubFetch(admin: () => Response): { fetch: typeof globalThis.fetch; calls: Call[] } {

@@ -242,7 +242,7 @@ describe("tenant from Keycloak Organization membership", () => {
   test("selects the single membership that carries an organization id", () => {
     expect(
       selectOrganizationMembership({
-        organizations: { "zerocopter-dev": { id: "org-1", groups: [], roles: [], clientRoles: {} } },
+        organizations: { "zerocopter-dev": { id: "org-1" } },
       }),
     ).toEqual({ alias: "zerocopter-dev", id: "org-1" });
   });
@@ -250,7 +250,7 @@ describe("tenant from Keycloak Organization membership", () => {
   test("fails closed without an id, and on several memberships with no organization:<alias> scope", () => {
     expect(
       selectOrganizationMembership({
-        organizations: { acme: { id: null, groups: [], roles: [], clientRoles: {} } },
+        organizations: { acme: { id: null } },
       }),
     ).toBeNull();
     const two = {

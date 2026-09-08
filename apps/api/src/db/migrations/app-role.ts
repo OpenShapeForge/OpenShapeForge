@@ -23,8 +23,8 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
  * fully idempotent:
  *   - the role is created only if pg_roles has no such row, and its password
  *     is set only at that point (never force-reset on later runs);
- *   - ALTER ROLE ... NOSUPERUSER / NOBYPASSRLS re-asserts the load-bearing RLS
- *     attributes every run (defensive against manual tampering);
+ *   - ALTER ROLE ... NOSUPERUSER / NOBYPASSRLS repairs the load-bearing RLS
+ *     attributes only when they drift (defensive against manual tampering);
  *   - GRANT and ALTER DEFAULT PRIVILEGES are naturally idempotent.
  *
  * PASSWORD OWNERSHIP
@@ -198,10 +198,24 @@ export async function applyAppRoleMigration(db: OpenShapeForgeDatabase) {
     $$;
   `.execute(db);
 
-  // Re-assert the load-bearing RLS attributes every run so a tampered or legacy
-  // role is repaired. These are NOT secrets, so re-asserting them is safe.
-  // LOGIN is re-asserted too (a NOLOGIN role would break the runtime pool).
-  await sql`alter role ${sql.ref(APP_ROLE)} login nosuperuser nobypassrls`.execute(db);
+  // Repair the load-bearing attributes only when they drift. Besides avoiding
+  // a cluster-wide pg_authid write on every migration, the guard is required
+  // for managed Postgres administrators: they can manage ordinary roles but
+  // PostgreSQL rejects even an idempotent NOSUPERUSER clause unless the caller
+  // is itself a superuser. An already-safe role needs no privileged write.
+  await sql`
+    do $$
+    begin
+      if exists (
+        select 1 from pg_roles
+        where rolname = ${sql.lit(APP_ROLE)}
+          and (not rolcanlogin or rolsuper or rolbypassrls)
+      ) then
+        execute format('alter role %I login nosuperuser nobypassrls', ${sql.lit(APP_ROLE)});
+      end if;
+    end
+    $$;
+  `.execute(db);
 
   // Rotate the password ONLY when explicitly requested for this run. This is
   // the sole path that overwrites an existing role's password; the default

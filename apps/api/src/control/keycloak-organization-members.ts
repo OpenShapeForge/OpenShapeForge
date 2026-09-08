@@ -157,6 +157,11 @@ export type KeycloakOrganizationMembersOptions = {
   tokens?: ServiceAccountTokenProvider;
 };
 
+export type OrganizationBootstrapReads = {
+  hasInvitationMailConfiguration(): Promise<boolean>;
+  organizationAdministrators(organizationId: string, clientId: string, role: string): Promise<{ email: string | null }[]>;
+};
+
 function optionalString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
@@ -172,9 +177,10 @@ function normalizeEmail(email: string): string {
 export function createKeycloakOrganizationMembersClient(
   config: KeycloakServiceAccountConfig,
   options: KeycloakOrganizationMembersOptions = {},
-): KeycloakOrganizationMembersClient {
+): KeycloakOrganizationMembersClient & OrganizationBootstrapReads {
   const doFetch = options.fetch ?? globalThis.fetch;
-  const adminBase = `${config.baseUrl}/admin/realms/${encodeURIComponent(config.tenantRealm)}/organizations`;
+  const realmBase = `${config.baseUrl}/admin/realms/${encodeURIComponent(config.tenantRealm)}`;
+  const adminBase = `${realmBase}/organizations`;
 
   const tokens =
     options.tokens ??
@@ -308,6 +314,29 @@ export function createKeycloakOrganizationMembersClient(
   }
 
   return {
+    async hasInvitationMailConfiguration() {
+      const { body } = await request(realmBase, { method: "GET" }, "checking invitation mail configuration");
+      const smtp = (body as { smtpServer?: Record<string, string> })?.smtpServer;
+      return Boolean(smtp?.host?.trim() && smtp?.from?.trim());
+    },
+    async organizationAdministrators(organizationId, clientId, role) {
+      const { body: clients } = await request(`${realmBase}/clients?clientId=${encodeURIComponent(clientId)}`, { method: "GET" }, "resolving the role client");
+      if (!Array.isArray(clients) || clients.length !== 1 || clients[0]?.clientId !== clientId || typeof clients[0]?.id !== "string") {
+        throw new KeycloakAdminError("KEYCLOAK_ADMIN_REJECTED", "The organization role client is missing or ambiguous.");
+      }
+      const result: { email: string | null }[] = [];
+      for (let first = 0; ; first += 100) {
+        const { body: members } = await request(`${adminBase}/${encodeURIComponent(organizationId)}/members?first=${first}&max=100`, { method: "GET" }, "checking organization administrators");
+        if (!Array.isArray(members)) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid organization members response.");
+        for (const member of members) {
+          if (typeof member.id !== "string") throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid organization member.");
+          const { body: roles } = await request(`${realmBase}/users/${encodeURIComponent(member.id)}/role-mappings/clients/${encodeURIComponent(clients[0].id)}/composite`, { method: "GET" }, "checking organization administrator roles");
+          if (!Array.isArray(roles)) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid member roles response.");
+          if (roles.some(r => r.name === role)) result.push({ email: optionalString(member.email) });
+        }
+        if (members.length < 100) return result;
+      }
+    },
     async inviteUser(organizationId, input) {
       const body = new URLSearchParams({ email: input.email });
       if (input.firstName) body.set("firstName", input.firstName);

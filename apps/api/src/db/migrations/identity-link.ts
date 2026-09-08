@@ -102,11 +102,18 @@ export async function applyIdentityLinkMigration(db: OpenShapeForgeDatabase) {
     -- each other, and a subquery in each direction is a policy recursion
     -- PostgreSQL refuses. A point lookup of one column, nothing else.
     create or replace function app.identity_subject(identity uuid) returns text
-    language plpgsql stable parallel safe
-    set app.bypass_rls = 'true'
+    language plpgsql volatile parallel unsafe
     as $$
+    declare
+      previous_bypass text := current_setting('app.bypass_rls', true);
+      identity_subject text;
     begin
-      return (select i.subject from platform.identities i where i.id = identity);
+      perform set_config('app.bypass_rls', 'true', true);
+      identity_subject := (select i.subject from platform.identities i where i.id = identity);
+      perform set_config('app.bypass_rls', coalesce(previous_bypass, ''), true);
+      return identity_subject;
+    exception when others then
+      raise;
     end
     $$;
 

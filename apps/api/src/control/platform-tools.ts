@@ -6,11 +6,9 @@
  * Written for a language model that is about to act on a platform
  * administrator's behalf, so every description says when to use the tool,
  * what it changes for whom, and what it never does — the same register the
- * tenant surface's `pentest_guide` uses. The one surface-wide rule an
- * assistant must internalise: this MCP acts for EVERY tenant at once. A
- * publish or retirement reaches all of them in one call; the only per-tenant
- * tool is `apply_catalog_update_for_tenant`, and that is the administrator
- * deciding to discard one organization's overrides.
+ * tenant surface's `pentest_guide` uses. A publish or retirement reaches all
+ * tenants in one call; forced updates and first-admin bootstrap instead
+ * require an explicit tenant slug and never impersonate a tenant member.
  *
  * Nothing here touches the database directly; `platform-catalog.ts` does,
  * under the audited system session. This module validates the arguments so a
@@ -28,6 +26,7 @@ import { ControlAuthorizationError } from "./authorization.js";
 import { ControlServiceError } from "./errors.js";
 import { ControlInputError } from "./organization-naming.js";
 import type { PlatformAdministrator } from "./platform-admin.js";
+import { FirstAdministratorError, inviteFirstTenantAdministrator, type FirstAdministratorClients } from "./first-tenant-administrator.js";
 // ---- update notices (control/update-notices-admin.ts) ----
 import {
   listUpdateNotices,
@@ -55,11 +54,12 @@ export const PLATFORM_SERVER_INFO = { name: "openshapeforge-platform", version: 
 export const PLATFORM_SERVER_INSTRUCTIONS =
   "Platform administration for an OpenShapeForge deployment: the integration " +
   "catalog (Adapters, Capabilities, Services) that is installed per tenant. " +
-  "This server acts for EVERY tenant at once — a publish or retirement reaches " +
+  "Catalog writes act for EVERY tenant at once — a publish or retirement reaches " +
   "all of them in one call. Read platform_guide before changing anything, " +
   "inspect with list_catalog_entries / get_catalog_entry first, and confirm a " +
   "publish, retirement or forced update with the administrator before " +
-  "calling it. Nothing here reads or writes tenant data; it manages definitions.";
+  "calling it. Use invite_first_tenant_admin to invite the first organization " +
+  "administrator for one existing tenant by email; this never makes you a tenant member.";
 
 export const PLATFORM_SESSION_RESOURCE_URI = "osf://platform-session";
 
@@ -91,7 +91,7 @@ const readOnly = {
 export const PLATFORM_GUIDE = [
   "# Platform administration guide",
   "",
-  "You are acting for a platform administrator of this OpenShapeForge deployment — a member of the control realm, not of any tenant. Everything you do here applies to all tenants; there is no 'current organization'.",
+  "You are acting for a platform administrator of this OpenShapeForge deployment — a member of the control realm, not of any tenant. There is no 'current organization'. Catalog publication is platform-wide; first-administrator invitations address only the explicit tenant slug.",
   "",
   "## What the catalog is",
   "Integration definitions (Adapters, Capabilities, Services) are platform-level, versioned catalog entries identified by kind and key. Each tenant has an installed copy. A published version is immutable: changing a definition always means publishing version N+1.",
@@ -100,6 +100,7 @@ export const PLATFORM_GUIDE = [
   "publish_catalog_entry installs the new version for every tenant in the same call: a tenant that has not overridden the row is updated in place (its own renames and narrowed lists are kept); a tenant that overrode a marked field (input/output fields, bindings, mappings, operation) is only FLAGGED — its row keeps running unchanged and shows updateAvailable. The tenant's own integration administrator can apply the update (apply_catalog_update on their MCP), or you can force it with apply_catalog_update_for_tenant, which discards that tenant's overrides. Never force without the administrator's explicit go-ahead for that tenant.",
   "",
   "## Process",
+  "For an existing tenant without an organization administrator, confirm its exact slug and the recipient email, then use invite_first_tenant_admin. The role is fixed to org_admin. Working SMTP on the tenant Keycloak realm is required; a pending invitation is not proof the person accepted. Repeating the same request does not resend mail. Once an administrator exists, use that tenant administrator's invite_employee workflow. The platform administrator stays outside the tenant.",
   "1. list_tenants and list_catalog_entries to see what exists and who overrode what.",
   "2. get_catalog_entry for the full current definition; start every change from it (publish takes the WHOLE definition, not a patch).",
   "3. Show the administrator the exact change and which tenants will be updated versus flagged; get confirmation.",
@@ -115,10 +116,17 @@ export const PLATFORM_GUIDE = [
   "retire_catalog_entry publishes a version marked retired. A Service is set to draft (unpublished) for every tenant that did not override it; overridden tenants are flagged and keep the Service until the update is applied. Adapters and Capabilities keep their rows and only carry the marker.",
   "",
   "## Never",
-  "Never invent a definition from memory — read it. Never publish to 'test'; there is no dry run and every tenant is affected. Never read or change tenant data through this server; it has no tools for that.",
+  "Never invent a definition from memory — read it. Never publish to 'test'; there is no dry run and every tenant is affected. This server does not expose tenant business data. The first-administrator invitation is a narrowly scoped bootstrap, not tenant impersonation or general member management.",
 ].join("\n");
 
 export const PLATFORM_TOOLS: readonly Tool[] = [
+  {
+    name: "invite_first_tenant_admin",
+    title: "Invite first tenant administrator",
+    description: "Invites the first org_admin by email for ONE existing active tenant. Confirm the exact tenant slug and recipient first. Uses the existing Keycloak organization invitation and acceptance flow; requires working tenant-realm SMTP. Repeating the same request reuses the invitation without resending. Refuses a different first administrator once one exists or is pending. Does not make the platform administrator a tenant member or grant a role before acceptance.",
+    inputSchema: { type: "object", properties: { slug: slugProperty, email: { type: "string", format: "email" } }, required: ["slug", "email"], additionalProperties: false },
+    annotations: { title: "Invite first tenant administrator", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
   {
     name: "whoami",
     title: "Who am I",
@@ -532,7 +540,8 @@ export function failedPlatformTool(error: unknown, log?: (error: unknown) => voi
     error instanceof PlatformCatalogError ||
     error instanceof ControlServiceError ||
     error instanceof ControlInputError ||
-    error instanceof ControlAuthorizationError
+    error instanceof ControlAuthorizationError ||
+    error instanceof FirstAdministratorError
   ) {
     code = error.code;
     message = error.message;
@@ -586,6 +595,7 @@ function rejectUnknown(args: Record<string, unknown>, allowed: readonly string[]
 }
 
 export type PlatformToolContext = PlatformCatalogDeps & {
+  firstAdministrator?: FirstAdministratorClients;
   /** The whoami counts, from the server's own lists. */
   access: () => { tools: number; resources: number };
   /** The MCP client that opened this session, when one introduced itself. */
@@ -615,6 +625,9 @@ export async function callPlatformTool(
       : {};
   try {
     switch (name) {
+      case "invite_first_tenant_admin":
+        rejectUnknown(args, ["slug", "email"]);
+        return ok(await inviteFirstTenantAdministrator(context, { slug: requireString(args, "slug"), email: requireString(args, "email") }));
       case "whoami": {
         rejectUnknown(args, []);
         const tenants = await listPlatformTenantsCount(context);

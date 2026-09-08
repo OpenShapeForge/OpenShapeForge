@@ -169,7 +169,7 @@ function requireAdmin(session: { roles?: readonly string[] | null | undefined })
   }
 }
 
-function normalisedEmail(email: string): string {
+export function normalisedEmail(email: string): string {
   const trimmed = email.trim();
   if (!trimmed || !EMAIL_PATTERN.test(trimmed)) {
     throw new HttpError(400, "VALIDATION", "email must be a valid e-mail address.");
@@ -234,7 +234,7 @@ type InvitationRow = {
   revoked_at: Date | string | null;
 };
 
-function toInvitation(row: InvitationRow): EmployeeInvitation {
+export function toInvitation(row: InvitationRow): EmployeeInvitation {
   return {
     id: row.id,
     email: row.email,
@@ -287,12 +287,23 @@ export async function inviteEmployee(
     rethrowKeycloakError(error);
   }
 
-  const row = await withDbSession(db, session, async (trx) => {
+  const invitation = await withDbSession(db, session, (trx) =>
+    recordEmployeeInvitation(trx, session.tenantId, actor, input, email),
+  );
+  console.info(`[auth] ${actor} invited ${email} to tenant ${session.tenantId} as ${input.role}.`);
+  return invitation;
+}
+
+/** Shared persistence after Keycloak confirms delivery; caller owns authorization. */
+export async function recordEmployeeInvitation(
+  trx: Transaction<DB>, tenantId: string, actor: string, input: InviteEmployeeInput,
+  email = normalisedEmail(input.email),
+): Promise<EmployeeInvitation> {
     const inserted = await sql<InvitationRow>`
       insert into platform.employee_invitations
         (tenant_id, email, role, first_name, last_name, invited_by)
       values
-        (${session.tenantId}, ${email}, ${input.role},
+        (${tenantId}, ${email}, ${input.role},
          ${input.firstName ?? null}, ${input.lastName ?? null}, ${actor})
       on conflict (tenant_id, lower(email)) where status = 'pending'
       do update set
@@ -304,13 +315,7 @@ export async function inviteEmployee(
         updated_at = now()
       returning id, email, role, first_name, last_name, status, invited_by, invited_at, revoked_at
     `.execute(trx);
-    return inserted.rows[0]!;
-  });
-
-  console.info(
-    `[auth] ${actor} invited ${email} to tenant ${session.tenantId} as ${input.role}.`,
-  );
-  return toInvitation(row);
+    return toInvitation(inserted.rows[0]!);
 }
 
 /** Every invitation this tenant still has `status = 'pending'`, newest first. */

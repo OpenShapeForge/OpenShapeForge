@@ -53,3 +53,7 @@ docs/entities.generated.md
 apps/web/e2e/.auth/
 apps/web/test-results/
 apps/web/playwright-report/
+
+# Locally-trusted TLS material for the compose stack (mkcert, per machine).
+# Regenerate with scripts/dev-tls-cert.sh; the private key must never be committed.
+certs/

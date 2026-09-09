@@ -19,6 +19,12 @@ const CONTROL_ISSUER = "https://keycloak.test/realms/openshapeforge-control";
 const TENANT_ISSUER = "https://keycloak.test/realms/openshapeforge";
 const HOST = "127.0.0.1:3351";
 const ORIGIN = `http://${HOST}`;
+// The full API-e2e job already supplies a real control realm. This file owns a
+// throwaway in-process realm and must not replace those process-wide variables
+// while unrelated test files are still using the real stack.
+const EXTERNAL_CONTROL_REALM = Boolean(
+  process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER,
+);
 
 const MANAGED_ENV = [
   "OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL",
@@ -27,6 +33,7 @@ const MANAGED_ENV = [
   "OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI",
   "OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID",
   "OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES",
+  "OPENSHAPEFORGE_PUBLIC_ORIGIN",
   "OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER",
   "OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI",
   "OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE",
@@ -45,7 +52,7 @@ function signJwt(key: KeyObject, payload: Record<string, unknown>): string {
   return `${signingInput}.${signature.toString("base64url")}`;
 }
 
-beforeAll(async () => {
+if (!EXTERNAL_CONTROL_REALM) beforeAll(async () => {
   for (const key of MANAGED_ENV) {
     saved.set(key, process.env[key]);
     delete process.env[key];
@@ -62,13 +69,14 @@ beforeAll(async () => {
   process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI = new URL("/certs", controlJwks.url).href;
   process.env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID = "openshapeforge-admin-gateway";
   process.env.OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES = "openshapeforge-admin-gateway,codex-platform";
+  process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = ORIGIN;
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = TENANT_ISSUER;
   __resetControlVerifiersForTests();
   app = createApiApp({ cors: false });
   await app.ready();
 });
 
-afterAll(async () => {
+if (!EXTERNAL_CONTROL_REALM) afterAll(async () => {
   await app?.close();
   controlJwks?.stop(true);
   for (const key of MANAGED_ENV) {
@@ -108,7 +116,7 @@ async function call(token?: string, method = "tools/list") {
   });
 }
 
-describe("platform administrator MCP discovery", () => {
+describe.skipIf(EXTERNAL_CONTROL_REALM)("platform administrator MCP discovery", () => {
   test("publishes its own metadata naming the CONTROL realm as authorization server", async () => {
     const response = await app.inject({ method: "GET", url: CONTROL_MCP_METADATA_PATH, headers: { host: HOST } });
     expect(response.statusCode).toBe(200);
@@ -116,7 +124,7 @@ describe("platform administrator MCP discovery", () => {
     expect(body.resource).toBe(`${ORIGIN}${CONTROL_MCP_PATH}`);
     expect(body.authorization_servers).toEqual([CONTROL_ISSUER]);
     expect(body.bearer_methods_supported).toEqual(["header"]);
-    expect(body.scopes_supported).toBeUndefined();
+    expect(body.scopes_supported).toEqual(["roles", "profile", "email", "mcp-resource:control"]);
     // ...while the tenant document keeps naming the tenant realm.
     const tenant = await app.inject({ method: "GET", url: PROTECTED_RESOURCE_METADATA_PATH, headers: { host: HOST } });
     expect(JSON.parse(tenant.body).authorization_servers).toEqual([TENANT_ISSUER]);
@@ -126,12 +134,12 @@ describe("platform administrator MCP discovery", () => {
     const response = await call();
     expect(response.statusCode).toBe(401);
     expect(String(response.headers["www-authenticate"])).toBe(
-      `Bearer resource_metadata="${ORIGIN}${CONTROL_MCP_METADATA_PATH}"`,
+      `Bearer resource_metadata="${ORIGIN}${CONTROL_MCP_METADATA_PATH}", scope="roles profile email mcp-resource:control"`,
     );
   });
 });
 
-describe("platform administrator MCP admission", () => {
+describe.skipIf(EXTERNAL_CONTROL_REALM)("platform administrator MCP admission", () => {
   test("a platform_admin token from the PKCE client is admitted (and only then reaches the database)", async () => {
     const response = await call(adminToken());
     expect(response.statusCode).toBe(503);

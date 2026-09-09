@@ -102,14 +102,15 @@
  * which a self-registering MCP client cannot ask for it), and no such scope may
  * name an Organization the realm no longer has. Those five findings
  * (`ORGANIZATION_SCOPE_*`) are computed against the SAME realm listing the
- * hierarchy comparison uses, and they are repaired by ONE realm-wide scope pass
- * rather than by replaying tenants: a scope is derived configuration keyed by
- * alias and origins, not registry state, so the "replay the create" argument
- * above does not apply — and a scope finding must not drag a whole tenant's
- * subtree through the SPI. The scope pass is the only place this module
- * DELETES anything in Keycloak; see the scope module for why that is safe
- * where deleting an Organization is not, and why it is suppressed whenever the
- * realm listing was truncated.
+ * hierarchy comparison uses. A full re-apply repairs them in one realm-wide
+ * pass and may remove orphan scopes. A tenant-bound re-apply instead ensures
+ * only the selected tenant's root and sub-organisation aliases and never
+ * removes an orphan; otherwise a request scoped to one tenant could mutate
+ * another tenant's authorization surface. Scope repair never replays the
+ * tenant tree through the SPI. The full scope pass is the only place this
+ * module DELETES anything in Keycloak; see the scope module for why that is
+ * safe where deleting an Organization is not, and why deletion is suppressed
+ * whenever the realm listing was truncated.
  */
 import { sql } from "kysely";
 import { withSystemSession } from "../db/session.js";
@@ -126,6 +127,7 @@ import {
 } from "./organization-naming.js";
 import {
   compareOrganizationScopes,
+  ensureOrganizationScope,
   isOrganizationScopeDriftCode,
   reconcileOrganizationScopes,
   type OrganizationScopeDrift,
@@ -883,18 +885,32 @@ function scopeFindings(
   organizations: KeycloakOrganizationSnapshot[],
 ): DriftFinding[] {
   const tenantsBySlug = new Map(scan.tenants.map((tenant) => [tenant.slug, tenant]));
+  const tenantsById = new Map(scan.tenants.map((tenant) => [tenant.id, tenant]));
+  const unitsByOrganizationId = new Map(
+    scan.orgUnits.flatMap((unit) =>
+      unit.keycloakOrganizationId === null
+        ? []
+        : [[unit.keycloakOrganizationId, unit] as const],
+    ),
+  );
   const organizationsByAlias = new Map(
     organizations.map((organization) => [organization.alias, organization]),
   );
   return drift.map((item) => {
-    const tenant = item.alias === null ? undefined : tenantsBySlug.get(item.alias);
     const organization =
       item.alias === null ? undefined : organizationsByAlias.get(item.alias);
+    const unit = organization === undefined
+      ? undefined
+      : unitsByOrganizationId.get(organization.id);
+    const tenant = item.alias === null
+      ? undefined
+      : tenantsBySlug.get(item.alias) ??
+        (unit === undefined ? undefined : tenantsById.get(unit.tenantId));
     return {
       code: item.code,
       tenantSlug: tenant?.slug ?? null,
       tenantId: tenant?.id ?? null,
-      orgUnitId: null,
+      orgUnitId: unit?.id ?? null,
       organizationId: organization?.id ?? null,
       expected: item.expected,
       actual: item.actual,
@@ -984,7 +1000,7 @@ export async function reapplyProjection(
       .filter(
         (item) => input.tenantSlug === undefined || item.tenantSlug === input.tenantSlug,
       )
-      .map((item) => item.tenantSlug!),
+      .flatMap((item) => item.tenantSlug === null ? [] : [item.tenantSlug]),
   );
 
   const unitsByTenant = new Map<string, ScannedOrgUnit[]>();
@@ -1101,36 +1117,61 @@ export async function reapplyProjection(
   }
 
   // ── the scope pass ───────────────────────────────────────────────────────
-  // Realm-wide, and only when the report found scope drift, so a converged
-  // realm is still a genuine no-op. A `tenantSlug` bound does not narrow it:
-  // the orphan case names no tenant, and a scope pass is bounded by the realm's
-  // Organization count either way. Runs AFTER the replays so an Organization a
-  // replay just recreated gets its scope in the same run.
+  // A full run reconciles the realm and removes orphan scopes. A tenant-bound
+  // run instead ensures only that tenant's expected aliases and never removes
+  // an orphan: proving an alias is absent from one tenant does not prove it is
+  // absent from the realm. Runs AFTER replays so recreated Organizations receive
+  // their scope in the same run.
   const scopeDrift = before.findings.filter((item) => isOrganizationScopeDriftCode(item.code));
   if (
     scopeDrift.length > 0 &&
     (input.tenantSlug === undefined ||
-      scopeDrift.some((item) => item.tenantSlug === input.tenantSlug || item.tenantSlug === null))
+      scopeDrift.some((item) => item.tenantSlug === input.tenantSlug))
   ) {
     try {
-      // Tenant replay can replace Organizations and therefore their aliases.
-      // Re-read the realm here so the scope pass converges the state that now
-      // exists, rather than the stale pre-repair snapshot that drove the run.
-      const listed = await deps.keycloakAdmin.listOrganizations(
-        RECONCILIATION_ORGANIZATION_LIMIT,
-      );
-      const realm: RealmAliases = {
-        aliases: listed.organizations
-          .map((organization) => organization.alias)
-          .filter((alias) => alias.length > 0),
-        removeOrphans: !listed.truncated,
-      };
-      const result = await reconcileOrganizationScopes(
-        deps.organizationScopes,
-        realm,
-        deps.mcpResource,
-      );
-      for (const action of result.actions) {
+      let scopeActions: { scope: string }[];
+      if (input.tenantSlug === undefined) {
+        // Tenant replay can replace Organizations and therefore their aliases.
+        // Re-read the realm so this full pass converges the current state.
+        const listed = await deps.keycloakAdmin.listOrganizations(
+          RECONCILIATION_ORGANIZATION_LIMIT,
+        );
+        const result = await reconcileOrganizationScopes(
+          deps.organizationScopes,
+          {
+            aliases: listed.organizations
+              .map((organization) => organization.alias)
+              .filter((alias) => alias.length > 0),
+            removeOrphans: !listed.truncated,
+          },
+          deps.mcpResource,
+        );
+        scopeActions = result.actions;
+      } else {
+        const tenant = tenantsBySlug.get(input.tenantSlug);
+        if (!tenant) throw tenantNotFound(input.tenantSlug);
+        const aliases = [tenant.slug];
+        for (const unit of scan.orgUnits.filter((item) => item.tenantId === tenant.id)) {
+          if (unit.slug === null || unit.chain.some((segment) => segment === null)) continue;
+          aliases.push(
+            subOrganizationIdentifiers(
+              tenant.slug,
+              unit.id,
+              [tenant.slug, ...(unit.chain as string[])],
+            ).alias,
+          );
+        }
+        const states = [];
+        for (const alias of aliases.sort()) {
+          states.push(await ensureOrganizationScope(
+            deps.organizationScopes,
+            alias,
+            deps.mcpResource,
+          ));
+        }
+        scopeActions = states.flatMap((state) => state.actions);
+      }
+      for (const action of scopeActions) {
         const alias = action.scope.slice(action.scope.indexOf(":") + 1);
         actions.push({
           target: "organizationScope",

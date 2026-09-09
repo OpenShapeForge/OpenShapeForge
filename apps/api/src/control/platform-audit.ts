@@ -65,6 +65,20 @@ const TARGET_PATTERNS: Readonly<Record<string, RegExp | null>> = {
   invite_first_tenant_admin: /^[a-z][a-z0-9-]*$/,
   list_tenants: null,
   get_tenant: /^slug="[a-z][a-z0-9-]*"$/,
+  create_tenant:
+    /^(create tenant slug="[a-z][a-z0-9-]*"|link tenant slug="[a-z][a-z0-9-]*" to organization "[A-Za-z0-9._:/-]{1,255}")$/,
+  update_tenant:
+    /^(rename|set status="(active|inactive|suspended)") on tenant slug="[a-z][a-z0-9-]*"$/,
+  get_tenant_organization_tree:
+    /^read the sub-organisation tree of tenant slug="[a-z][a-z0-9-]*"$/,
+  create_tenant_organization:
+    /^(create sub-organisation slug="[a-z][a-z0-9-]*" in tenant "[a-z][a-z0-9-]*"|link sub-organisation "[a-z][a-z0-9-/]*" to organization "[A-Za-z0-9._:/-]{1,255}")$/,
+  update_tenant_organization:
+    /^(rename|reparent|rename and reparent) sub-organisation "[0-9a-f-]{36}" in tenant "[a-z][a-z0-9-]*"$/i,
+  get_reconciliation_report:
+    /^scan the tenant registry and org-unit tree for Keycloak drift$/,
+  reapply_reconciliation:
+    /^(scan the tenant registry and org-unit tree for Keycloak drift|create tenant slug="[a-z][a-z0-9-]*"|link tenant slug="[a-z][a-z0-9-]*" to organization "[A-Za-z0-9._:/-]{1,255}"|create sub-organisation slug="[a-z][a-z0-9-]*" in tenant "[a-z][a-z0-9-]*"|link sub-organisation "[a-z][a-z0-9-/]*" to organization "[A-Za-z0-9._:/-]{1,255}")$/,
   list_platform_audit: null,
   list_catalog_entries: null,
   get_catalog_entry: /^(adapter|capability|service)\/[a-z][a-z0-9-]*$/,

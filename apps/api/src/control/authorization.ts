@@ -67,6 +67,10 @@ export type ControlOperator = {
   issuer: string;
   /** `preferred_username`, for human-readable audit context. Optional. */
   username: string | undefined;
+  /** Identifies an interactive platform-MCP elevation in the shared audit log. */
+  auditSource?: "platform-mcp" | undefined;
+  /** Tool name prepended to each lower-level service reason for safe projection. */
+  auditAction?: string | undefined;
 };
 
 const BEARER_AUTHORIZATION = /^Bearer\s+(.+)$/i;
@@ -256,6 +260,8 @@ export function systemSessionForOperator(
   return {
     actorSubject: actor,
     roles: [SYSTEM_BYPASS_ROLE],
-    reason: `control-plane: ${reason}`,
+    reason:
+      `${operator.auditSource ?? "control-plane"}: ` +
+      `${operator.auditAction ? `${operator.auditAction} ` : ""}${reason}`,
   };
 }

@@ -47,10 +47,17 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ControlAuthorizationError } from "../control/authorization.js";
 import { clientInfoFromInitializeBody, type McpClientInfo } from "./session-client.js";
-import { readControlPlaneConfig, type ControlPlaneConfigResult } from "../control/config.js";
+import {
+  readControlPlaneConfig,
+  type ControlPlaneConfig,
+  type ControlPlaneConfigResult,
+} from "../control/config.js";
 import type { FirstAdministratorClients } from "../control/first-tenant-administrator.js";
 import { createKeycloakOrganizationMembersClient } from "../control/keycloak-organization-members.js";
-import { createKeycloakOrganizationAdminClient } from "../control/keycloak-organization-admin.js";
+import { createKeycloakOrganizationAdminClient, KeycloakAdminError } from "../control/keycloak-organization-admin.js";
+import { createServiceAccountTokenProvider } from "../control/keycloak-service-account.js";
+import { createKeycloakSpiClient, KeycloakSpiError } from "../control/keycloak-spi-client.js";
+import { createOrganizationScopeAdminClient } from "../control/organization-scopes.js";
 import {
   resolvePlatformAdministrator,
   type PlatformAdministrator,
@@ -69,6 +76,7 @@ import {
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { headersFromFastify } from "../http/headers.js";
 import type { RuntimeModule } from "../modules/contract.js";
+import type { ControlDeps } from "../control/tenant-registry.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import {
   AUTHORIZATION_SERVER_METADATA_PREFIXES,
@@ -184,8 +192,64 @@ export type ControlMcpOptions = {
   config?: ControlPlaneConfigResult;
 };
 
+/**
+ * Keycloak clients used by the platform MCP. Kept as one composition boundary
+ * so tests can prove that the SPI and Admin API preserve their own refusal
+ * classes even though both obtain the same service-account credential.
+ */
+export function createPlatformKeycloakClients(
+  config: ControlPlaneConfig,
+  options: { fetch?: typeof globalThis.fetch } = {},
+): {
+  firstAdministrator: FirstAdministratorClients;
+  control: Omit<ControlDeps, "db" | "operator">;
+} {
+  const spiTokens = createServiceAccountTokenProvider(config.keycloak, {
+    ...options,
+    unauthorized: (message, status) =>
+      new KeycloakSpiError("KEYCLOAK_SPI_UNAUTHORIZED", message, status),
+    unavailable: (message, status) =>
+      new KeycloakSpiError("KEYCLOAK_SPI_UNAVAILABLE", message, status),
+  });
+  const adminTokens = createServiceAccountTokenProvider(config.keycloak, {
+    ...options,
+    unauthorized: (message, status) =>
+      new KeycloakAdminError("KEYCLOAK_ADMIN_UNAUTHORIZED", message, status),
+    unavailable: (message, status) =>
+      new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", message, status),
+  });
+  const keycloak = createKeycloakSpiClient(config.keycloak, { ...options, tokens: spiTokens });
+  const keycloakAdmin = createKeycloakOrganizationAdminClient(config.keycloak, {
+    ...options,
+    tokens: adminTokens,
+  });
+  const organizationScopes = createOrganizationScopeAdminClient(config.keycloak, {
+    ...options,
+    tokens: adminTokens,
+  });
+  const members = createKeycloakOrganizationMembersClient(config.keycloak, {
+    ...options,
+    tokens: adminTokens,
+  });
+  return {
+    firstAdministrator: {
+      tenantRealm: config.keycloak.tenantRealm,
+      members,
+      organizations: keycloakAdmin,
+    },
+    control: {
+      keycloak,
+      keycloakAdmin,
+      organizationScopes,
+      mcpResource: config.mcpResource,
+      tenantRealm: config.keycloak.tenantRealm,
+    },
+  };
+}
+
 function buildPlatformServer(input: {
   firstAdministrator: FirstAdministratorClients | undefined;
+  control: Omit<ControlDeps, "db" | "operator"> | undefined;
   db: OpenShapeForgeDatabase;
   administrator: PlatformAdministrator;
   provider: PlatformCatalogProvider | undefined;
@@ -200,6 +264,7 @@ function buildPlatformServer(input: {
   const access = () => ({ tools: PLATFORM_TOOLS.length, resources: 1 });
   const context = {
     ...(input.firstAdministrator ? { firstAdministrator: input.firstAdministrator } : {}),
+    ...(input.control ? { control: input.control } : {}),
     db: input.db,
     administrator: input.administrator,
     provider: input.provider,
@@ -242,11 +307,11 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
   const configResult = options.config ?? readControlPlaneConfig();
   const controlIssuer = configResult.ok ? configResult.config.operator.issuer : undefined;
   const provider = platformCatalogProviderOf(options.modules);
-  const firstAdministrator = configResult.ok ? {
-    tenantRealm: configResult.config.keycloak.tenantRealm,
-    members: createKeycloakOrganizationMembersClient(configResult.config.keycloak),
-    organizations: createKeycloakOrganizationAdminClient(configResult.config.keycloak),
-  } : undefined;
+  const clients = configResult.ok
+    ? createPlatformKeycloakClients(configResult.config)
+    : undefined;
+  const firstAdministrator = clients?.firstAdministrator;
+  const control = clients?.control;
 
   if (!configResult.ok) {
     app.log.warn(
@@ -394,7 +459,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
 
       if (request.method === "POST" && isInitializeBody(request.body)) {
         const client = clientInfoFromInitializeBody(request.body);
-        const server = buildPlatformServer({ db, administrator, provider, client, log, firstAdministrator });
+        const server = buildPlatformServer({ db, administrator, provider, client, log, firstAdministrator, control });
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
@@ -417,7 +482,7 @@ export function registerControlMcpServer(app: FastifyInstance, options: ControlM
       }
 
       // Sessionless single shot, for probes and scripted proofs.
-      const server = buildPlatformServer({ db, administrator, provider, client: null, log, firstAdministrator });
+      const server = buildPlatformServer({ db, administrator, provider, client: null, log, firstAdministrator, control });
       const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
       reply.raw.on("close", () => {
         void transport.close();

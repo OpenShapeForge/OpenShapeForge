@@ -53,6 +53,13 @@ describe("the tool list", () => {
       "platform_guide",
       "list_tenants",
       "get_tenant",
+      "create_tenant",
+      "update_tenant",
+      "get_tenant_organization_tree",
+      "create_tenant_organization",
+      "update_tenant_organization",
+      "get_reconciliation_report",
+      "reapply_reconciliation",
       "list_platform_audit",
       "list_catalog_entries",
       "get_catalog_entry",
@@ -77,6 +84,11 @@ describe("the tool list", () => {
     );
     expect(annotations.list_catalog_entries).toBe(true);
     expect(annotations.list_platform_audit).toBe(true);
+    expect(annotations.get_tenant_organization_tree).toBe(true);
+    expect(annotations.get_reconciliation_report).toBe(true);
+    expect(annotations.create_tenant).toBe(false);
+    expect(annotations.update_tenant).toBe(false);
+    expect(annotations.reapply_reconciliation).toBe(false);
     expect(annotations.publish_catalog_entry).toBe(false);
     expect(annotations.retire_catalog_entry).toBe(false);
     expect(annotations.apply_catalog_update_for_tenant).toBe(false);
@@ -91,6 +103,9 @@ describe("the tool list", () => {
     expect(required.publish_catalog_entry).toEqual(["kind", "key", "definition"]);
     expect(required.retire_catalog_entry).toEqual(["kind", "key"]);
     expect(required.apply_catalog_update_for_tenant).toEqual(["slug", "kind", "key"]);
+    expect(required.create_tenant).toEqual(["slug", "name"]);
+    expect(required.create_tenant_organization).toEqual(["tenantSlug", "slug", "name"]);
+    expect(required.update_tenant_organization).toEqual(["tenantSlug", "orgUnitId"]);
   });
 });
 
@@ -149,6 +164,15 @@ describe("argument validation happens before any elevation", () => {
     expect(errorOf(await callPlatformTool("list_platform_audit", { since: "2026-09-10T00:00:00Z", until: "2026-09-09T00:00:00Z" }, untouchable)).message).toContain("earlier than until");
     expect(errorOf(await callPlatformTool("list_platform_audit", { query: "password" }, untouchable)).message).toContain("not an argument");
     expect(errorOf(await callPlatformTool("list_platform_audit", { cursor: "not-a-cursor" }, untouchable)).message).toContain("nextCursor");
+  });
+
+  it("validates lifecycle and organization changes before opening an elevated session", async () => {
+    expect(errorOf(await callPlatformTool("create_tenant", { slug: "Not valid", name: "Acme" }, untouchable)).code).toBe("CONTROL_INVALID_INPUT");
+    expect(errorOf(await callPlatformTool("update_tenant", { slug: "acme" }, untouchable)).message).toContain("changes nothing");
+    expect(errorOf(await callPlatformTool("update_tenant", { slug: "acme", status: "deleted" }, untouchable)).message).toContain("status must be one of");
+    expect(errorOf(await callPlatformTool("create_tenant_organization", { tenantSlug: "acme", slug: "sales", name: "Sales", keycloakOrganizationId: "injected" }, untouchable)).message).toContain("not an argument");
+    expect(errorOf(await callPlatformTool("update_tenant_organization", { tenantSlug: "acme", orgUnitId: "not-a-uuid", name: "Sales" }, untouchable)).code).toBe("CONTROL_INVALID_INPUT");
+    expect(errorOf(await callPlatformTool("reapply_reconciliation", { tenantSlug: 42 }, untouchable)).message).toContain("tenantSlug is required");
   });
 
   it("answers the guide without a database and says what the surface never does", async () => {

@@ -24,10 +24,16 @@ import {
 import { connectedViaLabel, type McpClientInfo } from "../mcp/session-client.js";
 import { ControlAuthorizationError } from "./authorization.js";
 import { ControlServiceError } from "./errors.js";
-import { ControlInputError } from "./organization-naming.js";
+import { KeycloakAdminError } from "./keycloak-organization-admin.js";
+import { KeycloakSpiError } from "./keycloak-spi-client.js";
+import { assertDisplayName, assertSlug, assertUuid, ControlInputError } from "./organization-naming.js";
+import { listOrgUnits, parseOrgUnitUpdate, updateOrgUnit } from "./org-unit-registry.js";
 import type { PlatformAdministrator } from "./platform-admin.js";
 import { listPlatformAudit } from "./platform-audit.js";
 import { FirstAdministratorError, inviteFirstTenantAdministrator, type FirstAdministratorClients } from "./first-tenant-administrator.js";
+import { provisionSubOrganization, provisionTenant } from "./provisioning.js";
+import { buildDriftReport, reapplyProjection } from "./reconciliation.js";
+import { parseTenantUpdate, TENANT_STATUSES, updateTenant, type ControlDeps } from "./tenant-registry.js";
 // ---- update notices (control/update-notices-admin.ts) ----
 import {
   listUpdateNotices,
@@ -53,13 +59,16 @@ import {
 export const PLATFORM_SERVER_INFO = { name: "openshapeforge-platform", version: "1" } as const;
 
 export const PLATFORM_SERVER_INSTRUCTIONS =
-  "Platform administration for an OpenShapeForge deployment: the integration " +
-  "catalog (Adapters, Capabilities, Services) that is installed per tenant. " +
+  "Platform administration for an OpenShapeForge deployment: tenant lifecycle, " +
+  "organization structure, identity reconciliation, and the integration catalog " +
+  "that is installed per tenant. " +
   "Catalog writes act for EVERY tenant at once — a publish or retirement reaches " +
   "all of them in one call. Read platform_guide before changing anything, " +
   "inspect with list_catalog_entries / get_catalog_entry first, and confirm a " +
   "publish, retirement or forced update with the administrator before " +
-  "calling it. Use invite_first_tenant_admin to invite the first organization " +
+  "calling it. Inspect tenant and organization state before mutating it, and inspect " +
+  "get_reconciliation_report before reapplying drift. Use invite_first_tenant_admin " +
+  "to invite the first organization " +
   "administrator for one existing tenant by email; this never makes you a tenant member.";
 
 export const PLATFORM_SESSION_RESOURCE_URI = "osf://platform-session";
@@ -115,6 +124,10 @@ export const PLATFORM_GUIDE = [
   "publish_catalog_entry installs the new version for every tenant in the same call: a tenant that has not overridden the row is updated in place (its own renames and narrowed lists are kept); a tenant that overrode a marked field (input/output fields, bindings, mappings, operation) is only FLAGGED — its row keeps running unchanged and shows updateAvailable. The tenant's own integration administrator can apply the update (apply_catalog_update on their MCP), or you can force it with apply_catalog_update_for_tenant, which discards that tenant's overrides. Never force without the administrator's explicit go-ahead for that tenant.",
   "",
   "## Process",
+  "For a new tenant, use create_tenant with its permanent URL slug and display name. It writes the authoritative registry first, then provisions the root Keycloak Organization and its MCP audience. Repeating the call safely repairs an incomplete projection. The slug cannot change later.",
+  "Use update_tenant for display-name or lifecycle changes. Suspending or deactivating a tenant disables its root Organization and can interrupt access; confirm that consequence first. Use get_tenant_organization_tree before creating or moving a sub-organization, and pass only its opaque org-unit ids — never invent or accept a Keycloak Organization id.",
+  "Use get_reconciliation_report to compare the authoritative registry with Keycloak. reapply_reconciliation pushes repairable registry state into Keycloak for one tenant or every affected tenant; it never deletes an unclaimed Organization. Confirm an all-tenant run first.",
+  "",
   "For an existing tenant without an organization administrator, confirm its exact slug and the recipient email, then use invite_first_tenant_admin. The role is fixed to org_admin. Working SMTP on the tenant Keycloak realm is required; a pending invitation is not proof the person accepted. Repeating the same request does not resend mail. Once an administrator exists, use that tenant administrator's invite_employee workflow. The platform administrator stays outside the tenant.",
   "1. list_tenants and list_catalog_entries to see what exists and who overrode what.",
   "2. get_catalog_entry for the full current definition; start every change from it (publish takes the WHOLE definition, not a patch).",
@@ -191,6 +204,55 @@ export const PLATFORM_TOOLS: readonly Tool[] = [
       additionalProperties: false,
     },
     annotations: { title: "Get tenant", ...readOnly },
+  },
+  {
+    name: "create_tenant",
+    title: "Create tenant",
+    description: "Creates or safely replays ONE tenant in the platform registry and its root Keycloak Organization. Use a stable kebab-case slug and a human display name. A replay returns the existing tenant and repairs an incomplete Keycloak projection; it never deletes or replaces an existing tenant.",
+    inputSchema: { type: "object", properties: { slug: slugProperty, name: { type: "string", description: "Human display name." } }, required: ["slug", "name"], additionalProperties: false },
+    annotations: { title: "Create tenant", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  {
+    name: "update_tenant",
+    title: "Update tenant",
+    description: "Renames ONE tenant's display name and/or changes its lifecycle status. The slug stays immutable. Setting inactive or suspended disables the root Keycloak Organization and can interrupt access, so confirm that status change first. Repeating the same state is a no-op.",
+    inputSchema: { type: "object", properties: { slug: slugProperty, name: { type: "string" }, status: { type: "string", enum: [...TENANT_STATUSES] } }, required: ["slug"], additionalProperties: false },
+    annotations: { title: "Update tenant", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  },
+  {
+    name: "get_tenant_organization_tree",
+    title: "Get tenant organization tree",
+    description: "Returns the complete bounded sub-organization tree for ONE tenant, rooted beneath that tenant's Keycloak Organization. Use the returned opaque org-unit ids when creating or moving children. Read-only; it never returns members, credentials or another tenant's business data.",
+    inputSchema: { type: "object", properties: { slug: slugProperty }, required: ["slug"], additionalProperties: false },
+    annotations: { title: "Get tenant organization tree", ...readOnly },
+  },
+  {
+    name: "create_tenant_organization",
+    title: "Create tenant organization",
+    description: "Creates or safely replays ONE sub-organization beneath a tenant root or an explicit parent org unit, and provisions its Keycloak Organization and MCP audience scope. Use ids returned by get_tenant_organization_tree; the operation never accepts a Keycloak organization id directly.",
+    inputSchema: { type: "object", properties: { tenantSlug: slugProperty, slug: { type: "string", description: "Immutable kebab-case path segment." }, name: { type: "string", description: "Human display name." }, parentOrgUnitId: { type: "string", format: "uuid", description: "Opaque parent org-unit id; omit for the tenant root." } }, required: ["tenantSlug", "slug", "name"], additionalProperties: false },
+    annotations: { title: "Create tenant organization", readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  {
+    name: "update_tenant_organization",
+    title: "Update tenant organization",
+    description: "Renames and/or reparents ONE existing sub-organization inside its tenant. The org-unit id and slug stay immutable. Reparenting also reprojects every descendant path in Keycloak and can affect access, so confirm the move first; null moves the unit directly beneath the tenant root.",
+    inputSchema: { type: "object", properties: { tenantSlug: slugProperty, orgUnitId: { type: "string", format: "uuid" }, name: { type: "string" }, parentOrgUnitId: { anyOf: [{ type: "string", format: "uuid" }, { type: "null" }], description: "New parent id, or null for the tenant root; omit to keep the current parent." } }, required: ["tenantSlug", "orgUnitId"], additionalProperties: false },
+    annotations: { title: "Update tenant organization", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+  },
+  {
+    name: "get_reconciliation_report",
+    title: "Get reconciliation report",
+    description: "Compares the authoritative tenant and organization registry with its Keycloak projection and returns every bounded drift finding, including safe non-repairable findings. Read-only: inspect this before reapply_reconciliation and never infer that an unclaimed Keycloak Organization may be deleted.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    annotations: { title: "Get reconciliation report", ...readOnly },
+  },
+  {
+    name: "reapply_reconciliation",
+    title: "Reapply reconciliation",
+    description: "Pushes authoritative registry state back into Keycloak for repairable drift, either for ONE tenant slug or for every affected tenant when omitted. It never deletes unclaimed Organizations. Inspect get_reconciliation_report and confirm the intended blast radius first; replay is idempotent but may change identity access.",
+    inputSchema: { type: "object", properties: { tenantSlug: slugProperty }, additionalProperties: false },
+    annotations: { title: "Reapply reconciliation", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
   },
   {
     name: "list_platform_audit",
@@ -579,7 +641,9 @@ export function failedPlatformTool(error: unknown, log?: (error: unknown) => voi
     error instanceof ControlServiceError ||
     error instanceof ControlInputError ||
     error instanceof ControlAuthorizationError ||
-    error instanceof FirstAdministratorError
+    error instanceof FirstAdministratorError ||
+    error instanceof KeycloakSpiError ||
+    error instanceof KeycloakAdminError
   ) {
     code = error.code;
     message = error.message;
@@ -634,12 +698,34 @@ function rejectUnknown(args: Record<string, unknown>, allowed: readonly string[]
 
 export type PlatformToolContext = PlatformCatalogDeps & {
   firstAdministrator?: FirstAdministratorClients;
+  /** Existing typed control-plane services; absent when Keycloak is not configured. */
+  control?: Omit<ControlDeps, "db" | "operator">;
   /** The whoami counts, from the server's own lists. */
   access: () => { tools: number; resources: number };
   /** The MCP client that opened this session, when one introduced itself. */
   client?: McpClientInfo | null;
   log?: (error: unknown) => void;
 };
+
+function controlDeps(context: PlatformToolContext, auditAction: string): ControlDeps {
+  if (!context.control) {
+    throw new ControlAuthorizationError(
+      "CONTROL_PLANE_NOT_CONFIGURED",
+      "Tenant and organization administration is not configured.",
+    );
+  }
+  return {
+    db: context.db,
+    ...context.control,
+    operator: {
+      subject: context.administrator.subject,
+      issuer: context.administrator.issuer,
+      username: context.administrator.username,
+      auditSource: "platform-mcp",
+      auditAction,
+    },
+  };
+}
 
 /** The tenant count for whoami; null rather than a failure when the registry cannot be read. */
 export function listPlatformTenantsCount(context: PlatformCatalogDeps): Promise<number | null> {
@@ -687,6 +773,75 @@ export async function callPlatformTool(
       case "get_tenant":
         rejectUnknown(args, ["slug"]);
         return ok(await getPlatformTenant(context, requireString(args, "slug")));
+      case "create_tenant": {
+        rejectUnknown(args, ["slug", "name"]);
+        const slug = requireString(args, "slug");
+        const displayName = requireString(args, "name");
+        assertSlug(slug, "slug");
+        assertDisplayName(displayName, "name");
+        return ok(await provisionTenant(controlDeps(context, name), {
+          slug,
+          name: displayName,
+        }));
+      }
+      case "update_tenant": {
+        rejectUnknown(args, ["slug", "name", "status"]);
+        const slug = requireString(args, "slug");
+        assertSlug(slug, "slug");
+        const update = parseTenantUpdate(Object.fromEntries(
+          ["name", "status"].filter((key) => Object.hasOwn(args, key)).map((key) => [key, args[key]]),
+        ));
+        return ok(await updateTenant(controlDeps(context, name), slug, update));
+      }
+      case "get_tenant_organization_tree": {
+        rejectUnknown(args, ["slug"]);
+        const slug = requireString(args, "slug");
+        assertSlug(slug, "slug");
+        return ok(await listOrgUnits(controlDeps(context, name), slug));
+      }
+      case "create_tenant_organization": {
+        rejectUnknown(args, ["tenantSlug", "slug", "name", "parentOrgUnitId"]);
+        const tenantSlug = requireString(args, "tenantSlug");
+        const slug = requireString(args, "slug");
+        const displayName = requireString(args, "name");
+        assertSlug(tenantSlug, "tenantSlug");
+        assertSlug(slug, "slug");
+        assertDisplayName(displayName, "name");
+        if (args.parentOrgUnitId !== undefined) assertUuid(args.parentOrgUnitId, "parentOrgUnitId");
+        return ok(await provisionSubOrganization(controlDeps(context, name), {
+          tenantSlug,
+          slug,
+          name: displayName,
+          ...(args.parentOrgUnitId === undefined ? {} : { parentOrgUnitId: args.parentOrgUnitId as string }),
+        }));
+      }
+      case "update_tenant_organization": {
+        rejectUnknown(args, ["tenantSlug", "orgUnitId", "name", "parentOrgUnitId"]);
+        const tenantSlug = requireString(args, "tenantSlug");
+        const orgUnitId = requireString(args, "orgUnitId");
+        assertSlug(tenantSlug, "tenantSlug");
+        assertUuid(orgUnitId, "orgUnitId");
+        const update = parseOrgUnitUpdate(Object.fromEntries(
+          ["name", "parentOrgUnitId"].filter((key) => Object.hasOwn(args, key)).map((key) => [key, args[key]]),
+        ));
+        return ok(await updateOrgUnit(
+          controlDeps(context, name),
+          tenantSlug,
+          orgUnitId,
+          update,
+        ));
+      }
+      case "get_reconciliation_report":
+        rejectUnknown(args, []);
+        return ok(await buildDriftReport(controlDeps(context, name)));
+      case "reapply_reconciliation": {
+        rejectUnknown(args, ["tenantSlug"]);
+        const tenantSlug = args.tenantSlug === undefined ? undefined : requireString(args, "tenantSlug");
+        if (tenantSlug !== undefined) assertSlug(tenantSlug, "tenantSlug");
+        return ok(await reapplyProjection(controlDeps(context, name), {
+          ...(tenantSlug === undefined ? {} : { tenantSlug }),
+        }));
+      }
       case "list_platform_audit": {
         rejectUnknown(args, ["actor", "action", "result", "since", "until", "cursor", "limit"]);
         const limit = args.limit;

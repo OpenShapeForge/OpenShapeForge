@@ -243,8 +243,9 @@ single-hyphen groups, which is what makes `--` an unambiguous separator.
 
 The control plane has one more surface, for a different job: `/api/control/mcp`
 (Streamable HTTP, `src/mcp/control-mcp-server.ts`) lets a **platform
-administrator** — a control-realm person, not a tenant member — manage the
-integration catalog of a runtime module for *every* tenant at once. It is a
+administrator** — a control-realm person, not a tenant member — perform bounded
+platform operations for *every* tenant and manage the integration catalog of a
+runtime module. It is a
 separate small MCP server beside the generated one rather than a mode of it,
 for the reason the REST control plane is not on the GraphQL schema: the
 generated server is per-tenant by construction and a platform session names
@@ -274,10 +275,22 @@ no tenant.
   get, publish, retire, apply for one tenant, installation counts) and
   `src/control/platform-catalog.ts` calls it with the cross-tenant session,
   mapping tenant ids to slugs so no id reaches a client.
-- **Tools** (`src/control/platform-tools.ts`): `whoami` (role "Platform
+- **Tenant and organisation tools** (`src/control/platform-tools.ts`):
+  `list_tenants`, `get_tenant`, `create_tenant`, `update_tenant` (name and
+  lifecycle state), `get_tenant_organization_tree`,
+  `create_tenant_organization`, and `update_tenant_organization` (rename or
+  reparent). These delegate to the same audited control services as REST; the
+  MCP is not a generic Keycloak proxy and exposes no realm configuration,
+  credentials, tokens, or destructive tenant deletion.
+- **Reconciliation tools:** `get_reconciliation_report` and
+  `reapply_reconciliation`. A tenant-bound re-apply may change only that
+  tenant's Organization tree and audience scopes and never performs orphan
+  cleanup. An all-tenant re-apply may reconcile realm-wide audience scopes and
+  remove derived orphan scopes; it still never deletes an unclaimed Keycloak
+  Organization.
+- **Identity, guide, catalog and audit tools:** `whoami` (role "Platform
   administrator", scope `platform`, tenant count), `platform_guide`,
-  `list_tenants`, `get_tenant`, `list_catalog_entries`, `get_catalog_entry`,
-  `list_platform_audit`,
+  `list_catalog_entries`, `get_catalog_entry`, `list_platform_audit`,
   `publish_catalog_entry` (version N+1 from a whole definition; tenants
   without overrides updated in place, overridden ones flagged),
   `retire_catalog_entry`, `apply_catalog_update_for_tenant` (forces one

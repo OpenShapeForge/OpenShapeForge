@@ -130,7 +130,7 @@ test("platform MCP delegates tenant, organization and reconciliation tasks to th
       context,
     ));
     expect(organizationScopes.audiencesOf("mcp-resource:acme")).toEqual([
-      "https://app.example",
+      "https://app.example/acme",
     ]);
     expect(organizationScopes.audiencesOf("mcp-resource:beta")).toEqual([]);
     expect(organizationScopes.writes.every((write) => !write.includes("beta"))).toBe(true);

@@ -601,6 +601,8 @@ export type PlatformToolContext = PlatformCatalogDeps & {
   /** The MCP client that opened this session, when one introduced itself. */
   client?: McpClientInfo | null;
   log?: (error: unknown) => void;
+  /** MCP JSON-RPC id for correlating safe operator diagnostics to this call. */
+  correlationId?: string;
 };
 
 /** The tenant count for whoami; null rather than a failure when the registry cannot be read. */

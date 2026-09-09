@@ -17,9 +17,40 @@ export type FirstAdministratorClients = {
   organizations: Pick<KeycloakOrganizationAdminClient, "getOrganization">;
 };
 
+/** Error shape deliberately restricted to fields that are safe in shared logs. */
+export class KeycloakInvitationDiagnosticError extends Error {
+  readonly code: KeycloakAdminError["code"];
+  readonly status: number | undefined;
+  readonly operation: KeycloakAdminError["operation"];
+  readonly durationMs: number | undefined;
+  readonly correlationId: string | undefined;
+
+  constructor(error: KeycloakAdminError, correlationId?: string) {
+    super("Keycloak invitation subcall failed.");
+    this.name = "KeycloakInvitationDiagnosticError";
+    this.code = error.code;
+    this.status = error.status;
+    this.operation = error.operation;
+    this.durationMs = error.durationMs;
+    this.correlationId = correlationId;
+  }
+}
+
+export function invitationDeliveryUnconfirmed(
+  error: KeycloakAdminError,
+  log?: (error: unknown) => void,
+  correlationId?: string,
+): FirstAdministratorError {
+  log?.(new KeycloakInvitationDiagnosticError(error, correlationId));
+  return new FirstAdministratorError(
+    "INVITATION_DELIVERY_UNCONFIRMED",
+    "Keycloak did not confirm the invitation operation. Check its availability, service-account permissions and tenant-realm SMTP; no successful email delivery is claimed.",
+  );
+}
+
 /** Only called behind resolvePlatformAdministrator; never synthesizes a tenant identity. */
 export async function inviteFirstTenantAdministrator(
-  deps: { db: OpenShapeForgeDatabase; administrator: PlatformAdministrator; firstAdministrator?: FirstAdministratorClients },
+  deps: { db: OpenShapeForgeDatabase; administrator: PlatformAdministrator; firstAdministrator?: FirstAdministratorClients; log?: (error: unknown) => void; correlationId?: string },
   input: { slug: string; email: string },
 ) {
   if (!/^[a-z][a-z0-9-]*$/.test(input.slug)) throw new FirstAdministratorError("INVALID_INPUT", "A tenant slug is required.");
@@ -69,8 +100,9 @@ export async function inviteFirstTenantAdministrator(
       return { tenant: input.slug, ...invitation };
     });
   } catch (error) {
-    if (error instanceof KeycloakAdminError) throw new FirstAdministratorError("INVITATION_DELIVERY_UNCONFIRMED",
-      "Keycloak did not confirm the invitation operation. Check its availability, service-account permissions and tenant-realm SMTP; no successful email delivery is claimed.");
+    if (error instanceof KeycloakAdminError) {
+      throw invitationDeliveryUnconfirmed(error, deps.log, deps.correlationId);
+    }
     throw error;
   }
 }

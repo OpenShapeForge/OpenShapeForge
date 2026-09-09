@@ -112,16 +112,45 @@ export type KeycloakAdminErrorCode =
   /** Anything else: unreachable, 5xx, unparseable body. */
   | "KEYCLOAK_ADMIN_UNAVAILABLE";
 
+/** Fixed, non-identifying names for the Keycloak admin subcall that failed. */
+export type KeycloakAdminOperation =
+  | "service_account_token"
+  | "get_organization"
+  | "get_organization_for_update"
+  | "update_organization"
+  | "list_organizations"
+  | "link_identity_provider"
+  | "list_identity_providers"
+  | "unlink_identity_provider"
+  | "check_invitation_smtp"
+  | "resolve_role_client"
+  | "list_organization_members"
+  | "list_member_roles"
+  | "list_invitations"
+  | "invite_member"
+  | "delete_invitation";
+
 export class KeycloakAdminError extends Error {
   readonly code: KeycloakAdminErrorCode;
   /** Upstream HTTP status, when there was a response at all. */
   readonly status: number | undefined;
+  /** Safe fixed tag: never a URL, organization id, address, or response body. */
+  readonly operation: KeycloakAdminOperation | undefined;
+  /** Wall-clock duration of only the failed Keycloak subcall. */
+  readonly durationMs: number | undefined;
 
-  constructor(code: KeycloakAdminErrorCode, message: string, status?: number) {
+  constructor(
+    code: KeycloakAdminErrorCode,
+    message: string,
+    status?: number,
+    diagnostic?: { operation: KeycloakAdminOperation; durationMs: number },
+  ) {
     super(message);
     this.name = "KeycloakAdminError";
     this.code = code;
     this.status = status;
+    this.operation = diagnostic?.operation;
+    this.durationMs = diagnostic?.durationMs;
   }
 }
 
@@ -238,6 +267,7 @@ export function createKeycloakOrganizationAdminClient(
   options: KeycloakOrganizationAdminOptions = {},
 ): KeycloakOrganizationAdminClient {
   const doFetch = options.fetch ?? globalThis.fetch;
+  const now = options.now ?? (() => Date.now());
   const adminBase = `${config.baseUrl}/admin/realms/${encodeURIComponent(config.tenantRealm)}/organizations`;
 
   const tokens =
@@ -265,9 +295,23 @@ export function createKeycloakOrganizationAdminClient(
   async function request(
     url: string,
     init: RequestInit,
+    operation: KeycloakAdminOperation,
     contentType: string = "application/json",
   ): Promise<{ status: number; body: unknown }> {
-    const token = await tokens.get();
+    const tokenStartedAt = now();
+    let token: string;
+    try {
+      token = await tokens.get();
+    } catch (error) {
+      if (error instanceof KeycloakAdminError && error.operation === undefined) {
+        throw new KeycloakAdminError(error.code, error.message, error.status, {
+          operation: "service_account_token",
+          durationMs: Math.max(0, now() - tokenStartedAt),
+        });
+      }
+      throw error;
+    }
+    const requestStartedAt = now();
     let response: Response;
     try {
       response = await doFetch(url, {
@@ -284,6 +328,8 @@ export function createKeycloakOrganizationAdminClient(
         "KEYCLOAK_ADMIN_UNAVAILABLE",
         `Could not reach the Keycloak admin API at ${url}: ` +
           (error instanceof Error ? error.message : String(error)),
+        undefined,
+        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
       );
     }
 
@@ -302,6 +348,7 @@ export function createKeycloakOrganizationAdminClient(
           `${describeError(body, response.statusText)}. The service account must hold ` +
           "realm-management manage-realm.",
         response.status,
+        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
       );
     }
     if (response.status === 404) {
@@ -310,6 +357,7 @@ export function createKeycloakOrganizationAdminClient(
         "The Keycloak organization this tenant is linked to no longer exists. " +
           "Replay the tenant's provisioning create to recreate and relink it.",
         response.status,
+        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
       );
     }
     if (response.status === 400) {
@@ -317,6 +365,7 @@ export function createKeycloakOrganizationAdminClient(
         "KEYCLOAK_ADMIN_REJECTED",
         describeError(body, "The Keycloak admin API rejected the request."),
         response.status,
+        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
       );
     }
     throw new KeycloakAdminError(
@@ -324,6 +373,7 @@ export function createKeycloakOrganizationAdminClient(
       `The Keycloak admin API answered ${response.status}: ` +
         describeError(body, response.statusText),
       response.status,
+      { operation, durationMs: Math.max(0, now() - requestStartedAt) },
     );
   }
 
@@ -376,13 +426,13 @@ export function createKeycloakOrganizationAdminClient(
 
   return {
     async getOrganization(organizationId) {
-      const { body } = await request(organizationUrl(organizationId), { method: "GET" });
+      const { body } = await request(organizationUrl(organizationId), { method: "GET" }, "get_organization");
       return toState(body, organizationId);
     },
 
     async setOrganizationEnabled(organizationId, enabled) {
       const url = organizationUrl(organizationId);
-      const { body } = await request(url, { method: "GET" });
+      const { body } = await request(url, { method: "GET" }, "get_organization_for_update");
       const current = toState(body, organizationId);
       if (current.enabled === enabled) {
         return { organization: current, changed: false };
@@ -392,7 +442,7 @@ export function createKeycloakOrganizationAdminClient(
       // the hierarchy attributes ride along untouched rather than trusting
       // Keycloak to merge a partial body.
       const representation = { ...((body ?? {}) as Record<string, unknown>), enabled };
-      await request(url, { method: "PUT", body: JSON.stringify(representation) });
+      await request(url, { method: "PUT", body: JSON.stringify(representation) }, "update_organization");
       return { organization: { ...current, enabled }, changed: true };
     },
 
@@ -406,7 +456,7 @@ export function createKeycloakOrganizationAdminClient(
       });
       const { body } = await request(`${adminBase}?${search.toString()}`, {
         method: "GET",
-      });
+      }, "list_organizations");
       const rows = Array.isArray(body) ? body : [];
       const organizations = rows
         .slice(0, limit)
@@ -427,13 +477,14 @@ export function createKeycloakOrganizationAdminClient(
       await request(`${organizationUrl(organizationId)}/identity-providers`, {
         method: "POST",
         body: JSON.stringify(alias),
-      });
+      }, "link_identity_provider");
     },
 
     async listIdentityProviders(organizationId) {
       const { body } = await request(
         `${organizationUrl(organizationId)}/identity-providers`,
         { method: "GET" },
+        "list_identity_providers",
       );
       const rows = Array.isArray(body) ? body : [];
       return rows
@@ -455,6 +506,7 @@ export function createKeycloakOrganizationAdminClient(
         await request(
           `${organizationUrl(organizationId)}/identity-providers/${encodeURIComponent(alias)}`,
           { method: "DELETE" },
+          "unlink_identity_provider",
         );
       } catch (error) {
         // Already unlinked (or never linked): idempotent, not an error. A

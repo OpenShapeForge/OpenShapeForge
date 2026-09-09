@@ -156,6 +156,8 @@ describe("failure mapping", () => {
       .getOrganization("acme")
       .catch((caught: unknown) => caught)) as KeycloakAdminError;
     expect(error).toBeInstanceOf(KeycloakAdminError);
+    expect(error.operation).toBe("get_organization");
+    expect(error.durationMs).toBeGreaterThanOrEqual(0);
     return error;
   };
 
@@ -192,6 +194,7 @@ describe("failure mapping", () => {
       .catch((caught: unknown) => caught)) as KeycloakAdminError;
 
     expect(error.code).toBe("KEYCLOAK_ADMIN_UNAUTHORIZED");
+    expect(error.operation).toBe("service_account_token");
     expect(error.message).toContain("unauthorized_client");
   });
 

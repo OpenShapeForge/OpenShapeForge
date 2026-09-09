@@ -85,7 +85,10 @@ import {
   type KeycloakServiceAccountConfig,
   type ServiceAccountTokenProvider,
 } from "./keycloak-service-account.js";
-import { KeycloakAdminError } from "./keycloak-organization-admin.js";
+import {
+  KeycloakAdminError,
+  type KeycloakAdminOperation,
+} from "./keycloak-organization-admin.js";
 
 export type InviteOrganizationMemberInput = {
   email: string;
@@ -179,6 +182,7 @@ export function createKeycloakOrganizationMembersClient(
   options: KeycloakOrganizationMembersOptions = {},
 ): KeycloakOrganizationMembersClient & OrganizationBootstrapReads {
   const doFetch = options.fetch ?? globalThis.fetch;
+  const now = options.now ?? (() => Date.now());
   const realmBase = `${config.baseUrl}/admin/realms/${encodeURIComponent(config.tenantRealm)}`;
   const adminBase = `${realmBase}/organizations`;
 
@@ -214,9 +218,23 @@ export function createKeycloakOrganizationMembersClient(
     url: string,
     init: RequestInit,
     what: string,
+    operation: KeycloakAdminOperation,
     notFoundIsAnswer = false,
   ): Promise<{ status: number; body: unknown }> {
-    const token = await tokens.get();
+    const tokenStartedAt = now();
+    let token: string;
+    try {
+      token = await tokens.get();
+    } catch (error) {
+      if (error instanceof KeycloakAdminError && error.operation === undefined) {
+        throw new KeycloakAdminError(error.code, error.message, error.status, {
+          operation: "service_account_token",
+          durationMs: Math.max(0, now() - tokenStartedAt),
+        });
+      }
+      throw error;
+    }
+    const requestStartedAt = now();
     let response: Response;
     try {
       response = await doFetch(url, {
@@ -232,6 +250,8 @@ export function createKeycloakOrganizationMembersClient(
         "KEYCLOAK_ADMIN_UNAVAILABLE",
         `Could not reach the Keycloak admin API at ${url}: ` +
           (error instanceof Error ? error.message : String(error)),
+        undefined,
+        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
       );
     }
 
@@ -246,6 +266,7 @@ export function createKeycloakOrganizationMembersClient(
           `${describeError(body, response.statusText)}. The service account must hold ` +
           "realm-management manage-realm.",
         response.status,
+        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
       );
     }
     if (response.status === 404) {
@@ -254,6 +275,7 @@ export function createKeycloakOrganizationMembersClient(
         "KEYCLOAK_ADMIN_ORGANIZATION_NOT_FOUND",
         "The Keycloak organization this tenant is linked to no longer exists.",
         response.status,
+        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
       );
     }
     if (response.status === 400 || response.status === 409) {
@@ -262,6 +284,7 @@ export function createKeycloakOrganizationMembersClient(
         `The Keycloak admin API rejected the request while ${what}: ` +
           describeError(body, response.statusText),
         response.status,
+        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
       );
     }
     // Includes the realm's own 500 "Failed to send invite email" — a
@@ -274,6 +297,7 @@ export function createKeycloakOrganizationMembersClient(
       `The Keycloak admin API answered ${response.status} while ${what}: ` +
         describeError(body, response.statusText),
       response.status,
+      { operation, durationMs: Math.max(0, now() - requestStartedAt) },
     );
   }
 
@@ -306,6 +330,7 @@ export function createKeycloakOrganizationMembersClient(
       invitationsUrl(organizationId),
       { method: "GET" },
       "listing the pending invitations",
+      "list_invitations",
     );
     const rows = Array.isArray(body) ? body : [];
     return rows
@@ -315,22 +340,22 @@ export function createKeycloakOrganizationMembersClient(
 
   return {
     async hasInvitationMailConfiguration() {
-      const { body } = await request(realmBase, { method: "GET" }, "checking invitation mail configuration");
+      const { body } = await request(realmBase, { method: "GET" }, "checking invitation mail configuration", "check_invitation_smtp");
       const smtp = (body as { smtpServer?: Record<string, string> })?.smtpServer;
       return Boolean(smtp?.host?.trim() && smtp?.from?.trim());
     },
     async organizationAdministrators(organizationId, clientId, role) {
-      const { body: clients } = await request(`${realmBase}/clients?clientId=${encodeURIComponent(clientId)}`, { method: "GET" }, "resolving the role client");
+      const { body: clients } = await request(`${realmBase}/clients?clientId=${encodeURIComponent(clientId)}`, { method: "GET" }, "resolving the role client", "resolve_role_client");
       if (!Array.isArray(clients) || clients.length !== 1 || clients[0]?.clientId !== clientId || typeof clients[0]?.id !== "string") {
         throw new KeycloakAdminError("KEYCLOAK_ADMIN_REJECTED", "The organization role client is missing or ambiguous.");
       }
       const result: { email: string | null }[] = [];
       for (let first = 0; ; first += 100) {
-        const { body: members } = await request(`${adminBase}/${encodeURIComponent(organizationId)}/members?first=${first}&max=100`, { method: "GET" }, "checking organization administrators");
+        const { body: members } = await request(`${adminBase}/${encodeURIComponent(organizationId)}/members?first=${first}&max=100`, { method: "GET" }, "checking organization administrators", "list_organization_members");
         if (!Array.isArray(members)) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid organization members response.");
         for (const member of members) {
           if (typeof member.id !== "string") throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid organization member.");
-          const { body: roles } = await request(`${realmBase}/users/${encodeURIComponent(member.id)}/role-mappings/clients/${encodeURIComponent(clients[0].id)}/composite`, { method: "GET" }, "checking organization administrator roles");
+          const { body: roles } = await request(`${realmBase}/users/${encodeURIComponent(member.id)}/role-mappings/clients/${encodeURIComponent(clients[0].id)}/composite`, { method: "GET" }, "checking organization administrator roles", "list_member_roles");
           if (!Array.isArray(roles)) throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "Invalid member roles response.");
           if (roles.some(r => r.name === role)) result.push({ email: optionalString(member.email) });
         }
@@ -350,6 +375,7 @@ export function createKeycloakOrganizationMembersClient(
           body: body.toString(),
         },
         "inviting a member",
+        "invite_member",
       );
     },
 
@@ -360,6 +386,7 @@ export function createKeycloakOrganizationMembersClient(
         `${invitationsUrl(organizationId)}/${encodeURIComponent(invitationId)}`,
         { method: "DELETE" },
         "cancelling an invitation",
+        "delete_invitation",
         true,
       );
       return status !== 404;

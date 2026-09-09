@@ -6,7 +6,12 @@ import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
 import { applyEmployeeInvitationsMigration } from "../../db/migrations/employee-invitations.js";
 import { applySystemBypassAuditMigration } from "../../db/migrations/system-bypass-audit.js";
 import { inviteEmployee } from "../../auth/employee-invitations.js";
-import { inviteFirstTenantAdministrator, type FirstAdministratorClients } from "../first-tenant-administrator.js";
+import {
+  invitationDeliveryUnconfirmed,
+  inviteFirstTenantAdministrator,
+  KeycloakInvitationDiagnosticError,
+  type FirstAdministratorClients,
+} from "../first-tenant-administrator.js";
 import { KeycloakAdminError } from "../keycloak-organization-admin.js";
 import type { PlatformAdministrator } from "../platform-admin.js";
 
@@ -19,6 +24,35 @@ const administrator: PlatformAdministrator = {
   subject: 'operator', issuer: 'https://identity.example/realms/control', username: 'platform-admin',
   name: null, email: null, authorizedParty: 'platform-mcp', expiresAtMs: Date.now() + 60000,
 };
+
+describe("first tenant administrator error boundary", () => {
+  it("logs only safe Keycloak subcall metadata and preserves the public error", () => {
+    const logged: unknown[] = [];
+    const publicError = invitationDeliveryUnconfirmed(
+      new KeycloakAdminError(
+        "KEYCLOAK_ADMIN_UNAVAILABLE",
+        "private@example.com at https://keycloak/private-org",
+        503,
+        { operation: "invite_member", durationMs: 10_004 },
+      ),
+      (error) => logged.push(error),
+      "mcp-request-42",
+    );
+
+    expect(publicError).toMatchObject({ code: "INVITATION_DELIVERY_UNCONFIRMED" });
+    expect(logged[0]).toBeInstanceOf(KeycloakInvitationDiagnosticError);
+    expect(logged[0]).toMatchObject({
+      code: "KEYCLOAK_ADMIN_UNAVAILABLE",
+      operation: "invite_member",
+      durationMs: 10_004,
+      status: 503,
+      correlationId: "mcp-request-42",
+      message: "Keycloak invitation subcall failed.",
+    });
+    expect(JSON.stringify(logged[0])).not.toContain("private");
+    expect(JSON.stringify(logged[0])).not.toContain("keycloak/private-org");
+  });
+});
 
 describe.skipIf(!url)('first tenant administrator (real PostgreSQL, stubbed Keycloak)', () => {
   let owner: DatabaseRuntime;

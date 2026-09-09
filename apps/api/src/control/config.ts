@@ -35,6 +35,11 @@ import { DEFAULT_MCP_CLIENTS } from "./organization-scopes.js";
 export type ControlPlaneEnv = {
   /** Keycloak origin, e.g. `http://localhost:8181`. No trailing path. */
   OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL?: string | undefined;
+  /**
+   * Optional TLS ingress used only for network routing. Requests retain the
+   * public base URL as their Host header and TLS server name.
+   */
+  OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL?: string | undefined;
   /** The realm holding tenant Organizations and the SPI. Defaults to `openshapeforge`. */
   OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM?: string | undefined;
   /**
@@ -117,6 +122,7 @@ export type ControlPlaneEnv = {
 export type ControlPlaneConfig = {
   keycloak: {
     baseUrl: string;
+    connectUrl?: string;
     tenantRealm: string;
     clientId: string;
     clientSecret: string;
@@ -190,6 +196,7 @@ export function readControlPlaneConfig(
   env: ControlPlaneEnv = process.env as ControlPlaneEnv,
 ): ControlPlaneConfigResult {
   const baseUrl = trimmed(env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL);
+  const connectUrl = trimmed(env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL);
   const clientSecret = trimmed(env.KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API);
   const issuer = trimmed(env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER);
   const jwksUri = trimmed(env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI);
@@ -206,6 +213,14 @@ export function readControlPlaneConfig(
   if (!jwksUri) missing.push("OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI");
   if (!operatorClientId) missing.push("OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID");
   if (!publicOrigin) missing.push("OPENSHAPEFORGE_PUBLIC_ORIGIN");
+
+  const normalizedBaseUrl = baseUrl ? asOrigin(baseUrl.replace(/\/+$/, "")) : null;
+  const normalizedConnectUrl = connectUrl ? asOrigin(connectUrl.replace(/\/+$/, "")) : null;
+  if (connectUrl && (!normalizedBaseUrl?.startsWith("https://") || !normalizedConnectUrl?.startsWith("https://"))) {
+    missing.push(
+      "OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL (requires HTTPS origins for both connect and base URL)",
+    );
+  }
 
   // A malformed origin is reported in the same list as an absent one: both mean
   // "no audience can be minted", and an operator reads one 503 either way.
@@ -235,6 +250,7 @@ export function readControlPlaneConfig(
         // Normalised once here so every caller can join paths without guessing
         // whether the operator wrote a trailing slash.
         baseUrl: baseUrl!.replace(/\/+$/, ""),
+        ...(normalizedConnectUrl ? { connectUrl: normalizedConnectUrl } : {}),
         tenantRealm:
           trimmed(env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM) ?? DEFAULT_TENANT_REALM,
         clientId:

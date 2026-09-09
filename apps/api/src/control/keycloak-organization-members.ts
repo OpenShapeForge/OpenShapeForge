@@ -79,6 +79,7 @@
  */
 import {
   createServiceAccountTokenProvider,
+  createKeycloakFetch,
   describeError,
   readJson,
   REQUEST_TIMEOUT_MS,
@@ -181,7 +182,7 @@ export function createKeycloakOrganizationMembersClient(
   config: KeycloakServiceAccountConfig,
   options: KeycloakOrganizationMembersOptions = {},
 ): KeycloakOrganizationMembersClient & OrganizationBootstrapReads {
-  const doFetch = options.fetch ?? globalThis.fetch;
+  const doFetch = createKeycloakFetch(config, options.fetch ?? globalThis.fetch);
   const now = options.now ?? (() => Date.now());
   const realmBase = `${config.baseUrl}/admin/realms/${encodeURIComponent(config.tenantRealm)}`;
   const adminBase = `${realmBase}/organizations`;

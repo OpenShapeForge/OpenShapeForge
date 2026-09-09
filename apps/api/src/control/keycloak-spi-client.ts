@@ -47,6 +47,7 @@
  */
 import {
   createServiceAccountTokenProvider,
+  createKeycloakFetch,
   describeError,
   readJson,
   REQUEST_TIMEOUT_MS,
@@ -137,7 +138,7 @@ export function createKeycloakSpiClient(
   config: KeycloakSpiClientConfig,
   options: KeycloakSpiClientOptions = {},
 ): KeycloakSpiClient {
-  const doFetch = options.fetch ?? globalThis.fetch;
+  const doFetch = createKeycloakFetch(config, options.fetch ?? globalThis.fetch);
   const realmBase = `${config.baseUrl}/realms/${encodeURIComponent(config.tenantRealm)}`;
 
   const tokens =

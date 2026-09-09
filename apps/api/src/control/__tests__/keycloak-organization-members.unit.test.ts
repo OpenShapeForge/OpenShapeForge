@@ -22,6 +22,7 @@ import {
 } from "../keycloak-organization-members.js";
 import { KeycloakAdminError } from "../keycloak-organization-admin.js";
 import type { KeycloakServiceAccountConfig } from "../keycloak-service-account.js";
+import type { ServiceAccountTokenProvider } from "../keycloak-service-account.js";
 
 const config: KeycloakServiceAccountConfig = {
   baseUrl: "http://keycloak.test:8080",
@@ -77,6 +78,65 @@ function stubFetch(admin: () => Response): { fetch: typeof globalThis.fetch; cal
 }
 
 describe("inviting a member", () => {
+  it("identifies the timed-out admin subcall without carrying request data", async () => {
+    const readings = [0, 10, 10_010];
+    const tokens: ServiceAccountTokenProvider = {
+      get: async () => "service-account-token",
+      invalidate: () => undefined,
+    };
+    const fetch = (async () => {
+      throw new DOMException("The operation was aborted", "TimeoutError");
+    }) as unknown as typeof globalThis.fetch;
+
+    let error: KeycloakAdminError;
+    try {
+      await createKeycloakOrganizationMembersClient(config, {
+        fetch,
+        tokens,
+        now: () => readings.shift() ?? 10_010,
+      }).inviteUser("private-organization-id", { email: "private@example.com" });
+      throw new Error("expected a rejection");
+    } catch (caught) {
+      error = caught as KeycloakAdminError;
+    }
+
+    expect(error).toMatchObject({
+      code: "KEYCLOAK_ADMIN_UNAVAILABLE",
+      operation: "invite_member",
+      durationMs: 10_000,
+      status: undefined,
+    });
+    expect(JSON.stringify({ operation: error.operation, durationMs: error.durationMs, code: error.code }))
+      .not.toContain("private");
+  });
+
+  it("distinguishes a service-account token failure from the admin request", async () => {
+    const readings = [100, 10_100];
+    const tokens: ServiceAccountTokenProvider = {
+      get: async () => {
+        throw new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", "secret token endpoint detail");
+      },
+      invalidate: () => undefined,
+    };
+
+    let error: KeycloakAdminError;
+    try {
+      await createKeycloakOrganizationMembersClient(config, {
+        tokens,
+        now: () => readings.shift() ?? 10_100,
+      }).inviteUser("private-organization-id", { email: "private@example.com" });
+      throw new Error("expected a rejection");
+    } catch (caught) {
+      error = caught as KeycloakAdminError;
+    }
+
+    expect(error).toMatchObject({
+      operation: "service_account_token",
+      durationMs: 10_000,
+      status: undefined,
+    });
+  });
+
   it("posts form-urlencoded fields to the invite-user endpoint with the service-account token", async () => {
     const { fetch, calls } = stubFetch(() => new Response(null, { status: 204 }));
     await createKeycloakOrganizationMembersClient(config, { fetch }).inviteUser("acme", {

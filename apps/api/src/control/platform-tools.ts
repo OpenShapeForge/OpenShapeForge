@@ -705,6 +705,8 @@ export type PlatformToolContext = PlatformCatalogDeps & {
   /** The MCP client that opened this session, when one introduced itself. */
   client?: McpClientInfo | null;
   log?: (error: unknown) => void;
+  /** MCP JSON-RPC id for correlating safe operator diagnostics to this call. */
+  correlationId?: string;
 };
 
 function controlDeps(context: PlatformToolContext, auditAction: string): ControlDeps {

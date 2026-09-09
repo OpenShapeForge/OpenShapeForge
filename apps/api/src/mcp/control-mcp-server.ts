@@ -297,8 +297,11 @@ function buildPlatformServer(input: {
       ],
     };
   });
-  server.setRequestHandler(CallToolRequestSchema, async (request) =>
-    callPlatformTool(request.params.name, request.params.arguments ?? {}, context),
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
+    callPlatformTool(request.params.name, request.params.arguments ?? {}, {
+      ...context,
+      correlationId: String(extra.requestId),
+    }),
   );
   return server;
 }

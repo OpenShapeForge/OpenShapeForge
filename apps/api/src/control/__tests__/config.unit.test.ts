@@ -117,6 +117,32 @@ describe("readControlPlaneConfig", () => {
     expect(result.config.keycloak.baseUrl).toBe("http://localhost:8181");
   });
 
+  it("accepts a separate HTTPS connect origin", () => {
+    const result = readControlPlaneConfig({
+      ...complete,
+      OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL: "https://identity.example.test",
+      OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL: "https://identity-ingress.example.test///",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.keycloak.connectUrl).toBe("https://identity-ingress.example.test");
+  });
+
+  it("refuses a connect route that would weaken transport encryption", () => {
+    const result = readControlPlaneConfig({
+      ...complete,
+      OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL: "https://identity.example.test",
+      OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL: "http://identity-internal.example.test",
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.missing).toContain(
+      "OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL (requires HTTPS origins for both connect and base URL)",
+    );
+  });
+
   it("honours an overridden tenant realm and SPI client id", () => {
     const result = readControlPlaneConfig({
       ...complete,

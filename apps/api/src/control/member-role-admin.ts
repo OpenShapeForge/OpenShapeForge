@@ -78,6 +78,7 @@
  */
 import {
   createServiceAccountTokenProvider,
+  createKeycloakFetch,
   describeError,
   readJson,
   REQUEST_TIMEOUT_MS,
@@ -125,7 +126,7 @@ export function createMemberRoleAdminClient(
   config: KeycloakServiceAccountConfig,
   options: MemberRoleAdminOptions = {},
 ): MemberRoleAdminClient {
-  const doFetch = options.fetch ?? globalThis.fetch;
+  const doFetch = createKeycloakFetch(config, options.fetch ?? globalThis.fetch);
   const adminBase = `${config.baseUrl}/admin/realms/${encodeURIComponent(config.tenantRealm)}`;
 
   const tokens =

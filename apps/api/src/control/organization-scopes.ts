@@ -125,6 +125,7 @@ import {
 import { KeycloakAdminError } from "./keycloak-organization-admin.js";
 import {
   createServiceAccountTokenProvider,
+  createKeycloakFetch,
   describeError,
   readJson,
   REQUEST_TIMEOUT_MS,
@@ -735,7 +736,7 @@ export function createOrganizationScopeAdminClient(
   config: KeycloakServiceAccountConfig,
   options: OrganizationScopeAdminOptions = {},
 ): OrganizationScopeAdminClient {
-  const doFetch = options.fetch ?? globalThis.fetch;
+  const doFetch = createKeycloakFetch(config, options.fetch ?? globalThis.fetch);
   const adminBase = `${config.baseUrl}/admin/realms/${encodeURIComponent(config.tenantRealm)}`;
 
   const tokens =

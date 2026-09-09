@@ -166,6 +166,7 @@ jobs:
           OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER: http://localhost:8181/realms/openshapeforge-control
           OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI: http://localhost:8181/realms/openshapeforge-control/protocol/openid-connect/certs
           OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID: openshapeforge-admin-gateway
+          OPENSHAPEFORGE_PUBLIC_ORIGIN: http://localhost:3001
           KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API: openshapeforge-auth-api-secret
         run: bun run test:e2e:report
 

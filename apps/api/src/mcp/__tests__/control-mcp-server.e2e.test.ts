@@ -116,7 +116,7 @@ async function call(token?: string, method = "tools/list") {
   });
 }
 
-describe.skipIf(EXTERNAL_CONTROL_REALM)("platform administrator MCP discovery", () => {
+if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP discovery", () => {
   test("publishes its own metadata naming the CONTROL realm as authorization server", async () => {
     const response = await app.inject({ method: "GET", url: CONTROL_MCP_METADATA_PATH, headers: { host: HOST } });
     expect(response.statusCode).toBe(200);
@@ -139,7 +139,7 @@ describe.skipIf(EXTERNAL_CONTROL_REALM)("platform administrator MCP discovery", 
   });
 });
 
-describe.skipIf(EXTERNAL_CONTROL_REALM)("platform administrator MCP admission", () => {
+if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP admission", () => {
   test("a platform_admin token from the PKCE client is admitted (and only then reaches the database)", async () => {
     const response = await call(adminToken());
     expect(response.statusCode).toBe(503);

@@ -81,7 +81,11 @@ import { createDatabaseRuntime } from "../../db/connection.js";
 import { runMigrationChain } from "../../db/migration-chain.js";
 import { loadRuntimeModules } from "../../modules/registry.js";
 import { createApiApp } from "../../roles/api.js";
-import { getKeycloakToken, getRolelessKeycloakToken } from "./e2e/harness.js";
+import {
+  getKeycloakToken,
+  getRolelessKeycloakToken,
+  seedKeycloakTokenPeople,
+} from "./e2e/harness.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -168,6 +172,7 @@ async function startSuite(): Promise<Suite> {
     await migrationRuntime.db
       .connection()
       .execute((connection) => runMigrationChain(connection, { moduleSeeds }));
+    await seedKeycloakTokenPeople(migrationRuntime.db, [writerToken, rolelessToken]);
   } finally {
     // The server opens its own pool from the same URL; two would just compete.
     await migrationRuntime.close();

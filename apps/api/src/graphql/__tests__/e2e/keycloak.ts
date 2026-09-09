@@ -1,10 +1,64 @@
 // SPDX-License-Identifier: BUSL-1.1
 
+import { sql, type Kysely } from "kysely";
+import type { DB } from "../../../generated/db/types.js";
+
 type KeycloakTokenStore = {
   defaultToken: Promise<string | null> | null;
   rolelessToken: Promise<string | null> | null;
   tokens: Map<string, Promise<string | null>>;
 };
+
+/**
+ * Give the real-realm identities used by transport tests a tenant-owned
+ * Relation. Production correctly refuses a valid realm token that the tenant
+ * neither knows nor invited; these suites test bearer verification and role
+ * enforcement, so membership is test setup rather than their subject.
+ */
+export async function seedKeycloakTokenPeople(
+  db: Kysely<DB>,
+  tokens: readonly (string | null)[],
+): Promise<void> {
+  for (const token of tokens) {
+    if (!token) continue;
+    const claims = JSON.parse(
+      Buffer.from(token.split(".")[1]!, "base64url").toString(),
+    ) as {
+      tid?: string;
+      email?: string;
+      name?: string;
+      preferred_username?: string;
+    };
+    if (!claims.tid || !claims.email) continue;
+    const displayName = claims.name ?? claims.preferred_username ?? claims.email;
+    await sql`
+      insert into platform.tenants (id, slug, name, status)
+      values (
+        ${claims.tid},
+        ${`e2e-realm-${claims.tid}`},
+        ${`E2E realm tenant ${claims.tid}`},
+        'active'
+      )
+      on conflict (id) do nothing
+    `.execute(db);
+    await sql`
+      with created as (
+        insert into erp.relations (tenant_id, display_name, relation_type, status)
+        select ${claims.tid}, ${displayName}, 'person', 'active'
+        where not exists (
+          select 1
+          from erp.contact_details cd
+          where cd.tenant_id = ${claims.tid}
+            and cd.type = 'email'
+            and lower(cd.value) = lower(${claims.email})
+        )
+        returning id, tenant_id
+      )
+      insert into erp.contact_details (tenant_id, relation_id, type, value, is_primary)
+      select tenant_id, id, 'email', ${claims.email}, true from created
+    `.execute(db);
+  }
+}
 
 const store = ((globalThis as Record<string, unknown>).__openshapeforgeE2EKeycloak ??= {
   defaultToken: null,

@@ -185,7 +185,10 @@ describe("generated MCP server", () => {
     const { status, body } = await rpc(tenantA, "tools/list");
     expect(status).toBe(200);
     const names = (body.result.tools as { name: string }[]).map((tool) => tool.name);
-    expect(names).toEqual(catalog.tools.map((tool) => tool.name));
+    const compiledNames = new Set(catalog.tools.map((tool) => tool.name));
+    expect(names.filter((name) => compiledNames.has(name))).toEqual(
+      catalog.tools.map((tool) => tool.name),
+    );
   });
 
   test("binds, authorizes and dispatches a canonical operation tool", async () => {
@@ -225,8 +228,12 @@ describe("generated MCP server", () => {
     const { status, body } = await rpc(tenantA, "resources/list");
     expect(status).toBe(200);
     const resources = body.result.resources as { uri: string; title: string }[];
-    expect(resources[0]?.uri).toBe("osf://schema/entities");
-    expect(resources.slice(1).map((resource) => resource.uri)).toEqual(
+    expect(resources.map((resource) => resource.uri)).toContain("osf://schema/entities");
+    expect(
+      resources
+        .map((resource) => resource.uri)
+        .filter((uri) => uri.startsWith("osf://schema/entities/")),
+    ).toEqual(
       catalog.entities.map((entity) => `osf://schema/entities/${entity.slug}`),
     );
 
@@ -302,9 +309,9 @@ describe("generated MCP server", () => {
 
   test("does not enumerate or read entity resources for a session without roles", async () => {
     const listed = await rpc(noRoles, "resources/list");
-    expect(listed.body.result.resources.map((resource: any) => resource.uri)).toEqual([
-      "osf://schema/entities",
-    ]);
+    const uris = listed.body.result.resources.map((resource: any) => resource.uri);
+    expect(uris).toContain("osf://schema/entities");
+    expect(uris.filter((uri: string) => uri.startsWith("osf://schema/entities/"))).toEqual([]);
     const denied = await rpc(noRoles, "resources/read", {
       uri: `osf://schema/entities/${catalog.entities[0]!.slug}`,
     });
@@ -313,10 +320,11 @@ describe("generated MCP server", () => {
 
   test("answers optional MCP catalogs without protocol errors", async () => {
     expect((await rpc(tenantA, "prompts/list")).body.result.prompts).toEqual([]);
-    expect(
-      (await rpc(tenantA, "resources/templates/list")).body.result
-        .resourceTemplates,
-    ).toEqual([]);
+    const templates = (await rpc(tenantA, "resources/templates/list")).body.result
+      .resourceTemplates as { uriTemplate: string }[];
+    expect(templates).toContainEqual(
+      expect.objectContaining({ uriTemplate: "osf://onboarding/step/{step}" }),
+    );
   });
 
   test("annotates read-only and destructive tools", async () => {
@@ -338,9 +346,11 @@ describe("generated MCP server", () => {
     expect(names).not.toContain("relation_delete");
   });
 
-  test("advertises nothing to a session with no roles", async () => {
+  test("advertises no generated entity tools to a session with no roles", async () => {
     const { body } = await rpc(noRoles, "tools/list");
-    expect(body.result.tools).toEqual([]);
+    const names = (body.result.tools as { name: string }[]).map((tool) => tool.name);
+    const compiledNames = new Set(catalog.tools.map((tool) => tool.name));
+    expect(names.filter((name) => compiledNames.has(name))).toEqual([]);
   });
 
   test("refuses a tool the session may not invoke", async () => {

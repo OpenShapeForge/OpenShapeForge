@@ -19,6 +19,7 @@ import { REST_MOUNT_PATH } from "../generated-rest-routes.js";
 import {
   describe,
   getRuntime,
+  getSeedRuntime,
   gql,
   registerSuiteLifecycle,
   remoteUrl,
@@ -84,7 +85,7 @@ beforeAll(async () => {
     }
   }
   if (!table) return;
-  const db = getRuntime().db;
+  const db = getSeedRuntime().db;
   await sql
     .raw(
       `CREATE OR REPLACE FUNCTION public.${FUNCTION_NAME}() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -108,7 +109,7 @@ afterAll(async () => {
         `DROP TRIGGER IF EXISTS ${FUNCTION_NAME} ON ${table.schema}.${table.table};
          DROP FUNCTION IF EXISTS public.${FUNCTION_NAME}();`,
       )
-      .execute(getRuntime().db);
+      .execute(getSeedRuntime().db);
   }
   await app?.close();
   app = null;

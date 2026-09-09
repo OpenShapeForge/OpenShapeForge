@@ -125,7 +125,12 @@ jobs:
 
       - name: Install Chromium
         working-directory: apps/web
-        run: bunx playwright install --with-deps chromium
+        run: |
+          # The hosted runner adds Google's Chrome apt repository, but this
+          # job installs Playwright Chromium. A temporarily inconsistent
+          # Google index otherwise makes apt fail before browser tests start.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+          bunx playwright install --with-deps chromium
 
       - name: Apply migrations
         env:

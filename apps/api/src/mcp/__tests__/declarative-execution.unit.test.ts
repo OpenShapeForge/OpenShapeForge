@@ -15,6 +15,7 @@ import {
   bindingSelected,
   buildAuthHeaders,
   executeBinding,
+  executeBindingStep,
   fetchWithAllowedRedirects,
   mapOperationResponse,
   mergeOutputs,
@@ -1845,6 +1846,95 @@ describe("mapping honesty", () => {
       fetchImpl: fetchWith({ items: [] }),
     });
     expect(empty).toEqual({ ids: [], starts: [] });
+  });
+});
+
+describe("executeBindingStep", () => {
+  const providerRow = {
+    transport: "rest",
+    baseUrlTemplate: "https://api.example.com",
+    egressHosts: ["api.example.com"],
+  };
+  const binding = {
+    order: 2,
+    forEach: { from: "recordIds", as: "recordId" },
+    inputMapping: [{ from: "recordId", to: "providerId" }],
+    outputMapping: [{ from: "record", to: "records" }],
+  };
+  const operationRow = {
+    key: "read-record",
+    kind: "query",
+    operation: { method: "GET", pathTemplate: "/records/{providerId}" },
+    responseMapping: { fieldPaths: [{ field: "record", path: "$" }] },
+  };
+
+  it("fans a query out over an earlier collection and preserves its order", async () => {
+    const calls: string[] = [];
+    const outputs = await executeBindingStep({
+      binding,
+      operationRow,
+      providerRow,
+      connectionValues: {},
+      serviceInputs: { recordIds: ["second", "first"] },
+      secretScope: "unused",
+      fetchImpl: (async (input) => {
+        const url = String(input);
+        calls.push(url);
+        const id = url.split("/").at(-1);
+        return Response.json({ id, title: `Title ${id}` });
+      }) as typeof fetch,
+    });
+
+    expect(calls).toEqual([
+      "https://api.example.com/records/second",
+      "https://api.example.com/records/first",
+    ]);
+    expect(outputs).toEqual({
+      records: [
+        { id: "second", title: "Title second" },
+        { id: "first", title: "Title first" },
+      ],
+    });
+  });
+
+  it("returns empty authored collections without calling the provider", async () => {
+    let called = false;
+    const outputs = await executeBindingStep({
+      binding,
+      operationRow,
+      providerRow,
+      connectionValues: {},
+      serviceInputs: { recordIds: [] },
+      secretScope: "unused",
+      fetchImpl: (async () => {
+        called = true;
+        return Response.json({});
+      }) as unknown as typeof fetch,
+    });
+
+    expect(called).toBe(false);
+    expect(outputs).toEqual({ records: [] });
+  });
+
+  it("fails closed for missing, mutating and oversized fan-out", async () => {
+    const base = {
+      binding,
+      operationRow,
+      providerRow,
+      connectionValues: {},
+      secretScope: "unused",
+    };
+    await expect(executeBindingStep({ ...base, serviceInputs: {} }))
+      .rejects.toMatchObject({ code: "SERVICE_MISCONFIGURED" });
+    await expect(executeBindingStep({
+      ...base,
+      operationRow: { ...operationRow, kind: "mutation" },
+      serviceInputs: { recordIds: ["one"] },
+    })).rejects.toThrow(/only for query operations/);
+    await expect(executeBindingStep({
+      ...base,
+      serviceInputs: { recordIds: Array.from({ length: 101 }, (_, index) => index) },
+    })).rejects.toThrow(/100-item limit/);
   });
 });
 

@@ -18,8 +18,7 @@
  *                   inputFields, responseMapping { rootPath, fieldPaths,
  *                   transforms }
  *   binding:        <operationRef>, order, inputMapping [{from,to}],
- *                   outputMapping [{from,to}], optional
- *                   forEach {from,as} for bounded query fan-out
+ *                   outputMapping [{from,to}]
  *   connection row: <connectionValuesField> — plain values and encrypted
  *                   StoredSecret values from create-time elicitation
  *
@@ -87,7 +86,6 @@ export type DeclarativeOperationUrl = {
 const KEYRING_ENV = "OPENSHAPEFORGE_ELICITED_SECRET_KEYS";
 const REQUEST_TIMEOUT_MS = 15_000;
 const MAX_REDIRECTS = 5;
-const MAX_BINDING_FAN_OUT = 100;
 
 /** Follow redirects only while every hop remains inside the authored grant. */
 export async function fetchWithAllowedRedirects(
@@ -1634,78 +1632,6 @@ export async function executeBinding(
   }
 
   return mapOperationResponse(binding, operationRow, parsed);
-}
-
-/**
- * Execute a binding once, or once per item from an earlier Service output.
- * Each invocation receives the item under the authored local name and mapped
- * outputs are collected in source order. This is provider-neutral control
- * flow; provider operations and result shapes remain authoring data.
- */
-export async function executeBindingStep(
-  input: ExecuteBindingInput,
-): Promise<JsonRecord> {
-  const raw = input.binding.forEach;
-  if (raw === undefined) return executeBinding(input);
-  if (
-    !raw ||
-    typeof raw !== "object" ||
-    Array.isArray(raw) ||
-    typeof (raw as JsonRecord).from !== "string" ||
-    typeof (raw as JsonRecord).as !== "string" ||
-    !(raw as JsonRecord).from ||
-    !(raw as JsonRecord).as
-  ) {
-    throw new HttpError(
-      400,
-      "SERVICE_MISCONFIGURED",
-      "Binding forEach needs non-empty string fields `from` and `as`.",
-    );
-  }
-  if (input.operationRow.kind !== "query") {
-    throw new HttpError(
-      400,
-      "SERVICE_MISCONFIGURED",
-      "Binding forEach is allowed only for query operations.",
-    );
-  }
-  const from = (raw as JsonRecord).from as string;
-  const localName = (raw as JsonRecord).as as string;
-  const items = input.serviceInputs[from];
-  if (!Array.isArray(items)) {
-    throw new HttpError(
-      400,
-      "SERVICE_MISCONFIGURED",
-      `Binding forEach source "${from}" must be a collection from an earlier binding.`,
-    );
-  }
-  if (items.length > MAX_BINDING_FAN_OUT) {
-    throw new HttpError(
-      400,
-      "SERVICE_MISCONFIGURED",
-      `Binding forEach source "${from}" exceeds the ${MAX_BINDING_FAN_OUT}-item limit.`,
-    );
-  }
-
-  const collected: JsonRecord = {};
-  const mappings = Array.isArray(input.binding.outputMapping)
-    ? (input.binding.outputMapping as JsonRecord[])
-    : [];
-  for (const mapping of mappings) {
-    if (typeof mapping.to === "string") collected[mapping.to] = [];
-  }
-  for (const item of items) {
-    input.signal?.throwIfAborted();
-    const outputs = await executeBinding({
-      ...input,
-      serviceInputs: { ...input.serviceInputs, [localName]: item },
-    });
-    for (const [key, value] of Object.entries(outputs)) {
-      if (!Array.isArray(collected[key])) collected[key] = [];
-      (collected[key] as unknown[]).push(value);
-    }
-  }
-  return collected;
 }
 
 /**

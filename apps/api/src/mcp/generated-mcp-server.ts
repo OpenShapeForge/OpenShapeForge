@@ -124,7 +124,7 @@ import {
   bindingSelected,
   composeBindingRequest,
   definitionFieldKeys,
-  executeBindingStep,
+  executeBinding,
   fetchWithAllowedRedirects,
   mergeOutputs,
   orderedBindings,
@@ -5494,7 +5494,7 @@ function buildServer(
                 try {
                   assertParentInvocationActive?.();
                   assertInterceptorActive?.();
-                  outputs = await executeBindingStep({
+                  outputs = await executeBinding({
                     binding,
                     operationRow,
                     providerRow: providerForExecution,

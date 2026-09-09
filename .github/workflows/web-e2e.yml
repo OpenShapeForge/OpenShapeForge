@@ -129,7 +129,9 @@ jobs:
           # The hosted runner adds Google's Chrome apt repository, but this
           # job installs Playwright Chromium. A temporarily inconsistent
           # Google index otherwise makes apt fail before browser tests start.
-          sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+          sudo rm -f \
+            /etc/apt/sources.list.d/google-chrome.list \
+            /etc/apt/sources.list.d/google-chrome.sources
           bunx playwright install --with-deps chromium
 
       - name: Apply migrations

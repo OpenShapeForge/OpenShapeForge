@@ -264,6 +264,11 @@ no tenant.
 - **Audited per call.** Every tool runs inside `withSystemSession` with the
   reason `platform-mcp: <tool> <kind>/<key>`, so
   `platform.system_bypass_audit` reads as a log of what the administrator did.
+  `list_platform_audit` exposes a paginated projection of that register with
+  exact actor/action/result and time-window filters. It returns only actor,
+  timestamps, action, target and result: never application logs, credentials,
+  invitation links, or request/response bodies. The read writes its own audit
+  row but excludes that in-progress row from its answer.
 - **The catalog is a module's.** Core has no integration catalog; the module
   that owns one supplies `RuntimeModule.platformCatalog` (a small API: list,
   get, publish, retire, apply for one tenant, installation counts) and
@@ -272,6 +277,7 @@ no tenant.
 - **Tools** (`src/control/platform-tools.ts`): `whoami` (role "Platform
   administrator", scope `platform`, tenant count), `platform_guide`,
   `list_tenants`, `get_tenant`, `list_catalog_entries`, `get_catalog_entry`,
+  `list_platform_audit`,
   `publish_catalog_entry` (version N+1 from a whole definition; tenants
   without overrides updated in place, overridden ones flagged),
   `retire_catalog_entry`, `apply_catalog_update_for_tenant` (forces one

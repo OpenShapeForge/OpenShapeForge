@@ -269,6 +269,12 @@ export type SystemSessionInput = {
   tenantId?: string | null;
 };
 
+export type SystemSessionAuditContext = {
+  /** The row written for this invocation; useful when an audit read must omit itself. */
+  auditId: string;
+  startedAt: string;
+};
+
 /**
  * Break-glass wrapper that disables RLS for the duration of the callback.
  * Use ONLY for:
@@ -285,7 +291,10 @@ export type SystemSessionInput = {
 export async function withSystemSession<TDatabase, TResult>(
   db: Kysely<TDatabase>,
   input: SystemSessionInput,
-  callback: (trx: Transaction<TDatabase>) => Promise<TResult>,
+  callback: (
+    trx: Transaction<TDatabase>,
+    audit: SystemSessionAuditContext,
+  ) => Promise<TResult>,
 ): Promise<TResult> {
   if (!input.roles.includes(SYSTEM_BYPASS_ROLE)) {
     throw new Error(
@@ -323,7 +332,7 @@ export async function withSystemSession<TDatabase, TResult>(
           (${auditId}, ${input.actorSubject}, ${input.reason}, ${startedAt}, ${input.tenantId ?? null})
       `.execute(trx);
 
-      const result = await callback(trx);
+      const result = await callback(trx, { auditId, startedAt });
       succeeded = true;
       endedAt = new Date().toISOString();
 

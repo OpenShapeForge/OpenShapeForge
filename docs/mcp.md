@@ -208,8 +208,9 @@ another path is `403`.
 control plane's MCP for a platform administrator, who has no tenant. It
 authenticates against the **control** realm (its metadata document names that
 realm as authorization server), requires the realm role `platform_admin`, and
-offers nine tools that manage a runtime module's integration catalog for every
-tenant at once. See [api.md, "The platform administrator MCP"](api.md#the-platform-administrator-mcp).
+offers a deliberately bounded set of tools for tenant inventory, integration
+catalog administration, update notices, first-administrator bootstrap and the
+safe platform audit projection. See [api.md, "The platform administrator MCP"](api.md#the-platform-administrator-mcp).
 
 ## Tool surface
 

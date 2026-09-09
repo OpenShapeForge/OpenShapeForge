@@ -26,6 +26,7 @@ import { ControlAuthorizationError } from "./authorization.js";
 import { ControlServiceError } from "./errors.js";
 import { ControlInputError } from "./organization-naming.js";
 import type { PlatformAdministrator } from "./platform-admin.js";
+import { listPlatformAudit } from "./platform-audit.js";
 import { FirstAdministratorError, inviteFirstTenantAdministrator, type FirstAdministratorClients } from "./first-tenant-administrator.js";
 // ---- update notices (control/update-notices-admin.ts) ----
 import {
@@ -66,6 +67,20 @@ export const PLATFORM_SESSION_RESOURCE_URI = "osf://platform-session";
 const KINDS: readonly CatalogKind[] = ["adapter", "capability", "service"];
 const AUTHORITIES: readonly CatalogAuthority[] = ["platform_release", "host", "tenant_shared"];
 const KEBAB = /^[a-z][a-z0-9-]*$/;
+const ISO_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
+
+function isIsoDateTime(value: string): boolean {
+  const match = ISO_DATE_TIME.exec(value);
+  if (!match || !Number.isFinite(Date.parse(value))) return false;
+  const [, year, month, day, hour, minute, second, , offsetHour, offsetMinute] = match;
+  const parts = [year, month, day, hour, minute, second].map(Number);
+  const calendar = new Date(Date.UTC(parts[0]!, parts[1]! - 1, parts[2]!));
+  return calendar.getUTCFullYear() === parts[0]
+    && calendar.getUTCMonth() + 1 === parts[1]
+    && calendar.getUTCDate() === parts[2]
+    && parts[3]! <= 23 && parts[4]! <= 59 && parts[5]! <= 59
+    && (offsetHour === undefined || (Number(offsetHour) <= 23 && Number(offsetMinute) <= 59));
+}
 
 const kindProperty = {
   type: "string",
@@ -176,6 +191,29 @@ export const PLATFORM_TOOLS: readonly Tool[] = [
       additionalProperties: false,
     },
     annotations: { title: "Get tenant", ...readOnly },
+  },
+  {
+    name: "list_platform_audit",
+    title: "List platform audit",
+    description:
+      "Recent audited platform actions, newest first: actor, time, action, target and result. " +
+      "Filter by exact actor or action, result and a bounded time window; pass nextCursor back " +
+      "as cursor to continue. This is a safe audit projection, not application logs: it never " +
+      "returns tokens, credentials, invitation links or request and response bodies. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        actor: { type: "string", description: "Exact audited actor subject." },
+        action: { type: "string", description: "Exact action name, such as publish_catalog_entry." },
+        result: { type: "string", enum: ["succeeded", "failed", "in_progress"], description: "Exact action result." },
+        since: { type: "string", format: "date-time", description: "Include actions at or after this time." },
+        until: { type: "string", format: "date-time", description: "Include actions before this time." },
+        cursor: { type: "string", description: "nextCursor from the previous page." },
+        limit: { type: "integer", minimum: 1, maximum: 200, description: "Page size, default 50." },
+      },
+      additionalProperties: false,
+    },
+    annotations: { title: "List platform audit", ...readOnly },
   },
   {
     name: "list_catalog_entries",
@@ -649,6 +687,38 @@ export async function callPlatformTool(
       case "get_tenant":
         rejectUnknown(args, ["slug"]);
         return ok(await getPlatformTenant(context, requireString(args, "slug")));
+      case "list_platform_audit": {
+        rejectUnknown(args, ["actor", "action", "result", "since", "until", "cursor", "limit"]);
+        const limit = args.limit;
+        if (limit !== undefined && (!Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 200)) {
+          throw new ControlInputError("limit must be an integer from 1 through 200.");
+        }
+        if (args.result !== undefined && !["succeeded", "failed", "in_progress"].includes(String(args.result))) {
+          throw new ControlInputError("result must be succeeded, failed or in_progress.");
+        }
+        const since = optionalString(args, "since");
+        const until = optionalString(args, "until");
+        const actor = optionalString(args, "actor");
+        const action = optionalString(args, "action");
+        const cursor = optionalString(args, "cursor");
+        for (const [name, value] of [["since", since], ["until", until]] as const) {
+          if (value !== undefined && !isIsoDateTime(value)) {
+            throw new ControlInputError(`${name} must be an ISO date-time.`);
+          }
+        }
+        if (since && until && Date.parse(since) >= Date.parse(until)) {
+          throw new ControlInputError("since must be earlier than until.");
+        }
+        return ok(await listPlatformAudit(context, {
+          ...(actor ? { actor } : {}),
+          ...(action ? { action } : {}),
+          ...(args.result !== undefined ? { result: args.result as "succeeded" | "failed" | "in_progress" } : {}),
+          ...(since ? { since: new Date(since).toISOString() } : {}),
+          ...(until ? { until: new Date(until).toISOString() } : {}),
+          ...(cursor ? { cursor } : {}),
+          ...(limit !== undefined ? { limit: Number(limit) } : {}),
+        }));
+      }
       case "list_catalog_entries": {
         rejectUnknown(args, ["kind", "key", "cursor", "limit"]);
         const kind = optionalString(args, "kind");

@@ -53,6 +53,7 @@ describe("the tool list", () => {
       "platform_guide",
       "list_tenants",
       "get_tenant",
+      "list_platform_audit",
       "list_catalog_entries",
       "get_catalog_entry",
       "publish_catalog_entry",
@@ -75,6 +76,7 @@ describe("the tool list", () => {
       PLATFORM_TOOLS.map((tool) => [tool.name, tool.annotations?.readOnlyHint]),
     );
     expect(annotations.list_catalog_entries).toBe(true);
+    expect(annotations.list_platform_audit).toBe(true);
     expect(annotations.publish_catalog_entry).toBe(false);
     expect(annotations.retire_catalog_entry).toBe(false);
     expect(annotations.apply_catalog_update_for_tenant).toBe(false);
@@ -136,6 +138,17 @@ describe("argument validation happens before any elevation", () => {
   it("refuses a limit that is not a positive integer", async () => {
     expect(errorOf(await callPlatformTool("list_catalog_entries", { limit: 0 }, untouchable)).message).toContain("limit");
     expect(errorOf(await callPlatformTool("list_catalog_entries", { limit: "ten" }, untouchable)).message).toContain("limit");
+  });
+
+  it("validates platform audit filters before opening an elevated session", async () => {
+    expect(errorOf(await callPlatformTool("list_platform_audit", { limit: 201 }, untouchable)).message).toContain("1 through 200");
+    expect(errorOf(await callPlatformTool("list_platform_audit", { result: "maybe" }, untouchable)).message).toContain("succeeded, failed or in_progress");
+    expect(errorOf(await callPlatformTool("list_platform_audit", { since: "yesterday" }, untouchable)).message).toContain("ISO date-time");
+    expect(errorOf(await callPlatformTool("list_platform_audit", { since: "2026-09-09" }, untouchable)).message).toContain("ISO date-time");
+    expect(errorOf(await callPlatformTool("list_platform_audit", { since: "2026-02-30T00:00:00Z" }, untouchable)).message).toContain("ISO date-time");
+    expect(errorOf(await callPlatformTool("list_platform_audit", { since: "2026-09-10T00:00:00Z", until: "2026-09-09T00:00:00Z" }, untouchable)).message).toContain("earlier than until");
+    expect(errorOf(await callPlatformTool("list_platform_audit", { query: "password" }, untouchable)).message).toContain("not an argument");
+    expect(errorOf(await callPlatformTool("list_platform_audit", { cursor: "not-a-cursor" }, untouchable)).message).toContain("nextCursor");
   });
 
   it("answers the guide without a database and says what the surface never does", async () => {

@@ -981,13 +981,15 @@ describe("generated MCP runtime module security boundary", () => {
               version: 1,
             },
             outcome: "connection_required",
+            guidance:
+              "The organization's Other connection is not set up. Ask an organization administrator to set up the Other connection (create_connection).",
           }]);
           const unavailableJson = JSON.stringify(
             currentSourceResolution()?.unavailable,
           );
           expect(unavailableJson).not.toContain(otherProviderId);
           expect(unavailableJson).not.toContain(otherConnectionId);
-          expect(unavailableJson).not.toContain("Other");
+          expect(unavailableJson).toContain("Other");
 
           await admin.connection().execute((trx) => sql`
             insert into public.module_connection_test
@@ -1153,7 +1155,7 @@ describe("generated MCP runtime module security boundary", () => {
                 error: {
                   code: "REAUTHORIZATION_REQUIRED",
                   message:
-                    "This connection's stored authorization is unreadable and must be authorized again.",
+                    "The organization's Wrong key sign-in is stored in a form this runtime can no longer read. An organization administrator calls the connect tool again and approves at Wrong key.",
                 },
               },
             });

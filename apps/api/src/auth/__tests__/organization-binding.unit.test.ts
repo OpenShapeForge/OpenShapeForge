@@ -270,7 +270,7 @@ describe("organization resource paths", () => {
     expect(organizationAliasFromPath("/")).toBeNull();
     // The server's own names are never an organization, whatever Keycloak
     // would accept as an alias.
-    for (const reserved of ["/api/rest/v1", "/graphql", "/admin", "/admin/mcp", "/assets/main.js", "/.well-known/x"]) {
+    for (const reserved of ["/api/rest/v1", "/graphql", "/admin", "/admin/mcp", "/assets/main.js", "/.well-known/x", "/healthz"]) {
       expect(organizationAliasFromPath(reserved)).toBeNull();
     }
     expect(organizationMcpPath("hubble")).toBe("/hubble");

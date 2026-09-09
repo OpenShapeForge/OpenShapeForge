@@ -172,6 +172,11 @@ jobs:
           echo "::error::keycloak did not become ready within 120s"
           docker logs keycloak; exit 1
 
+      - name: Enable password login on the loopback test realm
+        env:
+          KC_URL: http://127.0.0.1:8181
+        run: bun scripts/keycloak-dev-password-login.ts openshapeforge
+
       # AUTH_URL is http://localhost:3000 because that origin is one of the
       # redirect URIs the dev realm's gateway client accepts. Serving the app
       # anywhere else means adding that origin to

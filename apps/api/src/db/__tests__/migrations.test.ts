@@ -175,8 +175,9 @@ describe("generated schema migration", () => {
         // RECORDED, which is what stops it running against the first database
         // that later grows the table. 0007 installs the authoritative document
         // version constraints and commands. 0008 adds the encrypted MCP browser
-        // handoff store before the generated schema grants are applied. A fresh
-        // install applies all seven in order; the list mirrors the registry in
+        // handoff store before the generated schema grants are applied. 0009
+        // makes a billing run item's period optional. A fresh install applies
+        // all eight in order; the list mirrors the registry in
         // migrations/versioned/index.ts.
         expect(first.versionedApplied).toEqual([
           "0002_org-unit-closure-trigger",
@@ -186,6 +187,7 @@ describe("generated schema migration", () => {
           "0006_workflow-node-category-localized",
           "0007_document-version-authority",
           "0008_mcp-handoffs",
+          "0009_billing-run-item-period-optional",
         ]);
 
         await withDb(url, async (db) => {

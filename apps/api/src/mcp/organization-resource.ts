@@ -56,6 +56,7 @@ export const ORGANIZATION_MCP_PATH_PREFIX = `${MCP_MOUNT_PATH}/organizations`;
 export const RESERVED_ROOT_SEGMENTS: ReadonlySet<string> = new Set([
   "api",
   "graphql",
+  "healthz",
   ".well-known",
   "admin",
   "assets",

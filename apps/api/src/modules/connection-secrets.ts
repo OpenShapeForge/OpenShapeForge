@@ -81,8 +81,8 @@ type CatalogShape = {
 
 const catalog = rawCatalog as CatalogShape;
 
-function executionShape(): ExecutionShape | undefined {
-  for (const entry of catalog.derivedTools ?? []) {
+function executionShape(source: CatalogShape): ExecutionShape | undefined {
+  for (const entry of source.derivedTools ?? []) {
     if (entry.execution?.connectionTable) return entry.execution;
   }
   return undefined;
@@ -99,8 +99,11 @@ type ManifestTable = {
   };
 };
 
-function manifestTable(name: string): ManifestTable | undefined {
-  return ((manifest as { tables?: ManifestTable[] }).tables ?? []).find(
+function manifestTable(
+  source: { tables?: ManifestTable[] },
+  name: string,
+): ManifestTable | undefined {
+  return (source.tables ?? []).find(
     (table) => table.name === name,
   );
 }
@@ -163,6 +166,11 @@ export type ResolveConnectionInput = {
   keyring?: SecretKeyring | undefined;
   /** Test seam for the token endpoint an expired OAuth sign-in is renewed at. */
   fetchImpl?: typeof fetch | undefined;
+  /** Generated host artifacts; omitted in production, injectable for tests. */
+  artifacts?: {
+    catalog: CatalogShape;
+    manifest: { tables?: ManifestTable[] };
+  } | undefined;
 };
 
 /**
@@ -174,15 +182,19 @@ export type ResolveConnectionInput = {
 export async function resolveConnectionValues(
   input: ResolveConnectionInput,
 ): Promise<ModuleConnectionResolution> {
-  const execution = executionShape();
+  const artifacts = input.artifacts ?? {
+    catalog,
+    manifest: manifest as { tables?: ManifestTable[] },
+  };
+  const execution = executionShape(artifacts.catalog);
   if (!execution) {
     return refuse(
       "CONNECTION_REQUIRED",
       "This deployment declares no Connections, so there is nothing to resolve.",
     );
   }
-  const connectionTable = manifestTable(execution.connectionTable);
-  const providerTable = manifestTable(execution.providerTable);
+  const connectionTable = manifestTable(artifacts.manifest, execution.connectionTable);
+  const providerTable = manifestTable(artifacts.manifest, execution.providerTable);
   const valuesColumn = columnFor(connectionTable, execution.connectionValuesField);
   const providerRefColumn = columnFor(connectionTable, execution.connectionProviderRef);
   const ownerColumn =
@@ -314,7 +326,7 @@ export async function resolveConnectionValues(
 
   const keyring = input.keyring ?? keyringFromEnv(process.env[KEYRING_ENV]);
   const elicitScope =
-    (catalog.entities ?? []).find((entity) => entity.table === execution.connectionTable)
+    (artifacts.catalog.entities ?? []).find((entity) => entity.table === execution.connectionTable)
       ?.elicitOnCreate?.sourceTable ?? execution.providerTable;
   const tokenScope = tokenSecretScope(execution.connectionTable);
   const egress = Array.isArray(row.adapter_egress)

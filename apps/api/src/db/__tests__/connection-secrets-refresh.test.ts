@@ -42,6 +42,42 @@ const ELICIT_SCOPE = "integration.adapters";
 const TOKEN_SCOPE = connectionTokenSecretScope(CONNECTION_TABLE);
 const TOKEN_URL = "https://auth.provider.example/token";
 
+const ARTIFACTS = {
+  catalog: {
+    entities: [{ table: CONNECTION_TABLE, elicitOnCreate: { sourceTable: ELICIT_SCOPE } }],
+    derivedTools: [{ execution: {
+      providerTable: ELICIT_SCOPE,
+      connectionTable: CONNECTION_TABLE,
+      connectionProviderRef: "adapterId",
+      connectionValuesField: "configurationValues",
+    } }],
+  },
+  manifest: {
+    tables: [
+      {
+        name: ELICIT_SCOPE, schema: "integration", table: "adapters", primaryKey: "id",
+        columns: [
+          { name: "key", sourceField: "key" },
+          { name: "auth", sourceField: "auth" },
+          { name: "transport", sourceField: "transport" },
+          { name: "egress_hosts", sourceField: "egressHosts" },
+          { name: "configuration_fields", sourceField: "configurationFields" },
+        ],
+      },
+      {
+        name: CONNECTION_TABLE, schema: "integration", table: "connections", primaryKey: "id",
+        columns: [
+          { name: "key", sourceField: "key" },
+          { name: "adapter_id", sourceField: "adapterId" },
+          { name: "configuration_values", sourceField: "configurationValues" },
+          { name: "owner_user_id", sourceField: "ownerUserId" },
+        ],
+        source: { authorization: { rowAccess: { owner: { column: "owner_user_id" } } } },
+      },
+    ],
+  },
+};
+
 function scratchUrl(name: string, asApp: boolean): string {
   const url = new URL(ADMIN_URL);
   if (url.pathname === "/openshapeforge_dev") {
@@ -73,6 +109,36 @@ beforeAll(async () => {
   adminRuntime = createDatabaseRuntime({ databaseUrl: scratchUrl(scratchName, false), maxConnections: 4 });
   admin = adminRuntime.db;
   await admin.connection().execute((conn) => runMigrationChain(conn));
+  await admin.connection().execute(async (conn) => {
+    await sql`
+      create schema integration;
+      create table integration.adapters (
+        id uuid primary key, tenant_id uuid not null, key text not null,
+        name text not null, description text not null, transport text not null,
+        discovery text not null, auth jsonb not null,
+        configuration_fields jsonb not null, egress_hosts jsonb not null
+      );
+      create table integration.connections (
+        id uuid primary key, tenant_id uuid not null, key text not null,
+        name text not null, adapter_id uuid not null references integration.adapters(id),
+        configuration_values jsonb not null, owner_user_id uuid
+      );
+      alter table integration.adapters enable row level security;
+      alter table integration.adapters force row level security;
+      alter table integration.connections enable row level security;
+      alter table integration.connections force row level security;
+      create policy adapters_tenant_scope on integration.adapters
+        using (app.bypass_rls() or tenant_id = app.current_tenant());
+      create policy connections_owner_scope on integration.connections
+        using (app.bypass_rls() or (tenant_id = app.current_tenant()
+          and (owner_user_id is null or owner_user_id = app.current_user_id())))
+        with check (app.bypass_rls() or (tenant_id = app.current_tenant()
+          and (owner_user_id is null or owner_user_id = app.current_user_id())));
+      grant usage on schema integration to ${sql.id(APP_ROLE)};
+      grant select on integration.adapters to ${sql.id(APP_ROLE)};
+      grant select, update on integration.connections to ${sql.id(APP_ROLE)}
+    `.execute(conn);
+  });
   appRuntime = createDatabaseRuntime({ databaseUrl: scratchUrl(scratchName, true), maxConnections: 4 });
   app = appRuntime.db;
 }, TEST_TIMEOUT);
@@ -174,6 +240,7 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
             selector: { adapterKey: seed.adapterKey },
             keyring: KEYRING,
             fetchImpl: endpoint.fetchImpl,
+            artifacts: ARTIFACTS,
           });
 
         const first = await resolve();
@@ -229,6 +296,7 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
           selector: { adapterKey: seed.adapterKey },
           keyring: KEYRING,
           fetchImpl: endpoint.fetchImpl,
+          artifacts: ARTIFACTS,
         });
         expect(refused.ok).toBe(false);
         if (refused.ok) throw new Error("expected a refusal");
@@ -260,6 +328,7 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
           selector: { adapterKey: live.adapterKey },
           keyring: KEYRING,
           fetchImpl: endpoint.fetchImpl,
+          artifacts: ARTIFACTS,
         });
         if (!fresh.ok) throw new Error(`${fresh.code}: ${fresh.message}`);
         expect(fresh.connection.values.accessToken).toBe("access-1");
@@ -291,6 +360,7 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
           selector: { adapterKey },
           keyring: KEYRING,
           fetchImpl: endpoint.fetchImpl,
+          artifacts: ARTIFACTS,
         });
         if (!password.ok) throw new Error(`${password.code}: ${password.message}`);
         expect(password.connection.values.appPassword).toBe("app-pw");

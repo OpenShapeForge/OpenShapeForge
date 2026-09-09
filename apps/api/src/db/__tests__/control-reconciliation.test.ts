@@ -252,6 +252,8 @@ describe("the drift report", () => {
           "ORGANIZATION_PARENT_MISMATCH",
           "ORGANIZATION_PATH_MISMATCH",
           "ORGANIZATION_ROOT_MISMATCH",
+          "ORGANIZATION_SCOPE_MISSING",
+          "ORGANIZATION_SCOPE_ORPHANED",
           "ORG_UNIT_ORGANIZATION_MISSING",
         ]);
 
@@ -385,7 +387,7 @@ describe("re-apply", () => {
         expect(first.converged).toBe(true);
         // The root, then both units — depth-ordered, so a parent is always in
         // place before its child names it.
-        expect(first.actions.map((action) => action.path)).toEqual([
+        expect(first.actions.filter((action) => action.target !== "organizationScope").map((action) => action.path)).toEqual([
           "acme",
           "acme/emea",
           "acme/emea/nl",

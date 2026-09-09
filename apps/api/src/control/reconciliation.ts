@@ -967,7 +967,7 @@ export async function reapplyProjection(
   // rather than a 404 about a tenant that could never have existed.
   if (input.tenantSlug !== undefined) assertSlug(input.tenantSlug, "tenantSlug");
 
-  const { report: before, scan, realm } = await scanAndCompare(deps);
+  const { report: before, scan } = await scanAndCompare(deps);
 
   const tenantsBySlug = new Map(scan.tenants.map((tenant) => [tenant.slug, tenant]));
   if (input.tenantSlug !== undefined && !tenantsBySlug.has(input.tenantSlug)) {
@@ -1113,6 +1113,18 @@ export async function reapplyProjection(
       scopeDrift.some((item) => item.tenantSlug === input.tenantSlug || item.tenantSlug === null))
   ) {
     try {
+      // Tenant replay can replace Organizations and therefore their aliases.
+      // Re-read the realm here so the scope pass converges the state that now
+      // exists, rather than the stale pre-repair snapshot that drove the run.
+      const listed = await deps.keycloakAdmin.listOrganizations(
+        RECONCILIATION_ORGANIZATION_LIMIT,
+      );
+      const realm: RealmAliases = {
+        aliases: listed.organizations
+          .map((organization) => organization.alias)
+          .filter((alias) => alias.length > 0),
+        removeOrphans: !listed.truncated,
+      };
       const result = await reconcileOrganizationScopes(
         deps.organizationScopes,
         realm,

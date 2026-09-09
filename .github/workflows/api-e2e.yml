@@ -136,6 +136,11 @@ jobs:
           echo "::error::keycloak did not become ready within 120s"
           docker logs keycloak; exit 1
 
+      - name: Enable password login on the loopback test realms
+        env:
+          KC_URL: http://127.0.0.1:8181
+        run: bun scripts/keycloak-dev-password-login.ts openshapeforge openshapeforge-control
+
       # The harness supplies DATABASE_URL and the internal-context secret
       # itself; what is set here is exactly what a laptop exports to enable the
       # Keycloak-backed flows (the recipe in control-provisioning.e2e.test.ts

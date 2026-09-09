@@ -304,6 +304,16 @@ function runSteps(scope: Scope, steps: unknown, index: number): Rec {
         );
         break;
       }
+      case "last": {
+        const where = parseWhere(step, i);
+        requireString(step, i, "to");
+        unary((list) =>
+          Array.isArray(list)
+            ? ([...list].reverse().find((item) => matches(item, where)) ?? null)
+            : null,
+        );
+        break;
+      }
       case "filter": {
         const where = parseWhere(step, i);
         unary((list) =>

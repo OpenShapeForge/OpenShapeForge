@@ -147,7 +147,7 @@ describe("splitAddressList", () => {
 });
 
 describe("applyResponseTransforms", () => {
-  it("first returns the match or null; filter returns matches", () => {
+  it("first and last return a match or null; filter returns matches", () => {
     const outputs = {
       items: [
         { kind: "A", data: "" },
@@ -172,6 +172,12 @@ describe("applyResponseTransforms", () => {
         where: { path: "kind", equals: "z" },
       },
       {
+        op: "last",
+        from: "items",
+        to: "last",
+        where: { path: "data", exists: true },
+      },
+      {
         op: "filter",
         from: "items",
         to: "some",
@@ -186,6 +192,7 @@ describe("applyResponseTransforms", () => {
     ]);
     expect(result.hit).toEqual({ kind: "a", data: "x" });
     expect(result.miss).toBeNull();
+    expect(result.last).toEqual({ kind: "b", data: "y" });
     expect(result.some).toEqual([
       { kind: "a", data: "x" },
       { kind: "b", data: "y" },

@@ -247,6 +247,15 @@ export function createPlatformKeycloakClients(
   };
 }
 
+/**
+ * A correlation id is diagnostic metadata and therefore server-owned. MCP
+ * request ids are client-controlled JSON values and may contain credentials,
+ * personal data or unbounded text; never copy them into control-plane logs.
+ */
+export function platformCorrelationId(_requestId: unknown): string {
+  return randomUUID();
+}
+
 function buildPlatformServer(input: {
   firstAdministrator: FirstAdministratorClients | undefined;
   control: Omit<ControlDeps, "db" | "operator"> | undefined;
@@ -300,7 +309,7 @@ function buildPlatformServer(input: {
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
     callPlatformTool(request.params.name, request.params.arguments ?? {}, {
       ...context,
-      correlationId: String(extra.requestId),
+      correlationId: platformCorrelationId(extra.requestId),
     }),
   );
   return server;

@@ -146,7 +146,8 @@ test("platform MCP delegates tenant, organization and reconciliation tasks to th
     const entries = visibleAudit.entries as { action: string; target: string | null }[];
     expect(entries).toHaveLength(4);
     expect(entries.every((entry) => entry.action === "create_tenant")).toBe(true);
-    expect(entries.every((entry) => entry.target?.includes("acme"))).toBe(true);
+    expect(entries.filter((entry) => entry.target?.includes("acme"))).toHaveLength(2);
+    expect(entries.filter((entry) => entry.target?.includes("beta"))).toHaveLength(2);
 
     const audit = await sql<{ reason: string; actor_subject: string }>`
       select reason, actor_subject

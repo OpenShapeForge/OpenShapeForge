@@ -42,7 +42,7 @@ import {
 // (packages/osf-integration/src/authoring/catalog-admin.ts). Kept as plain
 // types so core never imports a plugin package.
 
-export type CatalogKind = "adapter" | "capability" | "service";
+export type CatalogKind = "provider" | "capability" | "adapter" | "service";
 export type CatalogAuthority = "platform_release" | "host" | "tenant_shared";
 
 export type CatalogTenantState = {

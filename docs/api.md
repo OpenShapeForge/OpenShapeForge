@@ -112,7 +112,13 @@ REST-specific semantics:
   (`BAD_USER_INPUT` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403,
   `GENERATED_CRUD_NOT_ENABLED` / `GENERATED_CRUD_OPERATION_NOT_ENABLED` 404,
   `DATABASE_NOT_CONFIGURED` 503; anything
-  unexpected is a redacted 500).
+  unexpected is a redacted 500). A write the database itself refuses — an
+  authored trigger or guard function that RAISEs, or a system constraint —
+  is answered in the same vocabulary on every transport
+  (`src/db/database-refusals.ts`): `NOT_PUBLISHABLE` 400, `REFERENCE_NOT_FOUND`
+  404, `OPERATION_REFUSED` / `REFERENCE_IN_USE` / `ALREADY_EXISTS` 409, with the
+  authored message forwarded and the driver's text, constraint and table names
+  never.
 - **OpenAPI** — `bun run generate` also emits
   `apps/api/src/generated/rest/openapi.json` (always, empty `paths` when no
   entity opts in), served verbatim at `GET /api/rest/openapi.json`.
@@ -232,6 +238,66 @@ alias **cannot be changed once set** (`PUT` with a different one answers
 The human-readable name stays in `platform.tenants` / `platform.org_unit`, which
 are the system of record for it. Slugs are lowercase alphanumerics in
 single-hyphen groups, which is what makes `--` an unambiguous separator.
+
+### The platform administrator MCP
+
+The control plane has one more surface, for a different job: `/api/control/mcp`
+(Streamable HTTP, `src/mcp/control-mcp-server.ts`) lets a **platform
+administrator** — a control-realm person, not a tenant member — perform bounded
+platform operations for *every* tenant and manage the integration catalog of a
+runtime module. It is a
+separate small MCP server beside the generated one rather than a mode of it,
+for the reason the REST control plane is not on the GraphQL schema: the
+generated server is per-tenant by construction and a platform session names
+no tenant.
+
+- **Same realm, its own gate.** A verified control-realm bearer, minted for
+  a party on `OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES` (default: the
+  operator client; the reference realm setup adds a public PKCE client
+  `codex-platform` for interactive sign-in from an MCP client), holding the
+  realm role `platform_admin` — looked for in `realm_access` only. API keys
+  and trusted-context headers name a tenant and are refused; a tenant-realm
+  token fails verification and is refused with the same 401 as no token.
+  Its metadata document,
+  `/.well-known/oauth-protected-resource/api/control/mcp`, names the
+  **control** realm as authorization server, so a client that follows the
+  challenge signs the person in against the right realm.
+- **Audited per call.** Every tool runs inside `withSystemSession` with the
+  reason `platform-mcp: <tool> <kind>/<key>`, so
+  `platform.system_bypass_audit` reads as a log of what the administrator did.
+  `list_platform_audit` exposes a paginated projection of that register with
+  exact actor/action/result and time-window filters. It returns only actor,
+  timestamps, action, target and result: never application logs, credentials,
+  invitation links, or request/response bodies. The read writes its own audit
+  row but excludes that in-progress row from its answer.
+- **The catalog is a module's.** Core has no integration catalog; the module
+  that owns one supplies `RuntimeModule.platformCatalog` (a small API: list,
+  get, publish, retire, apply for one tenant, installation counts) and
+  `src/control/platform-catalog.ts` calls it with the cross-tenant session,
+  mapping tenant ids to slugs so no id reaches a client.
+- **Tenant and organisation tools** (`src/control/platform-tools.ts`):
+  `list_tenants`, `get_tenant`, `create_tenant`, `update_tenant` (name and
+  lifecycle state), `get_tenant_organization_tree`,
+  `create_tenant_organization`, and `update_tenant_organization` (rename or
+  reparent). These delegate to the same audited control services as REST; the
+  MCP is not a generic Keycloak proxy and exposes no realm configuration,
+  credentials, tokens, or destructive tenant deletion.
+- **Reconciliation tools:** `get_reconciliation_report` and
+  `reapply_reconciliation`. A tenant-bound re-apply may change only that
+  tenant's Organization tree and audience scopes and never performs orphan
+  cleanup. An all-tenant re-apply may reconcile realm-wide audience scopes and
+  remove derived orphan scopes; it still never deletes an unclaimed Keycloak
+  Organization.
+- **Identity, guide, catalog and audit tools:** `whoami` (role "Platform
+  administrator", scope `platform`, tenant count), `platform_guide`,
+  `list_catalog_entries`, `get_catalog_entry`, `list_platform_audit`,
+  `publish_catalog_entry` (version N+1 from a whole definition; tenants
+  without overrides updated in place, overridden ones flagged),
+  `retire_catalog_entry`, `apply_catalog_update_for_tenant` (forces one
+  tenant, discarding its overrides). A refusal is a tool result with a code
+  (`CATALOG_INVALID_DEFINITION` with `problems`, `CATALOG_ENTRY_NOT_FOUND`,
+  `CATALOG_UNCHANGED`, `CATALOG_NOT_INSTALLED`, `CATALOG_UPDATE_FAILED`,
+  `PLATFORM_CATALOG_UNAVAILABLE` when no loaded module administers a catalog).
 
 ### Moving a sub-organisation
 
@@ -471,6 +537,23 @@ composites like `directie` into per-client entity roles under
 `resource_access`, so realm roles alone would never match the entity role
 lists), and `groups` (requires the group-membership protocol mapper).
 
+**Tenant from Organization membership.** A token with no `tid` names its
+tenant through Keycloak's own `organization` claim instead — the Organization
+Membership mapper of the built-in `organization` client scope, configured with
+"add organization id", emits `organization.<alias>.id`. The Organization id is
+not the tenant id; the link is the registry row the control plane stamps
+(`platform.tenants.keycloak_organization_id`, matched together with
+`keycloak_realm` against the token's `iss`). That one lookup happens before
+the session has a tenant to scope by, so it goes through
+`app.tenant_for_keycloak_organization(realm, organization_id)` — a point
+lookup with a function-scoped RLS bypass, answering one id for one pair. It is
+fail-closed: no membership id, no linked row, several memberships without an
+`organization:<alias>` scope selecting one, or a surface that resolves sessions
+without a database (`db` not passed) all leave the tenant unresolved. When both
+are present `tid` wins, so a realm that still maps the attribute is unchanged.
+Organization-local roles nested under a membership are parsed
+(`identity.organizations`) but never merged into the effective role set.
+
 **2. Customer-provisioned API keys** — `Authorization: Bearer osf_live_…`.
 Routed by prefix BEFORE the JWKS path and never falling through, for the same
 non-downgradable reason. A key is not a second source of roles: it names an
@@ -616,6 +699,8 @@ compose stack):
 | `OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER` / `_JWKS_URI` / `_CLIENT_ID` | control-realm operator verification; `_CLIENT_ID` pins `azp`, not `aud` |
 | `OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL` + `KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API` | how provisioning reaches the SPI in the tenant realm; the secret shares its name with the realm generator's |
 | `OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM` / `_CLIENT_ID` | optional overrides (default `openshapeforge` / `openshapeforge-auth-api`) |
+| `OPENSHAPEFORGE_PUBLIC_ORIGIN` + `OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS` / `OPENSHAPEFORGE_MCP_CLIENTS` | the audiences and clients of the per-organization `mcp-resource:<alias>` scope the control plane provisions with every Organization; the public origin is required for the control plane, the other two optional — see [mcp.md](mcp.md#per-organization-resources) |
+| `OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES` | comma-separated `azp` allow-list of the platform administrator MCP (`/api/control/mcp`); default: the operator client |
 | `API_RATE_LIMIT_MAX` / `_WINDOW_MS` | anonymous budget per window (default 600 / 60s) |
 | `API_RATE_LIMIT_MAX_TRUSTED` | budget for a signed trusted-context caller (default 5× the anonymous budget) |
 | `API_RATE_LIMIT_REDIS_URL` | shared limiter store; unset ⇒ in-memory, budget enforced per instance |

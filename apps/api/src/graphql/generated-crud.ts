@@ -5,6 +5,10 @@ import { sql } from "kysely";
 import { redactElicitedValues } from "../connectors/secrets.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
+import {
+  classifyDatabaseError,
+  type DatabaseErrorTableContext,
+} from "../db/database-refusals.js";
 import { jsonbLiteral } from "../db/sql-helpers.js";
 import { appendScopedEntityEventInTransaction } from "../platform/entity-events.js";
 import {
@@ -121,6 +125,18 @@ export type GeneratedCrudColumn = {
    * does, so all three transports inherit it from one authored fact.
    */
   immutable?: boolean;
+  /**
+   * Authored `writtenBy: [...]` on the backing field: the value records that a
+   * process took place and is written only by the listed operations, never
+   * through generated create/update. Each entry carries the routes a caller can
+   * use instead, resolved by the compiler, so the refusal below is complete
+   * without this layer knowing the operation catalog.
+   */
+  writtenBy?: {
+    operation: string;
+    rest: string;
+    mcp?: string;
+  }[];
 };
 
 export type GeneratedCrudRelationship = {
@@ -382,10 +398,55 @@ export function getGeneratedCrudTables() {
   return [...generatedCrudTables.values()];
 }
 
-function generatedCrudError(message: string, code: string, status?: number) {
+function generatedCrudError(
+  message: string,
+  code: string,
+  status?: number,
+  authored?: { detail?: string; hint?: string },
+) {
   return new GraphQLError(message, {
-    extensions: { code, ...(status === undefined ? {} : { status }) },
+    extensions: {
+      code,
+      ...(status === undefined ? {} : { status }),
+      ...(authored?.detail === undefined ? {} : { detail: authored.detail }),
+      ...(authored?.hint === undefined ? {} : { hint: authored.hint }),
+    },
   });
+}
+
+/**
+ * A database refusal on a generated write becomes a GraphQLError carrying the
+ * public code and status, so all three transports answer alike: GraphQL passes
+ * it through unmasked (no originalError), REST and MCP map it via toHttpError.
+ * Anything the classifier declines stays the original driver error and is
+ * redacted downstream exactly as before.
+ */
+function translateDatabaseError(table: GeneratedCrudTable, error: unknown): unknown {
+  const refusal = classifyDatabaseError(error, databaseErrorContext(table));
+  return refusal
+    ? generatedCrudError(refusal.message, refusal.code, refusal.status, {
+        ...(refusal.detail === undefined ? {} : { detail: refusal.detail }),
+        ...(refusal.hint === undefined ? {} : { hint: refusal.hint }),
+      })
+    : error;
+}
+
+function databaseErrorContext(table: GeneratedCrudTable): DatabaseErrorTableContext {
+  const columns = tableColumnMap(table);
+  const belongsTo = new Set<string>();
+  for (const relationship of table.source?.graphql?.relationships ?? []) {
+    if (relationship.resolve === "belongsTo" && relationship.foreignKey) {
+      belongsTo.add(relationship.foreignKey);
+    }
+  }
+  return {
+    table: table.table,
+    belongsTo,
+    fieldName: (column) => {
+      const known = columns.get(column);
+      return known ? fieldNameForColumn(known) : undefined;
+    },
+  };
 }
 
 /**
@@ -809,8 +870,71 @@ export function isCallerWritableColumn(
 ) {
   return (
     isWritableColumn(column, operation) &&
-    !isElicitedOutputColumn(table, column)
+    !isElicitedOutputColumn(table, column) &&
+    !isOperationWrittenColumn(column)
   );
+}
+
+/**
+ * Authored `writtenBy: [...]`: the column records that a process took place —
+ * a finding reviewed, a scope approved, a retest concluded — and the named
+ * operation is the one place the preconditions for saying so are checked.
+ * `review_finding` refuses a reviewer who is the finding's own assignee; a
+ * writable `reviewedAt` hands that check straight back to the caller, and the
+ * four-eyes rule becomes decoration.
+ *
+ * Caller-facing only, exactly like the elicitation target above: the operations
+ * themselves write through the runtime-owned path, which uses
+ * isWritableColumn. Both create and update, because "reviewed" is no more
+ * settable at insert than it is afterwards.
+ */
+export function isOperationWrittenColumn(column: GeneratedCrudColumn): boolean {
+  return column.writtenBy !== undefined && column.writtenBy.length > 0;
+}
+
+/** The refusal, phrased so the caller knows what to call instead. */
+export function operationWrittenRefusal(
+  field: string,
+  writers: NonNullable<GeneratedCrudColumn["writtenBy"]>,
+): string {
+  const routes = writers
+    .map((writer) =>
+      writer.mcp
+        ? `${writer.operation} (MCP tool ${writer.mcp}, REST ${writer.rest})`
+        : `${writer.operation} (REST ${writer.rest})`,
+    )
+    .join("; ");
+  return (
+    `"${field}" records that a process took place and cannot be set through ` +
+    `create or update. Use ${routes}, which checks what may be checked before ` +
+    `writing it.`
+  );
+}
+
+/**
+ * Refuse a body that carries a `writtenBy` field. normalizeWritableValues would
+ * otherwise drop it silently, and a silently dropped review reads as a review
+ * that happened.
+ */
+function assertNoOperationWrittenValues(
+  table: GeneratedCrudTable,
+  input: Record<string, unknown>,
+): void {
+  for (const column of table.columns) {
+    if (!isOperationWrittenColumn(column)) continue;
+    const field = fieldNameForColumn(column);
+    if (
+      !Object.prototype.hasOwnProperty.call(input, field) &&
+      !Object.prototype.hasOwnProperty.call(input, column.name)
+    ) {
+      continue;
+    }
+    throw generatedCrudError(
+      operationWrittenRefusal(field, column.writtenBy!),
+      "BAD_USER_INPUT",
+      400,
+    );
+  }
 }
 
 function assertNoCallerElicitedOutput(
@@ -962,6 +1086,7 @@ export async function createGeneratedEntity(
 ): Promise<GeneratedEntityRow> {
   const table = readGeneratedCrudTable(input.table, "create", session);
   assertNoCallerElicitedOutput(table, input.values);
+  assertNoOperationWrittenValues(table, input.values);
   const values = normalizeWritableValues(table, input.values, "create");
   return insertGeneratedRow(db, session, table, values);
 }
@@ -998,6 +1123,8 @@ function insertGeneratedRow(
       eventType: "created",
     });
     return projectGeneratedEntityRow(table, session, row);
+  }).catch((error) => {
+    throw translateDatabaseError(table, error);
   });
 }
 
@@ -1012,6 +1139,7 @@ export async function updateGeneratedEntity(
 ): Promise<GeneratedEntityRow | null> {
   const table = readGeneratedCrudTable(input.table, "update", session);
   assertNoCallerElicitedOutput(table, input.values);
+  assertNoOperationWrittenValues(table, input.values);
   const values = normalizeWritableValues(table, input.values, "update");
   return applyGeneratedRowUpdate(db, session, table, input.id, values);
 }
@@ -1059,6 +1187,8 @@ async function applyGeneratedRowUpdate(
       eventType: "updated",
     });
     return projectGeneratedEntityRow(table, session, row);
+  }).catch((error) => {
+    throw translateDatabaseError(table, error);
   });
 }
 
@@ -1091,6 +1221,8 @@ export async function deleteGeneratedEntity(
       eventType: "deleted",
     });
     return true;
+  }).catch((error) => {
+    throw translateDatabaseError(table, error);
   });
 }
 

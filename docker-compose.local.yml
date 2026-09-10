@@ -97,10 +97,28 @@ services:
       # though the control realm sets organizationsEnabled: false.
       KC_FEATURES: organization
       KC_HEALTH_ENABLED: "true"
+      # Keep the management interface (health/metrics on :9000) on plain http.
+      # Configuring TLS below otherwise flips *every* listener to https,
+      # including this one, and the healthcheck below — plus
+      # scripts/wait-for-keycloak-ready.sh — speak plaintext to it.
+      KC_HTTP_MANAGEMENT_SCHEME: http
       KC_HTTP_ENABLED: "true"
       KC_HTTP_PORT: "8080"
-      KC_HOSTNAME: "http://localhost:${KEYCLOAK_PORT:-8181}"
-      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      # The canonical, browser-facing base URL — and therefore the `iss` of
+      # every token and the `issuer` of every discovery document. Keycloak
+      # itself speaks plain http; a host that needs https (MCP clients will not
+      # open a plain-http sign-in URL) puts a TLS-terminating proxy in front and
+      # overrides this with the name that proxy serves.
+      KC_HOSTNAME: "${KEYCLOAK_PUBLIC_URL:-http://localhost:8181}"
+      # Deliberately false. With dynamic backchannel resolution a request that
+      # arrives on the plain-http listener gets a discovery document (and, for
+      # the token endpoint, an `iss`) derived from *that* request's host, so the
+      # same realm would mint tokens under two different issuers depending on
+      # which port the caller happened to use. Pinning it keeps exactly one
+      # issuer — the value of KC_HOSTNAME — no matter which listener served
+      # the request, which is what the bearer verifier on the
+      # Hubble runtime and every already-issued token expect.
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "false"
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_HTTPS: "false"
     volumes:

@@ -21,7 +21,10 @@
 import manifest from "../generated/db/manifest.json" with { type: "json" };
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "./connection.js";
-import { nonManifestManagedTables } from "./migrations/generated-schema.js";
+import {
+  isNonManifestManagedColumn,
+  nonManifestManagedTables,
+} from "./migrations/generated-schema.js";
 
 /** Version key of the generated-schema row in platform.schema_migrations. */
 export const GENERATED_SCHEMA_MIGRATION_VERSION = "0001_generated_platform_schema";
@@ -110,6 +113,13 @@ export type UndeclaredDatabaseSchema = {
   columns: string[];
 };
 
+/** The slice of a manifest table findUndeclaredDatabaseSchema reads. */
+export type UndeclaredSchemaManifestTable = {
+  name: string;
+  schema: string;
+  columns: { name: string }[];
+};
+
 /**
  * Find schema the database has and this branch does not declare.
  *
@@ -122,22 +132,25 @@ export type UndeclaredDatabaseSchema = {
  * correctly, and rerunning it will keep refusing.
  *
  * Only schemas the manifest covers are examined, so unrelated schemas on the
- * same database are never mistaken for drift. `nonManifestManagedTables` is
- * exempt for the same reason the migrator exempts it: those tables come from
- * dedicated migrations, not from the manifest.
+ * same database are never mistaken for drift. `nonManifestManagedTables` and
+ * `nonManifestManagedColumns` are exempt for the same reason the migrator
+ * exempts them: those tables and columns come from dedicated (core or plugin)
+ * migrations, not from the manifest.
  *
  * Two catalog queries, no row probes; safe to run as the restricted runtime
  * role. A missing schema is not an error here — information_schema simply
  * returns nothing.
+ *
+ * `declaredTables` defaults to the bundled manifest; it is a parameter so
+ * tests can exercise the classification against a purpose-built schema (as
+ * diffManifestAgainstDatabase allows). Production callers never pass it.
  */
 export async function findUndeclaredDatabaseSchema(
   db: OpenShapeForgeDatabase,
+  declaredTables: readonly UndeclaredSchemaManifestTable[] = manifest.tables as
+    UndeclaredSchemaManifestTable[],
 ): Promise<UndeclaredDatabaseSchema> {
-  const manifestTables = manifest.tables as {
-    name: string;
-    schema: string;
-    columns: { name: string }[];
-  }[];
+  const manifestTables = declaredTables;
   const schemas = [...new Set(manifestTables.map((table) => table.schema))];
   if (schemas.length === 0) {
     return { tables: [], columns: [] };
@@ -185,7 +198,10 @@ export async function findUndeclaredDatabaseSchema(
     if (declared === undefined || nonManifestManagedTables.has(name)) {
       continue;
     }
-    if (!declared.has(row.column_name)) {
+    if (
+      !declared.has(row.column_name) &&
+      !isNonManifestManagedColumn(name, row.column_name)
+    ) {
       columns.push(`${name}.${row.column_name}`);
     }
   }

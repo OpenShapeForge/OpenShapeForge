@@ -145,6 +145,26 @@ export function listOperationContracts(): readonly OperationContract[] {
 type Bound = { operation: OperationContract; handler: ModuleOperationHandler };
 const bindingCache = new WeakMap<readonly RuntimeModule[], Map<string, Bound>>();
 
+/**
+ * Whether any module in this process claims a canonical operation.
+ *
+ * A build with no such module — a core-only deployment, or a test that
+ * resolves no modules — advertises no operation tools rather than failing
+ * every request over a handler nothing was ever going to provide. The moment
+ * one operation module is present, every operation has to bind, and
+ * `bindOperationHandlers` throws for the ones that cannot. REST boot
+ * (roles/api.ts) and the MCP server (mcp/generated-mcp-server.ts) read this
+ * one rule, so the two transports cannot disagree about whether operations
+ * exist.
+ */
+export function operationModulesConfigured(
+  modules: readonly Pick<RuntimeModule, "name">[],
+  operations: readonly OperationContract[] = catalog.operations,
+): boolean {
+  const plugins = new Set(operations.map((operation) => operation.plugin));
+  return modules.some((module) => plugins.has(module.name));
+}
+
 export function bindOperationHandlers(
   modules: readonly RuntimeModule[],
   operations: readonly OperationContract[] = catalog.operations,
@@ -206,6 +226,41 @@ function asInput(value: unknown): Record<string, unknown> {
     throw new HttpError(400, "BAD_USER_INPUT", "Operation input must be an object.");
   }
   return value as Record<string, unknown>;
+}
+
+const BASE64_BLOCK = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/**
+ * The optional MCP projection of a success result: JSON-safe content blocks
+ * of the kinds the MCP tool result carries. Text needs `text`; image and
+ * audio need base64 `data` and a `mimeType`; resource links need a `uri`.
+ */
+export function isMcpProjection(projection: unknown): boolean {
+  if (!projection || typeof projection !== "object" || Array.isArray(projection)) return false;
+  const { content, structuredContent } = projection as { content?: unknown; structuredContent?: unknown };
+  if (!Array.isArray(content) || content.length === 0 || !isJsonValue(content)) return false;
+  if (
+    structuredContent !== undefined &&
+    (!structuredContent || typeof structuredContent !== "object" || Array.isArray(structuredContent) ||
+      !isJsonValue(structuredContent))
+  ) {
+    return false;
+  }
+  return content.every((block) => {
+    if (!block || typeof block !== "object") return false;
+    const { type, text, data, mimeType, uri } = block as Record<string, unknown>;
+    switch (type) {
+      case "text":
+        return typeof text === "string";
+      case "image":
+      case "audio":
+        return typeof data === "string" && BASE64_BLOCK.test(data) && typeof mimeType === "string";
+      case "resource_link":
+        return typeof uri === "string";
+      default:
+        return false;
+    }
+  });
 }
 
 function isJsonValue(value: unknown, seen = new Set<object>()): boolean {
@@ -328,6 +383,13 @@ export async function invokeOperation(
     }
     if (bound.operation.transports.rest.response.kind === "json" && !validation.output(result.value)) {
       throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned a value outside its canonical output schema.");
+    }
+    if (result.mcp !== undefined && !isMcpProjection(result.mcp)) {
+      throw new HttpError(
+        500,
+        "HANDLER_CONTRACT_VIOLATION",
+        "Operation handler returned an MCP projection that is not a list of well-formed content blocks.",
+      );
     }
     return result;
   };

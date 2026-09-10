@@ -298,6 +298,12 @@ describe("the one status table", () => {
     "GENERATED_CRUD_NOT_ENABLED",
     "GENERATED_CRUD_OPERATION_NOT_ENABLED",
     "DATABASE_NOT_CONFIGURED",
+    // Database refusals (db/database-refusals.ts), answered on every transport.
+    "NOT_PUBLISHABLE",
+    "OPERATION_REFUSED",
+    "REFERENCE_NOT_FOUND",
+    "REFERENCE_IN_USE",
+    "ALREADY_EXISTS",
     "CONNECTOR_NOT_FOUND",
     "CONNECTOR_NOT_CONFIGURED",
     "CONNECTOR_NEEDS_REPAIR",

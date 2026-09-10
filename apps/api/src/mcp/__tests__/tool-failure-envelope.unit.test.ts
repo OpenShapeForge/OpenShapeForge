@@ -14,9 +14,13 @@ import {
 import { HttpError, toHttpError } from "../../rest/http-error.js";
 import {
   __failedForTests as failed,
+  __nativeToolOutputForTests as nativeToolOutput,
   __okForTests as ok,
   __unavailableOutcomeForTests as unavailableOutcome,
 } from "../generated-mcp-server.js";
+
+/** Tool content is a union of block kinds; the envelope's blocks are text. */
+const textOf = (block: unknown): string => (block as { text: string }).text;
 
 const OUTCOME: ConnectorProviderOutcome = {
   code: "CONNECTOR_PROVIDER_RATE_LIMITED",
@@ -36,12 +40,23 @@ const RATE_LIMITED = new ConnectorExecutionError(
 );
 
 describe("a successful tool result", () => {
-  it("retains the existing text-only shape without a success envelope", () => {
-    const result = ok({ id: "example" });
+  it("carries an object payload as structuredContent too, without a success envelope", () => {
+    // A Service aggregating several query bindings reads structuredContent
+    // only; a text-only success reached it as `{}`.
+    const result = ok({ id: "example", openFindingsTotal: 3 });
     expect(result).toEqual({
-      content: [{ type: "text", text: '{\n  "id": "example"\n}' }],
+      content: [{ type: "text", text: '{\n  "id": "example",\n  "openFindingsTotal": 3\n}' }],
+      structuredContent: { id: "example", openFindingsTotal: 3 },
     });
-    expect(result).not.toHaveProperty("structuredContent");
+    expect(result).not.toHaveProperty("isError");
+  });
+
+  it("keeps arrays and scalars text-only, since they have no structured form", () => {
+    expect(ok([{ id: "a" }])).toEqual({
+      content: [{ type: "text", text: '[\n  {\n    "id": "a"\n  }\n]' }],
+    });
+    expect(ok(true)).toEqual({ content: [{ type: "text", text: "true" }] });
+    expect(ok(null)).toEqual({ content: [{ type: "text", text: "null" }] });
   });
 });
 
@@ -64,11 +79,11 @@ describe("a classified connector failure", () => {
         correlationId: "corr-1",
       },
     });
-    expect(JSON.parse(result.content[1]!.text)).toEqual(result.structuredContent);
+    expect(JSON.parse(textOf(result.content[1]))).toEqual(result.structuredContent);
   });
 
   it("leads with a summary that agrees with the structured retry meaning", () => {
-    const summary = result.content[0]!.text;
+    const summary = textOf(result.content[0]);
     expect(summary).toBe(
       "CONNECTOR_PROVIDER_RATE_LIMITED: Connector \"object-store\" operation \"listObjects\" " +
         "was rate limited by its provider. Retry after 2026-01-01T00:00:30.000Z.",
@@ -105,7 +120,7 @@ describe("a non-retryable classified failure", () => {
       'Operation "getTicket" was denied permission by its provider.',
       403,
     ));
-    expect(denied.content[0]!.text).toBe(
+    expect(textOf(denied.content[0])).toBe(
       'CONNECTOR_PROVIDER_PERMISSION_DENIED: Operation "getTicket" was ' +
         "denied permission by its provider. Not retryable; contact an administrator.",
     );
@@ -136,10 +151,72 @@ describe("an unclassified failure", () => {
   it("keeps the plain envelope and the CODE: message summary", () => {
     const result = failed(new HttpError(404, "NOT_FOUND", 'Unknown tool "x".'));
     expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toBe('NOT_FOUND: Unknown tool "x".');
+    expect(textOf(result.content[0])).toBe('NOT_FOUND: Unknown tool "x".');
     expect(result.structuredContent).toEqual({
       error: { code: "NOT_FOUND", message: 'Unknown tool "x".' },
     });
-    expect(JSON.parse(result.content[1]!.text)).toEqual(result.structuredContent);
+    expect(JSON.parse(textOf(result.content[1]))).toEqual(result.structuredContent);
+  });
+});
+
+/** A refusal RAISEd by a PL/pgSQL trigger, as Bun's SQL driver throws it. */
+function raisedRefusal(message: string, hint: string): Error {
+  const error = new Error(message);
+  error.name = "PostgresError";
+  Object.assign(error, {
+    code: "ERR_POSTGRES_SERVER_ERROR",
+    errno: "P0001",
+    hint,
+    routine: "exec_stmt_raise",
+    where: "PL/pgSQL function pentest.assert_status_transition() line 9 at RAISE",
+  });
+  return error;
+}
+
+describe("a database rule's refusal", () => {
+  const result = failed(
+    raisedRefusal("A finding cannot move from closed back to open.", "Create a new finding instead."),
+  );
+
+  it("is rendered as the same readable body REST answers with, with the trigger's hint", () => {
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual({
+      error: {
+        code: "OPERATION_REFUSED",
+        message: "A finding cannot move from closed back to open.",
+        hint: "Create a new finding instead.",
+      },
+    });
+    expect(result.content[0]).toEqual({
+      type: "text",
+      text: "OPERATION_REFUSED: A finding cannot move from closed back to open.",
+    });
+  });
+
+  it("reaches a Service running the entity tool natively with its own code, not a provider fault", () => {
+    let thrown: unknown;
+    try {
+      nativeToolOutput(result);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(HttpError);
+    expect(thrown).toMatchObject({
+      status: 409,
+      code: "OPERATION_REFUSED",
+      message: "A finding cannot move from closed back to open.",
+      hint: "Create a new finding instead.",
+    });
+    expect(result.structuredContent).toEqual(toHttpError(thrown).body);
+  });
+
+  it("still folds a failure without a structured body into a provider fault", () => {
+    let thrown: unknown;
+    try {
+      nativeToolOutput({ content: [{ type: "text" as const, text: "boom" }], isError: true });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toMatchObject({ status: 502, code: "PROVIDER_ERROR", message: "boom" });
   });
 });

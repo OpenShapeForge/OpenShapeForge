@@ -18,9 +18,32 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomBytes, randomUUID } from "node:crypto";
 
+/**
+ * Where the suite REACHES Keycloak: the plain-http listener of the compose
+ * stack, which needs no CA trust. That is not necessarily the issuer the realm
+ * mints — a deployment that pins `KC_HOSTNAME` to a public https name (the
+ * host repo does: `https://auth.hubble.localhost`) reports that name in every
+ * token's `iss` no matter which port a caller used. Verifying against a URL
+ * that was only ever the way in would then reject every token, so the issuer
+ * is read from the realm's own discovery document instead of assumed.
+ */
 const KEYCLOAK_URL = process.env.E2E_KEYCLOAK_URL ?? "http://localhost:8181";
 const REALM = process.env.E2E_KEYCLOAK_REALM ?? "openshapeforge";
-const ISSUER = `${KEYCLOAK_URL}/realms/${REALM}`;
+const REALM_URL = `${KEYCLOAK_URL}/realms/${REALM}`;
+const ISSUER = process.env.E2E_KEYCLOAK_ISSUER ?? (await discoverIssuer()) ?? REALM_URL;
+
+async function discoverIssuer(): Promise<string | null> {
+  try {
+    const response = await fetch(`${REALM_URL}/.well-known/openid-configuration`, {
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!response.ok) return null;
+    const issuer = ((await response.json()) as { issuer?: unknown }).issuer;
+    return typeof issuer === "string" && issuer.length > 0 ? issuer : null;
+  } catch {
+    return null;
+  }
+}
 const DATABASE_URL =
   process.env.DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev";
@@ -42,7 +65,9 @@ const TENANT_ACME = "11111111-1111-4111-8111-111111111111";
 // Set BEFORE the app modules read them. identity.ts caches the verifier lazily
 // and exposes a reset, so ordering only has to hold at first use.
 process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = ISSUER;
-process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = `${ISSUER}/protocol/openid-connect/certs`;
+// Keys over the reachable listener, issuer as minted: the same split the host
+// runtime makes, so neither needs the https name to be trusted locally.
+process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = `${REALM_URL}/protocol/openid-connect/certs`;
 process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = ROLE_CLIENT;
 process.env.OPENSHAPEFORGE_API_KEY_SECRET_KEYS = `e2e:${randomBytes(32).toString("base64")}`;
 process.env.OPENSHAPEFORGE_KEYCLOAK_BASE_URL = KEYCLOAK_URL;
@@ -168,11 +193,11 @@ async function reachable(url: string): Promise<boolean> {
   }
 }
 
-const keycloakUp = await reachable(`${ISSUER}/.well-known/openid-configuration`);
+const keycloakUp = await reachable(`${REALM_URL}/.well-known/openid-configuration`);
 
 /** Bearer token for a seeded realm user, via the dev gateway client. */
 async function userToken(username: string, password = "test"): Promise<string | null> {
-  const response = await fetch(`${ISSUER}/protocol/openid-connect/token`, {
+  const response = await fetch(`${REALM_URL}/protocol/openid-connect/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({

@@ -21,6 +21,7 @@ import type { GraphqlCorsPolicy } from "@openshapeforge/observability/yoga";
 import Fastify from "fastify";
 import { readApiLimits } from "../config/limits.js";
 import { readGraphqlCorsPolicy } from "../config/graphql-cors.js";
+import { rewriteShortAddress } from "../mcp/organization-resource.js";
 import { assertProductionEnv } from "../config/production-guard.js";
 import {
   createDatabaseRuntime,
@@ -36,6 +37,8 @@ import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
 import { registerConnectorOAuthRoutes } from "../connectors/oauth-routes.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
 import { registerControlRestRoutes } from "../control/rest-routes.js";
+import { registerControlMcpServer } from "../mcp/control-mcp-server.js";
+import { registerAgreementMilestoneRestRoutes } from "../billing/rest-routes.js";
 import { registerDocumentRestRoutes } from "../documents/rest-routes.js";
 import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
 import {
@@ -67,6 +70,7 @@ import {
 } from "./api-readiness.js";
 import {
   bindOperationHandlers,
+  operationModulesConfigured,
   listOperationContracts,
   registerOperationRestRoutes,
   type OperationContract,
@@ -173,6 +177,29 @@ export function createApiApp(options: {
     },
     trustProxy: limits.trustProxy,
     requestTimeout: limits.requestTimeoutMs,
+    // Browser handoff tokens (`/api/entity-configuration/<token>`,
+    // mcp/handoff-store.ts) are `<tenant>.<handoff>.<secret>` — 117
+    // characters — and the router's default of 100 answered them with 414
+    // before the route ever ran (found live). Generous but bounded.
+    maxParamLength: 512,
+    // Short addresses: `https://hubble.com/zerocopter/...`.
+    //
+    // One organization, one prefix, every surface underneath it —
+    // `/<alias>` and `/<alias>/mcp` are the MCP resource, `/<alias>/api/...`
+    // is REST and `/<alias>/graphql` is GraphQL. They are rewritten onto the
+    // routes this server already has rather than registered a second time, so
+    // there is exactly one handler per surface and no pair of routes that can
+    // drift apart. What a client is TOLD the resource is called is the short
+    // form and comes from `organizationMcpPath` (mcp/organization-resource.ts);
+    // this is the inverse of that function, and the only place that knows both
+    // spellings.
+    //
+    // Platform administration rides along: `/admin/mcp` is the operator MCP
+    // resource `/api/control/mcp`.
+    //
+    // A first segment that is one of the server's own names, or not a
+    // well-formed alias, is left alone — see RESERVED_ROOT_SEGMENTS.
+    rewriteUrl: (request) => rewriteShortAddress(request.url) ?? request.url ?? "/",
   });
 
   // Request-rate boundary, before GraphQL/REST execution — that ordering is
@@ -303,19 +330,26 @@ export function createApiApp(options: {
     const initialised = await initRuntimeModules(modules, moduleContext);
     initialisedModules = initialised.loaded;
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
-    const operationPlugins = new Set(operationContracts.map((operation) => operation.plugin));
-    const operationModulesConfigured = modules.loaded.some((module) => operationPlugins.has(module.name)) ||
-      modules.failures.some((failure) => operationPlugins.has(failure.name));
     // Ordinary runtime modules remain fail-soft. A canonical operation is a
     // stronger promise: every generated transport points at its handler, so a
     // load/init failure must stop boot instead of silently deleting the API.
-    if (operationModulesConfigured) bindOperationHandlers(initialised.loaded, operationContracts);
+    // A failed module counts as configured for exactly that reason.
+    const operationsConfigured = operationModulesConfigured(
+      [...modules.loaded, ...modules.failures],
+      operationContracts,
+    );
+    if (operationsConfigured) bindOperationHandlers(initialised.loaded, operationContracts);
+    // Read once, served twice: REST and GraphQL answer from the same
+    // configuration, so a deployment cannot mint keys on one transport and
+    // say NOT_CONFIGURED on the other.
+    const apiKeyConfig = readApiKeyProvisioningConfig();
     ready = {
       yoga: createGraphqlYoga({
         ...dbOptions,
         cors: options.cors,
         modules: initialised.loaded,
         moduleContext,
+        surfaces: { apiKeyConfig },
         ...(options.persistedOperations
           ? { persistedOperations: options.persistedOperations }
           : {}),
@@ -420,6 +454,7 @@ export function createApiApp(options: {
 
     registerGeneratedRestRoutes(routes, dbOptions);
     registerDocumentRestRoutes(routes, dbOptions);
+    registerAgreementMilestoneRestRoutes(routes, dbOptions);
     registerConnectorRestRoutes(routes, {
       ...dbOptions,
       config: readConnectorRuntimeConfig(),
@@ -444,17 +479,21 @@ export function createApiApp(options: {
     registerAuthorizationServerMetadataAliases(routes);
     registerApiKeyRestRoutes(routes, {
       ...dbOptions,
-      config: readApiKeyProvisioningConfig(),
+      config: apiKeyConfig,
     });
     // The tenant control plane, on its own mount and its own realm. Registered
     // unconditionally so an unconfigured deployment answers 503 naming what is
     // missing rather than 404, which reads like a version mismatch.
     registerControlRestRoutes(routes, dbOptions);
+    // The platform administrator MCP (`/api/control/mcp`): same realm as the
+    // control plane, its own small server (mcp/control-mcp-server.ts), and the
+    // loaded modules so the one that administers a catalog can be found.
+    registerControlMcpServer(routes, { ...dbOptions, modules: initialised.loaded });
 
     for (const module of initialised.loaded) {
       module.restRoutes?.(routes, moduleContext);
     }
-    if (operationModulesConfigured) {
+    if (operationsConfigured) {
       registerOperationRestRoutes(routes, initialised.loaded, moduleContext, operationContracts);
     }
   });

@@ -175,8 +175,9 @@ describe("generated schema migration", () => {
         // RECORDED, which is what stops it running against the first database
         // that later grows the table. 0007 installs the authoritative document
         // version constraints and commands. 0008 adds the encrypted MCP browser
-        // handoff store before the generated schema grants are applied. A fresh
-        // install applies all seven in order; the list mirrors the registry in
+        // handoff store before the generated schema grants are applied. 0009
+        // makes a billing run item's period optional. A fresh install applies
+        // all eight in order; the list mirrors the registry in
         // migrations/versioned/index.ts.
         expect(first.versionedApplied).toEqual([
           "0002_org-unit-closure-trigger",
@@ -186,6 +187,7 @@ describe("generated schema migration", () => {
           "0006_workflow-node-category-localized",
           "0007_document-version-authority",
           "0008_mcp-handoffs",
+          "0009_billing-run-item-period-optional",
         ]);
 
         await withDb(url, async (db) => {
@@ -633,6 +635,99 @@ describe("generated schema column defaults", () => {
           );
           expect(foreignCast).toContain("DEFAULT 'process'");
           expect(foreignCast).toContain("'process'::character varying");
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+});
+
+describe("plugin-migration-owned columns", () => {
+  // The osf-integration plugin's 0004_platform-catalog migration ALTERs the
+  // generated integration.* tables to add its installation bookkeeping. Those
+  // columns exist in the database and not in the manifest by design, so the
+  // roll-forward diff must not classify them as non-additive drift — while a
+  // column nobody declared anywhere stays drift.
+  const idColumn = probeColumn("id", "uuid", "gen_random_uuid()", {
+    primaryKey: true,
+  });
+
+  test(
+    "a column owned by a plugin schema migration is not drift",
+    async () => {
+      await withScratchDb(async (url) => {
+        await withDb(url, async (db) => {
+          await sql`create schema integration`.execute(db);
+          await sql`
+            create table integration.adapters (
+              id uuid primary key default gen_random_uuid(),
+              key text not null default '',
+              catalog_entry_id uuid,
+              installed_version integer,
+              overridden boolean not null default false,
+              override_fields text[] not null default '{}',
+              update_available_version integer
+            )
+          `.execute(db);
+
+          const table: ManifestTable = {
+            name: "integration.adapters",
+            schema: "integration",
+            table: "adapters",
+            columns: [idColumn, probeColumn("key", "text", "''")],
+          };
+
+          const diff = await diffManifestAgainstDatabase(db, [table]);
+          expect(diff.nonAdditive).toEqual([]);
+          expect(diff.missingTables).toEqual([]);
+          expect(diff.missingColumns).toEqual([]);
+        });
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "a column no plugin migration owns is still non-additive drift",
+    async () => {
+      await withScratchDb(async (url) => {
+        await withDb(url, async (db) => {
+          await sql`create schema integration`.execute(db);
+          // The exempt table plus one column with no owner at all, and a
+          // second table where the plugin-owned NAME is not exempt: the
+          // exemption is keyed schema.table.column, not just column.
+          await sql`
+            create table integration.adapters (
+              id uuid primary key default gen_random_uuid(),
+              catalog_entry_id uuid,
+              rogue text
+            )
+          `.execute(db);
+          await sql`
+            create table integration.unrelated (
+              id uuid primary key default gen_random_uuid(),
+              catalog_entry_id uuid
+            )
+          `.execute(db);
+
+          const diff = await diffManifestAgainstDatabase(db, [
+            {
+              name: "integration.adapters",
+              schema: "integration",
+              table: "adapters",
+              columns: [idColumn],
+            },
+            {
+              name: "integration.unrelated",
+              schema: "integration",
+              table: "unrelated",
+              columns: [idColumn],
+            },
+          ]);
+          expect(diff.nonAdditive).toEqual([
+            "integration.adapters.rogue: column exists in the database but not in the generated manifest",
+            "integration.unrelated.catalog_entry_id: column exists in the database but not in the generated manifest",
+          ]);
         });
       });
     },

@@ -29,11 +29,17 @@
  * of it must keep starting exactly as before, with the control routes answering
  * 503 and saying why.
  */
+import { DEFAULT_MCP_CLIENTS } from "./organization-scopes.js";
 
 /** Environment variables the control plane reads. */
 export type ControlPlaneEnv = {
   /** Keycloak origin, e.g. `http://localhost:8181`. No trailing path. */
   OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL?: string | undefined;
+  /**
+   * Optional TLS ingress used only for network routing. Requests retain the
+   * public base URL as their Host header and TLS server name.
+   */
+  OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL?: string | undefined;
   /** The realm holding tenant Organizations and the SPI. Defaults to `openshapeforge`. */
   OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM?: string | undefined;
   /**
@@ -76,11 +82,47 @@ export type ControlPlaneEnv = {
    * becomes the better pin and this should move.
    */
   OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID?: string | undefined;
+  /**
+   * The runtime's own public origin, e.g. `https://api.example.com`. Required:
+   * it is the first audience every per-organization MCP scope carries
+   * (`<origin>/api/mcp/organizations/<alias>`), and a scope with no audience
+   * would let provisioning "succeed" while every token for the resource is
+   * refused. The same variable the MCP server reads for its callback URL, so
+   * one deployment has one answer to "where am I served".
+   */
+  OPENSHAPEFORGE_PUBLIC_ORIGIN?: string | undefined;
+  /**
+   * Optional comma-separated list of ADDITIONAL origins the MCP resources are
+   * reachable on (a second ingress, a local port beside the public one). Each
+   * one gets its own audience mapper on every organization scope; origins
+   * removed from the list are removed from Keycloak on the next reconcile.
+   */
+  OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS?: string | undefined;
+  /**
+   * Optional comma-separated `clientId`s the scope is attached to as an
+   * optional client scope. Defaults to `codex`, `openshapeforge-gateway`,
+   * `openshapeforge-inspector`; a listed client the realm does not have is
+   * skipped. The realm's default optional scopes are always extended, so
+   * dynamically registered MCP clients need no entry here.
+   */
+  OPENSHAPEFORGE_MCP_CLIENTS?: string | undefined;
+  /**
+   * The clients whose tokens the platform administrator MCP
+   * (`/api/control/mcp`, `mcp/control-mcp-server.ts`) accepts, matched
+   * against `azp`, comma-separated. Optional; defaults to the operator client
+   * above. An MCP client signs in interactively with a public PKCE client of
+   * the control realm (`codex-platform` in the reference realm setup), which
+   * is a different party from the admin gateway, so the allow-list is a list.
+   * The `admin-cli` hazard the CLIENT_ID pin closes applies unchanged: a name
+   * that is not on this list is refused before any role is looked at.
+   */
+  OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES?: string | undefined;
 };
 
 export type ControlPlaneConfig = {
   keycloak: {
     baseUrl: string;
+    connectUrl?: string;
     tenantRealm: string;
     clientId: string;
     clientSecret: string;
@@ -91,7 +133,28 @@ export type ControlPlaneConfig = {
     /** Matched against the token's `azp`. See ControlPlaneEnv for why not `aud`. */
     clientId: string;
   };
+  /** What `organization-scopes.ts` provisions per Organization. */
+  mcpResource: {
+    /** Public origin first, then the additional ones; deduplicated, no trailing slash. */
+    origins: string[];
+    clients: string[];
+  };
+  /**
+   * The platform administrator MCP's `azp` allow-list. Absent means "the
+   * operator client only" (`platformMcpAuthorizedParties` applies that
+   * default), so a configuration literal built before this field existed
+   * keeps its meaning.
+   */
+  platformMcp?: {
+    authorizedParties: readonly string[];
+  };
 };
+
+/** The `azp` values `/api/control/mcp` admits, with the default applied. */
+export function platformMcpAuthorizedParties(config: ControlPlaneConfig): readonly string[] {
+  const configured = config.platformMcp?.authorizedParties ?? [];
+  return configured.length > 0 ? configured : [config.operator.clientId];
+}
 
 export type ControlPlaneConfigResult =
   | { ok: true; config: ControlPlaneConfig }
@@ -105,14 +168,40 @@ function trimmed(value: string | undefined): string | undefined {
   return text ? text : undefined;
 }
 
+function commaList(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
+}
+
+/**
+ * An origin as the audience needs it: scheme + host (+ port), nothing after.
+ * Returns null for anything `new URL` cannot parse or that carries a path,
+ * because `https://api.example.com/v1` would produce an audience the resource
+ * never derives for itself (`canonicalResourceUri` builds it from the request
+ * origin) and every token would be refused with no hint why.
+ */
+function asOrigin(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.pathname !== "/" || url.search !== "" || url.hash !== "") return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
 export function readControlPlaneConfig(
   env: ControlPlaneEnv = process.env as ControlPlaneEnv,
 ): ControlPlaneConfigResult {
   const baseUrl = trimmed(env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL);
+  const connectUrl = trimmed(env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL);
   const clientSecret = trimmed(env.KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API);
   const issuer = trimmed(env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER);
   const jwksUri = trimmed(env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI);
   const operatorClientId = trimmed(env.OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID);
+  const publicOrigin = trimmed(env.OPENSHAPEFORGE_PUBLIC_ORIGIN);
 
   // Reported together, never one at a time: an operator fixing a control-plane
   // rollout should learn everything that is missing from one 503, not discover
@@ -123,9 +212,36 @@ export function readControlPlaneConfig(
   if (!issuer) missing.push("OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER");
   if (!jwksUri) missing.push("OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_JWKS_URI");
   if (!operatorClientId) missing.push("OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_CLIENT_ID");
+  if (!publicOrigin) missing.push("OPENSHAPEFORGE_PUBLIC_ORIGIN");
+
+  const normalizedBaseUrl = baseUrl ? asOrigin(baseUrl.replace(/\/+$/, "")) : null;
+  const normalizedConnectUrl = connectUrl ? asOrigin(connectUrl.replace(/\/+$/, "")) : null;
+  if (connectUrl && (!normalizedBaseUrl?.startsWith("https://") || !normalizedConnectUrl?.startsWith("https://"))) {
+    missing.push(
+      "OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL (requires HTTPS origins for both connect and base URL)",
+    );
+  }
+
+  // A malformed origin is reported in the same list as an absent one: both mean
+  // "no audience can be minted", and an operator reads one 503 either way.
+  const origins: string[] = [];
+  for (const [name, values] of [
+    ["OPENSHAPEFORGE_PUBLIC_ORIGIN", publicOrigin ? [publicOrigin] : []],
+    ["OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS", commaList(env.OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS)],
+  ] as const) {
+    for (const value of values) {
+      const origin = asOrigin(value);
+      if (!origin) {
+        missing.push(`${name} (not an origin: "${value}")`);
+      } else if (!origins.includes(origin)) {
+        origins.push(origin);
+      }
+    }
+  }
   if (missing.length > 0) {
     return { ok: false, missing };
   }
+  const clients = commaList(env.OPENSHAPEFORGE_MCP_CLIENTS);
 
   return {
     ok: true,
@@ -134,6 +250,7 @@ export function readControlPlaneConfig(
         // Normalised once here so every caller can join paths without guessing
         // whether the operator wrote a trailing slash.
         baseUrl: baseUrl!.replace(/\/+$/, ""),
+        ...(normalizedConnectUrl ? { connectUrl: normalizedConnectUrl } : {}),
         tenantRealm:
           trimmed(env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM) ?? DEFAULT_TENANT_REALM,
         clientId:
@@ -141,6 +258,16 @@ export function readControlPlaneConfig(
         clientSecret: clientSecret!,
       },
       operator: { issuer: issuer!, jwksUri: jwksUri!, clientId: operatorClientId! },
+      mcpResource: {
+        origins,
+        clients: clients.length > 0 ? clients : [...DEFAULT_MCP_CLIENTS],
+      },
+      platformMcp: {
+        authorizedParties: (env.OPENSHAPEFORGE_CONTROL_MCP_AUTHORIZED_PARTIES ?? "")
+          .split(",")
+          .map((party) => party.trim())
+          .filter((party) => party.length > 0),
+      },
     },
   };
 }

@@ -981,13 +981,15 @@ describe("generated MCP runtime module security boundary", () => {
               version: 1,
             },
             outcome: "connection_required",
+            guidance:
+              "The organization's Other connection is not set up. Ask an organization administrator to set up the Other connection (create_connection).",
           }]);
           const unavailableJson = JSON.stringify(
             currentSourceResolution()?.unavailable,
           );
           expect(unavailableJson).not.toContain(otherProviderId);
           expect(unavailableJson).not.toContain(otherConnectionId);
-          expect(unavailableJson).not.toContain("Other");
+          expect(unavailableJson).toContain("Other");
 
           await admin.connection().execute((trx) => sql`
             insert into public.module_connection_test
@@ -1153,7 +1155,7 @@ describe("generated MCP runtime module security boundary", () => {
                 error: {
                   code: "REAUTHORIZATION_REQUIRED",
                   message:
-                    "This connection's stored authorization is unreadable and must be authorized again.",
+                    "The organization's Wrong key sign-in is stored in a form this runtime can no longer read. An organization administrator calls the connect tool again and approves at Wrong key.",
                 },
               },
             });
@@ -1427,6 +1429,30 @@ describe("generated MCP runtime module security boundary", () => {
             expect(JSON.stringify(outcome)).not.toContain("msr1.");
           }
 
+          const sharedConnectionId = randomUUID();
+          await admin.connection().execute(async (trx) => {
+            await sql`update public.module_provider_test
+               set auth = '{"connectionScope":"both","scheme":"header","headerName":"x-api-key","tokenFrom":"apiKey"}'::jsonb
+             where id = ${providerId}::uuid
+            `.execute(trx);
+            await sql`insert into public.module_connection_test
+              (id, tenant_id, owner_user_id, provider_id, values)
+            values (${sharedConnectionId}::uuid, ${tenantId}::uuid, null,
+              ${providerId}::uuid, '{"apiKey":"obviously-fake-shared"}'::jsonb)
+            `.execute(trx);
+          });
+
+          personalSourceIndex = 0;
+          const personalAndShared = await client.callTool({
+            name: "public_read",
+            arguments: {},
+          });
+          expect(personalAndShared.isError).not.toBe(true);
+          expect(currentSourceResolution()?.sources).toHaveLength(4);
+          expect(
+            currentSourceResolution()?.sources.map((source) => source.scope).sort(),
+          ).toEqual(["personal", "personal", "tenant", "tenant"]);
+
           mode = "normal";
           await admin.connection().execute(async (trx) => {
             await sql`update public.module_provider_test
@@ -1439,7 +1465,7 @@ describe("generated MCP runtime module security boundary", () => {
              where id = ${connectionId}::uuid
             `.execute(trx);
             await sql`delete from public.module_connection_test
-             where id = ${secondConnectionId}::uuid
+             where id in (${secondConnectionId}::uuid, ${sharedConnectionId}::uuid)
             `.execute(trx);
           });
 

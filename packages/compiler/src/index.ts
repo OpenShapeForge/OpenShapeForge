@@ -216,6 +216,9 @@ export async function collectAllArtifacts(
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, {
       source: activeManifestSource,
+      // Resolves the operation keys authored in `writtenBy` into routes, and
+      // fails the build on a key no operation answers to.
+      operations,
       openApi: {
         entities,
         referentiedata,

@@ -41,6 +41,7 @@ import type {
   KeycloakOrganization,
   KeycloakSpiClient,
 } from "../../../control/keycloak-spi-client.js";
+import type { OrganizationScopeAdminClient } from "../../../control/organization-scopes.js";
 
 /**
  * One organization as the fake realm holds it: the last create request that
@@ -118,6 +119,19 @@ export function fakeAdmin(spi: FakeSpiClient): KeycloakOrganizationAdminClient {
     if (!found) throw new Error(`fake admin: no organization "${id}"`);
     return found;
   };
+  // organizationId -> aliases of identity providers linked to it. A realm-wide
+  // map, not per-organization state on FakeOrganization, so cross-tenant
+  // isolation is provable the same way the real Keycloak Organizations
+  // endpoint's per-id scoping is: two organizations never share a Set.
+  const identityProviders = new Map<string, Set<string>>();
+  const linkedAliases = (id: string): Set<string> => {
+    let aliases = identityProviders.get(id);
+    if (!aliases) {
+      aliases = new Set();
+      identityProviders.set(id, aliases);
+    }
+    return aliases;
+  };
   const state = (id: string) => {
     const org = require_(id);
     return {
@@ -157,6 +171,226 @@ export function fakeAdmin(spi: FakeSpiClient): KeycloakOrganizationAdminClient {
     async listOrganizations(limit) {
       const rows = [...spi.organizations.entries()].map(([id, org]) => snapshot(id, org));
       return { organizations: rows.slice(0, limit), truncated: rows.length > limit };
+    },
+    async linkIdentityProvider(id, alias) {
+      require_(id);
+      linkedAliases(id).add(alias);
+    },
+    async listIdentityProviders(id) {
+      require_(id);
+      return [...linkedAliases(id)].map((alias) => ({
+        alias,
+        providerId: "google",
+        enabled: true,
+      }));
+    },
+    async unlinkIdentityProvider(id, alias) {
+      require_(id);
+      linkedAliases(id).delete(alias);
+    },
+  };
+}
+
+/** One client scope as the fake realm holds it: its mappers, by mapper id. */
+export type FakeClientScope = {
+  id: string;
+  name: string;
+  mappers: Map<string, { audience: string | null; accessTokenClaim: boolean }>;
+};
+
+/**
+ * The realm's anonymous `Allowed Client Scopes` policy as the fake holds it:
+ * the whole component config, so a test can assert that only the one key this
+ * module owns is touched. `null` reproduces a realm that has no such component.
+ */
+export type FakeRegistrationPolicy = { id: string; config: Record<string, string[]> };
+
+export type FakeScopeClient = OrganizationScopeAdminClient & {
+  scopes: Map<string, FakeClientScope>;
+  /** Keyed by clientId; the realm's clients and their attached scope NAMES. */
+  clients: Map<string, { id: string; defaultScopes: string[]; optionalScopes: string[] }>;
+  realm: { defaultScopes: string[]; optionalScopes: string[] };
+  /** Every write, in order, as `"<op> <subject>"` — what idempotency is asserted on. */
+  writes: string[];
+  scopeNamed: (name: string) => FakeClientScope | undefined;
+  audiencesOf: (name: string) => string[];
+  /** The component as the fake realm holds it; null when the realm has none. */
+  policy: FakeRegistrationPolicy | null;
+  /** `allowed-client-scopes`, in realm order. */
+  allowedClientScopes: () => string[];
+};
+
+export type FakeOrganizationScopesOptions = {
+  clientIds?: readonly string[];
+  /**
+   * The realm's client scopes, beyond the `mcp-resource:*` ones the module
+   * creates. The default is the two the allow-list refers to out of the box —
+   * an entry naming no client scope makes Keycloak refuse the whole write.
+   */
+  realmScopes?: readonly string[];
+  /** `null` for a realm with no client-registration policy at all. */
+  policy?: FakeRegistrationPolicy | null;
+};
+
+/**
+ * The client-scope half of the admin API. It reproduces exactly the behaviours
+ * `organization-scopes.ts` relies on: deleting a scope detaches it from every
+ * client and from the realm defaults (Keycloak does this as part of the
+ * delete), `?clientId=` is an exact match, and an attach is addressed by the
+ * client's uuid rather than its clientId.
+ *
+ * It also reproduces the client-registration policy component: its update
+ * REPLACES the component (so a test can catch a config key being dropped), and
+ * a name that is not a realm client scope is refused exactly as Keycloak's
+ * `validateConfiguration` refuses it — the whole write, not just the entry.
+ */
+export function fakeOrganizationScopes(
+  options: FakeOrganizationScopesOptions = {},
+): FakeScopeClient {
+  const clientIds = options.clientIds ?? [
+    "codex",
+    "openshapeforge-gateway",
+    "openshapeforge-inspector",
+  ];
+  const scopes = new Map<string, FakeClientScope>();
+  for (const name of options.realmScopes ?? ["organization", "offline_access"]) {
+    const id = randomUUID();
+    scopes.set(id, { id, name, mappers: new Map() });
+  }
+  const clients = new Map<
+    string,
+    { id: string; defaultScopes: string[]; optionalScopes: string[] }
+  >();
+  for (const clientId of clientIds) {
+    clients.set(clientId, { id: randomUUID(), defaultScopes: [], optionalScopes: [] });
+  }
+  const realm = { defaultScopes: [] as string[], optionalScopes: [] as string[] };
+  const writes: string[] = [];
+  const policy: FakeRegistrationPolicy | null =
+    options.policy === undefined
+      ? {
+          id: "allowed-client-scopes-anonymous",
+          config: {
+            "allow-default-scopes": ["true"],
+            "allowed-client-scopes": ["openid", "offline_access"],
+          },
+        }
+      : options.policy;
+
+  const requireScope = (scopeId: string): FakeClientScope => {
+    const scope = scopes.get(scopeId);
+    if (!scope) throw new Error(`fake scopes: no client scope "${scopeId}"`);
+    return scope;
+  };
+  const scopeNamed = (name: string) =>
+    [...scopes.values()].find((scope) => scope.name === name);
+
+  return {
+    scopes,
+    clients,
+    realm,
+    writes,
+    scopeNamed,
+    policy,
+    allowedClientScopes() {
+      return [...(policy?.config["allowed-client-scopes"] ?? [])];
+    },
+    audiencesOf(name) {
+      const scope = scopeNamed(name);
+      return scope
+        ? [...scope.mappers.values()]
+            .filter((mapper) => mapper.accessTokenClaim && mapper.audience !== null)
+            .map((mapper) => mapper.audience!)
+            .sort()
+        : [];
+    },
+    async listClientScopes() {
+      return [...scopes.values()].map(({ id, name }) => ({ id, name }));
+    },
+    async createClientScope(input) {
+      if (scopeNamed(input.name)) {
+        throw new Error(`fake scopes: client scope "${input.name}" already exists`);
+      }
+      const id = randomUUID();
+      scopes.set(id, { id, name: input.name, mappers: new Map() });
+      writes.push(`create-scope ${input.name}`);
+      return { id, name: input.name };
+    },
+    async deleteClientScope(scopeId) {
+      const scope = requireScope(scopeId);
+      scopes.delete(scopeId);
+      for (const client of clients.values()) {
+        client.defaultScopes = client.defaultScopes.filter((name) => name !== scope.name);
+        client.optionalScopes = client.optionalScopes.filter((name) => name !== scope.name);
+      }
+      realm.defaultScopes = realm.defaultScopes.filter((name) => name !== scope.name);
+      realm.optionalScopes = realm.optionalScopes.filter((name) => name !== scope.name);
+      writes.push(`delete-scope ${scope.name}`);
+    },
+    async listAudienceMappers(scopeId) {
+      return [...requireScope(scopeId).mappers.entries()].map(([id, mapper]) => ({
+        id,
+        ...mapper,
+      }));
+    },
+    async createAudienceMapper(scopeId, audience) {
+      const scope = requireScope(scopeId);
+      scope.mappers.set(randomUUID(), { audience, accessTokenClaim: true });
+      writes.push(`add-audience ${scope.name} ${audience}`);
+    },
+    async deleteProtocolMapper(scopeId, mapperId) {
+      const scope = requireScope(scopeId);
+      const mapper = scope.mappers.get(mapperId);
+      if (!mapper) throw new Error(`fake scopes: no mapper "${mapperId}"`);
+      scope.mappers.delete(mapperId);
+      writes.push(`remove-audience ${scope.name} ${mapper.audience ?? "<none>"}`);
+    },
+    async findClient(clientId) {
+      const client = clients.get(clientId);
+      return client
+        ? {
+            id: client.id,
+            clientId,
+            defaultClientScopes: [...client.defaultScopes],
+            optionalClientScopes: [...client.optionalScopes],
+          }
+        : null;
+    },
+    async addOptionalClientScope(clientUuid, scopeId) {
+      const client = [...clients.entries()].find(([, value]) => value.id === clientUuid);
+      if (!client) throw new Error(`fake scopes: no client with uuid "${clientUuid}"`);
+      const scope = requireScope(scopeId);
+      if (!client[1].optionalScopes.includes(scope.name)) {
+        client[1].optionalScopes.push(scope.name);
+      }
+      writes.push(`attach-client ${client[0]} ${scope.name}`);
+    },
+    async getRealmDefaultScopes() {
+      return { defaultScopes: [...realm.defaultScopes], optionalScopes: [...realm.optionalScopes] };
+    },
+    async addRealmOptionalScope(scopeId) {
+      const scope = requireScope(scopeId);
+      if (!realm.optionalScopes.includes(scope.name)) realm.optionalScopes.push(scope.name);
+      writes.push(`attach-realm ${scope.name}`);
+    },
+    async findRegistrationPolicy() {
+      return policy
+        ? { id: policy.id, allowedScopes: [...(policy.config["allowed-client-scopes"] ?? [])] }
+        : null;
+    },
+    async setRegistrationPolicyScopes(policyId, next) {
+      if (!policy || policy.id !== policyId) {
+        throw new Error(`fake scopes: no client-registration policy "${policyId}"`);
+      }
+      // Keycloak's own `validateConfiguration`: every entry must name a realm
+      // client scope, or the literal `openid`. It refuses the whole list.
+      const allowed = new Set([...[...scopes.values()].map((scope) => scope.name), "openid"]);
+      const rejected = next.filter((entry) => !allowed.has(entry));
+      if (rejected.length > 0) {
+        throw new Error(`fake scopes: client scopes not allowed: [${next.join(", ")}]`);
+      }
+      policy.config = { ...policy.config, "allowed-client-scopes": [...next] };
+      writes.push(`set-registration-policy ${next.join(",")}`);
     },
   };
 }

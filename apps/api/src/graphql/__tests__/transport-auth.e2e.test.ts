@@ -5,9 +5,10 @@
  * password-grant token driving the CRUD path (skipped when Keycloak is
  * not reachable).
  */
-import { expect } from "bun:test";
+import { beforeAll, expect } from "bun:test";
 import {
   describe,
+  ensureKeycloakTokenPeople,
   getKeycloakToken,
   getRolelessKeycloakToken,
   keycloakTokenFor,
@@ -30,6 +31,15 @@ const rolelessToken = await getRolelessKeycloakToken();
 // Same role, different tenant — the pair that isolates tenancy from authorization.
 const acmeToken = await keycloakTokenFor("acme-verhuurconsulent");
 const betaToken = await keycloakTokenFor("beta-verhuurconsulent");
+
+beforeAll(() =>
+  ensureKeycloakTokenPeople([
+    keycloakToken,
+    rolelessToken,
+    acmeToken,
+    betaToken,
+  ]),
+);
 
 /** Every role a bearer token carries, realm and client alike. */
 function tokenRoles(token: string): Set<string> {

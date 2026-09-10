@@ -504,6 +504,17 @@ export const HTTP_STATUS_BY_CODE = {
   GENERATED_CRUD_NOT_ENABLED: 404,
   GENERATED_CRUD_OPERATION_NOT_ENABLED: 404,
   DATABASE_NOT_CONFIGURED: 503,
+  // Database refusals (db/database-refusals.ts). NOT_PUBLISHABLE is the same
+  // code core's publication validation answers with, so a trigger saying it
+  // gets the same 400. A rule that refuses the requested state is a conflict
+  // (409); a reference the caller cannot see is not found (404); a row that
+  // clashes with an existing one is a conflict (409). An authored code
+  // absent from this table is 409.
+  NOT_PUBLISHABLE: 400,
+  OPERATION_REFUSED: 409,
+  REFERENCE_NOT_FOUND: 404,
+  REFERENCE_IN_USE: 409,
+  ALREADY_EXISTS: 409,
   // Catalog and configuration.
   CONNECTOR_NOT_FOUND: 404,
   CONNECTOR_NOT_CONFIGURED: 409,
@@ -570,7 +581,14 @@ export function httpStatusForCode(code: string): number | undefined {
  * different things.
  */
 export type FailureBody = {
-  error: { code: string; message: string } & Partial<Omit<ConnectorProviderOutcome, "code">>;
+  error: {
+    code: string;
+    message: string;
+    /** Authored DETAIL of a database rule's refusal (db/database-refusals.ts). */
+    detail?: string;
+    /** Authored HINT of a database rule's refusal: what the caller can do instead. */
+    hint?: string;
+  } & Partial<Omit<ConnectorProviderOutcome, "code">>;
 };
 
 export function failureBody(

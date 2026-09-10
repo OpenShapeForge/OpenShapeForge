@@ -26,6 +26,7 @@
  * fields inside it. Handing us a second `type Query` would be a schema error
  * that only surfaced at boot.
  */
+import type { Duplex } from "node:stream";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Kysely, Transaction } from "kysely";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -40,6 +41,7 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import type { CatalogSeedResult } from "../db/migrations/catalog-seed.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
+import type { PlatformCatalogProvider } from "../control/platform-catalog.js";
 
 /** What a module may read when building its surfaces. */
 export type ModuleRuntimeContext = {
@@ -101,6 +103,13 @@ export type ModuleUnavailableInvocationSource = {
     | "unavailable"
     | "connection_required"
     | "reauthorization_required";
+  /**
+   * The platform's own next step for a connection gap, worded for the
+   * caller (mcp/connection-guidance.ts): which Adapter, which tool, who may
+   * run it. Never provider text. A coordinating module should surface it
+   * verbatim as the source's explanation when present.
+   */
+  guidance?: string;
 };
 
 export type ModuleInvocationSourceResolution = {
@@ -179,6 +188,79 @@ export type ModuleEgressRequest = {
 
 export type ModuleEgressFailureKind = "policy_blocked" | "timeout";
 
+/**
+ * Which Connection a module wants. `adapterKey` is the ordinary case — "the
+ * caller's own connection to this Adapter" — and deliberately needs no
+ * identifier from tool input, which would be untrusted anyway. `connectionId`
+ * is for a module that already holds one from its own stored state.
+ */
+export type ModuleConnectionSelector =
+  | { connectionId: string; adapterKey?: never }
+  | { adapterKey: string; connectionId?: never };
+
+/**
+ * Permission to open outbound connections, minted by core alongside a resolved
+ * Connection. Opaque on purpose: a module cannot read the allow-list off it,
+ * cannot widen it, and cannot construct one. It is handed straight back to
+ * `platform.egress.connect`, which looks the real policy up again.
+ */
+export type ModuleSocketGrant = { readonly __brand: unique symbol };
+
+export type ModuleSocketRequest = {
+  host: string;
+  port: number;
+  /** Implicit TLS from the first byte (an IMAPS port, say). */
+  tls: boolean;
+  /** SNI name; defaults to `host`. */
+  servername?: string;
+  /** Only a test server against a self-signed certificate sets this false. */
+  rejectUnauthorized?: boolean;
+  /** Deadline for establishing the connection. */
+  timeoutMs?: number;
+};
+
+/** One Connection's values, opened for the module core decided may see them. */
+export type ModuleConnectionValues = {
+  connectionId: string;
+  connectionKey: string;
+  adapterKey: string;
+  /** The Adapter's declared transport, e.g. "rest" or "socket". */
+  transport: string;
+  /** Whether this Adapter's Connections are per employee or per organization. */
+  connectionScope: "tenant" | "user";
+  /** The employee this Connection belongs to; null for an organization one. */
+  ownerUserId: string | null;
+  /**
+   * Every configuration value, decrypted: the plain ones and the ones stored
+   * as ciphertext, keyed by the Adapter's configuration field keys. Any OAuth
+   * tokens stored against the Connection appear as `accessToken` /
+   * `refreshToken` — a socket koppeling authenticates with the token the same
+   * way an HTTP one puts it in a header.
+   */
+  values: Readonly<Record<string, string>>;
+  /** Which of those keys the Adapter classifies as secret, for a module's own logging. */
+  secretKeys: readonly string[];
+  /** Permission to connect where this Adapter says it may. */
+  egressGrant: ModuleSocketGrant;
+};
+
+export type ModuleConnectionResolution =
+  | { ok: true; connection: ModuleConnectionValues }
+  | {
+      ok: false;
+      code:
+        | "NOT_FOUND"
+        | "FORBIDDEN"
+        | "CONNECTION_REQUIRED"
+        | "SECRET_KEYRING_MISSING"
+        /** The stored OAuth sign-in expired and could not be renewed: the person signs in again. */
+        | "REAUTHORIZATION_REQUIRED"
+        /** The provider's token endpoint or the Adapter's OAuth configuration failed; nothing was handed over. */
+        | "TOKEN_REFRESH_FAILED";
+      /** A sentence for the person who has to fix it. */
+      message: string;
+    };
+
 export type ModulePlatformServices = {
   db: {
     withSession<T>(
@@ -196,6 +278,32 @@ export type ModulePlatformServices = {
         payload: Record<string, unknown>;
       },
     ): Promise<void>;
+  };
+  /**
+   * The plaintext of a Connection's configuration — the seam a koppeling that
+   * is not HTTP needs and had no way to reach. Core resolves the row under the
+   * caller's session, enforces the Adapter's connection scope, and only then
+   * decrypts; the keyring itself never leaves core. See
+   * `modules/connection-secrets.ts` for the three gates.
+   */
+  secrets: {
+    resolveConnectionValues(
+      session: TrustedSessionContext,
+      selector: ModuleConnectionSelector,
+    ): Promise<ModuleConnectionResolution>;
+  };
+  /**
+   * Outbound connections that are not requests. `egressHosts` entries naming a
+   * port (`mail.example.com:993`) grant a socket to exactly that host and
+   * port; a bare hostname stays an HTTP grant and grants no socket. See
+   * `modules/socket-egress.ts`.
+   */
+  egress: {
+    connect(
+      session: TrustedSessionContext,
+      grant: ModuleSocketGrant,
+      request: ModuleSocketRequest,
+    ): Promise<Duplex>;
   };
   mcp: {
     notifyToolsChanged(scope: { tenantId: string | null }): void;
@@ -366,6 +474,18 @@ export type ModuleOperationSuccessResult = {
   status?: number;
   headers?: Record<string, string>;
   contentType?: string;
+  /**
+   * Optional MCP projection of the same result. `value` stays the canonical
+   * JSON answer every transport validates against the output schema; this
+   * lets a handler additionally hand the model non-JSON content blocks — an
+   * image, a rendered page — that REST and GraphQL cannot carry. Only the
+   * MCP tool call reads it: the blocks replace the default JSON text block,
+   * and `structuredContent` defaults to `value` when that is an object.
+   */
+  mcp?: {
+    content: CallToolResult["content"];
+    structuredContent?: Record<string, unknown>;
+  };
 };
 
 /** A non-success result must match one error declared by the compiler plugin. */
@@ -442,4 +562,11 @@ export type RuntimeModule = {
   mcp?: RuntimeMcpContribution;
   /** At most one loaded module may own final outbound request execution. */
   egress?: { fetch(request: ModuleEgressRequest): Promise<Response> };
+  /**
+   * A platform-level (cross-tenant) catalog this module administers, used
+   * ONLY by the control plane's platform administrator MCP
+   * (`control/platform-catalog.ts`) on an audited system session. Never
+   * reached from a tenant session. At most one loaded module may supply it.
+   */
+  platformCatalog?: PlatformCatalogProvider;
 };

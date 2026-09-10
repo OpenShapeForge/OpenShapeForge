@@ -11,6 +11,7 @@ import type {
   McpInvocationContext,
   ModuleAuthorizationDecision,
   ModuleAuthorizationSubject,
+  ModuleConnectionSelector,
   ModuleInvocationSourceResolution,
   ModuleInvocationSourceSelector,
   ModulePlatformServices,
@@ -18,6 +19,27 @@ import type {
   ModuleToolExecutionResult,
 } from "./contract.js";
 import { parseModuleToolExecutionOptions } from "./invocation-sources.js";
+import { resolveConnectionValues } from "./connection-secrets.js";
+import { connectSocket } from "./socket-egress.js";
+
+/**
+ * Narrow a module's selector to exactly one form before it reaches a query.
+ * A module cannot pass both halves, and cannot pass anything else: the
+ * selector is the only untrusted input on this path.
+ */
+function parseConnectionSelector(
+  selector: ModuleConnectionSelector,
+): ModuleConnectionSelector {
+  const candidate = selector as { connectionId?: unknown; adapterKey?: unknown };
+  const hasId = typeof candidate.connectionId === "string" && candidate.connectionId !== "";
+  const hasKey = typeof candidate.adapterKey === "string" && candidate.adapterKey !== "";
+  if (hasId === hasKey) {
+    throw new Error("A connection selector names either connectionId or adapterKey.");
+  }
+  return hasId
+    ? { connectionId: candidate.connectionId as string }
+    : { adapterKey: candidate.adapterKey as string };
+}
 
 const platformRuntimes = new WeakMap<
   ModulePlatformServices,
@@ -177,6 +199,43 @@ export class ModulePlatformRuntime {
           await appendEntityEvent(this.#db, session, {
             ...event,
             payload: event.payload as Json,
+          });
+        },
+      },
+      secrets: {
+        resolveConnectionValues: async (session, selector) => {
+          // Same liveness rule as `db.withSession`: a module may only open a
+          // credential while it is genuinely serving that session's request.
+          // A retained handle replayed later fails closed, exactly like a
+          // retained database session does.
+          if (!this.#acceptsScopedSession(session)) {
+            throw new Error(
+              "Module connection resolution requires a live verified session.",
+            );
+          }
+          return resolveConnectionValues({
+            db: this.#db,
+            session,
+            selector: parseConnectionSelector(selector),
+          });
+        },
+      },
+      egress: {
+        connect: async (session, grant, request) => {
+          if (!this.#acceptsScopedSession(session)) {
+            throw new Error("Module egress requires a live verified session.");
+          }
+          return connectSocket(grant, {
+            host: String(request.host ?? ""),
+            port: Number(request.port),
+            tls: request.tls === true,
+            ...(request.servername ? { servername: String(request.servername) } : {}),
+            ...(request.rejectUnauthorized === false
+              ? { rejectUnauthorized: false }
+              : {}),
+            ...(typeof request.timeoutMs === "number"
+              ? { timeoutMs: request.timeoutMs }
+              : {}),
           });
         },
       },

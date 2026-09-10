@@ -188,6 +188,8 @@ fields:
     description:
       en: Free text notes about this relation.
       nl: Vrije tekst notities over deze relatie.
+    classification:
+      sensitivity: confidential
     persisted:
       column: notes
       storageClass: core
@@ -196,6 +198,25 @@ fields:
       props:
         rows: 4
         maxLength: 2000
+  - key: businessContext
+    valueType: string
+    required: false
+    label:
+      en: Business context
+      nl: Bedrijfscontext
+    description:
+      en: Free-text business context for this organization or person, meant to help an assistant understand what it does — visible to anyone who can read this record, unlike the internal `notes` field.
+      nl: Vrije tekst bedrijfscontext voor deze organisatie of persoon, bedoeld om een assistent te helpen begrijpen wat het doet — zichtbaar voor iedereen die dit record mag lezen, in tegenstelling tot het interne `notes`-veld.
+    validation:
+      maxLength: 4000
+    persisted:
+      column: business_context
+      storageClass: core
+    render:
+      component: Textarea
+      props:
+        rows: 6
+        maxLength: 4000
 relationships:
   - key: relationGroup
     kind: belongsTo
@@ -415,6 +436,11 @@ ui:
                 - address
                 - location
             - title:
+                en: Context
+                nl: Context
+              fields:
+                - businessContext
+            - title:
                 en: Notes
                 nl: Notities
               fields:
@@ -460,6 +486,11 @@ ui:
               fields:
                 - address
                 - location
+            - title:
+                en: Context
+                nl: Context
+              fields:
+                - businessContext
             - title:
                 en: Notes
                 nl: Notities

@@ -14,6 +14,10 @@ import {
 
 const repoRoot = process.cwd();
 const webPresent = existsSync(join(repoRoot, "apps/web"));
+// AgreementMilestone withholds generic `create` (see agreement-milestone.yaml)
+// so the stock full-CRUD web UI is intentionally not generated for it
+// (isGeneratedCrudUiEnabled requires every operation to be true) — it stays
+// at the pre-existing count rather than 117.
 const expectedGeneratedCrudEntityCount = 116;
 
 /**

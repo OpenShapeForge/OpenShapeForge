@@ -21,7 +21,7 @@ import type {
   ModuleRuntimeContext,
   RuntimeModule,
 } from "../modules/contract.js";
-import { buildGraphqlSchema } from "./schema.js";
+import { buildGraphqlSchema, type GraphqlSurfaceOptions } from "./schema.js";
 import persistedManifest from "../generated/graphql/persisted-operations.json" with { type: "json" };
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 
@@ -54,6 +54,8 @@ export type CreateGraphqlYogaOptions = {
   reportUnexpectedError?: (report: SanitizedErrorReport) => void;
   /** Host-selected generated manifest; injectable for rolling-deployment contract tests. */
   persistedOperations?: PersistedOperationManifest;
+  /** Configuration the host resolved once for every transport (see schema.ts). */
+  surfaces?: GraphqlSurfaceOptions | undefined;
 };
 
 export type PersistedOperationManifest = {
@@ -129,6 +131,7 @@ export function createGraphqlYoga(options: CreateGraphqlYogaOptions) {
     schema: buildGraphqlSchema(
       options.modules ?? [],
       options.moduleContext ?? { db: options.db },
+      options.surfaces ?? {},
     ),
     graphqlEndpoint: "/api/graphql",
     cors: createYogaCorsConfiguration(options.cors),

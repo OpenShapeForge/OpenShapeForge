@@ -52,6 +52,11 @@ import type {
   AuthorizationRealmRole,
 } from "../types/authoring.js";
 import { KEYCLOAK_ROLE_SEGMENT_RENAMES, normalizeKeycloakRoleName } from "../role-names.js";
+import {
+  buildPasskeyProfile,
+  type KeycloakAuthenticationFlowExport,
+  type KeycloakRequiredActionExport,
+} from "./keycloak-passkeys.js";
 
 const DEFAULT_REALM_NAME = "openshapeforge";
 
@@ -198,6 +203,27 @@ interface KeycloakRealmExport {
   eventsEnabled?: boolean;
   adminEventsEnabled?: boolean;
   eventsListeners?: string[];
+  /**
+   * Passkey profile — see generators/keycloak-passkeys.ts. Emitted for EVERY
+   * realm, with no mode switch: the browser flow a human meets must not be
+   * something a forgotten environment variable can relax.
+   */
+  browserFlow?: string;
+  directGrantFlow?: string;
+  registrationFlow?: string;
+  authenticationFlows?: KeycloakAuthenticationFlowExport[];
+  requiredActions?: KeycloakRequiredActionExport[];
+  webAuthnPolicyPasswordlessRpEntityName?: string;
+  webAuthnPolicyPasswordlessRpId?: string;
+  webAuthnPolicyPasswordlessSignatureAlgorithms?: string[];
+  webAuthnPolicyPasswordlessAttestationConveyancePreference?: string;
+  webAuthnPolicyPasswordlessAuthenticatorAttachment?: string;
+  webAuthnPolicyPasswordlessRequireResidentKey?: string;
+  webAuthnPolicyPasswordlessUserVerificationRequirement?: string;
+  webAuthnPolicyPasswordlessCreateTimeout?: number;
+  webAuthnPolicyPasswordlessAvoidSameAuthenticatorRegister?: boolean;
+  webAuthnPolicyPasswordlessAcceptableAaguids?: string[];
+  webAuthnPolicyPasswordlessExtraOrigins?: string[];
   clients: KeycloakClient[];
   identityProviders?: KeycloakIdentityProvider[];
   identityProviderMappers?: KeycloakIdentityProviderMapper[];
@@ -1099,6 +1125,22 @@ export interface KeycloakRealmArtifact {
   contents: string;
 }
 
+/**
+ * Let the authored rpId be a `${env:VAR:-devDefault}` reference, under the
+ * same rule as every other environment-specific value in this file: the
+ * fallback is development-only, so a production build that forgot to set the
+ * variable fails instead of publishing the laptop hostname as the relying
+ * party — which would make every production passkey fail to verify.
+ */
+function resolveRpIdRef(
+  raw: string | undefined,
+  dev: boolean,
+  realmName: string,
+): string | undefined {
+  if (raw === undefined) return undefined;
+  return resolveEnvRef(raw, dev, `Realm "${realmName}": realm.webAuthn.rpId`) ?? raw;
+}
+
 export function generateKeycloakRealmArtifacts(
   contracts: CompiledEntityContract[],
   authConfig: AuthorizationConfigFile | null | undefined,
@@ -1272,7 +1314,12 @@ export function generateKeycloakRealmArtifacts(
     registrationAllowed: realmCfg.registrationAllowed,
     loginWithEmailAllowed: realmCfg.loginWithEmailAllowed,
     duplicateEmailsAllowed: realmCfg.duplicateEmailsAllowed,
-    resetPasswordAllowed: realmCfg.resetPasswordAllowed,
+    // Forced off, in every mode. "Forgot password" is a self-service path to a
+    // password credential, and this realm's browser flow has nowhere to put
+    // one. The equivalent for a passkey — an admin-issued, single-use,
+    // time-boxed enrolment link — is deliberately NOT self-service; see the
+    // escape-hatch section of generators/keycloak-passkeys.ts.
+    resetPasswordAllowed: false,
     editUsernameAllowed: realmCfg.editUsernameAllowed,
     // Also forced: an internet-reachable login endpoint without lockout is an
     // open invitation to credential stuffing, and the authored default is off
@@ -1285,6 +1332,16 @@ export function generateKeycloakRealmArtifacts(
     eventsEnabled: realmCfg.events?.enabled ?? legacyEvents?.eventsEnabled,
     adminEventsEnabled: realmCfg.events?.adminEnabled ?? legacyEvents?.adminEventsEnabled,
     eventsListeners: realmCfg.events?.listeners ?? legacyEvents?.eventsListeners,
+    // Passkeys. Unconditional on purpose — `dev` reaches this call only to
+    // supply an rpId fallback that a laptop never exercises. See
+    // generators/keycloak-passkeys.ts for why the development relaxation is a
+    // loopback-only admin script instead of a flag here.
+    ...buildPasskeyProfile({
+      realmName,
+      realmDisplayName: realmCfg.displayName,
+      rpId: resolveRpIdRef(realmCfg.webAuthn?.rpId, dev, realmName),
+      dev,
+    }),
     clients,
     ...(idp.identityProviders.length > 0
       ? {

@@ -89,6 +89,7 @@
  */
 import {
   createServiceAccountTokenProvider,
+  createKeycloakFetch,
   describeError,
   readJson,
   REQUEST_TIMEOUT_MS,
@@ -112,16 +113,45 @@ export type KeycloakAdminErrorCode =
   /** Anything else: unreachable, 5xx, unparseable body. */
   | "KEYCLOAK_ADMIN_UNAVAILABLE";
 
+/** Fixed, non-identifying names for the Keycloak admin subcall that failed. */
+export type KeycloakAdminOperation =
+  | "service_account_token"
+  | "get_organization"
+  | "get_organization_for_update"
+  | "update_organization"
+  | "list_organizations"
+  | "link_identity_provider"
+  | "list_identity_providers"
+  | "unlink_identity_provider"
+  | "check_invitation_smtp"
+  | "resolve_role_client"
+  | "list_organization_members"
+  | "list_member_roles"
+  | "list_invitations"
+  | "invite_member"
+  | "delete_invitation";
+
 export class KeycloakAdminError extends Error {
   readonly code: KeycloakAdminErrorCode;
   /** Upstream HTTP status, when there was a response at all. */
   readonly status: number | undefined;
+  /** Safe fixed tag: never a URL, organization id, address, or response body. */
+  readonly operation: KeycloakAdminOperation | undefined;
+  /** Wall-clock duration of only the failed Keycloak subcall. */
+  readonly durationMs: number | undefined;
 
-  constructor(code: KeycloakAdminErrorCode, message: string, status?: number) {
+  constructor(
+    code: KeycloakAdminErrorCode,
+    message: string,
+    status?: number,
+    diagnostic?: { operation: KeycloakAdminOperation; durationMs: number },
+  ) {
     super(message);
     this.name = "KeycloakAdminError";
     this.code = code;
     this.status = status;
+    this.operation = diagnostic?.operation;
+    this.durationMs = diagnostic?.durationMs;
   }
 }
 
@@ -180,6 +210,13 @@ export type ListOrganizationsResult = {
   truncated: boolean;
 };
 
+/** One identity provider linked to an Organization, as the native endpoint reports it. */
+export type OrganizationIdentityProvider = {
+  alias: string;
+  providerId: string;
+  enabled: boolean;
+};
+
 export type KeycloakOrganizationAdminClient = {
   /** The organization's current state, or a named error if it is not there. */
   getOrganization(organizationId: string): Promise<KeycloakOrganizationState>;
@@ -200,6 +237,21 @@ export type KeycloakOrganizationAdminClient = {
    * realm side. There is no per-tenant question that answers it.
    */
   listOrganizations(limit: number): Promise<ListOrganizationsResult>;
+  /**
+   * Link an identity provider — already authored in the realm (see
+   * docs/identity-providers.md) — to this Organization, via Keycloak's native
+   * `POST /organizations/{id}/identity-providers`. Realm-wide
+   * `identityProviders[]` authors WHAT a provider is; this is the ONLY thing
+   * that decides WHICH Organization brokers through it. Idempotent: linking
+   * an alias already linked to this Organization is a no-op (Keycloak answers
+   * 204 either way; verified there is no distinguishable "already linked"
+   * error on 26.5.3, so no such re-signal is invented here).
+   */
+  linkIdentityProvider(organizationId: string, alias: string): Promise<void>;
+  /** Identity providers currently linked to this Organization. */
+  listIdentityProviders(organizationId: string): Promise<OrganizationIdentityProvider[]>;
+  /** Unlink an identity provider from this Organization. Idempotent. */
+  unlinkIdentityProvider(organizationId: string, alias: string): Promise<void>;
 };
 
 export type KeycloakOrganizationAdminOptions = {
@@ -215,7 +267,8 @@ export function createKeycloakOrganizationAdminClient(
   config: KeycloakServiceAccountConfig,
   options: KeycloakOrganizationAdminOptions = {},
 ): KeycloakOrganizationAdminClient {
-  const doFetch = options.fetch ?? globalThis.fetch;
+  const doFetch = createKeycloakFetch(config, options.fetch ?? globalThis.fetch);
+  const now = options.now ?? (() => Date.now());
   const adminBase = `${config.baseUrl}/admin/realms/${encodeURIComponent(config.tenantRealm)}/organizations`;
 
   const tokens =
@@ -243,15 +296,30 @@ export function createKeycloakOrganizationAdminClient(
   async function request(
     url: string,
     init: RequestInit,
+    operation: KeycloakAdminOperation,
+    contentType: string = "application/json",
   ): Promise<{ status: number; body: unknown }> {
-    const token = await tokens.get();
+    const tokenStartedAt = now();
+    let token: string;
+    try {
+      token = await tokens.get();
+    } catch (error) {
+      if (error instanceof KeycloakAdminError && error.operation === undefined) {
+        throw new KeycloakAdminError(error.code, error.message, error.status, {
+          operation: "service_account_token",
+          durationMs: Math.max(0, now() - tokenStartedAt),
+        });
+      }
+      throw error;
+    }
+    const requestStartedAt = now();
     let response: Response;
     try {
       response = await doFetch(url, {
         ...init,
         headers: {
           authorization: `Bearer ${token}`,
-          "content-type": "application/json",
+          ...(init.body === undefined ? {} : { "content-type": contentType }),
           ...init.headers,
         },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
@@ -261,6 +329,8 @@ export function createKeycloakOrganizationAdminClient(
         "KEYCLOAK_ADMIN_UNAVAILABLE",
         `Could not reach the Keycloak admin API at ${url}: ` +
           (error instanceof Error ? error.message : String(error)),
+        undefined,
+        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
       );
     }
 
@@ -279,6 +349,7 @@ export function createKeycloakOrganizationAdminClient(
           `${describeError(body, response.statusText)}. The service account must hold ` +
           "realm-management manage-realm.",
         response.status,
+        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
       );
     }
     if (response.status === 404) {
@@ -287,6 +358,7 @@ export function createKeycloakOrganizationAdminClient(
         "The Keycloak organization this tenant is linked to no longer exists. " +
           "Replay the tenant's provisioning create to recreate and relink it.",
         response.status,
+        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
       );
     }
     if (response.status === 400) {
@@ -294,6 +366,7 @@ export function createKeycloakOrganizationAdminClient(
         "KEYCLOAK_ADMIN_REJECTED",
         describeError(body, "The Keycloak admin API rejected the request."),
         response.status,
+        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
       );
     }
     throw new KeycloakAdminError(
@@ -301,6 +374,7 @@ export function createKeycloakOrganizationAdminClient(
       `The Keycloak admin API answered ${response.status}: ` +
         describeError(body, response.statusText),
       response.status,
+      { operation, durationMs: Math.max(0, now() - requestStartedAt) },
     );
   }
 
@@ -353,13 +427,13 @@ export function createKeycloakOrganizationAdminClient(
 
   return {
     async getOrganization(organizationId) {
-      const { body } = await request(organizationUrl(organizationId), { method: "GET" });
+      const { body } = await request(organizationUrl(organizationId), { method: "GET" }, "get_organization");
       return toState(body, organizationId);
     },
 
     async setOrganizationEnabled(organizationId, enabled) {
       const url = organizationUrl(organizationId);
-      const { body } = await request(url, { method: "GET" });
+      const { body } = await request(url, { method: "GET" }, "get_organization_for_update");
       const current = toState(body, organizationId);
       if (current.enabled === enabled) {
         return { organization: current, changed: false };
@@ -369,7 +443,7 @@ export function createKeycloakOrganizationAdminClient(
       // the hierarchy attributes ride along untouched rather than trusting
       // Keycloak to merge a partial body.
       const representation = { ...((body ?? {}) as Record<string, unknown>), enabled };
-      await request(url, { method: "PUT", body: JSON.stringify(representation) });
+      await request(url, { method: "PUT", body: JSON.stringify(representation) }, "update_organization");
       return { organization: { ...current, enabled }, changed: true };
     },
 
@@ -383,7 +457,7 @@ export function createKeycloakOrganizationAdminClient(
       });
       const { body } = await request(`${adminBase}?${search.toString()}`, {
         method: "GET",
-      });
+      }, "list_organizations");
       const rows = Array.isArray(body) ? body : [];
       const organizations = rows
         .slice(0, limit)
@@ -393,6 +467,60 @@ export function createKeycloakOrganizationAdminClient(
         // would collide with every other malformed row in the map built from this.
         .filter((organization) => organization.id.length > 0);
       return { organizations, truncated: rows.length > limit };
+    },
+
+    async linkIdentityProvider(organizationId, alias) {
+      // The native endpoint's body is the alias as a JSON string (i.e. the
+      // literal bytes `"alias"`), Content-Type application/json — verified
+      // against a running Keycloak 26.5.3: a bare unquoted string with
+      // text/plain is rejected with 415, and a JSON-quoted string succeeds
+      // with 204.
+      await request(`${organizationUrl(organizationId)}/identity-providers`, {
+        method: "POST",
+        body: JSON.stringify(alias),
+      }, "link_identity_provider");
+    },
+
+    async listIdentityProviders(organizationId) {
+      const { body } = await request(
+        `${organizationUrl(organizationId)}/identity-providers`,
+        { method: "GET" },
+        "list_identity_providers",
+      );
+      const rows = Array.isArray(body) ? body : [];
+      return rows
+        .map((row) => {
+          const record = (row ?? {}) as Record<string, unknown>;
+          return typeof record.alias === "string"
+            ? {
+                alias: record.alias,
+                providerId: typeof record.providerId === "string" ? record.providerId : "",
+                enabled: record.enabled !== false,
+              }
+            : null;
+        })
+        .filter((idp): idp is OrganizationIdentityProvider => idp !== null);
+    },
+
+    async unlinkIdentityProvider(organizationId, alias) {
+      try {
+        await request(
+          `${organizationUrl(organizationId)}/identity-providers/${encodeURIComponent(alias)}`,
+          { method: "DELETE" },
+          "unlink_identity_provider",
+        );
+      } catch (error) {
+        // Already unlinked (or never linked): idempotent, not an error. A
+        // missing ORGANIZATION is a real error and still throws.
+        if (
+          error instanceof KeycloakAdminError &&
+          error.code === "KEYCLOAK_ADMIN_ORGANIZATION_NOT_FOUND" &&
+          error.status === 404
+        ) {
+          return;
+        }
+        throw error;
+      }
     },
   };
 }

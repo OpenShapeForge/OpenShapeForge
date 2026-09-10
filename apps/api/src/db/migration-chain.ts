@@ -22,6 +22,18 @@
  *   4. generated roll-forward — manifest-driven schema apply/diff.
  *   4b. plugin invariants     — immutable compiler-plugin constraints,
  *      functions, triggers, and other DDL, after contributed tables exist.
+ *   4c. identity link         — runtime-owned platform.identities /
+ *      platform.identity_relations (idempotent DDL, like step 2); after the
+ *      generated step because they reference platform.tenants and
+ *      erp.relations.
+ *   4d. employee invitations  — runtime-owned platform.employee_invitations
+ *      (idempotent DDL, same reasoning); references platform.tenants only, so
+ *      it could run before 4c, but sits next to it because both are the
+ *      "login ↔ party" story (db/migrations/employee-invitations.ts).
+ *   4e. organization relation link — platform.tenants.relation_id (idempotent
+ *      DDL, same reasoning); references erp.relations, so it must run after
+ *      the generated step like 4c/4d
+ *      (db/migrations/organization-relation-link.ts).
  *   5. app role grants        — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically,
  *      re-apply the `app` schema USAGE/EXECUTE grants that step 0 had to skip
@@ -46,6 +58,11 @@ import { applyAppRoleMigration, applyAppRoleGrants } from "./migrations/app-role
 import { applyWorkerRoleMigration, applyWorkerRoleGrants } from "./migrations/worker-role.js";
 import { applyAppHelpersMigration } from "./migrations/app-helpers.js";
 import { applySystemBypassAuditMigration } from "./migrations/system-bypass-audit.js";
+import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
+import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitations.js";
+import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
+import { applyOnboardingMigration } from "./migrations/onboarding.js";
+import { applyUpdateNoticesMigration } from "./migrations/update-notices.js";
 import {
   applyVersionedMigrations,
   type VersionedMigration,
@@ -112,6 +129,11 @@ export async function runMigrationChain(
     options.pluginMigrations ?? (await loadGeneratedPluginMigrations()),
     options.appliedBy,
   );
+  await applyIdentityLinkMigration(db);
+  await applyEmployeeInvitationsMigration(db);
+  await applyOrganizationRelationLinkMigration(db);
+  await applyOnboardingMigration(db);
+  await applyUpdateNoticesMigration(db);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
   // The worker role's grants are enumerated from the manifest rather than

@@ -15,7 +15,8 @@
  *                   { scheme: basic|bearer|header, usernameTemplate,
  *                     passwordFrom, headerName, tokenFrom }, egressHosts
  *   operation row:  kind, operation { method, pathTemplate },
- *                   inputFields, responseMapping { rootPath, fieldPaths }
+ *                   inputFields, responseMapping { rootPath, fieldPaths,
+ *                   transforms }
  *   binding:        <operationRef>, order, inputMapping [{from,to}],
  *                   outputMapping [{from,to}]
  *   connection row: <connectionValuesField> — plain values and encrypted
@@ -32,6 +33,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { HttpError } from "../rest/http-error.js";
+import { applyResponseTransforms } from "./response-transforms.js";
 import { hostAllowed } from "../connectors/executor.js";
 import {
   boundedAbortSignal,
@@ -923,7 +925,158 @@ export type ExecuteBindingInput = {
    * them, every encrypted value is treated as secret.
    */
   providerDefinitions?: unknown;
+  /**
+   * In-process executor for the platform-owned native provider (transport
+   * "native"). The runtime supplies it with the caller's own session bound in,
+   * so a native operation runs under exactly the identity and roles that
+   * called the Service — never a service account, never over the network.
+   */
+  native?: NativeOperationExecutor | undefined;
 };
+
+/** Runs one generated operation (by its catalog key) with the caller's session. */
+export type NativeOperationExecutor = (
+  operationKey: string,
+  inputs: JsonRecord,
+) => Promise<JsonRecord>;
+
+/** The scheme a composed native request carries; nothing ever fetches it. */
+export const NATIVE_REQUEST_SCHEME = "osf-native:";
+
+/**
+ * Map ONE operation's parsed response onto the binding's outputs: rootPath
+ * extraction, declared field paths (collection or object), the binding's
+ * output mapping, and the cursor when the operation paginates. Shared by the
+ * HTTP transports and the native executor, so a native operation's output is
+ * shaped by exactly the same authored mapping as a provider response.
+ */
+export function mapOperationResponse(
+  binding: JsonRecord,
+  operationRow: JsonRecord,
+  parsed: unknown,
+): JsonRecord {
+  const responseMapping = (operationRow.responseMapping ?? {}) as JsonRecord;
+  const extracted = extractPath(parsed, responseMapping.rootPath);
+  const fieldPaths = Array.isArray(responseMapping.fieldPaths)
+    ? (responseMapping.fieldPaths as { field?: unknown; path?: unknown }[])
+    : [];
+  let operationOutputs: JsonRecord;
+  if (
+    fieldPaths.length > 0 &&
+    extracted !== null &&
+    typeof extracted === "object"
+  ) {
+    operationOutputs = {};
+    if (Array.isArray(extracted)) {
+      // A field that no item carries is an OPTIONAL attribute (a calendar
+      // week without a single `location`), not a broken mapping: it projects
+      // to nulls. Only a mapping in which NOTHING resolves across the whole
+      // collection is a definition mistake — seen live as
+      // SERVICE_MISCONFIGURED on a perfectly good week of events.
+      let anyFieldResolved = false;
+      let projectedFields = 0;
+      for (const entry of fieldPaths) {
+        if (typeof entry.field !== "string") continue;
+        if (entry.path === "$") {
+          operationOutputs[entry.field] = extracted;
+          anyFieldResolved = true;
+          continue;
+        }
+        projectedFields += 1;
+        const projected = extracted.map((item) => {
+          const value = extractPath(item, entry.path);
+          if (value !== undefined) anyFieldResolved = true;
+          return value === undefined ? null : value;
+        });
+        operationOutputs[entry.field] = projected;
+      }
+      if (!anyFieldResolved && projectedFields > 0 && extracted.length > 0) {
+        throw new HttpError(
+          502,
+          "SERVICE_MISCONFIGURED",
+          `The response mapping produced no outputs: none of its field paths ` +
+            `(${fieldPaths.map((entry) => String(entry.path)).join(", ")}) exist in the ` +
+            `provider response, which holds a collection of ${extracted.length} items — ` +
+            `use path "$" to pass it through.`,
+        );
+      }
+    } else {
+      for (const entry of fieldPaths) {
+        if (typeof entry.field !== "string") continue;
+        operationOutputs[entry.field] = extractPath(extracted, entry.path);
+      }
+      // A mapping that matches NOTHING while the provider answered with data
+      // is a definition mistake, not an empty result — an empty success here
+      // silently loses the whole response (seen live: a calendar's events
+      // vanished into {}). Name what was looked for and what was there.
+      const anyResolved = Object.values(operationOutputs).some(
+        (value) => value !== undefined,
+      );
+      const sourceKeys = Object.keys(extracted);
+      if (!anyResolved && sourceKeys.length > 0) {
+        throw new HttpError(
+          502,
+          "SERVICE_MISCONFIGURED",
+          `The response mapping produced no outputs: none of its field paths ` +
+            `(${fieldPaths.map((entry) => String(entry.path)).join(", ")}) exist in the ` +
+            `provider response, which holds ${sourceKeys.join(", ")}.`,
+        );
+      }
+    }
+  } else {
+    operationOutputs =
+      extracted !== null &&
+      typeof extracted === "object" &&
+      !Array.isArray(extracted)
+        ? (extracted as JsonRecord)
+        : { result: extracted };
+  }
+
+  // Declarative transforms (see response-transforms.ts) reshape what the
+  // field paths could only reach, not decode — header lists, MIME trees,
+  // base64url bodies. They run after the "produced no outputs" checks and
+  // before the binding's output mapping, so the mapping sees final names.
+  if (
+    Array.isArray(responseMapping.transforms) &&
+    responseMapping.transforms.length > 0
+  ) {
+    operationOutputs = applyResponseTransforms(
+      operationOutputs,
+      responseMapping.transforms,
+    );
+  }
+
+  const mapped = applyMapping(operationOutputs, binding.outputMapping);
+  if (
+    Array.isArray(binding.outputMapping) &&
+    (binding.outputMapping as unknown[]).length > 0 &&
+    Object.keys(mapped).length === 0 &&
+    Object.keys(operationOutputs).some(
+      (key) => operationOutputs[key] !== undefined,
+    )
+  ) {
+    throw new HttpError(
+      502,
+      "SERVICE_MISCONFIGURED",
+      `The binding's output mapping matched nothing; the operation produced: ` +
+        `${Object.keys(operationOutputs).join(", ")}.`,
+    );
+  }
+
+  // Cursor pagination surfaces as data: the next-page cursor (when the
+  // operation declares where it lives) rides along as `nextCursor`, and the
+  // author feeds it back through a service input mapped onto the page
+  // parameter. The engine stays single-request per call.
+  const pagination = (operationRow.pagination ?? {}) as JsonRecord;
+  if (
+    pagination.style === "cursor" &&
+    typeof pagination.cursorPath === "string"
+  ) {
+    const cursor = extractPath(parsed, pagination.cursorPath);
+    if (cursor !== undefined && cursor !== null) mapped.nextCursor = cursor;
+  }
+  return mapped;
+}
 
 /**
  * Execute ONE binding: map service inputs to operation inputs, build the
@@ -997,6 +1150,32 @@ export function describeAuthHeaders(auth: unknown): Record<string, string> {
   }
 }
 
+/** A generated entity tool (finding_create) or a plugin operation key. */
+const NATIVE_OPERATION_KEY =
+  /^(?:[a-z][a-z0-9_]*|[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+)$/;
+
+/**
+ * The in-process operation a native Capability binds to, validated: either a
+ * generated entity tool name (`finding_create`) or a plugin operation's key
+ * (`osf-integration.mail.read-attachment`), which the native executor runs
+ * through the operation runtime under the caller's session — so a plugin
+ * operation that carries no dedicated MCP tool is still reachable as a
+ * building block of a Service.
+ */
+export function nativeOperationKey(operationRow: JsonRecord): string {
+  const operation = (operationRow.operation ?? {}) as JsonRecord;
+  const key = operation.nativeOperation;
+  if (typeof key !== "string" || !NATIVE_OPERATION_KEY.test(key)) {
+    throw new HttpError(
+      400,
+      "OPERATION_MISCONFIGURED",
+      "A native Capability must name operation.nativeOperation (a generated operation key such as " +
+        "finding_create, or a plugin operation key such as osf-integration.mail.read-attachment).",
+    );
+  }
+  return key;
+}
+
 export type ComposedRequest = {
   method: string;
   url: URL;
@@ -1021,11 +1200,34 @@ export async function composeBindingRequest(
   const fetchImpl = input.fetchImpl ?? fetch;
 
   const transport = providerRow.transport;
+  if (transport === "native") {
+    // The native provider has no URL, credentials or egress: the "request" is
+    // a descriptor naming the generated operation and the mapped inputs, so a
+    // dry run shows exactly what would execute in-process.
+    const operationKey = nativeOperationKey(operationRow);
+    const operationInputs = applyMapping(serviceInputs, binding.inputMapping);
+    return {
+      method: "NATIVE",
+      url: new URL(`${NATIVE_REQUEST_SCHEME}/${operationKey}`),
+      headers: {},
+      body: JSON.stringify(operationInputs),
+    };
+  }
   if (transport !== "rest" && transport !== "graphql") {
+    // A transport this executor does not speak is not automatically a mistake.
+    // An Adapter may exist to be a CONNECTION POINT rather than an HTTP
+    // provider: it declares the configuration fields a person fills in, the
+    // scope those values are held at, and — through egressHosts entries that
+    // name a port — where the module owning that protocol may connect. Its
+    // Capabilities run in-process (transport "native", operation.nativeOperation)
+    // and reach the connection through platform.secrets/platform.egress. What
+    // must never happen is this executor guessing an HTTP request for it.
     throw new HttpError(
       501,
       "NOT_IMPLEMENTED",
-      `Transport "${String(transport)}" is not executable; rest and graphql are.`,
+      `Transport "${String(transport)}" is not an HTTP transport, so no request can be ` +
+        "composed for it. This executor speaks rest and graphql; a Capability on a " +
+        "non-HTTP Adapter runs in-process and must declare operation.nativeOperation.",
     );
   }
 
@@ -1331,6 +1533,21 @@ export async function executeBinding(
     ? (providerRow.egressHosts as string[])
     : [];
 
+  if (providerRow.transport === "native") {
+    if (!input.native) {
+      throw new HttpError(
+        501,
+        "NOT_IMPLEMENTED",
+        "Native execution is not available on this transport.",
+      );
+    }
+    const operationKey = nativeOperationKey(operationRow);
+    const operationInputs = applyMapping(input.serviceInputs, binding.inputMapping);
+    input.signal?.throwIfAborted();
+    const produced = await input.native(operationKey, operationInputs);
+    return mapOperationResponse(binding, operationRow, produced);
+  }
+
   let request: ComposedRequest;
   try {
     request = await composeBindingRequest(invocationInput);
@@ -1414,105 +1631,7 @@ export async function executeBinding(
     parsed = (parsed as JsonRecord | null)?.data ?? null;
   }
 
-  const responseMapping = (operationRow.responseMapping ?? {}) as JsonRecord;
-  const extracted = extractPath(parsed, responseMapping.rootPath);
-  const fieldPaths = Array.isArray(responseMapping.fieldPaths)
-    ? (responseMapping.fieldPaths as { field?: unknown; path?: unknown }[])
-    : [];
-  let operationOutputs: JsonRecord;
-  if (
-    fieldPaths.length > 0 &&
-    extracted !== null &&
-    typeof extracted === "object"
-  ) {
-    operationOutputs = {};
-    if (Array.isArray(extracted)) {
-      for (const entry of fieldPaths) {
-        if (typeof entry.field !== "string") continue;
-        if (entry.path === "$") {
-          operationOutputs[entry.field] = extracted;
-          continue;
-        }
-        let anyResolved = false;
-        const projected = extracted.map((item) => {
-          const value = extractPath(item, entry.path);
-          if (value !== undefined) anyResolved = true;
-          return value === undefined ? null : value;
-        });
-        if (!anyResolved && extracted.length > 0) {
-          throw new HttpError(
-            502,
-            "SERVICE_MISCONFIGURED",
-            `The response mapping produced no outputs: field path ` +
-              `(${String(entry.path)}) does not exist in the provider response, ` +
-              `which holds a collection of ${extracted.length} items — use path "$" ` +
-              "to pass it through.",
-          );
-        }
-        operationOutputs[entry.field] = projected;
-      }
-    } else {
-      for (const entry of fieldPaths) {
-        if (typeof entry.field !== "string") continue;
-        operationOutputs[entry.field] = extractPath(extracted, entry.path);
-      }
-      // A mapping that matches NOTHING while the provider answered with data
-      // is a definition mistake, not an empty result — an empty success here
-      // silently loses the whole response (seen live: a calendar's events
-      // vanished into {}). Name what was looked for and what was there.
-      const anyResolved = Object.values(operationOutputs).some(
-        (value) => value !== undefined,
-      );
-      const sourceKeys = Object.keys(extracted);
-      if (!anyResolved && sourceKeys.length > 0) {
-        throw new HttpError(
-          502,
-          "SERVICE_MISCONFIGURED",
-          `The response mapping produced no outputs: none of its field paths ` +
-            `(${fieldPaths.map((entry) => String(entry.path)).join(", ")}) exist in the ` +
-            `provider response, which holds ${sourceKeys.join(", ")}.`,
-        );
-      }
-    }
-  } else {
-    operationOutputs =
-      extracted !== null &&
-      typeof extracted === "object" &&
-      !Array.isArray(extracted)
-        ? (extracted as JsonRecord)
-        : { result: extracted };
-  }
-
-  const mapped = applyMapping(operationOutputs, binding.outputMapping);
-  if (
-    Array.isArray(binding.outputMapping) &&
-    (binding.outputMapping as unknown[]).length > 0 &&
-    Object.keys(mapped).length === 0 &&
-    Object.keys(operationOutputs).some(
-      (key) => operationOutputs[key] !== undefined,
-    )
-  ) {
-    throw new HttpError(
-      502,
-      "SERVICE_MISCONFIGURED",
-      `The binding's output mapping matched nothing; the operation produced: ` +
-        `${Object.keys(operationOutputs).join(", ")}.`,
-    );
-  }
-
-  // Cursor pagination surfaces as data: the next-page cursor (when the
-  // operation declares where it lives) rides along as `nextCursor`, and the
-  // author feeds it back through a service input mapped onto the page
-  // parameter. The engine stays single-request per call.
-  const pagination = (operationRow.pagination ?? {}) as JsonRecord;
-  if (
-    pagination.style === "cursor" &&
-    typeof pagination.cursorPath === "string"
-  ) {
-    const cursor = extractPath(parsed, pagination.cursorPath);
-    if (cursor !== undefined && cursor !== null) mapped.nextCursor = cursor;
-  }
-  return mapped;
+  return mapOperationResponse(binding, operationRow, parsed);
 }
 
 /**

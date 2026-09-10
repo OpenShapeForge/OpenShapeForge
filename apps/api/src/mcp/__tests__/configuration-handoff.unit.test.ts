@@ -9,6 +9,8 @@
 import { describe, expect, it } from "bun:test";
 import {
   consumeConfiguration,
+  findExistingConfiguration,
+  mergeConfigurationValues,
   mintConfiguration,
   parseSubmission,
   peekConfiguration,
@@ -231,5 +233,35 @@ describe("retry rendering after a rejected verification", () => {
     expect(html).toContain('name="subdomain"');
     expect(html).toContain('value="acme-typo"');
     expect(html).not.toContain("s3cret");
+  });
+});
+
+describe("resubmitting a key that already exists", () => {
+  const pending = { modelValues: { adapterId: "adapter-1", key: "google", name: "Google" } };
+
+  it("resolves to the stored row with that key, never to another key", () => {
+    const rows = [
+      { id: "row-other", key: "zendesk", configurationValues: {} },
+      { id: "row-google", key: "google", configurationValues: { clientId: "old-id" } },
+    ];
+    expect(findExistingConfiguration(rows, pending)?.id).toBe("row-google");
+    expect(findExistingConfiguration([rows[0]!], pending)).toBeUndefined();
+    expect(findExistingConfiguration(rows, { modelValues: {} })).toBeUndefined();
+  });
+
+  it("replaces the submitted keys in place and keeps the untouched ones", () => {
+    const stored = {
+      clientId: "old-id",
+      clientSecret: { keyId: "k1", ciphertext: "old", iv: "a", tag: "b" },
+      subdomain: "acme",
+    };
+    const rotated = { keyId: "k1", ciphertext: "new", iv: "c", tag: "d" };
+    const merged = mergeConfigurationValues(stored, { clientSecret: rotated, clientId: "old-id" });
+    expect(merged).toEqual({ clientId: "old-id", clientSecret: rotated, subdomain: "acme" });
+    expect(Object.keys(merged)).toHaveLength(3);
+    expect(mergeConfigurationValues(null, { clientId: "x" })).toEqual({ clientId: "x" });
+    expect(mergeConfigurationValues(["not", "an", "object"], { clientId: "x" })).toEqual({
+      clientId: "x",
+    });
   });
 });

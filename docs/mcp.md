@@ -47,14 +47,45 @@ same bearer token, customer-provisioned API key, or signed trusted-context
 headers every other transport takes; an unauthenticated request is `401` before
 any dispatch.
 
-For ordinary configuration data, the runtime preserves this UX order:
-in-client elicitation, then an MCP App when the client advertises
-`io.modelcontextprotocol/ui`, then the signed-in host web form. The private app
-receives its single-use handoff only in tool-result metadata. The external
-fallback is the stable `${OPENSHAPEFORGE_WEB_ORIGIN}/configuration` URL and
-resolves the pending form after normal Keycloak login, so a bearer handoff URL
-never enters model context. Secret and confidential values post directly to the
-runtime and are encrypted at rest with `OPENSHAPEFORGE_ELICITED_SECRET_KEYS`.
+For ordinary configuration data (a `create_connection` for an Adapter, or any
+entity with `mcp.elicitOnCreate`), the runtime preserves this UX order:
+
+1. **In-client elicitation** — the secure form in place; values never touch
+   the model.
+2. **An MCP App**, only when the client advertises `io.modelcontextprotocol/ui`
+   **and** `OPENSHAPEFORGE_PUBLIC_ORIGIN` is `https://`. The app renders the
+   handoff form in an iframe inside the host's own https sandbox, so an
+   `http://` or loopback origin (local development) cannot render there — the
+   panel stays blank — and the runtime does not offer it at all. The private
+   app receives its single-use handoff only in tool-result metadata.
+3. **The configuration URL in the open.** Every other client (Codex, ChatGPT
+   without an MCP-App-capable origin, a plain connector) gets a result whose
+   text and `structuredContent` both carry it:
+
+   ```json
+   {
+     "action": "configure", "status": "awaiting_person", "pending": true,
+     "configurationUrl": "https://api.example.com/api/entity-configuration/<token>",
+     "expiresAt": "2026-09-05T10:30:00.000Z", "expiresInSeconds": 1800,
+     "fields": [
+       { "key": "clientId", "label": "Google OAuth client ID", "secret": false },
+       { "key": "clientSecret", "label": "Google OAuth client secret", "secret": true }
+     ],
+     "resumeWith": "list_connections",
+     "instructions": "The secure form could not be completed in this client. Give the person configurationUrl: open this link in a browser and enter the values there; they never pass through the chat. …"
+   }
+   ```
+
+   The page is served on the API's own origin (`/api/entity-configuration/<token>`,
+   branded, see `browser-pages.ts`), so no web origin is needed; the token is
+   single-use and expires after 30 minutes. Submitting the form verifies the
+   values the way `test_connection` does, creates the row, and burns the
+   token. When `OPENSHAPEFORGE_WEB_ORIGIN` is set the result also carries
+   `externalUrl`, the signed-in host web form that resolves the same pending
+   handoff after Keycloak login.
+
+Secret and confidential values post directly to the runtime and are encrypted
+at rest with `OPENSHAPEFORGE_ELICITED_SECRET_KEYS`.
 
 ### Discovery
 
@@ -89,6 +120,98 @@ unset.
 The server is registered inside the rate-limited plugin scope, so the API's
 request-rate boundary applies.
 
+### Per-organization resources
+
+Beside `/api/mcp` the same server answers on one resource per Keycloak
+Organization:
+
+    POST|GET|DELETE /api/mcp/organizations/<alias>
+
+`<alias>` is the Organization's Keycloak alias — the key of the `organization`
+claim and the name the built-in `organization:<alias>` scope selects — not the
+tenant slug or id. On `/api/mcp` the tenant comes from the token alone (`tid`,
+or the single Organization membership); a user who is a member of several
+Organizations therefore holds one token that is good for all of them. On a
+per-organization resource the session is admitted only when token, path and
+registry agree (`apps/api/src/auth/organization-binding.ts`):
+
+1. **membership** — `organization.<alias>.id` is present for the path's alias;
+2. **audience** — `aud` contains the canonical URL of *this* resource, i.e.
+   the token was minted for it (RFC 8707 as Keycloak 26 can express it: a
+   per-organization client scope carrying an audience mapper, because Keycloak
+   does not fold the `resource` request parameter into `aud`);
+3. **registry** — `platform.tenants.keycloak_organization_id` links that
+   Organization (in the token's realm) to a tenant, which the session is
+   pinned to regardless of any other membership or `tid` in the token.
+
+Any failure — an alias that does not exist, an Organization the caller is not
+a member of, a token that was not requested for this resource — answers the
+same `403 ORGANIZATION_RESOURCE_FORBIDDEN`, with a body naming the scopes to
+request and `WWW-Authenticate: Bearer error="insufficient_scope", scope="…",
+resource_metadata="…"`. The audience is not authority: Keycloak mints the
+per-organization audience for anyone who requests its scope; membership is
+what the identity provider actually asserts, the audience is what stops a token
+minted for another resource (another Organization, another origin) from being
+replayed here. Only a bearer JWT is accepted on these paths; API keys and
+trusted-context headers name a tenant, not a membership, and are refused.
+
+Each resource has its own metadata document,
+`/.well-known/oauth-protected-resource/api/mcp/organizations/<alias>`, whose
+`resource` is that exact URL and whose `scopes_supported` lists the two scopes
+a client must request:
+
+- `organization:<alias>` — Keycloak's built-in dynamic scope; selects the
+  membership and emits `organization.<alias>.id`;
+- `mcp-resource:<alias>` — a client scope with one `oidc-audience-mapper` per
+  public origin, value `<origin>/api/mcp/organizations/<alias>`. It
+  deliberately does not share the `organization:` prefix: a static client
+  scope named `organization:<alias>` shadows the dynamic one, and the token
+  then carries the audience but no membership claim.
+
+The `mcp-resource:<alias>` scope is **provisioned by the tenant control plane**
+(`apps/api/src/control/organization-scopes.ts`), not by hand: `POST
+/api/control/v1/tenants` and `POST /api/control/v1/tenants/{slug}/organizations`
+create it right after the Organization is linked, the drift report
+(`GET /api/control/v1/reconciliation`) names a scope that is missing, carries
+the wrong audiences, is not attached, or belongs to an Organization that no
+longer exists (`ORGANIZATION_SCOPE_*`), and a re-apply
+(`POST /api/control/v1/reconciliation/reapply`) repairs all four in one
+realm-wide pass — the only place the control plane deletes anything in
+Keycloak, because a scope is derived configuration with no members behind it.
+The scope is hidden from consent and from the provider metadata, and is
+attached as an *optional* scope to the configured clients and to the realm's
+default optional scopes, so dynamically registered MCP clients can request it
+too. What it is provisioned for comes from the control plane's environment:
+
+| variable | meaning |
+| --- | --- |
+| `OPENSHAPEFORGE_PUBLIC_ORIGIN` | **required** — the first audience on every scope, `<origin>/api/mcp/organizations/<alias>`; the same variable the MCP server reads for its callback URL |
+| `OPENSHAPEFORGE_MCP_RESOURCE_ORIGINS` | optional comma-separated *additional* origins (a second ingress, a local port beside the public one); each gets its own mapper, and an origin removed from the list is removed from Keycloak on the next re-apply |
+| `OPENSHAPEFORGE_MCP_CLIENTS` | optional comma-separated `clientId`s the scope is attached to; default `codex,openshapeforge-gateway,openshapeforge-inspector`; a listed client the realm does not have is skipped |
+
+An origin must be scheme + host (+ port) with no path — `https://api.example.com/v1`
+is refused at startup, because it would mint an audience the resource never
+derives for itself and every token would be refused with no hint why. The
+`openshapeforge-auth-api` service account needs realm-management
+`manage-clients` beside `manage-realm` for this: client scopes are client
+configuration in Keycloak's admin permission model, and the realm generator
+grants both.
+
+The document echoes the alias it was asked about without any lookup, so it is
+not an oracle for which Organizations exist. An MCP session id is bound to the
+resource it was initialized on as well as to the identity; replaying it on
+another path is `403`.
+
+### The platform administrator resource
+
+`/api/control/mcp` is a different server on the same transport plumbing: the
+control plane's MCP for a platform administrator, who has no tenant. It
+authenticates against the **control** realm (its metadata document names that
+realm as authorization server), requires the realm role `platform_admin`, and
+offers a deliberately bounded set of tools for tenant inventory, integration
+catalog administration, update notices, first-administrator bootstrap and the
+safe platform audit projection. See [api.md, "The platform administrator MCP"](api.md#the-platform-administrator-mcp).
+
 ## Tool surface
 
 Two catalog styles, chosen per entity:
@@ -119,6 +242,14 @@ documentation, not a second field model:
 - `osf://schema/entities/{slug}` describes one entity with its authored title,
   description, domains, field semantics, relationships and the operations
   available to the current session.
+- `osf://organization/profile` is the tenant's own business context: `{ name,
+  businessContext }` for the Relation configured as this organization
+  (`platform.tenants.relation_id`, `set_organization_relation`), read from the
+  broadly-readable `Relation.businessContext` field — distinct from the
+  internal, `classification: confidential` `Relation.notes` field. Resolves
+  successfully with a "not configured yet" message rather than erroring when
+  nothing is linked, so a fresh tenant can still read the resource. See
+  "First use: onboarding" below for how an administrator sets it.
 
 `resources/list` is role-filtered just like `tools/list`. `resources/read`
 withholds classified fields for a caller who may not read them, using the same
@@ -137,6 +268,85 @@ fields are not writable. The per-operation input schemas returned by
 OpenShapeForge does not currently author MCP prompts or resource templates, so
 their list methods return valid empty catalogs. This keeps generic MCP clients
 from treating an intentionally empty optional surface as a protocol failure.
+
+## Who am I: `whoami` and `osf://session`
+
+Every authenticated session sees one tool that takes no arguments, `whoami`,
+and one resource, `osf://session`. Both return the same answer: who the server
+thinks the caller is, in plain language. No role is required — the answer only
+contains facts the caller already presented in its own credential — and it is
+never the token: no claims, no ids, no slugs, no tenant keys.
+
+```json
+{
+  "name": "Hans Eilers",
+  "email": "hans@example.com",
+  "organization": "Zerocopter",
+  "role": "Organization administrator",
+  "permissions": ["Pentest.All.ReadWrite", "Relations.All.ReadWrite"],
+  "groups": [{ "name": "Zerocopter", "active": true }],
+  "signedInVia": "Codex",
+  "accessTokenExpiresAt": "2026-09-04T10:12:00.000Z",
+  "accessTokenExpiresIn": "in 12 minutes",
+  "sessionEndsAfterInactivity": "14 days",
+  "signOut": "Sign out in your client (Codex: codex mcp logout <entry>; ChatGPT: the connector's menu).",
+  "access": { "tools": 68, "resources": 13 },
+  "relation": {
+    "status": "Linked", "name": "Hans Eilers", "kind": "person",
+    "explanation": "The record you act as in this organization; roles like employee or supplier are assigned by an administrator."
+  },
+  "summary": "You are Hans Eilers, organization administrator of Zerocopter, signed in via Codex. Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. You act as the record Hans Eilers. You can use 68 tools and 13 resources."
+}
+```
+
+- `organization` is the display name from the tenant registry
+  (`platform.tenants.name`), read as the session's own row under the same
+  row-level-security policy `Query.currentTenant` relies on.
+- `role` is derived from the realm's composite roles — `org_admin` reads as
+  "Organization administrator", `org_employee` as "Employee" — and otherwise
+  falls back to the raw role list. `permissions` lists the remaining role names
+  (Keycloak's own bookkeeping roles such as `offline_access` are dropped).
+- `groups` are the Keycloak Organization memberships the token carries, with
+  the one the session acts for marked `active`. On a per-organization endpoint
+  (`/api/mcp/organizations/<alias>`) that is the bound organization, whatever
+  `organization:<alias>` scope the token also carries. Only the active group
+  can be named from the registry; other memberships show their alias (naming
+  them would take a registry read outside the session's own row, which
+  row-level security fences — left open on purpose).
+- `signedInVia` names the client the token was issued to (`codex` → "Codex",
+  `openshapeforge-inspector` → "MCP Inspector", `openshapeforge-gateway` →
+  "Hubble", any other `azp` as is). A trusted-context session reports
+  "Development identity" and has no expiry. On a per-organization endpoint the
+  summary adds "on the Zerocopter endpoint" (the organization's display name).
+- `accessTokenExpiresAt` / `accessTokenExpiresIn` are the access token's own
+  expiry, which a client refreshes silently, and are named for it: published as
+  `signInExpiresAt` they read as the end of the sign-in and regularly showed a
+  moment in the past while every call in the same turn succeeded.
+  `sessionEndsAfterInactivity` is what the person experiences — the identity provider's SSO / offline session, which
+  idles out after `OPENSHAPEFORGE_SESSION_IDLE_DAYS` days (default 14, the
+  value the reference realm setup configures; the realm's own value is not
+  cheaply readable from the API). The summary states the latter and mentions
+  the token only once it has actually lapsed. `signOut` says where to end the
+  session, since the client owns it, not this server.
+- `access` counts what THIS session sees, through the same per-session
+  builders `tools/list` and `resources/list` use — it is not a deployment-wide
+  number.
+- `relation` is the record (Relation) the person acts as in the organization,
+  through the identity ↔ Relation link (`auth/identity-link.ts`, read with
+  `sessionRelation(session)`). `status` is "Linked" (`name` and `kind` — the
+  Relation's `relation_type`, "person" for a just-in-time link — describe the
+  record), "Pending confirmation" (a Relation carrying the person's e-mail
+  exists; `name`/`kind` describe that candidate and the summary says "A record
+  with your e-mail exists — run confirm_my_link to use it.") or "Not linked"
+  (no record, or a session that carries no person: API key, development
+  identity). `explanation` is one fixed line saying what a Relation is. No
+  ids leave the answer.
+
+The tool result carries the JSON both as text content and as
+`structuredContent`. The implementation is `apps/api/src/mcp/session-info.ts`;
+the display facts a token carries beyond the session context (name, client,
+expiry, memberships) are captured at the MCP entry point from the request that
+was already verified, so they reflect the token that initialised the session.
 
 ## What the field definition contributes
 
@@ -175,6 +385,38 @@ the create schema and is absent from the update schema. That is the flag which
 carries the API contract, and it reaches the CRUD layer through the manifest
 column, so the advertised update schema and the server's `400` come from one
 authored fact rather than two rules that can drift (#177).
+
+Authored `writtenBy` **is** consulted, on create and on update: the field is
+absent from both schemas, and a caller that sends it anyway is refused with a
+message naming the operation that may set it. It takes a list of operation
+contract keys:
+
+```yaml
+  - key: reviewedAt
+    writtenBy: [pentest.finding.review]
+```
+
+Use it for a field that records that a process took place — a review signed
+off, a scope approved, a retest concluded — where an operation is the one place
+the preconditions are checked. `review_finding` refuses a reviewer who is the
+finding's own author; while `reviewedAt` is writable through the update tool,
+that refusal is advice. The flag is what makes it a rule, and it makes the same
+rule on REST and GraphQL, because a hole in one transport is the whole hole.
+
+It is not `readOnly` with teeth. `readOnly` stays a rendering choice; a field
+may be both, or either, and they answer different questions. Nor is it
+`immutable`: these values are no more settable at insert than afterwards.
+
+The named operations are unaffected — they write through the runtime-owned
+path, the way the secure elicitation target does. A key that no compiled
+operation answers to **fails the build**: a field nobody can write is worse
+than an unprotected one. The compiler resolves each key into the route a caller
+can use and puts it on the manifest column, so the refusal names something
+callable without the CRUD layer having to know the operation catalog.
+
+GraphQL is the one transport that cannot phrase its own refusal — an unknown
+input field dies in validation before a resolver runs — so its create and
+update input types carry the explanation in their description instead.
 
 ### Enumerations
 
@@ -216,6 +458,163 @@ Field-level classification is enforced on the call path too:
 - writes to a classified field are refused for a caller who could not read the
   value back.
 
+## Identities and Relations
+
+A bearer token proves an **identity**: who, at which identity provider
+(`iss` + `sub`). What an organization works with is the **party** that identity
+acts as — a Relation of the tenant: the employee, the supplier contact, the
+customer contact. Which of those the person is, is a RelationRole on that
+Relation; the link itself only says "this login is that Relation".
+
+Identity is platform-level (one Keycloak account signs in to several tenants),
+the party is per tenant, so the link is per (identity, tenant):
+
+| table | one row per | columns |
+| --- | --- | --- |
+| `platform.identities` | (`issuer`, `subject`) | `email`, `display_name` as the token last reported them |
+| `platform.identity_relations` | (`identity_id`, `tenant_id`) | `status` (`linked` / `pending_confirmation`), `relation_id`, `candidate_relation_id`, `linked_at`, `linked_by` (`jit` or the identity id of whoever linked) |
+
+Both are runtime-owned (`apps/api/src/db/migrations/identity-link.ts`,
+applied on every migrate like the bypass audit table) and row-level secured
+like the rest of `platform.*`: a link made in tenant A does not exist from a
+session in tenant B; an administrator only sees identities that have signed in
+to their own organization.
+
+**How a link comes about** (`apps/api/src/auth/identity-link.ts`):
+
+1. **Just in time.** On a person's first bearer session in a tenant:
+   - no Relation in the tenant carries the token's e-mail → a Relation of type
+     `person` is created through the generated CRUD path (plus a NaturalPerson
+     when the token gives first and last name, and an `email` ContactDetail),
+     and linked with `linked_by = 'jit'`;
+   - exactly one Relation carries the e-mail → nothing is linked silently. The
+     row is recorded as `pending_confirmation` with that Relation as
+     `candidate_relation_id`;
+   - several carry it, or the token has no e-mail → `pending_confirmation`
+     without a candidate; an administrator decides.
+   No RelationRole is assigned: the platform knows the person signed in, not
+   whether they are staff, a supplier or a customer.
+2. **`confirm_my_link`** — shown to the person while they have a pending
+   candidate. No arguments; it links their own identity to that one candidate.
+3. **`link_identity`** — for organization administrators
+   (`Organization.All.ReadWrite`): `identityEmail` (or `identityId`) +
+   `relationId`. The identity must have signed in to this organization at
+   least once. Re-linking is allowed and audited; the previous Relation is left
+   as it is.
+
+Both tools answer the resulting state and record who linked. Calling one the
+session was not shown gets the same `NOT_FOUND` an unknown tool gets.
+
+**Reading it.** The state rides on the session as `session.relation`; read it
+through the accessor rather than the field:
+
+```ts
+import { sessionRelation } from "../auth/identity-link.js";
+const party = sessionRelation(session); // { relationId, displayName } | null
+```
+
+`null` means "not linked": pending, never resolved, or a session that carries
+no person at all (trusted-context and API key sessions never link). Resolution
+is cached per (identity, tenant) for a minute inside a process; a link made
+through the tools invalidates it there and shows up elsewhere within the TTL.
+
+Not part of this: Keycloak user attributes as a data source, relation ids in
+tokens, and RelationRoles — the administrator assigns those.
+
+## First use: onboarding
+
+The first time a person connects, the assistant has to set them up and has to
+know when that is done. Both are server-side facts, not remembered prose:
+
+- the server's `initialize` instructions end with one sentence — *Call
+  `whoami` first. If its `onboarding.status` is not Completed, follow
+  `onboarding_guide`.* — which is what every client shows the model;
+- `whoami` carries an `onboarding` object: a **computed checklist**, also
+  available on its own as the `onboarding_status` tool;
+- `complete_onboarding` records completion durably, once, per (identity,
+  tenant); `onboarding_guide` is the process for the assistant.
+
+All three tools are listed for every authenticated session
+(`apps/api/src/mcp/onboarding.ts`; wired into the generated server by a few
+delimited hunks).
+
+```json
+"onboarding": {
+  "status": "In progress",
+  "version": 2,
+  "completedAt": null,
+  "steps": [
+    { "key": "identity",                 "title": "Linked to your Relation",                 "status": "done",           "howTo": "Your login is linked to your Relation." },
+    { "key": "organization_connections", "title": "Organization connections to providers",  "status": "todo",           "howTo": "Run create_connection { adapterId: \"…\", key, name } for Google. The secure form asks for: Google OAuth client ID, Google OAuth client secret (secret). Register this redirect URL on the provider's OAuth client first: https://api.example.com/api/entity-oauth/callback. Never ask for the values in chat: a capable client shows a secure form, any other client receives a configurationUrl to open in a browser." },
+    { "key": "connections",              "title": "Personal sign-ins at providers",          "status": "todo",           "howTo": "Run connect_service { tool: \"google_koppelen\" } to sign in at Google; the person opens the returned URL and approves." },
+    { "key": "preferences",              "title": "Working preferences",                     "status": "todo",           "howTo": "Ask the person, in one batched question, about working hours, priorities and house style, then save the answer with set_my_preferences (omit `tool` to apply it to all tools). They may skip this: complete_onboarding { skip: true }." },
+    { "key": "guide",                    "title": "Role guide read",                         "status": "not_applicable", "howTo": "No role guide applies to this person's roles." }
+  ],
+  "summary": "Onboarding is in progress: 1 of 4 steps done (to do: organization_connections, connections, preferences). Follow onboarding_guide."
+}
+```
+
+**The steps.** Each is `done`, `todo` or `not_applicable`, with a `howTo`
+naming the exact next call:
+
+| step | done when | not applicable when |
+| --- | --- | --- |
+| `identity` | `session.relation.status === "linked"` (see [Identities and Relations](#identities-and-relations)). Pending with a candidate → `confirm_my_link`; without → an administrator's `link_identity`. | the session carries no person (development identity, API key) |
+| `organization_connections` | **organization administrators only** (`org_admin`): for every Adapter in the organization whose auth needs organization-level configuration — it declares `configurationFields`, or its auth profile references credential values (an API key, basic credentials, the OAuth client behind a personal sign-in) — a tenant-owned Connection exists and passes the same required-values check `test_connection` runs. The `howTo` names `create_connection` with the `adapterId`, lists the form fields with secret ones marked, and for an OAuth Adapter the redirect URL to register (`<OPENSHAPEFORGE_PUBLIC_ORIGIN>/api/entity-oauth/callback`); an incomplete Connection is named with its missing values. Shared vocabulary: `apps/api/src/mcp/connection-guidance.ts`. | the person is not an organization administrator, or no Adapter needs organization-level configuration |
+| `connections` | for every published Service this person can use whose provider needs a **personal** sign-in (`auth.connectionScope: user`, or an `oauth2AuthorizationCode` profile), a Connection row owned by this person exists. The `howTo` names `connect_service` with the tool that binds the widest set of that provider's capabilities — the natural entry point, since one consent covers the provider. | no such Service is published for this person (a fresh tenant, or a person outside the Services' audience) |
+| `preferences` | at least one PersonalInstruction of this person exists (`set_my_preferences`), or the person skipped the step (`complete_onboarding { skip: true }`) | the deployment offers no personal instructions to this person |
+| `guide` | every role guide the session is shown (`pentest_guide` for pentest roles, `provider_setup_guide` for integration administrators) was read — in this session, or recorded at an earlier completion | no guide applies to the person's roles |
+
+**Status.** `Completed` once `complete_onboarding` succeeded under the current
+`ONBOARDING_VERSION`; otherwise `In progress` when any applicable step is done
+(the just-in-time identity link usually makes it so), `Not started` when none
+is, and `Not applicable` for a session that carries no person at all.
+
+**What is stored** — on `platform.identity_relations`, the same row as the
+identity link (`apps/api/src/db/migrations/onboarding.ts`, additive columns
+applied on every migrate):
+
+| column | meaning |
+| --- | --- |
+| `onboarding_completed_at` | when `complete_onboarding` last succeeded |
+| `onboarding_version` | the `ONBOARDING_VERSION` it completed under; bumping the constant (a new required step) re-opens onboarding for everyone, and the checklist says so |
+| `onboarding_preferences_skipped` | the person chose to skip the preferences step |
+| `onboarding_guides_read` | the guides read by then, so a later session still counts the step as done |
+
+Nothing else is persisted: the checklist is recomputed on every call, so a
+connection that disappears shows up as `todo` again in `onboarding_status`,
+while `status` stays `Completed` — onboarding is a one-time event, not a
+health check.
+
+**`complete_onboarding`** verifies the checklist first and refuses with
+`409 ONBOARDING_INCOMPLETE` listing the missing steps (`error.missing`, each
+with its `howTo`); the optional `skip: true` satisfies `preferences` only.
+On success it writes the row (the identity's own, under the existing
+row-level policy) and answers the final checklist. Calling it again answers
+`alreadyCompleted: true`.
+
+**`onboarding_guide`** is the process for the assistant: call `whoami` first;
+walk the `todo` steps in order; ask the preferences in one batched question,
+never one item at a time; never ask for secrets in chat (sign-ins go through
+the URL `connect_service` returns, organization credentials through the
+secure form or the `configurationUrl` a create tool answers with); confirm
+with `complete_onboarding`; afterwards never mention onboarding again. Its
+wording follows the caller's role: an organization administrator gets an
+administrator section — organization connections first (`create_connection`,
+the secure form or the `configurationUrl` for clients without one, the
+redirect URL for OAuth providers, then `test_connection`), then their own
+personal sign-in, then preferences; linking colleagues with `link_identity`;
+`provider_setup_guide` for adding a provider — while an employee is told to
+ask an administrator for what they cannot do themselves.
+
+**Service descriptions say what they need.** A derived Service tool whose
+Adapter needs an organization connection, or a personal sign-in, carries one
+generated sentence per need under its authored description — *Requires the
+organization's Google connection; administrators set it up with
+create_connection. Sign in once with connect_service.* — derived from the
+Adapter's auth block and configuration contract at listing time
+(`derivedToolsForSession`), never authored.
+
 ## Errors
 
 A failed tool call returns an MCP tool result with `isError: true` rather than
@@ -230,6 +629,25 @@ platform could classify adds the normalized provider outcome — `retryable`,
 calls keep their existing text-only shape until one unified output contract is
 defined. See
 [connectors.md](connectors.md#provider-failures).
+
+**Connection failures are actionable.** Every "connection required / missing"
+answer names the Adapter, the tool to use and who may use it, through one
+helper (`apps/api/src/mcp/connection-guidance.ts`) so descriptions, errors
+and the onboarding checklist cannot disagree:
+
+| code | who | message |
+| --- | --- | --- |
+| `CONNECTION_MISSING` (400) | employee | *The organization's Google connection is not set up. Ask an organization administrator to set up the Google connection (create_connection).* |
+| `CONNECTION_MISSING` (400) | organization administrator | the same, plus *set it up with create_connection { adapterId: "…" }, or open `<configurationUrl>` in a browser …* — a fresh 30-minute browser handoff to the same secure form is minted for administrators when no Connection row exists yet |
+| `CONNECTION_REQUIRED` (403) | personal sign-in missing | *This tool needs your personal Google sign-in. Call connect_service { tool: "inbox_doorzoeken" } and open the returned URL to approve at Google.* |
+| `CONNECTION_REQUIRED` (403) | tenant-wide sign-in missing | *… needs a one-time sign-in for the whole organization. Ask an organization administrator to call connect_service { tool: "…" } …* |
+| `REAUTHORIZATION_REQUIRED` (403) | token expired / unreadable / scopes missing | *Your Google sign-in does not cover the required scopes: …. Call connect_service { tool: "…" } again and approve at Google.* |
+
+The same text rides on the coordination surface: an unavailable invocation
+source (`ModuleUnavailableInvocationSource`, `modules/contract.ts`) carries
+it as `guidance` next to its `outcome`, and an optional binding a derived
+tool skipped reports it as `unavailable[].outcome.guidance`, so a coordinating
+module can surface the platform's own next step instead of a generic line.
 
 Transport-level problems — no credentials, no database — are still HTTP status
 codes (`401`, `503`) with the REST error body shape.

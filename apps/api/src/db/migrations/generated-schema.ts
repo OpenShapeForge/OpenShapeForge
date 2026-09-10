@@ -83,7 +83,101 @@ const manifestTables = manifest.tables as unknown as ManifestTable[];
 export const nonManifestManagedTables = new Set<string>([
   "platform.schema_migrations",
   "platform.system_bypass_audit",
+  // Keycloak identity ↔ Relation link: created by migrations/identity-link.ts
+  // after the generated step (its FKs point at generated tables).
+  "platform.identities",
+  "platform.identity_relations",
+  // Pending employee invitations: created by migrations/employee-invitations.ts
+  // after the generated step.
+  "platform.employee_invitations",
+  // Update notices and who has been told: created by migrations/update-notices.ts
+  // after the generated step, for the same reason as the two above — they are
+  // runtime bookkeeping, not authored entities, so no manifest describes them
+  // and drift detection would read them as foreign schema.
+  "platform.update_notices",
+  "platform.user_update_notices",
 ]);
+
+/**
+ * Columns on generated (manifest-declared) tables that a plugin schema
+ * migration owns. A `CompilerPlugin.schemaMigrations` entry is free to
+ * `ALTER TABLE ... ADD COLUMN` a generated entity table — the manifest cannot
+ * express foreign keys into contributed platform tables, install bookkeeping,
+ * or anything else the DDL of a versioned plugin migration provides — and the
+ * resulting column is then, by design, present in the database and absent from
+ * the manifest. Without this exemption the roll-forward diff reports every
+ * such column as "exists in the database but not in the generated manifest",
+ * which is the non-additive class, and migrate refuses to run on a database
+ * the plugin migration has already touched.
+ *
+ * Keyed `schema.table.column`. Exported for the same reason as
+ * `nonManifestManagedTables`: ../schema-drift.ts must apply the identical
+ * exemption or readiness would flag these columns as foreign schema.
+ *
+ * This is an explicit list because the plugin migration contract
+ * (`PluginSchemaMigration` = `{ version, sql }`, projected verbatim into
+ * generated/plugin-migrations/registry.json as `{ plugin, version, checksum,
+ * sql }`) carries opaque DDL and no column metadata. Follow-up: let a plugin
+ * declare the columns its migrations own (e.g. `ownedColumns` next to
+ * `schemaMigrations`), emit them into the registry, and derive this set from
+ * it at runtime instead of hand-maintaining it here.
+ */
+const pluginMigrationOwnedColumns: {
+  plugin: string;
+  migration: string;
+  tables: string[];
+  columns: string[];
+}[] = [
+  {
+    // Installation bookkeeping on the tenant definition tables. `catalog`
+    // (the projected field) is declared in the manifest and deliberately NOT
+    // listed here.
+    plugin: "osf-integration",
+    migration: "0004_platform-catalog",
+    tables: [
+      "integration.adapters",
+      "integration.capabilities",
+      "integration.services",
+    ],
+    columns: [
+      "catalog_entry_id",
+      "installed_version",
+      "overridden",
+      "override_fields",
+      "update_available_version",
+    ],
+  },
+  {
+    // The tenant's own organization Relation, linked by a core migration
+    // after the generated step (it points at a generated table, so it cannot
+    // be part of the manifest that creates that table).
+    plugin: "core",
+    migration: "organization-relation-link",
+    tables: ["platform.tenants"],
+    columns: ["relation_id"],
+  },
+];
+
+export const nonManifestManagedColumns = new Set<string>(
+  pluginMigrationOwnedColumns.flatMap((entry) =>
+    entry.tables.flatMap((table) =>
+      entry.columns.map((column) => `${table}.${column}`),
+    ),
+  ),
+);
+
+/**
+ * True when `columnName` on the qualified `tableName` is owned by a plugin
+ * schema migration rather than the generated manifest. Both drift readers
+ * (the roll-forward diff below and ../schema-drift.ts) go through this so the
+ * exemption cannot diverge.
+ */
+export function isNonManifestManagedColumn(
+  tableName: string,
+  columnName: string,
+): boolean {
+  return nonManifestManagedColumns.has(`${tableName}.${columnName}`);
+}
 
 /**
  * Manifest scalar type -> information_schema.columns.data_type. Anything not
@@ -261,7 +355,8 @@ export type ManifestSchemaDiff = {
  *
  * Non-additive:
  * - required no-default non-identity column missing on a table WITH rows;
- * - DB column absent from the manifest;
+ * - DB column absent from the manifest (unless a plugin schema migration
+ *   owns it — see nonManifestManagedColumns);
  * - column type, nullability, identity, or (manifest-declared) default mismatch;
  * - DB table (in a covered schema, not in nonManifestManagedTables) absent
  *   from the manifest;
@@ -431,7 +526,10 @@ export async function diffManifestAgainstDatabase(
     }
 
     for (const columnName of live.keys()) {
-      if (!table.columns.some((column) => column.name === columnName)) {
+      if (
+        !table.columns.some((column) => column.name === columnName) &&
+        !isNonManifestManagedColumn(table.name, columnName)
+      ) {
         nonAdditive.push(
           `${table.name}.${columnName}: column exists in the database but not in the generated manifest`,
         );

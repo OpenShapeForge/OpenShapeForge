@@ -18,6 +18,7 @@
  * compiler package.
  */
 
+import { localizedText, type ResolvedLocale } from "./locale.js";
 import type { ExecutionCatalogEntry } from "./declarative-execution.js";
 
 export type DerivedToolsCatalogEntry = {
@@ -94,16 +95,20 @@ type StoredFieldDefinition = {
   item?: unknown;
 };
 
-function localized(value: unknown): string | undefined {
-  if (typeof value === "string") return value;
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const first =
-      record.en ??
-      Object.values(record).find((entry) => typeof entry === "string");
-    if (typeof first === "string") return first;
-  }
-  return undefined;
+/**
+ * A Service and its fields are stored rows, so unlike the compiled entity
+ * catalog they still carry the authored `{ en, nl, … }` map at run time. That
+ * makes this the one place on this transport where a person's own language can
+ * actually be honoured, so the resolution goes through `mcp/locale.ts` with the
+ * session's language rather than the English-first order this used to hard-code.
+ * `locale` stays optional: author tooling (dry runs, publication checks) has no
+ * session and gets the English-first fallback the resolver ends with.
+ */
+function localized(
+  value: unknown,
+  locale?: ResolvedLocale,
+): string | undefined {
+  return localizedText(value, locale);
 }
 
 const VALUE_TYPE_TO_SCHEMA: Record<string, Record<string, unknown>> = {
@@ -118,6 +123,7 @@ const VALUE_TYPE_TO_SCHEMA: Record<string, Record<string, unknown>> = {
 
 function scalarSchema(
   definition: StoredFieldDefinition,
+  locale?: ResolvedLocale,
 ): Record<string, unknown> {
   const valueType =
     typeof definition.valueType === "string" ? definition.valueType : "string";
@@ -128,6 +134,7 @@ function scalarSchema(
   if (valueType === "object" && Array.isArray(definition.children)) {
     const nested = objectSchemaFrom(
       definition.children as StoredFieldDefinition[],
+      locale,
     );
     Object.assign(schema, nested);
   }
@@ -156,15 +163,16 @@ function scalarSchema(
     if (values.length > 0) schema.enum = values;
   }
 
-  const title = localized(definition.label);
+  const title = localized(definition.label, locale);
   if (title) schema.title = title;
-  const description = localized(definition.description);
+  const description = localized(definition.description, locale);
   if (description) schema.description = description;
   return schema;
 }
 
 function fieldSchema(
   definition: StoredFieldDefinition,
+  locale?: ResolvedLocale,
 ): Record<string, unknown> {
   const schema =
     definition.cardinality === "collection"
@@ -172,22 +180,23 @@ function fieldSchema(
           type: "array",
           items:
             definition.item && typeof definition.item === "object"
-              ? fieldSchema(definition.item as StoredFieldDefinition)
-              : scalarSchema({ ...definition, cardinality: undefined }),
+              ? fieldSchema(definition.item as StoredFieldDefinition, locale)
+              : scalarSchema({ ...definition, cardinality: undefined }, locale),
         }
-      : scalarSchema(definition);
+      : scalarSchema(definition, locale);
   return schema;
 }
 
 function objectSchemaFrom(
   definitions: StoredFieldDefinition[],
+  locale?: ResolvedLocale,
 ): Record<string, unknown> {
   const properties: Record<string, unknown> = {};
   const required: string[] = [];
   for (const definition of definitions) {
     if (typeof definition?.key !== "string" || definition.key.length === 0)
       continue;
-    properties[definition.key] = fieldSchema(definition);
+    properties[definition.key] = fieldSchema(definition, locale);
     if (definition.required === true) required.push(definition.key);
   }
   return {
@@ -198,14 +207,19 @@ function objectSchemaFrom(
   };
 }
 
-/** Translate a stored FieldDefinition collection into an input JSON Schema. */
+/**
+ * Translate a stored FieldDefinition collection into an input JSON Schema.
+ * `locale` picks the language of the `title`/`description` a client shows a
+ * person; the keys, types and validation are the same in every language.
+ */
 export function inputSchemaFromStoredFields(
   value: unknown,
+  locale?: ResolvedLocale,
 ): Record<string, unknown> {
   const definitions = Array.isArray(value)
     ? (value as StoredFieldDefinition[])
     : [];
-  return objectSchemaFrom(definitions);
+  return objectSchemaFrom(definitions, locale);
 }
 
 /** Whether the session's roles admit it to this derived-tools audience. */
@@ -216,6 +230,17 @@ export function sessionInAudience(
   const granted = new Set(sessionRoles ?? []);
   return entry.roles.some((role) => granted.has(role));
 }
+
+/**
+ * The exact separator the personal layer hangs under. Named rather than
+ * inlined because a runtime plugin that composes further tiers on top of a
+ * projected description (osf-integration's organization instruction and its
+ * per-Service personal-instruction policy) has to find the boundary between
+ * what was authored and what this person added, and cannot import this
+ * module. Changing this string changes that contract.
+ */
+export const PERSONAL_NOTES_MARKER =
+  "\n\nPersonal notes from this user (everything above always takes precedence): ";
 
 /**
  * Append one person's standing instructions to their projected tool
@@ -251,9 +276,7 @@ export function applyPersonalNotes(
     if (notes.length === 0) return tool;
     return {
       ...tool,
-      description:
-        `${tool.description}\n\nPersonal notes from this user (everything above always ` +
-        `takes precedence): ${notes.join(" ")}`,
+      description: `${tool.description}${PERSONAL_NOTES_MARKER}${notes.join(" ")}`,
     };
   });
 }
@@ -268,6 +291,7 @@ export function derivedToolsFromRows(
   rows: Record<string, unknown>[],
   reservedNames: ReadonlySet<string>,
   sessionRoles?: readonly string[],
+  locale?: ResolvedLocale,
 ): DerivedTool[] {
   const tools: DerivedTool[] = [];
   const seen = new Set<string>(reservedNames);
@@ -302,13 +326,16 @@ export function derivedToolsFromRows(
     if (!name || seen.has(name)) continue;
     seen.add(name);
     const title = entry.titleField
-      ? localized(row[entry.titleField])
+      ? localized(row[entry.titleField], locale)
       : undefined;
     tools.push({
       name,
       ...(title ? { title } : {}),
-      description: localized(row[entry.descriptionField]) ?? "",
-      inputSchema: inputSchemaFromStoredFields(row[entry.inputFieldsField]),
+      description: localized(row[entry.descriptionField], locale) ?? "",
+      inputSchema: inputSchemaFromStoredFields(
+        row[entry.inputFieldsField],
+        locale,
+      ),
       entity: entry.entity,
       table: entry.table,
       rowId: String(row.id ?? ""),

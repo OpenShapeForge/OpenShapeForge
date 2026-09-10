@@ -595,7 +595,9 @@ function prodIdpConfig(identityProviders: AuthorizationIdentityProvider[]): Auth
   return {
     schemaVersion: 2,
     kind: "authorizationConfig",
-    realm: { name: "openshapeforge", sslRequired: "external" },
+    // A production realm must author the WebAuthn relying-party id: the passkey
+    // profile refuses to guess Keycloak's browser-facing hostname.
+    realm: { name: "openshapeforge", sslRequired: "external", webAuthn: { rpId: "openshapeforge.example" } },
     keycloak: {
       clients: [
         {

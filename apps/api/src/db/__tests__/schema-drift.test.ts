@@ -10,6 +10,8 @@
  *   1. empty database                     -> "unmigrated"
  *   2. migrations row with stale checksum -> "behind"
  *   3. row updated to bundled checksum    -> "ok"
+ * then findUndeclaredDatabaseSchema is exercised against a purpose-built
+ * integration.* table in the same scratch database.
  *
  * Run directly with:
  *   bun test src/db/__tests__/schema-drift.test.ts   (cwd: apps/api)
@@ -23,6 +25,7 @@ import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
 import {
   GENERATED_SCHEMA_MIGRATION_VERSION,
   checkGeneratedSchemaDrift,
+  findUndeclaredDatabaseSchema,
 } from "../schema-drift.js";
 
 const ADMIN_URL =
@@ -106,5 +109,59 @@ describe("checkGeneratedSchemaDrift", () => {
     expect(drift.status).toBe("ok");
     expect(drift.recordedChecksum).toBe(manifest.checksum);
     expect(drift.bundledChecksum).toBe(manifest.checksum);
+  });
+});
+
+describe("findUndeclaredDatabaseSchema", () => {
+  // Mirrors the roll-forward diff's exemption (migrations.test.ts,
+  // "plugin-migration-owned columns"): readiness must not report a column a
+  // plugin schema migration added to a generated table as foreign schema,
+  // and must still report one nobody declared.
+  test("exempts plugin-migration-owned columns but not a foreign one", async () => {
+    await sql`create schema integration`.execute(runtime.db);
+    await sql`
+      create table integration.services (
+        id uuid primary key default gen_random_uuid(),
+        catalog_entry_id uuid,
+        installed_version integer,
+        overridden boolean not null default false,
+        override_fields text[] not null default '{}',
+        update_available_version integer,
+        rogue text
+      )
+    `.execute(runtime.db);
+    await sql`
+      create table integration.unrelated (
+        id uuid primary key default gen_random_uuid(),
+        catalog_entry_id uuid
+      )
+    `.execute(runtime.db);
+
+    const services = {
+      name: "integration.services",
+      schema: "integration",
+      columns: [{ name: "id" }],
+    };
+    const unrelated = {
+      name: "integration.unrelated",
+      schema: "integration",
+      columns: [{ name: "id" }],
+    };
+
+    const undeclared = await findUndeclaredDatabaseSchema(runtime.db, [services]);
+    expect(undeclared.tables).toEqual(["integration.unrelated"]);
+    expect(undeclared.columns).toEqual(["integration.services.rogue"]);
+
+    // The exemption is keyed schema.table.column: the same column NAME on a
+    // table the plugin migration does not touch is foreign.
+    const bothDeclared = await findUndeclaredDatabaseSchema(runtime.db, [
+      services,
+      unrelated,
+    ]);
+    expect(bothDeclared.tables).toEqual([]);
+    expect(bothDeclared.columns).toEqual([
+      "integration.services.rogue",
+      "integration.unrelated.catalog_entry_id",
+    ]);
   });
 });

@@ -80,6 +80,8 @@ export const UNSCHEMAD_KINDS: Readonly<Record<string, string>> = Object.freeze({
     "a strategic-merge fragment, not a document: it restates only what it changes, so core-entity.schema.json rejects it for the properties it deliberately omits. The base it merges into is validated as coreEntity",
   appShellPatch:
     "the same strategic-merge fragment against appShell.yaml, whose base kind has no schema either",
+  authorizationPatch:
+    "a strategic-merge fragment against an authorization*.yaml realm file (plus a renameClient directive); the MERGED result is validated as authorizationConfig by the layer resolver",
 });
 
 export type AuthoringValidator = {

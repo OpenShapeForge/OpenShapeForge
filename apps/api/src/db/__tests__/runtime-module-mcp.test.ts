@@ -1448,10 +1448,10 @@ describe("generated MCP runtime module security boundary", () => {
             arguments: {},
           });
           expect(personalAndShared.isError).not.toBe(true);
-          expect(currentSourceResolution()?.sources).toHaveLength(3);
+          expect(currentSourceResolution()?.sources).toHaveLength(4);
           expect(
             currentSourceResolution()?.sources.map((source) => source.scope).sort(),
-          ).toEqual(["personal", "personal", "tenant"]);
+          ).toEqual(["personal", "personal", "tenant", "tenant"]);
 
           mode = "normal";
           await admin.connection().execute(async (trx) => {

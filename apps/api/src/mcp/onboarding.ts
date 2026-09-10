@@ -847,8 +847,12 @@ export function onboardingEnvironment(input: {
  */
 export function providerNeedsPersonalSignIn(auth: unknown): boolean {
   const record = auth && typeof auth === "object" ? (auth as Record<string, unknown>) : null;
-  if (record?.connectionScope === "user" || record?.connectionScope === "tenant") {
-    return record.connectionScope === "user";
+  if (
+    record?.connectionScope === "user" ||
+    record?.connectionScope === "tenant" ||
+    record?.connectionScope === "both"
+  ) {
+    return record.connectionScope === "user" || record.connectionScope === "both";
   }
   return record?.profile === "oauth2AuthorizationCode";
 }

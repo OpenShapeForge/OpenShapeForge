@@ -124,10 +124,10 @@ function tableRef(name: string) {
  * so the two cannot drift: an `oauth2AuthorizationCode` profile is personal
  * unless the Adapter says otherwise.
  */
-export function connectionScopeOf(auth: unknown): "tenant" | "user" {
+export function connectionScopeOf(auth: unknown): "tenant" | "user" | "both" {
   const config = auth && typeof auth === "object" ? (auth as JsonRecord) : undefined;
   const declared = config?.connectionScope;
-  if (declared === "user" || declared === "tenant") return declared;
+  if (declared === "user" || declared === "tenant" || declared === "both") return declared;
   return config?.profile === "oauth2AuthorizationCode" ? "user" : "tenant";
 }
 
@@ -304,7 +304,13 @@ export async function resolveConnectionValues(
     );
   }
 
-  const scope = connectionScopeOf(row.adapter_auth);
+  const declaredScope = connectionScopeOf(row.adapter_auth);
+  const scope =
+    declaredScope === "both"
+      ? row.owner === input.session.userId
+        ? "user"
+        : "tenant"
+      : declaredScope;
   if (scope === "user") {
     if (!input.session.userId) {
       return refuse(

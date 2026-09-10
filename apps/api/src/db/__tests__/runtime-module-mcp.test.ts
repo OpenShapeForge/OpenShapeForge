@@ -1429,6 +1429,30 @@ describe("generated MCP runtime module security boundary", () => {
             expect(JSON.stringify(outcome)).not.toContain("msr1.");
           }
 
+          const sharedConnectionId = randomUUID();
+          await admin.connection().execute(async (trx) => {
+            await sql`update public.module_provider_test
+               set auth = '{"connectionScope":"both","scheme":"header","headerName":"x-api-key","tokenFrom":"apiKey"}'::jsonb
+             where id = ${providerId}::uuid
+            `.execute(trx);
+            await sql`insert into public.module_connection_test
+              (id, tenant_id, owner_user_id, provider_id, values)
+            values (${sharedConnectionId}::uuid, ${tenantId}::uuid, null,
+              ${providerId}::uuid, '{"apiKey":"obviously-fake-shared"}'::jsonb)
+            `.execute(trx);
+          });
+
+          personalSourceIndex = 0;
+          const personalAndShared = await client.callTool({
+            name: "public_read",
+            arguments: {},
+          });
+          expect(personalAndShared.isError).not.toBe(true);
+          expect(currentSourceResolution()?.sources).toHaveLength(3);
+          expect(
+            currentSourceResolution()?.sources.map((source) => source.scope).sort(),
+          ).toEqual(["personal", "personal", "tenant"]);
+
           mode = "normal";
           await admin.connection().execute(async (trx) => {
             await sql`update public.module_provider_test
@@ -1441,7 +1465,7 @@ describe("generated MCP runtime module security boundary", () => {
              where id = ${connectionId}::uuid
             `.execute(trx);
             await sql`delete from public.module_connection_test
-             where id = ${secondConnectionId}::uuid
+             where id in (${secondConnectionId}::uuid, ${sharedConnectionId}::uuid)
             `.execute(trx);
           });
 

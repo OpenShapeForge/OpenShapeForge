@@ -40,9 +40,13 @@ export type ConnectionNeeds = {
  * Mirrors connectionScopeOf in generated-mcp-server.ts: explicit
  * auth.connectionScope wins; absent, a sign-in profile implies "user".
  */
-export function connectionScopeOfAuth(auth: unknown): "user" | "tenant" {
+export function connectionScopeOfAuth(auth: unknown): "user" | "tenant" | "both" {
   const record = auth && typeof auth === "object" ? (auth as JsonRecord) : null;
-  if (record?.connectionScope === "user" || record?.connectionScope === "tenant") {
+  if (
+    record?.connectionScope === "user" ||
+    record?.connectionScope === "tenant" ||
+    record?.connectionScope === "both"
+  ) {
     return record.connectionScope;
   }
   return record?.profile === "oauth2AuthorizationCode" ? "user" : "tenant";
@@ -53,7 +57,8 @@ export function connectionNeedsOf(auth: unknown, definitions: unknown): Connecti
   const declaredFields = Array.isArray(definitions) ? definitions.length : 0;
   return {
     organization: declaredFields > 0 || requiredAuthValueKeys(auth).length > 0,
-    personal: connectionScopeOfAuth(auth) === "user",
+    personal:
+      connectionScopeOfAuth(auth) === "user" || connectionScopeOfAuth(auth) === "both",
     oauthClient: record?.profile === "oauth2AuthorizationCode",
   };
 }

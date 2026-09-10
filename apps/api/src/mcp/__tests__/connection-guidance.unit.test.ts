@@ -50,6 +50,11 @@ describe("connectionNeedsOf", () => {
       personal: false,
       oauthClient: true,
     });
+    expect(connectionNeedsOf({ profile: "oauth2AuthorizationCode", connectionScope: "both" }, [])).toEqual({
+      organization: true,
+      personal: true,
+      oauthClient: true,
+    });
     // The native provider: no auth, no fields, nothing to set up.
     expect(connectionNeedsOf(null, [])).toEqual({ organization: false, personal: false, oauthClient: false });
     expect(connectionNeedsOf(undefined, undefined)).toEqual({

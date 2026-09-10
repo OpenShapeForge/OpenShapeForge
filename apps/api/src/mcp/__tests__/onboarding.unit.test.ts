@@ -320,6 +320,7 @@ describe("guide text and instructions", () => {
     expect(providerNeedsPersonalSignIn({ profile: "oauth2AuthorizationCode" })).toBe(true);
     expect(providerNeedsPersonalSignIn({ profile: "apiKey" })).toBe(false);
     expect(providerNeedsPersonalSignIn({ profile: "apiKey", connectionScope: "user" })).toBe(true);
+    expect(providerNeedsPersonalSignIn({ profile: "apiKey", connectionScope: "both" })).toBe(true);
     expect(
       providerNeedsPersonalSignIn({ profile: "oauth2AuthorizationCode", connectionScope: "tenant" }),
     ).toBe(false);

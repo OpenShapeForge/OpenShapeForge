@@ -571,8 +571,12 @@ function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
  */
 function connectionScopeOf(
   auth: Record<string, unknown> | null | undefined,
-): "user" | "tenant" {
-  if (auth?.connectionScope === "user" || auth?.connectionScope === "tenant") {
+): "user" | "tenant" | "both" {
+  if (
+    auth?.connectionScope === "user" ||
+    auth?.connectionScope === "tenant" ||
+    auth?.connectionScope === "both"
+  ) {
     return auth.connectionScope;
   }
   return auth?.profile === "oauth2AuthorizationCode" ? "user" : "tenant";
@@ -3021,9 +3025,12 @@ function buildServer(
                 adapter,
                 toolName,
                 connectTool,
-                scope: connectionScopeOf(
-                  (providerRow.auth ?? null) as Record<string, unknown> | null,
-                ),
+                scope:
+                  connectionScopeOf(
+                    (providerRow.auth ?? null) as Record<string, unknown> | null,
+                  ) === "tenant"
+                    ? "tenant"
+                    : "user",
                 reason: "expired or no longer covers the scopes this tool needs",
               });
           }
@@ -3073,9 +3080,11 @@ function buildServer(
             string,
             unknown
           > | null;
-          const personal = connectionScopeOf(providerAuth) === "user";
+          const declaredScope = connectionScopeOf(providerAuth);
+          const allowsPersonal = declaredScope === "user" || declaredScope === "both";
+          const allowsTenant = declaredScope === "tenant" || declaredScope === "both";
           const personalOAuth =
-            personal && providerAuth?.profile === "oauth2AuthorizationCode";
+            allowsPersonal && providerAuth?.profile === "oauth2AuthorizationCode";
           const bindingNumber = Number(binding.order ?? 0);
           let personalCapture:
             | ReturnType<typeof capturePersonalOAuthConnections>
@@ -3098,12 +3107,15 @@ function buildServer(
             }
           }
           const eligible = personalCapture
-            ? personalCapture.personal
+            ? [
+                ...personalCapture.personal,
+                ...(allowsTenant ? [personalCapture.tenantSupport] : []),
+              ]
             : connectionRows
                 .filter((row) =>
-                  personal
-                    ? row.ownerUserId === session.userId
-                    : row.ownerUserId === null || row.ownerUserId === undefined,
+                  (allowsPersonal && row.ownerUserId === session.userId) ||
+                  (allowsTenant &&
+                    (row.ownerUserId === null || row.ownerUserId === undefined)),
                 )
                 .filter(
                   (row): row is Record<string, unknown> & { id: string } =>
@@ -3145,12 +3157,13 @@ function buildServer(
               needsReauthorization = true;
               continue;
             }
+            const sourceIsPersonal = connection.ownerUserId === session.userId;
             const identity = {
               tenantId,
-              actorId: personal ? session.userId : null,
-              scope: personal ? ("personal" as const) : ("tenant" as const),
+              actorId: sourceIsPersonal ? session.userId : null,
+              scope: sourceIsPersonal ? ("personal" as const) : ("tenant" as const),
               connectionTable: execution.connectionTable,
-              connectionId: connection.id,
+              connectionId: String(connection.id),
             };
             const sourceReference = mintInvocationSourceReference(identity);
             const internal: CapturedDerivedExecution = {
@@ -3159,10 +3172,10 @@ function buildServer(
               binding,
               operationRow,
               providerRow,
-              connectionRows: personalCapture
+              connectionRows: personalCapture && sourceIsPersonal
                 ? [personalCapture.tenantSupport, connection]
                 : [connection],
-              selectedConnectionId: connection.id,
+              selectedConnectionId: String(connection.id),
             };
             const fingerprint = authorityFingerprint(internal);
             const validate = async (validationSignal?: AbortSignal) => {
@@ -3208,7 +3221,7 @@ function buildServer(
                 providerRow,
                 reauthorize
                   ? "reauthorization"
-                  : personal
+                  : allowsPersonal && !allowsTenant
                     ? "personal"
                     : providerAuth?.profile === "oauth2AuthorizationCode"
                       ? "tenant_sign_in"
@@ -3513,7 +3526,13 @@ function buildServer(
               tool: {
                 type: "string",
                 description:
-                  "Name of the tool to create your personal connection for.",
+                  "Name of the tool to connect.",
+              },
+              connectionScope: {
+                type: "string",
+                enum: ["personal", "organization"],
+                description:
+                  "Connect your own account (default) or an organization-managed shared account. Organization scope requires an administrator role.",
               },
             },
             required: ["tool"],
@@ -3854,6 +3873,9 @@ function buildServer(
         const toolArg = (
           request.params.arguments as Record<string, unknown> | undefined
         )?.tool;
+        const requestedConnectionScope = (
+          request.params.arguments as Record<string, unknown> | undefined
+        )?.connectionScope;
         if (typeof toolArg !== "string" || toolArg.length === 0) {
           throw new HttpError(
             400,
@@ -4047,12 +4069,16 @@ function buildServer(
             requiredScopesByProvider.get(providerRowId) ?? new Set<string>();
           const providerRow = signIn.row;
           const auth = signIn.auth;
-          const scope_ = connectionScopeOf(auth);
+          const declaredScope = connectionScopeOf(auth);
+          const scope_ =
+            declaredScope === "both"
+              ? requestedConnectionScope === "organization"
+                ? "tenant"
+                : "user"
+              : declaredScope;
           if (
             scope_ === "tenant" &&
-            !connectEntry.connect!.roles.some((role) =>
-              (session.roles ?? []).includes(role),
-            )
+            !isOrganizationAdministrator(session.roles)
           ) {
             throw new HttpError(
               403,
@@ -4555,9 +4581,11 @@ function buildServer(
               auth: { scheme: "bearer", tokenFrom: "accessToken" },
             };
             notes.push(
-              connectionScopeOf(providerAuth) === "user"
-                ? "Executing uses the caller's personal sign-in token as the bearer value."
-                : "Executing uses the tenant sign-in token as the bearer value.",
+              connectionScopeOf(providerAuth) === "both"
+                ? "Execution can use an explicitly selected personal or organization sign-in token."
+                : connectionScopeOf(providerAuth) === "user"
+                  ? "Executing uses the caller's personal sign-in token as the bearer value."
+                  : "Executing uses the tenant sign-in token as the bearer value.",
             );
           }
           try {
@@ -5076,15 +5104,15 @@ function buildServer(
                   unknown
                 > | null;
                 if (selectedReference && session.tenantId && !captured) {
-                  const personalSource =
-                    connectionScopeOf(providerAuth) === "user";
                   connectionRows = connectionRows.filter((row) =>
                     sameInvocationSourceReference(
                       selectedReference,
                       mintInvocationSourceReference({
                         tenantId: session.tenantId!,
-                        actorId: personalSource ? session.userId : null,
-                        scope: personalSource ? "personal" : "tenant",
+                        actorId:
+                          row.ownerUserId === session.userId ? session.userId : null,
+                        scope:
+                          row.ownerUserId === session.userId ? "personal" : "tenant",
                         connectionTable: execution.connectionTable,
                         connectionId: String(row.id),
                       }),
@@ -5098,8 +5126,27 @@ function buildServer(
                 let connectionValues: unknown;
                 let secretScope = elicitScope;
                 let oauthConnectionAudit: ConnectionTokenAudit | undefined;
+                const selectedConnectionId = captured?.selectedConnectionId;
+                const selectedConnection = selectedConnectionId
+                  ? connectionRows.find((row) => row.id === selectedConnectionId)
+                  : connectionRows.length === 1
+                    ? connectionRows[0]
+                    : undefined;
+                const declaredScope = connectionScopeOf(providerAuth);
+                if (declaredScope === "both" && !selectedConnection) {
+                  throw new HttpError(
+                    400,
+                    "CONNECTION_AMBIGUOUS",
+                    "Choose one authorized personal or organization connection for this mutation.",
+                  );
+                }
+                const personalExecution =
+                  declaredScope === "user" ||
+                  (declaredScope === "both" &&
+                    selectedConnection?.ownerUserId === session.userId);
+                const effectiveScope = personalExecution ? "user" : "tenant";
 
-                if (connectionScopeOf(providerAuth) === "user") {
+                if (personalExecution) {
                   // Every personal auth profile resolves ONLY the caller's
                   // captured connection. OAuth adds tenant support/config and
                   // refresh below; API-key/header/basic profiles use this same
@@ -5485,7 +5532,7 @@ function buildServer(
                     adapter: providerDisplayName(providerRow, execution),
                     toolName: name,
                     connectTool: entry?.connect?.name ?? null,
-                    scope: connectionScopeOf(providerAuth),
+                    scope: effectiveScope,
                     reason: `does not cover the required scopes: ${operationScopes.join(", ")}`,
                   });
                 }
@@ -5594,7 +5641,7 @@ function buildServer(
                       adapter: providerDisplayName(providerRow, execution),
                       toolName: name,
                       connectTool: entry?.connect?.name ?? null,
-                      scope: connectionScopeOf(providerAuth),
+                      scope: effectiveScope,
                       reason: "is stored in a form this runtime can no longer read",
                     });
                   }

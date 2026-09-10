@@ -58,6 +58,22 @@ export type {
   McpDeclarativeRequestHeaderMapping,
   McpDeclarativeRequestMapping,
 } from "./authoring/types.js";
+export { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
+export type {
+  WebCollectionView,
+  WebEntityInterface,
+  WebFieldGroup,
+  WebFieldProjection,
+  WebFormView,
+  WebManifestOptions,
+  WebManifestV1,
+  WebOperationIntent,
+  WebOperationRef,
+  WebRecordTab,
+  WebRecordView,
+  WebRelationshipProjection,
+  WebRendererKey,
+} from "./authoring/web-manifest.js";
 
 const defaultRepoRoot = resolve(import.meta.dir, "../../..");
 

@@ -18,6 +18,7 @@ import type { EntityManifestEntryData } from "./generators/app.js";
 import type { RuntimeMetadataData } from "./generators/manifest.js";
 import type { ViewDefinition } from "./types.js";
 import { generatePersistedOperationArtifacts } from "../persisted-operations.js";
+import { buildWebManifest, renderWebManifest } from "./web-manifest.js";
 
 export type AuthoringUiArtifact = {
   path: string;
@@ -436,6 +437,13 @@ export async function generateAuthoringUiArtifacts(
   for (const [path, contents] of routeFiles) {
     generatedFiles.set(path, contents);
   }
+
+  generatedFiles.set(
+    "generated/web/web-manifest.json",
+    renderWebManifest(buildWebManifest(
+      compiled.map(({ name, contract }) => ({ slug: name, contract })),
+    )),
+  );
 
   const persisted = await generatePersistedOperationArtifacts({
     repoRoot,

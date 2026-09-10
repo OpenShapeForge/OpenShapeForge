@@ -46,7 +46,7 @@ describe("compiler host artifact assembly", () => {
     expect(second.all).toEqual(first.all);
   }, 60_000);
 
-  test("web hosts retain the populated API and web manifest pair", async () => {
+  test("web hosts retain persisted operations and receive a web interface manifest", async () => {
     const root = await hostRoot({ web: true });
     const { all } = await collectAllArtifacts(root);
     const paths = [
@@ -58,6 +58,15 @@ describe("compiler host artifact assembly", () => {
     expect(persisted.map((artifact) => artifact.path).sort()).toEqual(paths);
     expect(persisted[0]!.contents).toBe(persisted[1]!.contents);
     expect(JSON.parse(persisted[0]!.contents).operationNames.length).toBeGreaterThan(0);
+    const webManifestArtifact = all.find(
+      (artifact) => artifact.path === "apps/web/src/generated/web-manifest.json",
+    );
+    expect(webManifestArtifact).toBeDefined();
+    expect(JSON.parse(webManifestArtifact!.contents)).toMatchObject({
+      contract: "openshapeforge.web-manifest",
+      version: 1,
+      entities: { Relation: { operations: { list: { id: "Relation.list" } } } },
+    });
   }, 60_000);
 
   test("committed REST onboarding reaches the generated OpenAPI artifact", async () => {

@@ -324,7 +324,7 @@ function RelationWorkPanel({ actions, counts, onActionActivate, onCountActivate 
 }
 
 /**
- * Habeon 1.3 relation detail screen.
+ * Relation detail screen.
  *
  * @figma file-key=CbKdajB2p4lAW3bBGcHBYd
  * @figma name="relatie (inbox-main-context)"

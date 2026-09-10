@@ -50,7 +50,7 @@ function withTooltip(content: ReactElement, tooltip: string | undefined) {
 }
 
 /**
- * @figma component set — https://www.figma.com/design/CbKdajB2p4lAW3bBGcHBYd/Habe%C5%8Dn-1.3?node-id=392-6329
+ * @figma component set — file-key=CbKdajB2p4lAW3bBGcHBYd node-id=392-6329
  * @figma node-id=392:6329
  */
 export function ListTable({
@@ -284,7 +284,7 @@ export function ListTableHead({
 }
 
 /**
- * @figma component set — https://www.figma.com/design/CbKdajB2p4lAW3bBGcHBYd/Habe%C5%8Dn-1.3?node-id=397-6951
+ * @figma component set — file-key=CbKdajB2p4lAW3bBGcHBYd node-id=397-6951
  * @figma node-id=397:6951
  */
 export function ListTableFileTypeIcon({

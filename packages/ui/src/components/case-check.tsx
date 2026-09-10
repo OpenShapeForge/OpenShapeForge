@@ -100,9 +100,9 @@ function CheckedIcon() {
 }
 
 /**
- * Habeon 1.3 `case-check` component for compact case-step status rows.
+ * `case-check` component for compact case-step status rows.
  *
- * @figma case-check component-id=1001:14253 — https://www.figma.com/design/CbKdajB2p4lAW3bBGcHBYd/Habe%C5%8Dn-1.3?node-id=226-59907
+ * @figma case-check component-id=1001:14253 file-key=CbKdajB2p4lAW3bBGcHBYd node-id=226-59907
  * @figma node-id=311-6178 — https://www.figma.com/design/zokrrtGzRevHFAesahnlVi/Battery?node-id=311-6178
  * @figma node-id=311-6179 — https://www.figma.com/design/zokrrtGzRevHFAesahnlVi/Battery?node-id=311-6179
  * @figma node-id=311-6184 — https://www.figma.com/design/zokrrtGzRevHFAesahnlVi/Battery?node-id=311-6184

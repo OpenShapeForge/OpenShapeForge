@@ -25,6 +25,7 @@ import type { DbSessionInput } from "../db/session.js";
 import {
   entityOperationRef,
   executeEntityOperation,
+  fieldNameForColumn,
   getGeneratedCrudTables,
   isCallerWritableColumn,
   isOperationWrittenColumn,
@@ -32,6 +33,7 @@ import {
 } from "../operations/entity/index.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "./http-error.js";
+import { serializeGeneratedRestRow } from "./serialize-generated-row.js";
 
 import { registerRestDocs } from "./rest-docs.js";
 // Re-exported so existing import sites keep working.
@@ -48,16 +50,6 @@ const RESERVED_LIST_PARAMS = new Set([
   "sortField",
   "sortDirection",
 ]);
-
-function fieldNameForColumn(column: GeneratedColumn) {
-  return column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_match, char: string) => char.toUpperCase());
-}
-
-function serializeRow(table: GeneratedTable, row: Record<string, unknown>) {
-  return Object.fromEntries(
-    table.columns.map((column) => [fieldNameForColumn(column), row[column.name]]),
-  );
-}
 
 /**
  * REST bodies are stricter than GraphQL parity: unknown keys are rejected
@@ -358,7 +350,7 @@ export function registerGeneratedRestRoutes(
           if (operationResult.intent !== "list") throw new Error("Unexpected entity result.");
           const result = operationResult.connection;
           return reply.send({
-            items: result.rows.map((row) => serializeRow(table, row)),
+            items: result.rows.map((row) => serializeGeneratedRestRow(table, row)),
             totalCount: result.totalCount,
             nextCursor: result.nextCursor,
           });
@@ -378,7 +370,7 @@ export function registerGeneratedRestRoutes(
           if (!row) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
-          return reply.send(serializeRow(table, row));
+          return reply.send(serializeGeneratedRestRow(table, row));
         });
       }
 
@@ -393,7 +385,7 @@ export function registerGeneratedRestRoutes(
           if (result.intent !== "create") throw new Error("Unexpected entity result.");
           const row = result.record;
           if (!row) throw new Error("Create operation returned no record.");
-          return reply.status(201).send(serializeRow(table, row));
+          return reply.status(201).send(serializeGeneratedRestRow(table, row));
         });
       }
 
@@ -411,7 +403,7 @@ export function registerGeneratedRestRoutes(
           if (!row) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
-          return reply.send(serializeRow(table, row));
+          return reply.send(serializeGeneratedRestRow(table, row));
         });
       }
 

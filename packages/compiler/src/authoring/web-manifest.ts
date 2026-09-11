@@ -94,6 +94,16 @@ function projectGroups(groups: readonly CompiledViewGroup[] | undefined): WebFie
   });
 }
 
+function projectTabGroups(tab: CompiledViewGroup): WebFieldGroup[] {
+  const ownFields = fieldKeys(tab);
+  return [
+    ...(ownFields.length > 0
+      ? [{ id: tab.id, title: localized(tab.title ?? tab.label, tab.id), fields: ownFields }]
+      : []),
+    ...projectGroups(tab.groups),
+  ];
+}
+
 function formGroups(
   variant: CompiledFormVariant | undefined,
   fallback?: CompiledFormVariant,
@@ -276,7 +286,7 @@ function projectEntity(
     return [{
       id: tab.id,
       label: localized(tab.label ?? tab.title, tab.id),
-      groups: projectGroups(tab.groups),
+      groups: projectTabGroups(tab),
       ...(relationshipId ? { relationshipId } : {}),
     }];
   });

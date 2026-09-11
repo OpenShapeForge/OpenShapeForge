@@ -408,39 +408,44 @@ ui:
             nl: Weet je zeker dat je deze labelregel wilt verwijderen?
           mutation: delete
       groups:
-        - id: general
-          title:
-            en: General
-            nl: Algemeen
-          fields:
-            - name
-            - key
-            - entityType
-            - outputType
-            - label
-            - variant
-            - priority
-            - active
-        - id: validity
-          title:
-            en: Validity
-            nl: Geldigheid
-          fields:
-            - validity
-            - startDate
-            - endDate
-        - id: expression
-          title:
-            en: Expression
-            nl: Expressie
-          fields:
-            - expression
-        - id: description
-          title:
-            en: Description template
-            nl: Omschrijvingstemplate
-          fields:
-            - descriptionTemplate
+        - id: overview
+          label:
+            en: Overview
+            nl: Overzicht
+          groups:
+            - id: general
+              title:
+                en: General
+                nl: Algemeen
+              fields:
+                - name
+                - key
+                - entityType
+                - outputType
+                - label
+                - variant
+                - priority
+                - active
+            - id: validity
+              title:
+                en: Validity
+                nl: Geldigheid
+              fields:
+                - validity
+                - startDate
+                - endDate
+            - id: expression
+              title:
+                en: Expression
+                nl: Expressie
+              fields:
+                - expression
+            - id: description
+              title:
+                en: Description template
+                nl: Omschrijvingstemplate
+              fields:
+                - descriptionTemplate
     form:
       variants:
         create:

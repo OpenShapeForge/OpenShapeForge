@@ -46,6 +46,7 @@ function coreView(): CompiledViewContext {
       items: [{
         id: "overview",
         label: text("Overview", "Overzicht"),
+        fields: ["displayName"],
         groups: [{ id: "basics", title: text("Basics", "Basis"), fields: ["displayName", "id"] }],
       }, {
         id: "contacts",
@@ -188,6 +189,13 @@ describe("web manifest projection", () => {
           collection: { operation: { id: "ContactDetail.list" } },
         },
       },
+    });
+    expect(manifest.entities.Relation?.record?.tabs[0]).toMatchObject({
+      id: "overview",
+      groups: [
+        { id: "overview", fields: ["displayName"] },
+        { id: "basics", fields: ["displayName", "id"] },
+      ],
     });
     expect(JSON.stringify(manifest)).not.toContain("api/rest");
   });

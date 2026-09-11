@@ -39,6 +39,7 @@ import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
 import type { CompiledEntityInfo } from "./plugins.js";
 import type { CompiledField } from "./authoring/types.js";
 import { renderEmptyApiPersistedOperationArtifact } from "./persisted-operations.js";
+import { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
 
 export type {
   FieldDefinition,
@@ -212,6 +213,7 @@ export async function collectAllArtifacts(
   // data-layer + API repo skips them entirely; adding apps/web back
   // re-enables generation without compiler changes.
   const webPresent = existsSync(join(repoRoot, "apps/web"));
+  const productWebPresent = existsSync(join(repoRoot, "apps/product-web"));
   // Built once, as a value, and shared by everything that needs it. Reading the
   // emitted snapshot back off disk would see the PREVIOUS run's file, since
   // artifacts are written only after every generator has produced its contents.
@@ -311,9 +313,15 @@ export async function collectAllArtifacts(
     // Headless hosts get the API's empty persisted-operation manifest from the
     // graphql group above. Web hosts generate the populated API + web pair as
     // part of their UI corpus.
-    ui: webPresent
-      ? await generateAuthoringUiArtifacts(authoringDir, repoRoot)
-      : [],
+    ui: [
+      ...(webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot) : []),
+      ...(productWebPresent
+        ? [{
+            path: "apps/product-web/src/generated/web-manifest.json",
+            contents: renderWebManifest(buildWebManifest(entities, { locale: "nl", routeLocale: "en" })),
+          }]
+        : []),
+    ],
     keycloak: generateAuthoringKeycloakArtifacts(authoringDir),
     plugins: [],
   };

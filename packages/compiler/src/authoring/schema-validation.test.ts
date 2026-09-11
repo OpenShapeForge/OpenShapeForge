@@ -388,6 +388,91 @@ describe("coreEntity properties the compiler implements", () => {
     };
   }
 
+  const v2Operation = (action: string) => ({
+    name: `${action} billing runs`,
+    description: `${action} billing runs`,
+    implementation: { type: "entity", action },
+    effects: { data: action === "list" || action === "get" ? "read" : "write", external: "none" },
+    reliability: { idempotency: { mode: action === "list" || action === "get" ? "natural" : "none" } },
+    confirmation: { mode: "none" },
+  });
+
+  it("accepts strict v2 operation and interface authoring", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { list: v2Operation("list"), get: v2Operation("get") },
+      interfaces: {
+        rest: { operations: { list: {}, get: {} } },
+        mcp: { operations: { list: {}, get: {} } },
+        web: {
+          operations: { list: {}, get: {} },
+          views: {
+            collection: { route: "/billing-runs", columns: [{ key: "idempotencyKey" }] },
+            record: {
+              routes: { read: "/billing-runs/:id" },
+              title: "{{idempotencyKey}}",
+              layout: { tabs: [{ id: "main", fields: ["idempotencyKey"] }] },
+            },
+          },
+        },
+      },
+    });
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+  });
+
+  it("accepts only the canonical server-issued, version-bound challenge shape", () => {
+    const challenged = {
+      ...v2Operation("delete"),
+      confirmation: {
+        mode: "challenge",
+        challenge: {
+          kind: "type-current-field",
+          field: "idempotencyKey",
+          issuedBy: "server",
+          bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+          expiresAfter: "PT5M",
+          singleUse: true,
+        },
+      },
+    };
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { remove: challenged },
+      interfaces: { rest: { operations: { remove: {} } } },
+    });
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+
+    challenged.confirmation.challenge.issuedBy = "client" as never;
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/issuedBy/);
+  });
+
+  it("keeps v1 and v2 closed instead of accepting mixed contracts", () => {
+    const v1WithOperations = coreEntity({
+      operations: { list: v2Operation("list") },
+      interfaces: { rest: { operations: { list: {} } } },
+    });
+    expect(() => validator.validate(v1WithOperations, "billing-run.yaml")).toThrow();
+
+    const v2WithLegacyRest = coreEntity({
+      schemaVersion: 2,
+      rest: true,
+      operations: { list: v2Operation("list") },
+      interfaces: { rest: { operations: { list: {} } } },
+    });
+    expect(() => validator.validate(v2WithLegacyRest, "billing-run.yaml")).toThrow();
+  });
+
+  it("rejects operation field projections until the compiler implements them", () => {
+    const operation = { ...v2Operation("get"), output: { fields: ["idempotencyKey"] } };
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { get: operation },
+      interfaces: { rest: { operations: { get: {} } } },
+    });
+
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/output/);
+  });
+
   it("accepts entity-level indexes", () => {
     // backend-manifest.ts resolves these field keys to columns and emits
     // CREATE [UNIQUE] INDEX; the schema used to reject the block outright.

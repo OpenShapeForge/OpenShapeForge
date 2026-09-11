@@ -149,6 +149,15 @@ function internalOperationError(): OperationError {
   };
 }
 
+function projectedOfferIntents(
+  request: EntityOperationRequest,
+  candidates: readonly GeneratedCrudExposureOperation[],
+): GeneratedCrudExposureOperation[] {
+  if (!request.offerIntents) return [...candidates];
+  const projected = new Set(request.offerIntents);
+  return candidates.filter((intent) => projected.has(intent));
+}
+
 /** Interface-neutral dispatcher used by REST, MCP and future transports. */
 export async function executeEntityOperation(
   db: OpenShapeForgeDatabase,
@@ -172,7 +181,7 @@ export async function executeEntityOperation(
               operations: getEntityOperationOffers(
                 entityName,
                 session,
-                RECORD_OFFER_INTENTS,
+                projectedOfferIntents(request, RECORD_OFFER_INTENTS),
               ),
             })),
             totalCount: connection.totalCount,
@@ -181,7 +190,7 @@ export async function executeEntityOperation(
           operations: getEntityOperationOffers(
             entityName,
             session,
-            COLLECTION_OFFER_INTENTS,
+            projectedOfferIntents(request, COLLECTION_OFFER_INTENTS),
           ),
         };
       }
@@ -194,7 +203,11 @@ export async function executeEntityOperation(
           intent: "get",
           data,
           operations: data
-            ? getEntityOperationOffers(entityName, session, RECORD_OFFER_INTENTS)
+            ? getEntityOperationOffers(
+                entityName,
+                session,
+                projectedOfferIntents(request, RECORD_OFFER_INTENTS),
+              )
             : [],
         };
       }
@@ -206,7 +219,11 @@ export async function executeEntityOperation(
         return {
           intent: "create",
           data,
-          operations: getEntityOperationOffers(entityName, session, RECORD_OFFER_INTENTS),
+          operations: getEntityOperationOffers(
+            entityName,
+            session,
+            projectedOfferIntents(request, RECORD_OFFER_INTENTS),
+          ),
         };
       }
       case "update": {
@@ -219,7 +236,11 @@ export async function executeEntityOperation(
           intent: "update",
           data,
           operations: data
-            ? getEntityOperationOffers(entityName, session, RECORD_OFFER_INTENTS)
+            ? getEntityOperationOffers(
+                entityName,
+                session,
+                projectedOfferIntents(request, RECORD_OFFER_INTENTS),
+              )
             : [],
         };
       }
@@ -234,7 +255,7 @@ export async function executeEntityOperation(
           operations: getEntityOperationOffers(
             entityName,
             session,
-            COLLECTION_OFFER_INTENTS,
+            projectedOfferIntents(request, COLLECTION_OFFER_INTENTS),
           ),
         };
       }

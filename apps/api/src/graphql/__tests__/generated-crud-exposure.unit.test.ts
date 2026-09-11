@@ -22,6 +22,10 @@ function withOperations(
     source: {
       ...base.source,
       crud: { operations },
+      graphql: {
+        ...base.source!.graphql!,
+        operations,
+      },
     },
   };
 }
@@ -88,5 +92,21 @@ describe("generated GraphQL CRUD exposure", () => {
     expect(renderGeneratedQueryFields(table)).toEqual([]);
     expect(renderGeneratedMutationFields(table)).toHaveLength(1);
     expect(renderGeneratedMutationFields(table)[0]).toContain("createRelation");
+  });
+
+  test("v2 GraphQL interface exposure can narrow the shared CRUD operations", () => {
+    const table = withOperations({
+      list: true,
+      get: true,
+      create: true,
+      update: false,
+      delete: false,
+    });
+    table.source!.graphql = {
+      ...table.source!.graphql!,
+      operations: { list: false, get: false, create: false, update: false, delete: false },
+    };
+    expect(renderGeneratedQueryFields(table)).toEqual([]);
+    expect(renderGeneratedMutationFields(table)).toEqual([]);
   });
 });

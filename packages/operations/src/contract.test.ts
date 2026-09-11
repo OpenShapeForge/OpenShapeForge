@@ -4,8 +4,25 @@ import {
   isOperationFailure,
   operationErrorOf,
   operationFailure,
+  type OperationConfirmation,
   type OperationResult,
 } from "./index.js";
+
+test("a challenge is server-issued, version-bound and single-use", () => {
+  const confirmation = {
+    mode: "challenge",
+    challenge: {
+      kind: "type-current-field",
+      field: "displayName",
+      issuedBy: "server",
+      bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+      expiresAfter: "PT5M",
+      singleUse: true,
+    },
+  } satisfies OperationConfirmation;
+
+  expect(confirmation.challenge.bindTo).toContain("target.version");
+});
 
 test("validation and temporary refusals use one canonical failure contract", () => {
   const result: OperationResult<never> = {

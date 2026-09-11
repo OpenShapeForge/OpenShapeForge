@@ -32,6 +32,11 @@ import { deriveTableName } from "./helpers.js";
 import { buildCanonicalCompilerKernel } from "./canonical/index.js";
 import { buildAuthorization } from "./authorization.js";
 import { buildEntityOperations } from "./entity-operations.js";
+import {
+  isCoreEntityV2,
+  v2WebOperationActions,
+  v2WebUi,
+} from "../entity-v2.js";
 
 function visitGroups(
   groups: readonly CompiledViewGroup[] | undefined,
@@ -94,7 +99,10 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   const crud = buildCrud(coreEntity);
   const rest = buildRest(coreEntity, crud);
   const mcp = buildMcp(coreEntity, crud);
-  const views = buildViews(coreEntity, profiles, componentCatalog, artifacts.viewDefinition ?? undefined);
+  const viewEntity = isCoreEntityV2(coreEntity)
+    ? { ...coreEntity, ui: v2WebUi(coreEntity) }
+    : coreEntity;
+  const views = buildViews(viewEntity, profiles, componentCatalog, artifacts.viewDefinition ?? undefined);
 
   validateTimelineIncludes(coreEntity.entity, relationships, views);
   const compiledProfiles = buildProfiles(profiles, mappings);
@@ -105,6 +113,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   };
   const entityOperations = buildEntityOperations({
     entity,
+    coreEntity,
     crud,
     authorization,
   });
@@ -116,6 +125,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   });
 
   return {
+    authoringVersion: coreEntity.schemaVersion === 2 ? 2 : 1,
     contractVersion: 2,
     kind: "compiledEntityContract",
     entity: {
@@ -135,6 +145,15 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     model: { fields: modelFields, relationships },
     crud,
     entityOperations,
+    ...(isCoreEntityV2(coreEntity)
+      ? {
+          interfaces: {
+            ...(coreEntity.interfaces?.web
+              ? { web: { operations: v2WebOperationActions(coreEntity)! } }
+              : {}),
+          },
+        }
+      : {}),
     graphql,
     ...(rest ? { rest } : {}),
     ...(mcp ? { mcp } : {}),
@@ -146,7 +165,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
             : {}),
         }
       : undefined,
-    hooks: coreEntity.hooks,
+    hooks: isCoreEntityV2(coreEntity) ? undefined : coreEntity.hooks,
     permissions: coreEntity.permissions,
     authorization,
     views,

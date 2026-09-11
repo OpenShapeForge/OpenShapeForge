@@ -89,7 +89,8 @@ const documentationByGraphqlType = createGraphqlDocumentationIndex(
 type CrudOperation = "list" | "get" | "create" | "update" | "delete";
 
 function operationEnabled(table: GeneratedTable, operation: CrudOperation): boolean {
-  return isGeneratedCrudOperationEnabled(table, operation);
+  return table.source?.graphql?.operations?.[operation] !== false &&
+    isGeneratedCrudOperationEnabled(table, operation);
 }
 
 export function renderGeneratedQueryFields(table: GeneratedTable): string[] {

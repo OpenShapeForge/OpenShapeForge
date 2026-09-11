@@ -6,6 +6,8 @@ import type {
   CrudSection,
   EntityOperationIntent,
 } from "../types.js";
+import type { CoreEntity } from "../types.js";
+import { isCoreEntityV2, v2OperationByAction } from "../entity-v2.js";
 
 const OPERATION_ORDER: readonly EntityOperationIntent[] = [
   "list",
@@ -17,9 +19,31 @@ const OPERATION_ORDER: readonly EntityOperationIntent[] = [
 
 type OperationSource = {
   entity: { id: string; name: string };
+  coreEntity?: CoreEntity;
   crud: CrudSection;
   authorization: CompiledAuthorization;
 };
+
+function defaultEffects(intent: EntityOperationIntent) {
+  return {
+    data: intent === "list" || intent === "get"
+      ? "read" as const
+      : intent === "delete"
+        ? "delete" as const
+        : "write" as const,
+    external: "none" as const,
+  };
+}
+
+function defaultIdempotency(intent: EntityOperationIntent) {
+  return {
+    idempotency: {
+      mode: intent === "list" || intent === "get" || intent === "delete"
+        ? "natural" as const
+        : "none" as const,
+    },
+  };
+}
 
 function authorizationAction(
   intent: EntityOperationIntent,
@@ -32,13 +56,24 @@ function compileOperation(
   intent: EntityOperationIntent,
 ): CompiledEntityOperation {
   const action = authorizationAction(intent);
+  const authored = source.coreEntity && isCoreEntityV2(source.coreEntity)
+    ? v2OperationByAction(source.coreEntity)[intent]
+    : undefined;
+  const key = authored?.[0] ?? intent;
+  const definition = authored?.[1];
   const shared = {
-    id: `${source.entity.name}.${intent}`,
+    id: `${source.entity.name}.${key}`,
+    key,
     entityId: source.entity.id,
     entityName: source.entity.name,
     intent,
+    name: definition?.name ?? `${source.entity.name} ${intent}`,
+    description: definition?.description ?? `${intent} ${source.entity.name}`,
+    ...(definition?.guidance ? { guidance: definition.guidance } : {}),
     authorization: { action, roles: [...source.authorization.roles[action]] },
-    interaction: { confirmation: "none" as const },
+    effects: definition?.effects ?? defaultEffects(intent),
+    reliability: definition?.reliability ?? defaultIdempotency(intent),
+    interaction: { confirmation: definition?.confirmation ?? { mode: "none" as const } },
   };
   switch (intent) {
     case "list":

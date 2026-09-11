@@ -118,6 +118,7 @@ function entity(
     path: `authoring/entities/${slug}.yaml`,
     origin: "core",
     contract: {
+      authoringVersion: 1,
       contractVersion: 2,
       kind: "compiledEntityContract",
       entity: {
@@ -228,12 +229,35 @@ describe("web manifest projection", () => {
 
   test("projects the web interface independently of REST exposure", () => {
     const relation = entity("Relation", "relation", [field("displayName")], coreView());
+    relation.contract.authoringVersion = 2;
+    relation.contract.interfaces = {
+      web: { operations: { list: true, get: true, create: true, update: true, delete: true } },
+    };
     delete relation.contract.rest;
 
     const projected = buildWebManifest([relation]).entities.Relation;
     expect(projected).toBeDefined();
     expect(projected!.operations.list).toEqual({ id: "Relation.list", intent: "list" });
     expect(projected!.views.collection.route).toBe("/relations");
+  });
+
+  test("does not widen the legacy v1 WebManifest beyond REST exposure", () => {
+    const relation = entity("Relation", "relation", [field("displayName")], coreView());
+    delete relation.contract.rest;
+
+    expect(buildWebManifest([relation]).entities.Relation).toBeUndefined();
+  });
+
+  test("preserves authored record routes instead of reconstructing them", () => {
+    const view = coreView();
+    view.routes.detail = { en: "/people/:id", nl: "/personen/:id" };
+    view.routes.create = { en: "/people/new-person", nl: "/personen/nieuw" };
+    const relation = entity("Relation", "relation", [field("displayName")], view);
+
+    expect(buildWebManifest([relation]).entities.Relation?.views.record?.routes).toEqual({
+      read: "/people/:id",
+      create: "/people/new-person",
+    });
   });
 
   test("uses the exposed REST collection path when no authored route exists", () => {
@@ -258,6 +282,18 @@ describe("web manifest projection", () => {
     const serialized = JSON.stringify(buildWebManifest([relation]));
     expect(serialized).not.toContain("\"renderers\"");
     expect(serialized).not.toContain("\"rendererProps\"");
+  });
+
+  test("preserves an interface-neutral reference-data option source", () => {
+    const relation = entity("Relation", "relation", [
+      field("relationType", {
+        options: { type: "referentiedata", referentieGroep: "RELATIONTYPE" },
+      }),
+    ], coreView());
+    expect(buildWebManifest([relation]).entities.Relation?.fields.relationType)
+      .toMatchObject({
+        optionSource: { type: "referentiedata", group: "RELATIONTYPE" },
+      });
   });
 
   test("preserves condition semantics and declarative variable sources", () => {

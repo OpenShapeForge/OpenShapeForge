@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
-import {
-  buildMcpCatalog,
-  MAX_DEDICATED_TOOLS,
-  type McpCatalogInput,
-} from "./generate-mcp.js";
+import Ajv2020 from "ajv/dist/2020.js";
+import { buildEntityOperations } from "./authoring/compiler/entity-operations.js";
 import type {
   CompiledEntityContract,
   CompiledField,
   CompiledRelationship,
 } from "./authoring/types.js";
-import { buildEntityOperations } from "./authoring/compiler/entity-operations.js";
+import {
+  buildMcpCatalog,
+  MAX_DEDICATED_TOOLS,
+  type McpCatalogInput,
+} from "./generate-mcp.js";
 
 const field = (
   overrides: Partial<CompiledField> & { key: string },
@@ -152,6 +153,135 @@ describe("buildMcpCatalog", () => {
     });
   });
 
+  it("emits canonical output envelopes for every generated entity operation", () => {
+    const catalog = buildMcpCatalog(
+      [
+        input(
+          contract({
+            fields: [
+              field({ key: "id", required: true, validation: { format: "uuid" } }),
+              field({ key: "name" }),
+            ],
+            columns: [
+              {
+                field: "id",
+                column: "id",
+                type: "uuid",
+                nullable: false,
+                storageClass: "core",
+              },
+              {
+                field: "name",
+                column: "name",
+                type: "text",
+                nullable: true,
+                storageClass: "core",
+              },
+            ],
+          }),
+        ),
+      ],
+      "test",
+    );
+    const byOperation = new Map(
+      catalog.tools.map((tool) => [tool.operation, tool]),
+    );
+    const success = (operation: "list" | "get" | "create" | "update" | "delete") =>
+      (byOperation.get(operation)!.outputSchema.oneOf as Record<string, unknown>[])[0]!;
+
+    const record = (
+      success("get").properties as Record<string, Record<string, unknown>>
+    ).data!;
+    expect(record).toMatchObject({
+      type: "object",
+      additionalProperties: true,
+      required: ["id", "tenantId", "createdAt", "updatedAt"],
+    });
+    expect(prop(record, "name").anyOf).toEqual([
+      expect.objectContaining({ type: "string" }),
+      { type: "null" },
+    ]);
+
+    const listData = (
+      success("list").properties as Record<string, Record<string, unknown>>
+    ).data!;
+    const listItems = prop(listData, "items").items as Record<string, unknown>;
+    expect(listItems.required).toEqual(["data", "operations"]);
+    expect(prop(listItems, "operations").items).toEqual({
+      $ref: "#/$defs/OperationOffer",
+    });
+    expect(listData.required).toEqual(["items", "totalCount", "nextCursor"]);
+
+    const deleted = (
+      success("delete").properties as Record<string, Record<string, unknown>>
+    ).data!;
+    expect(prop(deleted, "deleted")).toEqual({ type: "boolean", const: true });
+
+    for (const tool of catalog.tools) {
+      expect(tool.outputSchema.type).toBe("object");
+      expect(tool.outputSchema.$defs).toMatchObject({
+        OperationReference: expect.any(Object),
+        OperationOffer: expect.any(Object),
+        OperationError: expect.any(Object),
+      });
+      expect((tool.outputSchema.oneOf as Record<string, unknown>[])[1]).toMatchObject({
+        required: ["error"],
+        properties: { error: { $ref: "#/$defs/OperationError" } },
+      });
+    }
+
+    const ajv = new Ajv2020.default({ strict: false, validateFormats: false });
+    const instant = "2026-09-11T12:00:00.000Z";
+    const recordValue = {
+      id: "00000000-0000-4000-8000-000000000001",
+      tenantId: "00000000-0000-4000-8000-000000000002",
+      createdAt: instant,
+      updatedAt: instant,
+      name: null,
+    };
+    const offers = [
+      {
+        operation: { id: "Widget.get", intent: "get" },
+        available: true,
+      },
+    ];
+    const successes: Record<string, unknown> = {
+      list: {
+        data: {
+          items: [{ data: recordValue, operations: offers }],
+          totalCount: 1,
+          nextCursor: null,
+        },
+        operations: offers,
+      },
+      get: { data: recordValue, operations: offers },
+      create: { data: recordValue, operations: offers },
+      update: { data: recordValue, operations: offers },
+      delete: { data: { deleted: true }, operations: offers },
+    };
+    for (const tool of catalog.tools) {
+      const validate = ajv.compile(tool.outputSchema);
+      expect(validate(successes[tool.operation])).toBe(true);
+      expect(
+        validate({
+          error: {
+            code: "LOCKED",
+            message: "This record is being edited.",
+            detail: "The lease is still active.",
+            retryable: true,
+            retryAt: instant,
+          },
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("does not advertise update as idempotent while it repeats events and updatedAt", () => {
+    const catalog = buildMcpCatalog([input(contract())], "test");
+    const update = catalog.tools.find((tool) => tool.operation === "update")!;
+    expect(update.annotations.idempotentHint).toBe(false);
+  });
+
   it("routes generic-style entities through the shared osf_* tools", () => {
     const catalog = buildMcpCatalog(
       [
@@ -174,6 +304,15 @@ describe("buildMcpCatalog", () => {
       "test",
     );
     expect(catalog.tools[0]?.name).toBe("osf_list");
+    const success = (
+      catalog.tools[0]?.outputSchema.oneOf as Record<string, unknown>[]
+    )[0]!;
+    const listData = (
+      success.properties as Record<string, Record<string, unknown>>
+    ).data!;
+    const item = prop(listData, "items").items as Record<string, unknown>;
+    const itemData = prop(item, "data");
+    expect(itemData).toEqual({ type: "object", additionalProperties: true });
   });
 
   describe("field-level schema", () => {

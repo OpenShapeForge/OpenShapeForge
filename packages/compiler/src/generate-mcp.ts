@@ -18,12 +18,13 @@
  * Determinism: pure function of the compiled contracts; no timestamps,
  * entities sorted by tool prefix, fields in authored order.
  */
+import { pluralize } from "./authoring/compiler/helpers.js";
 import type {
+  CompiledColumn,
   CompiledEntityContract,
   CompiledField,
   CompiledRelationship,
 } from "./authoring/types.js";
-import { pluralize } from "./authoring/compiler/helpers.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
 import {
@@ -49,6 +50,261 @@ function describeMcpField(field: CompiledField): string | undefined {
 }
 
 const MCP_FIELD_SCHEMA_OPTIONS = { describeField: describeMcpField };
+
+const ENTITY_OPERATION_INTENTS = [
+  "list",
+  "get",
+  "create",
+  "update",
+  "delete",
+] as const;
+
+function storageValueSchema(type: CompiledColumn["type"]): JsonObject {
+  switch (type) {
+    case "uuid":
+      return { type: "string", format: "uuid" };
+    case "boolean":
+      return { type: "boolean" };
+    case "integer":
+    case "bigint":
+      return { type: "integer" };
+    case "numeric":
+      return { type: "number" };
+    case "date":
+      return { type: "string", format: "date" };
+    case "timestamptz":
+      return { type: "string", format: "date-time" };
+    case "jsonb":
+      return {};
+    default:
+      return { type: "string" };
+  }
+}
+
+function nullableSchema(schema: JsonObject): JsonObject {
+  return { anyOf: [schema, { type: "null" }] };
+}
+
+/**
+ * The record shape returned by generated CRUD. It follows persisted storage,
+ * not the create schema: server-managed values and relationship foreign keys
+ * are present in reads too. `additionalProperties` stays open because the MCP
+ * runtime may add a safe, server-derived projection such as oauthRedirectUrl.
+ */
+function entityRecordOutputSchema(
+  contract: CompiledEntityContract,
+  generic: boolean,
+): JsonObject {
+  if (generic) {
+    return { type: "object", additionalProperties: true };
+  }
+
+  const fields = new Map(
+    contract.model.fields.map((field) => [field.key, field]),
+  );
+  const properties: JsonObject = {};
+  const required: string[] = [];
+
+  const add = (
+    key: string,
+    schema: JsonObject,
+    isRequired: boolean,
+  ): void => {
+    properties[key] = schema;
+    if (isRequired) required.push(key);
+  };
+
+  for (const column of contract.storage.columns) {
+    const field = fields.get(column.field);
+    const label = field ? localizedText(field.label) : undefined;
+    const description = field ? describeMcpField(field) : undefined;
+    // Responses describe what storage can actually contain. Create/update
+    // validation bounds and enums constrain new input, but older/imported rows
+    // are not rewritten by those rules and must remain valid output.
+    const schema = {
+      ...storageValueSchema(column.type),
+      ...(label ? { title: label } : {}),
+      ...(description ? { description } : {}),
+    };
+    add(
+      column.field,
+      column.nullable ? nullableSchema(schema) : schema,
+      !column.nullable,
+    );
+  }
+
+  // Generated CRUD requires id and injects tenant/timestamps into its storage
+  // manifest even when a compact compiled fixture omits the platform fields.
+  if (!("id" in properties)) {
+    add("id", { type: "string", format: "uuid" }, true);
+  }
+  if (!("tenantId" in properties)) {
+    add("tenantId", { type: "string", format: "uuid" }, true);
+  }
+  if (!("createdAt" in properties)) {
+    add("createdAt", { type: "string", format: "date-time" }, true);
+  }
+  if (!("updatedAt" in properties)) {
+    add("updatedAt", { type: "string", format: "date-time" }, true);
+  }
+
+  return {
+    type: "object",
+    properties,
+    required,
+    additionalProperties: true,
+  };
+}
+
+function canonicalOutputDefinitions(): JsonObject {
+  return {
+    OperationReference: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "intent"],
+      properties: {
+        id: { type: "string" },
+        intent: { type: "string", enum: [...ENTITY_OPERATION_INTENTS] },
+      },
+    },
+    OperationError: {
+      type: "object",
+      additionalProperties: false,
+      required: ["code", "message", "retryable"],
+      properties: {
+        code: { type: "string" },
+        message: { type: "string" },
+        detail: { type: "string" },
+        retryable: { type: "boolean" },
+        retryAt: { type: "string", format: "date-time" },
+        violations: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["code", "message"],
+            properties: {
+              field: { type: "string" },
+              code: { type: "string" },
+              message: { type: "string" },
+              detail: { type: "string" },
+            },
+          },
+        },
+        data: { type: "object", additionalProperties: true },
+      },
+    },
+    OperationOffer: {
+      oneOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["operation", "available"],
+          properties: {
+            operation: { $ref: "#/$defs/OperationReference" },
+            available: { const: true },
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["operation", "available", "error"],
+          properties: {
+            operation: { $ref: "#/$defs/OperationReference" },
+            available: { const: false },
+            error: { $ref: "#/$defs/OperationError" },
+          },
+        },
+      ],
+    },
+  };
+}
+
+function offersSchema(): JsonObject {
+  return {
+    type: "array",
+    items: { $ref: "#/$defs/OperationOffer" },
+  };
+}
+
+function recordEnvelopeSchema(record: JsonObject): JsonObject {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["data", "operations"],
+    properties: {
+      data: record,
+      operations: offersSchema(),
+    },
+  };
+}
+
+function entityToolOutputSchema(
+  operation: McpToolDefinition["operation"],
+  record: JsonObject,
+): JsonObject {
+  let success: JsonObject;
+  if (operation === "list") {
+    success = {
+      type: "object",
+      additionalProperties: false,
+      required: ["data", "operations"],
+      properties: {
+        data: {
+          type: "object",
+          additionalProperties: false,
+          required: ["items", "totalCount", "nextCursor"],
+          properties: {
+            items: {
+              type: "array",
+              items: recordEnvelopeSchema(record),
+            },
+            totalCount: { type: "integer" },
+            nextCursor: {
+              anyOf: [{ type: "string" }, { type: "null" }],
+            },
+          },
+        },
+        operations: offersSchema(),
+      },
+    };
+  } else if (operation === "delete") {
+    success = {
+      type: "object",
+      additionalProperties: false,
+      required: ["data", "operations"],
+      properties: {
+        data: {
+          type: "object",
+          additionalProperties: false,
+          required: ["deleted"],
+          properties: { deleted: { type: "boolean", const: true } },
+        },
+        operations: offersSchema(),
+      },
+    };
+  } else {
+    success = recordEnvelopeSchema(record);
+  }
+
+  return {
+    type: "object",
+    oneOf: [
+      success,
+      {
+        type: "object",
+        additionalProperties: false,
+        required: ["error"],
+        properties: {
+          error: { $ref: "#/$defs/OperationError" },
+        },
+      },
+    ],
+    $defs: {
+      ...canonicalOutputDefinitions(),
+    },
+  };
+}
 
 /** Operations whose tools accept no entity fields, only identifiers/paging. */
 const READ_OPERATIONS = new Set(["list", "get"]);
@@ -242,6 +498,8 @@ export type McpToolDefinition = {
   title?: string;
   description: string;
   inputSchema: JsonObject;
+  /** Canonical success/error envelope returned as MCP structuredContent. */
+  outputSchema: JsonObject;
   annotations: {
     readOnlyHint: boolean;
     destructiveHint: boolean;
@@ -268,7 +526,9 @@ function annotationsFor(operation: McpToolDefinition["operation"]) {
       return {
         readOnlyHint: false,
         destructiveHint: false,
-        idempotentHint: true,
+        // The current runtime appends an event and advances updated_at on each
+        // execution; retrying the same request is therefore not idempotent.
+        idempotentHint: false,
       };
     case "delete":
       return {
@@ -342,6 +602,12 @@ function buildToolsForEntity(
   const sortable = sortableFieldKeys(fields, mcp.elicitOnCreate?.into);
   const filterField = contract.entity.filterField;
   const tools: McpToolDefinition[] = [];
+  const output = entityRecordOutputSchema(
+    contract,
+    mcp.tools === "generic",
+  );
+  const outputSchema = (operation: McpToolDefinition["operation"]) =>
+    entityToolOutputSchema(operation, output);
 
   const idSchema: JsonObject = {
     type: "object",
@@ -381,12 +647,30 @@ function buildToolsForEntity(
     operation: McpToolDefinition["operation"],
     fallback: string,
   ) => {
+    if (contract.authoringVersion === 2) {
+      const canonical = contract.entityOperations[operation];
+      const parts = [
+        localizedText(canonical?.description) ?? fallback,
+        localizedText(canonical?.guidance?.assistant),
+        localizedText(mcp.operationInstructions?.[operation]),
+      ].filter((part): part is string => Boolean(part));
+      const description = parts.join(" ");
+      return operation === "create" || operation === "update"
+        ? `${description}${writerNote}`
+        : description;
+    }
     const authored = mcp.toolOverrides?.[operation]?.description;
     if (authored === undefined) return fallback;
     return operation === "create" || operation === "update"
       ? `${authored}${writerNote}`
       : authored;
   };
+  const titled = (
+    operation: McpToolDefinition["operation"],
+    fallback: string,
+  ) => contract.authoringVersion === 2
+    ? (localizedText(contract.entityOperations[operation]?.name) ?? fallback)
+    : fallback;
 
   if (mcp.operations.list) {
     const filterProperties: JsonObject = {};
@@ -417,7 +701,7 @@ function buildToolsForEntity(
       operation: "list",
       entity: contract.entity.name,
       table,
-      title: `List ${label}`,
+      title: titled("list", `List ${label}`),
       description: described(
         "list",
         `${description} Returns a page of records. Text filters match on substring; ` +
@@ -455,6 +739,7 @@ function buildToolsForEntity(
         },
         additionalProperties: false,
       },
+      outputSchema: outputSchema("list"),
       annotations: annotationsFor("list"),
     });
   }
@@ -466,12 +751,13 @@ function buildToolsForEntity(
       operation: "get",
       entity: contract.entity.name,
       table,
-      title: `Get ${label}`,
+      title: titled("get", `Get ${label}`),
       description: described(
         "get",
         `${description} Fetches a single record by id.`,
       ),
       inputSchema: idSchema,
+      outputSchema: outputSchema("get"),
       annotations: annotationsFor("get"),
     });
   }
@@ -483,7 +769,7 @@ function buildToolsForEntity(
       operation: "create",
       entity: contract.entity.name,
       table,
-      title: `Create ${label}`,
+      title: titled("create", `Create ${label}`),
       description: described(
         "create",
         `${description} Creates a new record.${writerNote}`,
@@ -497,6 +783,7 @@ function buildToolsForEntity(
         relationships,
         true,
       ),
+      outputSchema: outputSchema("create"),
       annotations: annotationsFor("create"),
     });
   }
@@ -521,7 +808,7 @@ function buildToolsForEntity(
       operation: "update",
       entity: contract.entity.name,
       table,
-      title: `Update ${label}`,
+      title: titled("update", `Update ${label}`),
       description: described(
         "update",
         `${description} Partially updates a record; omitted fields are left unchanged.` +
@@ -541,6 +828,7 @@ function buildToolsForEntity(
         additionalProperties: false,
         ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
       },
+      outputSchema: outputSchema("update"),
       annotations: annotationsFor("update"),
     });
   }
@@ -552,12 +840,13 @@ function buildToolsForEntity(
       operation: "delete",
       entity: contract.entity.name,
       table,
-      title: `Delete ${label}`,
+      title: titled("delete", `Delete ${label}`),
       description: described(
         "delete",
         `${description} Permanently deletes a record by id.`,
       ),
       inputSchema: idSchema,
+      outputSchema: outputSchema("delete"),
       annotations: annotationsFor("delete"),
     });
   }

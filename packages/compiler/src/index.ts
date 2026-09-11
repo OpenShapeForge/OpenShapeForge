@@ -319,7 +319,7 @@ export async function collectAllArtifacts(
         ? [{
             path: "apps/product-web/src/generated/web-manifest.json",
             contents: renderWebManifest(buildWebManifest(
-              entities.filter((entity) => entity.contract.rest !== undefined),
+              entities,
               { locale: "nl", routeLocale: "en" },
             )),
           }]

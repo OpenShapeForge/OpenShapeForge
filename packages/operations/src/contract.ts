@@ -6,6 +6,35 @@ export type OperationReference<TIntent extends string = string> = {
   intent: TIntent;
 };
 
+export type OperationConfirmationBinding =
+  | "subject"
+  | "tenant"
+  | "operation"
+  | "target.id"
+  | "target.version";
+
+export type OperationConfirmation =
+  | { mode: "none" }
+  | { mode: "explicit" }
+  | {
+      mode: "challenge";
+      challenge: {
+        kind: "type-current-field";
+        field: string;
+        issuedBy: "server";
+        bindTo: readonly [
+          "subject",
+          "tenant",
+          "operation",
+          "target.id",
+          "target.version",
+        ];
+        /** ISO 8601 duration, for example PT5M. */
+        expiresAfter: string;
+        singleUse: true;
+      };
+    };
+
 export type OperationViolation = {
   field?: string;
   code: string;

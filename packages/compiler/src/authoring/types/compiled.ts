@@ -1,6 +1,6 @@
 // @ts-nocheck
 // SPDX-License-Identifier: BUSL-1.1
-import type { OperationReference } from "@openshapeforge/operations";
+import type { OperationConfirmation, OperationReference } from "@openshapeforge/operations";
 import type {
   LocalizedText,
   FieldValidation,
@@ -183,6 +183,8 @@ export interface GraphQLSection {
     update: { name: string; input: string };
     delete: { name: string; args: { name: string; type: string }[] };
   };
+  /** Explicit only for v2 authoring; v1 continues to use the CRUD upper bound. */
+  operations?: Record<CrudOperationKey, boolean>;
 }
 
 export interface McpSection {
@@ -208,6 +210,8 @@ export interface McpSection {
   toolOverrides?: Partial<
     Record<McpOperationKey, { name?: string; description?: string }>
   >;
+  /** MCP-only guidance refining the canonical v2 operation description. */
+  operationInstructions?: Partial<Record<McpOperationKey, string | LocalizedText>>;
   /**
    * Authored MCP resource exposure, validated but not defaulted — the
    * catalog generator resolves the name/description fallbacks because it
@@ -312,16 +316,24 @@ export type EntityOperationOutput =
 
 export type CompiledEntityOperation = OperationReference<EntityOperationIntent> & {
   /** Stable interface-neutral identity, e.g. `Relation.update`. */
+  key: string;
   entityId: string;
   entityName: string;
+  name: string | LocalizedText;
+  description: string | LocalizedText;
+  guidance?: { assistant?: string | LocalizedText };
   input: EntityOperationInput;
   output: EntityOperationOutput;
   authorization: {
     action: "read" | "create" | "update" | "delete";
     roles: string[];
   };
-  /** Explicit current behavior; richer confirmation policies are additive. */
-  interaction: { confirmation: "none" };
+  effects: {
+    data: "read" | "write" | "delete";
+    external: "none" | "read" | "write";
+  };
+  reliability: { idempotency: { mode: "natural" | "keyed" | "none" } };
+  interaction: { confirmation: OperationConfirmation };
 };
 
 export interface CompiledListView {
@@ -586,6 +598,7 @@ export interface CompiledAuthorization {
 }
 
 export interface CompiledEntityContract {
+  authoringVersion: 1 | 2;
   contractVersion: number;
   kind: "compiledEntityContract";
   entity: {
@@ -615,6 +628,11 @@ export interface CompiledEntityContract {
   crud: CrudSection;
   /** Canonical generated operations projected by REST, MCP, web and GraphQL. */
   entityOperations: Partial<Record<EntityOperationIntent, CompiledEntityOperation>>;
+  /** Explicit v2 interface exposure; v1 contracts keep using legacy projections. */
+  interfaces?: {
+    web?: { operations: Partial<Record<EntityOperationIntent, boolean>> };
+    graphql?: { operations: Partial<Record<EntityOperationIntent, boolean>> };
+  };
   graphql: GraphQLSection;
   /** Present only when the entity opts into generated REST exposure. */
   rest?: RestSection;

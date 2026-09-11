@@ -23,6 +23,10 @@ export type WebFieldOption = {
   label: LocalizedText;
 };
 
+export type WebFieldOptionSource =
+  | { type: "referentiedata"; group: string }
+  | { type: "remote" | "dynamic"; source: string };
+
 /**
  * Semantic field projection. A renderer registry resolves presentation from
  * semanticType, valueType, cardinality, surface and mode; fields never name a
@@ -38,6 +42,7 @@ export type WebFieldProjection = {
   variables?: "none" | "whole" | "template" | "both";
   suggestions?: WebFieldSuggestions;
   options?: WebFieldOption[];
+  optionSource?: WebFieldOptionSource;
   cardinality: "one" | "many";
   required: boolean;
   /** Static capabilities only. Effective rights arrive in operation offers. */

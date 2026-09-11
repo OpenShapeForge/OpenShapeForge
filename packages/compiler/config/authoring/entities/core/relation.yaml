@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 2
 kind: coreEntity
 module: core
 entity: Relation
@@ -14,8 +14,6 @@ labels:
   nl: Relatie
 domains:
   - relations
-rest: true
-mcp: true
 authorization:
   roles:
     read:
@@ -77,11 +75,9 @@ fields:
     persisted:
       column: relation_type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: RELATIONTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: RELATIONTYPE
   - key: relationSubType
     valueType: string
     required: false
@@ -110,11 +106,9 @@ fields:
     persisted:
       column: preferred_contact_channel
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: COMMUNICATIONCHANNEL
-        clearable: true
+    options:
+      type: referentiedata
+      referentieGroep: COMMUNICATIONCHANNEL
   - key: status
     valueType: string
     required: false
@@ -155,11 +149,6 @@ fields:
     persisted:
       column: address
       storageClass: core
-    render:
-      component: AddressAutocomplete
-      props:
-        provider: bag
-        country: NL
   - key: location
     valueType: string
     required: false
@@ -172,14 +161,6 @@ fields:
     persisted:
       column: location
       storageClass: core
-    render:
-      component: MapPicker
-      props:
-        defaultZoom: 13
-        defaultCenter:
-          - 52.0907
-          - 5.1214
-        geocodeProvider: nominatim
   - key: notes
     valueType: string
     required: false
@@ -191,14 +172,11 @@ fields:
       nl: Vrije tekst notities over deze relatie.
     classification:
       sensitivity: confidential
+    validation:
+      maxLength: 2000
     persisted:
       column: notes
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 2000
   - key: businessContext
     valueType: string
     required: false
@@ -213,11 +191,6 @@ fields:
     persisted:
       column: business_context
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 6
-        maxLength: 4000
 relationships:
   - key: relationGroup
     kind: belongsTo
@@ -338,175 +311,113 @@ relationships:
     label:
       en: Context associations
       nl: Contextkoppelingen
-hooks:
-  beforeCreate:
-    - handler: checkDuplicateRelation
-      failMessage:
-        en: A relation with this name already exists
-        nl: Er bestaat al een relatie met deze naam
-  afterCreate:
-    - handler: sendWelcomeNotification
-  beforeDelete:
-    - handler: checkOpenAgreements
-      failMessage:
-        en: "Cannot delete: open agreements exist"
-        nl: "Kan niet verwijderen: er bestaan openstaande overeenkomsten"
-ui:
-  routes:
-    list:
-      en: /relations
-      nl: /relaties
-    detail:
-      en: /relations/:id
-      nl: /relaties/:id
-    create:
-      en: /relations/create
-      nl: /relaties/aanmaken
-    edit:
-      en: /relations/:id/edit
-      nl: /relaties/:id/bewerken
-    delete:
-      en: /relations/:id/delete
-      nl: /relaties/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Relations
-        nl: Relaties
-      columns:
-        - key: displayName
-          sortable: true
-        - key: relationType
-          sortable: true
-        - key: status
-          sortable: true
-      defaultSort:
-        key: displayName
-        direction: asc
-      rowLink:
-        en: /relations/:id
-        nl: /relaties/:id
-    detail:
-      header:
+operations:
+  list:
+    name: { en: List relations, nl: Relaties tonen }
+    description:
+      en: Returns a filtered and sorted page of relations.
+      nl: Geeft een gefilterde en gesorteerde pagina met relaties terug.
+    guidance:
+      assistant:
+        en: Use this operation to find relations; use get for one known id.
+        nl: Gebruik deze operatie om relaties te zoeken; gebruik get voor één bekend id.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  get:
+    name: { en: Get relation, nl: Relatie ophalen }
+    description:
+      en: Returns one relation by its canonical id.
+      nl: Geeft één relatie terug op basis van het canonieke id.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  create:
+    name: { en: Create relation, nl: Relatie aanmaken }
+    description:
+      en: Creates one relation after validating its canonical fields.
+      nl: Maakt één relatie aan na validatie van de canonieke velden.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    confirmation: { mode: none }
+
+interfaces:
+  rest:
+    operations:
+      list: {}
+      get: {}
+      create: {}
+  mcp:
+    operations:
+      list: {}
+      get: {}
+      create:
+        instructions:
+          en: Ask for missing required fields before invoking this tool.
+          nl: Vraag ontbrekende verplichte velden uit voordat je deze tool aanroept.
+    resource:
+      uri: app://relations
+      name: Relations
+      description: Read the relations available to the signed-in identity.
+      templateDescription: Read one relation by its canonical id.
+  web:
+    operations:
+      list: {}
+      get: {}
+      create: {}
+    views:
+      collection:
+        route: { en: /relations, nl: /relaties }
+        title: { en: Relations, nl: Relaties }
+        columns:
+          - { key: displayName, sortable: true }
+          - { key: relationType, sortable: true }
+          - { key: status, sortable: true }
+        defaultSort: { key: displayName, direction: asc }
+      record:
+        routes:
+          read: { en: /relations/:id, nl: /relaties/:id }
+          create: { en: /relations/new, nl: /relaties/nieuw }
         title: "{{displayName}}"
         subtitle: "{{relationType}}"
-        badges:
-          - relationType
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Basics
-                nl: Basisgegevens
-              fields:
-                - displayName
-                - relationType
-                - relationSubType
-                - preferredContactChannel
-                - status
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-            - title:
-                en: Location
-                nl: Locatie
-              fields:
-                - address
-                - location
-            - title:
-                en: Context
-                nl: Context
-              fields:
-                - businessContext
-            - title:
-                en: Notes
-                nl: Notities
-              fields:
-                - notes
-        - id: agreements
-          label:
-            en: Agreements
-            nl: Overeenkomsten
-          relationship: agreements
-        - id: tasks
-          label:
-            en: Tasks
-            nl: Taken
-          relationship: tasks
-    form:
-      variants:
-        create:
-          title:
-            en: Create relation
-            nl: Relatie aanmaken
-          groups:
-            - title:
-                en: Basics
-                nl: Basisgegevens
-              fields:
-                - displayName
-                - relationType
-                - relationSubType
-                - preferredContactChannel
-                - status
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-            - title:
-                en: Location
-                nl: Locatie
-              fields:
-                - address
-                - location
-            - title:
-                en: Context
-                nl: Context
-              fields:
-                - businessContext
-            - title:
-                en: Notes
-                nl: Notities
-              fields:
-                - notes
-        edit:
-          extends: create
-          title:
-            en: Edit relation
-            nl: Relatie bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        layout:
+          tabs:
+            - id: overview
+              label: { en: Overview, nl: Overzicht }
+              groups:
+                - title: { en: Basics, nl: Basisgegevens }
+                  fields: [displayName, relationType, relationSubType, preferredContactChannel, status]
+                - title: { en: Source, nl: Herkomst }
+                  fields: [externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration]
+                - title: { en: Location, nl: Locatie }
+                  fields: [address, location]
+                - title: { en: Context, nl: Context }
+                  fields: [businessContext]
+                - title: { en: Notes, nl: Notities }
+                  fields: [notes]
+            - id: agreements
+              label: { en: Agreements, nl: Overeenkomsten }
+              relationship: agreements
+            - id: tasks
+              label: { en: Tasks, nl: Taken }
+              relationship: tasks
+        modes:
+          create:
+            title: { en: Create relation, nl: Relatie aanmaken }
+            groups:
+              - title: { en: Basics, nl: Basisgegevens }
+                fields: [displayName, relationType, relationSubType, preferredContactChannel, status]
+              - title: { en: Source, nl: Herkomst }
+                fields: [externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration]
+              - title: { en: Location, nl: Locatie }
+                fields: [address, location]
+              - title: { en: Context, nl: Context }
+                fields: [businessContext]
+              - title: { en: Notes, nl: Notities }
+                fields: [notes]

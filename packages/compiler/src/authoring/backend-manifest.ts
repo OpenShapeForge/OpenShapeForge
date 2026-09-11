@@ -1151,6 +1151,9 @@ export function compileAuthoringBackendManifest(
           createMutationName: candidate.contract.graphql.mutations.create.name,
           updateMutationName: candidate.contract.graphql.mutations.update.name,
           deleteMutationName: candidate.contract.graphql.mutations.delete.name,
+          ...(candidate.contract.graphql.operations
+            ? { operations: candidate.contract.graphql.operations }
+            : {}),
           relationships: candidate.contract.graphql.relationships
             .filter((relationship): relationship is typeof relationship & { resolve: "belongsTo" | "hasMany" } =>
               relationship.resolve === "belongsTo" || relationship.resolve === "hasMany",

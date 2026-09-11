@@ -300,6 +300,14 @@ export type TableSourceDefinition = {
     createMutationName: string;
     updateMutationName: string;
     deleteMutationName: string;
+    /** Explicit v2 interface exposure; absent for v1 manifests. */
+    operations?: {
+      list: boolean;
+      get: boolean;
+      create: boolean;
+      update: boolean;
+      delete: boolean;
+    };
     relationships: Array<{
       name: string;
       target: string;

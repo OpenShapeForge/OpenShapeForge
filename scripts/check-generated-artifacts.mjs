@@ -14,11 +14,11 @@ import {
 
 const repoRoot = process.cwd();
 const webPresent = existsSync(join(repoRoot, "apps/web"));
-// AgreementMilestone withholds generic `create` (see agreement-milestone.yaml)
-// so the stock full-CRUD web UI is intentionally not generated for it
-// (isGeneratedCrudUiEnabled requires every operation to be true) — it stays
-// at the pre-existing count rather than 117.
-const expectedGeneratedCrudEntityCount = 116;
+// AgreementMilestone and the schemaVersion 2 Relation slice withhold part of
+// generic CRUD. The stock full-CRUD web UI is intentionally not generated for
+// either one (isGeneratedCrudUiEnabled requires every operation to be true).
+// Relation is instead projected through WebManifest for Hubble.
+const expectedGeneratedCrudEntityCount = 115;
 
 /**
  * The realms this repository authors, by name.

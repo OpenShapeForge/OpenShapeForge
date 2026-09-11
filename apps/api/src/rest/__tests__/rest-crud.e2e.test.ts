@@ -26,6 +26,7 @@ import {
 } from "../../graphql/__tests__/e2e/harness.js";
 import {
   createRow,
+  eligibleTables,
   fieldName,
   foreignKeyTargets,
   isMutableColumn,
@@ -43,6 +44,9 @@ registerSuiteLifecycle();
 const SECRET = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ?? null;
 
 const restTables = tables.filter((table) => table.source?.rest);
+const restCreateTables = eligibleTables.filter(
+  (table) => table.source?.rest?.operations.create,
+);
 
 let app: ReturnType<typeof createApiApp> | null = null;
 function getApp() {
@@ -109,7 +113,9 @@ async function buildCreateBody(
   table: (typeof restTables)[number],
   identity: Identity,
   overrides: Record<string, unknown> = {},
+  depth = 0,
 ): Promise<Record<string, unknown>> {
+  if (depth > 5) throw new Error(`REST FK dependency chain too deep while creating ${table.name}`);
   const fkTargets = foreignKeyTargets(table);
   const body: Record<string, unknown> = { ...overrides };
   for (const column of table.columns) {
@@ -119,11 +125,7 @@ async function buildCreateBody(
     const fkTarget = fkTargets.get(column.name);
     if (fkTarget) {
       if (column.required) {
-        const targetTable = tablesByName.get(fkTarget);
-        if (!targetTable) {
-          throw new Error(`Required FK ${table.name}.${column.name} targets unknown table ${fkTarget}`);
-        }
-        body[field] = await createRow(targetTable, identity);
+        body[field] = await createForeignKeyTarget(fkTarget, identity, depth + 1);
       }
       continue;
     }
@@ -132,6 +134,28 @@ async function buildCreateBody(
     }
   }
   return body;
+}
+
+async function createForeignKeyTarget(
+  target: string,
+  identity: Identity,
+  depth = 0,
+): Promise<string> {
+  const fullCrudTarget = tablesByName.get(target);
+  if (fullCrudTarget) return createRow(fullCrudTarget, identity, {}, depth);
+
+  const restTarget = restCreateTables.find((table) => table.name === target);
+  if (!restTarget) throw new Error(`REST FK target ${target} has no create operation`);
+  const response = await rest(
+    identity,
+    "POST",
+    `${REST_MOUNT_PATH}/${restTarget.source!.rest!.basePath}`,
+    await buildCreateBody(restTarget, identity, {}, depth + 1),
+  );
+  expect(response.status).toBe(201);
+  const id = response.body.data.id as string;
+  createdRows.push({ table: restTarget, id, identity });
+  return id;
 }
 
 function trackRestRow(table: (typeof restTables)[number], id: string, identity: Identity) {
@@ -508,9 +532,7 @@ for (const table of restTables) {
   /** A value the column will accept: a real parent row for an FK, else a sample. */
   const valueFor = async (identity: Identity) => {
     if (!fkTarget) return sampleValue(immutable, `rest-immutable-${seed}`);
-    const targetTable = tablesByName.get(fkTarget);
-    if (!targetTable) throw new Error(`immutable FK targets unknown table ${fkTarget}`);
-    return await createRow(targetTable, identity);
+    return createForeignKeyTarget(fkTarget, identity);
   };
 
   describe(`${rest_.basePath} immutable fields`, () => {

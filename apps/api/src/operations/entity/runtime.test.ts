@@ -13,7 +13,7 @@ const relation = getGeneratedCrudTables().find(
 )!;
 
 describe("entity operation runtime", () => {
-  test("uses stable interface-neutral operation identities", () => {
+  test("uses stable interface-neutral identities for the operations authored by Relation v2", () => {
     expect(entityOperationRef(relation, "list")).toEqual({
       id: "Relation.list",
       intent: "list",
@@ -26,14 +26,8 @@ describe("entity operation runtime", () => {
       id: "Relation.create",
       intent: "create",
     });
-    expect(entityOperationRef(relation, "update")).toEqual({
-      id: "Relation.update",
-      intent: "update",
-    });
-    expect(entityOperationRef(relation, "delete")).toEqual({
-      id: "Relation.delete",
-      intent: "delete",
-    });
+    expect(() => entityOperationRef(relation, "update")).toThrow(/not available/);
+    expect(() => entityOperationRef(relation, "delete")).toThrow(/not available/);
   });
 
   test("resolves an operation to its generated entity contract", () => {
@@ -48,7 +42,7 @@ describe("entity operation runtime", () => {
       authorization: { action: "read" },
       input: { kind: "collection-query" },
       output: { kind: "entity-connection" },
-      interaction: { confirmation: "none" },
+      interaction: { confirmation: { mode: "none" } },
     });
   });
 
@@ -79,16 +73,16 @@ describe("entity operation runtime", () => {
 
   test("keeps an authorized temporary refusal visible with retryAt", () => {
     const update = getEntityOperationContracts().find(
-      (operation) => operation.id === "Relation.update",
+      (operation) => operation.intent === "update",
     )!;
     const retryAt = "2026-09-11T15:15:00.000Z";
     expect(
       getEntityOperationOffers(
-        "Relation",
+        update.entityName,
         { roles: [update.authorization.roles[0]!] },
         ["update"],
         {
-          "Relation.update": {
+          [update.id]: {
             code: "LOCKED",
             message: "This relation is currently being edited.",
             detail: "The edit lease expires in 15 minutes.",
@@ -99,7 +93,7 @@ describe("entity operation runtime", () => {
       ),
     ).toEqual([
       {
-        operation: { id: "Relation.update", intent: "update" },
+        operation: { id: update.id, intent: "update" },
         available: false,
         error: {
           code: "LOCKED",

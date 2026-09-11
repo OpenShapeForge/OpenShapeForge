@@ -1,5 +1,6 @@
 // @ts-nocheck
 // SPDX-License-Identifier: BUSL-1.1
+import type { OperationConfirmation } from "@openshapeforge/operations";
 import type {
   LocalizedText,
   FieldValidation,
@@ -492,6 +493,70 @@ export interface McpConfig {
   test?: McpTestConfig;
 }
 
+/**
+ * Version 2 entity authoring keeps behaviour in canonical operations and lets
+ * interfaces only opt into those operations.  The first supported
+ * implementation kind is generated entity CRUD; custom/plugin operations can
+ * be added without changing this entity contract.
+ */
+export type EntityOperationAction = CrudOperationKey;
+
+export interface EntityOperationDefinition {
+  name: string | LocalizedText;
+  description: string | LocalizedText;
+  guidance?: { assistant?: string | LocalizedText };
+  implementation: {
+    type: "entity";
+    action: EntityOperationAction;
+  };
+  effects: {
+    data: "read" | "write" | "delete";
+    external: "none" | "read" | "write";
+  };
+  reliability: {
+    idempotency: { mode: "natural" | "keyed" | "none" };
+  };
+  confirmation: OperationConfirmation;
+}
+
+export interface EntityInterfaceOperationProjection {
+  /** MCP-only wording may refine, but never redefine, the operation. */
+  instructions?: string | LocalizedText;
+}
+
+export interface EntityWebViewDefinition {
+  collection: {
+    route: string | LocalizedText;
+    title?: LocalizedText;
+    columns: { key: string; sortable?: boolean }[];
+    defaultSort?: { key: string; direction: "asc" | "desc" };
+  };
+  record?: {
+    routes?: { read?: string | LocalizedText; create?: string | LocalizedText };
+    title: string;
+    subtitle?: string;
+    actions?: string[];
+    layout: { tabs: import("./views.js").ViewGroup[] };
+    modes?: {
+      create?: { title: LocalizedText; groups: import("./views.js").ViewGroup[] };
+      update?: { title: LocalizedText; groups?: import("./views.js").ViewGroup[] };
+    };
+  };
+}
+
+export interface EntityInterfacesDefinition {
+  rest?: { operations: Record<string, EntityInterfaceOperationProjection> };
+  graphql?: { operations: Record<string, EntityInterfaceOperationProjection> };
+  mcp?: {
+    operations: Record<string, EntityInterfaceOperationProjection>;
+    resource?: McpResourceConfig;
+  };
+  web?: {
+    operations: Record<string, EntityInterfaceOperationProjection>;
+    views: EntityWebViewDefinition;
+  };
+}
+
 export interface CoreEntity {
   schemaVersion: number;
   kind: "coreEntity";
@@ -569,6 +634,10 @@ export interface CoreEntity {
    * prefix, and the `generic` tool style for large catalogs.
    */
   mcp?: boolean | McpConfig;
+  /** Canonical version-2 operations. Forbidden on schemaVersion 1 by JSON Schema. */
+  operations?: Record<string, EntityOperationDefinition>;
+  /** Thin version-2 interface projections. Forbidden on schemaVersion 1 by JSON Schema. */
+  interfaces?: EntityInterfacesDefinition;
   workflow?: {
     nodes?: {
       actions?: {

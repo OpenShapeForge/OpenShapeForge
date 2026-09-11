@@ -50,10 +50,15 @@ const context = { repoRoot: "/repo", authoringDir: "/repo/authoring", webPresent
 
 describe("first-class plugin operations", () => {
   test("renders canonical entity operations beside plugin operations", () => {
-    const entityOperation: CompiledEntityOperation = {
-      id: "Relation.list",
+  const entityOperation: CompiledEntityOperation = {
+    key: "list",
+    id: "Relation.list",
       entityId: "hubble.Relation",
-      entityName: "Relation",
+    entityName: "Relation",
+    name: "List Relation",
+    description: "List Relation",
+    effects: { data: "read", external: "none" },
+    reliability: { idempotency: { mode: "natural" } },
       intent: "list",
       input: {
         kind: "collection-query",
@@ -64,7 +69,7 @@ describe("first-class plugin operations", () => {
       },
       output: { kind: "entity-connection", entityId: "hubble.Relation" },
       authorization: { action: "read", roles: ["Relations.Read"] },
-      interaction: { confirmation: "none" },
+      interaction: { confirmation: { mode: "none" } },
     };
     const entities = [{ contract: { entityOperations: { list: entityOperation } } }] as never;
 

@@ -367,6 +367,7 @@ type CatalogTool = {
   title?: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
   annotations: {
     readOnlyHint: boolean;
     destructiveHint: boolean;
@@ -731,6 +732,60 @@ function withholdClassified(
   }
   root.properties = projected;
   return root;
+}
+
+/**
+ * Remove classified record properties from the advertised output without
+ * changing the shared catalog. The record itself stays open to additional
+ * properties because the database redaction layer currently returns withheld
+ * columns as null and the schema must not reveal their names.
+ */
+function withholdClassifiedOutput(
+  schema: Record<string, unknown>,
+  operation: McpOperation,
+  classifiedFields: readonly string[],
+): Record<string, unknown> {
+  if (classifiedFields.length === 0 || operation === "delete") return schema;
+  const copy = structuredClone(schema);
+  const success = Array.isArray(copy.oneOf)
+    ? (copy.oneOf[0] as Record<string, unknown> | undefined)
+    : undefined;
+  const successProperties = success?.properties as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  let record = successProperties?.data;
+  if (operation === "list") {
+    const listProperties = record?.properties as
+      | Record<string, Record<string, unknown>>
+      | undefined;
+    const items = listProperties?.items;
+    const item = items?.items as Record<string, unknown> | undefined;
+    const itemProperties = item?.properties as
+      | Record<string, Record<string, unknown>>
+      | undefined;
+    record = itemProperties?.data;
+  }
+  if (!record) return copy;
+
+  const withheld = new Set(classifiedFields);
+  const properties = record.properties;
+  if (
+    properties &&
+    typeof properties === "object" &&
+    !Array.isArray(properties)
+  ) {
+    record.properties = Object.fromEntries(
+      Object.entries(properties as Record<string, unknown>).filter(
+        ([name]) => !withheld.has(name),
+      ),
+    );
+  }
+  if (Array.isArray(record.required)) {
+    record.required = record.required.filter(
+      (name) => !withheld.has(name as string),
+    );
+  }
+  return copy;
 }
 
 function toolsForSession(
@@ -1520,6 +1575,11 @@ function describeTool(
       tool.inputSchema as Record<string, unknown>,
       classified,
     ),
+    outputSchema: withholdClassifiedOutput(
+      tool.outputSchema,
+      tool.operation,
+      classified,
+    ) as Tool["outputSchema"],
     annotations: {
       title: tool.title,
       ...tool.annotations,
@@ -1629,6 +1689,9 @@ function describeGenericTool(
       required: ["entity"],
       anyOf: branches,
     } as Tool["inputSchema"],
+    // Generic entries use the same field-agnostic canonical envelope, so the
+    // first catalog entry describes every entity this merged tool can return.
+    outputSchema: first.outputSchema as Tool["outputSchema"],
     annotations: {
       title: GENERIC_OPERATION_TITLE[operation],
       ...first.annotations,
@@ -2555,6 +2618,12 @@ async function invokeTool(
   elicitationCompleted = false,
 ): Promise<ToolResult> {
   const args = requireArguments(rawArgs);
+  const offerIntents = (Object.entries(table.source?.mcp?.operations ?? {}) as Array<[
+    McpOperation,
+    boolean,
+  ]>)
+    .filter(([, enabled]) => enabled)
+    .map(([intent]) => intent);
 
   switch (tool.operation) {
     case "list": {
@@ -2578,6 +2647,7 @@ async function invokeTool(
       // count pass is always requested (#17).
       const operationResult = await executeEntityOperation(db, session, {
         operation: { id: tool.operationId, intent: "list" },
+        offerIntents,
         input: {
           ...(typeof args.first === "number" ? { limit: args.first } : {}),
           ...(typeof args.after === "string" ? { cursor: args.after } : {}),
@@ -2605,6 +2675,7 @@ async function invokeTool(
     case "get": {
       const result = await executeEntityOperation(db, session, {
         operation: { id: tool.operationId, intent: "get" },
+        offerIntents,
         input: { id: requireId(args) },
       });
       if (result.intent !== "get") throw new Error("Unexpected entity result.");
@@ -2643,12 +2714,15 @@ async function invokeTool(
           operations: getEntityOperationOffers(
             entity?.entity ?? table.source?.authoringEntityName ?? table.name,
             session,
-            ["get", "update", "delete"],
+            ["get", "update", "delete"].filter((intent) =>
+              offerIntents.includes(intent as McpOperation),
+            ) as McpOperation[],
           ),
         });
       }
       const result = await executeEntityOperation(db, session, {
         operation: { id: tool.operationId, intent: "create" },
+        offerIntents,
         input: { values },
       });
       if (result.intent !== "create") throw new Error("Unexpected entity result.");
@@ -2678,6 +2752,7 @@ async function invokeTool(
       await assertPublishableWrite(db, session, tables, table, values, id);
       const result = await executeEntityOperation(db, session, {
         operation: { id: tool.operationId, intent: "update" },
+        offerIntents,
         input: { id, values },
       });
       if (result.intent !== "update") throw new Error("Unexpected entity result.");
@@ -2693,6 +2768,7 @@ async function invokeTool(
     case "delete": {
       const result = await executeEntityOperation(db, session, {
         operation: { id: tool.operationId, intent: "delete" },
+        offerIntents,
         input: { id: requireId(args) },
       });
       if (result.intent !== "delete") throw new Error("Unexpected entity result.");
@@ -3550,6 +3626,10 @@ function buildServer(
         if (!table) return fallbackOrNotFound();
         const result = await executeEntityOperation(db, session, {
           operation: entityOperationRef(table, "list"),
+          offerIntents: (Object.entries(table.source?.mcp?.operations ?? {}) as Array<[
+            McpOperation,
+            boolean,
+          ]>).filter(([, enabled]) => enabled).map(([intent]) => intent),
           input: { limit: RESOURCE_READ_LIMIT },
         });
         if (result.intent !== "list") throw new Error("Unexpected entity result.");
@@ -3577,6 +3657,10 @@ function buildServer(
         if (templated && table && id.length > 0 && !id.includes("/")) {
           const result = await executeEntityOperation(db, session, {
             operation: entityOperationRef(table, "get"),
+            offerIntents: (Object.entries(table.source?.mcp?.operations ?? {}) as Array<[
+              McpOperation,
+              boolean,
+            ]>).filter(([, enabled]) => enabled).map(([intent]) => intent),
             input: { id },
           });
           if (result.intent !== "get") throw new Error("Unexpected entity result.");
@@ -3821,6 +3905,7 @@ function buildServer(
           title: tool.title,
           description: tool.description,
           inputSchema: tool.inputSchema,
+          outputSchema: tool.outputSchema,
           annotations: { title: tool.title, ...tool.annotations },
         })),
     ] as Tool[];

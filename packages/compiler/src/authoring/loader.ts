@@ -18,6 +18,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { BASE_ENTITY_FILENAME, applyBaseEntityToCore, loadBaseEntity } from "./base-entity.js";
+import { assertV2Authoring } from "./entity-v2.js";
 import type {
   CoreEntity,
   EntityProfile,
@@ -239,6 +240,7 @@ export function loadEntity(
   // with a legacy fallback to authoring/core/.
   const corePath = resolveEntityFilePath(authoringDir, entityFileName);
   const rawCoreEntity = loadYaml<CoreEntity>(corePath);
+  assertV2Authoring(rawCoreEntity, corePath);
   const baseEntity = loadBaseEntity(authoringDir);
   const coreEntity = applyBaseEntityToCore(rawCoreEntity, baseEntity, {
     kind: "core",

@@ -124,6 +124,15 @@ function routeFor(
   return fallback;
 }
 
+function projectedRoute(
+  route: string | Partial<CompiledLocalizedText> | undefined,
+  routeLocale: "en" | "nl",
+  fallback: string,
+): string {
+  if (typeof route === "string") return route;
+  return route?.[routeLocale] ?? route?.en ?? route?.nl ?? fallback;
+}
+
 function collectionFor(
   entityName: string,
   contract: CompiledEntityContract,
@@ -167,6 +176,7 @@ type ProjectableEntity = {
   contract: CompiledEntityContract;
   view?: CompiledViewContext;
   route: string;
+  routeLocale: "en" | "nl";
   operations: Partial<Record<WebOperationIntent, WebOperationRef>>;
   collection: WebCollectionView;
 };
@@ -176,13 +186,19 @@ function projectableEntities(
   options: Required<WebManifestOptions>,
 ): ProjectableEntity[] {
   return entities.flatMap(({ slug, contract }) => {
-    if (!contract.entityOperations.list) return [];
+    if (contract.authoringVersion === 1 && !contract.rest) return [];
+    const exposed = contract.authoringVersion === 2
+      ? contract.interfaces?.web?.operations
+      : undefined;
+    if (!contract.entityOperations.list || (contract.authoringVersion === 2 && !exposed?.list)) return [];
     const view = contextFor(contract, options.context);
     const operations = Object.fromEntries(
       (["list", "get", "create", "update", "delete"] as const)
         .map((intent) => [
           intent,
-          operation(contract.entityOperations[intent]),
+          operation(exposed && exposed[intent] !== true
+            ? undefined
+            : contract.entityOperations[intent]),
         ])
         .filter((entry): entry is [WebOperationIntent, WebOperationRef] => Boolean(entry[1])),
     );
@@ -191,6 +207,7 @@ function projectableEntities(
       contract,
       ...(view ? { view } : {}),
       route: routeFor(contract, slug, view, options.routeLocale),
+      routeLocale: options.routeLocale,
       operations,
       collection: collectionFor(
         contract.entity.name,
@@ -236,6 +253,18 @@ function projectEntity(
               value,
               label: localized(label, value),
             })),
+          }
+        : {}),
+      ...(field.options?.type === "referentiedata" && field.options.referentieGroep
+        ? { optionSource: { type: "referentiedata" as const, group: field.options.referentieGroep } }
+        : {}),
+      ...((field.options?.type === "remote" || field.options?.type === "dynamic") &&
+      (field.options.remoteUrl || field.options.source)
+        ? {
+            optionSource: {
+              type: field.options.type,
+              source: field.options.remoteUrl ?? field.options.source!,
+            },
           }
         : {}),
       cardinality: field.cardinality === "collection" ? "many" : "one",
@@ -300,8 +329,24 @@ function projectEntity(
     preset: "inbox-main-context" as const,
     modes,
     routes: {
-      ...(modes.includes("read") ? { read: `${source.route}/:id` } : {}),
-      ...(modes.includes("create") ? { create: `${source.route}/new` } : {}),
+      ...(modes.includes("read")
+        ? {
+            read: projectedRoute(
+              view?.routes.detail,
+              source.routeLocale,
+              `${source.route}/:id`,
+            ),
+          }
+        : {}),
+      ...(modes.includes("create")
+        ? {
+            create: projectedRoute(
+              view?.routes.create,
+              source.routeLocale,
+              `${source.route}/new`,
+            ),
+          }
+        : {}),
     },
     operations: {
       ...(modes.includes("read") ? { read: operations.get } : {}),

@@ -3,6 +3,7 @@ import type {
   OperationEnvelope,
   OperationError,
   OperationOffer,
+  OperationConfirmation,
   OperationReference,
   OperationResult,
 } from "@openshapeforge/operations";
@@ -64,6 +65,7 @@ export type GeneratedCrudTable = {
       createMutationName: string;
       updateMutationName: string;
       deleteMutationName: string;
+      operations?: Record<GeneratedCrudExposureOperation, boolean>;
       relationships?: GeneratedCrudRelationship[];
       defaultSort?: { field: string; direction: "asc" | "desc" };
     };
@@ -118,7 +120,7 @@ export type EntityOperationContract = EntityOperationRef & {
     action: GeneratedCrudOperation;
     roles: string[];
   };
-  interaction: { confirmation: "none" };
+  interaction: { confirmation: OperationConfirmation };
 };
 
 export type EntityOperationInput = ListPageInput & {
@@ -129,6 +131,8 @@ export type EntityOperationInput = ListPageInput & {
 export type EntityOperationRequest = {
   operation: EntityOperationRef;
   input?: EntityOperationInput;
+  /** Interface projection to intersect with authorized result offers. */
+  offerIntents?: readonly GeneratedCrudExposureOperation[];
 };
 
 export type EntityOperationOffer = OperationOffer<GeneratedCrudExposureOperation>;

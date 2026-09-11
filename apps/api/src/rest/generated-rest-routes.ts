@@ -332,6 +332,12 @@ export function registerGeneratedRestRoutes(
     for (const table of restTables) {
       const rest = table.source.rest;
       const base = `${REST_MOUNT_PATH}/${rest.basePath}`;
+      const offerIntents = (Object.entries(rest.operations) as Array<[
+        "list" | "get" | "create" | "update" | "delete",
+        boolean,
+      ]>)
+        .filter(([, enabled]) => enabled)
+        .map(([intent]) => intent);
 
       if (rest.operations.list) {
         instance.get(base, async (request, reply) => {
@@ -342,6 +348,7 @@ export function registerGeneratedRestRoutes(
           // (#17). A REST opt-out would be a query-parameter contract change.
           const operationResult = await executeEntityOperation(context.db, context.session, {
             operation: entityOperationRef(table, "list"),
+            offerIntents,
             input: {
               ...buildListInput(table, query),
               includeTotalCount: true,
@@ -370,6 +377,7 @@ export function registerGeneratedRestRoutes(
           const { id } = request.params as { id: string };
           const result = await executeEntityOperation(context.db, context.session, {
             operation: entityOperationRef(table, "get"),
+            offerIntents,
             input: { id },
           });
           if (result.intent !== "get") throw new Error("Unexpected entity result.");
@@ -391,6 +399,7 @@ export function registerGeneratedRestRoutes(
           const values = assertWritableBody(table, request.body ?? {}, "create");
           const result = await executeEntityOperation(context.db, context.session, {
             operation: entityOperationRef(table, "create"),
+            offerIntents,
             input: { values },
           });
           if (result.intent !== "create") throw new Error("Unexpected entity result.");
@@ -411,6 +420,7 @@ export function registerGeneratedRestRoutes(
           const values = assertWritableBody(table, request.body ?? {}, "update");
           const result = await executeEntityOperation(context.db, context.session, {
             operation: entityOperationRef(table, "update"),
+            offerIntents,
             input: { id, values },
           });
           if (result.intent !== "update") throw new Error("Unexpected entity result.");
@@ -432,6 +442,7 @@ export function registerGeneratedRestRoutes(
           const { id } = request.params as { id: string };
           const result = await executeEntityOperation(context.db, context.session, {
             operation: entityOperationRef(table, "delete"),
+            offerIntents,
             input: { id },
           });
           if (result.intent !== "delete") throw new Error("Unexpected entity result.");

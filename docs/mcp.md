@@ -178,10 +178,12 @@ longer exists (`ORGANIZATION_SCOPE_*`), and a re-apply
 (`POST /api/control/v1/reconciliation/reapply`) repairs all four in one
 realm-wide pass — the only place the control plane deletes anything in
 Keycloak, because a scope is derived configuration with no members behind it.
-The scope is hidden from consent and from the provider metadata, and is
-attached as an *optional* scope to the configured clients and to the realm's
-default optional scopes, so dynamically registered MCP clients can request it
-too. What it is provisioned for comes from the control plane's environment:
+The scope is hidden from consent and from the provider metadata. It is attached
+only to the explicitly configured tenant clients; it is never a realm default.
+Dynamic clients may request it when the DCR allow-list admits that exact scope,
+without causing unrelated clients (such as the platform-admin MCP client) to
+inherit it. What it is provisioned for comes from the control plane's
+environment:
 
 | variable | meaning |
 | --- | --- |

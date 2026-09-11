@@ -32,10 +32,12 @@
  *   - it carries exactly one audience mapper per configured resource origin,
  *     value `<origin>/api/mcp/organizations/<alias>` — mappers for origins no
  *     longer configured are removed, so an origin change converges;
- *   - it is an OPTIONAL scope of every configured client and of the realm's
- *     default optional scopes, so dynamically registered MCP clients can
- *     request it too. A scope a client already holds as DEFAULT is left alone:
- *     that is a stronger binding someone chose, not drift.
+ *   - it is an OPTIONAL scope of every configured client. It is deliberately
+ *     NOT a realm default: a realm can serve multiple Organizations and a
+ *     control MCP, and putting one tenant audience in the defaults leaks that
+ *     resource choice into every newly registered client. A scope a client
+ *     already holds as DEFAULT is left alone: that is a stronger binding
+ *     someone chose, not drift.
  *   - it is listed in the realm's anonymous `Allowed Client Scopes`
  *     client-registration policy, so a client that registers itself may ask
  *     for it at all — see below.
@@ -101,8 +103,8 @@
  *
  * ── WHY THE SERVICE ACCOUNT NEEDS manage-clients ────────────────────────────
  *
- * Client scopes, protocol mappers, a client's optional scopes and the realm
- * default scopes are all CLIENT configuration in Keycloak's admin permission
+ * Client scopes, protocol mappers and a client's optional scopes are all
+ * CLIENT configuration in Keycloak's admin permission
  * model, gated by realm-management `manage-clients`. `manage-realm`, which the
  * Organization endpoints and the SPI require, does not cover them (verified on
  * 26.5.3: every `/client-scopes` call answers 403 with `manage-realm` alone).
@@ -231,7 +233,7 @@ export type OrganizationScopeAdminClient = {
   findClient(clientId: string): Promise<ClientScopeAttachment | null>;
   addOptionalClientScope(clientUuid: string, scopeId: string): Promise<void>;
   getRealmDefaultScopes(): Promise<RealmDefaultScopes>;
-  addRealmOptionalScope(scopeId: string): Promise<void>;
+  removeRealmDefaultScope(scopeId: string, kind: "default" | "optional"): Promise<void>;
   /** Null when the realm has no anonymous `allowed-client-templates` component. */
   findRegistrationPolicy(): Promise<RegistrationPolicySnapshot | null>;
   /**
@@ -250,7 +252,7 @@ export type OrganizationScopeActionKind =
   | "AUDIENCE_ADDED"
   | "AUDIENCE_REMOVED"
   | "CLIENT_ATTACHED"
-  | "REALM_ATTACHED"
+  | "REALM_DETACHED"
   /** A name added to the anonymous `Allowed Client Scopes` policy. */
   | "POLICY_ALLOWED"
   /** An orphan `mcp-resource:*` name removed from that policy. */
@@ -285,8 +287,10 @@ export type OrganizationScopeDriftCode =
   | "ORGANIZATION_SCOPE_MISSING"
   /** The scope exists but its audience mappers do not match the configured origins. */
   | "ORGANIZATION_SCOPE_AUDIENCE_MISMATCH"
-  /** The scope is not an optional scope of a configured client or of the realm defaults. */
+  /** The scope is not an optional scope of a configured client. */
   | "ORGANIZATION_SCOPE_NOT_ATTACHED"
+  /** A tenant resource scope is a realm default and would leak into unrelated DCR clients. */
+  | "ORGANIZATION_SCOPE_REALM_DEFAULT"
   /**
    * The scope exists but the realm's anonymous `Allowed Client Scopes`
    * client-registration policy does not list it, so a dynamically registering
@@ -300,6 +304,7 @@ export const ORGANIZATION_SCOPE_DRIFT_CODES: readonly OrganizationScopeDriftCode
   "ORGANIZATION_SCOPE_MISSING",
   "ORGANIZATION_SCOPE_AUDIENCE_MISMATCH",
   "ORGANIZATION_SCOPE_NOT_ATTACHED",
+  "ORGANIZATION_SCOPE_REALM_DEFAULT",
   "ORGANIZATION_SCOPE_NOT_REGISTRABLE",
   "ORGANIZATION_SCOPE_ORPHANED",
 ];
@@ -452,13 +457,20 @@ async function ensureWithSnapshot(
   }
 
   // ── the realm defaults ───────────────────────────────────────────────────
-  if (
-    !snapshot.realm.defaultScopes.includes(name) &&
-    !snapshot.realm.optionalScopes.includes(name)
-  ) {
-    await client.addRealmOptionalScope(scope.id);
-    snapshot.realm.optionalScopes.push(name);
-    actions.push({ kind: "REALM_ATTACHED", scope: name, subject: null });
+  // A tenant audience may be attached to explicit clients, never inherited by
+  // every future DCR client in a realm that also serves other tenant resources.
+  const realmKind = snapshot.realm.defaultScopes.includes(name)
+    ? "default"
+    : snapshot.realm.optionalScopes.includes(name)
+      ? "optional"
+      : null;
+  if (realmKind) {
+    await client.removeRealmDefaultScope(scope.id, realmKind);
+    snapshot.realm.defaultScopes = snapshot.realm.defaultScopes.filter((scopeName) => scopeName !== name);
+    snapshot.realm.optionalScopes = snapshot.realm.optionalScopes.filter(
+      (scopeName) => scopeName !== name,
+    );
+    actions.push({ kind: "REALM_DETACHED", scope: name, subject: null });
   }
 
   // ── the client-registration allow-list ───────────────────────────────────
@@ -678,20 +690,29 @@ export async function compareOrganizationScopes(
         detached.push(clientId);
       }
     }
-    if (
-      !snapshot.realm.defaultScopes.includes(name) &&
-      !snapshot.realm.optionalScopes.includes(name)
-    ) {
-      detached.push("<realm default optional scopes>");
-    }
     if (detached.length > 0) {
       findings.push({
         code: "ORGANIZATION_SCOPE_NOT_ATTACHED",
         alias,
         scope: name,
-        expected: [...normalised.clients, "<realm default optional scopes>"].join(" "),
+        expected: normalised.clients.join(" "),
         actual: detached.join(" "),
         message: `Client scope "${name}" is not an optional scope of: ${detached.join(", ")}.`,
+      });
+    }
+    if (
+      snapshot.realm.defaultScopes.includes(name) ||
+      snapshot.realm.optionalScopes.includes(name)
+    ) {
+      findings.push({
+        code: "ORGANIZATION_SCOPE_REALM_DEFAULT",
+        alias,
+        scope: name,
+        expected: "not attached",
+        actual: snapshot.realm.defaultScopes.includes(name)
+          ? "realm default scope"
+          : "realm default optional scope",
+        message: `Client scope "${name}" is a realm default and would leak this tenant resource into unrelated clients.`,
       });
     }
 
@@ -945,9 +966,9 @@ export function createOrganizationScopeAdminClient(
       };
     },
 
-    async addRealmOptionalScope(scopeId) {
-      await request(`/default-optional-client-scopes/${encodeURIComponent(scopeId)}`, {
-        method: "PUT",
+    async removeRealmDefaultScope(scopeId, kind) {
+      await request(`/default-${kind}-client-scopes/${encodeURIComponent(scopeId)}`, {
+        method: "DELETE",
       });
     },
 

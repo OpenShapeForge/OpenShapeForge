@@ -235,4 +235,47 @@ describe("web manifest projection", () => {
     expect(buildWebManifest([relation]).entities.Relation?.fields.labels?.renderers)
       .toEqual({ display: "labels", readonly: "labels", editable: "labels" });
   });
+
+  test("preserves condition renderers and declarative variable sources", () => {
+    const view = coreView();
+    view.form!.variableSources = [
+      { key: "entityFields", resolver: "entityFields", params: { sourceField: "entityType" } },
+      { key: "chips", resolver: "chips" },
+    ];
+    const labelRule = entity("LabelRule", "label-rule", [
+      field("entityType"),
+      field("status", {
+        options: { type: "static", items: [{ value: "active", label: text("Active", "Actief") }] },
+      }),
+      field("expression", {
+        valueType: "object",
+        semanticType: "condition",
+        variables: "template",
+        suggestions: { sourceKey: "entityFields" },
+      }),
+      field("descriptionTemplate", {
+        semanticType: "variableTemplate",
+        variables: "template",
+        suggestions: { sourceKey: "entityFields" },
+      }),
+    ], view);
+
+    const projected = buildWebManifest([labelRule]).entities.LabelRule!;
+    expect(projected.fields.expression).toMatchObject({
+      semanticType: "condition",
+      variables: "template",
+      suggestions: { sourceKey: "entityFields" },
+      renderers: { display: "condition", readonly: "condition", editable: "condition" },
+    });
+    expect(projected.fields.descriptionTemplate?.renderers).toEqual({
+      display: "variable-template",
+      readonly: "variable-template",
+      editable: "variable-template",
+    });
+    expect(projected.fields.status?.options).toEqual([
+      { value: "active", label: text("Active", "Actief") },
+    ]);
+    expect(projected.create?.variableSources).toEqual(view.form!.variableSources);
+    expect(projected.update?.variableSources).toEqual(view.form!.variableSources);
+  });
 });

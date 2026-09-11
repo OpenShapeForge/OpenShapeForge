@@ -63,7 +63,9 @@ function operation(
 }
 
 function displayRenderer(field: CompiledField): WebRendererKey {
+  if (field.semanticType === "condition") return "condition";
   if (field.semanticType === "labelSet") return "labels";
+  if (field.semanticType === "variableTemplate") return "variable-template";
   if (field.key.toLocaleLowerCase("en").includes("status")) return "status";
   if (field.valueType === "boolean") return "boolean";
   if (["integer", "number"].includes(field.valueType)) return "number";
@@ -208,6 +210,7 @@ function projectForm(
   variant: CompiledFormVariant | undefined,
   groups: WebFieldGroup[],
   operationRef: WebOperationRef | undefined,
+  variableSources: WebFormView["variableSources"],
 ): WebFormView | undefined {
   if (!variant || !operationRef) return undefined;
   return {
@@ -217,6 +220,7 @@ function projectForm(
     operation: operationRef,
     title: localized(variant.title, `${entityName} ${intent}`),
     groups,
+    ...(variableSources?.length ? { variableSources } : {}),
     submitLabel: localized(variant.submit.label, intent === "create" ? "Create" : "Save"),
   };
 }
@@ -246,6 +250,9 @@ function projectEntity(
       description: localized(field.description, ""),
       valueType: field.valueType,
       ...(field.semanticType ? { semanticType: field.semanticType } : {}),
+      ...(field.variables ? { variables: field.variables } : {}),
+      ...(field.suggestions ? { suggestions: field.suggestions } : {}),
+      ...(field.options?.items?.length ? { options: field.options.items } : {}),
       cardinality: field.cardinality === "collection" ? "many" : "one",
       required: field.required,
       access: {
@@ -315,8 +322,23 @@ function projectEntity(
         : {}),
     },
   } : undefined;
-  const create = projectForm(entityName, "create", createVariant, createGroups, operations.create);
-  const update = projectForm(entityName, "update", updateVariant, updateGroups, operations.update);
+  const variableSources = view?.form?.variableSources;
+  const create = projectForm(
+    entityName,
+    "create",
+    createVariant,
+    createGroups,
+    operations.create,
+    variableSources,
+  );
+  const update = projectForm(
+    entityName,
+    "update",
+    updateVariant,
+    updateGroups,
+    operations.update,
+    variableSources,
+  );
 
   return {
     entityId: entityName,

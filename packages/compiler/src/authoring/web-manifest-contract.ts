@@ -5,6 +5,7 @@ export type WebOperationIntent = "list" | "get" | "create" | "update" | "delete"
 export type WebOperationRef = { id: string; intent: WebOperationIntent };
 export type WebRendererKey =
   | "boolean"
+  | "condition"
   | "date"
   | "datetime"
   | "labels"
@@ -12,7 +13,24 @@ export type WebRendererKey =
   | "reference"
   | "status"
   | "text"
-  | "textarea";
+  | "textarea"
+  | "variable-template";
+
+export type WebVariableSource = {
+  key: string;
+  resolver: "chips" | "entityFields" | "templateParameters" | "workflowGraphVariables";
+  params?: Record<string, unknown>;
+};
+
+export type WebFieldSuggestions = {
+  sourceField?: string;
+  sourceKey?: string;
+};
+
+export type WebFieldOption = {
+  value: string;
+  label: LocalizedText;
+};
 
 export type WebFieldProjection = {
   id: string;
@@ -21,6 +39,9 @@ export type WebFieldProjection = {
   description: LocalizedText;
   valueType: string;
   semanticType?: string;
+  variables?: "none" | "whole" | "template" | "both";
+  suggestions?: WebFieldSuggestions;
+  options?: WebFieldOption[];
   cardinality: "one" | "many";
   required: boolean;
   /** Supported modes. Effective user authorization is resolved at runtime. */
@@ -85,6 +106,7 @@ export type WebFormView = {
   operation: WebOperationRef;
   title: LocalizedText;
   groups: WebFieldGroup[];
+  variableSources?: WebVariableSource[];
   submitLabel: LocalizedText;
 };
 

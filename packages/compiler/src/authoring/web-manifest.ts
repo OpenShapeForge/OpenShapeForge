@@ -15,23 +15,23 @@ import type {
   CompiledFormVariant,
   CompiledViewContext,
   CompiledViewGroup,
-  LocalizedText,
+  LocalizedText as CompiledLocalizedText,
 } from "./types.js";
 import type {
+  LocalizedText as WebLocalizedText,
   WebCollectionView,
   WebEntityInterface,
   WebFieldGroup,
   WebFieldProjection,
-  WebFormView,
   WebManifestOptions,
   WebManifestV1,
   WebOperationIntent,
   WebOperationRef,
   WebRecordTab,
   WebRelationshipProjection,
-  WebRendererKey,
-} from "./web-manifest-contract.js";
-export type * from "./web-manifest-contract.js";
+  WebViewMode,
+} from "@openshapeforge/interface-web";
+export type * from "@openshapeforge/interface-web";
 
 const technicalFields = new Set([
   "id",
@@ -43,7 +43,10 @@ const technicalFields = new Set([
   "sourceAdministration",
 ]);
 
-function localized(value: string | Partial<LocalizedText> | undefined, fallback: string): LocalizedText {
+function localized(
+  value: string | Partial<CompiledLocalizedText> | undefined,
+  fallback: string,
+): WebLocalizedText {
   if (typeof value === "string") return { en: value, nl: value };
   return {
     en: value?.en ?? value?.nl ?? fallback,
@@ -60,24 +63,6 @@ function operation(
   source: CompiledEntityOperation | undefined,
 ): WebOperationRef | undefined {
   return source ? { id: source.id, intent: source.intent } : undefined;
-}
-
-function displayRenderer(field: CompiledField): WebRendererKey {
-  if (field.semanticType === "condition") return "condition";
-  if (field.semanticType === "labelSet") return "labels";
-  if (field.semanticType === "variableTemplate") return "variable-template";
-  if (field.key.toLocaleLowerCase("en").includes("status")) return "status";
-  if (field.valueType === "boolean") return "boolean";
-  if (["integer", "number"].includes(field.valueType)) return "number";
-  if (field.valueType === "date") return "date";
-  if (field.valueType === "datetime") return "datetime";
-  return "text";
-}
-
-function editableRenderer(field: CompiledField): WebRendererKey {
-  if (field.render.component === "Textarea") return "textarea";
-  if (["ReferenceSelect", "EntityReferenceSelect"].includes(field.render.component)) return "reference";
-  return displayRenderer(field) === "status" ? "text" : displayRenderer(field);
 }
 
 function fieldKeys(group: CompiledViewGroup): string[] {
@@ -143,7 +128,9 @@ function collectionFor(
   entityName: string,
   contract: CompiledEntityContract,
   view: CompiledViewContext | undefined,
+  route: string,
   listOperation: WebOperationRef,
+  createOperation: WebOperationRef | undefined,
 ): WebCollectionView {
   const list = view?.list;
   const fieldByKey = new Map(contract.model.fields.map((field) => [field.key, field]));
@@ -153,7 +140,13 @@ function collectionFor(
   return {
     id: `${entityName}.collection`,
     kind: "collection",
-    operation: listOperation,
+    renderer: "entity.collection",
+    modes: ["read"],
+    route,
+    operations: {
+      read: listOperation,
+      ...(createOperation ? { create: createOperation } : {}),
+    },
     title,
     searchPlaceholder: localized(
       list?.search.placeholder ?? { en: "Search...", nl: "Zoeken..." },
@@ -199,30 +192,16 @@ function projectableEntities(
       ...(view ? { view } : {}),
       route: routeFor(contract, slug, view, options.routeLocale),
       operations,
-      collection: collectionFor(contract.entity.name, contract, view, operations.list!),
+      collection: collectionFor(
+        contract.entity.name,
+        contract,
+        view,
+        routeFor(contract, slug, view, options.routeLocale),
+        operations.list!,
+        operations.create,
+      ),
     }];
   }).sort((left, right) => left.contract.entity.name.localeCompare(right.contract.entity.name));
-}
-
-function projectForm(
-  entityName: string,
-  intent: "create" | "update",
-  variant: CompiledFormVariant | undefined,
-  groups: WebFieldGroup[],
-  operationRef: WebOperationRef | undefined,
-  variableSources: WebFormView["variableSources"],
-): WebFormView | undefined {
-  if (!variant || !operationRef) return undefined;
-  return {
-    id: `${entityName}.${intent}.form`,
-    kind: "form",
-    intent,
-    operation: operationRef,
-    title: localized(variant.title, `${entityName} ${intent}`),
-    groups,
-    ...(variableSources?.length ? { variableSources } : {}),
-    submitLabel: localized(variant.submit.label, intent === "create" ? "Create" : "Save"),
-  };
 }
 
 function snakeToCamel(value: string): string {
@@ -242,7 +221,6 @@ function projectEntity(
   const createFields = new Set(createGroups.flatMap(({ fields }) => fields));
   const updateFields = new Set(updateGroups.flatMap(({ fields }) => fields));
   const fields = Object.fromEntries(contract.model.fields.map((field) => {
-    const display = displayRenderer(field);
     const projected: WebFieldProjection = {
       id: `${entityName}.${field.key}`,
       key: field.key,
@@ -252,16 +230,21 @@ function projectEntity(
       ...(field.semanticType ? { semanticType: field.semanticType } : {}),
       ...(field.variables ? { variables: field.variables } : {}),
       ...(field.suggestions ? { suggestions: field.suggestions } : {}),
-      ...(field.options?.items?.length ? { options: field.options.items } : {}),
+      ...(field.options?.items?.length
+        ? {
+            options: field.options.items.map(({ value, label }) => ({
+              value,
+              label: localized(label, value),
+            })),
+          }
+        : {}),
       cardinality: field.cardinality === "collection" ? "many" : "one",
       required: field.required,
-      access: {
+      supports: {
         read: true,
         create: !field.readOnly && createFields.has(field.key),
         update: !field.readOnly && !field.immutable && updateFields.has(field.key),
       },
-      renderers: { display, readonly: display, editable: editableRenderer(field) },
-      ...(field.render.props ? { rendererProps: field.render.props } : {}),
     };
     return [field.key, projected];
   }));
@@ -299,58 +282,75 @@ function projectEntity(
   });
   const overview = tabs.find(({ relationshipId }) => !relationshipId);
   const detail = view?.detail;
-  const record = operations.get && detail ? {
+  const modes: WebViewMode[] = [
+    ...(operations.get && detail ? ["read" as const] : []),
+    ...(operations.create && createVariant ? ["create" as const] : []),
+    ...(operations.update && updateVariant ? ["update" as const] : []),
+  ];
+  const fallbackGroups = updateGroups.length > 0 ? updateGroups : createGroups;
+  const recordTabs = tabs.length > 0
+    ? tabs
+    : fallbackGroups.length > 0
+      ? [{ id: "main", label: localized(undefined, "Details"), groups: fallbackGroups }]
+      : [];
+  const record = modes.length > 0 ? {
     id: `${entityName}.record`,
     kind: "record" as const,
+    renderer: "entity.record" as const,
     preset: "inbox-main-context" as const,
-    load: operations.get,
-    titleTemplate: detail.header.title ?? `{{${source.collection.displayField}}}`,
-    ...(detail.header.subtitle ? { subtitleTemplate: detail.header.subtitle } : {}),
-    tabs,
-    context: {
-      groups: overview?.groups.slice(0, 1) ?? [],
-      relationships: Object.values(relationships)
-        .filter(({ kind }) => kind === "belongsTo")
-        .map(({ key }) => key),
+    modes,
+    routes: {
+      ...(modes.includes("read") ? { read: `${source.route}/:id` } : {}),
+      ...(modes.includes("create") ? { create: `${source.route}/new` } : {}),
     },
-    actions: {
-      ...(operations.update && detail.actions?.some(({ key }) => key === "edit")
-        ? { update: operations.update }
-        : {}),
-      ...(operations.delete && detail.actions?.some(({ mutation }) => mutation === "delete")
+    operations: {
+      ...(modes.includes("read") ? { read: operations.get } : {}),
+      ...(modes.includes("create") ? { create: operations.create } : {}),
+      ...(modes.includes("update") ? { update: operations.update } : {}),
+      ...(operations.delete && detail?.actions?.some(({ mutation }) => mutation === "delete")
         ? { delete: operations.delete }
         : {}),
     },
+    titleTemplate: detail?.header.title ?? `{{${source.collection.displayField}}}`,
+    ...(detail?.header.subtitle ? { subtitleTemplate: detail.header.subtitle } : {}),
+    layout: {
+      tabs: recordTabs,
+      context: {
+        groups: overview?.groups.slice(0, 1) ?? fallbackGroups.slice(0, 1),
+        relationships: Object.values(relationships)
+          .filter(({ kind }) => kind === "belongsTo")
+          .map(({ key }) => key),
+      },
+    },
+    ...(view?.form?.variableSources?.length
+      ? { variableSources: view.form.variableSources }
+      : {}),
+    labels: {
+      ...(createVariant
+        ? {
+            createTitle: localized(createVariant.title, `${entityName} create`),
+            createSubmit: localized(createVariant.submit.label, "Create"),
+          }
+        : {}),
+      ...(updateVariant
+        ? {
+            updateTitle: localized(updateVariant.title, `${entityName} update`),
+            updateSubmit: localized(updateVariant.submit.label, "Save"),
+          }
+        : {}),
+    },
   } : undefined;
-  const variableSources = view?.form?.variableSources;
-  const create = projectForm(
-    entityName,
-    "create",
-    createVariant,
-    createGroups,
-    operations.create,
-    variableSources,
-  );
-  const update = projectForm(
-    entityName,
-    "update",
-    updateVariant,
-    updateGroups,
-    operations.update,
-    variableSources,
-  );
 
   return {
     entityId: entityName,
     entitySlug: source.slug,
-    route: source.route,
     title: source.collection.title,
     fields,
     operations,
-    collection: source.collection,
-    ...(record ? { record } : {}),
-    ...(create ? { create } : {}),
-    ...(update ? { update } : {}),
+    views: {
+      collection: source.collection,
+      ...(record ? { record } : {}),
+    },
     relationships,
   };
 }

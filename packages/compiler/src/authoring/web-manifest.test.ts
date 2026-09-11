@@ -172,25 +172,43 @@ describe("web manifest projection", () => {
     expect(manifest).toMatchObject({ contract: "openshapeforge.web-manifest", version: 1, locale: "nl" });
     expect(Object.keys(manifest.entities)).toEqual(["ContactDetail", "Relation"]);
     expect(manifest.entities.Relation).toMatchObject({
-      route: "/relations",
       operations: { update: { id: "Relation.update", intent: "update" } },
       fields: {
-        id: { access: { read: true, create: false, update: false } },
-        displayName: { access: { read: true, create: true, update: true } },
+        id: { supports: { read: true, create: false, update: false } },
+        displayName: { supports: { read: true, create: true, update: true } },
       },
-      record: {
-        titleTemplate: "{{displayName}}",
-        actions: { update: { id: "Relation.update" }, delete: { id: "Relation.delete" } },
+      views: {
+        collection: {
+          renderer: "entity.collection",
+          modes: ["read"],
+          route: "/relations",
+          operations: {
+            read: { id: "Relation.list" },
+            create: { id: "Relation.create" },
+          },
+        },
+        record: {
+          renderer: "entity.record",
+          modes: ["read", "create", "update"],
+          routes: { read: "/relations/:id", create: "/relations/new" },
+          operations: {
+            read: { id: "Relation.get" },
+            create: { id: "Relation.create" },
+            update: { id: "Relation.update" },
+            delete: { id: "Relation.delete" },
+          },
+          titleTemplate: "{{displayName}}",
+        },
       },
       relationships: {
         contactDetails: {
           targetEntityId: "ContactDetail",
           recordField: "relationId",
-          collection: { operation: { id: "ContactDetail.list" } },
+          collection: { operations: { read: { id: "ContactDetail.list" } } },
         },
       },
     });
-    expect(manifest.entities.Relation?.record?.tabs[0]).toMatchObject({
+    expect(manifest.entities.Relation?.views.record?.layout.tabs[0]).toMatchObject({
       id: "overview",
       groups: [
         { id: "overview", fields: ["displayName"] },
@@ -215,7 +233,7 @@ describe("web manifest projection", () => {
     const projected = buildWebManifest([relation]).entities.Relation;
     expect(projected).toBeDefined();
     expect(projected!.operations.list).toEqual({ id: "Relation.list", intent: "list" });
-    expect(projected!.route).toBe("/relations");
+    expect(projected!.views.collection.route).toBe("/relations");
   });
 
   test("uses the exposed REST collection path when no authored route exists", () => {
@@ -223,21 +241,38 @@ describe("web manifest projection", () => {
     view.routes = {} as CompiledViewContext["routes"];
     const service = entity("Service", "service", [field("name")], view);
     service.contract.rest!.basePath = "services";
-    expect(buildWebManifest([service]).entities.Service?.route).toBe("/services");
+    expect(buildWebManifest([service]).entities.Service?.views.collection.route).toBe("/services");
   });
 
-  test("projects semantic label sets without naming a design-system component", () => {
+  test("projects semantic label sets without choosing a field renderer", () => {
     const relation = entity("Relation", "relation", [
       field("displayName"),
       field("labels", { valueType: "object", semanticType: "labelSet", readOnly: true }),
     ], coreView());
 
-    expect(buildWebManifest([relation]).entities.Relation?.fields.labels?.renderers)
-      .toEqual({ display: "labels", readonly: "labels", editable: "labels" });
+    expect(buildWebManifest([relation]).entities.Relation?.fields.labels).toMatchObject({
+      valueType: "object",
+      semanticType: "labelSet",
+      cardinality: "one",
+    });
+    const serialized = JSON.stringify(buildWebManifest([relation]));
+    expect(serialized).not.toContain("\"renderers\"");
+    expect(serialized).not.toContain("\"rendererProps\"");
   });
 
-  test("preserves condition renderers and declarative variable sources", () => {
+  test("preserves condition semantics and declarative variable sources", () => {
     const view = coreView();
+    view.detail!.groups.items[0]!.fields = [
+      "entityType",
+      "status",
+      "expression",
+      "descriptionTemplate",
+    ];
+    view.form!.variants.create!.groups = [{
+      id: "rule",
+      title: text("Rule"),
+      fields: ["entityType", "status", "expression", "descriptionTemplate"],
+    }];
     view.form!.variableSources = [
       { key: "entityFields", resolver: "entityFields", params: { sourceField: "entityType" } },
       { key: "chips", resolver: "chips" },
@@ -265,17 +300,18 @@ describe("web manifest projection", () => {
       semanticType: "condition",
       variables: "template",
       suggestions: { sourceKey: "entityFields" },
-      renderers: { display: "condition", readonly: "condition", editable: "condition" },
     });
-    expect(projected.fields.descriptionTemplate?.renderers).toEqual({
-      display: "variable-template",
-      readonly: "variable-template",
-      editable: "variable-template",
+    expect(projected.fields.descriptionTemplate).toMatchObject({
+      semanticType: "variableTemplate",
+      variables: "template",
     });
     expect(projected.fields.status?.options).toEqual([
       { value: "active", label: text("Active", "Actief") },
     ]);
-    expect(projected.create?.variableSources).toEqual(view.form!.variableSources);
-    expect(projected.update?.variableSources).toEqual(view.form!.variableSources);
+    expect(projected.views.record?.variableSources).toEqual(view.form!.variableSources);
+    expect(projected.views.record?.modes).toEqual(["read", "create", "update"]);
+    expect(projected.views.record?.layout.tabs[0]?.groups.flatMap(({ fields }) => fields))
+      .toContain("expression");
+    expect(JSON.stringify(projected.fields)).not.toContain("\"renderers\"");
   });
 });

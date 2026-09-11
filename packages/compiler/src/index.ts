@@ -63,10 +63,10 @@ export type {
 export { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
 export type {
   WebCollectionView,
+  WebEntityView,
   WebEntityInterface,
   WebFieldGroup,
   WebFieldProjection,
-  WebFormView,
   WebManifestOptions,
   WebManifestV1,
   WebOperationIntent,
@@ -74,7 +74,7 @@ export type {
   WebRecordTab,
   WebRecordView,
   WebRelationshipProjection,
-  WebRendererKey,
+  WebViewMode,
 } from "./authoring/web-manifest.js";
 
 const defaultRepoRoot = resolve(import.meta.dir, "../../..");

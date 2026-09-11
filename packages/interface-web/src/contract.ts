@@ -1,20 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { LocalizedText } from "./types.js";
+
+export type LocalizedText = { en: string; nl: string };
 
 export type WebOperationIntent = "list" | "get" | "create" | "update" | "delete";
 export type WebOperationRef = { id: string; intent: WebOperationIntent };
-export type WebRendererKey =
-  | "boolean"
-  | "condition"
-  | "date"
-  | "datetime"
-  | "labels"
-  | "number"
-  | "reference"
-  | "status"
-  | "text"
-  | "textarea"
-  | "variable-template";
+export type WebViewMode = "read" | "create" | "update";
 
 export type WebVariableSource = {
   key: string;
@@ -32,6 +22,11 @@ export type WebFieldOption = {
   label: LocalizedText;
 };
 
+/**
+ * Semantic field projection. A renderer registry resolves presentation from
+ * semanticType, valueType, cardinality, surface and mode; fields never name a
+ * component or renderer as their default behaviour.
+ */
 export type WebFieldProjection = {
   id: string;
   key: string;
@@ -44,14 +39,8 @@ export type WebFieldProjection = {
   options?: WebFieldOption[];
   cardinality: "one" | "many";
   required: boolean;
-  /** Supported modes. Effective user authorization is resolved at runtime. */
-  access: { read: boolean; create: boolean; update: boolean };
-  renderers: {
-    display: WebRendererKey;
-    readonly: WebRendererKey;
-    editable: WebRendererKey;
-  };
-  rendererProps?: Record<string, unknown>;
+  /** Static capabilities only. Effective rights arrive in operation offers. */
+  supports: { read: boolean; create: boolean; update: boolean };
 };
 
 export type WebFieldGroup = { id: string; title: LocalizedText; fields: string[] };
@@ -59,7 +48,13 @@ export type WebFieldGroup = { id: string; title: LocalizedText; fields: string[]
 export type WebCollectionView = {
   id: string;
   kind: "collection";
-  operation: WebOperationRef;
+  renderer: "entity.collection";
+  modes: readonly ["read"];
+  route: string;
+  operations: {
+    read: WebOperationRef;
+    create?: WebOperationRef;
+  };
   title: LocalizedText;
   searchPlaceholder: LocalizedText;
   displayField: string;
@@ -90,37 +85,46 @@ export type WebRecordTab = {
 export type WebRecordView = {
   id: string;
   kind: "record";
+  renderer: "entity.record";
   preset: "inbox-main-context";
-  load: WebOperationRef;
+  modes: WebViewMode[];
+  routes: {
+    read?: string;
+    create?: string;
+  };
+  operations: {
+    read?: WebOperationRef;
+    create?: WebOperationRef;
+    update?: WebOperationRef;
+    delete?: WebOperationRef;
+  };
   titleTemplate: string;
   subtitleTemplate?: string;
-  tabs: WebRecordTab[];
-  context: { groups: WebFieldGroup[]; relationships: string[] };
-  actions: { update?: WebOperationRef; delete?: WebOperationRef };
+  layout: {
+    tabs: WebRecordTab[];
+    context: { groups: WebFieldGroup[]; relationships: string[] };
+  };
+  variableSources?: WebVariableSource[];
+  labels: {
+    createTitle?: LocalizedText;
+    updateTitle?: LocalizedText;
+    createSubmit?: LocalizedText;
+    updateSubmit?: LocalizedText;
+  };
 };
 
-export type WebFormView = {
-  id: string;
-  kind: "form";
-  intent: "create" | "update";
-  operation: WebOperationRef;
-  title: LocalizedText;
-  groups: WebFieldGroup[];
-  variableSources?: WebVariableSource[];
-  submitLabel: LocalizedText;
-};
+export type WebEntityView = WebCollectionView | WebRecordView;
 
 export type WebEntityInterface = {
   entityId: string;
   entitySlug: string;
-  route: string;
   title: LocalizedText;
   fields: Record<string, WebFieldProjection>;
   operations: Partial<Record<WebOperationIntent, WebOperationRef>>;
-  collection: WebCollectionView;
-  record?: WebRecordView;
-  create?: WebFormView;
-  update?: WebFormView;
+  views: {
+    collection: WebCollectionView;
+    record?: WebRecordView;
+  };
   relationships: Record<string, WebRelationshipProjection>;
 };
 

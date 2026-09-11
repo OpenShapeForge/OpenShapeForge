@@ -360,14 +360,15 @@ export type McpOperation = "list" | "get" | "create" | "update" | "delete";
 
 type CatalogTool = {
   name: string;
-  operationId: string;
+  /** Strict v2 catalogues publish the canonical id; v1 resolves it internally. */
+  operationId?: string;
   operation: McpOperation;
   entity: string;
   table: string;
   title?: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  outputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
   annotations: {
     readOnlyHint: boolean;
     destructiveHint: boolean;
@@ -741,10 +742,11 @@ function withholdClassified(
  * columns as null and the schema must not reveal their names.
  */
 function withholdClassifiedOutput(
-  schema: Record<string, unknown>,
+  schema: Record<string, unknown> | undefined,
   operation: McpOperation,
   classifiedFields: readonly string[],
-): Record<string, unknown> {
+): Record<string, unknown> | undefined {
+  if (!schema) return undefined;
   if (classifiedFields.length === 0 || operation === "delete") return schema;
   const copy = structuredClone(schema);
   const success = Array.isArray(copy.oneOf)
@@ -1575,11 +1577,15 @@ function describeTool(
       tool.inputSchema as Record<string, unknown>,
       classified,
     ),
-    outputSchema: withholdClassifiedOutput(
-      tool.outputSchema,
-      tool.operation,
-      classified,
-    ) as Tool["outputSchema"],
+    ...(tool.outputSchema
+      ? {
+          outputSchema: withholdClassifiedOutput(
+            tool.outputSchema,
+            tool.operation,
+            classified,
+          ) as Tool["outputSchema"],
+        }
+      : {}),
     annotations: {
       title: tool.title,
       ...tool.annotations,
@@ -1689,9 +1695,12 @@ function describeGenericTool(
       required: ["entity"],
       anyOf: branches,
     } as Tool["inputSchema"],
-    // Generic entries use the same field-agnostic canonical envelope, so the
-    // first catalog entry describes every entity this merged tool can return.
-    outputSchema: first.outputSchema as Tool["outputSchema"],
+    // A shared generic tool may still contain legacy v1 entities. Do not add a
+    // response contract to that legacy surface; only an all-v2 group can
+    // advertise the common field-agnostic canonical envelope.
+    ...(entries.every(({ tool }) => tool.outputSchema !== undefined)
+      ? { outputSchema: first.outputSchema as Tool["outputSchema"] }
+      : {}),
     annotations: {
       title: GENERIC_OPERATION_TITLE[operation],
       ...first.annotations,
@@ -2252,7 +2261,21 @@ export const __configurationHandoffResultForTests = configurationHandoffResult;
  * model sees the code and the retry meaning before anything else. The
  * summary is derived from the same fields, so it cannot contradict them.
  */
-function failed(error: unknown): ToolResult {
+function legacyFailureBody(body: Record<string, unknown>): Record<string, unknown> {
+  const error = body.error as Record<string, unknown> | undefined;
+  if (!error) return body;
+  const data = error.data as Record<string, unknown> | undefined;
+  return {
+    error: {
+      code: error.code,
+      message: error.message,
+      ...(typeof error.detail === "string" ? { detail: error.detail } : {}),
+      ...(typeof data?.hint === "string" ? { hint: data.hint } : {}),
+    },
+  };
+}
+
+function failed(error: unknown, canonical = true): ToolResult {
   if (error instanceof DeclaredOperationError) {
     const body = error.body;
     const bodyMessage = body && typeof body === "object" && !Array.isArray(body)
@@ -2272,10 +2295,14 @@ function failed(error: unknown): ToolResult {
       isError: true,
     };
   }
-  const { body } = toHttpError(error);
+  const mapped = toHttpError(error).body;
+  const body = canonical
+    ? mapped
+    : legacyFailureBody(mapped as unknown as Record<string, unknown>);
+  const failure = body.error as Parameters<typeof failureSummary>[0];
   return {
     content: [
-      { type: "text", text: failureSummary(body.error) },
+      { type: "text", text: failureSummary(failure) },
       { type: "text", text: JSON.stringify(body, null, 2) },
     ],
     structuredContent: body,
@@ -2618,6 +2645,11 @@ async function invokeTool(
   elicitationCompleted = false,
 ): Promise<ToolResult> {
   const args = requireArguments(rawArgs);
+  const canonical = tool.outputSchema !== undefined;
+  const operationRef = (intent: McpOperation) =>
+    tool.operationId
+      ? { id: tool.operationId, intent }
+      : entityOperationRef(table, intent);
   const offerIntents = (Object.entries(table.source?.mcp?.operations ?? {}) as Array<[
     McpOperation,
     boolean,
@@ -2646,7 +2678,7 @@ async function invokeTool(
       // Like REST, the MCP list result always publishes totalCount, so the
       // count pass is always requested (#17).
       const operationResult = await executeEntityOperation(db, session, {
-        operation: { id: tool.operationId, intent: "list" },
+        operation: operationRef("list"),
         offerIntents,
         input: {
           ...(typeof args.first === "number" ? { limit: args.first } : {}),
@@ -2659,6 +2691,15 @@ async function invokeTool(
       if (operationResult.intent !== "list") throw new Error("Unexpected entity result.");
       if ("error" in operationResult) throw new OperationFailure(operationResult.error);
       const result = operationResult.data;
+      if (!canonical) {
+        return ok({
+          items: result.items.map((item) =>
+            serializeRowForEntity(entity, table, item.data),
+          ),
+          totalCount: result.totalCount,
+          nextCursor: result.nextCursor,
+        });
+      }
       return ok({
         data: {
           items: result.items.map((item) => ({
@@ -2674,7 +2715,7 @@ async function invokeTool(
 
     case "get": {
       const result = await executeEntityOperation(db, session, {
-        operation: { id: tool.operationId, intent: "get" },
+        operation: operationRef("get"),
         offerIntents,
         input: { id: requireId(args) },
       });
@@ -2682,6 +2723,7 @@ async function invokeTool(
       if ("error" in result) throw new OperationFailure(result.error);
       const row = result.data;
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
+      if (!canonical) return ok(serializeRowForEntity(entity, table, row));
       return ok({
         data: serializeRowForEntity(entity, table, row),
         operations: result.operations,
@@ -2709,8 +2751,10 @@ async function invokeTool(
               values,
               into: elicitField,
             });
+        const data = serializeRowForEntity(entity, table, row);
+        if (!canonical) return ok(data);
         return ok({
-          data: serializeRowForEntity(entity, table, row),
+          data,
           operations: getEntityOperationOffers(
             entity?.entity ?? table.source?.authoringEntityName ?? table.name,
             session,
@@ -2721,13 +2765,16 @@ async function invokeTool(
         });
       }
       const result = await executeEntityOperation(db, session, {
-        operation: { id: tool.operationId, intent: "create" },
+        operation: operationRef("create"),
         offerIntents,
         input: { values },
       });
       if (result.intent !== "create") throw new Error("Unexpected entity result.");
       if ("error" in result) throw new OperationFailure(result.error);
       if (!result.data) throw new Error("Create operation returned no record.");
+      if (!canonical) {
+        return ok(serializeRowForEntity(entity, table, result.data));
+      }
       return ok({
         data: serializeRowForEntity(entity, table, result.data),
         operations: result.operations,
@@ -2751,7 +2798,7 @@ async function invokeTool(
       assertWritableValues(values, entity, table, session);
       await assertPublishableWrite(db, session, tables, table, values, id);
       const result = await executeEntityOperation(db, session, {
-        operation: { id: tool.operationId, intent: "update" },
+        operation: operationRef("update"),
         offerIntents,
         input: { id, values },
       });
@@ -2759,6 +2806,7 @@ async function invokeTool(
       if ("error" in result) throw new OperationFailure(result.error);
       const row = result.data;
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
+      if (!canonical) return ok(serializeRowForEntity(entity, table, row));
       return ok({
         data: serializeRowForEntity(entity, table, row),
         operations: result.operations,
@@ -2767,7 +2815,7 @@ async function invokeTool(
 
     case "delete": {
       const result = await executeEntityOperation(db, session, {
-        operation: { id: tool.operationId, intent: "delete" },
+        operation: operationRef("delete"),
         offerIntents,
         input: { id: requireId(args) },
       });
@@ -2776,6 +2824,7 @@ async function invokeTool(
       const deleted = result.data.deleted;
       if (!deleted)
         throw new HttpError(404, "NOT_FOUND", "Resource not found.");
+      if (!canonical) return ok({ deleted: true });
       return ok({ data: result.data, operations: result.operations });
     }
   }
@@ -3634,20 +3683,24 @@ function buildServer(
         });
         if (result.intent !== "list") throw new Error("Unexpected entity result.");
         if ("error" in result) throw new OperationFailure(result.error);
-        payload = {
-          data: {
-            ...result.data,
-            items: result.data.items.map((item) => ({
-              data: serializeRowForEntity(
-                entityForTable(direct.table),
-                table,
-                item.data,
-              ),
-              operations: item.operations,
-            })),
-          },
-          operations: result.operations,
-        };
+        payload = table.source?.authoringVersion === 2
+          ? {
+              data: {
+                ...result.data,
+                items: result.data.items.map((item) => ({
+                  data: serializeRowForEntity(
+                    entityForTable(direct.table),
+                    table,
+                    item.data,
+                  ),
+                  operations: item.operations,
+                })),
+              },
+              operations: result.operations,
+            }
+          : result.data.items.map((item) =>
+              serializeRowForEntity(entityForTable(direct.table), table, item.data),
+            );
       } else {
         const templated = readable.find((resource) =>
           uri.startsWith(`${resource.uri}/`),
@@ -3666,14 +3719,14 @@ function buildServer(
           if (result.intent !== "get") throw new Error("Unexpected entity result.");
           if ("error" in result) throw new OperationFailure(result.error);
           if (result.data) {
-            payload = {
-              data: serializeRowForEntity(
-                entityForTable(templated.table),
-                table,
-                result.data,
-              ),
-              operations: result.operations,
-            };
+            const data = serializeRowForEntity(
+              entityForTable(templated.table),
+              table,
+              result.data,
+            );
+            payload = table.source?.authoringVersion === 2
+              ? { data, operations: result.operations }
+              : data;
           }
         }
         if (payload === undefined) {
@@ -5912,6 +5965,7 @@ function buildServer(
             `Call ${gatingGuide.name} first and follow it — it is the fixed process for ` +
               `this setup, and it overrides any cached local instructions or memories.`,
           ),
+          match.outputSchema !== undefined,
         );
       }
     }
@@ -6156,7 +6210,7 @@ function buildServer(
       }
       return outcome;
     } catch (error) {
-      return failed(error);
+      return failed(error, match.outputSchema !== undefined);
     }
     };
 
@@ -6226,7 +6280,12 @@ function buildServer(
         signal?.throwIfAborted();
       }
     } catch (error) {
-      return { result: failed(error) };
+      return {
+        result: failed(
+          error,
+          current?.source !== "crud" || current.tool.outputSchema !== undefined,
+        ),
+      };
     }
     if (!current) {
       return {
@@ -6359,7 +6418,12 @@ function buildServer(
         ? await modulePlatform.withActiveInvocation(ctx, run, name)
         : await run();
     } catch (error) {
-      return { result: failed(error) };
+      return {
+        result: failed(
+          error,
+          current.source !== "crud" || current.tool.outputSchema !== undefined,
+        ),
+      };
     }
   };
 

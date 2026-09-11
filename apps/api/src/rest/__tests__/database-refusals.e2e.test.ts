@@ -164,12 +164,18 @@ async function createBody(
   return { ...body, ...overrides };
 }
 
-const REFUSED = {
+const CANONICAL_REFUSED = {
   code: "OPERATION_REFUSED",
   message: RULE_MESSAGE,
   detail: RULE_DETAIL,
   retryable: false,
   data: { hint: RULE_HINT },
+};
+const LEGACY_REFUSED = {
+  code: "OPERATION_REFUSED",
+  message: RULE_MESSAGE,
+  detail: RULE_DETAIL,
+  hint: RULE_HINT,
 };
 
 describe("a trigger's refusal", () => {
@@ -187,7 +193,11 @@ describe("a trigger's refusal", () => {
       body,
     );
     expect(response.status).toBe(409);
-    expect(response.body).toEqual({ error: REFUSED });
+    expect(response.body).toEqual({
+      error: table!.source?.authoringVersion === 2
+        ? CANONICAL_REFUSED
+        : LEGACY_REFUSED,
+    });
   });
 
   test("GraphQL answers the code unmasked, with the trigger's message", async () => {

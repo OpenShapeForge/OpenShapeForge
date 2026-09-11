@@ -1130,6 +1130,9 @@ export function compileAuthoringBackendManifest(
         path: candidate.path,
         authoringEntityName: candidate.contract.entity.name,
         authoringEntitySlug: candidate.slug,
+        ...(candidate.contract.authoringVersion === 2
+          ? { authoringVersion: 2 as const }
+          : {}),
         generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
         crud: { operations: crudOperations },
         ...(candidate.contract.entity.labels

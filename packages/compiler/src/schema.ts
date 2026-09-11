@@ -272,6 +272,8 @@ export type TableSourceDefinition = {
   path?: string;
   authoringEntityName?: string;
   authoringEntitySlug?: string;
+  /** Present only for strict v2 entity authoring; absence means legacy v1. */
+  authoringVersion?: 2;
   generatedCrudEligibility?: "explicitly_enabled" | "explicitly_disabled";
   /**
    * Authored localized labels for the entity (e.g. `{ en: "Contact Moment",

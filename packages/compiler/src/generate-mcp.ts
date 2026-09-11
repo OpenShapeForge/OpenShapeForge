@@ -490,16 +490,16 @@ function classifiedFieldKeys(fields: CompiledField[]): string[] {
 
 export type McpToolDefinition = {
   name: string;
-  /** Stable interface-neutral operation contract id. */
-  operationId: string;
+  /** Stable interface-neutral operation id, published only by strict v2 authoring. */
+  operationId?: string;
   operation: "list" | "get" | "create" | "update" | "delete";
   entity: string;
   table: string;
   title?: string;
   description: string;
   inputSchema: JsonObject;
-  /** Canonical success/error envelope returned as MCP structuredContent. */
-  outputSchema: JsonObject;
+  /** Canonical success/error envelope returned by strict v2 tools. */
+  outputSchema?: JsonObject;
   annotations: {
     readOnlyHint: boolean;
     destructiveHint: boolean;
@@ -608,6 +608,7 @@ function buildToolsForEntity(
   );
   const outputSchema = (operation: McpToolDefinition["operation"]) =>
     entityToolOutputSchema(operation, output);
+  const v2Contract = contract.authoringVersion === 2;
 
   const idSchema: JsonObject = {
     type: "object",
@@ -697,7 +698,7 @@ function buildToolsForEntity(
     }
     tools.push({
       name: named("list"),
-      operationId: operationId("list"),
+      ...(v2Contract ? { operationId: operationId("list") } : {}),
       operation: "list",
       entity: contract.entity.name,
       table,
@@ -739,7 +740,7 @@ function buildToolsForEntity(
         },
         additionalProperties: false,
       },
-      outputSchema: outputSchema("list"),
+      ...(v2Contract ? { outputSchema: outputSchema("list") } : {}),
       annotations: annotationsFor("list"),
     });
   }
@@ -747,7 +748,7 @@ function buildToolsForEntity(
   if (mcp.operations.get) {
     tools.push({
       name: named("get"),
-      operationId: operationId("get"),
+      ...(v2Contract ? { operationId: operationId("get") } : {}),
       operation: "get",
       entity: contract.entity.name,
       table,
@@ -757,7 +758,7 @@ function buildToolsForEntity(
         `${description} Fetches a single record by id.`,
       ),
       inputSchema: idSchema,
-      outputSchema: outputSchema("get"),
+      ...(v2Contract ? { outputSchema: outputSchema("get") } : {}),
       annotations: annotationsFor("get"),
     });
   }
@@ -765,7 +766,7 @@ function buildToolsForEntity(
   if (mcp.operations.create) {
     tools.push({
       name: named("create"),
-      operationId: operationId("create"),
+      ...(v2Contract ? { operationId: operationId("create") } : {}),
       operation: "create",
       entity: contract.entity.name,
       table,
@@ -783,7 +784,7 @@ function buildToolsForEntity(
         relationships,
         true,
       ),
-      outputSchema: outputSchema("create"),
+      ...(v2Contract ? { outputSchema: outputSchema("create") } : {}),
       annotations: annotationsFor("create"),
     });
   }
@@ -804,7 +805,7 @@ function buildToolsForEntity(
     );
     tools.push({
       name: named("update"),
-      operationId: operationId("update"),
+      ...(v2Contract ? { operationId: operationId("update") } : {}),
       operation: "update",
       entity: contract.entity.name,
       table,
@@ -828,7 +829,7 @@ function buildToolsForEntity(
         additionalProperties: false,
         ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
       },
-      outputSchema: outputSchema("update"),
+      ...(v2Contract ? { outputSchema: outputSchema("update") } : {}),
       annotations: annotationsFor("update"),
     });
   }
@@ -836,7 +837,7 @@ function buildToolsForEntity(
   if (mcp.operations.delete) {
     tools.push({
       name: named("delete"),
-      operationId: operationId("delete"),
+      ...(v2Contract ? { operationId: operationId("delete") } : {}),
       operation: "delete",
       entity: contract.entity.name,
       table,
@@ -846,7 +847,7 @@ function buildToolsForEntity(
         `${description} Permanently deletes a record by id.`,
       ),
       inputSchema: idSchema,
-      outputSchema: outputSchema("delete"),
+      ...(v2Contract ? { outputSchema: outputSchema("delete") } : {}),
       annotations: annotationsFor("delete"),
     });
   }

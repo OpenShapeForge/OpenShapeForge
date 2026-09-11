@@ -51,6 +51,8 @@ export type GeneratedCrudTable = {
   columns: GeneratedCrudColumn[];
   source?: {
     authoringEntityName?: string;
+    /** Present only for strict v2 entity authoring; absence means legacy v1. */
+    authoringVersion?: 2;
     computedFields?: Array<{
       field: string;
       resolver: "labelRules";

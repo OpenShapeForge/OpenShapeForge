@@ -110,17 +110,18 @@ async function rpc(
   };
 }
 
-/** Parse the canonical tools/call result envelope. */
+/** Parse the JSON value returned by a generated tool. */
 function toolEnvelope(body: any): any {
   const text = body?.result?.content?.[0]?.text;
   return text ? JSON.parse(text) : undefined;
 }
 
-/** Return only data for legacy assertions that are not about operation offers. */
+/** Normalize strict-v2 envelopes and legacy-v1 payloads for shared assertions. */
 function toolPayload(body: any): any {
   const envelope = toolEnvelope(body);
-  const data = envelope?.data;
-  if (Array.isArray(data?.items)) {
+  const canonical = envelope && Object.hasOwn(envelope, "data");
+  const data = canonical ? envelope.data : envelope;
+  if (canonical && Array.isArray(data?.items)) {
     return { ...data, items: data.items.map((item: any) => item.data) };
   }
   return data;
@@ -276,21 +277,39 @@ describe("generated MCP server", () => {
       catalog.tools.map((tool) => tool.name),
     );
 
-    const advertisedFor = (operation: "list" | "get" | "update" | "delete") => {
-      const compiled = catalog.tools.find((tool) => tool.operation === operation);
+    const advertisedFor = (
+      operation: "list" | "get" | "create" | "update" | "delete",
+      entity?: string,
+    ) => {
+      const compiled = catalog.tools.find(
+        (tool) => (!entity || tool.entity === entity) && tool.operation === operation,
+      );
       return tools.find((tool) => tool.name === compiled?.name);
     };
-    const get = advertisedFor("get")!;
-    const list = advertisedFor("list")!;
+    const get = advertisedFor("get", "Relation")!;
+    const list = advertisedFor("list", "Relation")!;
+    const create = advertisedFor("create", "Relation")!;
     const remove = advertisedFor("delete")!;
     const update = advertisedFor("update")!;
-    for (const tool of [get, list, remove, update]) {
+    const canonicalTools = [get, list, create].filter(
+      (tool) => tool.outputSchema !== undefined,
+    );
+    for (const tool of canonicalTools) {
       expect(tool.outputSchema?.type).toBe("object");
       expect(Array.isArray(tool.outputSchema?.oneOf)).toBe(true);
       const definitions = tool.outputSchema?.$defs as Record<string, unknown>;
       expect(definitions.OperationOffer).toBeDefined();
       expect(definitions.OperationError).toBeDefined();
     }
+    const legacyNames = new Set(
+      catalog.tools
+        .filter((tool) => tool.outputSchema === undefined)
+        .map((tool) => tool.name),
+    );
+    expect(
+      tools.filter((tool) => legacyNames.has(tool.name))
+        .every((tool) => tool.outputSchema === undefined),
+    ).toBe(true);
     const getSuccess = (get.outputSchema!.oneOf as Record<string, unknown>[])[0]!;
     const getProperties = getSuccess.properties as Record<string, Record<string, unknown>>;
     expect(getSuccess.required).toEqual(["data", "operations"]);
@@ -304,14 +323,7 @@ describe("generated MCP server", () => {
         },
       },
     });
-    const deleteSuccess = (remove.outputSchema!.oneOf as Record<string, unknown>[])[0]!;
-    expect(deleteSuccess).toMatchObject({
-      properties: {
-        data: {
-          properties: { deleted: { const: true } },
-        },
-      },
-    });
+    expect(remove.outputSchema).toBeUndefined();
     expect(update.annotations?.idempotentHint).toBe(false);
   });
 
@@ -541,19 +553,27 @@ describe("generated MCP server", () => {
       const created = await callTool(tenantA, `${prefix}_create`, args);
       const createdEnvelope = toolEnvelope(created.body);
       const row = toolPayload(created.body);
+      const canonical = catalog.tools.find(
+        (tool) => tool.name === `${prefix}_create`,
+      )?.outputSchema !== undefined;
       expect(toolError(created.body)).toBeUndefined();
-      expectCanonicalToolOutput(`${prefix}_create`, created.body);
-      expect(createdEnvelope.operations.every((offer: any) => offer.available)).toBe(true);
+      if (canonical) {
+        expectCanonicalToolOutput(`${prefix}_create`, created.body);
+        expect(createdEnvelope.operations.every((offer: any) => offer.available)).toBe(true);
+      } else {
+        expect(createdEnvelope).not.toHaveProperty("data");
+        expect(createdEnvelope).not.toHaveProperty("operations");
+      }
       expect(row.id).toBeTruthy();
       createdRows.push({ table, id: row.id, identity: tenantA });
 
       const fetchedCall = await callTool(tenantA, `${prefix}_get`, { id: row.id });
-      expectCanonicalToolOutput(`${prefix}_get`, fetchedCall.body);
+      if (canonical) expectCanonicalToolOutput(`${prefix}_get`, fetchedCall.body);
       const fetched = toolPayload(fetchedCall.body);
       expect(fetched.id).toBe(row.id);
 
       const listedCall = await callTool(tenantA, `${prefix}_list`, { first: 5 });
-      expectCanonicalToolOutput(`${prefix}_list`, listedCall.body);
+      if (canonical) expectCanonicalToolOutput(`${prefix}_list`, listedCall.body);
       const listed = toolPayload(listedCall.body);
       expect(Array.isArray(listed.items)).toBe(true);
       expect(listed.totalCount).toBeGreaterThan(0);
@@ -569,19 +589,32 @@ describe("generated MCP server", () => {
           id: row.id,
           values: { [fieldName(textColumn)]: `updated-${seed}` },
         });
-        expectCanonicalToolOutput(`${prefix}_update`, updatedCall.body);
+        if (canonical) expectCanonicalToolOutput(`${prefix}_update`, updatedCall.body);
         const updated = toolPayload(updatedCall.body);
         expect(updated[fieldName(textColumn)]).toBe(`updated-${seed}`);
       }
 
       const deleted = await callTool(tenantA, `${prefix}_delete`, { id: row.id });
-      expectCanonicalToolOutput(`${prefix}_delete`, deleted.body);
+      if (canonical) expectCanonicalToolOutput(`${prefix}_delete`, deleted.body);
       expect(toolPayload(deleted.body)).toEqual({ deleted: true });
       untrackRow(row.id);
 
       const missing = await callTool(tenantA, `${prefix}_get`, { id: row.id });
-      expectCanonicalToolOutput(`${prefix}_get`, missing.body);
+      if (canonical) expectCanonicalToolOutput(`${prefix}_get`, missing.body);
       expect(toolError(missing.body)).toMatch(/NOT_FOUND/);
+      const missingError = missing.body.result.structuredContent.error;
+      if (canonical) {
+        expect(missingError).toMatchObject({
+          code: "NOT_FOUND",
+          message: "Resource not found.",
+          retryable: false,
+        });
+      } else {
+        expect(missingError).toEqual({
+          code: "NOT_FOUND",
+          message: "Resource not found.",
+        });
+      }
     });
 
     test(`${prefix}: does not leak rows across tenants`, async () => {

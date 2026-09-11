@@ -44,6 +44,24 @@ type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 type GeneratedColumn = GeneratedTable["columns"][number];
 type RestMetadata = NonNullable<NonNullable<GeneratedTable["source"]>["rest"]>;
 
+function usesCanonicalResultEnvelope(table: GeneratedTable): boolean {
+  return table.source?.authoringVersion === 2;
+}
+
+function legacyFailureBody(body: Record<string, unknown>): Record<string, unknown> {
+  const error = body.error as Record<string, unknown> | undefined;
+  if (!error) return body;
+  const data = error.data as Record<string, unknown> | undefined;
+  return {
+    error: {
+      code: error.code,
+      message: error.message,
+      ...(typeof error.detail === "string" ? { detail: error.detail } : {}),
+      ...(typeof data?.hint === "string" ? { hint: data.hint } : {}),
+    },
+  };
+}
+
 const RESERVED_LIST_PARAMS = new Set([
   "first",
   "after",
@@ -321,8 +339,16 @@ export function registerGeneratedRestRoutes(
       },
     );
 
-    instance.setErrorHandler((error, _request, reply) => {
-      const { status, body } = toHttpError(error);
+    instance.setErrorHandler((error, request, reply) => {
+      const { status, body: canonicalBody } = toHttpError(error);
+      const pathname = request.url.split("?", 1)[0] ?? request.url;
+      const table = restTables.find((candidate) => {
+        const base = `${REST_MOUNT_PATH}/${candidate.source.rest.basePath}`;
+        return pathname === base || pathname.startsWith(`${base}/`);
+      });
+      const body = table && !usesCanonicalResultEnvelope(table)
+        ? legacyFailureBody(canonicalBody as unknown as Record<string, unknown>)
+        : canonicalBody;
       if (status >= 500) {
         instance.log.error({ err: error }, "Generated REST route failed.");
       }
@@ -332,6 +358,7 @@ export function registerGeneratedRestRoutes(
     for (const table of restTables) {
       const rest = table.source.rest;
       const base = `${REST_MOUNT_PATH}/${rest.basePath}`;
+      const canonical = usesCanonicalResultEnvelope(table);
       const offerIntents = (Object.entries(rest.operations) as Array<[
         "list" | "get" | "create" | "update" | "delete",
         boolean,
@@ -357,6 +384,15 @@ export function registerGeneratedRestRoutes(
           if (operationResult.intent !== "list") throw new Error("Unexpected entity result.");
           if ("error" in operationResult) throw new OperationFailure(operationResult.error);
           const result = operationResult.data;
+          if (!canonical) {
+            return reply.send({
+              items: result.items.map((item) =>
+                serializeGeneratedRestRow(table, item.data),
+              ),
+              totalCount: result.totalCount,
+              nextCursor: result.nextCursor,
+            });
+          }
           return reply.send({
             data: {
               items: result.items.map((item) => ({
@@ -386,6 +422,7 @@ export function registerGeneratedRestRoutes(
           if (!row) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
+          if (!canonical) return reply.send(serializeGeneratedRestRow(table, row));
           return reply.send({
             data: serializeGeneratedRestRow(table, row),
             operations: result.operations,
@@ -406,6 +443,9 @@ export function registerGeneratedRestRoutes(
           if ("error" in result) throw new OperationFailure(result.error);
           const row = result.data;
           if (!row) throw new Error("Create operation returned no record.");
+          if (!canonical) {
+            return reply.status(201).send(serializeGeneratedRestRow(table, row));
+          }
           return reply.status(201).send({
             data: serializeGeneratedRestRow(table, row),
             operations: result.operations,
@@ -429,6 +469,7 @@ export function registerGeneratedRestRoutes(
           if (!row) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
+          if (!canonical) return reply.send(serializeGeneratedRestRow(table, row));
           return reply.send({
             data: serializeGeneratedRestRow(table, row),
             operations: result.operations,
@@ -451,6 +492,7 @@ export function registerGeneratedRestRoutes(
           if (!deleted) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
+          if (!canonical) return reply.status(204).send();
           return reply.send({ data: result.data, operations: result.operations });
         });
       }

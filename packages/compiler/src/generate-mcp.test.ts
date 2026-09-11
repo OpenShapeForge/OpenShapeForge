@@ -27,6 +27,7 @@ const field = (
 
 const contract = (
   overrides: {
+    authoringVersion?: 1 | 2;
     name?: string;
     fields?: CompiledField[];
     mcp?: CompiledEntityContract["mcp"];
@@ -36,6 +37,7 @@ const contract = (
   } = {},
 ): CompiledEntityContract => {
   const compiled = {
+    authoringVersion: overrides.authoringVersion ?? 1,
     contractVersion: 2,
     kind: "compiledEntityContract",
     entity: {
@@ -148,9 +150,10 @@ describe("buildMcpCatalog", () => {
       "widget_get",
     ]);
     expect(catalog.tools[0]).toMatchObject({
-      operationId: "Widget.list",
       operation: "list",
     });
+    expect(catalog.tools[0]).not.toHaveProperty("operationId");
+    expect(catalog.tools[0]).not.toHaveProperty("outputSchema");
   });
 
   it("emits canonical output envelopes for every generated entity operation", () => {
@@ -158,6 +161,7 @@ describe("buildMcpCatalog", () => {
       [
         input(
           contract({
+            authoringVersion: 2,
             fields: [
               field({ key: "id", required: true, validation: { format: "uuid" } }),
               field({ key: "name" }),
@@ -186,8 +190,11 @@ describe("buildMcpCatalog", () => {
     const byOperation = new Map(
       catalog.tools.map((tool) => [tool.operation, tool]),
     );
+    for (const tool of catalog.tools) {
+      expect(tool.operationId).toBe(`Widget.${tool.operation}`);
+    }
     const success = (operation: "list" | "get" | "create" | "update" | "delete") =>
-      (byOperation.get(operation)!.outputSchema.oneOf as Record<string, unknown>[])[0]!;
+      (byOperation.get(operation)!.outputSchema!.oneOf as Record<string, unknown>[])[0]!;
 
     const record = (
       success("get").properties as Record<string, Record<string, unknown>>
@@ -218,13 +225,13 @@ describe("buildMcpCatalog", () => {
     expect(prop(deleted, "deleted")).toEqual({ type: "boolean", const: true });
 
     for (const tool of catalog.tools) {
-      expect(tool.outputSchema.type).toBe("object");
-      expect(tool.outputSchema.$defs).toMatchObject({
+      expect(tool.outputSchema!.type).toBe("object");
+      expect(tool.outputSchema!.$defs).toMatchObject({
         OperationReference: expect.any(Object),
         OperationOffer: expect.any(Object),
         OperationError: expect.any(Object),
       });
-      expect((tool.outputSchema.oneOf as Record<string, unknown>[])[1]).toMatchObject({
+      expect((tool.outputSchema!.oneOf as Record<string, unknown>[])[1]).toMatchObject({
         required: ["error"],
         properties: { error: { $ref: "#/$defs/OperationError" } },
       });
@@ -260,7 +267,7 @@ describe("buildMcpCatalog", () => {
       delete: { data: { deleted: true }, operations: offers },
     };
     for (const tool of catalog.tools) {
-      const validate = ajv.compile(tool.outputSchema);
+      const validate = ajv.compile(tool.outputSchema!);
       expect(validate(successes[tool.operation])).toBe(true);
       expect(
         validate({
@@ -287,6 +294,7 @@ describe("buildMcpCatalog", () => {
       [
         input(
           contract({
+            authoringVersion: 2,
             mcp: {
               toolPrefix: "widget",
               tools: "generic",
@@ -305,7 +313,7 @@ describe("buildMcpCatalog", () => {
     );
     expect(catalog.tools[0]?.name).toBe("osf_list");
     const success = (
-      catalog.tools[0]?.outputSchema.oneOf as Record<string, unknown>[]
+      catalog.tools[0]?.outputSchema!.oneOf as Record<string, unknown>[]
     )[0]!;
     const listData = (
       success.properties as Record<string, Record<string, unknown>>

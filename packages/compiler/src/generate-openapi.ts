@@ -454,12 +454,19 @@ function listParameters(
   return parameters;
 }
 
-function errorResponse(description: string): JsonObject {
+function errorResponse(
+  description: string,
+  canonical: boolean,
+): JsonObject {
   return {
     description,
     content: {
       "application/json": {
-        schema: { $ref: "#/components/schemas/Error" },
+        schema: {
+          $ref: canonical
+            ? "#/components/schemas/OperationFailure"
+            : "#/components/schemas/Error",
+        },
       },
     },
   };
@@ -496,95 +503,116 @@ export function renderOpenApiSpec(
     .sort((a, b) =>
       a.source!.rest!.basePath.localeCompare(b.source!.rest!.basePath),
     );
+  const hasCanonicalEntity = [...contractsByEntityName.values()].some(
+    (contract) => contract.authoringVersion === 2,
+  );
 
   const schemas: JsonObject = {
-    OperationReference: {
-      type: "object",
-      additionalProperties: false,
-      required: ["id", "intent"],
-      properties: {
-        id: { type: "string" },
-        intent: {
-          type: "string",
-          enum: ["list", "get", "create", "update", "delete"],
-        },
-      },
-    },
-    OperationError: {
-      type: "object",
-      additionalProperties: false,
-      required: ["code", "message", "retryable"],
-      properties: {
-        code: { type: "string" },
-        message: { type: "string" },
-        detail: { type: "string" },
-        retryable: { type: "boolean" },
-        retryAt: { type: "string", format: "date-time" },
-        violations: {
-          type: "array",
-          items: {
-            type: "object",
-            additionalProperties: false,
-            required: ["code", "message"],
-            properties: {
-              field: { type: "string" },
-              code: { type: "string" },
-              message: { type: "string" },
-              detail: { type: "string" },
-            },
-          },
-        },
-        data: { type: "object", additionalProperties: true },
-      },
-    },
-    OperationOffer: {
-      oneOf: [
-        {
-          type: "object",
-          additionalProperties: false,
-          required: ["operation", "available"],
-          properties: {
-            operation: { $ref: "#/components/schemas/OperationReference" },
-            available: { const: true },
-          },
-        },
-        {
-          type: "object",
-          additionalProperties: false,
-          required: ["operation", "available", "error"],
-          properties: {
-            operation: { $ref: "#/components/schemas/OperationReference" },
-            available: { const: false },
-            error: { $ref: "#/components/schemas/OperationError" },
-          },
-        },
-      ],
-    },
     Error: {
       type: "object",
       required: ["error"],
       properties: {
-        error: { $ref: "#/components/schemas/OperationError" },
-      },
-    },
-    DeletionData: {
-      type: "object",
-      additionalProperties: false,
-      required: ["deleted"],
-      properties: { deleted: { type: "boolean", const: true } },
-    },
-    DeletionResult: {
-      type: "object",
-      additionalProperties: false,
-      required: ["data", "operations"],
-      properties: {
-        data: { $ref: "#/components/schemas/DeletionData" },
-        operations: {
-          type: "array",
-          items: { $ref: "#/components/schemas/OperationOffer" },
+        error: {
+          type: "object",
+          required: ["code", "message"],
+          properties: {
+            code: { type: "string" },
+            message: { type: "string" },
+          },
         },
       },
     },
+    ...(hasCanonicalEntity
+      ? {
+          OperationReference: {
+            type: "object",
+            additionalProperties: false,
+            required: ["id", "intent"],
+            properties: {
+              id: { type: "string" },
+              intent: {
+                type: "string",
+                enum: ["list", "get", "create", "update", "delete"],
+              },
+            },
+          },
+          OperationError: {
+            type: "object",
+            additionalProperties: false,
+            required: ["code", "message", "retryable"],
+            properties: {
+              code: { type: "string" },
+              message: { type: "string" },
+              detail: { type: "string" },
+              retryable: { type: "boolean" },
+              retryAt: { type: "string", format: "date-time" },
+              violations: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["code", "message"],
+                  properties: {
+                    field: { type: "string" },
+                    code: { type: "string" },
+                    message: { type: "string" },
+                    detail: { type: "string" },
+                  },
+                },
+              },
+              data: { type: "object", additionalProperties: true },
+            },
+          },
+          OperationOffer: {
+            oneOf: [
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["operation", "available"],
+                properties: {
+                  operation: { $ref: "#/components/schemas/OperationReference" },
+                  available: { const: true },
+                },
+              },
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["operation", "available", "error"],
+                properties: {
+                  operation: { $ref: "#/components/schemas/OperationReference" },
+                  available: { const: false },
+                  error: { $ref: "#/components/schemas/OperationError" },
+                },
+              },
+            ],
+          },
+          OperationFailure: {
+            type: "object",
+            required: ["error"],
+            properties: {
+              error: { $ref: "#/components/schemas/OperationError" },
+            },
+          },
+          DeletionData: {
+            type: "object",
+            additionalProperties: false,
+            required: ["deleted"],
+            properties: { deleted: { type: "boolean", const: true } },
+          },
+          DeletionResult: {
+            type: "object",
+            additionalProperties: false,
+            required: ["data", "operations"],
+            properties: {
+              data: { $ref: "#/components/schemas/DeletionData" },
+              operations: {
+                type: "array",
+                items: { $ref: "#/components/schemas/OperationOffer" },
+              },
+            },
+          },
+        }
+      : {}),
   };
   const paths: JsonObject = {};
   const tags: JsonObject[] = [];
@@ -593,6 +621,7 @@ export function renderOpenApiSpec(
     const rest = table.source!.rest!;
     const name = entitySchemaName(table);
     const contract = contractsByEntityName.get(name);
+    const canonical = contract?.authoringVersion === 2;
     const canonicalOperationId = (
       intent: "list" | "get" | "create" | "update" | "delete",
     ): string => {
@@ -657,18 +686,20 @@ export function renderOpenApiSpec(
       properties: read.properties,
       ...(read.required.length > 0 ? { required: read.required } : {}),
     };
-    schemas[`${name}Result`] = {
-      type: "object",
-      additionalProperties: false,
-      required: ["data", "operations"],
-      properties: {
-        data: { $ref: `#/components/schemas/${name}` },
-        operations: {
-          type: "array",
-          items: { $ref: "#/components/schemas/OperationOffer" },
+    if (canonical) {
+      schemas[`${name}Result`] = {
+        type: "object",
+        additionalProperties: false,
+        required: ["data", "operations"],
+        properties: {
+          data: { $ref: `#/components/schemas/${name}` },
+          operations: {
+            type: "array",
+            items: { $ref: "#/components/schemas/OperationOffer" },
+          },
         },
-      },
-    };
+      };
+    }
     const writerNote = operationWrittenNote(table);
     schemas[`${name}Input`] = {
       type: "object",
@@ -688,37 +719,45 @@ export function renderOpenApiSpec(
         "immutable are settable at create only and are rejected here." +
         writerNote,
     };
-    schemas[`${name}ListData`] = {
+    schemas[canonical ? `${name}ListData` : `${name}List`] = {
       type: "object",
       description: `A page of ${label} records.`,
       required: ["items", "totalCount", "nextCursor"],
       properties: {
         items: {
           type: "array",
-          items: { $ref: `#/components/schemas/${name}Result` },
+          items: {
+            $ref: canonical
+              ? `#/components/schemas/${name}Result`
+              : `#/components/schemas/${name}`,
+          },
         },
         totalCount: { type: "integer" },
         nextCursor: { type: ["string", "null"] },
       },
     };
-    schemas[`${name}ListResult`] = {
-      type: "object",
-      additionalProperties: false,
-      required: ["data", "operations"],
-      properties: {
-        data: { $ref: `#/components/schemas/${name}ListData` },
-        operations: {
-          type: "array",
-          items: { $ref: "#/components/schemas/OperationOffer" },
+    if (canonical) {
+      schemas[`${name}ListResult`] = {
+        type: "object",
+        additionalProperties: false,
+        required: ["data", "operations"],
+        properties: {
+          data: { $ref: `#/components/schemas/${name}ListData` },
+          operations: {
+            type: "array",
+            items: { $ref: "#/components/schemas/OperationOffer" },
+          },
         },
-      },
-    };
+      };
+    }
 
     const collectionPath: JsonObject = {};
     if (rest.operations.list) {
       collectionPath.get = {
         operationId: `list${name}`,
-        "x-osf-operation-id": canonicalOperationId("list"),
+        ...(canonical
+          ? { "x-osf-operation-id": canonicalOperationId("list") }
+          : {}),
         summary: `List ${label} records`,
         tags: [name],
         description:
@@ -727,17 +766,22 @@ export function renderOpenApiSpec(
           "documented below. Unknown filter fields are rejected.",
         parameters: listParameters(table, fieldsByKey),
         responses: {
-          "200": entityResponse(`${name}ListResult`, `${name} page and available operations`),
-          "400": errorResponse("Invalid filter, sort, or pagination input"),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
+          "200": entityResponse(
+            canonical ? `${name}ListResult` : `${name}List`,
+            canonical ? `${name} page and available operations` : `${name} page`,
+          ),
+          "400": errorResponse("Invalid filter, sort, or pagination input", canonical),
+          "401": errorResponse("Missing or invalid credentials", canonical),
+          "403": errorResponse("Session lacks a required entity role", canonical),
         },
       };
     }
     if (rest.operations.create) {
       collectionPath.post = {
         operationId: `create${name}`,
-        "x-osf-operation-id": canonicalOperationId("create"),
+        ...(canonical
+          ? { "x-osf-operation-id": canonicalOperationId("create") }
+          : {}),
         summary: `Create ${label}`,
         tags: [name],
         ...(description ? { description } : {}),
@@ -750,10 +794,13 @@ export function renderOpenApiSpec(
           },
         },
         responses: {
-          "201": entityResponse(`${name}Result`, `Created ${label} and available operations`),
-          "400": errorResponse("Invalid request body"),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
+          "201": entityResponse(
+            canonical ? `${name}Result` : name,
+            canonical ? `Created ${label} and available operations` : `Created ${label}`,
+          ),
+          "400": errorResponse("Invalid request body", canonical),
+          "401": errorResponse("Missing or invalid credentials", canonical),
+          "403": errorResponse("Session lacks a required entity role", canonical),
         },
       };
     }
@@ -775,22 +822,29 @@ export function renderOpenApiSpec(
     if (rest.operations.get) {
       itemPath.get = {
         operationId: `get${name}`,
-        "x-osf-operation-id": canonicalOperationId("get"),
+        ...(canonical
+          ? { "x-osf-operation-id": canonicalOperationId("get") }
+          : {}),
         summary: `Fetch ${label} by id`,
         tags: [name],
         ...(description ? { description } : {}),
         responses: {
-          "200": entityResponse(`${name}Result`, `${label} record and available operations`),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
-          "404": errorResponse("Not found"),
+          "200": entityResponse(
+            canonical ? `${name}Result` : name,
+            canonical ? `${label} record and available operations` : `${label} record`,
+          ),
+          "401": errorResponse("Missing or invalid credentials", canonical),
+          "403": errorResponse("Session lacks a required entity role", canonical),
+          "404": errorResponse("Not found", canonical),
         },
       };
     }
     if (rest.operations.update) {
       itemPath.patch = {
         operationId: `update${name}`,
-        "x-osf-operation-id": canonicalOperationId("update"),
+        ...(canonical
+          ? { "x-osf-operation-id": canonicalOperationId("update") }
+          : {}),
         summary: `Partially update ${label}`,
         tags: [name],
         ...(description ? { description } : {}),
@@ -803,26 +857,33 @@ export function renderOpenApiSpec(
           },
         },
         responses: {
-          "200": entityResponse(`${name}Result`, `Updated ${label} and available operations`),
-          "400": errorResponse("Invalid request body"),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
-          "404": errorResponse("Not found"),
+          "200": entityResponse(
+            canonical ? `${name}Result` : name,
+            canonical ? `Updated ${label} and available operations` : `Updated ${label}`,
+          ),
+          "400": errorResponse("Invalid request body", canonical),
+          "401": errorResponse("Missing or invalid credentials", canonical),
+          "403": errorResponse("Session lacks a required entity role", canonical),
+          "404": errorResponse("Not found", canonical),
         },
       };
     }
     if (rest.operations.delete) {
       itemPath.delete = {
         operationId: `delete${name}`,
-        "x-osf-operation-id": canonicalOperationId("delete"),
+        ...(canonical
+          ? { "x-osf-operation-id": canonicalOperationId("delete") }
+          : {}),
         summary: `Delete ${label}`,
         tags: [name],
         ...(description ? { description } : {}),
         responses: {
-          "200": entityResponse("DeletionResult", `${label} deleted`),
-          "401": errorResponse("Missing or invalid credentials"),
-          "403": errorResponse("Session lacks a required entity role"),
-          "404": errorResponse("Not found"),
+          ...(canonical
+            ? { "200": entityResponse("DeletionResult", `${label} deleted`) }
+            : { "204": { description: `${label} deleted` } }),
+          "401": errorResponse("Missing or invalid credentials", canonical),
+          "403": errorResponse("Session lacks a required entity role", canonical),
+          "404": errorResponse("Not found", canonical),
         },
       };
     }

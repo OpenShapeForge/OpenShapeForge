@@ -286,6 +286,45 @@ export interface CrudSection {
   operations: Record<CrudOperationKey, boolean>;
 }
 
+export type EntityOperationIntent = CrudOperationKey;
+
+export type EntityOperationInput =
+  | {
+      kind: "collection-query";
+      entityId: string;
+      filterMode: "declared-fields";
+      sortMode: "declared-fields";
+      pagination: { kind: "cursor"; defaultLimit: number; maxLimit: number };
+    }
+  | { kind: "identity"; identityField: "id" }
+  | { kind: "entity-create"; entityId: string }
+  | {
+      kind: "entity-update";
+      entityId: string;
+      identityField: "id";
+    };
+
+export type EntityOperationOutput =
+  | { kind: "entity-connection"; entityId: string }
+  | { kind: "entity-record"; entityId: string; nullable: boolean }
+  | { kind: "deletion-result" };
+
+export type CompiledEntityOperation = {
+  /** Stable interface-neutral identity, e.g. `Relation.update`. */
+  id: string;
+  entityId: string;
+  entityName: string;
+  intent: EntityOperationIntent;
+  input: EntityOperationInput;
+  output: EntityOperationOutput;
+  authorization: {
+    action: "read" | "create" | "update" | "delete";
+    roles: string[];
+  };
+  /** Explicit current behavior; richer confirmation policies are additive. */
+  interaction: { confirmation: "none" };
+};
+
 export interface CompiledListView {
   name?: string;
   kind?: "page" | "embedded";
@@ -575,6 +614,8 @@ export interface CompiledEntityContract {
   };
   /** Common upper bound for generated CRUD across every transport. */
   crud: CrudSection;
+  /** Canonical generated operations projected by REST, MCP, web and GraphQL. */
+  entityOperations: Partial<Record<EntityOperationIntent, CompiledEntityOperation>>;
   graphql: GraphQLSection;
   /** Present only when the entity opts into generated REST exposure. */
   rest?: RestSection;

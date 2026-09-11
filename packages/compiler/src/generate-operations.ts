@@ -8,6 +8,8 @@ import type {
   PluginOperationContract,
 } from "./plugins.js";
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
+import type { CompiledEntityOperation } from "./authoring/types.js";
+import type { CompiledEntityInfo } from "./plugins.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
 
@@ -491,8 +493,28 @@ export function collectPluginOperations(
   return operations.sort((left, right) => left.key.localeCompare(right.key));
 }
 
-export function renderOperationCatalog(operations: readonly CompiledPluginOperation[]): string {
-  return `${JSON.stringify({ version: 1, operations }, null, 2)}\n`;
+export function collectEntityOperations(
+  entities: readonly Pick<CompiledEntityInfo, "contract">[],
+): CompiledEntityOperation[] {
+  const operations = entities
+    .flatMap((entity) => Object.values(entity.contract.entityOperations))
+    .filter((operation): operation is CompiledEntityOperation => operation !== undefined)
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const ids = new Set<string>();
+  for (const operation of operations) {
+    if (ids.has(operation.id)) {
+      throw new Error(`Duplicate entity operation id "${operation.id}".`);
+    }
+    ids.add(operation.id);
+  }
+  return operations;
+}
+
+export function renderOperationCatalog(
+  operations: readonly CompiledPluginOperation[],
+  entityOperations: readonly CompiledEntityOperation[] = [],
+): string {
+  return `${JSON.stringify({ version: 1, operations, entityOperations }, null, 2)}\n`;
 }
 
 export function assertOperationRuntimeModules(

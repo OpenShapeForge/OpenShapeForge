@@ -78,7 +78,6 @@ import {
   operationWrittenRefusal,
   createGeneratedEntityAfterElicitation,
   createGeneratedEntityForTable,
-  entityOperationRef,
   executeEntityOperation,
   getGeneratedEntity,
   getGeneratedCrudTables,
@@ -355,6 +354,7 @@ export type McpOperation = "list" | "get" | "create" | "update" | "delete";
 
 type CatalogTool = {
   name: string;
+  operationId: string;
   operation: McpOperation;
   entity: string;
   table: string;
@@ -2528,7 +2528,7 @@ async function invokeTool(
       // Like REST, the MCP list result always publishes totalCount, so the
       // count pass is always requested (#17).
       const operationResult = await executeEntityOperation(db, session, {
-        operation: entityOperationRef(table, "list"),
+        operation: { id: tool.operationId, intent: "list" },
         input: {
           ...(typeof args.first === "number" ? { limit: args.first } : {}),
           ...(typeof args.after === "string" ? { cursor: args.after } : {}),
@@ -2550,7 +2550,7 @@ async function invokeTool(
 
     case "get": {
       const result = await executeEntityOperation(db, session, {
-        operation: entityOperationRef(table, "get"),
+        operation: { id: tool.operationId, intent: "get" },
         input: { id: requireId(args) },
       });
       if (result.intent !== "get") throw new Error("Unexpected entity result.");
@@ -2582,7 +2582,7 @@ async function invokeTool(
               into: elicitField,
             })
           : await executeEntityOperation(db, session, {
-              operation: entityOperationRef(table, "create"),
+              operation: { id: tool.operationId, intent: "create" },
               input: { values },
             }).then((result) => {
               if (result.intent !== "create") throw new Error("Unexpected entity result.");
@@ -2609,7 +2609,7 @@ async function invokeTool(
       assertWritableValues(values, entity, table, session);
       await assertPublishableWrite(db, session, tables, table, values, id);
       const result = await executeEntityOperation(db, session, {
-        operation: entityOperationRef(table, "update"),
+        operation: { id: tool.operationId, intent: "update" },
         input: { id, values },
       });
       if (result.intent !== "update") throw new Error("Unexpected entity result.");
@@ -2620,7 +2620,7 @@ async function invokeTool(
 
     case "delete": {
       const result = await executeEntityOperation(db, session, {
-        operation: entityOperationRef(table, "delete"),
+        operation: { id: tool.operationId, intent: "delete" },
         input: { id: requireId(args) },
       });
       if (result.intent !== "delete") throw new Error("Unexpected entity result.");

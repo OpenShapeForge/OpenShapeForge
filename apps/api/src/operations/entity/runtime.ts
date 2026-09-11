@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DbSessionInput } from "../../db/session.js";
+import rawOperationCatalog from "../../generated/operations/catalog.json" with { type: "json" };
 import { generatedCrudError, getGeneratedCrudTables } from "./catalog.js";
 import {
   createGeneratedEntity,
@@ -10,12 +11,21 @@ import {
 import { getGeneratedEntity, listGeneratedEntities } from "./queries.js";
 import type {
   EntityOperationInput,
+  EntityOperationContract,
   EntityOperationRef,
   EntityOperationRequest,
   EntityOperationResult,
   GeneratedCrudExposureOperation,
   GeneratedCrudTable,
 } from "./types.js";
+
+const operationCatalog = rawOperationCatalog as unknown as {
+  entityOperations?: EntityOperationContract[];
+};
+const entityOperations = operationCatalog.entityOperations ?? [];
+const entityOperationsById = new Map(
+  entityOperations.map((operation) => [operation.id, operation]),
+);
 
 function requireId(input: EntityOperationInput | undefined): string {
   if (!input?.id) {
@@ -47,21 +57,38 @@ export function entityOperationRef(
   table: GeneratedCrudTable,
   intent: GeneratedCrudExposureOperation,
 ): EntityOperationRef {
-  return { id: `${authoredEntityId(table)}.${intent}`, intent };
+  const entityName = authoredEntityId(table);
+  const operation = entityOperations.find(
+    (candidate) => candidate.entityName === entityName && candidate.intent === intent,
+  );
+  if (!operation) {
+    throw generatedCrudError(
+      `Entity operation ${entityName}.${intent} is not available.`,
+      "GENERATED_CRUD_NOT_ENABLED",
+      404,
+    );
+  }
+  return { id: operation.id, intent: operation.intent };
 }
 
 export function tableForEntityOperation(operation: EntityOperationRef): GeneratedCrudTable {
-  const suffix = `.${operation.intent}`;
-  if (!operation.id.endsWith(suffix)) {
+  const contract = entityOperationsById.get(operation.id);
+  if (!contract) {
+    throw generatedCrudError(
+      `Entity operation ${operation.id} is not available.`,
+      "GENERATED_CRUD_NOT_ENABLED",
+      404,
+    );
+  }
+  if (contract.intent !== operation.intent) {
     throw generatedCrudError(
       `Entity operation ${operation.id} does not match intent ${operation.intent}.`,
       "BAD_USER_INPUT",
       400,
     );
   }
-  const entityId = operation.id.slice(0, -suffix.length);
   const table = getGeneratedCrudTables().find(
-    (candidate) => candidate.source?.authoringEntityName === entityId,
+    (candidate) => candidate.source?.authoringEntityName === contract.entityName,
   );
   if (!table) {
     throw generatedCrudError(
@@ -71,6 +98,10 @@ export function tableForEntityOperation(operation: EntityOperationRef): Generate
     );
   }
   return table;
+}
+
+export function getEntityOperationContracts(): readonly EntityOperationContract[] {
+  return entityOperations;
 }
 
 /** Interface-neutral dispatcher used by REST, MCP and future transports. */

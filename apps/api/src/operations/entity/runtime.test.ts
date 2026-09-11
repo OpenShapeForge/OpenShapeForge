@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import { getGeneratedCrudTables } from "./catalog.js";
-import { entityOperationRef, tableForEntityOperation } from "./runtime.js";
+import {
+  entityOperationRef,
+  getEntityOperationContracts,
+  tableForEntityOperation,
+} from "./runtime.js";
 
 const relation = getGeneratedCrudTables().find(
   (table) => table.source?.authoringEntityName === "Relation",
@@ -33,6 +37,18 @@ describe("entity operation runtime", () => {
 
   test("resolves an operation to its generated entity contract", () => {
     expect(tableForEntityOperation({ id: "Relation.list", intent: "list" })).toBe(relation);
+  });
+
+  test("loads rights, input, output and interaction from the generated catalog", () => {
+    expect(
+      getEntityOperationContracts().find(({ id }) => id === "Relation.list"),
+    ).toMatchObject({
+      entityName: "Relation",
+      authorization: { action: "read" },
+      input: { kind: "collection-query" },
+      output: { kind: "entity-connection" },
+      interaction: { confirmation: "none" },
+    });
   });
 
   test("rejects mismatched and unavailable operation identities", () => {

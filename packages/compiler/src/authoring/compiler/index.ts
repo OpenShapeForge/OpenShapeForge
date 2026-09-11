@@ -31,6 +31,7 @@ import { buildProfiles } from "./profiles.js";
 import { deriveTableName } from "./helpers.js";
 import { buildCanonicalCompilerKernel } from "./canonical/index.js";
 import { buildAuthorization } from "./authorization.js";
+import { buildEntityOperations } from "./entity-operations.js";
 
 function visitGroups(
   groups: readonly CompiledViewGroup[] | undefined,
@@ -98,6 +99,15 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
   validateTimelineIncludes(coreEntity.entity, relationships, views);
   const compiledProfiles = buildProfiles(profiles, mappings);
   const authorization = buildAuthorization(coreEntity, profiles, modelFields);
+  const entity = {
+    id: `${coreEntity.module}.${coreEntity.entity}`,
+    name: coreEntity.entity,
+  };
+  const entityOperations = buildEntityOperations({
+    entity,
+    crud,
+    authorization,
+  });
   const tableName = deriveTableName(coreEntity.entity);
   const canonical = buildCanonicalCompilerKernel({
     model: { fields: modelFields, relationships },
@@ -109,8 +119,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     contractVersion: 2,
     kind: "compiledEntityContract",
     entity: {
-      id: `${coreEntity.module}.${coreEntity.entity}`,
-      name: coreEntity.entity,
+      ...entity,
       module: coreEntity.module,
       title: coreEntity.title,
       description: coreEntity.description,
@@ -125,6 +134,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     storage: { table: tableName, columns },
     model: { fields: modelFields, relationships },
     crud,
+    entityOperations,
     graphql,
     ...(rest ? { rest } : {}),
     ...(mcp ? { mcp } : {}),

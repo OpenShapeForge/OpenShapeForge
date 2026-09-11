@@ -31,6 +31,7 @@ import { loadAuthoringConfig } from "./authoring/layers.js";
 import {
   auditOperationSurfaceCollisions,
   assertOperationRuntimeModules,
+  collectEntityOperations,
   collectPluginOperations,
   renderOperationCatalog,
 } from "./generate-operations.js";
@@ -226,6 +227,7 @@ export async function collectAllArtifacts(
     authoringDir,
     webPresent,
   });
+  const entityOperations = collectEntityOperations(entities);
   const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries);
   assertOperationRuntimeModules(operations, moduleRegistry.modules.map((module) => module.name));
   auditOperationSurfaceCollisions(operations, manifest, connectors, MAX_DEDICATED_TOOLS);
@@ -268,7 +270,7 @@ export async function collectAllArtifacts(
     operations: [
       {
         path: "apps/api/src/generated/operations/catalog.json",
-        contents: renderOperationCatalog(operations),
+        contents: renderOperationCatalog(operations, entityOperations),
       },
     ],
     connectors: [

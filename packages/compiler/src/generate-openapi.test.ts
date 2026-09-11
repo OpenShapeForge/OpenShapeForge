@@ -102,6 +102,12 @@ const contract = {
       delete: true,
     },
   },
+  entityOperations: Object.fromEntries(
+    ["list", "get", "create", "update", "delete"].map((intent) => [
+      intent,
+      { id: `Relation.${intent}`, intent },
+    ]),
+  ),
 } as unknown as CompiledEntityContract;
 
 const manifest: PlatformSchemaManifest = {
@@ -367,6 +373,14 @@ describe("rich generated REST OpenAPI", () => {
     expect(Object.keys(rendered.paths["/api/rest/v1/relations/{id}"]!)).toEqual(
       ["parameters", "get"],
     );
+  });
+
+  it("links each REST projection to its canonical operation contract", () => {
+    const generated = spec();
+    expect(generated.paths["/api/rest/v1/relations"]?.get)
+      .toHaveProperty("x-osf-operation-id", "Relation.list");
+    expect(generated.paths["/api/rest/v1/relations/{id}"]?.patch)
+      .toHaveProperty("x-osf-operation-id", "Relation.update");
   });
 
   it("keeps response properties storage-derived while retaining entity documentation", () => {

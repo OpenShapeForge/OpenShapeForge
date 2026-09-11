@@ -6,10 +6,12 @@ import {
   auditOperationSurfaceCollisions,
   assertOperationRuntimeModules,
   collectPluginOperations,
+  collectEntityOperations,
   operationOpenApiPaths,
   renderOperationCatalog,
 } from "./generate-operations.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
+import type { CompiledEntityOperation } from "./authoring/types.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 
 const operation: PluginOperationContract = {
@@ -47,6 +49,34 @@ const operation: PluginOperationContract = {
 const context = { repoRoot: "/repo", authoringDir: "/repo/authoring", webPresent: false };
 
 describe("first-class plugin operations", () => {
+  test("renders canonical entity operations beside plugin operations", () => {
+    const entityOperation: CompiledEntityOperation = {
+      id: "Relation.list",
+      entityId: "hubble.Relation",
+      entityName: "Relation",
+      intent: "list",
+      input: {
+        kind: "collection-query",
+        entityId: "hubble.Relation",
+        filterMode: "declared-fields",
+        sortMode: "declared-fields",
+        pagination: { kind: "cursor", defaultLimit: 50, maxLimit: 200 },
+      },
+      output: { kind: "entity-connection", entityId: "hubble.Relation" },
+      authorization: { action: "read", roles: ["Relations.Read"] },
+      interaction: { confirmation: "none" },
+    };
+    const entities = [{ contract: { entityOperations: { list: entityOperation } } }] as never;
+
+    const collected = collectEntityOperations(entities);
+    expect(collected).toEqual([entityOperation]);
+    expect(JSON.parse(renderOperationCatalog([], collected))).toMatchObject({
+      version: 1,
+      operations: [],
+      entityOperations: [{ id: "Relation.list" }],
+    });
+  });
+
   test("collects deterministic canonical contracts and OpenAPI path parameters", () => {
     const plugins: CompilerPlugin[] = [{ name: "demo", operations: [operation] }];
     const collected = collectPluginOperations(plugins, context);

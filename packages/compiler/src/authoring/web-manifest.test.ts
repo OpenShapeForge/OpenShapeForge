@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { CompiledEntityInfo } from "../plugins.js";
 import type { CompiledEntityContract, CompiledField, CompiledViewContext } from "./types.js";
 import { buildWebManifest, renderWebManifest } from "./web-manifest.js";
+import { buildEntityOperations } from "./compiler/entity-operations.js";
 
 const text = (en: string, nl = en) => ({ en, nl });
 
@@ -88,6 +89,29 @@ function entity(
   view: CompiledViewContext,
   relationships: CompiledEntityContract["model"]["relationships"] = [],
 ): CompiledEntityInfo {
+  const storage = { table: slug, columns: fields.map((entry) => ({
+    field: entry.key,
+    column: entry.key,
+    type: "text",
+    nullable: !entry.required,
+    storageClass: "core" as const,
+  })) };
+  const authorization = {
+    entitySlug: slug,
+    roles: {
+      read: ["entity:read"],
+      create: ["entity:write"],
+      update: ["entity:write"],
+      delete: ["entity:write"],
+    },
+    compositeRoles: [],
+    fieldAuthorizations: [],
+    profileAuthorizations: {},
+  };
+  const crud = {
+    operations: { list: true, get: true, create: true, update: true, delete: true },
+  };
+  const identity = { id: `core.${name}`, name };
   return {
     slug,
     path: `authoring/entities/${slug}.yaml`,
@@ -96,8 +120,7 @@ function entity(
       contractVersion: 2,
       kind: "compiledEntityContract",
       entity: {
-        id: `core.${name}`,
-        name,
+        ...identity,
         module: "core",
         title: name,
         labels: text(`${name}s`, `${name}s`),
@@ -106,12 +129,17 @@ function entity(
           ? { filterField: fields.find(({ key }) => key !== "id")!.key }
           : {}),
       },
-      storage: { table: slug, columns: [] },
+      storage,
       model: { fields, relationships },
-      crud: { operations: { list: true, get: true, create: true, update: true, delete: true } },
+      crud,
+      entityOperations: buildEntityOperations({
+        entity: identity,
+        crud,
+        authorization,
+      }),
       rest: { basePath: `${slug}s`, operations: { list: true, get: true, create: true, update: true, delete: true } },
       graphql: {} as CompiledEntityContract["graphql"],
-      authorization: {} as CompiledEntityContract["authorization"],
+      authorization,
       views: { core: view },
       canonical: { contexts: {} },
       profiles: {},
@@ -170,5 +198,15 @@ describe("web manifest projection", () => {
     const beta = entity("Beta", "beta", [field("name")], view);
     expect(renderWebManifest(buildWebManifest([beta, alpha])))
       .toBe(renderWebManifest(buildWebManifest([alpha, beta])));
+  });
+
+  test("projects the web interface independently of REST exposure", () => {
+    const relation = entity("Relation", "relation", [field("displayName")], coreView());
+    delete relation.contract.rest;
+
+    const projected = buildWebManifest([relation]).entities.Relation;
+    expect(projected).toBeDefined();
+    expect(projected!.operations.list).toEqual({ id: "Relation.list", intent: "list" });
+    expect(projected!.route).toBe("/relations");
   });
 });

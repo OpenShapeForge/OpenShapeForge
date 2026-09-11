@@ -10,6 +10,7 @@ import type {
   CompiledField,
   CompiledRelationship,
 } from "./authoring/types.js";
+import { buildEntityOperations } from "./authoring/compiler/entity-operations.js";
 
 const field = (
   overrides: Partial<CompiledField> & { key: string },
@@ -32,8 +33,8 @@ const contract = (
     relationships?: CompiledRelationship[];
     columns?: CompiledEntityContract["storage"]["columns"];
   } = {},
-): CompiledEntityContract =>
-  ({
+): CompiledEntityContract => {
+  const compiled = {
     contractVersion: 2,
     kind: "compiledEntityContract",
     entity: {
@@ -72,11 +73,21 @@ const contract = (
         delete: true,
       },
     },
-    authorization: undefined as never,
+    authorization: {
+      entitySlug: (overrides.name ?? "Widget").toLowerCase(),
+      roles: { read: [], create: [], update: [], delete: [] },
+      compositeRoles: [],
+      fieldAuthorizations: [],
+      profileAuthorizations: {},
+    },
     views: {},
     canonical: {} as never,
     profiles: {},
-  }) as CompiledEntityContract;
+    entityOperations: {},
+  } as unknown as CompiledEntityContract;
+  compiled.entityOperations = buildEntityOperations(compiled);
+  return compiled;
+};
 
 const input = (
   c: CompiledEntityContract,
@@ -135,6 +146,10 @@ describe("buildMcpCatalog", () => {
       "widget_list",
       "widget_get",
     ]);
+    expect(catalog.tools[0]).toMatchObject({
+      operationId: "Widget.list",
+      operation: "list",
+    });
   });
 
   it("routes generic-style entities through the shared osf_* tools", () => {

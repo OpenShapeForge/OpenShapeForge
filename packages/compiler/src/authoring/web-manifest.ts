@@ -10,6 +10,7 @@
 import type { CompiledEntityInfo } from "../plugins.js";
 import type {
   CompiledEntityContract,
+  CompiledEntityOperation,
   CompiledField,
   CompiledFormVariant,
   CompiledViewContext,
@@ -56,11 +57,9 @@ function contextFor(contract: CompiledEntityContract, preferred: string): Compil
 }
 
 function operation(
-  entity: string,
-  intent: WebOperationIntent,
-  enabled: boolean | undefined,
+  source: CompiledEntityOperation | undefined,
 ): WebOperationRef | undefined {
-  return enabled ? { id: `${entity}.${intent}`, intent } : undefined;
+  return source ? { id: source.id, intent: source.intent } : undefined;
 }
 
 function displayRenderer(field: CompiledField): WebRendererKey {
@@ -114,15 +113,16 @@ function defaultColumnKeys(contract: CompiledEntityContract): string[] {
 
 function routeFor(
   contract: CompiledEntityContract,
+  slug: string,
   context: CompiledViewContext | undefined,
   routeLocale: "en" | "nl",
 ): string {
   const route = context?.routes.list;
   if (typeof route === "string") return route;
   if (route && typeof route === "object") {
-    return route[routeLocale] ?? route.en ?? route.nl ?? `/${contract.rest!.basePath}`;
+    return route[routeLocale] ?? route.en ?? route.nl ?? `/${slug}`;
   }
-  return `/${contract.rest!.basePath}`;
+  return `/${slug}`;
 }
 
 function collectionFor(
@@ -169,18 +169,21 @@ function projectableEntities(
   options: Required<WebManifestOptions>,
 ): ProjectableEntity[] {
   return entities.flatMap(({ slug, contract }) => {
-    if (!contract.rest?.operations.list) return [];
+    if (!contract.entityOperations.list) return [];
     const view = contextFor(contract, options.context);
     const operations = Object.fromEntries(
       (["list", "get", "create", "update", "delete"] as const)
-        .map((intent) => [intent, operation(contract.entity.name, intent, contract.rest?.operations[intent])])
+        .map((intent) => [
+          intent,
+          operation(contract.entityOperations[intent]),
+        ])
         .filter((entry): entry is [WebOperationIntent, WebOperationRef] => Boolean(entry[1])),
     );
     return [{
       slug,
       contract,
       ...(view ? { view } : {}),
-      route: routeFor(contract, view, options.routeLocale),
+      route: routeFor(contract, slug, view, options.routeLocale),
       operations,
       collection: collectionFor(contract.entity.name, contract, view, operations.list!),
     }];

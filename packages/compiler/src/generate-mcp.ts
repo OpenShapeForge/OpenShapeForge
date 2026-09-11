@@ -234,6 +234,8 @@ function classifiedFieldKeys(fields: CompiledField[]): string[] {
 
 export type McpToolDefinition = {
   name: string;
+  /** Stable interface-neutral operation contract id. */
+  operationId: string;
   operation: "list" | "get" | "create" | "update" | "delete";
   entity: string;
   table: string;
@@ -359,6 +361,16 @@ function buildToolsForEntity(
       ? (mcp.toolOverrides?.[operation]?.name ??
         `${mcp.toolPrefix}_${operation}`)
       : `osf_${operation}`;
+  const operationId = (intent: McpToolDefinition["operation"]): string => {
+    const operation = contract.entityOperations[intent];
+    if (!operation) {
+      throw new Error(
+        `mcp operation "${intent}" on entity "${contract.entity.name}" ` +
+          "has no canonical entity operation contract.",
+      );
+    }
+    return operation.id;
+  };
 
   // Authored description wins outright: an author writing one is correcting
   // the composed default, so nothing is appended to it — except the writtenBy
@@ -401,6 +413,7 @@ function buildToolsForEntity(
     }
     tools.push({
       name: named("list"),
+      operationId: operationId("list"),
       operation: "list",
       entity: contract.entity.name,
       table,
@@ -449,6 +462,7 @@ function buildToolsForEntity(
   if (mcp.operations.get) {
     tools.push({
       name: named("get"),
+      operationId: operationId("get"),
       operation: "get",
       entity: contract.entity.name,
       table,
@@ -465,6 +479,7 @@ function buildToolsForEntity(
   if (mcp.operations.create) {
     tools.push({
       name: named("create"),
+      operationId: operationId("create"),
       operation: "create",
       entity: contract.entity.name,
       table,
@@ -502,6 +517,7 @@ function buildToolsForEntity(
     );
     tools.push({
       name: named("update"),
+      operationId: operationId("update"),
       operation: "update",
       entity: contract.entity.name,
       table,
@@ -532,6 +548,7 @@ function buildToolsForEntity(
   if (mcp.operations.delete) {
     tools.push({
       name: named("delete"),
+      operationId: operationId("delete"),
       operation: "delete",
       entity: contract.entity.name,
       table,

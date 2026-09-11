@@ -520,6 +520,17 @@ export function renderOpenApiSpec(
     const rest = table.source!.rest!;
     const name = entitySchemaName(table);
     const contract = contractsByEntityName.get(name);
+    const canonicalOperationId = (
+      intent: "list" | "get" | "create" | "update" | "delete",
+    ): string => {
+      const operationId = contract?.entityOperations[intent]?.id;
+      if (!operationId) {
+        throw new Error(
+          `REST operation "${name}.${intent}" has no canonical entity operation contract.`,
+        );
+      }
+      return operationId;
+    };
     const fieldsByKey = new Map(
       (contract?.model.fields ?? []).map((field) => [field.key, field]),
     );
@@ -610,6 +621,7 @@ export function renderOpenApiSpec(
     if (rest.operations.list) {
       collectionPath.get = {
         operationId: `list${name}`,
+        "x-osf-operation-id": canonicalOperationId("list"),
         summary: `List ${label} records`,
         tags: [name],
         description:
@@ -628,6 +640,7 @@ export function renderOpenApiSpec(
     if (rest.operations.create) {
       collectionPath.post = {
         operationId: `create${name}`,
+        "x-osf-operation-id": canonicalOperationId("create"),
         summary: `Create ${label}`,
         tags: [name],
         ...(description ? { description } : {}),
@@ -665,6 +678,7 @@ export function renderOpenApiSpec(
     if (rest.operations.get) {
       itemPath.get = {
         operationId: `get${name}`,
+        "x-osf-operation-id": canonicalOperationId("get"),
         summary: `Fetch ${label} by id`,
         tags: [name],
         ...(description ? { description } : {}),
@@ -679,6 +693,7 @@ export function renderOpenApiSpec(
     if (rest.operations.update) {
       itemPath.patch = {
         operationId: `update${name}`,
+        "x-osf-operation-id": canonicalOperationId("update"),
         summary: `Partially update ${label}`,
         tags: [name],
         ...(description ? { description } : {}),
@@ -702,6 +717,7 @@ export function renderOpenApiSpec(
     if (rest.operations.delete) {
       itemPath.delete = {
         operationId: `delete${name}`,
+        "x-osf-operation-id": canonicalOperationId("delete"),
         summary: `Delete ${label}`,
         tags: [name],
         ...(description ? { description } : {}),

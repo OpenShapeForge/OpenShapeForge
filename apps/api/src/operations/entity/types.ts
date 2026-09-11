@@ -101,6 +101,18 @@ export type EntityOperationRef = {
   intent: GeneratedCrudExposureOperation;
 };
 
+export type EntityOperationContract = EntityOperationRef & {
+  entityId: string;
+  entityName: string;
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  authorization: {
+    action: GeneratedCrudOperation;
+    roles: string[];
+  };
+  interaction: { confirmation: "none" };
+};
+
 export type EntityOperationInput = ListPageInput & {
   id?: string;
   values?: Record<string, unknown>;

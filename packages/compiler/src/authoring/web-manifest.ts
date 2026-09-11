@@ -118,12 +118,13 @@ function routeFor(
   context: CompiledViewContext | undefined,
   routeLocale: "en" | "nl",
 ): string {
-  const route = context?.routes.list;
+  const fallback = `/${contract.rest?.basePath ?? slug}`;
+  const route = context?.routes?.list;
   if (typeof route === "string") return route;
   if (route && typeof route === "object") {
-    return route[routeLocale] ?? route.en ?? route.nl ?? `/${slug}`;
+    return route[routeLocale] ?? route.en ?? route.nl ?? fallback;
   }
-  return `/${slug}`;
+  return fallback;
 }
 
 function collectionFor(

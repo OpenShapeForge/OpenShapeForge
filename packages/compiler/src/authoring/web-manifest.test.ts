@@ -210,6 +210,14 @@ describe("web manifest projection", () => {
     expect(projected!.route).toBe("/relations");
   });
 
+  test("uses the exposed REST collection path when no authored route exists", () => {
+    const view = coreView();
+    view.routes = {} as CompiledViewContext["routes"];
+    const service = entity("Service", "service", [field("name")], view);
+    service.contract.rest!.basePath = "services";
+    expect(buildWebManifest([service]).entities.Service?.route).toBe("/services");
+  });
+
   test("projects semantic label sets without naming a design-system component", () => {
     const relation = entity("Relation", "relation", [
       field("displayName"),

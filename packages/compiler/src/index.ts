@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // SPDX-License-Identifier: BUSL-1.1
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
   generateAuthoringUiArtifacts,
@@ -271,6 +271,14 @@ export async function collectAllArtifacts(
       {
         path: "apps/api/src/generated/operations/catalog.json",
         contents: renderOperationCatalog(operations, entityOperations),
+      },
+      {
+        path: "apps/api/src/generated/compiler/canonical-condition.ts",
+        contents: await readFile(join(import.meta.dir, "authoring/canonical/canonical-condition.ts"), "utf8"),
+      },
+      {
+        path: "apps/api/src/generated/compiler/expression-evaluator.ts",
+        contents: await readFile(join(import.meta.dir, "authoring/canonical/expression-evaluator.ts"), "utf8"),
       },
     ],
     connectors: [

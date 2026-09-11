@@ -1138,6 +1138,12 @@ export function compileAuthoringBackendManifest(
         ...(candidate.contract.entity.displayTemplate
           ? { displayTemplate: candidate.contract.entity.displayTemplate }
           : {}),
+        ...(() => {
+          const computedFields = candidate.contract.model.fields
+            .filter((field) => field.semanticType === "labelSet")
+            .map((field) => ({ field: field.key, resolver: "labelRules" as const }));
+          return computedFields.length > 0 ? { computedFields } : {};
+        })(),
         graphql: {
           typeName: candidate.contract.graphql.typeName,
           singleQueryName: candidate.contract.graphql.queries.single.name,

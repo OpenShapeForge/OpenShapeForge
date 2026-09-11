@@ -209,4 +209,14 @@ describe("web manifest projection", () => {
     expect(projected!.operations.list).toEqual({ id: "Relation.list", intent: "list" });
     expect(projected!.route).toBe("/relations");
   });
+
+  test("projects semantic label sets without naming a design-system component", () => {
+    const relation = entity("Relation", "relation", [
+      field("displayName"),
+      field("labels", { valueType: "object", semanticType: "labelSet", readOnly: true }),
+    ], coreView());
+
+    expect(buildWebManifest([relation]).entities.Relation?.fields.labels?.renderers)
+      .toEqual({ display: "labels", readonly: "labels", editable: "labels" });
+  });
 });

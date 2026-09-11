@@ -63,6 +63,7 @@ function operation(
 }
 
 function displayRenderer(field: CompiledField): WebRendererKey {
+  if (field.semanticType === "labelSet") return "labels";
   if (field.key.toLocaleLowerCase("en").includes("status")) return "status";
   if (field.valueType === "boolean") return "boolean";
   if (["integer", "number"].includes(field.valueType)) return "number";

@@ -217,6 +217,14 @@ types:
     props:
       mode: free
 
+  labelSet:
+    valueType: object
+    label: { en: Labels, nl: Labels }
+    icon: Tags
+    render:
+      display: BadgeList
+      input: JsonFieldEditor
+
   variableTemplate:
     valueType: string
     label: { en: Variable template, nl: Variabele-template }

@@ -288,6 +288,11 @@ export type TableSourceDefinition = {
    * `sourceField` map to bridge authoring fields → DB columns.
    */
   displayTemplate?: string;
+  /** Interface-neutral values computed by the operation runtime after reading a row. */
+  computedFields?: Array<{
+    field: string;
+    resolver: "labelRules";
+  }>;
   graphql?: {
     typeName: string;
     singleQueryName: string;

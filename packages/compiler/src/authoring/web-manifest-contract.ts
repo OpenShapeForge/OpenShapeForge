@@ -7,6 +7,7 @@ export type WebRendererKey =
   | "boolean"
   | "date"
   | "datetime"
+  | "labels"
   | "number"
   | "reference"
   | "status"

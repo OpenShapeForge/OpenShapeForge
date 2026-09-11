@@ -43,6 +43,10 @@ export type GeneratedCrudTable = {
   columns: GeneratedCrudColumn[];
   source?: {
     authoringEntityName?: string;
+    computedFields?: Array<{
+      field: string;
+      resolver: "labelRules";
+    }>;
     crud?: {
       operations: Record<GeneratedCrudExposureOperation, boolean>;
     };

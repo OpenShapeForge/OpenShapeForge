@@ -33,6 +33,7 @@ authorization:
 fields:
   - key: labels
     valueType: object
+    semanticType: labelSet
     required: false
     readOnly: true
     label:

@@ -11,6 +11,7 @@ import {
   readGeneratedCrudTable,
 } from "./catalog.js";
 import { fieldColumnMap, tableColumnMap } from "./columns.js";
+import { resolveComputedEntityRows } from "./computed-fields.js";
 import type {
   CountedEntityConnection,
   GeneratedCrudColumn,
@@ -193,7 +194,7 @@ async function listGeneratedEntityRowsForTable(
   const where = buildFilterConditions(table, input.filter, fixedWhere);
   const orderBy = buildSortExpression(table, input.sort);
 
-  return withDbSession(db, session, async (trx) => {
+  return withDbSession(db, session, async (trx, resolvedSession) => {
     const result = await sql<{ row: GeneratedEntityRow }>`
       select to_jsonb(row_source.*) as row
       from ${sql.id(table.schema, table.table)} as row_source
@@ -216,9 +217,12 @@ async function listGeneratedEntityRowsForTable(
     }
 
     const storageRows = result.rows.slice(0, limit).map((row) => row.row);
-    const rows = projectOutput
+    const projectedRows = projectOutput
       ? projectRows(table, session, storageRows)
       : storageRows;
+    const rows = projectOutput
+      ? await resolveComputedEntityRows(trx, resolvedSession, table, projectedRows)
+      : projectedRows;
     return {
       rows,
       totalCount,
@@ -287,9 +291,11 @@ export async function getGeneratedEntity(
 ): Promise<GeneratedEntityRow | null> {
   const table = readGeneratedCrudTable(input.table, "get", session);
   const row = await fetchGeneratedEntityRow(db, session, table, input.id);
-  return row === null
-    ? null
-    : projectGeneratedEntityRow(table, session, row);
+  if (row === null) return null;
+  const projected = projectGeneratedEntityRow(table, session, row);
+  return withDbSession(db, session, async (trx, resolvedSession) =>
+    (await resolveComputedEntityRows(trx, resolvedSession, table, [projected]))[0] ?? null,
+  );
 }
 
 /**

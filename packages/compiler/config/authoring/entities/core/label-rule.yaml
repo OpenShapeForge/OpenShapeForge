@@ -12,6 +12,7 @@ labels:
   nl: Labelregel
 domains:
   - core
+rest: true
 authorization:
   roles:
     read:

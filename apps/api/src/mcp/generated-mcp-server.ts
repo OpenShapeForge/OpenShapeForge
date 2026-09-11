@@ -83,7 +83,9 @@ import {
   createGeneratedEntityAfterElicitation,
   createGeneratedEntityForTable,
   entityOperationRef,
+  entityOperationContract,
   executeEntityOperation,
+  getEntityOperationContracts,
   getEntityOperationOffers,
   getGeneratedEntity,
   getGeneratedCrudTables,
@@ -92,6 +94,9 @@ import {
   listGeneratedEntitiesForTable,
   listGeneratedEntityStorageRowsForTable,
   mergeGeneratedEntityObjectForTable,
+  invalidExpectedVersionFailure,
+  invalidMutationControlTypeFailure,
+  requireCreateOperationConfirmation,
   updateGeneratedEntityForTable,
 } from "../operations/entity/index.js";
 import {
@@ -124,6 +129,12 @@ import {
   mergeConfigurationValues,
 } from "./configuration-handoff.js";
 import { renderEntityOAuthCallbackPage } from "./browser-pages.js";
+import {
+  callEditLeaseTool,
+  editLeaseOperationIdsForSession,
+  EDIT_LEASE_TOOL_NAMES,
+  editLeaseToolsForOperationIds,
+} from "./edit-lease-tools.js";
 import {
   bindingSelected,
   composeBindingRequest,
@@ -357,6 +368,28 @@ export { MCP_MOUNT_PATH, ORGANIZATION_MCP_PATH_PREFIX } from "./organization-res
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
 export type McpOperation = "list" | "get" | "create" | "update" | "delete";
+
+function entityMutationControls(args: Record<string, unknown>) {
+  return {
+    ...(typeof args.expectedVersion === "string"
+      ? { expectedVersion: args.expectedVersion }
+      : {}),
+    ...(typeof args.leaseToken === "string"
+      ? { leaseToken: args.leaseToken }
+      : {}),
+    ...(typeof args.confirmed === "boolean"
+      ? { confirmed: args.confirmed }
+      : {}),
+    ...(typeof args.confirmationToken === "string"
+      ? { confirmationToken: args.confirmationToken }
+      : {}),
+    ...(typeof args.confirmationAnswer === "string"
+      ? { confirmationAnswer: args.confirmationAnswer }
+      : {}),
+  };
+}
+
+export const __entityMutationControlsForTests = entityMutationControls;
 
 type CatalogTool = {
   name: string;
@@ -844,6 +877,7 @@ function coreOwnsStaticToolName(name: string): boolean {
     SESSION_INFO_TOOL_NAME, // session-info (whoami / osf://session)
     ...ONBOARDING_TOOL_NAMES, // first-use onboarding (mcp/onboarding.ts)
     ...UPDATE_TOOL_NAMES, // update notices (mcp/update-notices.ts)
+    ...EDIT_LEASE_TOOL_NAMES, // central entity edit leases
   ].includes(name);
 }
 
@@ -1523,10 +1557,41 @@ function assertSchemaValid(
   schema: Record<string, unknown>,
   value: unknown,
   what: string,
+  expectedVersionField?: string,
 ): void {
   const checker: ValidateFunction = ajv.compile(schema);
   try {
     if (!checker(value)) {
+      const invalidMutationControlType = (checker.errors ?? []).find(
+        (error) =>
+          error.keyword === "type" &&
+          [
+            "/expectedVersion",
+            "/leaseToken",
+            "/confirmed",
+            "/confirmationToken",
+            "/confirmationAnswer",
+          ].includes(error.instancePath),
+      );
+      if (invalidMutationControlType) {
+        const field = invalidMutationControlType.instancePath.slice(1) as
+          | "expectedVersion"
+          | "leaseToken"
+          | "confirmed"
+          | "confirmationToken"
+          | "confirmationAnswer";
+        const expectedType = field === "confirmed" ? "boolean" : "string";
+        throw invalidMutationControlTypeFailure(field, expectedType);
+      }
+      const invalidExpectedVersion = (checker.errors ?? []).some(
+        (error) =>
+          error.instancePath === "/expectedVersion" &&
+          error.keyword === "format" &&
+          error.params?.format === "date-time",
+      );
+      if (invalidExpectedVersion && expectedVersionField) {
+        throw invalidExpectedVersionFailure(expectedVersionField);
+      }
       const details = (checker.errors ?? [])
         .slice(0, 5)
         .map((error) => {
@@ -2731,7 +2796,23 @@ async function invokeTool(
     }
 
     case "create": {
-      const values = requireArguments(args);
+      const values = canonical
+        ? Object.fromEntries(
+            Object.entries(requireArguments(args)).filter(
+              ([key]) => key !== "confirmed",
+            ),
+          )
+        : requireArguments(args);
+      if (canonical) {
+        requireCreateOperationConfirmation(
+          entityOperationContract(operationRef("create").id),
+          {
+            ...(typeof args.confirmed === "boolean"
+              ? { confirmed: args.confirmed }
+              : {}),
+          },
+        );
+      }
       // The elicited target field is server-set (collected from the person at
       // the client before this ran), so it is exempt from the declared-schema
       // and writable checks that guard MODEL-supplied fields.
@@ -2767,7 +2848,12 @@ async function invokeTool(
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("create"),
         offerIntents,
-        input: { values },
+        input: {
+          values,
+          ...(typeof args.confirmed === "boolean"
+            ? { confirmed: args.confirmed }
+            : {}),
+        },
       });
       if (result.intent !== "create") throw new Error("Unexpected entity result.");
       if ("error" in result) throw new OperationFailure(result.error);
@@ -2800,7 +2886,11 @@ async function invokeTool(
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("update"),
         offerIntents,
-        input: { id, values },
+        input: {
+          id,
+          values,
+          ...entityMutationControls(args),
+        },
       });
       if (result.intent !== "update") throw new Error("Unexpected entity result.");
       if ("error" in result) throw new OperationFailure(result.error);
@@ -2817,7 +2907,10 @@ async function invokeTool(
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("delete"),
         offerIntents,
-        input: { id: requireId(args) },
+        input: {
+          id: requireId(args),
+          ...entityMutationControls(args),
+        },
       });
       if (result.intent !== "delete") throw new Error("Unexpected entity result.");
       if ("error" in result) throw new OperationFailure(result.error);
@@ -2942,6 +3035,14 @@ function buildServer(
     }),
   });
   const tables = tableOverride ?? tablesByName();
+  const projectedEntityOperationIds = toolsForSession(session, tables)
+    .map(({ tool }) => tool.operationId)
+    .filter((operationId): operationId is string => Boolean(operationId));
+  const editLeaseOperationIds = editLeaseOperationIdsForSession(
+    session,
+    projectedEntityOperationIds,
+  );
+  const allowedEditLeaseOperationIds = new Set(editLeaseOperationIds);
   // The same rule REST boot applies (roles/api.ts): with no operation module
   // in the process there are no operation tools, rather than a 500 on every
   // request because the catalog names a handler nothing loaded.
@@ -3753,6 +3854,7 @@ function buildServer(
     const coreTools = [
       SESSION_INFO_TOOL, // session-info (whoami / osf://session): every authenticated session
       ...crudToolsForSession(session, tables),
+      ...editLeaseToolsForOperationIds(editLeaseOperationIds),
       ...catalogDerivedTools
         .filter(
           (entry) => entry.connect && sessionInAudience(entry, session.roles),
@@ -3964,6 +4066,9 @@ function buildServer(
     ] as Tool[];
     const sourceOf = (name: string): McpToolCallSource => {
       if (name === SESSION_INFO_TOOL_NAME) return "operation"; // session-info
+      if (EDIT_LEASE_TOOL_NAMES.includes(name as (typeof EDIT_LEASE_TOOL_NAMES)[number])) {
+        return "operation";
+      }
       if (catalog.tools.some((tool) => tool.name === name)) return "crud";
       if (catalog.operationTools.some((tool) => tool.name === name))
         return "operation";
@@ -4032,6 +4137,24 @@ function buildServer(
       }
     }
     // --- end session-info ---
+    const editLeaseOutcome = await (async () => {
+      try {
+        return await callEditLeaseTool(
+          name,
+          (request.params.arguments ?? {}) as Record<string, unknown>,
+          db,
+          session,
+          allowedEditLeaseOperationIds,
+        );
+      } catch (error) {
+        return failed(error);
+      }
+    })();
+    if (editLeaseOutcome) {
+      return "content" in editLeaseOutcome
+        ? editLeaseOutcome as ToolResult
+        : ok({ data: editLeaseOutcome, operations: [] });
+    }
     const operationTool = catalog.operationTools.find(
       (tool) => tool.name === name,
     );
@@ -6183,7 +6306,17 @@ function buildServer(
             : toValidate,
           table,
         );
-        assertSchemaValid(match.inputSchema, toValidate, "arguments");
+        const expectedVersionField = match.operationId
+          ? getEntityOperationContracts().find(
+              (operation) => operation.id === match.operationId,
+            )?.concurrency?.version?.field
+          : undefined;
+        assertSchemaValid(
+          match.inputSchema,
+          toValidate,
+          "arguments",
+          expectedVersionField,
+        );
       }
       const outcome = await invokeTool(
         match,

@@ -22,6 +22,7 @@ import { pluralize } from "./authoring/compiler/helpers.js";
 import type {
   CompiledColumn,
   CompiledEntityContract,
+  CompiledEntityOperation,
   CompiledField,
   CompiledRelationship,
 } from "./authoring/types.js";
@@ -321,6 +322,64 @@ const SERVER_MANAGED_FIELDS = new Set([
   "createdAt",
   "updatedAt",
 ]);
+
+function operationControlSchema(
+  operation: CompiledEntityOperation | undefined,
+): {
+  properties: JsonObject;
+  required: string[];
+  dependentRequired?: Record<string, string[]>;
+} {
+  const properties: JsonObject = {};
+  const required: string[] = [];
+  let dependentRequired: Record<string, string[]> | undefined;
+  if (operation?.concurrency?.version) {
+    properties.expectedVersion = {
+      type: "string",
+      format: "date-time",
+      description:
+        `Version from the record's ${operation.concurrency.version.field} field.`,
+    };
+    required.push("expectedVersion");
+  }
+  if (operation?.concurrency?.editLease) {
+    properties.leaseToken = {
+      type: "string",
+      minLength: 1,
+      description: "Opaque edit-lease token issued by the server for this operation and record.",
+    };
+    required.push("leaseToken");
+  }
+  if (operation?.interaction?.confirmation.mode === "acknowledgement") {
+    properties.confirmed = {
+      type: "boolean",
+      description:
+        "Only true lets the operation continue after user acknowledgement; this is not a server-issued security proof.",
+    };
+  }
+  if (operation?.interaction?.confirmation.mode === "challenge") {
+    properties.confirmationToken = {
+      type: "string",
+      minLength: 1,
+      description: "Opaque, single-use confirmation challenge token issued by the server.",
+    };
+    properties.confirmationAnswer = {
+      type: "string",
+      minLength: 1,
+      description:
+        `Exact current value requested for ${operation.interaction.confirmation.challenge.field}.`,
+    };
+    dependentRequired = {
+      confirmationToken: ["confirmationAnswer"],
+      confirmationAnswer: ["confirmationToken"],
+    };
+  }
+  return {
+    properties,
+    required,
+    ...(dependentRequired ? { dependentRequired } : {}),
+  };
+}
 
 /**
  * Fields a caller may write, mirroring the CRUD layer's writability rule so the
@@ -764,6 +823,18 @@ function buildToolsForEntity(
   }
 
   if (mcp.operations.create) {
+    const inputSchema = withRelationshipKeys(
+      compiledObjectSchema(creatable, referentiedata, {
+        requireRequired: true,
+        defaultsAreMaterialized: true,
+        ...MCP_FIELD_SCHEMA_OPTIONS,
+      }),
+      relationships,
+      true,
+    );
+    const controls = v2Contract
+      ? operationControlSchema(contract.entityOperations.create)
+      : { properties: {}, required: [] };
     tools.push({
       name: named("create"),
       ...(v2Contract ? { operationId: operationId("create") } : {}),
@@ -775,23 +846,30 @@ function buildToolsForEntity(
         "create",
         `${description} Creates a new record.${writerNote}`,
       ),
-      inputSchema: withRelationshipKeys(
-        compiledObjectSchema(creatable, referentiedata, {
-          requireRequired: true,
-          defaultsAreMaterialized: true,
-          ...MCP_FIELD_SCHEMA_OPTIONS,
-        }),
-        relationships,
-        true,
-      ),
+      inputSchema: v2Contract
+        ? {
+            ...inputSchema,
+            properties: {
+              ...(inputSchema.properties as JsonObject),
+              ...controls.properties,
+            },
+            required: [
+              ...((inputSchema.required as string[] | undefined) ?? []),
+              ...controls.required,
+            ],
+            ...(controls.dependentRequired
+              ? { dependentRequired: controls.dependentRequired }
+              : {}),
+          }
+        : inputSchema,
       ...(v2Contract ? { outputSchema: outputSchema("create") } : {}),
       annotations: annotationsFor("create"),
     });
   }
 
   if (mcp.operations.update) {
-    // Update is a partial: nothing is required beyond the id, because omitting
-    // a field means "leave it alone", not "clear it".
+    // Entity values are a partial: omitting one means "leave it alone", not
+    // "clear it". Canonical concurrency controls remain required separately.
     const { schema: patch, definitions } = splitBundledDefinitions(
       withRelationshipKeys(
         compiledObjectSchema(updatable, referentiedata, {
@@ -803,6 +881,9 @@ function buildToolsForEntity(
         false,
       ),
     );
+    const controls = v2Contract
+      ? operationControlSchema(contract.entityOperations.update)
+      : { properties: {}, required: [] };
     tools.push({
       name: named("update"),
       ...(v2Contract ? { operationId: operationId("update") } : {}),
@@ -824,9 +905,13 @@ function buildToolsForEntity(
             description: `Identifier of the ${label}.`,
           },
           values: patch,
+          ...controls.properties,
         },
-        required: ["id", "values"],
+        required: ["id", "values", ...controls.required],
         additionalProperties: false,
+        ...(controls.dependentRequired
+          ? { dependentRequired: controls.dependentRequired }
+          : {}),
         ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
       },
       ...(v2Contract ? { outputSchema: outputSchema("update") } : {}),
@@ -835,6 +920,9 @@ function buildToolsForEntity(
   }
 
   if (mcp.operations.delete) {
+    const controls = v2Contract
+      ? operationControlSchema(contract.entityOperations.delete)
+      : { properties: {}, required: [] };
     tools.push({
       name: named("delete"),
       ...(v2Contract ? { operationId: operationId("delete") } : {}),
@@ -846,7 +934,20 @@ function buildToolsForEntity(
         "delete",
         `${description} Permanently deletes a record by id.`,
       ),
-      inputSchema: idSchema,
+      inputSchema: v2Contract
+        ? {
+            type: "object",
+            properties: {
+              ...(idSchema.properties as JsonObject),
+              ...controls.properties,
+            },
+            required: ["id", ...controls.required],
+            additionalProperties: false,
+            ...(controls.dependentRequired
+              ? { dependentRequired: controls.dependentRequired }
+              : {}),
+          }
+        : idSchema,
       ...(v2Contract ? { outputSchema: outputSchema("delete") } : {}),
       annotations: annotationsFor("delete"),
     });

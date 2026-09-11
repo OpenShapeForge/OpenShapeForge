@@ -549,6 +549,7 @@ export async function resolveSessionContext(
       return {
         tenantId,
         userId: identity.userId,
+        userDisplayName: relation?.displayName ?? null,
         roles: effectiveRoles,
         oauthScopes: identity.scopes ?? [],
         groups,

@@ -18,6 +18,7 @@
  */
 import type {
   CompiledEntityContract,
+  CompiledEntityOperation,
   CompiledField,
 } from "./authoring/types.js";
 import type { RestApiDocumentation } from "./authoring/layers.js";
@@ -483,6 +484,64 @@ function entityResponse(name: string, description: string): JsonObject {
   };
 }
 
+function operationControlSchema(
+  operation: CompiledEntityOperation | undefined,
+): {
+  properties: JsonObject;
+  required: string[];
+  dependentRequired?: Record<string, string[]>;
+} {
+  const properties: JsonObject = {};
+  const required: string[] = [];
+  let dependentRequired: Record<string, string[]> | undefined;
+  if (operation?.concurrency?.version) {
+    properties.expectedVersion = {
+      type: "string",
+      format: "date-time",
+      description:
+        `Version from the record's ${operation.concurrency.version.field} field.`,
+    };
+    required.push("expectedVersion");
+  }
+  if (operation?.concurrency?.editLease) {
+    properties.leaseToken = {
+      type: "string",
+      minLength: 1,
+      description: "Opaque edit-lease token issued by the server for this operation and record.",
+    };
+    required.push("leaseToken");
+  }
+  if (operation?.interaction?.confirmation.mode === "acknowledgement") {
+    properties.confirmed = {
+      type: "boolean",
+      description:
+        "Only true lets the operation continue after caller acknowledgement; this is not a server-issued security proof.",
+    };
+  }
+  if (operation?.interaction?.confirmation.mode === "challenge") {
+    properties.confirmationToken = {
+      type: "string",
+      minLength: 1,
+      description: "Opaque, single-use confirmation challenge token issued by the server.",
+    };
+    properties.confirmationAnswer = {
+      type: "string",
+      minLength: 1,
+      description:
+        `Exact current value requested for ${operation.interaction.confirmation.challenge.field}.`,
+    };
+    dependentRequired = {
+      confirmationToken: ["confirmationAnswer"],
+      confirmationAnswer: ["confirmationToken"],
+    };
+  }
+  return {
+    properties,
+    required,
+    ...(dependentRequired ? { dependentRequired } : {}),
+  };
+}
+
 export function renderOpenApiSpec(
   manifest: PlatformSchemaManifest,
   source: string,
@@ -506,6 +565,22 @@ export function renderOpenApiSpec(
   const hasCanonicalEntity = [...contractsByEntityName.values()].some(
     (contract) => contract.authoringVersion === 2,
   );
+  const restEditLeaseOperationIds = [...new Set(
+    restTables.flatMap((table) => {
+      const contract = contractsByEntityName.get(entitySchemaName(table));
+      if (contract?.authoringVersion !== 2) return [];
+      return (["list", "get", "create", "update", "delete"] as const).flatMap(
+        (intent) => {
+          const operation = contract.entityOperations[intent];
+          return table.source!.rest!.operations[intent] === true &&
+            operation?.concurrency?.editLease?.mode === "required"
+            ? [operation.id]
+            : [];
+        },
+      );
+    }),
+  )].sort();
+  const hasCanonicalEditLease = restEditLeaseOperationIds.length > 0;
 
   const schemas: JsonObject = {
     Error: {
@@ -611,11 +686,194 @@ export function renderOpenApiSpec(
               },
             },
           },
+          ...(hasCanonicalEditLease
+            ? {
+                EditLeaseAcquireInput: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["operationId", "targetId"],
+                  properties: {
+                    operationId: {
+                      type: "string",
+                      enum: restEditLeaseOperationIds,
+                      description: "Canonical lease-protected Operation id.",
+                    },
+                    targetId: { type: "string", format: "uuid" },
+                  },
+                },
+                EditLeaseTokenInput: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["leaseToken"],
+                  properties: {
+                    leaseToken: {
+                      type: "string",
+                      minLength: 20,
+                      description: "Opaque edit-lease token issued by the server.",
+                    },
+                  },
+                },
+                EditLeaseAcquireData: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: [
+                    "leaseToken",
+                    "operationId",
+                    "entityId",
+                    "targetId",
+                    "targetVersion",
+                    "expiresAt",
+                  ],
+                  properties: {
+                    leaseToken: { type: "string", minLength: 20 },
+                    operationId: { type: "string" },
+                    entityId: { type: "string" },
+                    targetId: { type: "string", format: "uuid" },
+                    targetVersion: { type: "string", format: "date-time" },
+                    expiresAt: { type: "string", format: "date-time" },
+                  },
+                },
+                EditLeaseAcquireResult: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["data", "operations"],
+                  properties: {
+                    data: { $ref: "#/components/schemas/EditLeaseAcquireData" },
+                    operations: {
+                      type: "array",
+                      maxItems: 0,
+                      items: { $ref: "#/components/schemas/OperationOffer" },
+                    },
+                  },
+                },
+                EditLeaseRenewData: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: [
+                    "operationId",
+                    "entityId",
+                    "targetId",
+                    "targetVersion",
+                    "expiresAt",
+                  ],
+                  properties: {
+                    operationId: { type: "string" },
+                    entityId: { type: "string" },
+                    targetId: { type: "string", format: "uuid" },
+                    targetVersion: { type: "string", format: "date-time" },
+                    expiresAt: { type: "string", format: "date-time" },
+                  },
+                },
+                EditLeaseRenewResult: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["data", "operations"],
+                  properties: {
+                    data: { $ref: "#/components/schemas/EditLeaseRenewData" },
+                    operations: {
+                      type: "array",
+                      maxItems: 0,
+                      items: { $ref: "#/components/schemas/OperationOffer" },
+                    },
+                  },
+                },
+                EditLeaseReleaseData: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["released"],
+                  properties: { released: { type: "boolean" } },
+                },
+                EditLeaseReleaseResult: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["data", "operations"],
+                  properties: {
+                    data: { $ref: "#/components/schemas/EditLeaseReleaseData" },
+                    operations: {
+                      type: "array",
+                      maxItems: 0,
+                      items: { $ref: "#/components/schemas/OperationOffer" },
+                    },
+                  },
+                },
+              }
+            : {}),
         }
       : {}),
   };
   const paths: JsonObject = {};
   const tags: JsonObject[] = [];
+
+  if (hasCanonicalEditLease) {
+    tags.push({
+      name: "Edit leases",
+      description: "Central leases for long-running record write modes.",
+    });
+    paths["/api/operation-leases"] = {
+      post: {
+        operationId: "acquireEditLease",
+        summary: "Acquire an edit lease",
+        tags: ["Edit leases"],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/EditLeaseAcquireInput" },
+            },
+          },
+        },
+        responses: {
+          "201": entityResponse("EditLeaseAcquireResult", "Edit lease acquired"),
+          "400": errorResponse("Invalid or unsupported operation", true),
+          "401": errorResponse("Missing or invalid credentials", true),
+          "403": errorResponse("Session lacks the operation role", true),
+          "404": errorResponse("Target not found", true),
+          "423": errorResponse("Target is already being edited", true),
+        },
+      },
+    };
+    paths["/api/operation-leases/renew"] = {
+      post: {
+        operationId: "renewEditLease",
+        summary: "Renew an active edit lease",
+        tags: ["Edit leases"],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/EditLeaseTokenInput" },
+            },
+          },
+        },
+        responses: {
+          "200": entityResponse("EditLeaseRenewResult", "Edit lease renewed"),
+          "400": errorResponse("Invalid request", true),
+          "401": errorResponse("Missing or invalid credentials", true),
+          "409": errorResponse("Lease expired or invalid", true),
+        },
+      },
+    };
+    paths["/api/operation-leases/release"] = {
+      post: {
+        operationId: "releaseEditLease",
+        summary: "Release an edit lease",
+        tags: ["Edit leases"],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/EditLeaseTokenInput" },
+            },
+          },
+        },
+        responses: {
+          "200": entityResponse("EditLeaseReleaseResult", "Edit lease released"),
+          "400": errorResponse("Invalid request", true),
+          "401": errorResponse("Missing or invalid credentials", true),
+        },
+      },
+    };
+  }
 
   for (const table of restTables) {
     const rest = table.source!.rest!;
@@ -668,6 +926,31 @@ export function renderOpenApiSpec(
       "update",
     );
     const updateSchemaName = `${name}UpdateInput`;
+    const deleteSchemaName = `${name}DeleteInput`;
+    const createControls = canonical
+      ? operationControlSchema(contract?.entityOperations.create)
+      : { properties: {}, required: [] };
+    const updateControls = canonical
+      ? operationControlSchema(contract?.entityOperations.update)
+      : { properties: {}, required: [] };
+    const deleteControls = canonical
+      ? operationControlSchema(contract?.entityOperations.delete)
+      : { properties: {}, required: [] };
+    const hasDeleteControls = Object.keys(deleteControls.properties).length > 0;
+    const createOperation = contract?.entityOperations.create;
+    const updateOperation = contract?.entityOperations.update;
+    const deleteOperation = contract?.entityOperations.delete;
+    const createRequiresConfirmation =
+      createOperation?.interaction?.confirmation.mode !== undefined &&
+      createOperation.interaction.confirmation.mode !== "none";
+    const updateRequiresConfirmation =
+      updateOperation?.interaction?.confirmation.mode !== undefined &&
+      updateOperation.interaction.confirmation.mode !== "none";
+    const deleteRequiresChallenge =
+      deleteOperation?.interaction?.confirmation.mode === "challenge";
+    const deleteRequiresConfirmation =
+      deleteOperation?.interaction?.confirmation.mode !== undefined &&
+      deleteOperation.interaction.confirmation.mode !== "none";
     const fieldDefinitionDefinitions = {
       ...read.definitions,
       ...creatable.definitions,
@@ -705,20 +988,46 @@ export function renderOpenApiSpec(
       type: "object",
       description: `Create body for ${label}.${writerNote}`,
       additionalProperties: false,
-      properties: creatable.properties,
-      ...(creatable.required.length > 0
-        ? { required: creatable.required }
+      properties: { ...creatable.properties, ...createControls.properties },
+      ...(creatable.required.length + createControls.required.length > 0
+        ? { required: [...creatable.required, ...createControls.required] }
         : {}),
     };
     schemas[updateSchemaName] = {
       type: "object",
       additionalProperties: false,
-      properties: updatable.properties,
+      properties: { ...updatable.properties, ...updateControls.properties },
+      ...(updateControls.required.length > 0
+        ? { required: updateControls.required }
+        : {}),
+      ...(updateControls.dependentRequired
+        ? { dependentRequired: updateControls.dependentRequired }
+        : {}),
       description:
         "PATCH body; omitted fields are left unchanged. Fields authored " +
         "immutable are settable at create only and are rejected here." +
         writerNote,
     };
+    if (hasDeleteControls) {
+      schemas[deleteSchemaName] = {
+        type: "object",
+        additionalProperties: false,
+        properties: deleteControls.properties,
+        ...(deleteControls.required.length > 0
+          ? { required: deleteControls.required }
+          : {}),
+        ...(deleteControls.dependentRequired
+          ? { dependentRequired: deleteControls.dependentRequired }
+          : {}),
+        description: deleteRequiresChallenge
+          ? `Submit ${deleteControls.required.join(" and ")} first to receive a server-issued ` +
+            "confirmation challenge. Retry with the same controls plus both " +
+            "confirmationToken and confirmationAnswer."
+          : deleteRequiresConfirmation
+            ? "Set confirmed to true to continue; omitting it or sending false returns CONFIRMATION_REQUIRED."
+            : "Required concurrency controls for this deletion.",
+      };
+    }
     schemas[canonical ? `${name}ListData` : `${name}List`] = {
       type: "object",
       description: `A page of ${label} records.`,
@@ -801,6 +1110,14 @@ export function renderOpenApiSpec(
           "400": errorResponse("Invalid request body", canonical),
           "401": errorResponse("Missing or invalid credentials", canonical),
           "403": errorResponse("Session lacks a required entity role", canonical),
+          ...(canonical && createRequiresConfirmation
+            ? {
+                "428": errorResponse(
+                  "CONFIRMATION_REQUIRED — this operation requires confirmation controls",
+                  true,
+                ),
+              }
+            : {}),
         },
       };
     }
@@ -865,6 +1182,34 @@ export function renderOpenApiSpec(
           "401": errorResponse("Missing or invalid credentials", canonical),
           "403": errorResponse("Session lacks a required entity role", canonical),
           "404": errorResponse("Not found", canonical),
+          ...(canonical && updateOperation?.concurrency?.version
+            ? {
+                "409": errorResponse(
+                  "VERSION_CONFLICT — expectedVersion does not match the current record version",
+                  true,
+                ),
+                "422": errorResponse(
+                  "VALIDATION — expectedVersion is not a semantically valid record version",
+                  true,
+                ),
+              }
+            : {}),
+          ...(canonical && updateOperation?.concurrency?.editLease
+            ? {
+                "423": errorResponse(
+                  "LOCKED — another identity currently holds the record edit lease",
+                  true,
+                ),
+              }
+            : {}),
+          ...(canonical && updateRequiresConfirmation
+            ? {
+                "428": errorResponse(
+                  "CONFIRMATION_REQUIRED — this operation requires confirmation controls",
+                  true,
+                ),
+              }
+            : {}),
         },
       };
     }
@@ -877,13 +1222,61 @@ export function renderOpenApiSpec(
         summary: `Delete ${label}`,
         tags: [name],
         ...(description ? { description } : {}),
+        ...(hasDeleteControls
+          ? {
+              requestBody: {
+                required: deleteControls.required.length > 0,
+                content: {
+                  "application/json": {
+                    schema: { $ref: `#/components/schemas/${deleteSchemaName}` },
+                  },
+                },
+              },
+            }
+          : {}),
         responses: {
           ...(canonical
             ? { "200": entityResponse("DeletionResult", `${label} deleted`) }
             : { "204": { description: `${label} deleted` } }),
+          ...(canonical
+            ? {
+                "400": errorResponse(
+                  "BAD_USER_INPUT — invalid request body or mutation controls",
+                  true,
+                ),
+              }
+            : {}),
           "401": errorResponse("Missing or invalid credentials", canonical),
           "403": errorResponse("Session lacks a required entity role", canonical),
           "404": errorResponse("Not found", canonical),
+          ...(canonical && deleteOperation?.concurrency?.version
+            ? {
+                "409": errorResponse(
+                  "VERSION_CONFLICT — expectedVersion does not match the current record version",
+                  true,
+                ),
+                "422": errorResponse(
+                  "VALIDATION — expectedVersion is not a semantically valid record version",
+                  true,
+                ),
+              }
+            : {}),
+          ...(canonical && deleteOperation?.concurrency?.editLease
+            ? {
+                "423": errorResponse(
+                  "LOCKED — another identity currently holds the record edit lease",
+                  true,
+                ),
+              }
+            : {}),
+          ...(canonical && deleteRequiresConfirmation
+            ? {
+                "428": errorResponse(
+                  "CONFIRMATION_REQUIRED — this operation requires confirmation controls",
+                  true,
+                ),
+              }
+            : {}),
         },
       };
     }

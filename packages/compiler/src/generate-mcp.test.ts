@@ -289,6 +289,136 @@ describe("buildMcpCatalog", () => {
     expect(update.annotations.idempotentHint).toBe(false);
   });
 
+  it("projects version, lease and confirmation controls into v2 mutation inputs", () => {
+    const secured = contract({ authoringVersion: 2 });
+    secured.entityOperations.create = {
+      ...secured.entityOperations.create!,
+      interaction: { confirmation: { mode: "acknowledgement" } },
+    };
+    secured.entityOperations.update = {
+      ...secured.entityOperations.update!,
+      concurrency: {
+        version: { mode: "required", field: "updatedAt" },
+        editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+      },
+      interaction: {
+        confirmation: {
+          mode: "challenge",
+          challenge: {
+            kind: "type-current-field",
+            field: "name",
+            issuedBy: "server",
+            bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+            expiresAfter: "PT5M",
+            singleUse: true,
+          },
+        },
+      },
+    };
+    secured.entityOperations.delete = {
+      ...secured.entityOperations.delete!,
+      concurrency: {
+        version: { mode: "required", field: "updatedAt" },
+        editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+      },
+      interaction: {
+        confirmation: {
+          mode: "challenge",
+          challenge: {
+            kind: "type-current-field",
+            field: "name",
+            issuedBy: "server",
+            bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+            expiresAfter: "PT5M",
+            singleUse: true,
+          },
+        },
+      },
+    };
+
+    const catalog = buildMcpCatalog([input(secured)], "test");
+    const create = catalog.tools.find((tool) => tool.operation === "create")!;
+    const update = catalog.tools.find((tool) => tool.operation === "update")!;
+    const deletion = catalog.tools.find((tool) => tool.operation === "delete")!;
+
+    expect(create.inputSchema.required).not.toContain("confirmed");
+    expect(prop(create.inputSchema, "confirmed")).toMatchObject({
+      type: "boolean",
+    });
+    expect(prop(create.inputSchema, "confirmed")).not.toHaveProperty("const");
+    expect(update.inputSchema.required).toEqual([
+      "id",
+      "values",
+      "expectedVersion",
+      "leaseToken",
+    ]);
+    expect(update.inputSchema.dependentRequired).toEqual({
+      confirmationToken: ["confirmationAnswer"],
+      confirmationAnswer: ["confirmationToken"],
+    });
+    expect(prop(update.inputSchema, "expectedVersion")).toMatchObject({
+      type: "string",
+      format: "date-time",
+    });
+    expect(prop(update.inputSchema, "leaseToken")).toMatchObject({ minLength: 1 });
+    expect(deletion.inputSchema.required).toEqual([
+      "id",
+      "expectedVersion",
+      "leaseToken",
+    ]);
+    expect(deletion.inputSchema.dependentRequired).toEqual({
+      confirmationToken: ["confirmationAnswer"],
+      confirmationAnswer: ["confirmationToken"],
+    });
+    expect(prop(deletion.inputSchema, "confirmationAnswer").description).toContain(
+      "name",
+    );
+
+    const validateDelete = new Ajv2020.default({
+      strict: false,
+      validateFormats: false,
+    }).compile(deletion.inputSchema);
+    const firstCall = {
+      id: "00000000-0000-4000-8000-000000000001",
+      expectedVersion: "2026-09-11T12:00:00.000Z",
+      leaseToken: "edit-lease-token",
+    };
+    expect(validateDelete(firstCall)).toBe(true);
+    expect(validateDelete({ ...firstCall, confirmationToken: "challenge-token" })).toBe(
+      false,
+    );
+    expect(
+      validateDelete({
+        ...firstCall,
+        confirmationToken: "challenge-token",
+        confirmationAnswer: "Current name",
+      }),
+    ).toBe(true);
+  });
+
+  it("leaves acknowledgement to the canonical runtime instead of MCP schema rejection", () => {
+    const acknowledged = contract({ authoringVersion: 2 });
+    for (const intent of ["create", "update", "delete"] as const) {
+      acknowledged.entityOperations[intent] = {
+        ...acknowledged.entityOperations[intent]!,
+        interaction: { confirmation: { mode: "acknowledgement" } },
+      };
+    }
+
+    const catalog = buildMcpCatalog([input(acknowledged)], "test");
+    for (const intent of ["create", "update", "delete"] as const) {
+      const tool = catalog.tools.find((candidate) => candidate.operation === intent)!;
+      expect(tool.inputSchema.required).not.toContain("confirmed");
+      expect(prop(tool.inputSchema, "confirmed")).toMatchObject({
+        type: "boolean",
+      });
+      expect(prop(tool.inputSchema, "confirmed")).not.toHaveProperty("const");
+      expect(prop(tool.inputSchema, "confirmed").description).toContain(
+        "Only true",
+      );
+    }
+  });
+
   it("routes generic-style entities through the shared osf_* tools", () => {
     const catalog = buildMcpCatalog(
       [

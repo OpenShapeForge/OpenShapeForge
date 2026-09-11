@@ -20,6 +20,8 @@ const MAX_EXPANDED_SESSION_GROUPS = 4096;
 export type DbSessionInput = {
   tenantId?: string | null;
   userId?: string | null;
+  /** Server-derived display label used only in safe, tenant-local messages. */
+  userDisplayName?: string | null;
   roles?: readonly string[] | null;
   groups?: readonly string[] | null;
   scope?: DbSessionScope | null;

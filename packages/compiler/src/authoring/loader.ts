@@ -240,12 +240,12 @@ export function loadEntity(
   // with a legacy fallback to authoring/core/.
   const corePath = resolveEntityFilePath(authoringDir, entityFileName);
   const rawCoreEntity = loadYaml<CoreEntity>(corePath);
-  assertV2Authoring(rawCoreEntity, corePath);
   const baseEntity = loadBaseEntity(authoringDir);
   const coreEntity = applyBaseEntityToCore(rawCoreEntity, baseEntity, {
     kind: "core",
     path: corePath,
   });
+  assertV2Authoring(coreEntity, corePath);
   validateEntityContentIdentifiers(coreEntity, corePath);
 
   // Scan for context partials (field extensions)

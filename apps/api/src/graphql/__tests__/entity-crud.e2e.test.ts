@@ -19,7 +19,7 @@ import {
   createRow,
   fieldName,
   foreignKeyTargets,
-  tables,
+  graphqlTables as tables,
   tablesByName,
   textColumnFor,
   untrackRow,

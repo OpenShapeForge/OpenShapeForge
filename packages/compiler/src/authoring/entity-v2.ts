@@ -68,6 +68,25 @@ function completeProjectedActions(
   ) as Record<CrudOperationKey, boolean>;
 }
 
+function fixedDurationSeconds(value: string): number | undefined {
+  const match = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(value);
+  if (!match) return undefined;
+  const seconds =
+    Number(match[1] ?? 0) * 86_400 +
+    Number(match[2] ?? 0) * 3_600 +
+    Number(match[3] ?? 0) * 60 +
+    Number(match[4] ?? 0);
+  return Number.isSafeInteger(seconds) ? seconds : undefined;
+}
+
+const RESERVED_MUTATION_CONTROL_FIELD_KEYS = new Set([
+  "expectedVersion",
+  "leaseToken",
+  "confirmed",
+  "confirmationToken",
+  "confirmationAnswer",
+]);
+
 export function v2RestConfig(entity: CoreEntity): RestConfig | undefined {
   if (!entity.interfaces?.rest) return undefined;
   return { operations: completeProjectedActions(entity, "rest") };
@@ -128,11 +147,12 @@ export function v2WebUi(entity: CoreEntity): UIDefinition | undefined {
         title: record.title,
         ...(record.subtitle ? { subtitle: record.subtitle } : {}),
       },
-      actions: (record.actions ?? []).map((key) =>
-        key === "delete"
+      actions: (record.actions ?? []).map((key) => {
+        const action = entity.operations![key]!.implementation.action;
+        return action === "delete"
           ? { key, mutation: "delete" }
-          : { key, route: key },
-      ),
+          : { key, route: action === "update" ? "edit" : key };
+      }),
       groups: record.layout.tabs,
     };
     const variants: Record<string, { title: import("./types.js").LocalizedText; groups?: import("./types.js").ViewGroup[]; extends?: string }> = {};
@@ -165,13 +185,167 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
   }
   v2OperationByAction(entity);
 
-  for (const [operationKey, operation] of v2OperationEntries(entity)) {
-    if (operation.confirmation.mode !== "none") {
+  const fieldsByKey = new Map(entity.fields.map((field) => [field.key, field]));
+  for (const field of entity.fields) {
+    if (RESERVED_MUTATION_CONTROL_FIELD_KEYS.has(field.key)) {
       throw new Error(
-        `${origin} operation "${operationKey}" declares confirmation mode ` +
-          `"${operation.confirmation.mode}". The contract is reserved, but runtime ` +
-          "enforcement must land before this mode can compile.",
+        `${origin} schemaVersion 2 field "${field.key}" uses a reserved platform ` +
+          "mutation-control name. Rename the entity field so REST and MCP can " +
+          "project canonical controls without stripping or reinterpreting entity data.",
       );
+    }
+  }
+
+  for (const [operationKey, operation] of v2OperationEntries(entity)) {
+    const action = operation.implementation.action;
+    const version = operation.concurrency?.version;
+    const editLease = operation.concurrency?.editLease;
+    if (
+      (action === "list" || action === "get") &&
+      (operation.concurrency || operation.confirmation.mode !== "none")
+    ) {
+      throw new Error(
+        `${origin} operation "${operationKey}" declares concurrency or confirmation ` +
+          `for read action "${action}"; read operations cannot require mutation controls.`,
+      );
+    }
+    if (version) {
+      if (action !== "update" && action !== "delete") {
+        throw new Error(
+          `${origin} operation "${operationKey}" declares version concurrency for ` +
+            `entity action "${action}"; version concurrency is allowed only on update or delete.`,
+        );
+      }
+      if (version.field !== "updatedAt") {
+        throw new Error(
+          `${origin} operation "${operationKey}" uses concurrency version field ` +
+            `"${version.field}"; generated entity operations currently support only ` +
+            'the automatically advanced "updatedAt" field.',
+        );
+      }
+      const field = fieldsByKey.get(version.field);
+      if (!field) {
+        throw new Error(
+          `${origin} operation "${operationKey}" uses concurrency version field ` +
+            `"${version.field}", but that field does not exist.`,
+        );
+      }
+      if (!field.persisted) {
+        throw new Error(
+          `${origin} operation "${operationKey}" uses concurrency version field ` +
+            `"${version.field}", which must resolve to a persisted runtime column.`,
+        );
+      }
+      if (field.valueType !== "datetime" || field.readOnly !== true) {
+        throw new Error(
+          `${origin} operation "${operationKey}" uses concurrency version field ` +
+            `"${version.field}", which must be a readOnly datetime field.`,
+        );
+      }
+    }
+    if (editLease) {
+      if (action !== "update" && action !== "delete") {
+        throw new Error(
+          `${origin} operation "${operationKey}" declares editLease for entity action ` +
+            `"${action}"; editLease is allowed only on update or delete.`,
+        );
+      }
+      if (!version) {
+        throw new Error(
+          `${origin} operation "${operationKey}" declares editLease without required ` +
+            "version concurrency.",
+        );
+      }
+      const inactivitySeconds = fixedDurationSeconds(
+        editLease.expiresAfterInactivity,
+      );
+      if (
+        inactivitySeconds === undefined ||
+        inactivitySeconds < 30 ||
+        inactivitySeconds > 86_400
+      ) {
+        throw new Error(
+          `${origin} operation "${operationKey}" editLease expiresAfterInactivity ` +
+            `must be a fixed ISO-8601 duration between PT30S and P1D; received ` +
+            `${JSON.stringify(editLease.expiresAfterInactivity)}.`,
+        );
+      }
+    }
+    if (operation.confirmation.mode === "challenge") {
+      if (action !== "update" && action !== "delete") {
+        throw new Error(
+          `${origin} operation "${operationKey}" declares a confirmation challenge for ` +
+            `entity action "${action}"; challenges require an existing target and are ` +
+            "allowed only on update or delete.",
+        );
+      }
+      const challengeField = fieldsByKey.get(
+        operation.confirmation.challenge.field,
+      );
+      if (!challengeField) {
+        throw new Error(
+          `${origin} operation "${operationKey}" confirmation challenge field ` +
+            `"${operation.confirmation.challenge.field}" does not exist.`,
+        );
+      }
+      if (!challengeField.persisted) {
+        throw new Error(
+          `${origin} operation "${operationKey}" confirmation challenge field ` +
+            `"${challengeField.key}" must resolve to a persisted runtime column.`,
+        );
+      }
+      const challengeCardinality = challengeField.cardinality;
+      if (
+        challengeField.valueType === "object" ||
+        (challengeCardinality !== undefined && challengeCardinality !== "single") ||
+        challengeField.children !== undefined ||
+        challengeField.shape !== undefined ||
+        challengeField.item !== undefined
+      ) {
+        throw new Error(
+          `${origin} operation "${operationKey}" confirmation challenge field ` +
+            `"${challengeField.key}" must be a single scalar field; object and ` +
+            "collection values cannot be compared as an exact current-field answer.",
+        );
+      }
+      const operationRoles = entity.authorization?.roles[action] ?? [];
+      const entityReadRoles = entity.authorization?.roles.read ?? [];
+      const fieldReadRoles = challengeField.authorization?.roles.read ?? [];
+      const effectiveReadRoles = fieldReadRoles.length > 0
+        ? entityReadRoles.filter((role) => fieldReadRoles.includes(role))
+        : entityReadRoles;
+      const rolesWithoutChallengeRead = operationRoles.filter(
+        (role) => !effectiveReadRoles.includes(role),
+      );
+      if (rolesWithoutChallengeRead.length > 0) {
+        throw new Error(
+          `${origin} operation "${operationKey}" exposes confirmation challenge field ` +
+            `"${challengeField.key}" to operation role(s) that cannot read it: ` +
+            `${rolesWithoutChallengeRead.map((role) => JSON.stringify(role)).join(", ")}. ` +
+            "Every operation role must also be present in authorization.roles.read " +
+            "and, when declared, the field authorization.roles.read allow-list.",
+        );
+      }
+      if (!version) {
+        throw new Error(
+          `${origin} operation "${operationKey}" has a target.version-bound challenge ` +
+            "without required version concurrency.",
+        );
+      }
+      const challengeSeconds = fixedDurationSeconds(
+        operation.confirmation.challenge.expiresAfter,
+      );
+      if (
+        challengeSeconds === undefined ||
+        challengeSeconds < 30 ||
+        challengeSeconds > 900
+      ) {
+        throw new Error(
+          `${origin} operation "${operationKey}" confirmation challenge expiresAfter ` +
+            `must be a fixed ISO-8601 duration between PT30S and PT15M; received ` +
+            `${JSON.stringify(operation.confirmation.challenge.expiresAfter)}.`,
+        );
+      }
     }
     if (operation.reliability.idempotency.mode === "keyed") {
       throw new Error(
@@ -211,5 +385,32 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
 
   for (const interfaceName of ["rest", "graphql", "mcp", "web"] as const) {
     if (entity.interfaces?.[interfaceName]) projectedActions(entity, interfaceName);
+  }
+
+  if (entity.interfaces?.graphql) {
+    throw new Error(
+      `${origin} schemaVersion 2 interfaces.graphql projection is not supported: ` +
+        "the GraphQL adapter still exposes legacy direct CRUD and non-canonical " +
+        "response envelopes. Use a canonical REST, MCP, or web projection until " +
+        "the adapter supports the schemaVersion 2 Operation contract.",
+    );
+  }
+
+  const web = entity.interfaces?.web;
+  if (web) {
+    for (const operationKey of web.views.record?.actions ?? []) {
+      if (!entity.operations[operationKey]) {
+        throw new Error(
+          `${origin} interfaces.web.views.record.actions references unknown operation ` +
+            `"${operationKey}".`,
+        );
+      }
+      if (!web.operations[operationKey]) {
+        throw new Error(
+          `${origin} interfaces.web.views.record.actions operation "${operationKey}" ` +
+            "must also be projected by interfaces.web.operations.",
+        );
+      }
+    }
   }
 }

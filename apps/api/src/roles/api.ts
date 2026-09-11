@@ -33,6 +33,7 @@ import {
 } from "../graphql/yoga.js";
 import { headersFromFastify } from "../http/headers.js";
 import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
+import { registerEditLeaseRestRoutes } from "../rest/edit-lease-routes.js";
 import { registerConnectorRestRoutes } from "../connectors/rest-routes.js";
 import { registerConnectorOAuthRoutes } from "../connectors/oauth-routes.js";
 import { readConnectorRuntimeConfig } from "../connectors/runtime-config.js";
@@ -453,6 +454,7 @@ export function createApiApp(options: {
       });
 
     registerGeneratedRestRoutes(routes, dbOptions);
+    registerEditLeaseRestRoutes(routes, dbOptions);
     registerDocumentRestRoutes(routes, dbOptions);
     registerAgreementMilestoneRestRoutes(routes, dbOptions);
     registerConnectorRestRoutes(routes, {

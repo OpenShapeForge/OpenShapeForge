@@ -5,6 +5,7 @@ import {
   operationErrorOf,
   operationFailure,
   type OperationConfirmation,
+  type OperationConcurrency,
   type OperationResult,
 } from "./index.js";
 
@@ -22,6 +23,26 @@ test("a challenge is server-issued, version-bound and single-use", () => {
   } satisfies OperationConfirmation;
 
   expect(confirmation.challenge.bindTo).toContain("target.version");
+});
+
+test("an acknowledgement is distinct from server-issued proof", () => {
+  const confirmation = {
+    mode: "acknowledgement",
+  } satisfies OperationConfirmation;
+
+  expect(confirmation).toEqual({ mode: "acknowledgement" });
+});
+
+test("concurrency declares version and edit-lease requirements without interface details", () => {
+  const concurrency = {
+    version: { mode: "required", field: "updatedAt" },
+    editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+  } satisfies OperationConcurrency;
+
+  expect(concurrency).toEqual({
+    version: { mode: "required", field: "updatedAt" },
+    editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+  });
 });
 
 test("validation and temporary refusals use one canonical failure contract", () => {

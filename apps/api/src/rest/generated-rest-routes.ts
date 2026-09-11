@@ -27,6 +27,7 @@ import {
   executeEntityOperation,
   fieldNameForColumn,
   getGeneratedCrudTables,
+  invalidMutationControlTypeFailure,
   isCallerWritableColumn,
   isOperationWrittenColumn,
   operationWrittenRefusal,
@@ -68,6 +69,63 @@ const RESERVED_LIST_PARAMS = new Set([
   "sortField",
   "sortDirection",
 ]);
+
+const MUTATION_CONTROL_FIELDS = new Set([
+  "expectedVersion",
+  "leaseToken",
+  "confirmed",
+  "confirmationToken",
+  "confirmationAnswer",
+]);
+
+type MutationControlField =
+  | "expectedVersion"
+  | "leaseToken"
+  | "confirmed"
+  | "confirmationToken"
+  | "confirmationAnswer";
+
+function expectedMutationControlType(
+  field: MutationControlField,
+): "string" | "boolean" {
+  return field === "confirmed" ? "boolean" : "string";
+}
+
+function splitMutationBody(
+  body: unknown,
+  allowControls: boolean,
+): {
+  valuesBody: unknown;
+  controls: Record<string, string | boolean>;
+} {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return { valuesBody: body, controls: {} };
+  }
+  const entries = Object.entries(body as Record<string, unknown>);
+  if (allowControls) {
+    for (const [key, value] of entries) {
+      if (!MUTATION_CONTROL_FIELDS.has(key)) continue;
+      const field = key as MutationControlField;
+      const expectedType = expectedMutationControlType(field);
+      if (typeof value !== expectedType) {
+        throw invalidMutationControlTypeFailure(field, expectedType);
+      }
+    }
+  }
+  const controls = Object.fromEntries(
+    entries.filter(
+      ([key, value]) =>
+        allowControls &&
+        MUTATION_CONTROL_FIELDS.has(key) &&
+        (typeof value === "string" ||
+          (key === "confirmed" && typeof value === "boolean")),
+    ),
+  ) as Record<string, string | boolean>;
+  const valuesBody = Object.fromEntries(
+    entries.filter(([key]) => !allowControls || !MUTATION_CONTROL_FIELDS.has(key)),
+  );
+  return { valuesBody, controls };
+}
 
 /**
  * REST bodies are stricter than GraphQL parity: unknown keys are rejected
@@ -310,6 +368,7 @@ export function registerGeneratedRestRoutes(
       session: {
         tenantId: resolved.tenantId,
         userId: resolved.userId,
+        userDisplayName: resolved.userDisplayName ?? null,
         roles: [...resolved.roles],
         groups: [...resolved.groups],
         scope: resolved.scope,
@@ -433,11 +492,15 @@ export function registerGeneratedRestRoutes(
       if (rest.operations.create) {
         instance.post(base, async (request, reply) => {
           const context = await requireRestContext(request);
-          const values = assertWritableBody(table, request.body ?? {}, "create");
+          const { valuesBody, controls } = splitMutationBody(
+            request.body ?? {},
+            canonical,
+          );
+          const values = assertWritableBody(table, valuesBody, "create");
           const result = await executeEntityOperation(context.db, context.session, {
             operation: entityOperationRef(table, "create"),
             offerIntents,
-            input: { values },
+            input: { values, ...controls },
           });
           if (result.intent !== "create") throw new Error("Unexpected entity result.");
           if ("error" in result) throw new OperationFailure(result.error);
@@ -457,11 +520,15 @@ export function registerGeneratedRestRoutes(
         instance.patch(`${base}/:id`, async (request, reply) => {
           const context = await requireRestContext(request);
           const { id } = request.params as { id: string };
-          const values = assertWritableBody(table, request.body ?? {}, "update");
+          const { valuesBody, controls } = splitMutationBody(
+            request.body ?? {},
+            canonical,
+          );
+          const values = assertWritableBody(table, valuesBody, "update");
           const result = await executeEntityOperation(context.db, context.session, {
             operation: entityOperationRef(table, "update"),
             offerIntents,
-            input: { id, values },
+            input: { id, values, ...controls },
           });
           if (result.intent !== "update") throw new Error("Unexpected entity result.");
           if ("error" in result) throw new OperationFailure(result.error);
@@ -481,10 +548,26 @@ export function registerGeneratedRestRoutes(
         instance.delete(`${base}/:id`, async (request, reply) => {
           const context = await requireRestContext(request);
           const { id } = request.params as { id: string };
+          const { valuesBody, controls } = splitMutationBody(
+            request.body ?? {},
+            canonical,
+          );
+          if (
+            canonical &&
+            valuesBody &&
+            typeof valuesBody === "object" &&
+            Object.keys(valuesBody as Record<string, unknown>).length > 0
+          ) {
+            throw new HttpError(
+              400,
+              "BAD_USER_INPUT",
+              "Delete body contains an unknown control field.",
+            );
+          }
           const result = await executeEntityOperation(context.db, context.session, {
             operation: entityOperationRef(table, "delete"),
             offerIntents,
-            input: { id },
+            input: { id, ...controls },
           });
           if (result.intent !== "delete") throw new Error("Unexpected entity result.");
           if ("error" in result) throw new OperationFailure(result.error);

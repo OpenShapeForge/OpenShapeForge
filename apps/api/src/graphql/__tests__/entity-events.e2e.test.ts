@@ -19,7 +19,7 @@ import {
 import {
   createRow,
   fieldName,
-  tables,
+  graphqlTables as tables,
   textColumnFor,
   untrackRow,
 } from "./e2e/entity-factory.js";

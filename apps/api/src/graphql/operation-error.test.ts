@@ -34,6 +34,7 @@ test("canonical operation codes retain their intended HTTP meaning", async () =>
     ["VALIDATION", 422],
     ["LOCKED", 423],
     ["VERSION_CONFLICT", 409],
+    ["CONFIRMATION_REQUIRED", 428],
     ["ASSESSMENT_LOCKED", 409],
   ] as const) {
     const failure = operationFailure({ code, message: "Safe refusal." });

@@ -15,7 +15,13 @@ export type OperationConfirmationBinding =
 
 export type OperationConfirmation =
   | { mode: "none" }
-  | { mode: "explicit" }
+  | {
+      /**
+       * The caller must acknowledge this operation in the same request.
+       * This prevents accidental invocation, but is not server-issued proof.
+       */
+      mode: "acknowledgement";
+    }
   | {
       mode: "challenge";
       challenge: {
@@ -34,6 +40,24 @@ export type OperationConfirmation =
         singleUse: true;
       };
     };
+
+/**
+ * Interface-neutral concurrency guarantees enforced by an Operation runtime.
+ * Interfaces only carry the required control values; they never own lease or
+ * version semantics.
+ */
+export type OperationConcurrency = {
+  version?: {
+    mode: "required";
+    /** Generated CRUD's canonical read-only datetime version token. */
+    field: "updatedAt";
+  };
+  editLease?: {
+    mode: "required";
+    /** ISO 8601 duration, measured from the last accepted editor activity. */
+    expiresAfterInactivity: string;
+  };
+};
 
 export type OperationViolation = {
   field?: string;

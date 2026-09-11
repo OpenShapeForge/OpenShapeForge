@@ -122,12 +122,21 @@ export type EntityOperationContract = EntityOperationRef & {
     action: GeneratedCrudOperation;
     roles: string[];
   };
+  concurrency?: {
+    version?: { mode: "required"; field: string };
+    editLease?: { mode: "required"; expiresAfterInactivity: string };
+  };
   interaction: { confirmation: OperationConfirmation };
 };
 
 export type EntityOperationInput = ListPageInput & {
   id?: string;
   values?: Record<string, unknown>;
+  expectedVersion?: string;
+  leaseToken?: string;
+  confirmed?: boolean;
+  confirmationToken?: string;
+  confirmationAnswer?: string;
 };
 
 export type EntityOperationRequest = {

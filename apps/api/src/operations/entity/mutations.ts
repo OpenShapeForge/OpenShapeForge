@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { sql } from "kysely";
+import { sql, type Transaction } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
+import type { DB } from "../../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import {
@@ -14,6 +15,15 @@ import {
 } from "./catalog.js";
 import { fieldNameForColumn } from "./columns.js";
 import { fetchGeneratedEntityRow } from "./queries.js";
+import { normalizeTimestampToken } from "../../db/timestamps.js";
+import {
+  consumeEntityConfirmationInTransaction,
+  type ChallengeProtectedOperation,
+} from "./confirmation-challenges.js";
+import {
+  consumeEntityEditLeaseInTransaction,
+  type LeaseProtectedOperation,
+} from "./edit-leases.js";
 import type {
   GeneratedCrudColumn,
   GeneratedCrudTable,
@@ -25,6 +35,25 @@ import {
   normalizeWritableValues,
   writableColumnMap,
 } from "./write-policy.js";
+
+async function fetchGeneratedRowInTransaction(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  id: string,
+): Promise<GeneratedEntityRow | null> {
+  const tenantWhere = table.tenantScoped
+    ? sql`and ${sql.id("tenant_id")} = ${session.tenantId}`
+    : sql``;
+  const result = await sql<{ row: GeneratedEntityRow }>`
+    select to_jsonb(${sql.id(table.table)}.*) as row
+    from ${sql.id(table.schema, table.table)}
+    where ${sql.id(table.primaryKey!)}::text = ${id}
+      ${tenantWhere}
+    limit 1
+  `.execute(trx);
+  return result.rows[0]?.row ?? null;
+}
 
 /**
  * Role-ungated create for RUNTIME surfaces (not callers), mirroring
@@ -172,13 +201,20 @@ export async function updateGeneratedEntity(
     table: string;
     id: string;
     values: Record<string, unknown>;
+    guard?: {
+      operation: ChallengeProtectedOperation & LeaseProtectedOperation;
+      expectedVersion: string;
+      leaseToken?: string;
+      confirmationToken?: string;
+      confirmationAnswer?: string;
+    };
   },
 ): Promise<GeneratedEntityRow | null> {
   const table = readGeneratedCrudTable(input.table, "update", session);
   assertNoCallerElicitedOutput(table, input.values);
   assertNoOperationWrittenValues(table, input.values);
   const values = normalizeWritableValues(table, input.values, "update");
-  return applyGeneratedRowUpdate(db, session, table, input.id, values);
+  return applyGeneratedRowUpdate(db, session, table, input.id, values, input.guard);
 }
 
 async function applyGeneratedRowUpdate(
@@ -187,6 +223,13 @@ async function applyGeneratedRowUpdate(
   table: GeneratedCrudTable,
   id: string,
   values: ReturnType<typeof normalizeWritableValues>,
+  guard?: {
+    operation: ChallengeProtectedOperation & LeaseProtectedOperation;
+    expectedVersion: string;
+    leaseToken?: string;
+    confirmationToken?: string;
+    confirmationAnswer?: string;
+  },
 ): Promise<GeneratedEntityRow | null> {
   const updatedAt = table.columns.find((column) => column.name === "updated_at");
   const assignments = [...values.entries()].map(([column, value]) =>
@@ -196,7 +239,7 @@ async function applyGeneratedRowUpdate(
     assignments.push(sql`${sql.id(updatedAt.name)} = now()`);
   }
 
-  if (assignments.length === 0) {
+  if (assignments.length === 0 && !guard) {
     // Already authorized as an update above; an empty-body update must not
     // additionally require the read role, so fetch without re-gating and then
     // apply the same output projection as every other return path.
@@ -205,18 +248,85 @@ async function applyGeneratedRowUpdate(
   }
 
   return withDbSession(db, session, async (trx) => {
+    if (guard?.operation.concurrency?.editLease) {
+      if (!guard.leaseToken) {
+        throw generatedCrudError(
+          "A valid edit lease is required for this operation.",
+          "LEASE_INVALID",
+        );
+      }
+      await consumeEntityEditLeaseInTransaction(trx, session, {
+        operation: guard.operation,
+        targetId: id,
+        expectedVersion: guard.expectedVersion,
+        leaseToken: guard.leaseToken,
+      });
+    }
+    if (guard?.confirmationToken && guard.confirmationAnswer) {
+      await consumeEntityConfirmationInTransaction(trx, session, {
+        operation: guard.operation,
+        targetId: id,
+        expectedVersion: guard.expectedVersion,
+        confirmationToken: guard.confirmationToken,
+        confirmationAnswer: guard.confirmationAnswer,
+      });
+    }
     const tenantWhere =
       table.tenantScoped ? sql`and ${sql.id("tenant_id")} = ${session.tenantId}` : sql``;
+    const versionField = guard?.operation.concurrency?.version?.field;
+    const versionColumn = versionField
+      ? table.columns.find((column) => fieldNameForColumn(column) === versionField)
+      : undefined;
+    if (guard && !versionColumn) {
+      throw generatedCrudError(
+        "Generated entity version metadata is invalid.",
+        "INTERNAL_SERVER_ERROR",
+      );
+    }
+    const expectedVersionWhere = guard && versionColumn
+      ? sql`and ${sql.id(versionColumn.name)} = ${normalizeTimestampToken(guard.expectedVersion)}::timestamptz`
+      : sql``;
+
+    if (assignments.length === 0) {
+      const unchanged = await sql<{ row: GeneratedEntityRow }>`
+        select to_jsonb(${sql.id(table.table)}.*) as row
+        from ${sql.id(table.schema, table.table)}
+        where ${sql.id(table.primaryKey!)}::text = ${id}
+          ${tenantWhere}
+          ${expectedVersionWhere}
+      `.execute(trx);
+      if (unchanged.rows[0]) {
+        return projectGeneratedEntityRow(table, session, unchanged.rows[0].row);
+      }
+      const current = await fetchGeneratedRowInTransaction(trx, session, table, id);
+      if (current) {
+        throw generatedCrudError(
+          "The record has changed since it was loaded. Reload it before saving.",
+          "VERSION_CONFLICT",
+        );
+      }
+      return null;
+    }
     const result = await sql<{ row: GeneratedEntityRow }>`
       update ${sql.id(table.schema, table.table)}
       set ${sql.join(assignments)}
       where ${sql.id(table.primaryKey!)}::text = ${id}
         ${tenantWhere}
+        ${expectedVersionWhere}
       returning to_jsonb(${sql.id(table.table)}.*) as row
     `.execute(trx);
 
     const row = result.rows[0]?.row ?? null;
     if (!row) {
+      const current = guard
+        ? await fetchGeneratedRowInTransaction(trx, session, table, id)
+        : null;
+      if (current) {
+        throw generatedCrudError(
+          "The record has changed since it was loaded. Reload it before saving.",
+          "VERSION_CONFLICT",
+        );
+      }
       return null;
     }
     await appendGeneratedCrudEvent(trx, table, {
@@ -235,22 +345,75 @@ export async function deleteGeneratedEntity(
   input: {
     table: string;
     id: string;
+    guard?: {
+      operation: ChallengeProtectedOperation & LeaseProtectedOperation;
+      expectedVersion: string;
+      leaseToken?: string;
+      confirmationToken?: string;
+      confirmationAnswer?: string;
+    };
   },
 ): Promise<boolean> {
   const table = readGeneratedCrudTable(input.table, "delete", session);
 
   return withDbSession(db, session, async (trx) => {
+    if (input.guard?.operation.concurrency?.editLease) {
+      if (!input.guard.leaseToken) {
+        throw generatedCrudError(
+          "A valid edit lease is required for this operation.",
+          "LEASE_INVALID",
+        );
+      }
+      await consumeEntityEditLeaseInTransaction(trx, session, {
+        operation: input.guard.operation,
+        targetId: input.id,
+        expectedVersion: input.guard.expectedVersion,
+        leaseToken: input.guard.leaseToken,
+      });
+    }
+    if (input.guard?.confirmationToken && input.guard.confirmationAnswer) {
+      await consumeEntityConfirmationInTransaction(trx, session, {
+        operation: input.guard.operation,
+        targetId: input.id,
+        expectedVersion: input.guard.expectedVersion,
+        confirmationToken: input.guard.confirmationToken,
+        confirmationAnswer: input.guard.confirmationAnswer,
+      });
+    }
     const tenantWhere =
       table.tenantScoped ? sql`and ${sql.id("tenant_id")} = ${session.tenantId}` : sql``;
+    const versionField = input.guard?.operation.concurrency?.version?.field;
+    const versionColumn = versionField
+      ? table.columns.find((column) => fieldNameForColumn(column) === versionField)
+      : undefined;
+    if (input.guard && !versionColumn) {
+      throw generatedCrudError(
+        "Generated entity version metadata is invalid.",
+        "INTERNAL_SERVER_ERROR",
+      );
+    }
+    const expectedVersionWhere = input.guard && versionColumn
+      ? sql`and ${sql.id(versionColumn.name)} = ${normalizeTimestampToken(input.guard.expectedVersion)}::timestamptz`
+      : sql``;
     const result = await sql<{ row: GeneratedEntityRow }>`
       delete from ${sql.id(table.schema, table.table)}
       where ${sql.id(table.primaryKey!)}::text = ${input.id}
         ${tenantWhere}
+        ${expectedVersionWhere}
       returning to_jsonb(${sql.id(table.table)}.*) as row
     `.execute(trx);
 
     const row = result.rows[0]?.row ?? null;
     if (!row) {
+      const current = input.guard
+        ? await fetchGeneratedRowInTransaction(trx, session, table, input.id)
+        : null;
+      if (current) {
+        throw generatedCrudError(
+          "The record has changed since it was loaded. Reload it before deleting.",
+          "VERSION_CONFLICT",
+        );
+      }
       return false;
     }
     await appendGeneratedCrudEvent(trx, table, {

@@ -1,12 +1,28 @@
 // SPDX-License-Identifier: BUSL-1.1
 import {
+  operationFailure,
   operationErrorOf,
   type OperationError,
 } from "@openshapeforge/operations";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DbSessionInput } from "../../db/session.js";
+import { normalizeTimestampToken } from "../../db/timestamps.js";
 import rawOperationCatalog from "../../generated/operations/catalog.json" with { type: "json" };
-import { generatedCrudError, getGeneratedCrudTables } from "./catalog.js";
+import {
+  generatedCrudError,
+  getGeneratedCrudTables,
+  requireEntityOperation,
+} from "./catalog.js";
+import {
+  acquireEntityEditLease,
+  editLeaseErrorsByTarget,
+  type EntityEditLease,
+  type LeaseProtectedOperation,
+} from "./edit-leases.js";
+import {
+  issueEntityConfirmationChallenge,
+  type ChallengeProtectedOperation,
+} from "./confirmation-challenges.js";
 import {
   createGeneratedEntity,
   deleteGeneratedEntity,
@@ -42,6 +58,31 @@ const entityOperationsById = new Map(
   entityOperations.map((operation) => [operation.id, operation]),
 );
 
+async function leaseUnavailabilityByTarget(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  entityName: string,
+  table: GeneratedCrudTable,
+  targetIds: readonly string[],
+): Promise<ReadonlyMap<string, Readonly<Record<string, OperationError>>>> {
+  const protectedOperations = entityOperations.filter(
+    (operation) =>
+      operation.entityName === entityName &&
+      operation.concurrency?.editLease?.mode === "required",
+  );
+  if (protectedOperations.length === 0) return new Map();
+  const byTarget = await editLeaseErrorsByTarget(db, session, {
+    entityId: protectedOperations[0]!.entityId,
+    targetIds,
+  });
+  return new Map(
+    [...byTarget].map(([targetId, error]) => [
+      targetId,
+      Object.fromEntries(protectedOperations.map(({ id }) => [id, error])),
+    ]),
+  );
+}
+
 function requireId(input: EntityOperationInput | undefined): string {
   if (!input?.id) {
     throw generatedCrudError("Entity operation requires an id.", "BAD_USER_INPUT");
@@ -54,6 +95,182 @@ function requireValues(input: EntityOperationInput | undefined): Record<string, 
     throw generatedCrudError("Entity operation requires values.", "BAD_USER_INPUT");
   }
   return input.values;
+}
+
+function requireControl(
+  input: EntityOperationInput | undefined,
+  key: "expectedVersion" | "leaseToken" | "confirmationToken" | "confirmationAnswer",
+): string {
+  const value = input?.[key];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw generatedCrudError(`Entity operation requires ${key}.`, "BAD_USER_INPUT");
+  }
+  return value;
+}
+
+/** Canonical semantic validation failure shared by every interface adapter. */
+export function invalidExpectedVersionFailure(versionField: string) {
+  return operationFailure({
+    code: "VALIDATION",
+    message: "The supplied record version is not valid.",
+    detail: `Reload the record and use its ${versionField} value.`,
+    violations: [
+      {
+        field: "expectedVersion",
+        code: "INVALID_DATETIME",
+        message: "Expected version must be a valid timestamp.",
+      },
+    ],
+  });
+}
+
+/** Canonical type failure for interface-neutral mutation controls. */
+export function invalidMutationControlTypeFailure(
+  field: "expectedVersion" | "leaseToken" | "confirmed" | "confirmationToken" | "confirmationAnswer",
+  expectedType: "string" | "boolean",
+) {
+  return operationFailure({
+    code: "VALIDATION",
+    message: "The supplied mutation control is not valid.",
+    detail: `${field} must be a ${expectedType}.`,
+    violations: [
+      {
+        field,
+        code: "INVALID_TYPE",
+        message: `${field} must be a ${expectedType}.`,
+      },
+    ],
+  });
+}
+
+/** Enforce a lightweight caller acknowledgement without treating it as proof. */
+export function requireOperationAcknowledgement(
+  operation: EntityOperationContract,
+  input: EntityOperationInput | undefined,
+): void {
+  if (operation.interaction.confirmation.mode !== "acknowledgement") return;
+  if (input?.confirmed !== true) {
+    throw operationFailure({
+      code: "CONFIRMATION_REQUIRED",
+      message: `Confirm ${operation.entityName}.${operation.intent} before continuing.`,
+      detail: "Retry the operation with confirmed set to true.",
+      retryable: true,
+      data: {
+        confirmation: {
+          kind: "acknowledgement",
+          requiredValue: true,
+        },
+      },
+    });
+  }
+}
+
+/** Create has no current target, so only a lightweight acknowledgement is meaningful. */
+export function requireCreateOperationConfirmation(
+  operation: EntityOperationContract,
+  input: EntityOperationInput | undefined,
+): void {
+  if (operation.interaction.confirmation.mode === "challenge") {
+    throw operationFailure({
+      code: "CONFIRMATION_NOT_SUPPORTED",
+      message: "A current-record challenge cannot protect a create operation.",
+    });
+  }
+  requireOperationAcknowledgement(operation, input);
+}
+
+type PreparedMutationConfirmation =
+  | { ready: true; confirmationToken?: string; confirmationAnswer?: string }
+  | { ready: false; error: OperationError };
+
+async function prepareMutationConfirmation(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  operation: EntityOperationContract,
+  table: GeneratedCrudTable,
+  input: EntityOperationInput | undefined,
+  concurrencyGuard: ReturnType<typeof mutationConcurrencyGuard>,
+): Promise<PreparedMutationConfirmation> {
+  const confirmation = operation.interaction.confirmation;
+  if (confirmation.mode === "none") return { ready: true };
+  if (confirmation.mode === "acknowledgement") {
+    requireOperationAcknowledgement(operation, input);
+    return { ready: true };
+  }
+  if (!concurrencyGuard?.expectedVersion) {
+    throw operationFailure({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "The operation's confirmation contract is incomplete.",
+    });
+  }
+  const confirmationToken = input?.confirmationToken;
+  const confirmationAnswer = input?.confirmationAnswer;
+  if (Boolean(confirmationToken) !== Boolean(confirmationAnswer)) {
+    throw generatedCrudError(
+      "Entity operation requires confirmationToken and confirmationAnswer together.",
+      "BAD_USER_INPUT",
+    );
+  }
+  if (!confirmationToken && !confirmationAnswer) {
+    return {
+      ready: false,
+      error: await issueEntityConfirmationChallenge(db, session, {
+        operation: operation as ChallengeProtectedOperation,
+        table,
+        targetId: requireId(input),
+        expectedVersion: concurrencyGuard.expectedVersion,
+        ...(concurrencyGuard.leaseToken
+          ? { leaseToken: concurrencyGuard.leaseToken }
+          : {}),
+      }),
+    };
+  }
+  return {
+    ready: true,
+    confirmationToken: requireControl(input, "confirmationToken"),
+    confirmationAnswer: requireControl(input, "confirmationAnswer"),
+  };
+}
+
+/**
+ * Build the interface-neutral precondition passed to the mutation engine.
+ * Version concurrency stands on its own; a lease is an additional control,
+ * never the switch that enables the version predicate.
+ */
+export function mutationConcurrencyGuard(
+  operation: EntityOperationContract,
+  input: EntityOperationInput | undefined,
+): {
+  operation: LeaseProtectedOperation;
+  expectedVersion: string;
+  leaseToken?: string;
+} | undefined {
+  const concurrency = operation.concurrency;
+  if (concurrency?.editLease && !concurrency.version) {
+    throw generatedCrudError(
+      `Entity operation ${operation.id} has an invalid edit-lease contract.`,
+      "INTERNAL_SERVER_ERROR",
+    );
+  }
+  let expectedVersion: string | undefined;
+  if (concurrency?.version) {
+    const rawExpectedVersion = requireControl(input, "expectedVersion");
+    try {
+      expectedVersion = normalizeTimestampToken(rawExpectedVersion);
+    } catch {
+      throw invalidExpectedVersionFailure(concurrency.version.field);
+    }
+  }
+  const leaseToken = concurrency?.editLease
+    ? requireControl(input, "leaseToken")
+    : undefined;
+  return expectedVersion
+    ? {
+        operation: operation as LeaseProtectedOperation,
+        expectedVersion,
+        ...(leaseToken ? { leaseToken } : {}),
+      }
+    : undefined;
 }
 
 function authoredEntityId(table: GeneratedCrudTable): string {
@@ -112,6 +329,63 @@ export function tableForEntityOperation(operation: EntityOperationRef): Generate
 
 export function getEntityOperationContracts(): readonly EntityOperationContract[] {
   return entityOperations;
+}
+
+/** Lease-protected Operations this identity may reach through the REST adapter. */
+export function restEditLeaseOperationIdsForSession(
+  session: Pick<DbSessionInput, "roles">,
+): string[] {
+  const heldRoles = new Set(session.roles ?? []);
+  return entityOperations
+    .filter((operation) => {
+      if (
+        (operation.intent !== "update" && operation.intent !== "delete") ||
+        operation.concurrency?.editLease?.mode !== "required" ||
+        !operation.authorization.roles.some((role) => heldRoles.has(role))
+      ) {
+        return false;
+      }
+      const table = tableForEntityOperation({
+        id: operation.id,
+        intent: operation.intent,
+      });
+      return table.source?.authoringVersion === 2 &&
+        table.source.rest?.operations[operation.intent] === true;
+    })
+    .map(({ id }) => id);
+}
+
+export function entityOperationContract(operationId: string): EntityOperationContract {
+  const operation = entityOperationsById.get(operationId);
+  if (!operation) {
+    throw generatedCrudError(
+      `Entity operation ${operationId} is not available.`,
+      "GENERATED_CRUD_NOT_ENABLED",
+    );
+  }
+  return operation;
+}
+
+/** Central acquisition entry point shared by REST, MCP and Web adapters. */
+export async function acquireEditLeaseForEntityOperation(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  input: { operationId: string; targetId: string },
+): Promise<EntityEditLease> {
+  const operation = entityOperationContract(input.operationId);
+  if (operation.intent !== "update" && operation.intent !== "delete") {
+    throw generatedCrudError(
+      `Entity operation ${operation.id} cannot acquire an edit lease.`,
+      "LEASE_NOT_SUPPORTED",
+    );
+  }
+  const table = tableForEntityOperation({ id: operation.id, intent: operation.intent });
+  requireEntityOperation(table, operation.intent, session);
+  return acquireEntityEditLease(db, session, {
+    operation: operation as LeaseProtectedOperation,
+    table,
+    targetId: input.targetId,
+  });
 }
 
 /**
@@ -173,6 +447,14 @@ export async function executeEntityOperation(
           table: table.name,
           ...request.input,
         });
+        const targetIds = connection.rows.map((row) => String(row[table.primaryKey!] ?? ""));
+        const unavailableByTarget = await leaseUnavailabilityByTarget(
+          db,
+          session,
+          entityName,
+          table,
+          targetIds,
+        );
         return {
           intent: "list",
           data: {
@@ -182,6 +464,7 @@ export async function executeEntityOperation(
                 entityName,
                 session,
                 projectedOfferIntents(request, RECORD_OFFER_INTENTS),
+                unavailableByTarget.get(String(row[table.primaryKey!] ?? "")) ?? {},
               ),
             })),
             totalCount: connection.totalCount,
@@ -199,6 +482,15 @@ export async function executeEntityOperation(
           table: table.name,
           id: requireId(request.input),
         });
+        const unavailableByTarget = data
+          ? await leaseUnavailabilityByTarget(
+              db,
+              session,
+              entityName,
+              table,
+              [String(data[table.primaryKey!] ?? "")],
+            )
+          : new Map();
         return {
           intent: "get",
           data,
@@ -207,11 +499,14 @@ export async function executeEntityOperation(
                 entityName,
                 session,
                 projectedOfferIntents(request, RECORD_OFFER_INTENTS),
+                unavailableByTarget.get(String(data[table.primaryKey!] ?? "")) ?? {},
               )
             : [],
         };
       }
       case "create": {
+        const operation = entityOperationContract(request.operation.id);
+        requireCreateOperationConfirmation(operation, request.input);
         const data = await createGeneratedEntity(db, session, {
           table: table.name,
           values: requireValues(request.input),
@@ -227,10 +522,34 @@ export async function executeEntityOperation(
         };
       }
       case "update": {
+        const operation = entityOperationContract(request.operation.id);
+        const concurrencyGuard = mutationConcurrencyGuard(operation, request.input);
+        const confirmation = await prepareMutationConfirmation(
+          db,
+          session,
+          operation,
+          table,
+          request.input,
+          concurrencyGuard,
+        );
+        if (!confirmation.ready) return { intent: "update", error: confirmation.error };
+        const guard = concurrencyGuard
+          ? {
+              ...concurrencyGuard,
+              operation: operation as ChallengeProtectedOperation & LeaseProtectedOperation,
+              ...(confirmation.confirmationToken
+                ? {
+                    confirmationToken: confirmation.confirmationToken,
+                    confirmationAnswer: confirmation.confirmationAnswer!,
+                  }
+                : {}),
+            }
+          : undefined;
         const data = await updateGeneratedEntity(db, session, {
           table: table.name,
           id: requireId(request.input),
           values: requireValues(request.input),
+          ...(guard ? { guard } : {}),
         });
         return {
           intent: "update",
@@ -245,9 +564,33 @@ export async function executeEntityOperation(
         };
       }
       case "delete": {
+        const operation = entityOperationContract(request.operation.id);
+        const concurrencyGuard = mutationConcurrencyGuard(operation, request.input);
+        const confirmation = await prepareMutationConfirmation(
+          db,
+          session,
+          operation,
+          table,
+          request.input,
+          concurrencyGuard,
+        );
+        if (!confirmation.ready) return { intent: "delete", error: confirmation.error };
+        const guard = concurrencyGuard
+          ? {
+              ...concurrencyGuard,
+              operation: operation as ChallengeProtectedOperation & LeaseProtectedOperation,
+              ...(confirmation.confirmationToken
+                ? {
+                    confirmationToken: confirmation.confirmationToken,
+                    confirmationAnswer: confirmation.confirmationAnswer!,
+                  }
+                : {}),
+            }
+          : undefined;
         const deleted = await deleteGeneratedEntity(db, session, {
           table: table.name,
           id: requireId(request.input),
+          ...(guard ? { guard } : {}),
         });
         return {
           intent: "delete",

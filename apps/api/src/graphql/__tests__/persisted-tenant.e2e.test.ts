@@ -4,7 +4,11 @@ import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { getOperationAST, parse } from "graphql";
 import persistedManifest from "../../generated/graphql/persisted-operations.json" with { type: "json" };
 import { createApiApp } from "../../roles/api.js";
-import { createRow, tables, untrackRow } from "./e2e/entity-factory.js";
+import {
+  createRow,
+  graphqlTables as tables,
+  untrackRow,
+} from "./e2e/entity-factory.js";
 import {
   describe,
   registerSuiteLifecycle,

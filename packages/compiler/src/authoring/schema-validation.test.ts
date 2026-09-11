@@ -446,6 +446,55 @@ describe("coreEntity properties the compiler implements", () => {
     expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/issuedBy/);
   });
 
+  it("uses acknowledgement instead of the ambiguous explicit confirmation mode", () => {
+    const create = {
+      ...v2Operation("create"),
+      confirmation: { mode: "acknowledgement" },
+    };
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { create },
+      interfaces: { rest: { operations: { create: {} } } },
+    });
+
+    expect(validator.validate(document, "billing-run.yaml")).toBe(
+      "core-entity.schema.json",
+    );
+
+    create.confirmation.mode = "explicit";
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(
+      /confirmation/,
+    );
+  });
+
+  it("accepts strict version and edit-lease concurrency authoring", () => {
+    const update = {
+      ...v2Operation("update"),
+      concurrency: {
+        version: { mode: "required", field: "updatedAt" },
+        editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+      },
+    };
+    const document = coreEntity({
+      schemaVersion: 2,
+      fields: [
+        { key: "updatedAt", valueType: "datetime", readOnly: true },
+        { key: "idempotencyKey", valueType: "string" },
+      ],
+      operations: { update },
+      interfaces: { rest: { operations: { update: {} } } },
+    });
+
+    expect(validator.validate(document, "billing-run.yaml")).toBe(
+      "core-entity.schema.json",
+    );
+
+    update.concurrency.editLease.expiresAfterInactivity = "15 minutes";
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(
+      /expiresAfterInactivity/,
+    );
+  });
+
   it("keeps v1 and v2 closed instead of accepting mixed contracts", () => {
     const v1WithOperations = coreEntity({
       operations: { list: v2Operation("list") },

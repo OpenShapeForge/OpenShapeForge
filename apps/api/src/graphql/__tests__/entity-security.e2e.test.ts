@@ -15,7 +15,7 @@ import {
   tenantB,
   test,
 } from "./e2e/harness.js";
-import { createRow, tables } from "./e2e/entity-factory.js";
+import { createRow, graphqlTables as tables } from "./e2e/entity-factory.js";
 
 registerSuiteLifecycle();
 

@@ -17,7 +17,7 @@ import {
   fieldName,
   foreignKeyTargets,
   isMutableColumn,
-  tables,
+  graphqlTables as tables,
   tablesByTypeName,
 } from "./e2e/entity-factory.js";
 

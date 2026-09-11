@@ -150,6 +150,69 @@ tables:
       - name: entity_events_tenant_aggregate_sequence_idx
         columns: [tenant_id, aggregate_type, aggregate_id, sequence]
 
+  # Central, interface-neutral edit leases for long-running human write modes.
+  # A lease is record-wide: one actor editing a Relation blocks every other
+  # lease-requiring operation on that same Relation until release or expiry.
+  # Only a SHA-256 token hash is stored; the opaque token itself is returned
+  # once to the caller and must be presented by the protected mutation.
+  - schema: platform
+    name: entity_edit_leases
+    tenantScoped: true
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: entity_id, type: text, required: true }
+      - { name: target_id, type: text, required: true }
+      - { name: operation_id, type: text, required: true }
+      - { name: owner_user_id, type: uuid, required: true }
+      - { name: owner_display_name, type: text }
+      - { name: token_hash, type: text, required: true }
+      - { name: acquired_version, type: text, required: true }
+      - { name: inactivity_timeout_seconds, type: integer, required: true }
+      - { name: acquired_at, type: timestamptz, required: true, default: now() }
+      - { name: last_activity_at, type: timestamptz, required: true, default: now() }
+      - { name: expires_at, type: timestamptz, required: true }
+    indexes:
+      - name: entity_edit_leases_target_uidx
+        columns: [tenant_id, entity_id, target_id]
+        unique: true
+      - name: entity_edit_leases_token_uidx
+        columns: [token_hash]
+        unique: true
+      - name: entity_edit_leases_expiry_idx
+        columns: [tenant_id, expires_at]
+
+  # Server-issued confirmation challenges for destructive entity Operations.
+  # The challenge and expected typed value are hashed at rest. Consumed rows
+  # remain briefly useful for deterministic ALREADY_USED responses and audit;
+  # a later housekeeping policy may remove expired history.
+  - schema: platform
+    name: operation_confirmation_challenges
+    tenantScoped: true
+    domainInternal: true
+    generatedCrud: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: operation_id, type: text, required: true }
+      - { name: entity_id, type: text, required: true }
+      - { name: target_id, type: text, required: true }
+      - { name: target_version, type: text, required: true }
+      - { name: owner_user_id, type: uuid, required: true }
+      - { name: token_hash, type: text, required: true }
+      - { name: expected_answer_hash, type: text, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: expires_at, type: timestamptz, required: true }
+      - { name: consumed_at, type: timestamptz }
+    indexes:
+      - name: operation_confirmation_challenges_token_uidx
+        columns: [token_hash]
+        unique: true
+      - name: operation_confirmation_challenges_target_idx
+        columns: [tenant_id, entity_id, target_id, operation_id]
+
   # Org-unit hierarchy for group-predicated RLS (authorization.rowAccess.group).
   # Both tables are tenantScoped (get {table}_tenant_isolation automatically) and
   # carry NO rowScope — they are the resolution substrate a user must be able to

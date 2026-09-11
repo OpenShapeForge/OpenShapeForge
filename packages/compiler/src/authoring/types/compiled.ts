@@ -1,6 +1,10 @@
 // @ts-nocheck
 // SPDX-License-Identifier: BUSL-1.1
-import type { OperationConfirmation, OperationReference } from "@openshapeforge/operations";
+import type {
+  OperationConcurrency,
+  OperationConfirmation,
+  OperationReference,
+} from "@openshapeforge/operations";
 import type {
   LocalizedText,
   FieldValidation,
@@ -333,6 +337,7 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
     external: "none" | "read" | "write";
   };
   reliability: { idempotency: { mode: "natural" | "keyed" | "none" } };
+  concurrency?: OperationConcurrency;
   interaction: { confirmation: OperationConfirmation };
 };
 

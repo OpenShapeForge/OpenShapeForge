@@ -346,6 +346,40 @@ operations:
     reliability:
       idempotency: { mode: none }
     confirmation: { mode: none }
+  update:
+    name: { en: Update relation, nl: Relatie wijzigen }
+    description:
+      en: Updates one relation while holding its server-issued edit lease and current version.
+      nl: Wijzigt één relatie met de server-uitgegeven bewerkingslease en actuele versie.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+    confirmation: { mode: none }
+  delete:
+    name: { en: Delete relation, nl: Relatie verwijderen }
+    description:
+      en: Permanently deletes one relation after a server-issued, version-bound confirmation challenge.
+      nl: Verwijdert één relatie definitief na een door de server uitgegeven, versiegebonden bevestigingsvraag.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+    confirmation:
+      mode: challenge
+      challenge:
+        kind: type-current-field
+        field: displayName
+        issuedBy: server
+        bindTo: [subject, tenant, operation, target.id, target.version]
+        expiresAfter: PT5M
+        singleUse: true
 
 interfaces:
   rest:
@@ -353,6 +387,8 @@ interfaces:
       list: {}
       get: {}
       create: {}
+      update: {}
+      delete: {}
   mcp:
     operations:
       list: {}
@@ -361,6 +397,14 @@ interfaces:
         instructions:
           en: Ask for missing required fields before invoking this tool.
           nl: Vraag ontbrekende verplichte velden uit voordat je deze tool aanroept.
+      update:
+        instructions:
+          en: Acquire an edit lease first and submit its token with the version returned by get.
+          nl: Vraag eerst een bewerkingslease aan en stuur het token mee met de versie uit get.
+      delete:
+        instructions:
+          en: First acquire an edit lease and submit id, expectedVersion, and leaseToken to request a challenge; then retry with the same controls, its token, and the exact requested current display name.
+          nl: Vraag eerst een bewerkingslease aan en stuur id, expectedVersion en leaseToken om een bevestigingsvraag te krijgen; herhaal daarna met dezelfde controles, het bevestigingstoken en exact de gevraagde actuele weergavenaam.
     resource:
       uri: app://relations
       name: Relations
@@ -371,6 +415,8 @@ interfaces:
       list: {}
       get: {}
       create: {}
+      update: {}
+      delete: {}
     views:
       collection:
         route: { en: /relations, nl: /relaties }
@@ -386,6 +432,7 @@ interfaces:
           create: { en: /relations/new, nl: /relaties/nieuw }
         title: "{{displayName}}"
         subtitle: "{{relationType}}"
+        actions: [update, delete]
         layout:
           tabs:
             - id: overview
@@ -421,3 +468,5 @@ interfaces:
                 fields: [businessContext]
               - title: { en: Notes, nl: Notities }
                 fields: [notes]
+          update:
+            title: { en: Update relation, nl: Relatie wijzigen }

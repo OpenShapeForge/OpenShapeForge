@@ -35,7 +35,7 @@ import {
   createRow,
   fieldName,
   sampleValue,
-  tables,
+  graphqlTables as tables,
   tablesByTypeName,
   untrackRow,
 } from "./e2e/entity-factory.js";

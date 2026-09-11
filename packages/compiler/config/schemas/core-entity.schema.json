@@ -651,7 +651,36 @@
             }
           }
         },
+        "concurrency": { "$ref": "#/$defs/operationConcurrencyV2" },
         "confirmation": { "$ref": "#/$defs/operationConfirmationV2" }
+      }
+    },
+    "operationConcurrencyV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "version": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "field"],
+          "properties": {
+            "mode": { "const": "required" },
+            "field": { "const": "updatedAt" }
+          }
+        },
+        "editLease": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "expiresAfterInactivity"],
+          "properties": {
+            "mode": { "const": "required" },
+            "expiresAfterInactivity": {
+              "type": "string",
+              "pattern": "^P(?=[0-9]|T[0-9])(?:[0-9]+(?:\\.[0-9]+)?Y)?(?:[0-9]+(?:\\.[0-9]+)?M)?(?:[0-9]+(?:\\.[0-9]+)?W)?(?:[0-9]+(?:\\.[0-9]+)?D)?(?:T(?=[0-9])(?:[0-9]+(?:\\.[0-9]+)?H)?(?:[0-9]+(?:\\.[0-9]+)?M)?(?:[0-9]+(?:\\.[0-9]+)?S)?)?$"
+            }
+          }
+        }
       }
     },
     "operationConfirmationV2": {
@@ -666,7 +695,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["mode"],
-          "properties": { "mode": { "const": "explicit" } }
+          "properties": { "mode": { "const": "acknowledgement" } }
         },
         {
           "type": "object",

@@ -4,6 +4,7 @@ export type {
   OperationEnvelope,
   OperationConfirmation,
   OperationConfirmationBinding,
+  OperationConcurrency,
   OperationError,
   OperationOffer,
   OperationReference,

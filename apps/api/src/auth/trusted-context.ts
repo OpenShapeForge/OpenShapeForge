@@ -24,6 +24,8 @@ export type SessionCredential = "none" | "bearer" | "api-key" | "trusted-context
 export type TrustedSessionContext = {
   tenantId: string | null;
   userId: string | null;
+  /** Verified tenant-local Relation label; display only, never authorization. */
+  userDisplayName?: string | null;
   roles: string[];
   /** OAuth scopes from a verified bearer token; empty on non-bearer carriers. */
   oauthScopes?: string[];

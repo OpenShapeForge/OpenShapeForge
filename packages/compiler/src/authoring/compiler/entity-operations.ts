@@ -73,6 +73,7 @@ function compileOperation(
     authorization: { action, roles: [...source.authorization.roles[action]] },
     effects: definition?.effects ?? defaultEffects(intent),
     reliability: definition?.reliability ?? defaultIdempotency(intent),
+    ...(definition?.concurrency ? { concurrency: definition.concurrency } : {}),
     interaction: { confirmation: definition?.confirmation ?? { mode: "none" as const } },
   };
   switch (intent) {

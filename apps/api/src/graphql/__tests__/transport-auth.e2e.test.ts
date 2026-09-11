@@ -22,7 +22,7 @@ import {
   foreignKeyTargets,
   isMutableColumn,
   sampleValue,
-  tables,
+  graphqlTables as tables,
 } from "./e2e/entity-factory.js";
 
 registerSuiteLifecycle();

@@ -1,4 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
+import type {
+  OperationEnvelope,
+  OperationError,
+  OperationOffer,
+  OperationReference,
+  OperationResult,
+} from "@openshapeforge/operations";
 
 export type GeneratedCrudOperation = "read" | "create" | "update" | "delete";
 export type GeneratedCrudExposureOperation = "list" | "get" | "create" | "update" | "delete";
@@ -100,10 +107,7 @@ export type CountedEntityConnection = GeneratedEntityConnection & {
   totalCount: number;
 };
 
-export type EntityOperationRef = {
-  id: string;
-  intent: GeneratedCrudExposureOperation;
-};
+export type EntityOperationRef = OperationReference<GeneratedCrudExposureOperation>;
 
 export type EntityOperationContract = EntityOperationRef & {
   entityId: string;
@@ -127,7 +131,25 @@ export type EntityOperationRequest = {
   input?: EntityOperationInput;
 };
 
+export type EntityOperationOffer = OperationOffer<GeneratedCrudExposureOperation>;
+export type EntityOperationError = OperationError;
+export type EntityRecordEnvelope = OperationEnvelope<
+  GeneratedEntityRow | null,
+  GeneratedCrudExposureOperation
+>;
+export type EntityCollectionData = {
+  items: OperationEnvelope<GeneratedEntityRow, GeneratedCrudExposureOperation>[];
+  nextCursor: string | null;
+  totalCount: number | null;
+};
+
 export type EntityOperationResult =
-  | { intent: "list"; connection: GeneratedEntityConnection }
-  | { intent: "get" | "create" | "update"; record: GeneratedEntityRow | null }
-  | { intent: "delete"; deleted: boolean };
+  | ({ intent: "list" } & OperationResult<EntityCollectionData, GeneratedCrudExposureOperation>)
+  | ({ intent: "get" | "create" | "update" } & OperationResult<
+      GeneratedEntityRow | null,
+      GeneratedCrudExposureOperation
+    >)
+  | ({ intent: "delete" } & OperationResult<
+      { deleted: boolean },
+      GeneratedCrudExposureOperation
+    >);

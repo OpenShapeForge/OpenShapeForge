@@ -168,7 +168,8 @@ const REFUSED = {
   code: "OPERATION_REFUSED",
   message: RULE_MESSAGE,
   detail: RULE_DETAIL,
-  hint: RULE_HINT,
+  retryable: false,
+  data: { hint: RULE_HINT },
 };
 
 describe("a trigger's refusal", () => {
@@ -204,7 +205,7 @@ describe("a trigger's refusal", () => {
     expect(response.errors?.[0]?.message).toBe(RULE_MESSAGE);
     expect(response.errors?.[0]?.extensions).toMatchObject({
       code: "OPERATION_REFUSED",
-      hint: RULE_HINT,
+      data: { hint: RULE_HINT },
     });
   });
 

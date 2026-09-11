@@ -33,6 +33,7 @@ import {
 // through, so REST and future transports are covered by the same code (#164).
 import { assertOperationAllowed } from "./generated-authz.js";
 import type { GraphqlContext } from "./context.js";
+import { projectGraphqlOperation } from "./operation-error.js";
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
@@ -526,11 +527,13 @@ const queryResolvers = Object.fromEntries(
       ...(operationEnabled(table, "get") ? [[
         graphql.singleQueryName,
         async (_parent: unknown, args: { id: string }, context: GraphqlContext) => {
-          const db = requireGeneratedDb(context);
-          assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
-          return getGeneratedEntity(db, context.session, {
-            table: table.name,
-            id: args.id,
+          return projectGraphqlOperation(() => {
+            const db = requireGeneratedDb(context);
+            assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
+            return getGeneratedEntity(db, context.session, {
+              table: table.name,
+              id: args.id,
+            });
           });
         },
       ]] : []),
@@ -547,19 +550,21 @@ const queryResolvers = Object.fromEntries(
           context: GraphqlContext,
           info: GraphQLResolveInfo,
         ) => {
-          const db = requireGeneratedDb(context);
-          assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
-          const result = await listGeneratedEntities(db, context.session, {
-            table: table.name,
-            ...(args.first === undefined ? {} : { limit: args.first }),
-            ...(args.after === undefined ? {} : { cursor: args.after }),
-            ...(args.filter === undefined ? {} : { filter: args.filter }),
-            ...(args.sort === undefined ? {} : { sort: args.sort }),
-            // The count is the expensive half of a list read (#17). Ask for it
-            // only when the client selected the field it feeds.
-            ...(selectionIncludes(info, "totalCount") ? { includeTotalCount: true as const } : {}),
+          return projectGraphqlOperation(async () => {
+            const db = requireGeneratedDb(context);
+            assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
+            const result = await listGeneratedEntities(db, context.session, {
+              table: table.name,
+              ...(args.first === undefined ? {} : { limit: args.first }),
+              ...(args.after === undefined ? {} : { cursor: args.after }),
+              ...(args.filter === undefined ? {} : { filter: args.filter }),
+              ...(args.sort === undefined ? {} : { sort: args.sort }),
+              // The count is the expensive half of a list read (#17). Ask for it
+              // only when the client selected the field it feeds.
+              ...(selectionIncludes(info, "totalCount") ? { includeTotalCount: true as const } : {}),
+            });
+            return toConnection(result.rows, result.nextCursor, result.totalCount);
           });
-          return toConnection(result.rows, result.nextCursor, result.totalCount);
         },
       ]] : []),
     ];
@@ -574,34 +579,40 @@ const mutationResolvers = Object.fromEntries(
       ...(operationEnabled(table, "create") ? [[
         graphql.createMutationName,
         async (_parent: unknown, args: { input: Record<string, unknown> }, context: GraphqlContext) => {
-          const db = requireGeneratedDb(context);
-          assertOperationAllowed(authorization, context.session, "create", graphql.typeName);
-          return createGeneratedEntity(db, context.session, {
-            table: table.name,
-            values: args.input,
+          return projectGraphqlOperation(() => {
+            const db = requireGeneratedDb(context);
+            assertOperationAllowed(authorization, context.session, "create", graphql.typeName);
+            return createGeneratedEntity(db, context.session, {
+              table: table.name,
+              values: args.input,
+            });
           });
         },
       ]] : []),
       ...(operationEnabled(table, "update") ? [[
         graphql.updateMutationName,
         async (_parent: unknown, args: { input: Record<string, unknown> & { id: string } }, context: GraphqlContext) => {
-          const db = requireGeneratedDb(context);
-          assertOperationAllowed(authorization, context.session, "update", graphql.typeName);
-          return updateGeneratedEntity(db, context.session, {
-            table: table.name,
-            id: args.input.id,
-            values: args.input,
+          return projectGraphqlOperation(() => {
+            const db = requireGeneratedDb(context);
+            assertOperationAllowed(authorization, context.session, "update", graphql.typeName);
+            return updateGeneratedEntity(db, context.session, {
+              table: table.name,
+              id: args.input.id,
+              values: args.input,
+            });
           });
         },
       ]] : []),
       ...(operationEnabled(table, "delete") ? [[
         graphql.deleteMutationName,
         async (_parent: unknown, args: { id: string }, context: GraphqlContext) => {
-          const db = requireGeneratedDb(context);
-          assertOperationAllowed(authorization, context.session, "delete", graphql.typeName);
-          return deleteGeneratedEntity(db, context.session, {
-            table: table.name,
-            id: args.id,
+          return projectGraphqlOperation(() => {
+            const db = requireGeneratedDb(context);
+            assertOperationAllowed(authorization, context.session, "delete", graphql.typeName);
+            return deleteGeneratedEntity(db, context.session, {
+              table: table.name,
+              id: args.id,
+            });
           });
         },
       ]] : []),

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Single translation point from the generated CRUD layer's GraphQLError
- * vocabulary (extensions.code / extensions.status) to REST HTTP responses.
- * Keeping the mapping here means REST handlers delegate to the exact same
- * CRUD functions as the GraphQL resolvers without duplicating error policy.
+ * Single translation point from canonical operation failures and remaining
+ * protocol-local failures to REST HTTP responses. Keeping the mapping here
+ * means REST handlers delegate to the shared operation runtime without
+ * duplicating error policy.
  */
 import { GraphQLError } from "graphql";
+import { operationErrorOf } from "@openshapeforge/operations";
 import { classifyDatabaseError } from "../db/database-refusals.js";
 import {
   failureBody,
@@ -93,8 +94,20 @@ export function toHttpError(error: unknown): {
         error: {
           code: "TOO_MANY_REQUESTS",
           message: "Rate limit exceeded. Please retry later.",
+          retryable: true,
         },
       },
+    };
+  }
+
+  const operationError = operationErrorOf(error);
+  if (operationError !== undefined) {
+    return {
+      // OperationFailure is an intentional, server-authored refusal. Unknown
+      // domain codes therefore remain conflicts rather than becoming 500s;
+      // unexpected exceptions never reach this branch.
+      status: httpStatusForCode(operationError.code) ?? 409,
+      body: { error: operationError },
     };
   }
 
@@ -105,8 +118,9 @@ export function toHttpError(error: unknown): {
         error: {
           code: error.code,
           message: error.message,
+          retryable: false,
           ...(error.detail !== undefined ? { detail: error.detail } : {}),
-          ...(error.hint !== undefined ? { hint: error.hint } : {}),
+          ...(error.hint !== undefined ? { data: { hint: error.hint } } : {}),
         },
       },
     };
@@ -142,6 +156,10 @@ export function toHttpError(error: unknown): {
           error: {
             code,
             message: error.message,
+            retryable:
+              typeof error.extensions?.retryable === "boolean"
+                ? error.extensions.retryable
+                : false,
             ...(typeof detail === "string" ? { detail } : {}),
             ...(typeof hint === "string" ? { hint } : {}),
           },
@@ -161,8 +179,9 @@ export function toHttpError(error: unknown): {
         error: {
           code: refusal.code,
           message: refusal.message,
+          retryable: false,
           ...(refusal.detail !== undefined ? { detail: refusal.detail } : {}),
-          ...(refusal.hint !== undefined ? { hint: refusal.hint } : {}),
+          ...(refusal.hint !== undefined ? { data: { hint: refusal.hint } } : {}),
         },
       },
     };
@@ -173,7 +192,11 @@ export function toHttpError(error: unknown): {
   return {
     status: 500,
     body: {
-      error: { code: "INTERNAL_SERVER_ERROR", message: "Internal server error." },
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        message: "Internal server error.",
+        retryable: false,
+      },
     },
   };
 }

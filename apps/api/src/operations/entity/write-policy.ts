@@ -116,7 +116,6 @@ export function assertNoOperationWrittenValues(
     throw generatedCrudError(
       operationWrittenRefusal(field, column.writtenBy!),
       "BAD_USER_INPUT",
-      400,
     );
   }
 }
@@ -135,7 +134,6 @@ export function assertNoCallerElicitedOutput(
     throw generatedCrudError(
       "Securely collected values cannot be supplied through generated CRUD.",
       "BAD_USER_INPUT",
-      400,
     );
   }
 }

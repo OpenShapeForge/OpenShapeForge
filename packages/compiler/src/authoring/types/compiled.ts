@@ -1,5 +1,6 @@
 // @ts-nocheck
 // SPDX-License-Identifier: BUSL-1.1
+import type { OperationReference } from "@openshapeforge/operations";
 import type {
   LocalizedText,
   FieldValidation,
@@ -309,12 +310,10 @@ export type EntityOperationOutput =
   | { kind: "entity-record"; entityId: string; nullable: boolean }
   | { kind: "deletion-result" };
 
-export type CompiledEntityOperation = {
+export type CompiledEntityOperation = OperationReference<EntityOperationIntent> & {
   /** Stable interface-neutral identity, e.g. `Relation.update`. */
-  id: string;
   entityId: string;
   entityName: string;
-  intent: EntityOperationIntent;
   input: EntityOperationInput;
   output: EntityOperationOutput;
   authorization: {

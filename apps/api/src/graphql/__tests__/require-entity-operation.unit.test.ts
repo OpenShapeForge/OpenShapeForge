@@ -8,7 +8,10 @@
  * needed.
  */
 import { describe, expect, test } from "bun:test";
-import { GraphQLError } from "graphql";
+import {
+  OperationFailure,
+  type OperationError,
+} from "@openshapeforge/operations";
 import {
   __requireEntityOperationForTests as requireEntityOperation,
   getGeneratedCrudTables,
@@ -24,12 +27,12 @@ type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 const table = getGeneratedCrudTables().find((t) => t.name === "erp.relations")!;
 const noRoleSession = { tenantId: "tenant", userId: "user", roles: [] as string[] };
 
-function captureThrow(fn: () => unknown): GraphQLError {
+function captureThrow(fn: () => unknown): OperationError {
   try {
     fn();
   } catch (error) {
-    expect(error).toBeInstanceOf(GraphQLError);
-    return error as GraphQLError;
+    expect(error).toBeInstanceOf(OperationFailure);
+    return (error as OperationFailure).operationError;
   }
   throw new Error("expected the guard to throw");
 }
@@ -40,8 +43,8 @@ describe("requireEntityOperation", () => {
       const error = captureThrow(() =>
         requireEntityOperation(table, operation, noRoleSession),
       );
-      expect(error.extensions.code).toBe("FORBIDDEN");
-      expect(error.extensions.status).toBe(403);
+      expect(error.code).toBe("FORBIDDEN");
+      expect(error.retryable).toBe(false);
       expect(error.message).toContain(operation);
       // No role enumeration: the allowed role list must never leak.
       expect(error.message).not.toContain("Relations.All");
@@ -75,7 +78,7 @@ describe("requireEntityOperation", () => {
         roles: ["Relations.All.Read"],
       }),
     );
-    expect(error.extensions.code).toBe("FORBIDDEN");
+    expect(error.code).toBe("FORBIDDEN");
   });
 
   test("fails closed on a table without role metadata (stale manifest)", () => {
@@ -90,7 +93,7 @@ describe("requireEntityOperation", () => {
         roles: ["Relations.All.ReadWrite"],
       }),
     );
-    expect(error.extensions.code).toBe("FORBIDDEN");
+    expect(error.code).toBe("FORBIDDEN");
     expect(error.message).toContain("no role metadata");
   });
 
@@ -110,9 +113,9 @@ describe("requireEntityOperation", () => {
         roles: ["Relations.All.ReadWrite"],
       }),
     );
-    expect(error.extensions).toMatchObject({
+    expect(error).toMatchObject({
       code: "GENERATED_CRUD_OPERATION_NOT_ENABLED",
-      status: 404,
+      retryable: false,
     });
   });
 
@@ -136,7 +139,7 @@ describe("requireEntityOperation", () => {
       },
     );
     await expect(attempt).rejects.toMatchObject({
-      extensions: { code: "FORBIDDEN", status: 403 },
+      operationError: { code: "FORBIDDEN", retryable: false },
     });
   });
 });

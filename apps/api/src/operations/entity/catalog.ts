@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
-import { GraphQLError } from "graphql";
+import { operationFailure } from "@openshapeforge/operations";
 import { redactElicitedValues } from "../../connectors/secrets.js";
 import type { DbSessionInput } from "../../db/session.js";
 import {
@@ -81,10 +81,10 @@ export function requireEntityOperation(
   session: DbSessionInput,
 ): void {
   if (!isGeneratedCrudOperationEnabled(table, operation)) {
-    throw new GraphQLError(
-      `Generated CRUD operation ${operation} is not enabled for ${table.source?.authoringEntityName ?? table.name}.`,
-      { extensions: { code: "GENERATED_CRUD_OPERATION_NOT_ENABLED", status: 404 } },
-    );
+    throw operationFailure({
+      code: "GENERATED_CRUD_OPERATION_NOT_ENABLED",
+      message: `Generated CRUD operation ${operation} is not enabled for ${table.source?.authoringEntityName ?? table.name}.`,
+    });
   }
   const authorizationOperation = AUTHORIZATION_OPERATION[operation];
   const allowed = entityRoleSets.get(table.name)?.[authorizationOperation];
@@ -92,18 +92,19 @@ export function requireEntityOperation(
     // A generatedCrud table without role metadata means the manifest predates
     // the authorization bridge (stale artifacts) — deny with distinct wording
     // so operators recognize the regeneration bug instead of a policy denial.
-    throw new GraphQLError(
-      `Entity ${table.name} has no role metadata for ${authorizationOperation}; access denied. ` +
+    throw operationFailure({
+      code: "FORBIDDEN",
+      message:
+        `Entity ${table.name} has no role metadata for ${authorizationOperation}; access denied. ` +
         `Regenerate artifacts with \`bun run generate\`.`,
-      { extensions: { code: "FORBIDDEN", status: 403 } },
-    );
+    });
   }
   const sessionRoles = session.roles ?? [];
   if (!sessionRoles.some((role) => allowed.has(role))) {
-    throw new GraphQLError(
-      `Not authorized to ${operation} ${table.source?.authoringEntityName ?? table.name}.`,
-      { extensions: { code: "FORBIDDEN", status: 403 } },
-    );
+    throw operationFailure({
+      code: "FORBIDDEN",
+      message: `Not authorized to ${operation} ${table.source?.authoringEntityName ?? table.name}.`,
+    });
   }
 }
 
@@ -157,7 +158,6 @@ export function elicitedOutputColumn(
     throw generatedCrudError(
       "Generated CRUD elicited-output metadata is invalid.",
       "INTERNAL_SERVER_ERROR",
-      500,
     );
   }
   return column;
@@ -202,7 +202,6 @@ export function assertElicitedQueryAllowed(
     throw generatedCrudError(
       "Filtering or sorting by an elicited-output field is not permitted.",
       "FORBIDDEN",
-      403,
     );
   }
 }
@@ -241,30 +240,26 @@ export function getGeneratedCrudTables() {
 export function generatedCrudError(
   message: string,
   code: string,
-  status?: number,
   authored?: { detail?: string; hint?: string },
 ) {
-  return new GraphQLError(message, {
-    extensions: {
-      code,
-      ...(status === undefined ? {} : { status }),
-      ...(authored?.detail === undefined ? {} : { detail: authored.detail }),
-      ...(authored?.hint === undefined ? {} : { hint: authored.hint }),
-    },
+  return operationFailure({
+    code,
+    message,
+    ...(authored?.detail === undefined ? {} : { detail: authored.detail }),
+    ...(authored?.hint === undefined ? {} : { data: { hint: authored.hint } }),
   });
 }
 
 /**
- * A database refusal on a generated write becomes a GraphQLError carrying the
- * public code and status, so all three transports answer alike: GraphQL passes
- * it through unmasked (no originalError), REST and MCP map it via toHttpError.
+ * A database refusal on a generated write becomes an OperationFailure carrying
+ * the public meaning, so every interface projects the same canonical error.
  * Anything the classifier declines stays the original driver error and is
  * redacted downstream exactly as before.
  */
 export function translateDatabaseError(table: GeneratedCrudTable, error: unknown): unknown {
   const refusal = classifyDatabaseError(error, databaseErrorContext(table));
   return refusal
-    ? generatedCrudError(refusal.message, refusal.code, refusal.status, {
+    ? generatedCrudError(refusal.message, refusal.code, {
         ...(refusal.detail === undefined ? {} : { detail: refusal.detail }),
         ...(refusal.hint === undefined ? {} : { hint: refusal.hint }),
       })

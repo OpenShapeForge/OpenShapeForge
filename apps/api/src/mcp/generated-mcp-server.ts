@@ -12,7 +12,7 @@
  *   - resolveSessionContext() for bearer/trusted-context authentication,
  *   - the generated CRUD service layer, which applies tenant scoping and RLS
  *     via withDbSession() and gates every operation on entity roles,
- *   - the CRUD layer's GraphQLError vocabulary, translated by toHttpError().
+ *   - the shared operation result/error contract, projected to MCP results.
  *
  * Two things this transport does that the others do not, both because its
  * consumer is a language model reading schemas to decide what to do:
@@ -32,6 +32,10 @@
  * through, so this transport inherits them by construction.
  */
 import { createHash, randomUUID } from "node:crypto";
+import {
+  OperationFailure,
+  type OperationError,
+} from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -78,7 +82,9 @@ import {
   operationWrittenRefusal,
   createGeneratedEntityAfterElicitation,
   createGeneratedEntityForTable,
+  entityOperationRef,
   executeEntityOperation,
+  getEntityOperationOffers,
   getGeneratedEntity,
   getGeneratedCrudTables,
   isGeneratedCrudOperationEnabled,
@@ -2032,17 +2038,34 @@ function nativeToolOutput(result: ToolResult): Record<string, unknown> {
     // Service's caller learns the reason the way a direct tool call would.
     const failure = (result.structuredContent as { error?: unknown } | undefined)?.error;
     if (failure && typeof failure === "object") {
-      const { code, message, detail, hint } = failure as {
+      const { code, message, detail, hint, retryable, retryAt, violations, data } = failure as {
         code?: unknown;
         message?: unknown;
         detail?: unknown;
         hint?: unknown;
+        retryable?: unknown;
+        retryAt?: unknown;
+        violations?: unknown;
+        data?: unknown;
       };
-      if (typeof code === "string" && typeof message === "string") {
-        throw new HttpError(httpStatusForCode(code) ?? 502, code, message, {
+      if (
+        typeof code === "string" &&
+        typeof message === "string" &&
+        typeof retryable === "boolean"
+      ) {
+        throw new OperationFailure({
+          code,
+          message,
+          retryable,
           ...(typeof detail === "string" ? { detail } : {}),
-          ...(typeof hint === "string" ? { hint } : {}),
-        });
+          ...(typeof retryAt === "string" ? { retryAt } : {}),
+          ...(Array.isArray(violations) ? { violations } : {}),
+          ...(data && typeof data === "object" && !Array.isArray(data)
+            ? { data: data as Record<string, unknown> }
+            : typeof hint === "string"
+              ? { data: { hint } }
+              : {}),
+        } as OperationError);
       }
     }
     const text = result.content.find((item) => item.type === "text");
@@ -2055,9 +2078,35 @@ function nativeToolOutput(result: ToolResult): Record<string, unknown> {
   const text = result.content.find((item) => item.type === "text");
   const parsed: unknown =
     text && "text" in text ? JSON.parse(String(text.text)) : null;
-  return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-    ? (parsed as Record<string, unknown>)
-    : { value: parsed };
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    const record = parsed as Record<string, unknown>;
+    // Operation offers are interface metadata, not values a composed Service
+    // maps between steps. Native composition consumes the canonical result's
+    // data while direct MCP callers retain the complete envelope.
+    if (Object.prototype.hasOwnProperty.call(record, "data") && Array.isArray(record.operations)) {
+      const data = record.data;
+      if (data && typeof data === "object" && !Array.isArray(data)) {
+        const projected = data as Record<string, unknown>;
+        if (Array.isArray(projected.items)) {
+          return {
+            ...projected,
+            items: projected.items.map((item) => {
+              if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+              const envelope = item as Record<string, unknown>;
+              return Object.prototype.hasOwnProperty.call(envelope, "data") &&
+                Array.isArray(envelope.operations)
+                ? envelope.data
+                : item;
+            }),
+          };
+        }
+        return projected;
+      }
+      return { value: data };
+    }
+    return record;
+  }
+  return { value: parsed };
 }
 
 export const __nativeToolOutputForTests = nativeToolOutput;
@@ -2538,13 +2587,18 @@ async function invokeTool(
         },
       });
       if (operationResult.intent !== "list") throw new Error("Unexpected entity result.");
-      const result = operationResult.connection;
+      if ("error" in operationResult) throw new OperationFailure(operationResult.error);
+      const result = operationResult.data;
       return ok({
-        items: result.rows.map((row) =>
-          serializeRowForEntity(entity, table, row),
-        ),
-        totalCount: result.totalCount,
-        nextCursor: result.nextCursor,
+        data: {
+          items: result.items.map((item) => ({
+            data: serializeRowForEntity(entity, table, item.data),
+            operations: item.operations,
+          })),
+          totalCount: result.totalCount,
+          nextCursor: result.nextCursor,
+        },
+        operations: operationResult.operations,
       });
     }
 
@@ -2554,9 +2608,13 @@ async function invokeTool(
         input: { id: requireId(args) },
       });
       if (result.intent !== "get") throw new Error("Unexpected entity result.");
-      const row = result.record;
+      if ("error" in result) throw new OperationFailure(result.error);
+      const row = result.data;
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      return ok(serializeRowForEntity(entity, table, row));
+      return ok({
+        data: serializeRowForEntity(entity, table, row),
+        operations: result.operations,
+      });
     }
 
     case "create": {
@@ -2574,22 +2632,32 @@ async function invokeTool(
       assertDeclaredProperties(tool.inputSchema, modelValues, "field");
       assertWritableValues(modelValues, entity, table, session);
       await assertPublishableWrite(db, session, tables, table, values);
-      const row =
-        elicitationCompleted && elicitField
-          ? await createGeneratedEntityAfterElicitation(db, session, {
+      if (elicitationCompleted && elicitField) {
+        const row = await createGeneratedEntityAfterElicitation(db, session, {
               table: table.name,
               values,
               into: elicitField,
-            })
-          : await executeEntityOperation(db, session, {
-              operation: { id: tool.operationId, intent: "create" },
-              input: { values },
-            }).then((result) => {
-              if (result.intent !== "create") throw new Error("Unexpected entity result.");
-              if (!result.record) throw new Error("Create operation returned no record.");
-              return result.record;
             });
-      return ok(serializeRowForEntity(entity, table, row));
+        return ok({
+          data: serializeRowForEntity(entity, table, row),
+          operations: getEntityOperationOffers(
+            entity?.entity ?? table.source?.authoringEntityName ?? table.name,
+            session,
+            ["get", "update", "delete"],
+          ),
+        });
+      }
+      const result = await executeEntityOperation(db, session, {
+        operation: { id: tool.operationId, intent: "create" },
+        input: { values },
+      });
+      if (result.intent !== "create") throw new Error("Unexpected entity result.");
+      if ("error" in result) throw new OperationFailure(result.error);
+      if (!result.data) throw new Error("Create operation returned no record.");
+      return ok({
+        data: serializeRowForEntity(entity, table, result.data),
+        operations: result.operations,
+      });
     }
 
     case "update": {
@@ -2613,9 +2681,13 @@ async function invokeTool(
         input: { id, values },
       });
       if (result.intent !== "update") throw new Error("Unexpected entity result.");
-      const row = result.record;
+      if ("error" in result) throw new OperationFailure(result.error);
+      const row = result.data;
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      return ok(serializeRowForEntity(entity, table, row));
+      return ok({
+        data: serializeRowForEntity(entity, table, row),
+        operations: result.operations,
+      });
     }
 
     case "delete": {
@@ -2624,10 +2696,11 @@ async function invokeTool(
         input: { id: requireId(args) },
       });
       if (result.intent !== "delete") throw new Error("Unexpected entity result.");
-      const deleted = result.deleted;
+      if ("error" in result) throw new OperationFailure(result.error);
+      const deleted = result.data.deleted;
       if (!deleted)
         throw new HttpError(404, "NOT_FOUND", "Resource not found.");
-      return ok({ deleted: true });
+      return ok({ data: result.data, operations: result.operations });
     }
   }
 }
@@ -3475,13 +3548,26 @@ function buildServer(
       if (direct) {
         const table = tables.get(direct.table);
         if (!table) return fallbackOrNotFound();
-        const result = await listGeneratedEntities(db, session, {
-          table: table.name,
-          limit: RESOURCE_READ_LIMIT,
+        const result = await executeEntityOperation(db, session, {
+          operation: entityOperationRef(table, "list"),
+          input: { limit: RESOURCE_READ_LIMIT },
         });
-        payload = result.rows.map((row) =>
-          serializeRowForEntity(entityForTable(direct.table), table, row),
-        );
+        if (result.intent !== "list") throw new Error("Unexpected entity result.");
+        if ("error" in result) throw new OperationFailure(result.error);
+        payload = {
+          data: {
+            ...result.data,
+            items: result.data.items.map((item) => ({
+              data: serializeRowForEntity(
+                entityForTable(direct.table),
+                table,
+                item.data,
+              ),
+              operations: item.operations,
+            })),
+          },
+          operations: result.operations,
+        };
       } else {
         const templated = readable.find((resource) =>
           uri.startsWith(`${resource.uri}/`),
@@ -3489,16 +3575,21 @@ function buildServer(
         const id = templated ? uri.slice(templated.uri.length + 1) : "";
         const table = templated ? tables.get(templated.table) : undefined;
         if (templated && table && id.length > 0 && !id.includes("/")) {
-          const row = await getGeneratedEntity(db, session, {
-            table: table.name,
-            id,
+          const result = await executeEntityOperation(db, session, {
+            operation: entityOperationRef(table, "get"),
+            input: { id },
           });
-          if (row) {
-            payload = serializeRowForEntity(
-              entityForTable(templated.table),
-              table,
-              row,
-            );
+          if (result.intent !== "get") throw new Error("Unexpected entity result.");
+          if ("error" in result) throw new OperationFailure(result.error);
+          if (result.data) {
+            payload = {
+              data: serializeRowForEntity(
+                entityForTable(templated.table),
+                table,
+                result.data,
+              ),
+              operations: result.operations,
+            };
           }
         }
         if (payload === undefined) {

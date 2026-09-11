@@ -293,8 +293,15 @@ describe("the one status table", () => {
   // silent 500. Extend the list when adding a code, not the other way round.
   const PUBLIC_CODES = [
     "BAD_USER_INPUT",
+    "VALIDATION",
     "UNAUTHENTICATED",
     "FORBIDDEN",
+    "NOT_FOUND",
+    "CONFLICT",
+    "VERSION_CONFLICT",
+    "LOCKED",
+    "TOO_MANY_REQUESTS",
+    "INTERNAL_SERVER_ERROR",
     "GENERATED_CRUD_NOT_ENABLED",
     "GENERATED_CRUD_OPERATION_NOT_ENABLED",
     "DATABASE_NOT_CONFIGURED",
@@ -378,7 +385,11 @@ describe("the failure envelope", () => {
       error: { message: "Rate limited.", ...outcome },
     });
     expect(failureBody("CONNECTOR_NOT_CONFIGURED", "Not configured.")).toEqual({
-      error: { code: "CONNECTOR_NOT_CONFIGURED", message: "Not configured." },
+      error: {
+        code: "CONNECTOR_NOT_CONFIGURED",
+        message: "Not configured.",
+        retryable: false,
+      },
     });
   });
 
@@ -418,7 +429,9 @@ describe("the failure envelope", () => {
     expect(failureSummary(denied.error)).not.toContain("Retry after");
 
     // An unclassified failure keeps the plain `CODE: message` form.
-    expect(failureSummary({ code: "FORBIDDEN", message: "No." })).toBe("FORBIDDEN: No.");
+    expect(failureSummary({ code: "FORBIDDEN", message: "No.", retryable: false })).toBe(
+      "FORBIDDEN: No.",
+    );
   });
 
   // REST and MCP both go through toHttpError, so proving it once proves the

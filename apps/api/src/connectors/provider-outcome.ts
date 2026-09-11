@@ -493,14 +493,21 @@ export function providerOutcomeOf(error: unknown): ConnectorProviderOutcome | un
  * typecheck; the unit test pins the full key set so a string-typed code
  * cannot drift either.
  *
- * Deliberately explicit rather than defaulted: an unmapped code becoming a
- * 500 is the right failure, because it means a new failure mode has appeared
- * that nobody decided how to present.
+ * Deliberately explicit for protocol adapters and untrusted failures. A
+ * canonical OperationFailure may additionally use a server-authored domain
+ * code; its adapter fallback is a conflict, never an internal exception.
  */
 export const HTTP_STATUS_BY_CODE = {
   BAD_USER_INPUT: 400,
+  VALIDATION: 422,
   UNAUTHENTICATED: 401,
   FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  CONFLICT: 409,
+  VERSION_CONFLICT: 409,
+  LOCKED: 423,
+  TOO_MANY_REQUESTS: 429,
+  INTERNAL_SERVER_ERROR: 500,
   GENERATED_CRUD_NOT_ENABLED: 404,
   GENERATED_CRUD_OPERATION_NOT_ENABLED: 404,
   DATABASE_NOT_CONFIGURED: 503,
@@ -584,11 +591,12 @@ export type FailureBody = {
   error: {
     code: string;
     message: string;
+    retryable: boolean;
     /** Authored DETAIL of a database rule's refusal (db/database-refusals.ts). */
     detail?: string;
-    /** Authored HINT of a database rule's refusal: what the caller can do instead. */
-    hint?: string;
-  } & Partial<Omit<ConnectorProviderOutcome, "code">>;
+    /** Safe structured details and next-step hints. */
+    data?: Readonly<Record<string, unknown>>;
+  } & Partial<Omit<ConnectorProviderOutcome, "code" | "retryable">>;
 };
 
 export function failureBody(
@@ -596,7 +604,14 @@ export function failureBody(
   message: string,
   outcome?: ConnectorProviderOutcome | undefined,
 ): FailureBody {
-  return { error: { code, message, ...(outcome ?? {}) } };
+  return {
+    error: {
+      code,
+      message,
+      retryable: outcome?.retryable ?? false,
+      ...(outcome ?? {}),
+    },
+  };
 }
 
 /**

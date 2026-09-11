@@ -9,8 +9,7 @@
  *   - resolveSessionContext() for bearer/trusted-context authentication,
  *   - the generated CRUD service layer (get/list/create/update/delete),
  *     which applies tenant scoping and RLS via withDbSession(),
- *   - the CRUD layer's GraphQLError vocabulary, translated to HTTP statuses
- *     by toHttpError().
+ *   - canonical Operation failures, translated to HTTP by toHttpError().
  *
  * Rows come back from the CRUD layer as to_jsonb() objects keyed by
  * snake_case column names; responses are serialized through the same
@@ -18,6 +17,7 @@
  * APIs present identical field names.
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { OperationFailure } from "@openshapeforge/operations";
 import openApiSpec from "../generated/rest/openapi.json" with { type: "json" };
 import { resolveSessionContext } from "../auth/identity.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
@@ -348,11 +348,18 @@ export function registerGeneratedRestRoutes(
             },
           });
           if (operationResult.intent !== "list") throw new Error("Unexpected entity result.");
-          const result = operationResult.connection;
+          if ("error" in operationResult) throw new OperationFailure(operationResult.error);
+          const result = operationResult.data;
           return reply.send({
-            items: result.rows.map((row) => serializeGeneratedRestRow(table, row)),
-            totalCount: result.totalCount,
-            nextCursor: result.nextCursor,
+            data: {
+              items: result.items.map((item) => ({
+                data: serializeGeneratedRestRow(table, item.data),
+                operations: item.operations,
+              })),
+              totalCount: result.totalCount,
+              nextCursor: result.nextCursor,
+            },
+            operations: operationResult.operations,
           });
         });
       }
@@ -366,11 +373,15 @@ export function registerGeneratedRestRoutes(
             input: { id },
           });
           if (result.intent !== "get") throw new Error("Unexpected entity result.");
-          const row = result.record;
+          if ("error" in result) throw new OperationFailure(result.error);
+          const row = result.data;
           if (!row) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
-          return reply.send(serializeGeneratedRestRow(table, row));
+          return reply.send({
+            data: serializeGeneratedRestRow(table, row),
+            operations: result.operations,
+          });
         });
       }
 
@@ -383,9 +394,13 @@ export function registerGeneratedRestRoutes(
             input: { values },
           });
           if (result.intent !== "create") throw new Error("Unexpected entity result.");
-          const row = result.record;
+          if ("error" in result) throw new OperationFailure(result.error);
+          const row = result.data;
           if (!row) throw new Error("Create operation returned no record.");
-          return reply.status(201).send(serializeGeneratedRestRow(table, row));
+          return reply.status(201).send({
+            data: serializeGeneratedRestRow(table, row),
+            operations: result.operations,
+          });
         });
       }
 
@@ -399,11 +414,15 @@ export function registerGeneratedRestRoutes(
             input: { id, values },
           });
           if (result.intent !== "update") throw new Error("Unexpected entity result.");
-          const row = result.record;
+          if ("error" in result) throw new OperationFailure(result.error);
+          const row = result.data;
           if (!row) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
-          return reply.send(serializeGeneratedRestRow(table, row));
+          return reply.send({
+            data: serializeGeneratedRestRow(table, row),
+            operations: result.operations,
+          });
         });
       }
 
@@ -416,11 +435,12 @@ export function registerGeneratedRestRoutes(
             input: { id },
           });
           if (result.intent !== "delete") throw new Error("Unexpected entity result.");
-          const deleted = result.deleted;
+          if ("error" in result) throw new OperationFailure(result.error);
+          const deleted = result.data.deleted;
           if (!deleted) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
-          return reply.status(204).send();
+          return reply.send({ data: result.data, operations: result.operations });
         });
       }
     }

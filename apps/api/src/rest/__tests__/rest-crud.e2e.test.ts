@@ -195,7 +195,10 @@ describe("REST entity role enforcement", () => {
 
     const list = await rest(readOnly, "GET", `${base}?id=${id}`);
     expect(list.status).toBe(200);
-    expect(list.body.totalCount).toBe(1);
+    expect(list.body.data.totalCount).toBe(1);
+    expect(list.body.operations.map((offer: any) => offer.operation.intent)).toEqual([
+      "list",
+    ]);
 
     const single = await rest(readOnly, "GET", `${base}/${id}`);
     expect(single.status).toBe(200);
@@ -221,15 +224,16 @@ for (const table of restTables) {
       const body = await buildCreateBody(table, tenantA);
       const created = await rest(tenantA, "POST", base, body);
       expect(created.status).toBe(201);
-      const id = created.body.id as string;
+      const id = created.body.data.id as string;
       expect(id).toBeTruthy();
       trackRestRow(table, id, tenantA);
-      expect(created.body.createdAt).toBeTruthy();
-      expect(Object.keys(created.body).some((key) => key.includes("_"))).toBe(false);
+      expect(created.body.data.createdAt).toBeTruthy();
+      expect(Object.keys(created.body.data).some((key) => key.includes("_"))).toBe(false);
+      expect(created.body.operations.every((offer: any) => offer.available)).toBe(true);
 
       const fetched = await rest(tenantA, "GET", `${base}/${id}`);
       expect(fetched.status).toBe(200);
-      expect(fetched.body.id).toBe(id);
+      expect(fetched.body.data.id).toBe(id);
     });
 
     test("POST with an unknown body field is rejected with 400", async () => {
@@ -243,8 +247,11 @@ for (const table of restTables) {
       const id = await createRow(table, tenantA);
       const eq = await rest(tenantA, "GET", `${base}?id=${id}`);
       expect(eq.status).toBe(200);
-      expect(eq.body.totalCount).toBe(1);
-      expect(eq.body.items[0].id).toBe(id);
+      expect(eq.body.data.totalCount).toBe(1);
+      expect(eq.body.data.items[0].data.id).toBe(id);
+      expect(
+        eq.body.data.items[0].operations.map((offer: any) => offer.operation.intent),
+      ).toContain("get");
 
       const inFilter = await rest(
         tenantA,
@@ -252,14 +259,14 @@ for (const table of restTables) {
         `${base}?id=${id}&id=${randomUUID()}`,
       );
       expect(inFilter.status).toBe(200);
-      expect(inFilter.body.totalCount).toBe(1);
+      expect(inFilter.body.data.totalCount).toBe(1);
 
       // Explicit `<field>In` naming (the GraphQL filter convention) must
       // behave identically — single value included, which previously would
       // have been silently dropped by the CRUD layer's array check.
       const inSingle = await rest(tenantA, "GET", `${base}?idIn=${id}`);
       expect(inSingle.status).toBe(200);
-      expect(inSingle.body.totalCount).toBe(1);
+      expect(inSingle.body.data.totalCount).toBe(1);
 
       const inRepeated = await rest(
         tenantA,
@@ -267,7 +274,7 @@ for (const table of restTables) {
         `${base}?idIn=${id}&idIn=${randomUUID()}`,
       );
       expect(inRepeated.status).toBe(200);
-      expect(inRepeated.body.totalCount).toBe(1);
+      expect(inRepeated.body.data.totalCount).toBe(1);
     });
 
     test("GET list paginates with first/after without overlap", async () => {
@@ -279,20 +286,22 @@ for (const table of restTables) {
       const idParams = ids.map((id) => `id=${id}`).join("&");
       const page1 = await rest(tenantA, "GET", `${base}?${idParams}&first=2`);
       expect(page1.status).toBe(200);
-      expect(page1.body.totalCount).toBe(3);
-      expect(page1.body.items).toHaveLength(2);
-      expect(page1.body.nextCursor).toBeTruthy();
+      expect(page1.body.data.totalCount).toBe(3);
+      expect(page1.body.data.items).toHaveLength(2);
+      expect(page1.body.data.nextCursor).toBeTruthy();
 
       const page2 = await rest(
         tenantA,
         "GET",
-        `${base}?${idParams}&first=2&after=${encodeURIComponent(page1.body.nextCursor)}`,
+        `${base}?${idParams}&first=2&after=${encodeURIComponent(page1.body.data.nextCursor)}`,
       );
       expect(page2.status).toBe(200);
-      expect(page2.body.items).toHaveLength(1);
-      expect(page2.body.nextCursor).toBeNull();
+      expect(page2.body.data.items).toHaveLength(1);
+      expect(page2.body.data.nextCursor).toBeNull();
 
-      const seen = [...page1.body.items, ...page2.body.items].map((item: any) => item.id);
+      const seen = [...page1.body.data.items, ...page2.body.data.items].map(
+        (item: any) => item.data.id,
+      );
       expect(new Set(seen).size).toBe(3);
     });
 
@@ -347,7 +356,7 @@ for (const table of restTables) {
             `${base}?id=${low}&id=${high}&sortField=${field}&sortDirection=${direction}&first=2`,
           );
           expect(response.status).toBe(200);
-          expect(response.body.items[0].id).toBe(expectedFirst);
+          expect(response.body.data.items[0].data.id).toBe(expectedFirst);
         }
       });
 
@@ -358,7 +367,7 @@ for (const table of restTables) {
           [field]: updated,
         });
         expect(response.status).toBe(200);
-        expect(response.body[field]).toBe(updated);
+        expect(response.body.data[field]).toBe(updated);
       });
     }
 
@@ -368,10 +377,12 @@ for (const table of restTables) {
       expect(response.body.error.code).toBe("NOT_FOUND");
     });
 
-    test("DELETE removes the row (204) and subsequent GET is 404", async () => {
+    test("DELETE removes the row and returns the canonical result envelope", async () => {
       const id = await createRow(table, tenantA);
       const deleted = await rest(tenantA, "DELETE", `${base}/${id}`);
-      expect(deleted.status).toBe(204);
+      expect(deleted.status).toBe(200);
+      expect(deleted.body.data).toEqual({ deleted: true });
+      expect(Array.isArray(deleted.body.operations)).toBe(true);
       untrackRow(id);
 
       const after = await rest(tenantA, "GET", `${base}/${id}`);
@@ -415,27 +426,27 @@ for (const table of restTables) {
         // Control: unclassified, the column is served to a read-only caller.
         const control = await rest(readOnly, "GET", `${base}/${id}`);
         expect(control.status).toBe(200);
-        expect(control.body[field]).toBe(value);
+        expect(control.body.data[field]).toBe(value);
 
         await withClassifiedColumn(classified, "pii", async () => {
           const single = await rest(readOnly, "GET", `${base}/${id}`);
           expect(single.status).toBe(200);
-          expect(single.body[field]).toBeNull();
+          expect(single.body.data[field]).toBeNull();
           // Unclassified columns are untouched.
-          expect(single.body.id).toBe(id);
-          expect(single.body.createdAt).toBeTruthy();
+          expect(single.body.data.id).toBe(id);
+          expect(single.body.data.createdAt).toBeTruthy();
 
           const list = await rest(readOnly, "GET", `${base}?id=${id}`);
           expect(list.status).toBe(200);
-          expect(list.body.totalCount).toBe(1);
-          expect(list.body.items[0][field]).toBeNull();
+          expect(list.body.data.totalCount).toBe(1);
+          expect(list.body.data.items[0].data[field]).toBeNull();
 
           // A write grant reads the real value on both paths — redaction is
           // scoped to the grant, not a blanket null.
           const writerSingle = await rest(tenantA, "GET", `${base}/${id}`);
-          expect(writerSingle.body[field]).toBe(value);
+          expect(writerSingle.body.data[field]).toBe(value);
           const writerList = await rest(tenantA, "GET", `${base}?id=${id}`);
-          expect(writerList.body.items[0][field]).toBe(value);
+          expect(writerList.body.data.items[0].data[field]).toBe(value);
         });
       },
     );
@@ -458,8 +469,7 @@ for (const table of restTables) {
             expect(response.status).toBe(403);
             expect(response.body.error.code).toBe("FORBIDDEN");
             // The refusal must not answer the question it refused.
-            expect(response.body.items).toBeUndefined();
-            expect(response.body.totalCount).toBeUndefined();
+            expect(response.body.data).toBeUndefined();
           }
 
           // The same query stays available to a write grant.
@@ -469,8 +479,8 @@ for (const table of restTables) {
             `${base}?${field}=${probe}&sortField=${field}`,
           );
           expect(allowed.status).toBe(200);
-          expect(allowed.body.totalCount).toBe(1);
-          expect(allowed.body.items[0].id).toBe(id);
+          expect(allowed.body.data.totalCount).toBe(1);
+          expect(allowed.body.data.items[0].data.id).toBe(id);
         });
       },
     );
@@ -509,9 +519,9 @@ for (const table of restTables) {
       const body = await buildCreateBody(table, tenantA, { [field]: value });
       const created = await rest(tenantA, "POST", base, body);
       expect(created.status).toBe(201);
-      const id = created.body.id as string;
+      const id = created.body.data.id as string;
       trackRestRow(table, id, tenantA);
-      expect(created.body[field]).toBe(value);
+      expect(created.body.data[field]).toBe(value);
 
       // Re-pointing the record at a different parent is the integrity gap.
       const repointed = await valueFor(tenantA);
@@ -522,7 +532,7 @@ for (const table of restTables) {
 
       const after = await rest(tenantA, "GET", `${base}/${id}`);
       expect(after.status).toBe(200);
-      expect(after.body[field]).toBe(value);
+      expect(after.body.data[field]).toBe(value);
     });
 
     test(`openapi.json advertises ${field} on POST only`, async () => {

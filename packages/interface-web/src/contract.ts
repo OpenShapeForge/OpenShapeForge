@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
+import type { OperationReference } from "@openshapeforge/operations";
 
 export type LocalizedText = { en: string; nl: string };
 
 export type WebOperationIntent = "list" | "get" | "create" | "update" | "delete";
-export type WebOperationRef = { id: string; intent: WebOperationIntent };
+export type WebOperationRef = OperationReference<WebOperationIntent>;
 export type WebViewMode = "read" | "create" | "update";
 
 export type WebVariableSource = {

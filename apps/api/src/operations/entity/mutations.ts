@@ -74,7 +74,6 @@ export async function mergeGeneratedEntityObjectForTable(
     throw generatedCrudError(
       "Generated CRUD object-merge metadata is invalid.",
       "INTERNAL_SERVER_ERROR",
-      500,
     );
   }
   const values = new Map<GeneratedCrudColumn, unknown>([
@@ -108,7 +107,6 @@ export async function createGeneratedEntityAfterElicitation(
     throw generatedCrudError(
       "Generated CRUD elicitation metadata is invalid.",
       "INTERNAL_SERVER_ERROR",
-      500,
     );
   }
   const values = normalizeWritableValues(table, input.values, "create");

@@ -208,6 +208,7 @@ type TestParameter = {
 type TestOperation = {
   tags?: string[];
   parameters?: TestParameter[];
+  responses?: Record<string, any>;
 };
 
 function spec() {
@@ -381,6 +382,41 @@ describe("rich generated REST OpenAPI", () => {
       .toHaveProperty("x-osf-operation-id", "Relation.list");
     expect(generated.paths["/api/rest/v1/relations/{id}"]?.patch)
       .toHaveProperty("x-osf-operation-id", "Relation.update");
+  });
+
+  it("documents canonical data and operation-offer envelopes", () => {
+    const generated = spec();
+    const schemas = generated.components.schemas;
+
+    expect(
+      generated.paths["/api/rest/v1/relations"]?.get?.responses?.["200"]
+        ?.content?.["application/json"]?.schema,
+    ).toEqual({ $ref: "#/components/schemas/RelationListResult" });
+    expect(schemas.RelationListResult).toMatchObject({
+      required: ["data", "operations"],
+      properties: {
+        data: { $ref: "#/components/schemas/RelationListData" },
+      },
+    });
+    expect(schemas.RelationListData).toMatchObject({
+      properties: {
+        items: {
+          items: { $ref: "#/components/schemas/RelationResult" },
+        },
+      },
+    });
+    expect(schemas.OperationError!.required).toEqual([
+      "code",
+      "message",
+      "retryable",
+    ]);
+    expect(schemas.OperationOffer!.oneOf).toHaveLength(2);
+    expect(
+      generated.paths["/api/rest/v1/relations/{id}"]?.delete?.responses,
+    ).toHaveProperty("200");
+    expect(
+      generated.paths["/api/rest/v1/relations/{id}"]?.delete?.responses,
+    ).not.toHaveProperty("204");
   });
 
   it("keeps response properties storage-derived while retaining entity documentation", () => {

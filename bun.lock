@@ -46,6 +46,7 @@
         "@modelcontextprotocol/sdk": "^1.30.0",
         "@openshapeforge/auth": "workspace:*",
         "@openshapeforge/observability": "workspace:*",
+        "@openshapeforge/operations": "workspace:*",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "fastify": "^5.8.2",
@@ -173,6 +174,7 @@
       },
       "dependencies": {
         "@openshapeforge/interface-web": "workspace:*",
+        "@openshapeforge/operations": "workspace:*",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "ejs": "^5.0.1",
@@ -189,6 +191,9 @@
     "packages/interface-web": {
       "name": "@openshapeforge/interface-web",
       "version": "0.1.0",
+      "dependencies": {
+        "@openshapeforge/operations": "workspace:*",
+      },
       "devDependencies": {
         "@types/bun": "^1.3.5",
         "typescript": "^5.9.0",
@@ -219,6 +224,14 @@
         "fastify": "^5.0.0",
         "graphql": "^16.0.0",
         "graphql-yoga": "^5.22.0",
+      },
+    },
+    "packages/operations": {
+      "name": "@openshapeforge/operations",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.3.5",
+        "typescript": "^5.9.0",
       },
     },
     "packages/ui": {
@@ -470,6 +483,8 @@
     "@openshapeforge/interface-web": ["@openshapeforge/interface-web@workspace:packages/interface-web"],
 
     "@openshapeforge/observability": ["@openshapeforge/observability@workspace:packages/observability"],
+
+    "@openshapeforge/operations": ["@openshapeforge/operations@workspace:packages/operations"],
 
     "@openshapeforge/ui": ["@openshapeforge/ui@workspace:packages/ui"],
 

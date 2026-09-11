@@ -108,10 +108,20 @@ async function rpc(
   };
 }
 
-/** Unwrap a tools/call result, parsing the JSON payload the tool returned. */
-function toolPayload(body: any): any {
+/** Parse the canonical tools/call result envelope. */
+function toolEnvelope(body: any): any {
   const text = body?.result?.content?.[0]?.text;
   return text ? JSON.parse(text) : undefined;
+}
+
+/** Return only data for legacy assertions that are not about operation offers. */
+function toolPayload(body: any): any {
+  const envelope = toolEnvelope(body);
+  const data = envelope?.data;
+  if (Array.isArray(data?.items)) {
+    return { ...data, items: data.items.map((item: any) => item.data) };
+  }
+  return data;
 }
 
 function toolError(body: any): string | undefined {
@@ -369,8 +379,10 @@ describe("generated MCP server", () => {
     test(`${prefix}: create, get, list, update, delete round-trip`, async () => {
       const args = await buildCreateArgs(table, tenantA);
       const created = await callTool(tenantA, `${prefix}_create`, args);
+      const createdEnvelope = toolEnvelope(created.body);
       const row = toolPayload(created.body);
       expect(toolError(created.body)).toBeUndefined();
+      expect(createdEnvelope.operations.every((offer: any) => offer.available)).toBe(true);
       expect(row.id).toBeTruthy();
       createdRows.push({ table, id: row.id, identity: tenantA });
 

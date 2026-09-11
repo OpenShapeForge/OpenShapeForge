@@ -498,17 +498,90 @@ export function renderOpenApiSpec(
     );
 
   const schemas: JsonObject = {
+    OperationReference: {
+      type: "object",
+      additionalProperties: false,
+      required: ["id", "intent"],
+      properties: {
+        id: { type: "string" },
+        intent: {
+          type: "string",
+          enum: ["list", "get", "create", "update", "delete"],
+        },
+      },
+    },
+    OperationError: {
+      type: "object",
+      additionalProperties: false,
+      required: ["code", "message", "retryable"],
+      properties: {
+        code: { type: "string" },
+        message: { type: "string" },
+        detail: { type: "string" },
+        retryable: { type: "boolean" },
+        retryAt: { type: "string", format: "date-time" },
+        violations: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["code", "message"],
+            properties: {
+              field: { type: "string" },
+              code: { type: "string" },
+              message: { type: "string" },
+              detail: { type: "string" },
+            },
+          },
+        },
+        data: { type: "object", additionalProperties: true },
+      },
+    },
+    OperationOffer: {
+      oneOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["operation", "available"],
+          properties: {
+            operation: { $ref: "#/components/schemas/OperationReference" },
+            available: { const: true },
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["operation", "available", "error"],
+          properties: {
+            operation: { $ref: "#/components/schemas/OperationReference" },
+            available: { const: false },
+            error: { $ref: "#/components/schemas/OperationError" },
+          },
+        },
+      ],
+    },
     Error: {
       type: "object",
       required: ["error"],
       properties: {
-        error: {
-          type: "object",
-          required: ["code", "message"],
-          properties: {
-            code: { type: "string" },
-            message: { type: "string" },
-          },
+        error: { $ref: "#/components/schemas/OperationError" },
+      },
+    },
+    DeletionData: {
+      type: "object",
+      additionalProperties: false,
+      required: ["deleted"],
+      properties: { deleted: { type: "boolean", const: true } },
+    },
+    DeletionResult: {
+      type: "object",
+      additionalProperties: false,
+      required: ["data", "operations"],
+      properties: {
+        data: { $ref: "#/components/schemas/DeletionData" },
+        operations: {
+          type: "array",
+          items: { $ref: "#/components/schemas/OperationOffer" },
         },
       },
     },
@@ -584,6 +657,18 @@ export function renderOpenApiSpec(
       properties: read.properties,
       ...(read.required.length > 0 ? { required: read.required } : {}),
     };
+    schemas[`${name}Result`] = {
+      type: "object",
+      additionalProperties: false,
+      required: ["data", "operations"],
+      properties: {
+        data: { $ref: `#/components/schemas/${name}` },
+        operations: {
+          type: "array",
+          items: { $ref: "#/components/schemas/OperationOffer" },
+        },
+      },
+    };
     const writerNote = operationWrittenNote(table);
     schemas[`${name}Input`] = {
       type: "object",
@@ -603,17 +688,29 @@ export function renderOpenApiSpec(
         "immutable are settable at create only and are rejected here." +
         writerNote,
     };
-    schemas[`${name}List`] = {
+    schemas[`${name}ListData`] = {
       type: "object",
       description: `A page of ${label} records.`,
       required: ["items", "totalCount", "nextCursor"],
       properties: {
         items: {
           type: "array",
-          items: { $ref: `#/components/schemas/${name}` },
+          items: { $ref: `#/components/schemas/${name}Result` },
         },
         totalCount: { type: "integer" },
         nextCursor: { type: ["string", "null"] },
+      },
+    };
+    schemas[`${name}ListResult`] = {
+      type: "object",
+      additionalProperties: false,
+      required: ["data", "operations"],
+      properties: {
+        data: { $ref: `#/components/schemas/${name}ListData` },
+        operations: {
+          type: "array",
+          items: { $ref: "#/components/schemas/OperationOffer" },
+        },
       },
     };
 
@@ -630,7 +727,7 @@ export function renderOpenApiSpec(
           "documented below. Unknown filter fields are rejected.",
         parameters: listParameters(table, fieldsByKey),
         responses: {
-          "200": entityResponse(`${name}List`, `${name} page`),
+          "200": entityResponse(`${name}ListResult`, `${name} page and available operations`),
           "400": errorResponse("Invalid filter, sort, or pagination input"),
           "401": errorResponse("Missing or invalid credentials"),
           "403": errorResponse("Session lacks a required entity role"),
@@ -653,7 +750,7 @@ export function renderOpenApiSpec(
           },
         },
         responses: {
-          "201": entityResponse(name, `Created ${label}`),
+          "201": entityResponse(`${name}Result`, `Created ${label} and available operations`),
           "400": errorResponse("Invalid request body"),
           "401": errorResponse("Missing or invalid credentials"),
           "403": errorResponse("Session lacks a required entity role"),
@@ -683,7 +780,7 @@ export function renderOpenApiSpec(
         tags: [name],
         ...(description ? { description } : {}),
         responses: {
-          "200": entityResponse(name, `${label} record`),
+          "200": entityResponse(`${name}Result`, `${label} record and available operations`),
           "401": errorResponse("Missing or invalid credentials"),
           "403": errorResponse("Session lacks a required entity role"),
           "404": errorResponse("Not found"),
@@ -706,7 +803,7 @@ export function renderOpenApiSpec(
           },
         },
         responses: {
-          "200": entityResponse(name, `Updated ${label}`),
+          "200": entityResponse(`${name}Result`, `Updated ${label} and available operations`),
           "400": errorResponse("Invalid request body"),
           "401": errorResponse("Missing or invalid credentials"),
           "403": errorResponse("Session lacks a required entity role"),
@@ -722,7 +819,7 @@ export function renderOpenApiSpec(
         tags: [name],
         ...(description ? { description } : {}),
         responses: {
-          "204": { description: `${label} deleted` },
+          "200": entityResponse("DeletionResult", `${label} deleted`),
           "401": errorResponse("Missing or invalid credentials"),
           "403": errorResponse("Session lacks a required entity role"),
           "404": errorResponse("Not found"),

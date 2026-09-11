@@ -4,6 +4,7 @@ import { getGeneratedCrudTables } from "./catalog.js";
 import {
   entityOperationRef,
   getEntityOperationContracts,
+  getEntityOperationOffers,
   tableForEntityOperation,
 } from "./runtime.js";
 
@@ -58,5 +59,56 @@ describe("entity operation runtime", () => {
     expect(() =>
       tableForEntityOperation({ id: "MissingEntity.list", intent: "list" }),
     ).toThrow(/is not available/);
+  });
+
+  test("omits unauthorized operations from a request-bound offer", () => {
+    const contracts = getEntityOperationContracts().filter(
+      (operation) => operation.entityName === "Relation",
+    );
+    const readRole = contracts.find((operation) => operation.intent === "get")!
+      .authorization.roles[0]!;
+
+    expect(
+      getEntityOperationOffers(
+        "Relation",
+        { roles: [readRole] },
+        ["get", "update", "delete"],
+      ).map((offer) => offer.operation.id),
+    ).toEqual(["Relation.get"]);
+  });
+
+  test("keeps an authorized temporary refusal visible with retryAt", () => {
+    const update = getEntityOperationContracts().find(
+      (operation) => operation.id === "Relation.update",
+    )!;
+    const retryAt = "2026-09-11T15:15:00.000Z";
+    expect(
+      getEntityOperationOffers(
+        "Relation",
+        { roles: [update.authorization.roles[0]!] },
+        ["update"],
+        {
+          "Relation.update": {
+            code: "LOCKED",
+            message: "This relation is currently being edited.",
+            detail: "The edit lease expires in 15 minutes.",
+            retryable: true,
+            retryAt,
+          },
+        },
+      ),
+    ).toEqual([
+      {
+        operation: { id: "Relation.update", intent: "update" },
+        available: false,
+        error: {
+          code: "LOCKED",
+          message: "This relation is currently being edited.",
+          detail: "The edit lease expires in 15 minutes.",
+          retryable: true,
+          retryAt,
+        },
+      },
+    ]);
   });
 });

@@ -1,14 +1,14 @@
 {
-  "name": "@openshapeforge/interface-web",
+  "name": "@openshapeforge/operations",
   "version": "0.1.0",
-  "description": "Transport-free web interface contracts and routing for OpenShapeForge hosts and plugins.",
+  "description": "Transport-independent operation results and availability offers for OpenShapeForge.",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/OpenShapeForge/OpenShapeForge.git",
-    "directory": "packages/interface-web"
+    "directory": "packages/operations"
   },
   "license": "BUSL-1.1",
   "type": "module",
@@ -22,9 +22,6 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit -p tsconfig.json"
-  },
-  "dependencies": {
-    "@openshapeforge/operations": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "^1.3.5",

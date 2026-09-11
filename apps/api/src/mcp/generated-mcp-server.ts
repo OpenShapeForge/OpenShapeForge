@@ -74,12 +74,12 @@ import type { DbSessionInput } from "../db/session.js";
 import { withDbSession } from "../db/session.js";
 import { appendEntityEventInTransaction } from "../platform/entity-events.js";
 import {
-  createGeneratedEntity,
   isOperationWrittenColumn,
   operationWrittenRefusal,
   createGeneratedEntityAfterElicitation,
   createGeneratedEntityForTable,
-  deleteGeneratedEntity,
+  entityOperationRef,
+  executeEntityOperation,
   getGeneratedEntity,
   getGeneratedCrudTables,
   isGeneratedCrudOperationEnabled,
@@ -87,9 +87,8 @@ import {
   listGeneratedEntitiesForTable,
   listGeneratedEntityStorageRowsForTable,
   mergeGeneratedEntityObjectForTable,
-  updateGeneratedEntity,
   updateGeneratedEntityForTable,
-} from "../graphql/generated-crud.js";
+} from "../operations/entity/index.js";
 import {
   applyPersonalNotes,
   deriveToolName,
@@ -2528,14 +2527,18 @@ async function invokeTool(
           : undefined;
       // Like REST, the MCP list result always publishes totalCount, so the
       // count pass is always requested (#17).
-      const result = await listGeneratedEntities(db, session, {
-        table: table.name,
-        ...(typeof args.first === "number" ? { limit: args.first } : {}),
-        ...(typeof args.after === "string" ? { cursor: args.after } : {}),
-        ...(filter ? { filter } : {}),
-        ...(sort ? { sort } : {}),
-        includeTotalCount: true,
+      const operationResult = await executeEntityOperation(db, session, {
+        operation: entityOperationRef(table, "list"),
+        input: {
+          ...(typeof args.first === "number" ? { limit: args.first } : {}),
+          ...(typeof args.after === "string" ? { cursor: args.after } : {}),
+          ...(filter ? { filter } : {}),
+          ...(sort ? { sort } : {}),
+          includeTotalCount: true,
+        },
       });
+      if (operationResult.intent !== "list") throw new Error("Unexpected entity result.");
+      const result = operationResult.connection;
       return ok({
         items: result.rows.map((row) =>
           serializeRowForEntity(entity, table, row),
@@ -2546,10 +2549,12 @@ async function invokeTool(
     }
 
     case "get": {
-      const row = await getGeneratedEntity(db, session, {
-        table: table.name,
-        id: requireId(args),
+      const result = await executeEntityOperation(db, session, {
+        operation: entityOperationRef(table, "get"),
+        input: { id: requireId(args) },
       });
+      if (result.intent !== "get") throw new Error("Unexpected entity result.");
+      const row = result.record;
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
       return ok(serializeRowForEntity(entity, table, row));
     }
@@ -2576,9 +2581,13 @@ async function invokeTool(
               values,
               into: elicitField,
             })
-          : await createGeneratedEntity(db, session, {
-              table: table.name,
-              values,
+          : await executeEntityOperation(db, session, {
+              operation: entityOperationRef(table, "create"),
+              input: { values },
+            }).then((result) => {
+              if (result.intent !== "create") throw new Error("Unexpected entity result.");
+              if (!result.record) throw new Error("Create operation returned no record.");
+              return result.record;
             });
       return ok(serializeRowForEntity(entity, table, row));
     }
@@ -2599,20 +2608,23 @@ async function invokeTool(
       assertOperationWrittenFields(values, table);
       assertWritableValues(values, entity, table, session);
       await assertPublishableWrite(db, session, tables, table, values, id);
-      const row = await updateGeneratedEntity(db, session, {
-        table: table.name,
-        id,
-        values,
+      const result = await executeEntityOperation(db, session, {
+        operation: entityOperationRef(table, "update"),
+        input: { id, values },
       });
+      if (result.intent !== "update") throw new Error("Unexpected entity result.");
+      const row = result.record;
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
       return ok(serializeRowForEntity(entity, table, row));
     }
 
     case "delete": {
-      const deleted = await deleteGeneratedEntity(db, session, {
-        table: table.name,
-        id: requireId(args),
+      const result = await executeEntityOperation(db, session, {
+        operation: entityOperationRef(table, "delete"),
+        input: { id: requireId(args) },
       });
+      if (result.intent !== "delete") throw new Error("Unexpected entity result.");
+      const deleted = result.deleted;
       if (!deleted)
         throw new HttpError(404, "NOT_FOUND", "Resource not found.");
       return ok({ deleted: true });

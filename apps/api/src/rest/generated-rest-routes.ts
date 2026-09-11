@@ -23,16 +23,13 @@ import { resolveSessionContext } from "../auth/identity.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
-  createGeneratedEntity,
-  deleteGeneratedEntity,
-  getGeneratedEntity,
+  entityOperationRef,
+  executeEntityOperation,
   getGeneratedCrudTables,
   isCallerWritableColumn,
   isOperationWrittenColumn,
   operationWrittenRefusal,
-  listGeneratedEntities,
-  updateGeneratedEntity,
-} from "../graphql/generated-crud.js";
+} from "../operations/entity/index.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError, toHttpError } from "./http-error.js";
 
@@ -351,11 +348,15 @@ export function registerGeneratedRestRoutes(
           // The REST list body always carries totalCount, so REST always pays
           // for the count pass — unlike GraphQL, where the client selects it
           // (#17). A REST opt-out would be a query-parameter contract change.
-          const result = await listGeneratedEntities(context.db, context.session, {
-            table: table.name,
-            ...buildListInput(table, query),
-            includeTotalCount: true,
+          const operationResult = await executeEntityOperation(context.db, context.session, {
+            operation: entityOperationRef(table, "list"),
+            input: {
+              ...buildListInput(table, query),
+              includeTotalCount: true,
+            },
           });
+          if (operationResult.intent !== "list") throw new Error("Unexpected entity result.");
+          const result = operationResult.connection;
           return reply.send({
             items: result.rows.map((row) => serializeRow(table, row)),
             totalCount: result.totalCount,
@@ -368,10 +369,12 @@ export function registerGeneratedRestRoutes(
         instance.get(`${base}/:id`, async (request, reply) => {
           const context = await requireRestContext(request);
           const { id } = request.params as { id: string };
-          const row = await getGeneratedEntity(context.db, context.session, {
-            table: table.name,
-            id,
+          const result = await executeEntityOperation(context.db, context.session, {
+            operation: entityOperationRef(table, "get"),
+            input: { id },
           });
+          if (result.intent !== "get") throw new Error("Unexpected entity result.");
+          const row = result.record;
           if (!row) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
@@ -383,10 +386,13 @@ export function registerGeneratedRestRoutes(
         instance.post(base, async (request, reply) => {
           const context = await requireRestContext(request);
           const values = assertWritableBody(table, request.body ?? {}, "create");
-          const row = await createGeneratedEntity(context.db, context.session, {
-            table: table.name,
-            values,
+          const result = await executeEntityOperation(context.db, context.session, {
+            operation: entityOperationRef(table, "create"),
+            input: { values },
           });
+          if (result.intent !== "create") throw new Error("Unexpected entity result.");
+          const row = result.record;
+          if (!row) throw new Error("Create operation returned no record.");
           return reply.status(201).send(serializeRow(table, row));
         });
       }
@@ -396,11 +402,12 @@ export function registerGeneratedRestRoutes(
           const context = await requireRestContext(request);
           const { id } = request.params as { id: string };
           const values = assertWritableBody(table, request.body ?? {}, "update");
-          const row = await updateGeneratedEntity(context.db, context.session, {
-            table: table.name,
-            id,
-            values,
+          const result = await executeEntityOperation(context.db, context.session, {
+            operation: entityOperationRef(table, "update"),
+            input: { id, values },
           });
+          if (result.intent !== "update") throw new Error("Unexpected entity result.");
+          const row = result.record;
           if (!row) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
@@ -412,10 +419,12 @@ export function registerGeneratedRestRoutes(
         instance.delete(`${base}/:id`, async (request, reply) => {
           const context = await requireRestContext(request);
           const { id } = request.params as { id: string };
-          const deleted = await deleteGeneratedEntity(context.db, context.session, {
-            table: table.name,
-            id,
+          const result = await executeEntityOperation(context.db, context.session, {
+            operation: entityOperationRef(table, "delete"),
+            input: { id },
           });
+          if (result.intent !== "delete") throw new Error("Unexpected entity result.");
+          const deleted = result.deleted;
           if (!deleted) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }

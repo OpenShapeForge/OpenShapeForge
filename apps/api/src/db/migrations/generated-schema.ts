@@ -295,9 +295,72 @@ function canonicalizeSafeJson(value: unknown, depth = 0): string | undefined {
   return undefined;
 }
 
+/**
+ * Reject JSON number spellings that JavaScript cannot compare losslessly even
+ * when JSON.parse happens to round them to a safe integer (for example
+ * 1.0000000000000001 -> 1 or 1e-999 -> 0). Quoted strings and their escapes
+ * are skipped; malformed JSON is left for JSON.parse to reject.
+ */
+function hasFractionalOrExponentJsonNumber(json: string): boolean {
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < json.length; index += 1) {
+    const character = json.charAt(index);
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character !== "-" && (character < "0" || character > "9")) {
+      continue;
+    }
+
+    let cursor = character === "-" ? index + 1 : index;
+    if (json.charAt(cursor) === "0") {
+      cursor += 1;
+    } else if (
+      json.charAt(cursor) >= "1" &&
+      json.charAt(cursor) <= "9"
+    ) {
+      do {
+        cursor += 1;
+      } while (
+        json.charAt(cursor) >= "0" &&
+        json.charAt(cursor) <= "9"
+      );
+    } else {
+      continue;
+    }
+
+    const suffix = json.charAt(cursor);
+    if (
+      suffix === "." ||
+      suffix === "e" ||
+      suffix === "E"
+    ) {
+      return true;
+    }
+    index = cursor - 1;
+  }
+
+  return false;
+}
+
 function canonicalizeJsonbLiteral(literal: string): string | undefined {
   try {
     const sqlContent = literal.slice(1, -1).replaceAll("''", "'");
+    if (hasFractionalOrExponentJsonNumber(sqlContent)) return undefined;
     const canonical = canonicalizeSafeJson(JSON.parse(sqlContent));
     return canonical === undefined ? undefined : `jsonb:${canonical}`;
   } catch {

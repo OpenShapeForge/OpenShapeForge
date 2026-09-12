@@ -597,6 +597,8 @@ describe("generated schema column defaults", () => {
               shifted_clock timestamptz not null default now() - interval '1 day',
               changed_json jsonb not null default '{"version":2,"branches":[]}',
               precise_json jsonb not null default '{"amount":9007199254740993}',
+              precise_decimal jsonb not null default '{"amount":1.0000000000000001}',
+              tiny_exponent jsonb not null default '{"amount":1e-999}',
               unchanged text not null default 'process'
             )
           `.execute(db);
@@ -625,6 +627,18 @@ describe("generated schema column defaults", () => {
                 "jsonb",
                 "'{\"amount\":9007199254740992}'::jsonb",
               ),
+              // JSON.parse rounds both of these live values to the manifest
+              // value; their original number tokens must remain distinct.
+              probeColumn(
+                "precise_decimal",
+                "jsonb",
+                "'{\"amount\":1}'::jsonb",
+              ),
+              probeColumn(
+                "tiny_exponent",
+                "jsonb",
+                "'{\"amount\":0}'::jsonb",
+              ),
               // Control: proves the five above are not drifting for some
               // unrelated reason.
               probeColumn("unchanged", "text", "'process'"),
@@ -633,7 +647,7 @@ describe("generated schema column defaults", () => {
 
           const diff = await diffManifestAgainstDatabase(db, [table]);
           const drifted = diff.nonAdditive;
-          expect(drifted).toHaveLength(7);
+          expect(drifted).toHaveLength(9);
           for (const column of [
             "changed_literal",
             "wrapped_call",
@@ -642,6 +656,8 @@ describe("generated schema column defaults", () => {
             "shifted_clock",
             "changed_json",
             "precise_json",
+            "precise_decimal",
+            "tiny_exponent",
           ]) {
             expect(
               drifted.some((line) =>

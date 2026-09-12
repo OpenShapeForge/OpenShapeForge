@@ -43,6 +43,20 @@ describe("compiler plugins", () => {
     expect(operationCatalog.operations.map((entry) => entry.key)).toContain(
       "workflow.instance.webhook-start",
     );
+    const runtimeFieldSchemas = JSON.parse(first.groups.operations.find((artifact) =>
+      artifact.path.endsWith("operations/field-schema-registry.json"),
+    )!.contents) as {
+      version: number;
+      fieldDefinitionSchema: { $ref: string };
+      semanticTypes: Record<string, unknown>;
+      referentiedata: Record<string, unknown>;
+    };
+    expect(runtimeFieldSchemas).toMatchObject({
+      version: 1,
+      fieldDefinitionSchema: { $ref: "#/$defs/fieldDefinition" },
+    });
+    expect(runtimeFieldSchemas.semanticTypes).toHaveProperty("fieldDefinition");
+    expect(Object.keys(runtimeFieldSchemas.referentiedata).length).toBeGreaterThan(0);
     const openApi = JSON.parse(first.groups.db.find((artifact) =>
       artifact.path.endsWith("rest/openapi.json"),
     )!.contents) as { paths: Record<string, Record<string, { operationId?: string }>> };

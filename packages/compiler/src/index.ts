@@ -45,7 +45,10 @@ import type { CompiledField } from "./authoring/types.js";
 import { renderEmptyApiPersistedOperationArtifact } from "./persisted-operations.js";
 import { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
 import { loadFieldCompilationCatalogs } from "./authoring/loader.js";
-import { createFieldSchemaCompiler } from "./field-json-schema.js";
+import {
+  createFieldSchemaCompiler,
+  renderRuntimeFieldSchemaRegistry,
+} from "./field-json-schema.js";
 
 export type {
   FieldDefinition,
@@ -107,6 +110,8 @@ export {
   compiledFieldSchema,
   compiledObjectSchema,
   createFieldSchemaCompiler,
+  renderRuntimeFieldSchemaRegistry,
+  runtimeFieldSchemaRegistry,
 } from "./field-json-schema.js";
 export type {
   CompiledFieldSchemaOptions,
@@ -305,8 +310,9 @@ export async function collectAllArtifacts(
     entities,
     referentiedata,
   );
+  const fieldCompilationCatalogs = loadFieldCompilationCatalogs(authoringDir);
   const fieldSchemas = createFieldSchemaCompiler({
-    ...loadFieldCompilationCatalogs(authoringDir),
+    ...fieldCompilationCatalogs,
     referentiedata,
   });
   const context = {
@@ -365,6 +371,13 @@ export async function collectAllArtifacts(
       {
         path: "apps/api/src/generated/operations/catalog.json",
         contents: renderOperationCatalog(operationCatalog),
+      },
+      {
+        path: "apps/api/src/generated/operations/field-schema-registry.json",
+        contents: renderRuntimeFieldSchemaRegistry({
+          semanticTypes: fieldCompilationCatalogs.semanticTypes,
+          referentiedata,
+        }),
       },
       {
         path: "apps/api/src/generated/compiler/canonical-condition.ts",

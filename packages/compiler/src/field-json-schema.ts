@@ -30,6 +30,12 @@ import fieldDefinitionAuthoringSchema from "../config/schemas/field-definition.s
 import workflowInspectorSchema from "../config/schemas/workflow-inspector.schema.json" with {
   type: "json",
 };
+import {
+  operationFieldObjectSchema,
+  operationFieldSchema,
+  type OperationFieldDefinition,
+  type OperationFieldSchemaRegistry,
+} from "@openshapeforge/operations";
 
 export type JsonObject = Record<string, unknown>;
 
@@ -53,6 +59,31 @@ const fieldDefinitionDefinitions = {
   ) as JsonObject),
   workflowInspector,
 };
+
+/** Registries emitted for the host-bound runtime FieldDefinition compiler. */
+export function runtimeFieldSchemaRegistry(input: {
+  semanticTypes?: Record<string, SemanticTypeDefinition>;
+  referentiedata?: CoreReferentiedataSnapshot;
+}): OperationFieldSchemaRegistry & {
+  fieldDefinitionSchema: JsonObject;
+} {
+  return {
+    semanticTypes: (input.semanticTypes ?? {}) as unknown as NonNullable<OperationFieldSchemaRegistry["semanticTypes"]>,
+    referentiedata: (input.referentiedata ?? {}) as unknown as NonNullable<OperationFieldSchemaRegistry["referentiedata"]>,
+    fieldDefinitionDefinitions: structuredClone(fieldDefinitionDefinitions),
+    fieldDefinitionSchema: {
+      $ref: FIELD_DEFINITION_SCHEMA_REF,
+      $defs: structuredClone(fieldDefinitionDefinitions),
+    },
+  };
+}
+
+export function renderRuntimeFieldSchemaRegistry(input: {
+  semanticTypes?: Record<string, SemanticTypeDefinition>;
+  referentiedata?: CoreReferentiedataSnapshot;
+}): string {
+  return `${JSON.stringify({ version: 1, ...runtimeFieldSchemaRegistry(input) }, null, 2)}\n`;
+}
 
 /**
  * The structural minimum this mapping reads. Both `CompiledField` (compiled
@@ -571,6 +602,7 @@ export function createFieldSchemaCompiler(input: {
   semanticTypes?: Record<string, SemanticTypeDefinition>;
   referentiedata?: CoreReferentiedataSnapshot;
 }): FieldSchemaCompiler {
+  const registry = runtimeFieldSchemaRegistry(input);
   const compile = (fields: readonly FieldDefinition[]) =>
     resolveModelFields(
       fields.map((field) => field as Field),
@@ -580,17 +612,16 @@ export function createFieldSchemaCompiler(input: {
   return {
     compile,
     field: (field, options) =>
-      compiledFieldSchema(
-        compile([field])[0]!,
-        input.referentiedata ?? {},
+      operationFieldSchema(
+        field as unknown as OperationFieldDefinition,
+        registry,
         options,
       ),
     object: (fields, options = {}) => {
-      const { requireRequired = true, ...schemaOptions } = options;
-      return compiledObjectSchema(
-        compile(fields),
-        input.referentiedata ?? {},
-        { ...schemaOptions, requireRequired },
+      return operationFieldObjectSchema(
+        fields as unknown as readonly OperationFieldDefinition[],
+        registry,
+        options,
       );
     },
   };

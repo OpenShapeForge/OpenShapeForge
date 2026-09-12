@@ -34,6 +34,16 @@ export type PluginSessionContext = {
 
 export type PluginDatabaseSchema = Record<string, unknown>;
 
+export type RuntimeFieldSchemaCompiler = {
+  /**
+   * Validate canonical stored FieldDefinitions and project their value object
+   * through the host's active semantic-type and reference-data registries.
+   */
+  object(
+    fields: readonly Readonly<Record<string, unknown>>[],
+  ): Readonly<Record<string, unknown>>;
+};
+
 export type RuntimeOperationDefinition = OperationReference & {
   key?: string;
   entityId?: string;
@@ -168,6 +178,9 @@ export type PluginDatabase = {
 
 export type PluginPlatformServices = {
   db: PluginDatabase;
+  schemas: {
+    fields: RuntimeFieldSchemaCompiler;
+  };
   events: {
     append(
       session: PluginSessionContext,

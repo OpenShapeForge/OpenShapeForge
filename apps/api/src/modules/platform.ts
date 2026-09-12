@@ -39,6 +39,7 @@ import { parseModuleToolExecutionOptions } from "./invocation-sources.js";
 import { resolveConnectionValues } from "./connection-secrets.js";
 import { connectSocket } from "./socket-egress.js";
 import { classifyDatabaseError } from "../db/database-refusals.js";
+import { generatedRuntimeFieldSchemas } from "./field-schemas.js";
 
 /**
  * Narrow a module's selector to exactly one form before it reaches a query.
@@ -245,6 +246,9 @@ export class ModulePlatformRuntime {
           }
           return withDbSession(this.#db, session, fn);
         },
+      },
+      schemas: {
+        fields: generatedRuntimeFieldSchemas,
       },
       events: {
         append: async (session, event) => {

@@ -185,7 +185,12 @@ the entity field compiler, including nested `children`/`item`, defaults,
 options, shared validation and collection cardinality bounds. The pure
 `createFieldSchemaCompiler`, `compiledFieldSchema`, `compiledObjectSchema` and
 `resolveModelFields` helpers are also exported from the compiler package root
-for build-time tooling; runtime renderers should consume the generated schema.
+for build-time tooling. Runtime modules that must turn stored, user-authored
+FieldDefinitions into an Operation interaction schema use
+`context.platform.schemas.fields.object(definitions)`. The host validates the
+definitions against the generated authoring schema and binds the same projector
+to its active semantic-type and reference-data registries; plugins neither
+import the compiler at runtime nor supply a fallback catalog.
 
 ### Registration
 

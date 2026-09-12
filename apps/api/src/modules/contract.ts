@@ -41,6 +41,7 @@ import type {
   RuntimeOperationExecutionResult,
   RuntimeOperationProvider,
   RuntimeOperationRequest,
+  RuntimeFieldSchemaCompiler,
   RuntimeModuleContract,
   RuntimeWorkerContextContract,
   RuntimeWorkerContract,
@@ -286,6 +287,9 @@ export type ModulePlatformServices = {
       session: TrustedSessionContext,
       fn: (trx: Transaction<DB>) => Promise<T>,
     ): Promise<T>;
+  };
+  schemas: {
+    fields: RuntimeFieldSchemaCompiler;
   };
   events: {
     append(

@@ -21,3 +21,17 @@ export {
   operationErrorOf,
   operationFailure,
 } from "./contract.js";
+export type {
+  OperationFieldDefinition,
+  OperationFieldOptions,
+  OperationFieldSchemaOptions,
+  OperationFieldSchemaRegistry,
+  OperationFieldSemanticType,
+  OperationFieldValidation,
+  OperationJsonSchema,
+  OperationLocalizedText,
+} from "./field-schema.js";
+export {
+  operationFieldObjectSchema,
+  operationFieldSchema,
+} from "./field-schema.js";

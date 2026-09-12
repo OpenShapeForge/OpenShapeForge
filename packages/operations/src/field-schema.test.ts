@@ -2,6 +2,25 @@
 import { expect, test } from "bun:test";
 import { operationFieldObjectSchema } from "./field-schema.js";
 
+test("cardinality bounds with max one preserve a scalar value", () => {
+  for (const cardinality of [{ min: 0, max: 1 }, { min: 1, max: 1 }, {}]) {
+    const schema = operationFieldObjectSchema([{
+      key: "email", valueType: "string", semanticType: "email", cardinality, required: true,
+    }], { semanticTypes: { email: { valueType: "string", validation: { format: "email" } } } });
+    expect(schema).toMatchObject({
+      properties: { email: { type: "string", format: "email" } }, required: ["email"],
+    });
+    expect((schema.properties as Record<string, Record<string, unknown>>).email!.items).toBeUndefined();
+  }
+});
+
+test("explicit collection and larger or unbounded maxima preserve arrays", () => {
+  for (const cardinality of ["collection", { min: 0, max: 2 }, { min: 0, max: "unbounded" }] as const) {
+    const schema = operationFieldObjectSchema([{ key: "emails", valueType: "string", cardinality }], {});
+    expect(schema).toMatchObject({ properties: { emails: { type: "array", items: { type: "string" } } } });
+  }
+});
+
 test("runtime fields use the host semantic and reference-data registries", () => {
   const schema = operationFieldObjectSchema([{
     key: "reasons",

@@ -135,9 +135,12 @@ function stringRule(rule: unknown): string | undefined {
 function cardinalityOf(
   value: OperationFieldDefinition["cardinality"],
 ): "single" | "collection" {
-  return value === "collection" || (typeof value === "object" && value !== null)
-    ? "collection"
-    : "single";
+  if (value === "collection") return "collection";
+  if (value && typeof value === "object" &&
+    (value.max === "unbounded" || (typeof value.max === "number" && value.max > 1))) {
+    return "collection";
+  }
+  return "single";
 }
 
 function resolveOptions(field: OperationFieldDefinition): OperationFieldOptions | undefined {

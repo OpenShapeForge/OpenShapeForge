@@ -14,6 +14,7 @@
  */
 import type { VersionedMigration } from "../versioned-runner.js";
 // migration-registry:imports — `bun run db:migration:new` inserts imports below this line.
+import m0011ReconcileGeneratedRlsPolicyPairs from "./0011_reconcile-generated-rls-policy-pairs.js";
 import m0010RelationGroupMemberships from "./0010_relation-group-memberships.js";
 import m0009BillingRunItemPeriodOptional from "./0009_billing-run-item-period-optional.js";
 import m0008McpHandoffs from "./0008_mcp-handoffs.js";
@@ -34,5 +35,6 @@ export const versionedMigrations: VersionedMigration[] = [
   m0008McpHandoffs,
   m0009BillingRunItemPeriodOptional,
   m0010RelationGroupMemberships,
+  m0011ReconcileGeneratedRlsPolicyPairs,
   // migration-registry:entries — `bun run db:migration:new` inserts entries above this line.
 ];

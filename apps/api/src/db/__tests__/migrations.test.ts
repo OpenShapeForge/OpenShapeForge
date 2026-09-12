@@ -179,7 +179,7 @@ describe("generated schema migration", () => {
         // makes a billing run item's period optional. 0010 introduces typed
         // RelationGroups and the canonical many-to-many membership table,
         // backfilling only the old Relation.relation_group_id link on upgrades.
-        // A fresh install applies all nine in order; the list mirrors the registry in
+        // A fresh install applies all ten in order; the list mirrors the registry in
         // migrations/versioned/index.ts.
         expect(first.versionedApplied).toEqual([
           "0002_org-unit-closure-trigger",
@@ -191,6 +191,7 @@ describe("generated schema migration", () => {
           "0008_mcp-handoffs",
           "0009_billing-run-item-period-optional",
           "0010_relation-group-memberships",
+          "0011_reconcile-generated-rls-policy-pairs",
         ]);
 
         await withDb(url, async (db) => {

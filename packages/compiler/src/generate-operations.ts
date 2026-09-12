@@ -262,12 +262,12 @@ function isJsonValue(value: unknown, seen = new Set<object>()): boolean {
   return valid;
 }
 
-function validateOperation(plugin: string, operation: PluginOperationContract): void {
+function validateOperation(plugin: string, operation: PluginOperationContract, authored = false): void {
   const where = `Plugin "${plugin}" operation "${operation.key}"`;
   if (!operation.transports?.typescript) {
     throw new Error(`${where} must declare an explicit TypeScript projection or disabled reason.`);
   }
-  if (!KEY.test(operation.key) || !operation.key.startsWith(`${plugin}.`)) {
+  if (!KEY.test(operation.key) || (!authored && !operation.key.startsWith(`${plugin}.`))) {
     throw new Error(`${where} must use a stable lowercase key prefixed with "${plugin}.".`);
   }
   nonEmpty(operation.title, `${where} title`);
@@ -277,10 +277,11 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
     throw new Error(`${where} handler must be a TypeScript identifier.`);
   }
   const restPath = operation.transports.rest.path;
-  if (RESERVED_API_NAMESPACES.has(plugin)) {
-    throw new Error(`${where} uses reserved API namespace "${plugin}".`);
+  const apiNamespace = authored ? operation.key.split(".")[0]! : plugin;
+  if (RESERVED_API_NAMESPACES.has(apiNamespace)) {
+    throw new Error(`${where} uses reserved API namespace "${apiNamespace}".`);
   }
-  const pluginRoot = `/api/${plugin}`;
+  const pluginRoot = `/api/${apiNamespace}`;
   if (!REST_PATH.test(restPath) ||
       (restPath !== pluginRoot && !restPath.startsWith(`${pluginRoot}/`))) {
     throw new Error(
@@ -544,6 +545,15 @@ export function collectPluginOperations(
   plugins: readonly CompilerPlugin[],
   context: PluginBaseContext,
 ): CompiledPluginOperation[] {
+  return collectOperationContracts(plugins, context, false);
+}
+
+/** Authored canonical identity is separate from the bound implementation owner. */
+function collectOperationContracts(
+  plugins: readonly CompilerPlugin[],
+  context: PluginBaseContext,
+  authored: boolean,
+): CompiledPluginOperation[] {
   const operations: CompiledPluginOperation[] = [];
   const keys = new Set<string>();
   const rest = new Set<string>();
@@ -556,7 +566,7 @@ export function collectPluginOperations(
       ? plugin.operations(context)
       : plugin.operations ?? [];
     for (const operation of declared) {
-      validateOperation(plugin.name, operation);
+      validateOperation(plugin.name, operation, authored);
       const restKey = normalizedRestRoute(
         operation.transports.rest.method,
         operation.transports.rest.path,
@@ -740,7 +750,7 @@ export function collectAuthoredEntityPluginOperations(
     name,
     operations,
   } satisfies CompilerPlugin));
-  return collectPluginOperations(synthetic, context);
+  return collectOperationContracts(synthetic, context, true);
 }
 
 /** Lower module/global YAML Operations through the same static registry. */
@@ -812,7 +822,7 @@ export function collectAuthoredModulePluginOperations(
       } satisfies PluginOperationContract;
     }),
   }));
-  return collectPluginOperations(synthetic, context);
+  return collectOperationContracts(synthetic, context, true);
 }
 
 export function collectEntityOperations(

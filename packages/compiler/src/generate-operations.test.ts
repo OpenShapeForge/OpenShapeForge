@@ -84,7 +84,7 @@ describe("first-class plugin operations", () => {
             id: "demo.quote.approve",
             name: "Approve quote",
             description: "Approves a quote.",
-            implementation: { type: "plugin", plugin: "demo", handler: "approveQuote" },
+            implementation: { type: "plugin", plugin: "new-owner", handler: "approveQuote" },
             target: { scope: "record", inputField: "quoteId" },
             input: {
               schema: {
@@ -119,6 +119,9 @@ describe("first-class plugin operations", () => {
         }],
       },
     }] as never, context);
+
+    expect(compiled!.key).toBe("demo.quote.approve");
+    expect(compiled!.plugin).toBe("new-owner");
 
     expect(compiled!.inputSchema).toMatchObject({
       required: ["quoteId", "expectedVersion", "leaseToken"],
@@ -799,6 +802,8 @@ describe("first-class plugin operations", () => {
   });
 
   test("requires safe plugin-owned paths and declared path parameters", () => {
+    expect(() => collectPluginOperations([{ name: "new-owner", operations: [operation] }], context))
+      .toThrow(/stable lowercase key prefixed/);
     expect(() => collectPluginOperations([{ name: "demo", operations: [{
       ...operation,
       transports: {

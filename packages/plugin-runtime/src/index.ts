@@ -277,6 +277,8 @@ export type RuntimeDurableWorkReference = {
 export type RuntimeResolvedOperationWork = {
   tenantId: string;
   serviceIdentityId: string;
+  /** Persisted before first dispatch; prevents changed contracts reopening unsafe retries. */
+  operationContractFingerprint?: string;
   operation: { id: string; input?: Record<string, unknown>; idempotencyKey: string };
 };
 
@@ -323,6 +325,12 @@ export type RuntimeWorkerContract<Context> = {
     context: Context,
     reference: RuntimeDurableWorkReference,
   ): Promise<RuntimeResolvedOperationWork | undefined>;
+  /** Atomically pin once under the exact active claim; reject a different fingerprint. */
+  pinOperationContract?(
+    context: Context,
+    reference: RuntimeDurableWorkReference,
+    fingerprint: string,
+  ): Promise<void>;
 };
 
 export type ModuleRuntimeContextContract<Database, Platform> = {

@@ -122,8 +122,6 @@ type ManifestWorkerTable = {
   table: string;
   workerAccess?: string;
   workerDml?: boolean;
-  generatedCrudEligible?: boolean;
-  generatedCrud: boolean;
 };
 
 const manifestTables = manifest.tables as unknown as ManifestWorkerTable[];
@@ -138,26 +136,22 @@ const manifestTables = manifest.tables as unknown as ManifestWorkerTable[];
  * removes its last worker plugin does not leave a credentialed role behind with
  * standing access to the model.
  */
-const hasWorkers = manifestTables.some((table) => table.workerAccess !== undefined);
-
 /**
  * The exact tables a worker is granted DML on, qualified and sorted so the DDL
  * order is deterministic.
  *
- * Three sources, and each is a different statement about the table:
+ * Two explicit sources, and each is a different statement about the table:
  *
  *   - `workerAccess` — the queue a worker claims ACROSS tenants. Its policy
  *     already names the worker; withholding the grant would emit a policy for a
  *     role that cannot reach the table.
  *   - `workerDml` — everything a worker touches inside a session scoped to one
  *     tenant: its run tables, its node catalog, its trigger registry.
- *   - generated-CRUD eligibility — the business entities. Derived rather than declared
- *     because the compiler emits an `entity.<slug>.<action>` workflow node for
- *     every generated entity, so any workflow may perform CRUD against any of
- *     them; asking each entity's author to name a worker they have never heard
- *     of would be a declaration nobody could maintain. RLS is what keeps this
- *     honest — the worker is NOBYPASSRLS, so it still reads one tenant at a
- *     time.
+ *
+ * Generated CRUD eligibility is deliberately NOT a grant source. Durable
+ * business Operations execute through the canonical HTTP boundary under a
+ * freshly verified organization service identity; the queue connection never
+ * needs direct access to every generated business table.
  *
  * What is left out is the point of enumerating at all: the platform control
  * plane. `platform.tenants`, `platform.api_keys`, `platform.api_key_integrations`,
@@ -168,21 +162,24 @@ const hasWorkers = manifestTables.some((table) => table.workerAccess !== undefin
  * reachable by the app role and none of them by a worker. Several are GLOBAL
  * tables with no policy at all, where the grant is the only gate there is.
  */
-export function workerGrantedTables(): string[] {
-  if (!hasWorkers) {
+export function workerGrantedTablesFromManifest(
+  tables: readonly ManifestWorkerTable[],
+): string[] {
+  if (!tables.some((table) => table.workerAccess !== undefined)) {
     return [];
   }
-  return manifestTables
+  return tables
     .filter(
       (table) =>
         table.workerAccess !== undefined ||
-        table.workerDml === true ||
-        (table.generatedCrudEligible === undefined
-          ? table.generatedCrud === true
-          : table.generatedCrudEligible === true),
+        table.workerDml === true,
     )
     .map((table) => `${table.schema}.${table.table}`)
     .sort();
+}
+
+export function workerGrantedTables(): string[] {
+  return workerGrantedTablesFromManifest(manifestTables);
 }
 
 /** Distinct schemas the granted tables live in, for the USAGE grants. */
@@ -289,8 +286,8 @@ export async function applyWorkerRoleMigration(db: OpenShapeForgeDatabase) {
  * `workerDml` without a bespoke migration.
  *
  * REVOKE-then-GRANT rather than GRANT alone. A table that STOPS declaring
- * `workerDml` — or an entity that stops being CRUD-generated, or a whole plugin
- * that is removed — must lose the grant, and a plain sweep would leave it in
+ * `workerDml` — or a whole plugin that is removed — must lose the grant, and a
+ * plain sweep would leave it in
  * place forever. `revoke all` names the worker role, so it can never touch the
  * app role's privileges, and it runs over every schema the manifest reaches
  * rather than only the ones currently granted.

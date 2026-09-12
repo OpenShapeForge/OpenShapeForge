@@ -235,6 +235,60 @@ describe("startWorkerRole", () => {
     expect(order).toEqual(["init", "start", "stop", "close"]);
   });
 
+  test("requires claim resolution and atomic contract pinning as one durable boundary", async () => {
+    for (const partial of ["resolver", "pinner"] as const) {
+      await expect(startWorkerRole("probe", {
+        databaseUrl,
+        log: silentLog,
+        modules: registry([{
+          name: "probe-module",
+          workers: {
+            probe: {
+              ...(partial === "resolver"
+                ? { resolveOperationWork: async () => undefined }
+                : { pinOperationContract: async () => {} }),
+              start: () => ({ stop: async () => {} }),
+            },
+          },
+        }]),
+      })).rejects.toThrow(/must contribute resolveOperationWork and pinOperationContract together/);
+    }
+  });
+
+  test("binds the module resolver and pinner into one host-owned durable broker", async () => {
+    let started: ModuleWorkerContext | undefined;
+    const handle = await startWorkerRole("probe", {
+      databaseUrl,
+      log: silentLog,
+      env: {
+        OPENSHAPEFORGE_ORGANIZATION_SERVICE_IDENTITIES: JSON.stringify([{
+          tenantId: "11111111-1111-4111-8111-111111111111",
+          clientId: "org-worker",
+          clientSecret: "local-test-only",
+        }]),
+        OPENSHAPEFORGE_OPERATION_API_URL: "http://127.0.0.1:3121",
+        OPENSHAPEFORGE_SERVICE_IDENTITY_TOKEN_URL: "http://127.0.0.1:8181/token",
+      },
+      modules: registry([{
+        name: "probe-module",
+        workers: {
+          probe: {
+            resolveOperationWork: async () => undefined,
+            pinOperationContract: async () => {},
+            start: (context) => {
+              started = context;
+              return { stop: async () => {} };
+            },
+          },
+        },
+      }]),
+    });
+
+    expect(started?.durableOperations?.authorize).toBeFunction();
+    expect(started?.durableOperations?.execute).toBeFunction();
+    await handle.stop();
+  });
+
   test("a module whose init throws does not contribute its role", async () => {
     // initRuntimeModules drops it, so the role it owns is genuinely absent
     // rather than present-but-broken.

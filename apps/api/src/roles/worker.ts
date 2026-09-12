@@ -212,8 +212,19 @@ export async function startWorkerRole(
     const context = { db: databaseRuntime.db, log,
       schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas } };
     const resolver = resolved.worker.resolveOperationWork;
-    const durableOperations = resolver
-      ? configuredDurableWorkerBroker((reference) => resolver(context, reference), options.env)
+    const pinner = resolved.worker.pinOperationContract;
+    if (Boolean(resolver) !== Boolean(pinner)) {
+      throw new Error(
+        `Worker role "${role}" must contribute resolveOperationWork and pinOperationContract together. ` +
+          "Durable execution cannot run without both an exact claim resolver and an atomic contract pin.",
+      );
+    }
+    const durableOperations = resolver && pinner
+      ? configuredDurableWorkerBroker(
+          (reference) => resolver(context, reference),
+          (reference, fingerprint) => pinner(context, reference, fingerprint),
+          options.env,
+        )
       : undefined;
     const handle: ModuleWorkerHandle = await resolved.worker.start({
       ...context,

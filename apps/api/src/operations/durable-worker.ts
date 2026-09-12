@@ -26,6 +26,39 @@ function fingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(sorted(value))).digest("hex");
 }
 
+/**
+ * Stable execution semantics only. Localised presentation can change without
+ * changing an already claimed command, while every server control or schema
+ * that can change what the command does remains part of the persisted pin.
+ */
+function operationContractFingerprint(definition: RuntimeOperationDefinition): string {
+  return `sha256:${fingerprint({
+    version: 1,
+    id: definition.id,
+    intent: definition.intent,
+    target: definition.target,
+    input: definition.input,
+    output: definition.output,
+    effects: definition.effects,
+    reliability: definition.reliability,
+    prerequisites: definition.prerequisites,
+    concurrency: definition.concurrency,
+    interaction: definition.interaction,
+  })}`;
+}
+
+function workFingerprint(work: RuntimeResolvedOperationWork): string {
+  return fingerprint({
+    tenantId: work.tenantId,
+    serviceIdentityId: work.serviceIdentityId,
+    operation: work.operation,
+  });
+}
+
+function hasWriteEffects(definition: RuntimeOperationDefinition): boolean {
+  return definition.effects.data !== "read" || definition.effects.external === "write";
+}
+
 function freeze<T>(value: T): T {
   if (value && typeof value === "object") { Object.values(value).forEach(freeze); Object.freeze(value); }
   return value;
@@ -39,6 +72,8 @@ function safeToRepeat(definition: RuntimeOperationDefinition): boolean {
 export type DurableWorkerBrokerOptions = {
   /** Bound by core to the actual registered module's persisted claim resolver. */
   resolveWork(reference: RuntimeDurableWorkReference): Promise<RuntimeResolvedOperationWork | undefined>;
+  /** Bound to the same module; atomically pins under the exact live claim. */
+  pinOperationContract(reference: RuntimeDurableWorkReference, fingerprint: string): Promise<void>;
   identities: readonly OrganizationServiceIdentity[];
   apiUrl: string;
   tokenUrl: string;
@@ -62,7 +97,8 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
     return { ...session, serviceIdentityId: claims.preferred_username === `service-account-${claims.azp}` ? claims.azp : null };
   });
   const capabilities = new WeakMap<object, {
-    reference: RuntimeDurableWorkReference; workHash: string; requestHash: string; expiresAt: number;
+    reference: RuntimeDurableWorkReference; workHash: string; requestHash: string;
+    contractFingerprint: string; expiresAt: number;
   }>();
   // A second dispatch within the SAME live claim is also an uncertain retry.
   const dispatchedUnsafeClaims = new Set<string>();
@@ -114,6 +150,50 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
       try {
         const { work, identity } = await resolved(reference);
         const { definition } = await current(identity, work.operation.id);
+        const contractFingerprint = operationContractFingerprint(definition);
+        if (work.operationContractFingerprint &&
+          work.operationContractFingerprint !== contractFingerprint) {
+          throw new DurableAuthorityError(
+            "OPERATION_CONTRACT_CHANGED",
+            "De betekenis van deze operatie is gewijzigd nadat de workflowstap werd vastgelegd.",
+          );
+        }
+        // A write reclaimed without a persisted pin may already have run under
+        // another contract. Even a currently keyed definition cannot prove
+        // what the previous attempt actually executed.
+        if (!work.operationContractFingerprint && reference.attempt > 1 && hasWriteEffects(definition)) {
+          throw new DurableAuthorityError(
+            "OPERATION_OUTCOME_UNKNOWN",
+            "Deze schrijfactie kan al uitgevoerd zijn. Controleer het resultaat voordat de workflow doorgaat.",
+          );
+        }
+
+        try {
+          await options.pinOperationContract(structuredClone(reference), contractFingerprint);
+        } catch {
+          // A database reply may be lost after commit. Re-reading the exact
+          // claim distinguishes that safe case without trusting exception text.
+        }
+        const pinned = await resolved(reference);
+        if (workFingerprint(pinned.work) !== workFingerprint(work)) {
+          throw new DurableAuthorityError(
+            "DURABLE_CLAIM_CHANGED",
+            "De automatische stap is tijdens autorisatie gewijzigd.",
+          );
+        }
+        if (!pinned.work.operationContractFingerprint) {
+          throw new DurableAuthorityError(
+            "DURABLE_CONTRACT_PIN_UNAVAILABLE",
+            "Het operatiecontract kon niet veilig aan deze workflowstap worden gekoppeld.",
+            true,
+          );
+        }
+        if (pinned.work.operationContractFingerprint !== contractFingerprint) {
+          throw new DurableAuthorityError(
+            "OPERATION_CONTRACT_CHANGED",
+            "De betekenis van deze operatie is gewijzigd nadat de workflowstap werd vastgelegd.",
+          );
+        }
         if (!safeToRepeat(definition) && (reference.attempt > 1 || dispatchedUnsafeClaims.has(fingerprint(reference)))) {
           throw new DurableAuthorityError("OPERATION_OUTCOME_UNKNOWN", "Deze schrijfactie kan al uitgevoerd zijn. Controleer het resultaat voordat de workflow doorgaat.");
         }
@@ -123,8 +203,8 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
           operation: { operation: { id: definition.id, intent: definition.intent },
             ...(work.operation.input ? { input: work.operation.input } : {}), idempotencyKey: work.operation.idempotencyKey },
         });
-        capabilities.set(capability, { reference: structuredClone(reference), workHash: fingerprint(work),
-          requestHash: fingerprint(result), expiresAt: now() + 30_000 });
+        capabilities.set(capability, { reference: structuredClone(reference), workHash: workFingerprint(pinned.work),
+          requestHash: fingerprint(result), contractFingerprint, expiresAt: now() + 30_000 });
         return result;
       } catch (error) {
         if (error instanceof DurableAuthorityError) throw error;
@@ -142,14 +222,22 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
       let repeatable = false;
       try {
         const { work, identity } = await resolved(minted.reference);
-        if (minted.workHash !== fingerprint(work)) return failure("DURABLE_CLAIM_CHANGED", "De automatische stap is na autorisatie gewijzigd.");
+        if (minted.workHash !== workFingerprint(work)) return failure("DURABLE_CLAIM_CHANGED", "De automatische stap is na autorisatie gewijzigd.");
+        if (work.operationContractFingerprint !== minted.contractFingerprint) {
+          return failure("OPERATION_CONTRACT_CHANGED", "De betekenis van deze operatie is gewijzigd nadat de workflowstap werd vastgelegd.");
+        }
         // Acquire a NEW token here: retained token roles never authorize a later execution.
         const { definition, headers } = await current(identity, work.operation.id, executionOptions?.signal);
-        if (definition.intent !== input.operation.operation.intent) return failure("OPERATION_CONTRACT_CHANGED", "De betekenis van deze operatie is gewijzigd.");
+        if (definition.intent !== input.operation.operation.intent ||
+          operationContractFingerprint(definition) !== minted.contractFingerprint) {
+          return failure("OPERATION_CONTRACT_CHANGED", "De betekenis van deze operatie is gewijzigd.");
+        }
         // Token exchange/discovery can take time. Recheck cancellation/fencing
         // immediately before dispatch instead of trusting the earlier read.
         const latest = await resolved(minted.reference);
-        if (minted.workHash !== fingerprint(latest.work) || now() >= minted.expiresAt) {
+        if (minted.workHash !== workFingerprint(latest.work) ||
+          latest.work.operationContractFingerprint !== minted.contractFingerprint ||
+          now() >= minted.expiresAt) {
           return failure("DURABLE_CLAIM_CHANGED", "De automatische stap is gewijzigd of de uitvoerbevoegdheid is verlopen.");
         }
         repeatable = safeToRepeat(definition);
@@ -184,9 +272,12 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
 }
 
 export function configuredDurableWorkerBroker(
-  resolveWork: DurableWorkerBrokerOptions["resolveWork"], env: NodeJS.ProcessEnv = process.env,
+  resolveWork: DurableWorkerBrokerOptions["resolveWork"],
+  pinOperationContract: DurableWorkerBrokerOptions["pinOperationContract"],
+  env: NodeJS.ProcessEnv = process.env,
 ): RuntimeWorkerOperationBroker {
-  return createDurableWorkerBroker({ resolveWork, identities: organizationServiceIdentities(env),
+  return createDurableWorkerBroker({ resolveWork, pinOperationContract,
+    identities: organizationServiceIdentities(env),
     apiUrl: env.OPENSHAPEFORGE_OPERATION_API_URL ?? "",
     tokenUrl: env.OPENSHAPEFORGE_SERVICE_IDENTITY_TOKEN_URL ?? "" });
 }

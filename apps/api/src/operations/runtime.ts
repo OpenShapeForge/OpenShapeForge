@@ -1057,65 +1057,86 @@ export function registerRuntimeOperationRestRoutes(
     return reply.status(response.status).send(response.body);
   };
 
-  app.get("/api/operations", async (request, reply) => {
-    try {
-      return await withSession(
-        request,
-        (session) => runtime.platform!.operations.list(session),
-      );
-    } catch (error) {
-      return failed(reply, error);
-    }
-  });
-  app.get("/api/operations/:id", async (request, reply) => {
-    try {
-      const id = (request.params as { id?: unknown }).id;
-      if (typeof id !== "string" || id.length === 0) {
-        throw new HttpError(400, "BAD_USER_INPUT", "Operation id is required.");
-      }
-      const definition = await withSession(
-        request,
-        (session) => runtime.platform!.operations.get(session, id),
-      );
-      if (!definition) {
-        throw new HttpError(404, "NOT_FOUND", "Operation is not available.");
-      }
-      return definition;
-    } catch (error) {
-      return failed(reply, error);
-    }
-  });
-  app.post("/api/operations/:id/execute", async (request, reply) => {
-    try {
-      const id = (request.params as { id?: unknown }).id;
-      if (typeof id !== "string" || id.length === 0) {
-        throw new HttpError(400, "BAD_USER_INPUT", "Operation id is required.");
-      }
-      const body = asInput(request.body ?? {});
-      if (typeof body.intent !== "string" || body.intent.length === 0) {
-        throw new HttpError(400, "BAD_USER_INPUT", "Operation intent is required.");
-      }
-      const operationInput = body.input === undefined
-        ? undefined
-        : asInput(body.input);
-      const idempotencyKey = request.headers["idempotency-key"];
-      if (idempotencyKey !== undefined && typeof idempotencyKey !== "string") {
-        throw new HttpError(
-          400,
-          "BAD_USER_INPUT",
-          "Idempotency-Key must have exactly one value.",
+  // createApiApp keeps JSON as bytes for GraphQL Yoga. Runtime Operation
+  // routes own ordinary JSON and therefore parse it in an encapsulated scope,
+  // just like generated CRUD and edit-lease routes do.
+  void app.register(async (instance) => {
+    instance.removeContentTypeParser("application/json");
+    instance.addContentTypeParser(
+      "application/json",
+      { parseAs: "string" },
+      (_request, body, done) => {
+        try {
+          done(null, body ? JSON.parse(body as string) : {});
+        } catch {
+          done(new HttpError(400, "BAD_USER_INPUT", "Request body is not valid JSON."), undefined);
+        }
+      },
+    );
+    instance.setErrorHandler((error, _request, reply) => {
+      void failed(reply, error);
+    });
+
+    instance.get("/api/operations", async (request, reply) => {
+      try {
+        return await withSession(
+          request,
+          (session) => runtime.platform!.operations.list(session),
         );
+      } catch (error) {
+        return failed(reply, error);
       }
-      return await withSession(request, (session) =>
-        runtime.platform!.operations.execute(session, {
-          operation: { id, intent: body.intent as string },
-          ...(operationInput ? { input: operationInput } : {}),
-          ...(idempotencyKey ? { idempotencyKey } : {}),
-        })
-      );
-    } catch (error) {
-      return failed(reply, error);
-    }
+    });
+    instance.get("/api/operations/:id", async (request, reply) => {
+      try {
+        const id = (request.params as { id?: unknown }).id;
+        if (typeof id !== "string" || id.length === 0) {
+          throw new HttpError(400, "BAD_USER_INPUT", "Operation id is required.");
+        }
+        const definition = await withSession(
+          request,
+          (session) => runtime.platform!.operations.get(session, id),
+        );
+        if (!definition) {
+          throw new HttpError(404, "NOT_FOUND", "Operation is not available.");
+        }
+        return definition;
+      } catch (error) {
+        return failed(reply, error);
+      }
+    });
+    instance.post("/api/operations/:id/execute", async (request, reply) => {
+      try {
+        const id = (request.params as { id?: unknown }).id;
+        if (typeof id !== "string" || id.length === 0) {
+          throw new HttpError(400, "BAD_USER_INPUT", "Operation id is required.");
+        }
+        const body = asInput(request.body ?? {});
+        if (typeof body.intent !== "string" || body.intent.length === 0) {
+          throw new HttpError(400, "BAD_USER_INPUT", "Operation intent is required.");
+        }
+        const operationInput = body.input === undefined
+          ? undefined
+          : asInput(body.input);
+        const idempotencyKey = request.headers["idempotency-key"];
+        if (idempotencyKey !== undefined && typeof idempotencyKey !== "string") {
+          throw new HttpError(
+            400,
+            "BAD_USER_INPUT",
+            "Idempotency-Key must have exactly one value.",
+          );
+        }
+        return await withSession(request, (session) =>
+          runtime.platform!.operations.execute(session, {
+            operation: { id, intent: body.intent as string },
+            ...(operationInput ? { input: operationInput } : {}),
+            ...(idempotencyKey ? { idempotencyKey } : {}),
+          })
+        );
+      } catch (error) {
+        return failed(reply, error);
+      }
+    });
   });
 }
 

@@ -37,7 +37,9 @@ import {
   operationGraphqlContribution,
   operationRestInput,
   registerOperationRestRoutes,
+  registerRuntimeOperationRestRoutes,
   requireOperationAuthorization,
+  runtimeStaticOperationRegistrations,
   type OperationContract,
 } from "./runtime.js";
 
@@ -756,6 +758,93 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
     else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI = previousJwks;
     if (previousIssuer === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
     else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = previousIssuer;
+    __resetSessionResolverForTests();
+  }
+});
+
+test("the generic runtime Operation route parses JSON inside a raw-buffer parent", async () => {
+  const previousSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+  const secret = "runtime-operation-rest-json-test-secret";
+  process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = secret;
+  __resetSessionResolverForTests();
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  const seen: unknown[] = [];
+  const module: RuntimeModule = {
+    name: "demo",
+    operationHandlers: {
+      publishQuote: async (input, context) => {
+        seen.push(input);
+        return {
+          value: {
+            quoteId: input.quoteId,
+            idempotencyKey: input.idempotencyKey,
+            tenantId: context.session!.tenantId,
+            userId: context.session!.userId,
+          },
+        };
+      },
+    },
+  };
+  platform.registerStaticOperations(runtimeStaticOperationRegistrations(
+    [module],
+    { db, platform: platform.services },
+    [restOperation],
+  ));
+  const app = Fastify();
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "buffer" },
+    (_request, body, done) => done(null, body),
+  );
+  registerRuntimeOperationRestRoutes(app, { db, platform: platform.services });
+  const headers = new Headers({
+    "content-type": "application/json",
+    "idempotency-key": "request-raw-buffer",
+  });
+  applyTrustedContextHeaders(headers, {
+    tenantId: "tenant-a",
+    userId: "user-a",
+    roles: ["quote-publisher"],
+    groups: [],
+  }, { secret });
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/operations/${restOperation.key}/execute`,
+      headers: Object.fromEntries(headers),
+      payload: { intent: "invoke", input: { quoteId: "quote-raw-buffer" } },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      data: {
+        quoteId: "quote-raw-buffer",
+        idempotencyKey: "request-raw-buffer",
+        tenantId: "tenant-a",
+        userId: "user-a",
+      },
+    });
+    expect(seen).toEqual([{
+      quoteId: "quote-raw-buffer",
+      idempotencyKey: "request-raw-buffer",
+    }]);
+
+    const malformed = await app.inject({
+      method: "POST",
+      url: `/api/operations/${restOperation.key}/execute`,
+      headers: Object.fromEntries(headers),
+      payload: "{",
+    });
+    expect(malformed.statusCode).toBe(400);
+    expect(malformed.json()).toMatchObject({
+      error: { code: "BAD_USER_INPUT", message: "Request body is not valid JSON." },
+    });
+  } finally {
+    await app.close();
+    await db.destroy();
+    if (previousSecret === undefined) delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
+    else process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET = previousSecret;
     __resetSessionResolverForTests();
   }
 });

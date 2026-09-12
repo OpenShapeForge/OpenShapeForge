@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { DbSessionInput } from "../../db/session.js";
 import {
   assertCreateRecordPermissions,
+  assertUpdateRecordPermissions,
   parseRecordPermissions,
   recordPermissionAllows,
   recordPermissionsAllowRow,
@@ -143,6 +144,41 @@ describe("record permissions", () => {
         authorization: { view: { users: "not-an-array" } },
       }),
     ).toThrow("The record permissions are not valid.");
+  });
+
+  test("update refuses malformed replacements before SQL without forcing self-retention", () => {
+    expect(() => assertUpdateRecordPermissions(table, { name: "unchanged ACL" })).not.toThrow();
+    expect(() => assertUpdateRecordPermissions(table, {
+      authorization: { view: { users: ["someone-else"] } },
+    })).not.toThrow();
+    for (const values of [
+      { authorization: { view: [] } },
+      { authorization: { edit: { roles: "admin" } } },
+      { authorization: null },
+    ]) {
+      expect(() => assertUpdateRecordPermissions(table, values)).toThrow(
+        "The record permissions are not valid.",
+      );
+    }
+    const aliased = {
+      ...table,
+      source: {
+        ...table.source,
+        authorization: {
+          ...table.source!.authorization,
+          recordPermissions: {
+            ...table.source!.authorization!.recordPermissions!,
+            field: "access.permissions",
+          },
+        },
+      },
+    } as GeneratedCrudTable;
+    expect(() => assertUpdateRecordPermissions(aliased, {
+      authorization: { view: [] },
+    })).toThrow("The record permissions are not valid.");
+    expect(() => assertUpdateRecordPermissions(aliased, {
+      "access.permissions": { view: [] },
+    })).toThrow("The record permissions are not valid.");
   });
 
   test("record offer checks use the authored field and all required actions", () => {

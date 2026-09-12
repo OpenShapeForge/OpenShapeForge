@@ -38,6 +38,7 @@ import {
 import {
   assertCreateRecordPermissions,
   assertRecordPermissionInTransaction,
+  assertUpdateRecordPermissions,
 } from "./record-permissions.js";
 
 async function fetchGeneratedRowInTransaction(
@@ -86,6 +87,7 @@ export async function updateGeneratedEntityForTable(
   id: string,
   rawValues: Record<string, unknown>,
 ): Promise<GeneratedEntityRow | null> {
+  assertUpdateRecordPermissions(table, rawValues);
   const values = normalizeWritableValues(table, rawValues, "update");
   return applyGeneratedRowUpdate(db, session, table, id, values);
 }
@@ -220,6 +222,7 @@ export async function updateGeneratedEntity(
   const table = readGeneratedCrudTable(input.table, "update", session);
   assertNoCallerElicitedOutput(table, input.values);
   assertNoOperationWrittenValues(table, input.values);
+  assertUpdateRecordPermissions(table, input.values);
   const values = normalizeWritableValues(table, input.values, "update");
   return applyGeneratedRowUpdate(db, session, table, input.id, values, input.guard);
 }

@@ -153,6 +153,33 @@ export function assertCreateRecordPermissions(
   }
 }
 
+/** A caller may replace an ACL only with another complete valid document. */
+export function assertUpdateRecordPermissions(
+  table: GeneratedCrudTable,
+  values: Readonly<Record<string, unknown>>,
+): void {
+  const config = policy(table);
+  if (!config) return;
+  const hasField = Object.prototype.hasOwnProperty.call(values, config.field);
+  const hasColumn = Object.prototype.hasOwnProperty.call(values, config.column);
+  if (!hasField && !hasColumn) return;
+
+  // Match the existing create input contract: authored field first, persisted
+  // column alias second. Undefined is ignored by normalizeWritableValues and
+  // therefore is not a replacement at all.
+  const value = values[config.field] ?? values[config.column];
+  if (value === undefined) return;
+  if (!parseRecordPermissions(value)) {
+    throw generatedCrudError(
+      "The record permissions are not valid.",
+      "VALIDATION",
+      {
+        detail: `${config.field} must contain only view, edit and delete subject sets with users, groups and roles string arrays.`,
+      },
+    );
+  }
+}
+
 export async function assertRecordPermissionInTransaction(
   trx: Transaction<DB>,
   session: DbSessionInput,

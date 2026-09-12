@@ -318,6 +318,29 @@ describe("web manifest projection", () => {
     expect(projected!.views.collection.route).toBe("/relations");
   });
 
+  test("projects a canonical create prerequisite without Web-owned policy", () => {
+    const adapter = entity("Adapter", "adapter", [field("name")], coreView());
+    adapter.contract.authoringVersion = 2;
+    adapter.contract.interfaces = {
+      web: { operations: { list: true, get: true, create: true, update: true, delete: true } },
+    };
+    adapter.contract.entityOperations.create!.prerequisites = [{
+      operation: "osf-integration.provider.setup-guide",
+      receipt: { binding: "loginSession" },
+    }];
+
+    const projected = buildWebManifest([adapter]).entities.Adapter!;
+    const create = projected.operations.create;
+    if (!create || create.intent !== "create") throw new Error("Expected entity create Operation");
+    expect(create.prerequisites).toEqual([{
+      operation: "osf-integration.provider.setup-guide",
+      receipt: { binding: "loginSession" },
+    }]);
+    expect(projected.views.collection.operations.create?.prerequisites).toEqual(
+      create.prerequisites,
+    );
+  });
+
   test("keeps canonical secure-input targets server-owned in Web forms", () => {
     const view = coreView();
     const createGroup = view.form!.variants.create!.groups[0]!;

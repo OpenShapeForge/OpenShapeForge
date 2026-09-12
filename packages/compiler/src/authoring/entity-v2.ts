@@ -251,6 +251,25 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
       (operation.implementation.type === "plugin" &&
         operation.target?.scope === "record" &&
         operation.effects.data !== "read");
+    if (operation.prerequisites) {
+      if (action !== "create") {
+        throw new Error(
+          `${origin} operation "${operationKey}" declares prerequisites for ` +
+            `operation kind "${operationKind}"; prerequisites are currently ` +
+            "supported only on generated entity create Operations.",
+        );
+      }
+      const sourceIds = new Set<string>();
+      for (const prerequisite of operation.prerequisites) {
+        if (sourceIds.has(prerequisite.operation)) {
+          throw new Error(
+            `${origin} operation "${operationKey}" repeats prerequisite ` +
+              `"${prerequisite.operation}".`,
+          );
+        }
+        sourceIds.add(prerequisite.operation);
+      }
+    }
     if (operation.implementation.type === "plugin") {
       if (!operation.target || !operation.input || !operation.output ||
         !operation.errors || !operation.auth || !operation.tenancy) {

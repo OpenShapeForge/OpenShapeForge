@@ -2,15 +2,19 @@
 import type {
   OperationConcurrency,
   OperationConfirmation,
+  OperationPrerequisite,
   OperationReference,
 } from "@openshapeforge/operations";
 
 export type LocalizedText = { en: string; nl: string };
 
 export type WebOperationIntent = "list" | "get" | "create" | "update" | "delete";
+export type WebOperationPrerequisite = OperationPrerequisite;
 export type WebOperationRef = OperationReference<WebOperationIntent> & {
   /** Canonical server-enforced controls; browsers derive lease timing from this value. */
   concurrency?: OperationConcurrency;
+  /** Canonical server-enforced instructions that must be completed first. */
+  prerequisites?: readonly WebOperationPrerequisite[];
 };
 export type WebCustomOperationRef = OperationReference<"invoke"> & {
   /** Authored key inside the entity Operations map. */

@@ -68,6 +68,7 @@ function operation(
         id: source.id,
         intent: source.intent,
         ...(source.concurrency ? { concurrency: source.concurrency } : {}),
+        ...(source.prerequisites ? { prerequisites: source.prerequisites } : {}),
       }
     : undefined;
 }

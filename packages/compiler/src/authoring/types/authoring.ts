@@ -3,6 +3,7 @@
 import type {
   OperationConcurrency,
   OperationConfirmation,
+  OperationPrerequisite,
 } from "@openshapeforge/operations";
 import type {
   LocalizedText,
@@ -524,6 +525,7 @@ export interface EntityOperationDefinition {
   name: string | LocalizedText;
   description: string | LocalizedText;
   guidance?: { assistant?: string | LocalizedText };
+  prerequisites?: OperationPrerequisite[];
   implementation:
     | {
         type: "entity";

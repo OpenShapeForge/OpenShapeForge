@@ -548,6 +548,30 @@ describe("coreEntity properties the compiler implements", () => {
     );
   });
 
+  it("accepts login-session prerequisites only on a v2 entity create Operation", () => {
+    const create = {
+      ...v2Operation("create"),
+      prerequisites: [{
+        operation: "osf-integration.provider.setup-guide",
+        receipt: { binding: "loginSession" },
+      }],
+    };
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { create },
+      interfaces: { rest: {}, graphql: {}, mcp: {} },
+    });
+
+    expect(validator.validate(document, "adapter.yaml")).toBe(
+      "core-entity.schema.json",
+    );
+
+    create.implementation.action = "update";
+    expect(() => validator.validate(document, "adapter.yaml")).toThrow(
+      /prerequisites|implementation/,
+    );
+  });
+
   it("rejects an unknown strict v2 MCP tool projection", () => {
     const document = coreEntity({
       schemaVersion: 2,

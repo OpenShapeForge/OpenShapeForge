@@ -3,6 +3,7 @@
 import type {
   OperationConcurrency,
   OperationConfirmation,
+  OperationPrerequisite,
   OperationReference,
 } from "@openshapeforge/operations";
 import type {
@@ -336,6 +337,7 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
   name: string | LocalizedText;
   description: string | LocalizedText;
   guidance?: { assistant?: string | LocalizedText };
+  prerequisites?: readonly OperationPrerequisite[];
   input: EntityOperationInput;
   output: EntityOperationOutput;
   authorization: {

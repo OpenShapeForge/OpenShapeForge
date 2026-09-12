@@ -837,6 +837,40 @@ export function buildStaticOperationCatalog(
       );
     }
   }
+  const byId = new Map(operations.map((operation) => [operation.id, operation]));
+  for (const target of concreteEntityOperations) {
+    for (const prerequisite of target.prerequisites ?? []) {
+      const source = byId.get(prerequisite.operation);
+      if (!source) {
+        throw new Error(
+          `Canonical entity Operation "${target.id}" references missing prerequisite ` +
+            `Operation "${prerequisite.operation}".`,
+        );
+      }
+      if (source.intent !== "invoke") {
+        throw new Error(
+          `Canonical entity Operation "${target.id}" prerequisite ` +
+            `"${prerequisite.operation}" must be an authored invoke Operation.`,
+        );
+      }
+      const requiredInput = Array.isArray(source.inputSchema.required)
+        ? source.inputSchema.required
+        : [];
+      if (
+        source.auth.mode !== "session" ||
+        source.tenancy.mode !== "required" ||
+        source.effects?.data !== "read" ||
+        source.effects.external !== "none" ||
+        requiredInput.length > 0
+      ) {
+        throw new Error(
+          `Canonical entity Operation "${target.id}" prerequisite ` +
+            `"${prerequisite.operation}" must use session auth, required tenancy, ` +
+            "read/no-external effects and no required input so every interface can show it safely.",
+        );
+      }
+    }
+  }
   return { version: 1, operations };
 }
 

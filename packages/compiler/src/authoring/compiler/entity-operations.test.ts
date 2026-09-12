@@ -191,6 +191,55 @@ describe("canonical entity operations", () => {
     );
   });
 
+  test("compiles a create prerequisite once and rejects it on other actions", () => {
+    const source = relationSource();
+    source.coreEntity = {
+      schemaVersion: 2,
+      kind: "coreEntity",
+      module: "osf-integration",
+      entity: "Adapter",
+      title: "Adapter",
+      language: "en",
+      fields: [],
+      operations: {
+        create: {
+          name: "Create adapter",
+          description: "Creates an adapter after the provider guide was read.",
+          prerequisites: [{
+            operation: "osf-integration.provider.setup-guide",
+            receipt: { binding: "loginSession" },
+          }],
+          implementation: { type: "entity", action: "create" },
+          effects: { data: "write", external: "none" },
+          reliability: { idempotency: { mode: "none" } },
+          confirmation: { mode: "none" },
+        },
+      },
+      interfaces: { rest: {}, graphql: {}, mcp: {} },
+    };
+    source.entity = { id: "osf-integration.Adapter", name: "Adapter" };
+    source.crud.operations = {
+      list: false,
+      get: false,
+      create: true,
+      update: false,
+      delete: false,
+    };
+
+    expect(() => assertV2Authoring(source.coreEntity!, "adapter.yaml")).not.toThrow();
+    expect(buildEntityOperations(source).create?.prerequisites).toEqual([{
+      operation: "osf-integration.provider.setup-guide",
+      receipt: { binding: "loginSession" },
+    }]);
+
+    const implementation = source.coreEntity.operations!.create!.implementation;
+    if (implementation.type !== "entity") throw new Error("Expected entity implementation");
+    implementation.action = "update";
+    expect(() => assertV2Authoring(source.coreEntity!, "adapter.yaml")).toThrow(
+      /prerequisites.*supported only.*create Operations/,
+    );
+  });
+
   test("preserves a server-issued version-bound challenge without interface translation", () => {
     const source = relationSource();
     source.coreEntity = {

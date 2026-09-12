@@ -89,6 +89,12 @@ function compileOperation(
     name: definition?.name ?? `${source.entity.name} ${intent}`,
     description: definition?.description ?? `${intent} ${source.entity.name}`,
     ...(definition?.guidance ? { guidance: definition.guidance } : {}),
+    ...(definition?.prerequisites
+      ? { prerequisites: definition.prerequisites.map((prerequisite) => ({
+          operation: prerequisite.operation,
+          receipt: { ...prerequisite.receipt },
+        })) }
+      : {}),
     authorization: {
       action,
       roles: [...source.authorization.roles[action]],

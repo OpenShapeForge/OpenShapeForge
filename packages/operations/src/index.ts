@@ -10,6 +10,7 @@ export type {
   OperationInteractionBinding,
   OperationInteractionChoice,
   OperationOffer,
+  OperationPrerequisite,
   OperationTargetBinding,
   OperationReference,
   OperationResult,

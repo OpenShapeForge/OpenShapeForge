@@ -4,6 +4,7 @@ import type {
   OperationEnvelope,
   OperationError,
   OperationOffer,
+  OperationPrerequisite,
   OperationConfirmation,
   OperationReference,
   OperationResult,
@@ -149,6 +150,7 @@ export type EntityOperationContract = EntityOperationRef & {
   reliability: {
     idempotency: { mode: "natural" | "keyed" | "none" };
   };
+  prerequisites?: readonly OperationPrerequisite[];
   interaction: {
     confirmation: OperationConfirmation;
     secureInput?: {

@@ -46,6 +46,7 @@ import {
   recordPermissionsAllowRow,
   type RecordPermissionAction,
 } from "./record-permissions.js";
+import { requireOperationPrerequisites } from "../prerequisite-receipts.js";
 
 const COLLECTION_OFFER_INTENTS: readonly GeneratedCrudExposureOperation[] = [
   "list",
@@ -715,6 +716,7 @@ export async function executeEntityOperation(
       }
       case "create": {
         const operation = entityOperationContract(request.operation.id);
+        await requireOperationPrerequisites(db, session, operation);
         requireCreateOperationConfirmation(operation, request.input);
         const interactionError = secureInputInteractionError(operation);
         if (interactionError) return { intent: "create", error: interactionError };

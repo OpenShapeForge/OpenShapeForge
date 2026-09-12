@@ -43,6 +43,7 @@ import {
   validateEntityVersionInTransaction,
 } from "./entity/edit-leases.js";
 import { getGeneratedCrudTables } from "./entity/catalog.js";
+import { getEntityOperationContracts } from "./entity/runtime.js";
 import type { GeneratedCrudTable } from "./entity/types.js";
 import {
   assertRecordPermission,
@@ -51,6 +52,7 @@ import {
 } from "./entity/record-permissions.js";
 import { normalizeTimestampToken } from "../db/timestamps.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
+import { issueOperationPrerequisiteReceipt } from "./prerequisite-receipts.js";
 
 export type OperationContract = {
   key: string;
@@ -819,12 +821,38 @@ export async function invokeOperation(
       }
       return result;
     };
-    return invokeCustomOperationWithControls(
+    const result = await invokeCustomOperationWithControls(
       bound,
       input,
       activeContext,
       invokeHandler,
     );
+    const prerequisiteTargets = getEntityOperationContracts().filter((operation) =>
+      operation.prerequisites?.some((prerequisite) =>
+        prerequisite.operation === bound.operation.key
+      )
+    );
+    if (prerequisiteTargets.length > 0) {
+      if (!activeContext.db || !activeContext.session) {
+        throw operationFailure({
+          code: "PREREQUISITE_RECEIPT_UNAVAILABLE",
+          message: "This prerequisite requires a verified interactive login session.",
+          detail: "Sign in with a user account and complete the prerequisite again.",
+          retryable: false,
+        });
+      }
+      for (const target of prerequisiteTargets) {
+        await issueOperationPrerequisiteReceipt(
+          activeContext.db,
+          activeContext.session,
+          {
+            sourceOperationId: bound.operation.key,
+            targetOperationId: target.id,
+          },
+        );
+      }
+    }
+    return result;
   };
 
   return withModuleOperationSession(

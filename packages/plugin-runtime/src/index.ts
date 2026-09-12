@@ -8,6 +8,7 @@ import type { Kysely, Transaction } from "kysely";
 import type {
   OperationConfirmation,
   OperationError,
+  OperationPrerequisite,
   OperationReference,
   OperationResult,
 } from "@openshapeforge/operations";
@@ -80,6 +81,8 @@ export type RuntimeOperationDefinition = OperationReference & {
   reliability: {
     idempotency: { mode: "natural" | "keyed" | "none" };
   };
+  /** Core-issued completion proof is required before this Operation may run. */
+  prerequisites?: readonly OperationPrerequisite[];
   concurrency?: {
     version?: { mode: "required"; field: string };
     editLease?: { mode: "required"; expiresAfterInactivity: string };

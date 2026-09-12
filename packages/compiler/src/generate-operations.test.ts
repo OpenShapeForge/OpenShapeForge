@@ -197,6 +197,76 @@ describe("first-class plugin operations", () => {
       .toThrow(/Duplicate canonical Operation id/);
   });
 
+  test("accepts only a safe canonical invoke Operation as a create prerequisite", () => {
+    const target: CompiledEntityOperation = {
+      id: "Adapter.create",
+      key: "create",
+      intent: "create",
+      entityId: "osf-integration.Adapter",
+      entityName: "Adapter",
+      name: "Create adapter",
+      description: "Create adapter",
+      prerequisites: [{
+        operation: "osf-integration.provider.setup-guide",
+        receipt: { binding: "loginSession" },
+      }],
+      input: { kind: "entity-create", entityId: "osf-integration.Adapter" },
+      output: { kind: "entity-record", entityId: "osf-integration.Adapter", nullable: false },
+      authorization: { action: "create", roles: ["integration_admin"] },
+      effects: { data: "write", external: "none" },
+      reliability: { idempotency: { mode: "none" } },
+      interaction: { confirmation: { mode: "none" } },
+    };
+    const entities = [{
+      contract: {
+        entity: { id: "osf-integration.Adapter", name: "Adapter", title: "Adapter" },
+        model: { fields: [], relationships: [] },
+        storage: { columns: [] },
+        entityOperations: { create: target },
+      },
+    }] as never;
+    const guideDefinition: PluginOperationContract = {
+      ...operation,
+      key: "osf-integration.provider.setup-guide",
+      title: "Provider setup guide",
+      description: "Shows the provider setup guide.",
+      handler: "providerSetupGuide",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      auth: { mode: "session", roles: ["integration_admin"] },
+      tenancy: { mode: "required" },
+      effects: { data: "read", external: "none" },
+      idempotency: { mode: "intrinsic" },
+      transports: {
+        rest: { method: "GET", path: "/api/osf-integration/provider/setup-guide", response: { kind: "json" } },
+        mcp: { enabled: true, name: "provider_setup_guide" },
+        graphql: { enabled: true, kind: "query", field: "providerSetupGuide" },
+        typescript: { enabled: true, functionName: "providerSetupGuide" },
+      },
+    };
+    const [guide] = collectPluginOperations(
+      [{ name: "osf-integration", operations: [guideDefinition] }],
+      context,
+    );
+
+    expect(() => buildStaticOperationCatalog([guide!], [target], entities, {}))
+      .not.toThrow();
+    expect(() => buildStaticOperationCatalog([], [target], entities, {}))
+      .toThrow(/missing prerequisite Operation/);
+    expect(() => buildStaticOperationCatalog([
+      { ...guide!, effects: { data: "write", external: "none" } },
+    ], [target], entities, {})).toThrow(/read\/no-external effects/);
+    expect(() => buildStaticOperationCatalog([
+      {
+        ...guide!,
+        inputSchema: {
+          type: "object",
+          required: ["provider"],
+          properties: { provider: { type: "string" } },
+        },
+      },
+    ], [target], entities, {})).toThrow(/no required input/);
+  });
+
   test("collects deterministic canonical contracts and OpenAPI path parameters", () => {
     const plugins: CompilerPlugin[] = [{ name: "demo", operations: [operation] }];
     const collected = collectPluginOperations(plugins, context);

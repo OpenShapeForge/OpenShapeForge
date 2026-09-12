@@ -6,6 +6,12 @@ export type OperationReference<TIntent extends string = string> = {
   intent: TIntent;
 };
 
+/** A canonical prerequisite whose completion is proven by the core host. */
+export type OperationPrerequisite = {
+  operation: string;
+  receipt: { binding: "loginSession" };
+};
+
 export type OperationConfirmationBinding =
   | "subject"
   | "tenant"

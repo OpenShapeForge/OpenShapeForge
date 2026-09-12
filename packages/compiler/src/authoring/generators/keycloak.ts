@@ -321,6 +321,31 @@ function gatewayProtocolMappers(resourceClientIds: string[]): KeycloakProtocolMa
   ];
 }
 
+/**
+ * Client-credentials tokens have no profile scope from which Keycloak can add
+ * `preferred_username`. The runtime still needs the exact synthetic username
+ * to distinguish the configured organization identity from an arbitrary
+ * client using the same tenant. Keep this mapper on tenant-bound service
+ * accounts only and emit it only in access tokens; this does not add human
+ * profile or email claims to the identity.
+ */
+function serviceAccountUsernameMapper(): KeycloakProtocolMapper {
+  return {
+    name: "service-account-preferred-username",
+    protocol: "openid-connect",
+    protocolMapper: "oidc-usermodel-property-mapper",
+    consentRequired: false,
+    config: {
+      "user.attribute": "username",
+      "claim.name": "preferred_username",
+      "jsonType.label": "String",
+      "id.token.claim": "false",
+      "access.token.claim": "true",
+      "userinfo.token.claim": "false",
+    },
+  };
+}
+
 /** Which kind of realm the compiler should emit. */
 export type RealmMode = "development" | "production";
 
@@ -595,6 +620,7 @@ function buildClient(
           // not carry the gateway's employee/organization-person claims.
           protocolMappers: [
             ...gatewayProtocolMappers([]).filter((mapper) => mapper.name === "tid-mapper"),
+            serviceAccountUsernameMapper(),
             ...audienceMappers(resourceClientIds),
           ],
           attributes: {

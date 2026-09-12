@@ -431,6 +431,21 @@ describe("service-account client role grants", () => {
     expect(client.redirectUris).toEqual([]);
     expect(client.webOrigins).toEqual([]);
     expect(client.protocolMappers.some((entry: any) => entry.name === "tid-mapper")).toBe(true);
+    expect(client.protocolMappers).toContainEqual({
+      name: "service-account-preferred-username",
+      protocol: "openid-connect",
+      protocolMapper: "oidc-usermodel-property-mapper",
+      consentRequired: false,
+      config: {
+        "user.attribute": "username",
+        "claim.name": "preferred_username",
+        "jsonType.label": "String",
+        "id.token.claim": "false",
+        "access.token.claim": "true",
+        "userinfo.token.claim": "false",
+      },
+    });
+    expect(client.defaultClientScopes).toEqual(["basic", "roles"]);
     expect(client.protocolMappers.some((entry: any) => entry.config["claim.name"] === "act")).toBe(false);
     expect(realm.users.find((entry: any) => entry.serviceAccountClientId === "automatic-org").attributes.tid)
       .toEqual(["11111111-1111-4111-8111-111111111111"]);
@@ -498,6 +513,9 @@ describe("service-account client role grants", () => {
     expect(svc!.clientRoles).toEqual({ "realm-management": ["manage-realm"] });
     // Service accounts are not login users — they must carry no credentials.
     expect(svc!.credentials).toBeUndefined();
+    const client = JSON.parse(generateKeycloakRealmArtifacts([], config)[0]!.contents)
+      .clients.find((entry: any) => entry.clientId === "openshapeforge-auth-api");
+    expect(client.protocolMappers).toBeUndefined();
   });
 
   test("does not emit a service-account user when no roles are granted", () => {

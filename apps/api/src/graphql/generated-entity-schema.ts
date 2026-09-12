@@ -522,6 +522,8 @@ export const generatedEntityTypeDefs = /* GraphQL */ `
     value: String!
     label: String!
     description: String
+    available: Boolean
+    error: EntityOperationError
   }
 
   type EntityOperationInteractionBinding {

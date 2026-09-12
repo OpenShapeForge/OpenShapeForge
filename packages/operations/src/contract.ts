@@ -81,11 +81,26 @@ export type OperationError = {
   data?: Readonly<Record<string, unknown>>;
 };
 
-export type OperationInteractionChoice = {
+type OperationInteractionChoiceBase = {
   value: string;
   label: string;
   description?: string;
 };
+
+/**
+ * A server-authored choice. Existing choices are available by default;
+ * unavailable choices remain visible with the same canonical refusal clients
+ * already render for unavailable Operations.
+ */
+export type OperationInteractionChoice =
+  | (OperationInteractionChoiceBase & {
+      available?: true;
+      error?: never;
+    })
+  | (OperationInteractionChoiceBase & {
+      available: false;
+      error: OperationError;
+    });
 
 export type OperationInteractionBinding = {
   /** Server-verified tenant and subject bindings are mandatory. */

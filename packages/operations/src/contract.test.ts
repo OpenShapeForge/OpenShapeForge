@@ -52,6 +52,31 @@ test("an available offer can carry a server-issued transport-neutral interaction
   });
 });
 
+test("a visible unavailable interaction choice carries a canonical reason", () => {
+  const offer = {
+    operation: { id: "workflow.interaction.respond", intent: "respond" },
+    available: true,
+    interaction: {
+      kind: "userInput",
+      offerId: "opaque-server-offer",
+      choices: [{
+        value: "approve",
+        label: "Approve",
+        available: false,
+        error: {
+          code: "CHOICE_DISABLED",
+          message: "Approval is unavailable until the review is complete.",
+          retryable: false,
+        },
+      }],
+      expiresAt: "2026-09-12T12:00:00.000Z",
+      bindTo: { tenant: "tenant-1", subject: "user-1" },
+    },
+  } satisfies OperationOffer<"respond">;
+
+  expect(offer.interaction.choices[0]!.error.message).toContain("review");
+});
+
 test("an acknowledgement is distinct from server-issued proof", () => {
   const confirmation = {
     mode: "acknowledgement",

@@ -171,6 +171,8 @@ describe("generated GraphQL CRUD exposure", () => {
     expect(definition).toContain("leaseToken: String!");
     expect(definition).toContain("confirmationToken: String");
     expect(definition).toContain("confirmationAnswer: String");
+    expect(generatedEntityTypeDefs).toContain("available: Boolean");
+    expect(generatedEntityTypeDefs).toContain("error: EntityOperationError");
   });
 
   test("v2 mutation controls are separated from authored values before dispatch", () => {

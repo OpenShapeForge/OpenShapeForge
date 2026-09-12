@@ -19,6 +19,8 @@
  *   3. versioned bespoke      — hand-written transformations; run BEFORE the
  *      generated step so a bespoke migration can eliminate non-additive drift
  *      before the roll-forward evaluates it.
+ *   3b. plugin cutovers       — immutable compiler-plugin migrations that
+ *      must transform legacy ownership before generated drift is evaluated.
  *   4. generated roll-forward — manifest-driven schema apply/diff.
  *   4b. plugin invariants     — immutable compiler-plugin constraints,
  *      functions, triggers, and other DDL, after contributed tables exist.
@@ -123,10 +125,23 @@ export async function runMigrationChain(
     db,
     options.versioned ?? versionedMigrations,
   );
-  const generated = await applyGeneratedSchemaMigration(db, options.appliedBy);
-  const pluginMigrations = await applyGeneratedPluginMigrations(
+  const configuredPluginMigrations =
+    options.pluginMigrations ?? (await loadGeneratedPluginMigrations());
+  const beforeGeneratedPluginMigrations = configuredPluginMigrations.filter(
+    ({ phase }) => phase === "beforeGenerated",
+  );
+  const afterGeneratedPluginMigrations = configuredPluginMigrations.filter(
+    ({ phase }) => phase !== "beforeGenerated",
+  );
+  const beforeGenerated = await applyGeneratedPluginMigrations(
     db,
-    options.pluginMigrations ?? (await loadGeneratedPluginMigrations()),
+    beforeGeneratedPluginMigrations,
+    options.appliedBy,
+  );
+  const generated = await applyGeneratedSchemaMigration(db, options.appliedBy);
+  const afterGenerated = await applyGeneratedPluginMigrations(
+    db,
+    afterGeneratedPluginMigrations,
     options.appliedBy,
   );
   await applyIdentityLinkMigration(db);
@@ -150,7 +165,10 @@ export async function runMigrationChain(
     ...generated,
     versionedApplied: versioned.applied,
     versionedReconciled: versioned.reconciled,
-    pluginMigrationsApplied: pluginMigrations.applied,
+    pluginMigrationsApplied: [
+      ...beforeGenerated.applied,
+      ...afterGenerated.applied,
+    ],
     pageConfigs,
     moduleSeeds,
   };

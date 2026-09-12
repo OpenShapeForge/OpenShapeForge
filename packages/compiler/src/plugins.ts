@@ -105,7 +105,13 @@ export type PluginExecutionCompatibility = {
 export type PluginSchemaMigration = {
   /** Plugin-local immutable migration version, e.g. `0100_install-triggers`. */
   version: string;
-  /** PostgreSQL DDL applied after the generated tables exist. */
+  /**
+   * Ownership cutovers may have to remove non-additive drift before the
+   * generated manifest is compared with the live database. Omission retains
+   * the historical post-generated invariant phase.
+   */
+  phase?: "beforeGenerated" | "afterGenerated";
+  /** PostgreSQL DDL applied in the selected migration phase. */
   sql: string;
 };
 

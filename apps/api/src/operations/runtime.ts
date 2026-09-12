@@ -24,7 +24,7 @@ import type {
   RuntimeOperationDefinition,
   RuntimeOperationExecutionResult,
 } from "@openshapeforge/plugin-runtime";
-import { operationFailure } from "@openshapeforge/operations";
+import { operationFailure, type OperationEnvelope } from "@openshapeforge/operations";
 import {
   invokeModuleDeclarativeService,
   invokeModuleHostOperation,
@@ -290,7 +290,9 @@ export function runtimeStaticOperationRegistrations(
             session,
           });
           options?.signal?.throwIfAborted();
-          return { data: result.value, operations: [] };
+          return result.resultKind === "operation-envelope"
+            ? result.value as OperationEnvelope<unknown>
+            : { data: result.value, operations: [] };
         } catch (error) {
           return { error: runtimeOperationError(error) };
         }
@@ -644,6 +646,20 @@ function isJsonValue(value: unknown, seen = new Set<object>()): boolean {
   return valid;
 }
 
+function isCanonicalSuccessEnvelope(value: unknown): value is OperationEnvelope<unknown> {
+  const object = (entry: unknown): entry is Record<string, unknown> => entry !== null && typeof entry === "object" && !Array.isArray(entry);
+  const text = (entry: unknown) => typeof entry === "string" && entry.length > 0;
+  if (!object(value) || !isJsonValue(value) || "error" in value || !Object.hasOwn(value, "data") || !Array.isArray(value.operations)) return false;
+  if (!value.operations.every((offer) => object(offer) && object(offer.operation)
+    && text(offer.operation.id) && text(offer.operation.intent)
+    && (offer.available === true ? !("error" in offer)
+      : offer.available === false && object(offer.error) && text(offer.error.code)
+        && text(offer.error.message) && typeof offer.error.retryable === "boolean"))) return false;
+  return value.resources === undefined || (Array.isArray(value.resources) && value.resources.every((resource) =>
+    object(resource) && text(resource.uri) && text(resource.name)
+      && ["title", "description", "mimeType"].every((field) => resource[field] === undefined || typeof resource[field] === "string")));
+}
+
 export async function invokeOperation(
   bound: Bound,
   inputValue: unknown,
@@ -747,6 +763,10 @@ export async function invokeOperation(
           );
         }
         throw new DeclaredOperationError(declaration, result);
+      }
+      if (result.resultKind !== undefined &&
+        (result.resultKind !== "operation-envelope" || !isCanonicalSuccessEnvelope(result.value))) {
+        throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned an invalid canonical success envelope.");
       }
       const declaredStatus = bound.operation.transports.rest.response.status ?? 200;
       if (result.status !== undefined && result.status !== declaredStatus) {

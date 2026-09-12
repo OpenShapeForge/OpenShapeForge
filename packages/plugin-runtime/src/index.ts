@@ -274,6 +274,8 @@ export type ModuleRuntimeContext = ModuleRuntimeContextContract<
 export type ModuleOperationSuccessResult<McpContent = readonly unknown[]> = {
   ok?: true;
   value: unknown;
+  /** Explicitly preserve an already canonical success envelope in nested execution. */
+  resultKind?: "operation-envelope";
   status?: number;
   headers?: Record<string, string>;
   contentType?: string;

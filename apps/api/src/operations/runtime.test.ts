@@ -762,6 +762,36 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
   }
 });
 
+test("explicit canonical handler envelopes preserve offers and resources without shape guessing", async () => {
+  const operation: OperationContract = { ...restOperation,
+    auth: { mode: "public" }, tenancy: { mode: "none" }, idempotency: { mode: "none" },
+    inputSchema: { type: "object" }, outputSchema: { type: "object" },
+    transports: { ...restOperation.transports, rest: { ...restOperation.transports.rest, response: { kind: "json", status: 200 } } },
+  };
+  const envelope = { data: { status: "waiting" }, operations: [{
+    operation: { id: "example.respond", intent: "invoke" }, available: true as const,
+    interaction: { kind: "userInput" as const, offerId: "server-issued", expiresAt: "2026-09-12T13:15:00Z",
+      bindTo: { tenant: "tenant-a", subject: "user-a", instance: "instance-a" }, choices: [{ value: "yes", label: "Ja" }] },
+  }], resources: [{ uri: "osf://example/result", name: "result" }] };
+  for (const explicit of [true, false]) {
+    const modules: RuntimeModule[] = [{ name: "demo", operationHandlers: {
+      publishQuote: async () => ({ value: envelope, ...(explicit ? { resultKind: "operation-envelope" as const } : {}) }),
+    } }];
+    const registration = runtimeStaticOperationRegistrations(modules, {}, [operation])[0]!;
+    const result = await registration.execute(session, { operation: { id: operation.key, intent: "invoke" }, input: {} }, {});
+    expect(result).toEqual(explicit ? envelope : { data: envelope, operations: [] });
+  }
+  for (const value of [{ data: {} }, { data: {}, operations: "invalid" }, { data: {}, operations: [], error: {} },
+    { data: {}, operations: [{ available: true }] }, { data: {}, operations: [], resources: [{ uri: "x" }] }]) {
+    const modules: RuntimeModule[] = [{ name: "demo", operationHandlers: {
+      publishQuote: async () => ({ value, resultKind: "operation-envelope" }),
+    } }];
+    const registration = runtimeStaticOperationRegistrations(modules, {}, [operation])[0]!;
+    expect(await registration.execute(session, { operation: { id: operation.key, intent: "invoke" }, input: {} }, {}))
+      .toMatchObject({ error: { code: "HANDLER_CONTRACT_VIOLATION" } });
+  }
+});
+
 test("the generic runtime Operation route parses JSON inside a raw-buffer parent", async () => {
   const previousSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
   const secret = "runtime-operation-rest-json-test-secret";

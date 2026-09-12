@@ -134,6 +134,7 @@ export async function resolveApiKeySession(
     roles,
     oauthScopes: identity.scopes ?? [],
     groups: identity.groups,
+    relationGroupIds: [],
     scope: deps.resolveScope(roles, identity.groups),
     credential: "api-key",
   };

@@ -21,6 +21,8 @@ export type GraphqlSessionContext = {
    * tokens without the group-membership protocol mapper).
    */
   groups: string[];
+  /** Active server-derived RelationGroup memberships; never token claims. */
+  relationGroupIds?: readonly string[];
   /**
    * Effective access scope resolved upstream (tenant/group/self). Threaded
    * through to the DB session layer as `DbSessionInput.scope`, which sets the
@@ -63,6 +65,7 @@ export async function createGraphqlContext(
     roles: [...resolved.roles],
     oauthScopes: [...(resolved.oauthScopes ?? [])],
     groups: [...resolved.groups],
+    relationGroupIds: [...(resolved.relationGroupIds ?? [])],
     scope: resolved.scope,
     credential: resolved.credential,
   };

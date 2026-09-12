@@ -83,7 +83,7 @@ function subjectAllows(
   }
   if (session.userId && subjects.users.includes(session.userId)) return true;
   if ((session.roles ?? []).some((role) => subjects.roles.includes(role))) return true;
-  const directGroups = (session.groups ?? []).filter((group) => UUID.test(group));
+  const directGroups = (session.relationGroupIds ?? []).filter((group) => UUID.test(group));
   return directGroups.some((group) => subjects.groups.includes(group));
 }
 

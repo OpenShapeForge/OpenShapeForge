@@ -57,6 +57,7 @@ export function registerEditLeaseRestRoutes(
         userDisplayName: resolved.userDisplayName ?? null,
         roles: [...resolved.roles],
         groups: [...resolved.groups],
+        relationGroupIds: [...(resolved.relationGroupIds ?? [])],
         scope: resolved.scope,
       },
     };

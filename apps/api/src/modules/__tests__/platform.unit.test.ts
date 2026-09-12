@@ -66,6 +66,20 @@ const binding = (
 });
 
 describe("runtime module platform session authority", () => {
+  it("keeps RelationGroup memberships request-fresh without exposing mutable authority", () => {
+    const source = claims();
+    source.relationGroupIds = ["11111111-1111-4111-8111-111111111111"];
+    const capability = createModuleSessionCapability(source);
+    expect(capability.relationGroupIds).toEqual(source.relationGroupIds);
+    expect(Object.isFrozen(capability.relationGroupIds)).toBe(true);
+
+    source.relationGroupIds = [];
+    expect(capability.relationGroupIds).toEqual([]);
+    expect(() => {
+      (capability.relationGroupIds as string[]).push("forged");
+    }).toThrow();
+  });
+
   it("exposes only canonical, safely classified database refusals", () => {
     const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
     const authored = Object.assign(

@@ -16,7 +16,8 @@ const session: DbSessionInput = {
   tenantId: "33333333-3333-4333-8333-333333333333",
   userId,
   roles: ["Records.All.Manage"],
-  groups: [groupId, "/untrusted/token/path"],
+  groups: [groupId, "/keycloak/group/path"],
+  relationGroupIds: [groupId],
 };
 
 const table = {
@@ -61,7 +62,7 @@ describe("record permissions", () => {
     }
   });
 
-  test("matches users, roles and exact internal group ids", () => {
+  test("matches users, roles and server-derived RelationGroup ids", () => {
     expect(
       recordPermissionAllows(
         { view: { users: [userId] } },
@@ -88,9 +89,17 @@ describe("record permissions", () => {
     ).toBe(true);
     expect(
       recordPermissionAllows(
-        { view: { groups: ["/untrusted/token/path"] } },
+        { view: { groups: ["/keycloak/group/path"] } },
         "view",
         session,
+        "restricted",
+      ),
+    ).toBe(false);
+    expect(
+      recordPermissionAllows(
+        { view: { groups: [groupId] } },
+        "view",
+        { ...session, relationGroupIds: [] },
         "restricted",
       ),
     ).toBe(false);

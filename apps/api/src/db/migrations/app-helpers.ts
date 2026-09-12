@@ -58,6 +58,18 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
       end
     $$;
 
+    -- Active domain RelationGroup memberships are independent from Keycloak
+    -- group paths and the platform org-unit hierarchy above. The application
+    -- resolves them from the verified identity↔Relation link on every request
+    -- and writes only that server-derived set to this dedicated GUC.
+    create or replace function app.current_relation_groups() returns uuid[]
+    language sql stable parallel safe as $$
+      select case
+        when nullif(current_setting('app.relation_group_ids', true), '') is null then array[]::uuid[]
+        else string_to_array(current_setting('app.relation_group_ids', true), ',')::uuid[]
+      end
+    $$;
+
     create or replace function app.has_scope(target text) returns boolean
     language sql stable parallel safe as $$
       select current_setting('app.scope', true) = target
@@ -135,7 +147,7 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
           )
           or coalesce(
             (subjects -> 'groups') ?| array(
-              select group_id::text from unnest(app.current_groups_exact()) as group_id
+              select group_id::text from unnest(app.current_relation_groups()) as group_id
             ),
             false
           )

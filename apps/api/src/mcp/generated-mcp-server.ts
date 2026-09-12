@@ -328,7 +328,11 @@ import {
   sameInvocationSourceReference,
 } from "../modules/source-reference.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
-import { sameStatefulMcpAuthorization } from "./stateful-session-authorization.js";
+import {
+  createStatefulMcpSessionContext,
+  sameStatefulMcpAuthorization,
+  withFreshRelationGroupMemberships,
+} from "./stateful-session-authorization.js";
 // --- session-info (whoami / osf://session) — see ./session-info.ts ---
 import {
   SESSION_INFO_TOOL,
@@ -8082,29 +8086,33 @@ export function registerGeneratedMcpServer(
         // server answers from it.
         carrySessionIdentity(existing.session, session);
         reply.hijack();
-        await existing.transport.handleRequest(
-          request.raw,
-          reply.raw,
-          request.body,
+        await withFreshRelationGroupMemberships(
+          session,
+          () => existing.transport.handleRequest(
+            request.raw,
+            reply.raw,
+            request.body,
+          ),
         );
         return;
       }
 
       if (request.method === "POST" && isInitializeBody(request.body)) {
+        const statefulSession = createStatefulMcpSessionContext(session);
         // What the client says about itself is said once, here; the server
         // built next reads it for its instructions, and `whoami` for the
         // life of the session (mcp/session-client.ts).
-        rememberSessionClient(session, clientInfoFromInitializeBody(request.body));
+        rememberSessionClient(statefulSession, clientInfoFromInitializeBody(request.body));
         const server = buildServer(
           db,
-          session,
+          statefulSession,
           options.modules,
           options.modulePlatform,
           options.egressOwner,
           notifyDerivedDefinitionChanged,
           true,
           undefined,
-          await sessionOpeningSentence({ db, session }),
+          await sessionOpeningSentence({ db, session: statefulSession }),
         );
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
@@ -8113,7 +8121,7 @@ export function registerGeneratedMcpServer(
               transport,
               server,
               resource,
-              session,
+              session: statefulSession,
               tenantId: session.tenantId as string,
               userId: session.userId as string,
               roles: [...(session.roles ?? [])],
@@ -8139,7 +8147,10 @@ export function registerGeneratedMcpServer(
         await server.connect(
           transport as unknown as Parameters<Server["connect"]>[0],
         );
-        await transport.handleRequest(request.raw, reply.raw, request.body);
+        await withFreshRelationGroupMemberships(
+          session,
+          () => transport.handleRequest(request.raw, reply.raw, request.body),
+        );
         return;
       }
 

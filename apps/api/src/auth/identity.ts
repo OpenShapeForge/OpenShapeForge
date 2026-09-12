@@ -24,6 +24,7 @@ import {
 import { resolveApiKeySession } from "./api-key/resolve.js";
 import { loginSessionBindingFromClaims } from "./login-session-binding.js";
 import { configuredOrganizationServiceAccount } from "./organization-service-identities.js";
+import { resolveRelationGroupMembershipIds } from "./relation-group-memberships.js";
 import {
   bindOrganizationResource,
   OrganizationBindingError,
@@ -75,6 +76,7 @@ const EMPTY_SESSION: TrustedSessionContext = {
   userId: null,
   roles: [],
   groups: [],
+  relationGroupIds: [],
   scope: "self",
   credential: "none",
 };
@@ -553,6 +555,20 @@ export async function resolveSessionContext(
       const loginSessionBinding = loginSessionBindingFromClaims(
         claims as Record<string, unknown>,
       );
+      const relationGroupIds =
+        tenantId && identity.userId && options.db && !serviceAccount && personClaims
+          ? await resolveRelationGroupMembershipIds(
+              options.db,
+              {
+                tenantId,
+                userId: identity.userId,
+                roles: effectiveRoles,
+                groups,
+                scope: effectiveScope,
+              },
+              { issuer: personClaims.issuer, subject: personClaims.subject },
+            )
+          : [];
       // ---- end identity ↔ Relation link ----
       return {
         tenantId,
@@ -562,6 +578,7 @@ export async function resolveSessionContext(
         roles: effectiveRoles,
         oauthScopes: identity.scopes ?? [],
         groups,
+        relationGroupIds,
         scope: effectiveScope,
         credential: "bearer",
         relation,

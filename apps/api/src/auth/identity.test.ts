@@ -25,6 +25,7 @@ const EMPTY = {
   userId: null,
   roles: [] as string[],
   groups: [] as string[],
+  relationGroupIds: [] as string[],
   scope: "self" as const,
   credential: "none" as const,
 };

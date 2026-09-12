@@ -38,6 +38,12 @@ export type TrustedSessionContext = {
    */
   groups: string[];
   /**
+   * Active RelationGroup memberships derived by the server from the linked
+   * Relation. This is deliberately separate from Keycloak group paths and
+   * platform org-unit scopes; inbound claims never populate it.
+   */
+  relationGroupIds?: readonly string[];
+  /**
    * Effective access scope used by the DB session layer to set `app.scope`.
    * Defaults to "self" — the most restrictive option — until upstream
    * resolution determines otherwise.
@@ -80,6 +86,7 @@ export function readTrustedSessionContext(
     userId: base.userId,
     roles: base.roles,
     groups: base.groups ?? [],
+    relationGroupIds: [],
     scope: "self",
     credential: "trusted-context",
   };

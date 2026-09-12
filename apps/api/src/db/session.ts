@@ -7,6 +7,7 @@ import { readStatementTimeoutMs } from "../config/limits.js";
 export type DbSessionScope = "tenant" | "group" | "self";
 
 const MAX_SESSION_GROUPS = 256;
+const MAX_RELATION_GROUPS = 256;
 
 // Closure expansion of the direct set (capped at MAX_SESSION_GROUPS) can
 // legitimately grow far beyond it: a shallow-but-wide org tree turns one
@@ -30,6 +31,11 @@ export type DbSessionInput = {
   userDisplayName?: string | null;
   roles?: readonly string[] | null;
   groups?: readonly string[] | null;
+  /**
+   * Server-derived active RelationGroup memberships. These are not Keycloak
+   * groups and are never expanded through the platform org-unit hierarchy.
+   */
+  relationGroupIds?: readonly string[] | null;
   scope?: DbSessionScope | null;
 };
 
@@ -38,6 +44,7 @@ export type DbSessionContext = {
   userId: string;
   roles: readonly string[];
   groups: readonly string[];
+  relationGroupIds: readonly string[];
   scope: DbSessionScope;
 };
 
@@ -86,6 +93,20 @@ function normalizeGroups(groups: readonly string[] | null | undefined): readonly
   return uuids;
 }
 
+function normalizeRelationGroupIds(
+  groups: readonly string[] | null | undefined,
+): readonly string[] {
+  if (!groups || groups.length === 0) return [];
+  if (groups.length > MAX_RELATION_GROUPS) {
+    throw new Error(
+      `Database session has ${groups.length} RelationGroup memberships; cap is ${MAX_RELATION_GROUPS}.`,
+    );
+  }
+  const unique = [...new Set(groups)];
+  for (const groupId of unique) assertUuid(groupId, "relationGroupId");
+  return unique.sort();
+}
+
 function assertExpandedGroupsWithinCap(expanded: readonly string[], label: string) {
   if (expanded.length > MAX_EXPANDED_SESSION_GROUPS) {
     throw new Error(
@@ -115,6 +136,7 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
     userId: input.userId,
     roles: input.roles ?? [],
     groups: normalizeGroups(input.groups),
+    relationGroupIds: normalizeRelationGroupIds(input.relationGroupIds),
     scope: normalizeScope(input.scope),
   };
 }
@@ -139,6 +161,7 @@ export async function applyDbSession<TDatabase>(
   await sql`select set_config('app.user_id', ${session.userId}, true)`.execute(trx);
   await sql`select set_config('app.roles', ${session.roles.join(",")}, true)`.execute(trx);
   await sql`select set_config('app.scope', ${session.scope}, true)`.execute(trx);
+  await sql`select set_config('app.relation_group_ids', ${session.relationGroupIds.join(",")}, true)`.execute(trx);
 
   // Group expansion (§E.1/E.3). The user's DIRECT org-unit UUIDs
   // (session.groups — already UUID-filtered and capped at MAX_SESSION_GROUPS by
@@ -206,7 +229,11 @@ export async function withDbSession<TDatabase, TResult>(
       active.session.roles.length === session.roles.length &&
       active.session.roles.every((role, index) => role === session.roles[index]) &&
       active.session.groups.length === session.groups.length &&
-      active.session.groups.every((group, index) => group === session.groups[index]);
+      active.session.groups.every((group, index) => group === session.groups[index]) &&
+      active.session.relationGroupIds.length === session.relationGroupIds.length &&
+      active.session.relationGroupIds.every(
+        (group, index) => group === session.relationGroupIds[index],
+      );
     if (!sameSession) {
       throw new Error("Nested database work cannot replace the active session.");
     }

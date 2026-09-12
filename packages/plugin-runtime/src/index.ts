@@ -30,6 +30,8 @@ export type PluginSessionContext = {
   roles: string[];
   oauthScopes?: string[];
   groups: string[];
+  /** Active RelationGroup memberships resolved by the host, never plugin input. */
+  relationGroupIds?: readonly string[];
   scope: PluginSessionScope;
   credential: PluginSessionCredential;
   relation?: unknown;

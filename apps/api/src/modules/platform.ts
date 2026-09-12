@@ -207,14 +207,24 @@ function assertSecretFree(value: unknown, path = "payload"): void {
 export function createModuleSessionCapability(
   session: TrustedSessionContext,
 ): TrustedSessionContext {
-  return Object.freeze({
+  const capability = {
     ...session,
     roles: Object.freeze([...session.roles]),
     groups: Object.freeze([...session.groups]),
     ...(session.oauthScopes
       ? { oauthScopes: Object.freeze([...session.oauthScopes]) }
       : {}),
-  }) as unknown as TrustedSessionContext;
+  };
+  // A stateful MCP server lives across HTTP requests. Its bearer roles and
+  // login binding are pinned, while domain memberships are deliberately
+  // refreshed from storage for every request. A getter keeps the plugin-facing
+  // capability immutable while reading the latest core-owned membership set.
+  Object.defineProperty(capability, "relationGroupIds", {
+    enumerable: true,
+    configurable: false,
+    get: () => Object.freeze([...(session.relationGroupIds ?? [])]),
+  });
+  return Object.freeze(capability) as unknown as TrustedSessionContext;
 }
 
 /**

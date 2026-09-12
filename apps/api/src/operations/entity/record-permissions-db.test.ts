@@ -35,8 +35,13 @@ const userB = randomUUID();
 const groupA = randomUUID();
 const roleA = "Records.All.Manage";
 
-function session(userId: string, roles: string[] = [], groups: string[] = []): DbSessionInput {
-  return { tenantId, userId, roles, groups, scope: "self" };
+function session(
+  userId: string,
+  roles: string[] = [],
+  relationGroupIds: string[] = [],
+  groups: string[] = [],
+): DbSessionInput {
+  return { tenantId, userId, roles, groups, relationGroupIds, scope: "self" };
 }
 
 let admin: SQL;
@@ -123,11 +128,16 @@ describe("record-permission RLS", () => {
     expect(await visibleMarkers(session(userB))).toEqual(["public-empty"]);
   }, TEST_TIMEOUT);
 
-  test("user, role and exact group subjects grant view independently", async () => {
+  test("user, role and RelationGroup subjects grant view independently", async () => {
     expect(await visibleMarkers(session(userA))).toEqual(["public-empty", "user-a"]);
     expect(await visibleMarkers(session(userB, [roleA]))).toEqual(["public-empty", "role-a"]);
     expect(await visibleMarkers(session(userB, [], [groupA]))).toEqual([
       "group-a",
+      "public-empty",
+    ]);
+    // A Keycloak/platform group UUID is a different namespace and cannot
+    // satisfy a domain RelationGroup ACL.
+    expect(await visibleMarkers(session(userB, [], [], [groupA]))).toEqual([
       "public-empty",
     ]);
   }, TEST_TIMEOUT);

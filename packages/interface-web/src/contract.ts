@@ -50,6 +50,9 @@ export type WebCustomOperationRef = OperationReference<"invoke"> & {
 };
 export type WebViewMode = "read" | "create" | "update";
 
+/** Opaque layout-renderer registry key. A host must reject unknown keys clearly. */
+export type WebRendererKey = string;
+
 export type WebVariableSource = {
   key: string;
   resolver: "chips" | "entityFields" | "templateParameters" | "workflowGraphVariables";
@@ -97,7 +100,7 @@ export type WebFieldGroup = { id: string; title: LocalizedText; fields: string[]
 export type WebCollectionView = {
   id: string;
   kind: "collection";
-  renderer: "entity.collection";
+  renderer: WebRendererKey;
   modes: readonly ["read"];
   route: string;
   operations: {
@@ -136,7 +139,7 @@ export type WebRecordTab = {
 export type WebRecordView = {
   id: string;
   kind: "record";
-  renderer: "entity.record";
+  renderer: WebRendererKey;
   preset: "inbox-main-context";
   modes: WebViewMode[];
   routes: {

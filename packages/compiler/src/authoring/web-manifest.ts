@@ -226,7 +226,7 @@ function collectionFor(
   return {
     id: `${entityName}.collection`,
     kind: "collection",
-    renderer: "entity.collection",
+    renderer: contract.interfaces?.web?.renderers?.collection ?? "entity.collection",
     modes: ["read"],
     route,
     operations: {
@@ -336,7 +336,8 @@ function projectEntity(
   const updateGroups = formGroups(updateVariant, createVariant, serverOwnedFields);
   const createFields = new Set(createGroups.flatMap(({ fields }) => fields));
   const updateFields = new Set(updateGroups.flatMap(({ fields }) => fields));
-  const fields = Object.fromEntries(contract.model.fields.map((field) => {
+  const explicitFieldKeys = new Set(contract.model.fields.map(({ key }) => key));
+  const explicitFields = contract.model.fields.map((field) => {
     const projected: WebFieldProjection = {
       id: `${entityName}.${field.key}`,
       key: field.key,
@@ -374,8 +375,40 @@ function projectEntity(
         update: !field.readOnly && !field.immutable && updateFields.has(field.key),
       },
     };
-    return [field.key, projected];
-  }));
+    return [field.key, projected] as const;
+  });
+  const implicitRelationshipFields = contract.model.relationships.flatMap((relationship) => {
+    if (relationship.kind !== "belongsTo" || !relationship.foreignKey) return [];
+    const column = contract.storage.columns.find(
+      (candidate) => candidate.column === relationship.foreignKey,
+    );
+    const key = column?.field ?? snakeToCamel(relationship.foreignKey);
+    // When an authored field owns this input key, its writability and
+    // presentation semantics are authoritative. Never widen it from the
+    // structural relationship declaration.
+    if (explicitFieldKeys.has(key)) return [];
+    const targetId = all.get(relationship.target)?.contract.model.fields.find(
+      (field) => field.key === "id",
+    );
+    const label = localized(relationship.label, relationship.key);
+    const projected: WebFieldProjection = {
+      id: `${entityName}.${key}`,
+      key,
+      label,
+      description: label,
+      valueType: "string",
+      ...(targetId?.semanticType ? { semanticType: targetId.semanticType } : {}),
+      cardinality: "one",
+      required: column ? !column.nullable : false,
+      supports: {
+        read: true,
+        create: Boolean(operations.create && createVariant),
+        update: Boolean(operations.update && updateVariant),
+      },
+    };
+    return [[key, projected] as const];
+  });
+  const fields = Object.fromEntries([...explicitFields, ...implicitRelationshipFields]);
 
   const relationships = Object.fromEntries(contract.model.relationships.flatMap((relationship) => {
     const target = all.get(relationship.target);
@@ -424,7 +457,7 @@ function projectEntity(
   const record = modes.length > 0 ? {
     id: `${entityName}.record`,
     kind: "record" as const,
-    renderer: "entity.record" as const,
+    renderer: contract.interfaces?.web?.renderers?.record ?? "entity.record",
     preset: "inbox-main-context" as const,
     modes,
     routes: {

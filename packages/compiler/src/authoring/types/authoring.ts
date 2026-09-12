@@ -606,6 +606,8 @@ export type EntityInterfaceOperationProjection =
 
 export interface EntityWebViewDefinition {
   collection: {
+    /** Opaque host renderer-registry key; omission uses the generic collection renderer. */
+    renderer?: string;
     route: string | LocalizedText;
     title?: LocalizedText;
     /** Ordered collection-scoped plugin Operations shown by Web consumers. */
@@ -614,6 +616,8 @@ export interface EntityWebViewDefinition {
     defaultSort?: { key: string; direction: "asc" | "desc" };
   };
   record?: {
+    /** Opaque host renderer-registry key; omission uses the generic record renderer. */
+    renderer?: string;
     routes?: { read?: string | LocalizedText; create?: string | LocalizedText };
     title: string;
     subtitle?: string;

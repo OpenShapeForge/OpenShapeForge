@@ -166,6 +166,30 @@ describe("strict-v2 outcome entities", () => {
     expect(quote.operations.get).not.toHaveProperty("concurrency");
   });
 
+  test("projects authored opaque Web renderer keys while retaining defaults", () => {
+    const source = loadEntity(authoringDir, "quote");
+    const web = source.coreEntity?.interfaces?.web;
+    if (!web?.views.record) throw new Error("Quote must declare both Web views");
+    web.views.collection.renderer = "finance.quote.collection";
+    web.views.record.renderer = "finance.quote.record";
+    assertV2Authoring(source.coreEntity, "quote.yaml");
+
+    const quote = buildWebManifest([{ slug: "quote", contract: compile(source) }])
+      .entities.Quote!;
+    expect(quote.views.collection.renderer).toBe("finance.quote.collection");
+    expect(quote.views.record?.renderer).toBe("finance.quote.record");
+
+    const agreement = buildWebManifest([compileOutcome("agreement")])
+      .entities.Agreement!;
+    expect(agreement.views.collection.renderer).toBe("entity.collection");
+    expect(agreement.views.record?.renderer).toBe("entity.record");
+
+    web.views.record.renderer = "Finance/Quote";
+    expect(() => assertV2Authoring(source.coreEntity, "quote.yaml")).toThrow(
+      /interfaces\.web\.views\.record\.renderer/,
+    );
+  });
+
   test("carries a collection-scoped YAML Operation into the collection action list", () => {
     const artifacts = loadEntity(authoringDir, "quote");
     artifacts.coreEntity.operations!.compose = {

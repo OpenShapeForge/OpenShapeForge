@@ -119,6 +119,8 @@ const RESERVED_MUTATION_CONTROL_FIELD_KEYS = new Set([
   "confirmationAnswer",
 ]);
 
+const WEB_RENDERER_KEY = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
+
 export function v2RestConfig(entity: CoreEntity): RestConfig | undefined {
   if (!entity.interfaces?.rest) return undefined;
   return { operations: completeProjectedActions(entity, "rest") };
@@ -525,6 +527,18 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
 
   const web = entity.interfaces?.web;
   if (web) {
+    for (const [scope, renderer] of [
+      ["collection", web.views.collection.renderer],
+      ["record", web.views.record?.renderer],
+    ] as const) {
+      if (renderer !== undefined &&
+        (renderer.length > 128 || !WEB_RENDERER_KEY.test(renderer))) {
+        throw new Error(
+          `${origin} interfaces.web.views.${scope}.renderer must be a non-empty ` +
+            "opaque registry key of at most 128 lowercase letters, digits, dots, underscores or hyphens.",
+        );
+      }
+    }
     const actionLists = [
       ["collection", web.views.collection.actions ?? []],
       ["record", web.views.record?.actions ?? []],

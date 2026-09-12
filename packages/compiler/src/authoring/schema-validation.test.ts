@@ -407,8 +407,13 @@ describe("coreEntity properties the compiler implements", () => {
         mcp: { tools: "generic" },
         web: {
           views: {
-            collection: { route: "/billing-runs", columns: [{ key: "idempotencyKey" }] },
+            collection: {
+              renderer: "billing-run.collection",
+              route: "/billing-runs",
+              columns: [{ key: "idempotencyKey" }],
+            },
             record: {
+              renderer: "billing-run.record",
               routes: { read: "/billing-runs/:id" },
               title: "{{idempotencyKey}}",
               layout: { tabs: [{ id: "main", fields: ["idempotencyKey"] }] },
@@ -418,6 +423,26 @@ describe("coreEntity properties the compiler implements", () => {
       },
     });
     expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+  });
+
+  it("rejects malformed strict v2 Web renderer registry keys", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { list: v2Operation("list") },
+      interfaces: {
+        web: {
+          views: {
+            collection: {
+              renderer: "Billing Run/Collection",
+              route: "/billing-runs",
+              columns: [{ key: "idempotencyKey" }],
+            },
+          },
+        },
+      },
+    });
+
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/renderer/);
   });
 
   it("accepts false as an explicit interface Operation exclusion", () => {

@@ -227,6 +227,83 @@ describe("web manifest projection", () => {
       .toBe(renderWebManifest(buildWebManifest([alpha, beta])));
   });
 
+  test("projects implicit belongsTo inputs as writable Web fields", () => {
+    const group = entity("RelationGroup", "relation-group", [
+      field("id", { required: true, readOnly: true, semanticType: "relationGroupId" }),
+      field("name"),
+    ], coreView());
+    const relation = entity("Relation", "relation", [
+      field("id", { required: true, readOnly: true }),
+      field("displayName"),
+    ], coreView(), [{
+      key: "relationGroup",
+      kind: "belongsTo",
+      target: "RelationGroup",
+      foreignKey: "relation_group_id",
+      label: text("Relation group", "Relatiegroep"),
+    }]);
+    relation.contract.storage.columns.push({
+      field: "relationGroupId",
+      column: "relation_group_id",
+      type: "uuid",
+      nullable: true,
+      storageClass: "core",
+    });
+
+    const projected = buildWebManifest([relation, group]).entities.Relation!;
+    expect(projected.fields.relationGroupId).toEqual({
+      id: "Relation.relationGroupId",
+      key: "relationGroupId",
+      label: text("Relation group", "Relatiegroep"),
+      description: text("Relation group", "Relatiegroep"),
+      valueType: "string",
+      semanticType: "relationGroupId",
+      cardinality: "one",
+      required: false,
+      supports: { read: true, create: true, update: true },
+    });
+    expect(projected.relationships.relationGroup).toMatchObject({
+      targetEntityId: "RelationGroup",
+      foreignKey: "relation_group_id",
+      recordField: "relationGroupId",
+    });
+  });
+
+  test("never widens an explicit protected field that owns a belongsTo key", () => {
+    const view = coreView();
+    view.form!.variants.create!.groups[0]!.fields!.push("relationGroupId");
+    const group = entity("RelationGroup", "relation-group", [
+      field("id", { required: true, readOnly: true, semanticType: "relationGroupId" }),
+      field("name"),
+    ], coreView());
+    const relation = entity("Relation", "relation", [
+      field("displayName"),
+      field("relationGroupId", {
+        label: text("Protected owner"),
+        semanticType: "protectedRelationId",
+        readOnly: true,
+        immutable: true,
+      }),
+    ], view, [{
+      key: "relationGroup",
+      kind: "belongsTo",
+      target: "RelationGroup",
+      foreignKey: "relation_group_id",
+      label: text("Relation group", "Relatiegroep"),
+    }]);
+    relation.contract.storage.columns.find(({ field }) => field === "relationGroupId")!.column =
+      "relation_group_id";
+
+    const projected = buildWebManifest([relation, group]).entities.Relation!;
+    expect(projected.fields.relationGroupId).toMatchObject({
+      label: text("Protected owner"),
+      semanticType: "protectedRelationId",
+      supports: { read: true, create: false, update: false },
+    });
+    expect(Object.keys(projected.fields).filter((key) => key === "relationGroupId"))
+      .toHaveLength(1);
+  });
+
   test("projects the web interface independently of REST exposure", () => {
     const relation = entity("Relation", "relation", [field("displayName")], coreView());
     relation.contract.authoringVersion = 2;

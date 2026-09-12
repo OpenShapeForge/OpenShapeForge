@@ -1059,6 +1059,7 @@
           "additionalProperties": false,
           "required": ["route", "columns"],
           "properties": {
+            "renderer": { "$ref": "#/$defs/webRendererKeyV2" },
             "route": { "$ref": "#/$defs/localizedOrString" },
             "title": { "$ref": "#/$defs/localizedText" },
             "actions": {
@@ -1095,6 +1096,7 @@
           "additionalProperties": false,
           "required": ["title", "layout"],
           "properties": {
+            "renderer": { "$ref": "#/$defs/webRendererKeyV2" },
             "routes": {
               "type": "object",
               "additionalProperties": false,
@@ -1132,6 +1134,12 @@
           }
         }
       }
+    },
+    "webRendererKeyV2": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
     },
     "webWriteModeV2": {
       "type": "object",

@@ -163,6 +163,19 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
                           ],
                         }
                       : {}),
+                    ...(coreEntity.interfaces.web.views.collection.renderer ||
+                      coreEntity.interfaces.web.views.record?.renderer
+                      ? {
+                          renderers: {
+                            ...(coreEntity.interfaces.web.views.collection.renderer
+                              ? { collection: coreEntity.interfaces.web.views.collection.renderer }
+                              : {}),
+                            ...(coreEntity.interfaces.web.views.record?.renderer
+                              ? { record: coreEntity.interfaces.web.views.record.renderer }
+                              : {}),
+                          },
+                        }
+                      : {}),
                   },
                 }
               : {}),

@@ -667,6 +667,11 @@ export interface CompiledEntityContract {
     web?: {
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
+      /** Authored layout-renderer exceptions; hosts resolve these opaque keys. */
+      renderers?: {
+        collection?: string;
+        record?: string;
+      };
     };
     graphql?: { operations: Partial<Record<EntityOperationIntent, boolean>> };
   };

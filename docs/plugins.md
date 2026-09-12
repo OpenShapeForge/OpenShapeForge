@@ -141,8 +141,11 @@ export type PluginGenerateContext = PluginBaseContext & {
   entities: CompiledEntityInfo[];     // every compiled entity contract
   operationCatalog: {
     version: 1;
-    operations: readonly CompiledEntityOperation[];
-  };                                  // interface-neutral entity Operations
+    operations: readonly (
+      | CompiledEntityOperation
+      | CompiledPluginOperation
+    )[];
+  };                                  // complete static Operation catalog
   fieldSchemas: FieldSchemaCompiler;  // canonical FieldDefinition projector
 };
 
@@ -160,10 +163,14 @@ A plugin module **default-exports** a `CompilerPlugin` with a non-empty
 string `name`; duplicate names across registered plugins are an error.
 
 `operationCatalog` is the public consumer boundary for plugins that derive
-workflow nodes, audit policy, or another product projection from entity
-Operations. It is compiled once from the resolved layers and is already
-sorted by stable Operation id. A plugin should consume this catalog instead
-of parsing entity YAML or inferring actions from transport routes.
+workflow nodes, audit policy, or another projection from Operations. It is
+compiled once from the resolved layers, contains both canonical entity CRUD
+and authored entity/module plugin Operations, rejects duplicate ids across
+those sources, and is sorted by stable Operation id. Plugin Operations carry
+`id === key` and `intent: "invoke"`; entity Operations keep their canonical
+CRUD intent and symbolic entity input/output contract. A plugin should consume
+this catalog instead of parsing entity YAML or inferring actions from transport
+routes.
 
 `fieldSchemas` is bound to the resolved component, semantic-type and reference-
 data catalogs for the current host. A generator that publishes configurable

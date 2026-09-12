@@ -1920,6 +1920,8 @@ describe("writtenBy columns", () => {
 
   const reviewOperation = {
     key: "pentest.finding.review",
+    id: "pentest.finding.review",
+    intent: "invoke",
     transports: {
       rest: { method: "POST", path: "/api/pentest/findings/:findingId/review" },
       mcp: { enabled: false },
@@ -1942,6 +1944,56 @@ describe("writtenBy columns", () => {
         rest: "POST /api/pentest/findings/:findingId/review",
       },
     ]);
+  });
+
+  it("resolves an entity create writer through its generated REST and generic MCP routes", () => {
+    const manifest = writtenByManifest("Finding.create");
+    manifest.tables[0]!.source = {
+      path: "entities/finding.yaml",
+      authoringEntityName: "Finding",
+      authoringEntitySlug: "finding",
+      generatedCrudEligibility: "explicitly_enabled",
+      crud: {
+        operations: { list: true, get: true, create: true, update: true, delete: true },
+      },
+      graphql: {
+        typeName: "Finding",
+        singleQueryName: "finding",
+        listQueryName: "findings",
+        createMutationName: "createFinding",
+        updateMutationName: "updateFinding",
+        deleteMutationName: "deleteFinding",
+        relationships: [],
+      },
+      rest: {
+        basePath: "findings",
+        operations: { list: true, get: true, create: true, update: true, delete: true },
+      },
+      mcp: {
+        toolPrefix: "finding",
+        tools: "generic",
+        operations: { list: true, get: true, create: true, update: true, delete: true },
+      },
+    };
+    const createOperation = {
+      id: "Finding.create",
+      key: "create",
+      intent: "create",
+      entityId: "pentest.Finding",
+      entityName: "Finding",
+    } as any;
+    const manifestJson = JSON.parse(
+      generateArtifacts(manifest, { operations: [createOperation] })
+        .find((artifact) => artifact.path.endsWith("db/manifest.json"))!.contents,
+    );
+    const column = manifestJson.tables[0].columns.find(
+      (candidate: { name: string }) => candidate.name === "reviewed_at",
+    );
+    expect(column.writtenBy).toEqual([{
+      operation: "Finding.create",
+      rest: "POST /api/rest/v1/findings",
+      mcp: "osf_create",
+    }]);
   });
 
   it("fails the build when the named operation does not exist", () => {

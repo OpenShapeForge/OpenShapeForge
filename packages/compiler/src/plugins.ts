@@ -41,22 +41,37 @@ export type PluginBaseContext = {
   webPresent: boolean;
 };
 
+/** A static plugin-backed Operation after compiler ownership is attached. */
+export type CompiledPluginOperation = PluginOperationContract & {
+  plugin: string;
+  /** Stable canonical identity. Equal to `key` for this operation kind. */
+  id: string;
+  intent: "invoke";
+};
+
+export type CompiledStaticOperation =
+  | CompiledEntityOperation
+  | CompiledPluginOperation;
+
 /**
  * Stable, interface-neutral catalog exposed to compiler plugins.
  *
- * Consumers can derive workflow nodes, audit policy or other projections from
- * the same canonical entity Operations as REST, MCP, GraphQL and Web without
- * parsing authoring YAML or depending on a product-specific model.
+ * This is the complete static catalog: generated entity CRUD and authored
+ * plugin/module Operations share one ordered namespace. Record-derived runtime
+ * Operations remain runtime contributions and therefore do not belong here.
  */
-export type EntityOperationCatalog = {
+export type StaticOperationCatalog = {
   version: 1;
-  operations: readonly CompiledEntityOperation[];
+  operations: readonly CompiledStaticOperation[];
 };
+
+/** @deprecated Use StaticOperationCatalog; retained as a migration alias. */
+export type EntityOperationCatalog = StaticOperationCatalog;
 
 export type PluginGenerateContext = PluginBaseContext & {
   manifest: PlatformSchemaManifest;
   entities: CompiledEntityInfo[];
-  operationCatalog: EntityOperationCatalog;
+  operationCatalog: StaticOperationCatalog;
   /** Canonical build-time FieldDefinition -> compiled field/JSON Schema projection. */
   fieldSchemas: FieldSchemaCompiler;
 };

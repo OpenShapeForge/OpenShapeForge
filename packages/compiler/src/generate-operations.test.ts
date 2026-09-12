@@ -5,6 +5,7 @@ import { renderOpenApiSpec } from "./generate-openapi.js";
 import {
   auditOperationSurfaceCollisions,
   assertOperationRuntimeModules,
+  buildStaticOperationCatalog,
   collectAuthoredEntityPluginOperations,
   collectPluginOperations,
   collectEntityOperations,
@@ -130,17 +131,40 @@ describe("first-class plugin operations", () => {
 
     const collected = collectEntityOperations(entities);
     expect(collected).toEqual([entityOperation]);
-    expect(JSON.parse(renderOperationCatalog([], collected))).toMatchObject({
+    const catalog = buildStaticOperationCatalog([], collected);
+    expect(catalog.operations).toEqual([entityOperation]);
+    expect(JSON.parse(renderOperationCatalog(catalog))).toMatchObject({
       version: 1,
       operations: [],
       entityOperations: [{ id: "Relation.list" }],
     });
   });
 
+  test("rejects a duplicate id across entity and plugin/module Operations", () => {
+    const [compiledPlugin] = collectPluginOperations(
+      [{ name: "demo", operations: [operation] }],
+      context,
+    );
+    const entityOperation = {
+      id: operation.key,
+      key: "create",
+      intent: "create",
+    } as CompiledEntityOperation;
+
+    expect(() => buildStaticOperationCatalog([compiledPlugin!], [entityOperation]))
+      .toThrow(/Duplicate canonical Operation id/);
+  });
+
   test("collects deterministic canonical contracts and OpenAPI path parameters", () => {
     const plugins: CompilerPlugin[] = [{ name: "demo", operations: [operation] }];
     const collected = collectPluginOperations(plugins, context);
-    expect(JSON.parse(renderOperationCatalog(collected)).operations[0].key).toBe(operation.key);
+    const catalog = buildStaticOperationCatalog(collected, []);
+    expect(catalog.operations[0]).toMatchObject({
+      id: operation.key,
+      key: operation.key,
+      intent: "invoke",
+    });
+    expect(JSON.parse(renderOperationCatalog(catalog)).operations[0].key).toBe(operation.key);
     expect(collected).toHaveLength(1);
     const paths = operationOpenApiPaths(collected) as Record<string, Record<string, any>>;
     const canonical = paths["/api/demo/quotes/{quoteId}/publish"]!.post;
@@ -696,7 +720,9 @@ describe("first-class plugin operations", () => {
     expect(first[0]!.transports.rest.path).toBe("/api/session");
     expect((operationOpenApiPaths(first) as Record<string, Record<string, unknown>>)["/api/session"])
       .toHaveProperty("get");
-    expect(renderOperationCatalog(first)).toBe(renderOperationCatalog(second));
+    expect(renderOperationCatalog(buildStaticOperationCatalog(first, []))).toBe(
+      renderOperationCatalog(buildStaticOperationCatalog(second, [])),
+    );
 
     const hyphenated = collectPluginOperations([{ name: "user-session", operations: [{
       ...rootOperation,
@@ -731,6 +757,8 @@ describe("first-class plugin operations", () => {
     ): CompiledPluginOperation => ({
       ...operation,
       plugin: "demo",
+      id: operation.key,
+      intent: "invoke",
       transports: {
         ...operation.transports,
         rest: { ...operation.transports.rest, method, path },

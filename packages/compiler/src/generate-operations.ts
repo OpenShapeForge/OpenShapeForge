@@ -3,6 +3,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import type {
   CompilerPlugin,
+  CompiledPluginOperation,
   JsonSchema,
   PluginBaseContext,
   PluginOperationContract,
@@ -18,7 +19,7 @@ import type { CompiledEntityInfo } from "./plugins.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
 
-export type CompiledPluginOperation = PluginOperationContract & { plugin: string };
+export type { CompiledPluginOperation } from "./plugins.js";
 
 /**
  * Platform-owned mutation controls are derived from the canonical Operation
@@ -557,6 +558,8 @@ export function collectPluginOperations(
       operations.push({
         ...operation,
         plugin: plugin.name,
+        id: operation.key,
+        intent: "invoke",
       });
     }
   }
@@ -790,10 +793,33 @@ export function collectEntityOperations(
   return operations;
 }
 
+/** Build the one deterministic namespace consumed by compiler plugins. */
+export function buildStaticOperationCatalog(
+  pluginOperations: readonly CompiledPluginOperation[],
+  entityOperations: readonly CompiledEntityOperation[],
+): import("./plugins.js").StaticOperationCatalog {
+  const operations = [...pluginOperations, ...entityOperations]
+    .sort((left, right) => left.id.localeCompare(right.id));
+  for (let index = 1; index < operations.length; index += 1) {
+    if (operations[index - 1]!.id === operations[index]!.id) {
+      throw new Error(
+        `Duplicate canonical Operation id "${operations[index]!.id}". ` +
+          "Keep its metadata in exactly one entity or plugin/module declaration.",
+      );
+    }
+  }
+  return { version: 1, operations };
+}
+
 export function renderOperationCatalog(
-  operations: readonly CompiledPluginOperation[],
-  entityOperations: readonly CompiledEntityOperation[] = [],
+  catalog: import("./plugins.js").StaticOperationCatalog,
 ): string {
+  const operations = catalog.operations.filter(
+    (operation): operation is CompiledPluginOperation => operation.intent === "invoke",
+  );
+  const entityOperations = catalog.operations.filter(
+    (operation): operation is CompiledEntityOperation => operation.intent !== "invoke",
+  );
   return `${JSON.stringify({ version: 1, operations, entityOperations }, null, 2)}\n`;
 }
 

@@ -32,6 +32,7 @@ import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
 import {
   auditOperationSurfaceCollisions,
   assertOperationRuntimeModules,
+  buildStaticOperationCatalog,
   collectAuthoredEntityPluginOperations,
   collectAuthoredModulePluginOperations,
   collectEntityOperations,
@@ -72,6 +73,8 @@ export type {
 export type {
   CompilerPlugin,
   CompiledEntityInfo,
+  CompiledPluginOperation,
+  CompiledStaticOperation,
   EntityOperationCatalog,
   JsonSchema,
   JsonValue,
@@ -82,6 +85,7 @@ export type {
   PluginOperationContract,
   PluginOperationError,
   PluginSchemaMigration,
+  StaticOperationCatalog,
 } from "./plugins.js";
 export { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
 export { resolveModelFields } from "./authoring/compiler/model.js";
@@ -281,7 +285,7 @@ export async function collectAllArtifacts(
   const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries);
   assertOperationRuntimeModules(operations, moduleRegistry.modules.map((module) => module.name));
   auditOperationSurfaceCollisions(operations, manifest, connectors, MAX_DEDICATED_TOOLS);
-  const operationCatalog = { version: 1 as const, operations: entityOperations };
+  const operationCatalog = buildStaticOperationCatalog(operations, entityOperations);
   const fieldSchemas = createFieldSchemaCompiler({
     ...loadFieldCompilationCatalogs(authoringDir),
     referentiedata,
@@ -306,7 +310,7 @@ export async function collectAllArtifacts(
       source: activeManifestSource,
       // Resolves the operation keys authored in `writtenBy` into routes, and
       // fails the build on a key no operation answers to.
-      operations,
+      operations: operationCatalog.operations,
       openApi: {
         entities,
         referentiedata,
@@ -341,7 +345,7 @@ export async function collectAllArtifacts(
     operations: [
       {
         path: "apps/api/src/generated/operations/catalog.json",
-        contents: renderOperationCatalog(operations, entityOperations),
+        contents: renderOperationCatalog(operationCatalog),
       },
       {
         path: "apps/api/src/generated/compiler/canonical-condition.ts",

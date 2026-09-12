@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { createHash } from "node:crypto";
 import { renderOpenApiSpec, type OpenApiSpecOptions } from "./generate-openapi.js";
-import type { CompiledPluginOperation } from "./generate-operations.js";
+import type { CompiledStaticOperation } from "./plugins.js";
 import type {
   ColumnDefinition,
   GeneratedArtifact,
@@ -32,11 +32,12 @@ export type GenerateArtifactsOptions = {
   source?: string;
   openApi?: OpenApiSpecOptions;
   /**
-   * Compiled plugin operations, used to resolve the operation keys authored in
-   * a field's `writtenBy` into the routes a caller can actually reach. Required
-   * as soon as any column carries `writtenBy`; see resolveColumnWriters.
+   * Complete static Operation catalog, used to resolve the operation ids
+   * authored in a field's `writtenBy` into routes a caller can actually reach.
+   * Required as soon as any column carries `writtenBy`; see
+   * resolveColumnWriters.
    */
-  operations?: CompiledPluginOperation[];
+  operations?: readonly CompiledStaticOperation[];
 };
 
 function sqlGeneratedHeader(source: string): string {
@@ -612,9 +613,9 @@ type ManifestColumnWriter = {
 };
 
 function resolveColumnWriters(
-  table: { name: string },
+  table: TableDefinition,
   column: { name: string; writtenBy?: string[] },
-  operations: CompiledPluginOperation[] | undefined,
+  operations: readonly CompiledStaticOperation[] | undefined,
 ): ManifestColumnWriter[] {
   const keys = column.writtenBy ?? [];
   if (keys.length === 0) return [];
@@ -625,9 +626,9 @@ function resolveColumnWriters(
         `generateArtifacts. Pass the operations so the refusal can name a route.`,
     );
   }
-  const byKey = new Map(operations.map((operation) => [operation.key, operation]));
+  const byId = new Map(operations.map((operation) => [operation.id, operation]));
   return keys.map((key) => {
-    const operation = byKey.get(key);
+    const operation = byId.get(key);
     if (!operation) {
       throw new Error(
         `Column ${table.name}.${column.name} is authored writtenBy: [${key}], but no ` +
@@ -635,9 +636,42 @@ function resolveColumnWriters(
           `unprotected one — fix the key or drop the writtenBy entry.`,
       );
     }
+    if (operation.intent !== "invoke") {
+      const rest = table.source?.rest;
+      if (
+        table.source?.authoringEntityName !== operation.entityName ||
+        !rest?.operations[operation.intent]
+      ) {
+        throw new Error(
+          `Column ${table.name}.${column.name} is authored writtenBy: [${key}], but ` +
+            "that entity Operation has no REST route on this table.",
+        );
+      }
+      const collection = operation.intent === "list" || operation.intent === "create";
+      const method = operation.intent === "create"
+        ? "POST"
+        : operation.intent === "update"
+          ? "PATCH"
+          : operation.intent === "delete"
+            ? "DELETE"
+            : "GET";
+      const base = `/api/rest/v1/${rest.basePath}`;
+      const mcp = table.source?.mcp;
+      return {
+        operation: operation.id,
+        rest: `${method} ${collection ? base : `${base}/:id`}`,
+        ...(mcp?.operations[operation.intent]
+          ? {
+              mcp: mcp.tools === "generic"
+                ? `osf_${operation.intent}`
+                : `${mcp.toolPrefix}_${operation.intent}`,
+            }
+          : {}),
+      };
+    }
     const { method, path } = operation.transports.rest;
     return {
-      operation: key,
+      operation: operation.id,
       rest: `${method} ${path}`,
       ...(operation.transports.mcp.enabled === true
         ? { mcp: operation.transports.mcp.name }
@@ -649,7 +683,7 @@ function resolveColumnWriters(
 function renderManifestJson(
   manifest: PlatformSchemaManifest,
   source: string,
-  operations?: CompiledPluginOperation[],
+  operations?: readonly CompiledStaticOperation[],
 ): string {
   const checksum = createHash("sha256")
     .update(JSON.stringify(manifest))

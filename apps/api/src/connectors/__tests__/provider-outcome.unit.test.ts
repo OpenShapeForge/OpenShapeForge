@@ -293,6 +293,11 @@ describe("the one status table", () => {
   // silent 500. Extend the list when adding a code, not the other way round.
   const PUBLIC_CODES = [
     "BAD_USER_INPUT",
+    "IDEMPOTENCY_KEY_REQUIRED",
+    "IDEMPOTENCY_KEY_REUSED",
+    "OPERATION_IN_PROGRESS",
+    "OPERATION_OUTCOME_UNKNOWN",
+    "IDEMPOTENCY_RECEIPT_UNAVAILABLE",
     "VALIDATION",
     "UNAUTHENTICATED",
     "FORBIDDEN",

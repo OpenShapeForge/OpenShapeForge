@@ -6,6 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
+import { operationFailure } from "@openshapeforge/operations";
 import Fastify from "fastify";
 import { GraphQLError } from "graphql";
 import {
@@ -33,6 +34,11 @@ import {
 import { HttpError } from "../rest/http-error.js";
 import { operationContractFingerprint } from "./contract-fingerprint.js";
 import {
+  __setOperationExecutionReceiptExecutorForTests,
+  keyedOperationReceiptIdentity,
+  type TestReceiptExecutor,
+} from "./execution-receipts.js";
+import {
   bindOperationHandlers,
   DeclaredOperationError,
   invokeOperation,
@@ -54,14 +60,43 @@ const session = {
   credential: "trusted-context" as const,
 };
 
-const testDatabase = () => new Kysely<DB>({
-  dialect: {
-    createAdapter: () => new PostgresAdapter(),
-    createDriver: () => new DummyDriver(),
-    createIntrospector: (db) => new PostgresIntrospector(db),
-    createQueryCompiler: () => new PostgresQueryCompiler(),
-  },
-});
+const testDatabase = (receiptExecutor?: TestReceiptExecutor) => {
+  const db = new Kysely<DB>({
+    dialect: {
+      createAdapter: () => new PostgresAdapter(),
+      createDriver: () => new DummyDriver(),
+      createIntrospector: (database) => new PostgresIntrospector(database),
+      createQueryCompiler: () => new PostgresQueryCompiler(),
+    },
+  });
+  const stored = new Map<string, { request: string; contract: string; value: unknown }>();
+  const inMemory: TestReceiptExecutor = async (active, options) => {
+    await options.authorizeReplay?.(undefined as never);
+    const identity = keyedOperationReceiptIdentity(active, options);
+    const key = [identity.tenantId, identity.actorId, identity.operationId,
+      identity.operationIntent, identity.keyHash].join(":");
+    const existing = stored.get(key);
+    if (existing) {
+      if (existing.request !== identity.requestFingerprint ||
+        existing.contract !== identity.contractFingerprint) {
+        throw operationFailure({
+          code: "IDEMPOTENCY_KEY_REUSED",
+          message: "This idempotency key was already used for different input.",
+        });
+      }
+      return options.decode(existing.value);
+    }
+    const value = await options.execute(() => undefined);
+    stored.set(key, {
+      request: identity.requestFingerprint,
+      contract: identity.contractFingerprint,
+      value: options.encode(value),
+    });
+    return value;
+  };
+  __setOperationExecutionReceiptExecutorForTests(db, receiptExecutor ?? inMemory);
+  return db;
+};
 
 const restOperation: OperationContract = {
   key: "demo.quote.publish",
@@ -715,7 +750,9 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
     },
   };
   const app = Fastify();
-  registerOperationRestRoutes(app, [module], {}, [restOperation]);
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  registerOperationRestRoutes(app, [module], { db, platform: platform.services }, [restOperation]);
   const paths = ["/api/demo/quotes/quote-1/publish"];
   try {
     for (const path of paths) {
@@ -775,7 +812,20 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
       expect(response.headers["x-operation-handler"]).toBe("publishQuote");
       successfulBodies.push(response.json());
     }
-    expect(successfulBodies).toHaveLength(1);
+    const replay = await app.inject({
+      method: "POST",
+      url: paths[0]!,
+      headers: {
+        ...Object.fromEntries(authorized),
+        "idempotency-key": "request-1",
+      },
+      payload: { outcome: "ok" },
+    });
+    expect(replay.statusCode).toBe(202);
+    expect(replay.headers["x-operation-handler"]).toBe("publishQuote");
+    successfulBodies.push(replay.json());
+    expect(successfulBodies).toHaveLength(2);
+    expect(successfulBodies[1]).toEqual(successfulBodies[0]);
     expect(observations).toHaveLength(1);
 
     for (const path of paths) {
@@ -808,6 +858,7 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
     }
   } finally {
     await app.close();
+    await db.destroy();
     if (previousSecret === undefined) {
       delete process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
     } else {
@@ -1191,7 +1242,12 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
     idempotencyKey: "declared-error",
   };
 
-  const contribution = operationGraphqlContribution([module], {})?.graphql?.({});
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  const contribution = operationGraphqlContribution(
+    [module],
+    { db, platform: platform.services },
+  )?.graphql?.({});
   const resolver = contribution?.resolvers?.Mutation?.workflowStartWebhook as
     | ((_parent: unknown, args: { input: unknown }, context: { session: TrustedSessionContext }) => Promise<unknown>)
     | undefined;
@@ -1207,8 +1263,6 @@ test("GraphQL and MCP project declared handler results as transport errors", asy
     extensions: { code: "CONFLICT", status: 409, body },
   });
 
-  const db = testDatabase();
-  const platform = new ModulePlatformRuntime(db);
   const server = __buildGeneratedMcpServerForTests({
     db,
     session,
@@ -1409,6 +1463,51 @@ test("MCP projects and dispatches live runtime provider Operations canonically",
   } finally {
     await client.close();
     await server.close();
+    await db.destroy();
+  }
+});
+
+test("runtime provider keyed Operations replay through the same durable core boundary", async () => {
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  const definition: RuntimeOperationDefinition = {
+    id: "example.keyed.invoke:one",
+    intent: "invoke",
+    key: "keyed-example",
+    name: "Keyed example",
+    description: "Writes once.",
+    input: { kind: "json-schema", schema: { type: "object" } },
+    output: { kind: "json-schema", schema: { type: "object" } },
+    effects: { data: "write", external: "none" },
+    reliability: { idempotency: { mode: "keyed" } },
+  };
+  let calls = 0;
+  platform.registerOperationProviders([{
+    name: "example",
+    operationProviders: [{
+      id: "example.keyed",
+      list: async () => [definition],
+      get: async (_active, id) => id === definition.id ? definition : undefined,
+      execute: async () => ({ data: { call: ++calls }, operations: [] }),
+    }],
+  }]);
+  try {
+    await platform.withActiveOperationSession(session, async (active) => {
+      const request = {
+        operation: { id: definition.id, intent: definition.intent },
+        input: { value: "same" },
+        idempotencyKey: "provider-key",
+      };
+      const first = await platform.services.operations.execute(active, request);
+      const replay = await platform.services.operations.execute(active, request);
+      expect(replay).toEqual(first);
+      expect(calls).toBe(1);
+      expect(await platform.services.operations.execute(active, {
+        ...request,
+        input: { value: "changed" },
+      })).toMatchObject({ error: { code: "IDEMPOTENCY_KEY_REUSED", retryable: false } });
+    });
+  } finally {
     await db.destroy();
   }
 });

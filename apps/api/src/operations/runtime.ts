@@ -3,6 +3,7 @@ import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { GraphQLError } from "graphql";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { Transaction } from "kysely";
 import rawCatalog from "../generated/operations/catalog.json" with { type: "json" };
 import {
   resolveSessionContext,
@@ -54,6 +55,9 @@ import { normalizeTimestampToken } from "../db/timestamps.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import { issueOperationPrerequisiteReceipt } from "./prerequisite-receipts.js";
 import { sessionOperationRolesAllow } from "./session-authorization.js";
+import { operationContractFingerprint } from "./contract-fingerprint.js";
+import { executeKeyedOperation } from "./execution-receipts.js";
+import type { DB } from "../generated/db/types.js";
 
 export type OperationContract = {
   key: string;
@@ -192,6 +196,43 @@ export function listOperationContracts(): readonly OperationContract[] {
   return catalog.operations;
 }
 
+function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
+  const method = entry.operation.transports.rest.method;
+  return {
+    id: entry.operation.key,
+    key: entry.operation.key,
+    intent: "invoke",
+    name: entry.operation.title,
+    description: entry.operation.description,
+    ...(entry.operation.target ? { target: entry.operation.target } : {}),
+    input: { kind: "json-schema", schema: entry.operation.inputSchema },
+    output: { kind: "json-schema", schema: entry.operation.outputSchema },
+    effects: {
+      data: entry.operation.effects?.data ?? (method === "GET"
+        ? "read"
+        : method === "DELETE"
+          ? "delete"
+          : "write"),
+      external: entry.operation.effects?.external ?? (method === "GET" ? "read" : "write"),
+    },
+    reliability: {
+      idempotency: {
+        mode: entry.operation.idempotency.mode === "intrinsic"
+          ? "natural"
+          : entry.operation.idempotency.mode === "idempotency-key"
+            ? "keyed"
+            : "none",
+      },
+    },
+    ...(entry.operation.concurrency
+      ? { concurrency: entry.operation.concurrency }
+      : {}),
+    interaction: {
+      confirmation: entry.operation.confirmation ?? { mode: "none" },
+    },
+  };
+}
+
 function runtimeOperationError(error: unknown) {
   const projected = error instanceof DeclaredOperationError
     ? error.body
@@ -227,40 +268,7 @@ export function runtimeStaticOperationRegistrations(
 ): readonly ModuleStaticOperationRegistration[] {
   const bound = bindOperationHandlers(modules, operations);
   return [...bound.values()].map((entry) => {
-    const method = entry.operation.transports.rest.method;
-    const definition: RuntimeOperationDefinition = {
-      id: entry.operation.key,
-      key: entry.operation.key,
-      intent: "invoke",
-      name: entry.operation.title,
-      description: entry.operation.description,
-      ...(entry.operation.target ? { target: entry.operation.target } : {}),
-      input: { kind: "json-schema", schema: entry.operation.inputSchema },
-      output: { kind: "json-schema", schema: entry.operation.outputSchema },
-      effects: {
-        data: entry.operation.effects?.data ?? (method === "GET"
-          ? "read"
-          : method === "DELETE"
-            ? "delete"
-            : "write"),
-        external: entry.operation.effects?.external ?? (method === "GET" ? "read" : "write"),
-      },
-      reliability: {
-        idempotency: {
-          mode: entry.operation.idempotency.mode === "intrinsic"
-            ? "natural"
-            : entry.operation.idempotency.mode === "idempotency-key"
-              ? "keyed"
-              : "none",
-        },
-      },
-      ...(entry.operation.concurrency
-        ? { concurrency: entry.operation.concurrency }
-        : {}),
-      interaction: {
-        confirmation: entry.operation.confirmation ?? { mode: "none" },
-      },
-    };
+    const definition = runtimeDefinition(entry);
     return {
       definition,
       available: (session) => {
@@ -439,6 +447,44 @@ function targetTable(operation: OperationContract): GeneratedCrudTable {
     });
   }
   return table;
+}
+
+async function assertCurrentRecordPermission(
+  operation: OperationContract,
+  input: Readonly<Record<string, unknown>>,
+  context: Parameters<ModuleOperationHandler>[1],
+  trx: Transaction<DB>,
+): Promise<void> {
+  const recordPermission = operation.auth.mode === "session"
+    ? operation.auth.recordPermission
+    : undefined;
+  if (!recordPermission) return;
+  if (!operation.target || operation.target.scope !== "record" ||
+    !operation.target.inputField || !context.session || !context.db) {
+    throw operationFailure({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "The protected Operation contract is incomplete.",
+    });
+  }
+  const targetValue = input[operation.target.inputField];
+  if (typeof targetValue !== "string" || targetValue.trim() === "") {
+    throw operationFailure({
+      code: "VALIDATION",
+      message: "The Operation target is not valid.",
+      violations: [{
+        field: operation.target.inputField,
+        code: "REQUIRED",
+        message: `${operation.target.inputField} must be a non-empty string.`,
+      }],
+    });
+  }
+  await assertRecordPermissionInTransaction(
+    trx,
+    context.session,
+    targetTable(operation),
+    targetValue,
+    recordPermission,
+  );
 }
 
 function protectedCustomOperation(
@@ -697,6 +743,44 @@ function isCanonicalSuccessEnvelope(value: unknown): value is OperationEnvelope<
       && ["title", "description", "mimeType"].every((field) => resource[field] === undefined || typeof resource[field] === "string")));
 }
 
+function decodedOperationSuccess(
+  operation: OperationContract,
+  validation: OperationValidators,
+  value: unknown,
+): ModuleOperationSuccessResult {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !isJsonValue(value) ||
+    !Object.hasOwn(value, "value")) {
+    throw new Error("Stored Operation receipt is not a canonical success result.");
+  }
+  const result = value as ModuleOperationSuccessResult;
+  if (result.ok !== undefined && result.ok !== true) {
+    throw new Error("Stored Operation receipt has an invalid success discriminant.");
+  }
+  if (result.resultKind !== undefined &&
+    (result.resultKind !== "operation-envelope" || !isCanonicalSuccessEnvelope(result.value))) {
+    throw new Error("Stored Operation receipt has an invalid canonical envelope.");
+  }
+  const declaredStatus = operation.transports.rest.response.status ?? 200;
+  if (result.status !== undefined && result.status !== declaredStatus) {
+    throw new Error("Stored Operation receipt has an invalid response status.");
+  }
+  if (operation.transports.rest.response.kind !== "json" || !validation.output(result.value)) {
+    throw new Error("Stored Operation receipt has an invalid canonical output.");
+  }
+  if (result.mcp !== undefined && !isMcpProjection(result.mcp)) {
+    throw new Error("Stored Operation receipt has an invalid MCP projection.");
+  }
+  if (result.headers !== undefined && Object.entries(result.headers).some(
+    ([name, header]) => name === "" || typeof header !== "string",
+  )) {
+    throw new Error("Stored Operation receipt has invalid response headers.");
+  }
+  if (result.contentType !== undefined && typeof result.contentType !== "string") {
+    throw new Error("Stored Operation receipt has an invalid content type.");
+  }
+  return result;
+}
+
 export async function invokeOperation(
   bound: Bound,
   inputValue: unknown,
@@ -821,38 +905,97 @@ export async function invokeOperation(
       }
       return result;
     };
-    const result = await invokeCustomOperationWithControls(
-      bound,
-      input,
-      activeContext,
-      invokeHandler,
-    );
-    const prerequisiteTargets = getEntityOperationContracts().filter((operation) =>
-      operation.prerequisites?.some((prerequisite) =>
-        prerequisite.operation === bound.operation.key
-      )
-    );
-    if (prerequisiteTargets.length > 0) {
-      if (!activeContext.db || !activeContext.session) {
-        throw operationFailure({
-          code: "PREREQUISITE_RECEIPT_UNAVAILABLE",
-          message: "This prerequisite requires a verified interactive login session.",
-          detail: "Sign in with a user account and complete the prerequisite again.",
-          retryable: false,
-        });
+    const execute = async (markEffectsAdmitted: () => void) => {
+      const result = await invokeCustomOperationWithControls(
+        bound,
+        input,
+        activeContext,
+        (handlerInput) => {
+          markEffectsAdmitted();
+          return invokeHandler(handlerInput);
+        },
+      );
+      const prerequisiteTargets = getEntityOperationContracts().filter((operation) =>
+        operation.prerequisites?.some((prerequisite) =>
+          prerequisite.operation === bound.operation.key
+        )
+      );
+      if (prerequisiteTargets.length > 0) {
+        if (!activeContext.db || !activeContext.session) {
+          throw operationFailure({
+            code: "PREREQUISITE_RECEIPT_UNAVAILABLE",
+            message: "This prerequisite requires a verified interactive login session.",
+            detail: "Sign in with a user account and complete the prerequisite again.",
+            retryable: false,
+          });
+        }
+        for (const target of prerequisiteTargets) {
+          await issueOperationPrerequisiteReceipt(
+            activeContext.db,
+            activeContext.session,
+            {
+              sourceOperationId: bound.operation.key,
+              targetOperationId: target.id,
+            },
+          );
+        }
       }
-      for (const target of prerequisiteTargets) {
-        await issueOperationPrerequisiteReceipt(
-          activeContext.db,
-          activeContext.session,
-          {
-            sourceOperationId: bound.operation.key,
-            targetOperationId: target.id,
-          },
-        );
-      }
+      return result;
+    };
+
+    if (bound.operation.idempotency.mode !== "idempotency-key") {
+      return execute(() => undefined);
     }
-    return result;
+    if (!activeContext.db || !activeContext.platform || !activeContext.session) {
+      // A direct unhosted invocation remains useful for pure contract tests,
+      // but no registered adapter may claim durable keyed execution without
+      // the core database/platform boundary.
+      if (activeContext.transport !== "operation" && !activeContext.request && !activeContext.reply) {
+        return execute(() => undefined);
+      }
+      throw operationFailure({
+        code: "IDEMPOTENCY_RECEIPT_UNAVAILABLE",
+        message: "The Operation cannot persist its required idempotency receipt.",
+        retryable: true,
+      });
+    }
+    if (bound.operation.transports.rest.response.kind !== "json") {
+      throw operationFailure({
+        code: "IDEMPOTENCY_RECEIPT_UNAVAILABLE",
+        message: "Keyed Operations require a replayable JSON result.",
+        retryable: false,
+      });
+    }
+    const field = bound.operation.idempotency.inputField!;
+    return executeKeyedOperation(activeContext.db, activeContext.session, {
+      operation: { id: bound.operation.key, intent: "invoke" },
+      idempotencyKey: typeof input[field] === "string" ? input[field] : "",
+      input,
+      idempotencyInputField: field,
+      platformControlFields: [
+        ...(bound.operation.concurrency?.version ? ["expectedVersion"] : []),
+        ...(bound.operation.concurrency?.editLease ? ["leaseToken"] : []),
+        ...(bound.operation.confirmation?.mode === "acknowledgement" ? ["confirmed"] : []),
+        ...(bound.operation.confirmation?.mode === "challenge"
+          ? ["confirmationToken", "confirmationAnswer"]
+          : []),
+      ],
+      contractFingerprint: operationContractFingerprint(runtimeDefinition(bound)),
+      externalWrite: runtimeDefinition(bound).effects.external === "write",
+      // Record ACL is current authorization, not a one-shot mutation control.
+      // Re-evaluate it in the same transaction that selects a replay;
+      // version, lease and confirmation remain inside execute() and are
+      // deliberately skipped for a completed receipt.
+      authorizeReplay: (trx) => assertCurrentRecordPermission(
+        bound.operation,
+        input,
+        activeContext,
+        trx,
+      ),
+      execute,
+      encode: (result) => result,
+      decode: (stored) => decodedOperationSuccess(bound.operation, validation, stored),
+    });
   };
 
   return withModuleOperationSession(
@@ -1328,6 +1471,13 @@ export function operationGraphqlContribution(
     const target = operation.transports.graphql.kind === "query" ? resolvers.Query : resolvers.Mutation;
     target[operation.transports.graphql.field!] = async (_parent: unknown, args: { input: unknown }, context: GraphqlContext) => {
       try {
+        if (operation.idempotency.mode === "idempotency-key" && (!runtime.db || !runtime.platform)) {
+          throw operationFailure({
+            code: "IDEMPOTENCY_RECEIPT_UNAVAILABLE",
+            message: "The Operation cannot persist its required idempotency receipt.",
+            retryable: true,
+          });
+        }
         return (await invokeOperation(bound.get(operation.key)!, args.input, {
           ...runtime,
           transport: "graphql",

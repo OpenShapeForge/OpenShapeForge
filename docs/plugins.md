@@ -103,6 +103,17 @@ response unless the operation explicitly declares the
 For `idempotency-key` operations, the canonical input field is required on all
 transports. REST clients supply it only through the declared required header;
 the runtime injects that header into canonical input before validation.
+Core then binds the key to the verified tenant and actor, the canonical
+Operation contract, and normalized authored input. Completed JSON results are
+replayed before one-shot version, lease, or confirmation controls are consumed
+again; current session and record authorization is still checked on every
+call. A concurrent call receives `OPERATION_IN_PROGRESS`, while reusing the
+same key for different authored input receives `IDEMPOTENCY_KEY_REUSED`.
+Database-only effects and their receipt share one transaction. An external
+write first persists a running receipt; if its outcome is lost, core returns
+`OPERATION_OUTCOME_UNKNOWN` and never repeats the effect automatically.
+Schema, authorization, version, lease, and confirmation refusals that happen
+before authored effects leave no receipt, so corrected input may reuse the key.
 
 ## The compiler half
 

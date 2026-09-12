@@ -42,6 +42,8 @@ import { classifyDatabaseError } from "../db/database-refusals.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "./field-schemas.js";
 import { organizationServiceIdentities } from "../auth/organization-service-identities.js";
 import { operationContractFingerprint } from "../operations/contract-fingerprint.js";
+import { executeKeyedOperation } from "../operations/execution-receipts.js";
+import { operationErrorOf } from "@openshapeforge/operations";
 
 function contractPreconditionFailure(
   definition: RuntimeOperationDefinition,
@@ -58,6 +60,24 @@ function contractPreconditionFailure(
       retryable: false,
     },
   };
+}
+
+function storedRuntimeOperationResult(value: unknown): RuntimeOperationExecutionResult {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Stored runtime Operation receipt is not an object.");
+  }
+  const candidate = value as RuntimeOperationExecutionResult;
+  if ("error" in candidate) {
+    if (!candidate.error || typeof candidate.error.code !== "string" ||
+      typeof candidate.error.message !== "string" || typeof candidate.error.retryable !== "boolean") {
+      throw new Error("Stored runtime Operation receipt has an invalid error.");
+    }
+    return candidate;
+  }
+  if (!Object.hasOwn(candidate, "data") || !Array.isArray(candidate.operations)) {
+    throw new Error("Stored runtime Operation receipt has an invalid success envelope.");
+  }
+  return candidate;
 }
 
 /**
@@ -676,7 +696,7 @@ export class ModulePlatformRuntime {
         },
       };
     }
-    return this.#operationCallStack.run(
+    const execute = () => this.#operationCallStack.run(
       [...stack, request.operation.id],
       () => match.provider.execute({
         session,
@@ -706,6 +726,35 @@ export class ModulePlatformRuntime {
           ),
       }, request),
     );
+    if (match.definition.reliability.idempotency.mode !== "keyed") return execute();
+    if (!request.idempotencyKey) {
+      return {
+        error: {
+          code: "IDEMPOTENCY_KEY_REQUIRED",
+          message: "This Operation requires an idempotency key.",
+          retryable: false,
+        },
+      };
+    }
+    try {
+      return await executeKeyedOperation(this.#db, session, {
+        operation: request.operation,
+        idempotencyKey: request.idempotencyKey,
+        input: request.input ?? {},
+        contractFingerprint: operationContractFingerprint(match.definition),
+        externalWrite: match.definition.effects.external === "write",
+        execute: async (markEffectsAdmitted) => {
+          markEffectsAdmitted();
+          return execute();
+        },
+        encode: (result) => result,
+        decode: storedRuntimeOperationResult,
+      });
+    } catch (error) {
+      const operationError = operationErrorOf(error);
+      if (operationError) return { error: operationError };
+      throw error;
+    }
   }
 
   registerHostOperationExecutor(executor: ModuleHostOperationExecutor): void {

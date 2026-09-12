@@ -36,6 +36,9 @@
  *      DDL, same reasoning); references erp.relations, so it must run after
  *      the generated step like 4c/4d
  *      (db/migrations/organization-relation-link.ts).
+ *   4f. Operation execution receipts — runtime-owned, actor-scoped durable
+ *      idempotency ledger. It references platform.tenants, so it also runs
+ *      after generated schema and before the app grant sweep.
  *   5. app role grants        — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically,
  *      re-apply the `app` schema USAGE/EXECUTE grants that step 0 had to skip
@@ -65,6 +68,7 @@ import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitat
 import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
 import { applyOnboardingMigration } from "./migrations/onboarding.js";
 import { applyUpdateNoticesMigration } from "./migrations/update-notices.js";
+import { applyOperationExecutionReceiptsMigration } from "./migrations/operation-execution-receipts.js";
 import {
   applyVersionedMigrations,
   type VersionedMigration,
@@ -149,6 +153,7 @@ export async function runMigrationChain(
   await applyOrganizationRelationLinkMigration(db);
   await applyOnboardingMigration(db);
   await applyUpdateNoticesMigration(db);
+  await applyOperationExecutionReceiptsMigration(db);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
   // The worker role's grants are enumerated from the manifest rather than

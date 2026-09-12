@@ -146,6 +146,8 @@ export type OperationOffer<TIntent extends string = string> =
       available: true;
       binding?: OperationTargetBinding;
       interaction?: OperationInteraction;
+      /** Canonical controls and lease timing for this currently available Operation. */
+      concurrency?: OperationConcurrency;
     }
   | {
       operation: OperationReference<TIntent>;

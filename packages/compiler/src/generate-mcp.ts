@@ -196,6 +196,30 @@ function canonicalOutputDefinitions(): JsonObject {
         data: { type: "object", additionalProperties: true },
       },
     },
+    OperationConcurrency: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        version: {
+          type: "object",
+          additionalProperties: false,
+          required: ["mode", "field"],
+          properties: {
+            mode: { const: "required" },
+            field: { const: "updatedAt" },
+          },
+        },
+        editLease: {
+          type: "object",
+          additionalProperties: false,
+          required: ["mode", "expiresAfterInactivity"],
+          properties: {
+            mode: { const: "required" },
+            expiresAfterInactivity: { type: "string" },
+          },
+        },
+      },
+    },
     OperationOffer: {
       oneOf: [
         {
@@ -205,6 +229,7 @@ function canonicalOutputDefinitions(): JsonObject {
           properties: {
             operation: { $ref: "#/$defs/OperationReference" },
             available: { const: true },
+            concurrency: { $ref: "#/$defs/OperationConcurrency" },
           },
         },
         {

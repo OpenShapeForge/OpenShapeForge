@@ -63,7 +63,13 @@ function contextFor(contract: CompiledEntityContract, preferred: string): Compil
 function operation(
   source: CompiledEntityOperation | undefined,
 ): WebOperationRef | undefined {
-  return source ? { id: source.id, intent: source.intent } : undefined;
+  return source
+    ? {
+        id: source.id,
+        intent: source.intent,
+        ...(source.concurrency ? { concurrency: source.concurrency } : {}),
+      }
+    : undefined;
 }
 
 function kebab(value: string): string {

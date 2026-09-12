@@ -443,6 +443,17 @@ describe("rich generated REST OpenAPI", () => {
     ]);
     expect(schemas.OperationOffer!.oneOf).toHaveLength(2);
     expect(
+      (schemas.OperationOffer!.oneOf as Array<{ properties: Record<string, unknown> }>)[0]!
+        .properties.concurrency,
+    ).toEqual({ $ref: "#/components/schemas/OperationConcurrency" });
+    expect(schemas.OperationConcurrency).toMatchObject({
+      properties: {
+        editLease: {
+          properties: { expiresAfterInactivity: { type: "string" } },
+        },
+      },
+    });
+    expect(
       generated.paths["/api/rest/v1/relations/{id}"]?.delete?.responses,
     ).toHaveProperty("200");
     expect(

@@ -230,6 +230,7 @@ describe("buildMcpCatalog", () => {
         OperationReference: expect.any(Object),
         OperationOffer: expect.any(Object),
         OperationError: expect.any(Object),
+        OperationConcurrency: expect.any(Object),
       });
       expect((tool.outputSchema!.oneOf as Record<string, unknown>[])[1]).toMatchObject({
         required: ["error"],
@@ -248,8 +249,12 @@ describe("buildMcpCatalog", () => {
     };
     const offers = [
       {
-        operation: { id: "Widget.get", intent: "get" },
+        operation: { id: "Widget.update", intent: "update" },
         available: true,
+        concurrency: {
+          version: { mode: "required", field: "updatedAt" },
+          editLease: { mode: "required", expiresAfterInactivity: "PT2M" },
+        },
       },
     ];
     const successes: Record<string, unknown> = {

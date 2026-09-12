@@ -542,10 +542,26 @@ export const generatedEntityTypeDefs = /* GraphQL */ `
     choices: [EntityOperationInteractionChoice!]
   }
 
+  type EntityOperationVersionConcurrency {
+    mode: String!
+    field: String!
+  }
+
+  type EntityOperationEditLeaseConcurrency {
+    mode: String!
+    expiresAfterInactivity: String!
+  }
+
+  type EntityOperationConcurrency {
+    version: EntityOperationVersionConcurrency
+    editLease: EntityOperationEditLeaseConcurrency
+  }
+
   type EntityOperationOffer {
     operation: EntityOperationReference!
     available: Boolean!
     interaction: EntityOperationInteraction
+    concurrency: EntityOperationConcurrency
     error: EntityOperationError
   }
 

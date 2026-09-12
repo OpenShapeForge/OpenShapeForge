@@ -8,7 +8,10 @@ import type {
 export type LocalizedText = { en: string; nl: string };
 
 export type WebOperationIntent = "list" | "get" | "create" | "update" | "delete";
-export type WebOperationRef = OperationReference<WebOperationIntent>;
+export type WebOperationRef = OperationReference<WebOperationIntent> & {
+  /** Canonical server-enforced controls; browsers derive lease timing from this value. */
+  concurrency?: OperationConcurrency;
+};
 export type WebCustomOperationRef = OperationReference<"invoke"> & {
   /** Authored key inside the entity Operations map. */
   key: string;

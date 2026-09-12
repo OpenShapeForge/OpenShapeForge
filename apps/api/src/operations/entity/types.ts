@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type {
+  OperationConcurrency,
   OperationEnvelope,
   OperationError,
   OperationOffer,
@@ -132,10 +133,7 @@ export type EntityOperationContract = EntityOperationRef & {
     action: GeneratedCrudOperation;
     roles: string[];
   };
-  concurrency?: {
-    version?: { mode: "required"; field: string };
-    editLease?: { mode: "required"; expiresAfterInactivity: string };
-  };
+  concurrency?: OperationConcurrency;
   effects: {
     data: "read" | "write" | "delete";
     external: "none" | "read" | "write";

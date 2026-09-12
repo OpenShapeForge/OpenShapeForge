@@ -138,6 +138,34 @@ describe("strict-v2 outcome entities", () => {
     expect(milestone.fields.description?.supports.update).toBe(true);
   });
 
+  test("projects a non-default authored lease timeout into every Web operation reference", () => {
+    const source = loadEntity(authoringDir, "quote");
+    const update = source.coreEntity?.operations?.update;
+    if (!update?.concurrency?.editLease) throw new Error("Quote.update must declare an edit lease");
+    update.concurrency.editLease.expiresAfterInactivity = "PT2M";
+    const quote = buildWebManifest([{
+      slug: "quote",
+      contract: compile(source),
+    }]).entities.Quote!;
+
+    expect(quote.operations.update).toMatchObject({
+      id: "Quote.update",
+      concurrency: {
+        version: { mode: "required", field: "updatedAt" },
+        editLease: { mode: "required", expiresAfterInactivity: "PT2M" },
+      },
+    });
+    expect(quote.views.record?.operations.update).toEqual(
+      expect.objectContaining({
+        id: "Quote.update",
+        concurrency: expect.objectContaining({
+          editLease: { mode: "required", expiresAfterInactivity: "PT2M" },
+        }),
+      }),
+    );
+    expect(quote.operations.get).not.toHaveProperty("concurrency");
+  });
+
   test("carries a collection-scoped YAML Operation into the collection action list", () => {
     const artifacts = loadEntity(authoringDir, "quote");
     artifacts.coreEntity.operations!.compose = {

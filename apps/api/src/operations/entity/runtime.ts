@@ -2,6 +2,7 @@
 import {
   operationFailure,
   operationErrorOf,
+  type OperationConcurrency,
   type OperationError,
 } from "@openshapeforge/operations";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
@@ -65,10 +66,7 @@ const operationCatalog = rawOperationCatalog as unknown as {
       | { mode: "public" }
       | { mode: "session"; roles: string[]; scopes?: string[] }
       | { mode: "custom" };
-    concurrency?: {
-      version?: { mode: "required"; field: string };
-      editLease?: { mode: "required"; expiresAfterInactivity: string };
-    };
+    concurrency?: OperationConcurrency;
     confirmation?: import("@openshapeforge/operations").OperationConfirmation;
     transports: {
       rest: { method: string; path: string };
@@ -527,7 +525,11 @@ export function getEntityOperationOffers(
       const reference = { id: operation.id, intent: operation.intent };
       return error
         ? { operation: reference, available: false as const, error }
-        : { operation: reference, available: true as const };
+        : {
+            operation: reference,
+            available: true as const,
+            ...(operation.concurrency ? { concurrency: operation.concurrency } : {}),
+          };
     });
   const scope = target ? "record" : "collection";
   const customOffers: EntityOperationOffer[] = pluginOperations
@@ -545,6 +547,7 @@ export function getEntityOperationOffers(
       return {
         operation: reference,
         available: true as const,
+        ...(operation.concurrency ? { concurrency: operation.concurrency } : {}),
         ...(target && operation.target?.inputField
           ? {
               binding: {

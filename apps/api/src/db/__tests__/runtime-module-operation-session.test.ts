@@ -139,7 +139,7 @@ describe("canonical operation database sessions", () => {
           effects: { data: "write", external: "none" },
           concurrency: {
             version: { mode: "required", field: "updatedAt" },
-            editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+            editLease: { mode: "required", expiresAfterInactivity: "PT2M" },
           },
           confirmation: { mode: "acknowledgement" },
           transports: {
@@ -217,6 +217,10 @@ describe("canonical operation database sessions", () => {
           table,
           targetId: relationId,
         });
+        expect((await sql<{ inactivity_timeout_seconds: number }>`
+          select inactivity_timeout_seconds from platform.entity_edit_leases
+          where operation_id = ${operation.key}
+        `.execute(admin)).rows[0]?.inactivity_timeout_seconds).toBe(120);
         const execute = () => withModuleOperationSession(
           platform.services,
           verifiedSession,

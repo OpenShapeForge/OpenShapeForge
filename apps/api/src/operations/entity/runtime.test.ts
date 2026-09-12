@@ -84,7 +84,7 @@ describe("entity operation runtime", () => {
       const versionOnly = {
         ...operation,
         concurrency: {
-          version: { mode: "required" as const, field: "updatedAt" },
+          version: { mode: "required" as const, field: "updatedAt" as const },
         },
       };
       const guard = mutationConcurrencyGuard(versionOnly, { expectedVersion });
@@ -273,8 +273,32 @@ describe("entity operation runtime", () => {
         "Relation",
         { roles: [readRole] },
         ["get", "update", "delete"],
-      ).map((offer) => offer.operation.id),
+    ).map((offer) => offer.operation.id),
     ).toEqual(["Relation.get"]);
+  });
+
+  test("projects canonical lease timing into available write offers only", () => {
+    const contracts = getEntityOperationContracts().filter(
+      (operation) => operation.entityName === "Relation",
+    );
+    const read = contracts.find(({ intent }) => intent === "get")!;
+    const update = contracts.find(({ intent }) => intent === "update")!;
+    const offers = getEntityOperationOffers(
+      "Relation",
+      { roles: [read.authorization.roles[0]!, update.authorization.roles[0]!] },
+      ["get", "update"],
+    );
+
+    expect(offers.find(({ operation }) => operation.id === "Relation.update"))
+      .toMatchObject({
+        available: true,
+        concurrency: {
+          version: { mode: "required", field: "updatedAt" },
+          editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+        },
+      });
+    expect(offers.find(({ operation }) => operation.id === "Relation.get"))
+      .not.toHaveProperty("concurrency");
   });
 
   test("keeps an authorized temporary refusal visible with retryAt", () => {

@@ -648,6 +648,7 @@ export function renderOpenApiSpec(
                 properties: {
                   operation: { $ref: "#/components/schemas/OperationReference" },
                   available: { const: true },
+                  concurrency: { $ref: "#/components/schemas/OperationConcurrency" },
                 },
               },
               {
@@ -661,6 +662,30 @@ export function renderOpenApiSpec(
                 },
               },
             ],
+          },
+          OperationConcurrency: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              version: {
+                type: "object",
+                additionalProperties: false,
+                required: ["mode", "field"],
+                properties: {
+                  mode: { const: "required" },
+                  field: { const: "updatedAt" },
+                },
+              },
+              editLease: {
+                type: "object",
+                additionalProperties: false,
+                required: ["mode", "expiresAfterInactivity"],
+                properties: {
+                  mode: { const: "required" },
+                  expiresAfterInactivity: { type: "string" },
+                },
+              },
+            },
           },
           OperationFailure: {
             type: "object",

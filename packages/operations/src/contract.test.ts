@@ -72,6 +72,19 @@ test("concurrency declares version and edit-lease requirements without interface
   });
 });
 
+test("an available offer carries the same canonical lease timing", () => {
+  const offer = {
+    operation: { id: "Relation.update", intent: "update" },
+    available: true,
+    concurrency: {
+      version: { mode: "required", field: "updatedAt" },
+      editLease: { mode: "required", expiresAfterInactivity: "PT2M" },
+    },
+  } satisfies OperationOffer<"update">;
+
+  expect(offer.concurrency.editLease.expiresAfterInactivity).toBe("PT2M");
+});
+
 test("validation and temporary refusals use one canonical failure contract", () => {
   const result: OperationResult<never> = {
     error: {

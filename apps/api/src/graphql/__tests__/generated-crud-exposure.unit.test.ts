@@ -43,6 +43,8 @@ describe("generated GraphQL CRUD exposure", () => {
     expect(generatedEntityTypeDefs).toContain("interaction: EntityOperationInteraction");
     expect(generatedEntityTypeDefs).toContain("offerId: String!");
     expect(generatedEntityTypeDefs).toContain("bindTo: EntityOperationInteractionBinding!");
+    expect(generatedEntityTypeDefs).toContain("concurrency: EntityOperationConcurrency");
+    expect(generatedEntityTypeDefs).toContain("expiresAfterInactivity: String!");
   });
   test("partial policies are visible to current runtimes and hidden from legacy ones", () => {
     const table = withOperations({

@@ -47,6 +47,7 @@
         "@openshapeforge/auth": "workspace:*",
         "@openshapeforge/observability": "workspace:*",
         "@openshapeforge/operations": "workspace:*",
+        "@openshapeforge/plugin-runtime": "workspace:*",
         "ajv": "^8.20.0",
         "ajv-formats": "^3.0.1",
         "fastify": "^5.8.2",
@@ -168,7 +169,7 @@
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",
-      "version": "0.1.6",
+      "version": "0.1.7",
       "bin": {
         "openshapeforge-compiler": "./src/index.ts",
       },
@@ -229,6 +230,18 @@
     "packages/operations": {
       "name": "@openshapeforge/operations",
       "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.3.5",
+        "typescript": "^5.9.0",
+      },
+    },
+    "packages/plugin-runtime": {
+      "name": "@openshapeforge/plugin-runtime",
+      "version": "0.1.0",
+      "dependencies": {
+        "fastify": "^5.8.2",
+        "kysely": "^0.29.4",
+      },
       "devDependencies": {
         "@types/bun": "^1.3.5",
         "typescript": "^5.9.0",
@@ -485,6 +498,8 @@
     "@openshapeforge/observability": ["@openshapeforge/observability@workspace:packages/observability"],
 
     "@openshapeforge/operations": ["@openshapeforge/operations@workspace:packages/operations"],
+
+    "@openshapeforge/plugin-runtime": ["@openshapeforge/plugin-runtime@workspace:packages/plugin-runtime"],
 
     "@openshapeforge/ui": ["@openshapeforge/ui@workspace:packages/ui"],
 

@@ -19,12 +19,13 @@ authorization:
     read:
       - Relations.All.Read
       - Relations.All.ReadWrite
+      - Relations.All.Delete
     create:
       - Relations.All.ReadWrite
     update:
       - Relations.All.ReadWrite
     delete:
-      - Relations.All.ReadWrite
+      - Relations.All.Delete
   rowAccess:
     enabled: true
     empty: public
@@ -382,17 +383,10 @@ operations:
         singleUse: true
 
 interfaces:
-  rest:
-    operations:
-      list: {}
-      get: {}
-      create: {}
-      update: {}
-      delete: {}
+  rest: {}
+  graphql: {}
   mcp:
     operations:
-      list: {}
-      get: {}
       create:
         instructions:
           en: Ask for missing required fields before invoking this tool.
@@ -411,12 +405,6 @@ interfaces:
       description: Read the relations available to the signed-in identity.
       templateDescription: Read one relation by its canonical id.
   web:
-    operations:
-      list: {}
-      get: {}
-      create: {}
-      update: {}
-      delete: {}
     views:
       collection:
         route: { en: /relations, nl: /relaties }

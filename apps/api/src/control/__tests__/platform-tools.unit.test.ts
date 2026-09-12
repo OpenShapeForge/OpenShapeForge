@@ -127,6 +127,9 @@ describe("argument validation happens before any elevation", () => {
     expect(errorOf(await callPlatformTool("get_catalog_entry", { kind: "widget", key: "x" }, untouchable)).code).toBe(
       "CONTROL_INVALID_INPUT",
     );
+    expect(errorOf(await callPlatformTool("get_catalog_entry", { kind: "provider", key: "x" }, untouchable)).code).toBe(
+      "CONTROL_INVALID_INPUT",
+    );
     expect(errorOf(await callPlatformTool("get_catalog_entry", { kind: "service", key: "Record Finding" }, untouchable)).message).toContain(
       "kebab-case",
     );

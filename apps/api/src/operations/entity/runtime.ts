@@ -39,6 +39,7 @@ import type {
   GeneratedCrudExposureOperation,
   GeneratedCrudTable,
 } from "./types.js";
+import { fieldNameForColumn } from "./columns.js";
 
 const COLLECTION_OFFER_INTENTS: readonly GeneratedCrudExposureOperation[] = [
   "list",
@@ -52,8 +53,31 @@ const RECORD_OFFER_INTENTS: readonly GeneratedCrudExposureOperation[] = [
 
 const operationCatalog = rawOperationCatalog as unknown as {
   entityOperations?: EntityOperationContract[];
+  operations?: Array<{
+    key: string;
+    target?: {
+      entityId: string;
+      entityName: string;
+      scope: "collection" | "record";
+      inputField?: string;
+    };
+    auth:
+      | { mode: "public" }
+      | { mode: "session"; roles: string[]; scopes?: string[] }
+      | { mode: "custom" };
+    concurrency?: {
+      version?: { mode: "required"; field: string };
+      editLease?: { mode: "required"; expiresAfterInactivity: string };
+    };
+    confirmation?: import("@openshapeforge/operations").OperationConfirmation;
+    transports: {
+      rest: { method: string; path: string };
+      mcp: { enabled: boolean };
+    };
+  }>;
 };
 const entityOperations = operationCatalog.entityOperations ?? [];
+const pluginOperations = operationCatalog.operations ?? [];
 const entityOperationsById = new Map(
   entityOperations.map((operation) => [operation.id, operation]),
 );
@@ -65,11 +89,18 @@ async function leaseUnavailabilityByTarget(
   table: GeneratedCrudTable,
   targetIds: readonly string[],
 ): Promise<ReadonlyMap<string, Readonly<Record<string, OperationError>>>> {
-  const protectedOperations = entityOperations.filter(
-    (operation) =>
-      operation.entityName === entityName &&
-      operation.concurrency?.editLease?.mode === "required",
-  );
+  const protectedOperations = [
+    ...entityOperations.filter(
+      (operation) =>
+        operation.entityName === entityName &&
+        operation.concurrency?.editLease?.mode === "required",
+    ),
+    ...pluginOperations.filter((operation) =>
+      operation.target?.entityName === entityName &&
+      operation.target.scope === "record" &&
+      operation.concurrency?.editLease?.mode === "required"
+    ).map((operation) => ({ id: operation.key, entityId: operation.target!.entityId })),
+  ];
   if (protectedOperations.length === 0) return new Map();
   const byTarget = await editLeaseErrorsByTarget(db, session, {
     entityId: protectedOperations[0]!.entityId,
@@ -177,6 +208,32 @@ export function requireCreateOperationConfirmation(
     });
   }
   requireOperationAcknowledgement(operation, input);
+}
+
+/**
+ * A secure-input target is server-owned. The ordinary canonical create path
+ * cannot accept it from REST, GraphQL, Web or a runtime module; an interaction
+ * adapter must collect, validate and store it through the dedicated core path.
+ */
+export function secureInputInteractionError(
+  operation: EntityOperationContract,
+): OperationError | undefined {
+  const secureInput = operation.interaction.secureInput;
+  if (!secureInput) return undefined;
+  return {
+    code: "INTERACTION_REQUIRED",
+    message: `Secure input is required before ${operation.entityName}.${operation.intent} can run.`,
+    ...(secureInput.message ? { detail: secureInput.message } : {}),
+    retryable: false,
+    data: {
+      interaction: {
+        kind: "secureInput",
+        sourceField: secureInput.sourceField,
+        sourceEntity: secureInput.sourceEntity,
+        definitionsField: secureInput.definitionsField,
+      },
+    },
+  };
 }
 
 type PreparedMutationConfirmation =
@@ -336,7 +393,7 @@ export function restEditLeaseOperationIdsForSession(
   session: Pick<DbSessionInput, "roles">,
 ): string[] {
   const heldRoles = new Set(session.roles ?? []);
-  return entityOperations
+  const generatedIds = entityOperations
     .filter((operation) => {
       if (
         (operation.intent !== "update" && operation.intent !== "delete") ||
@@ -353,6 +410,28 @@ export function restEditLeaseOperationIdsForSession(
         table.source.rest?.operations[operation.intent] === true;
     })
     .map(({ id }) => id);
+  return [
+    ...generatedIds,
+    ...pluginEditLeaseOperationIdsForSession(session, "rest"),
+  ];
+}
+
+/** Lease-protected YAML plugin Operations available on one interface. */
+export function pluginEditLeaseOperationIdsForSession(
+  session: Pick<DbSessionInput, "roles">,
+  transport: "rest" | "mcp",
+): string[] {
+  const heldRoles = new Set(session.roles ?? []);
+  return pluginOperations
+    .filter((operation) =>
+      operation.target?.scope === "record" &&
+      operation.concurrency?.version?.mode === "required" &&
+      operation.concurrency.editLease?.mode === "required" &&
+      operation.auth.mode === "session" &&
+      operation.auth.roles.some((role) => heldRoles.has(role)) &&
+      (transport === "rest" || operation.transports.mcp.enabled)
+    )
+    .map(({ key }) => key);
 }
 
 export function entityOperationContract(operationId: string): EntityOperationContract {
@@ -372,6 +451,42 @@ export async function acquireEditLeaseForEntityOperation(
   session: DbSessionInput,
   input: { operationId: string; targetId: string },
 ): Promise<EntityEditLease> {
+  const custom = pluginOperations.find((operation) => operation.key === input.operationId);
+  if (custom) {
+    const heldRoles = new Set(session.roles ?? []);
+    if (
+      custom.target?.scope !== "record" ||
+      custom.auth.mode !== "session" ||
+      !custom.auth.roles.some((role) => heldRoles.has(role)) ||
+      !custom.concurrency?.version ||
+      !custom.concurrency.editLease
+    ) {
+      throw generatedCrudError(
+        `Entity operation ${custom.key} cannot acquire an edit lease.`,
+        "LEASE_NOT_SUPPORTED",
+      );
+    }
+    const table = getGeneratedCrudTables().find((candidate) =>
+      candidate.source?.authoringEntityName === custom.target!.entityName
+    );
+    if (!table) {
+      throw generatedCrudError(
+        `Entity operation ${custom.key} has no generated target table.`,
+        "INTERNAL_SERVER_ERROR",
+      );
+    }
+    return acquireEntityEditLease(db, session, {
+      operation: {
+        id: custom.key,
+        entityId: custom.target.entityId,
+        entityName: custom.target.entityName,
+        intent: "invoke",
+        concurrency: custom.concurrency,
+      },
+      table,
+      targetId: input.targetId,
+    });
+  }
   const operation = entityOperationContract(input.operationId);
   if (operation.intent !== "update" && operation.intent !== "delete") {
     throw generatedCrudError(
@@ -397,9 +512,10 @@ export function getEntityOperationOffers(
   session: Pick<DbSessionInput, "roles">,
   intents: readonly GeneratedCrudExposureOperation[],
   unavailable: Readonly<Record<string, OperationError | undefined>> = {},
+  target?: { id: string; version?: string },
 ): EntityOperationOffer[] {
   const heldRoles = new Set(session.roles ?? []);
-  return entityOperations
+  const generatedOffers = entityOperations
     .filter(
       (operation) =>
         operation.entityName === entityName &&
@@ -413,6 +529,51 @@ export function getEntityOperationOffers(
         ? { operation: reference, available: false as const, error }
         : { operation: reference, available: true as const };
     });
+  const scope = target ? "record" : "collection";
+  const customOffers: EntityOperationOffer[] = pluginOperations
+    .filter((operation) =>
+      operation.target?.entityName === entityName &&
+      operation.target.scope === scope &&
+      (operation.auth.mode === "public" ||
+        (operation.auth.mode === "session" &&
+          operation.auth.roles.some((role) => heldRoles.has(role))))
+    )
+    .map((operation) => {
+      const error = unavailable[operation.key];
+      const reference = { id: operation.key, intent: "invoke" as const };
+      if (error) return { operation: reference, available: false as const, error };
+      return {
+        operation: reference,
+        available: true as const,
+        ...(target && operation.target?.inputField
+          ? {
+              binding: {
+                target: {
+                  entityId: operation.target.entityId,
+                  id: target.id,
+                  ...(target.version ? { version: target.version } : {}),
+                },
+                input: { [operation.target.inputField]: target.id },
+              },
+            }
+          : {}),
+      };
+    });
+  return [...generatedOffers, ...customOffers];
+}
+
+function offerTarget(
+  row: Readonly<Record<string, unknown>>,
+  table: GeneratedCrudTable,
+): { id: string; version?: string } {
+  const primaryColumn = table.columns.find(({ name }) => name === table.primaryKey);
+  const idKey = primaryColumn ? fieldNameForColumn(primaryColumn) : table.primaryKey!;
+  const id = String(row[idKey] ?? "");
+  const version = row.updatedAt;
+  return {
+    id,
+    ...(typeof version === "string" && version ? { version } : {}),
+  };
 }
 
 function internalOperationError(): OperationError {
@@ -447,7 +608,8 @@ export async function executeEntityOperation(
           table: table.name,
           ...request.input,
         });
-        const targetIds = connection.rows.map((row) => String(row[table.primaryKey!] ?? ""));
+        const targets = connection.rows.map((row) => offerTarget(row, table));
+        const targetIds = targets.map(({ id }) => id);
         const unavailableByTarget = await leaseUnavailabilityByTarget(
           db,
           session,
@@ -458,13 +620,14 @@ export async function executeEntityOperation(
         return {
           intent: "list",
           data: {
-            items: connection.rows.map((row) => ({
+            items: connection.rows.map((row, index) => ({
               data: row,
               operations: getEntityOperationOffers(
                 entityName,
                 session,
                 projectedOfferIntents(request, RECORD_OFFER_INTENTS),
-                unavailableByTarget.get(String(row[table.primaryKey!] ?? "")) ?? {},
+                unavailableByTarget.get(targets[index]!.id) ?? {},
+                targets[index],
               ),
             })),
             totalCount: connection.totalCount,
@@ -488,7 +651,7 @@ export async function executeEntityOperation(
               session,
               entityName,
               table,
-              [String(data[table.primaryKey!] ?? "")],
+              [offerTarget(data, table).id],
             )
           : new Map();
         return {
@@ -499,7 +662,8 @@ export async function executeEntityOperation(
                 entityName,
                 session,
                 projectedOfferIntents(request, RECORD_OFFER_INTENTS),
-                unavailableByTarget.get(String(data[table.primaryKey!] ?? "")) ?? {},
+                unavailableByTarget.get(offerTarget(data, table).id) ?? {},
+                offerTarget(data, table),
               )
             : [],
         };
@@ -507,6 +671,8 @@ export async function executeEntityOperation(
       case "create": {
         const operation = entityOperationContract(request.operation.id);
         requireCreateOperationConfirmation(operation, request.input);
+        const interactionError = secureInputInteractionError(operation);
+        if (interactionError) return { intent: "create", error: interactionError };
         const data = await createGeneratedEntity(db, session, {
           table: table.name,
           values: requireValues(request.input),
@@ -518,6 +684,8 @@ export async function executeEntityOperation(
             entityName,
             session,
             projectedOfferIntents(request, RECORD_OFFER_INTENTS),
+            {},
+            offerTarget(data, table),
           ),
         };
       }
@@ -559,6 +727,8 @@ export async function executeEntityOperation(
                 entityName,
                 session,
                 projectedOfferIntents(request, RECORD_OFFER_INTENTS),
+                {},
+                offerTarget(data, table),
               )
             : [],
         };

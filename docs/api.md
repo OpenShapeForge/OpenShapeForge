@@ -40,6 +40,20 @@ SQL. Per entity `Thing` it can emit:
 - Mutations `createThing(input)`, `updateThing(input)` (input carries `id`),
   `deleteThing(id): Boolean!`.
 
+Those direct return shapes remain the legacy v1 contract. A strict-v2 entity
+declaring `interfaces.graphql` projects its canonical Operations instead:
+queries and mutations return the same `{ data, operations }` or `{ error }`
+result boundary as REST, MCP and Web. Record results therefore carry the
+currently available, identity-specific Operation offers. Version, edit-lease,
+acknowledgement and confirmation-challenge values use the same canonical
+control names in generated GraphQL inputs. The resolver dispatches through
+`executeEntityOperation`; GraphQL does not implement a parallel write path.
+
+For every strict-v2 interface, presence means “project every canonical
+Operation declared by this entity.” Its optional `operations` map contains
+only interface-specific instructions or `false` exclusions; there is no
+`operations: all` authoring value.
+
 Engine semantics (`src/graphql/generated-crud.ts`):
 
 - **Filters** — for every field the filter input has `field` and `fieldIn`.
@@ -126,9 +140,12 @@ REST-specific semantics:
 ## The generated MCP surface
 
 A third transport over the same CRUD core, for language models and agents.
-Entities opt in with an `mcp:` block; the compiler emits a tool catalog whose
-JSON Schemas are built from the authored field definitions (validation bounds,
+Entities opt in with an `mcp:` block (strict-v2:
+`interfaces.mcp`); the compiler emits a tool catalog whose JSON
+Schemas are built from the authored field definitions (validation bounds,
 enumerations, labels), and `POST /api/mcp` serves it over Streamable HTTP.
+Strict-v2 may set `interfaces.mcp.tools` to `generic` to use the five shared
+`osf_*` CRUD tools; omission keeps the dedicated per-operation default.
 
 It differs from REST in two ways that matter for authorization: `tools/list` is
 resolved per session, so a caller is never shown a tool it lacks the roles for,
@@ -530,10 +547,10 @@ token's `azp` claim to a comma-separated allowlist of OAuth client IDs. When
 the variable is configured, a missing or unlisted `azp` is rejected while
 issuer and audience checks remain in force; when it is absent, existing bearer
 behavior is unchanged. A configured empty value admits no client.
-Claims used: `tid` (tenant UUID — the dev realm sets it as a user attribute
+Claims used: `tid` (tenant UUID — the test fixture sets it as a user attribute
 mapped to the `tid` claim), `sub` (user id), `realm_access.roles` **unioned
-with every `resource_access.<client>.roles` list** (Keycloak expands realm
-composites like `directie` into per-client entity roles under
+with every `resource_access.<client>.roles` list** (Keycloak expands realm and
+audience-client composites into per-client entity roles under
 `resource_access`, so realm roles alone would never match the entity role
 lists), and `groups` (requires the group-membership protocol mapper).
 
@@ -782,10 +799,10 @@ generate` before first compose up. `--import-realm` imports every file in the
 import directory, and the compose file mounts one bind per realm.
 
 `keycloak/openshapeforge-realm.json` (realm `openshapeforge`) is the **tenant**
-realm. Dev users (password `test`) carry a `tid` tenant attribute:
-`acme-directie`, `acme-vastgoedbeheerder`, `acme-wijkbeheerder`,
-`acme-verhuurconsulent`, `acme-noaccess` (tenant `11111111-…`), and
-`beta-verhuurconsulent` (tenant `33333333-…`). The interactive client is
+realm. The repository's test-only authoring layer adds neutral identities
+(password `test`) with a `tid` tenant attribute: `tenant-a-admin`,
+`tenant-a-user`, `tenant-a-no-access` (tenant `11111111-…`) and
+`tenant-b-user` (tenant `33333333-…`). The interactive client is
 `openshapeforge-gateway` (secret `dev-secret`) — the e2e suite uses it for the
 password-grant bearer test.
 

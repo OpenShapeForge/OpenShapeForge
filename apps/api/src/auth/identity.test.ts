@@ -205,27 +205,27 @@ describe("resolveSessionContext bearer fail-closed", () => {
 
 describe("mergeIdentityRoles (bearer effective roles)", () => {
   test("merges realm roles with every resource_access client's roles, deduplicated and sorted", () => {
-    // Mirrors a dev-realm token: `directie` is the realm composite; Keycloak
-    // expands it into entity client roles under resource_access.
+    // Mirrors a dev-realm token: an audience client composite is expanded by
+    // Keycloak into entity client roles under resource_access.
     expect(
       mergeIdentityRoles({
-        roles: ["directie", "default-roles-openshapeforge"],
+        roles: ["default-roles-openshapeforge"],
         clientRoles: {
-          "erp-provider": ["Relations.All.ReadWrite", "Relations.All.Read"],
+          "erp-provider": ["Test.Admin", "Relations.All.ReadWrite", "Relations.All.Read"],
           account: ["manage-account", "Relations.All.Read"],
         },
       }),
     ).toEqual([
       "Relations.All.Read",
       "Relations.All.ReadWrite",
+      "Test.Admin",
       "default-roles-openshapeforge",
-      "directie",
       "manage-account",
     ]);
   });
 
   test("returns realm roles unchanged when the token carries no client roles", () => {
-    expect(mergeIdentityRoles({ roles: ["directie"] })).toEqual(["directie"]);
+    expect(mergeIdentityRoles({ roles: ["realm-reader"] })).toEqual(["realm-reader"]);
     expect(mergeIdentityRoles({ roles: [], clientRoles: {} })).toEqual([]);
   });
 });

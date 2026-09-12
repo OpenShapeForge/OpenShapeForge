@@ -336,7 +336,8 @@ function listParameters(
   table: TableDefinition,
   fieldsByKey: Map<string, CompiledField>,
 ): JsonObject[] {
-  const elicitedOutputField = table.source?.mcp?.elicitOnCreate?.into;
+  const elicitedOutputField = table.source?.secureInputOnCreate?.into ??
+    table.source?.mcp?.elicitOnCreate?.into;
   const sortableFields = table.columns
     .filter(
       (column) =>
@@ -896,7 +897,8 @@ export function renderOpenApiSpec(
     );
     const label = entityLabel(contract, name);
     const description = entityDescription(contract);
-    const elicitedOutputField = table.source?.mcp?.elicitOnCreate?.into;
+    const elicitedOutputField = table.source?.secureInputOnCreate?.into ??
+      table.source?.mcp?.elicitOnCreate?.into;
     tags.push({ name, ...(description ? { description } : {}) });
 
     const read = columnProperties(

@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 2
 kind: coreEntity
 module: core
 entity: ContactDetail
@@ -12,8 +12,6 @@ labels:
   nl: Contactgegeven
 domains:
   - relations
-rest: true
-mcp: true
 authorization:
   roles:
     read:
@@ -59,11 +57,9 @@ fields:
     persisted:
       column: type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CONTACTDETAILTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: CONTACTDETAILTYPE
   - key: value
     valueType: string
     required: true
@@ -79,9 +75,6 @@ fields:
     persisted:
       column: value
       storageClass: core
-    render:
-      component: Input
-      props: {}
   - key: detailType
     valueType: string
     required: false
@@ -172,9 +165,6 @@ fields:
     persisted:
       column: verified_at
       storageClass: core
-    render:
-      component: DateTimePicker
-      props: {}
   - key: consentStatus
     valueType: string
     required: false
@@ -192,11 +182,6 @@ fields:
     persisted:
       column: consent_status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: CONTACTDETAILCONSENTSTATUS
-        clearable: true
   - key: validFrom
     valueType: date
     required: false
@@ -209,9 +194,6 @@ fields:
     persisted:
       column: valid_from
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: validUntil
     valueType: date
     required: false
@@ -224,9 +206,6 @@ fields:
     persisted:
       column: valid_until
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
 relationships:
   - key: relation
     kind: belongsTo
@@ -242,114 +221,137 @@ relationships:
     label:
       en: Relation role
       nl: Relatierol
-ui:
-  routes:
-    list:
-      en: /contact-details
-      nl: /contactgegevens
-    detail:
-      en: /contact-details/:id
-      nl: /contactgegevens/:id
-    create:
-      en: /contact-details/create
-      nl: /contactgegevens/aanmaken
-    edit:
-      en: /contact-details/:id/edit
-      nl: /contactgegevens/:id/bewerken
-    delete:
-      en: /contact-details/:id/delete
-      nl: /contactgegevens/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Contact Details
-        nl: Contactgegevens
-      columns:
-        - key: type
-          sortable: true
-        - key: detailType
-          sortable: true
-        - key: value
-          sortable: true
-        - key: isPrimary
-          sortable: true
-      defaultSort:
-        key: type
-        direction: asc
-      rowLink:
-        en: /contact-details/:id
-        nl: /contactgegevens/:id
-    detail:
-      header:
+operations:
+  list:
+    name: { en: List contact details, nl: Contactgegevens tonen }
+    description:
+      en: Returns a filtered and sorted page of contact details.
+      nl: Geeft een gefilterde en gesorteerde pagina met contactgegevens terug.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  get:
+    name: { en: Get contact detail, nl: Contactgegeven ophalen }
+    description:
+      en: Returns one contact detail by its canonical id.
+      nl: Geeft een contactgegeven terug op basis van het canonieke id.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  create:
+    name: { en: Create contact detail, nl: Contactgegeven aanmaken }
+    description:
+      en: Creates one contact detail after validating its canonical fields.
+      nl: Maakt een contactgegeven aan na validatie van de canonieke velden.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    confirmation: { mode: none }
+  update:
+    name: { en: Update contact detail, nl: Contactgegeven wijzigen }
+    description:
+      en: Updates one contact detail while holding its server-issued edit lease and current version.
+      nl: Wijzigt een contactgegeven met de server-uitgegeven bewerkingslease en actuele versie.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+    confirmation: { mode: none }
+  delete:
+    name: { en: Delete contact detail, nl: Contactgegeven verwijderen }
+    description:
+      en: Permanently deletes one contact detail after a server-issued, version-bound confirmation challenge.
+      nl: Verwijdert een contactgegeven definitief na een door de server uitgegeven, versiegebonden bevestigingsvraag.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+    confirmation:
+      mode: challenge
+      challenge:
+        kind: type-current-field
+        field: value
+        issuedBy: server
+        bindTo: [subject, tenant, operation, target.id, target.version]
+        expiresAfter: PT5M
+        singleUse: true
+
+interfaces:
+  rest:
+    operations:
+      list: {}
+      get: {}
+      create: {}
+      update: {}
+      delete: {}
+  mcp:
+    operations:
+      list: {}
+      get: {}
+      create: {}
+      update:
+        instructions:
+          en: Acquire an edit lease first and submit its token with the version returned by get.
+          nl: Vraag eerst een bewerkingslease aan en stuur het token mee met de versie uit get.
+      delete:
+        instructions:
+          en: Acquire an edit lease first; request the confirmation challenge and answer it with the exact current contact value.
+          nl: Vraag eerst een bewerkingslease en bevestigingsvraag aan en beantwoord die met exact de actuele contactwaarde.
+    resource:
+      uri: app://contact-details
+      name: Contact details
+      description: Read the contact details available to the signed-in identity.
+      templateDescription: Read one contact detail by its canonical id.
+  web:
+    operations:
+      list: {}
+      get: {}
+      create: {}
+      update: {}
+      delete: {}
+    views:
+      collection:
+        route: { en: /contact-details, nl: /contactgegevens }
+        title: { en: Contact details, nl: Contactgegevens }
+        columns:
+          - { key: type, sortable: true }
+          - { key: detailType, sortable: true }
+          - { key: value, sortable: true }
+          - { key: isPrimary, sortable: true }
+        defaultSort: { key: type, direction: asc }
+      record:
+        routes:
+          read: { en: /contact-details/:id, nl: /contactgegevens/:id }
+          create: { en: /contact-details/new, nl: /contactgegevens/nieuw }
         title: "{{type}}: {{value}}"
         subtitle: "{{status}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Contact information
-                nl: Contactinformatie
-              fields:
-                - type
-                - detailType
-                - value
-                - status
-                - confidentiality
-                - isPrimary
-                - preferenceRank
-                - isReachable
-                - consentStatus
-                - validFrom
-                - validUntil
-                - verifiedAt
-    form:
-      variants:
-        create:
-          title:
-            en: Create contact detail
-            nl: Contactgegeven aanmaken
-          groups:
-            - title:
-                en: Contact information
-                nl: Contactinformatie
-              fields:
-                - type
-                - detailType
-                - value
-                - status
-                - confidentiality
-                - isPrimary
-                - preferenceRank
-                - isReachable
-                - consentStatus
-                - verifiedAt
-        edit:
-          extends: create
-          title:
-            en: Edit contact detail
-            nl: Contactgegeven bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions: [update, delete]
+        layout:
+          tabs:
+            - id: overview
+              label: { en: Overview, nl: Overzicht }
+              groups:
+                - title: { en: Contact information, nl: Contactinformatie }
+                  fields: [type, detailType, value, status, confidentiality, isPrimary, preferenceRank, isReachable, consentStatus, validFrom, validUntil, verifiedAt]
+        modes:
+          create:
+            title: { en: Create contact detail, nl: Contactgegeven aanmaken }
+            groups:
+              - title: { en: Contact information, nl: Contactinformatie }
+                fields: [relationId, type, detailType, value, status, confidentiality, isPrimary, preferenceRank, isReachable, consentStatus, validFrom, validUntil, verifiedAt]
+          update:
+            title: { en: Update contact detail, nl: Contactgegeven wijzigen }
+            groups:
+              - title: { en: Contact information, nl: Contactinformatie }
+                fields: [type, detailType, value, status, confidentiality, isPrimary, preferenceRank, isReachable, consentStatus, validFrom, validUntil, verifiedAt]

@@ -40,6 +40,7 @@ function context(webPresent: boolean): PluginGenerateContext {
     webPresent,
     manifest: { tables: [] } as unknown as PlatformSchemaManifest,
     entities: [],
+    operationCatalog: { version: 1, operations: [] },
   };
 }
 

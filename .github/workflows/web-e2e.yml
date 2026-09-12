@@ -214,7 +214,7 @@ jobs:
           done
           echo "::error::the web app never became ready"; cat /tmp/web.log; exit 1
 
-      # E2E_USER_PASSWORD_ACME_DIRECTIE is deliberately not set: the suite falls
+      # E2E_USER_PASSWORD_TENANT_A_ADMIN is deliberately not set: the suite falls
       # back to the committed dev-realm literal exactly as the API's e2e harness
       # does, and this realm is the one `bun run generate` just produced.
       - name: Run the browser suite

@@ -36,6 +36,12 @@ import {
   OperationFailure,
   type OperationError,
 } from "@openshapeforge/operations";
+import type {
+  RuntimeDeclarativeServiceRequest,
+  RuntimeHostOperationRequest,
+  RuntimeOperationExecutionResult,
+  RuntimeOperationExecutionOptions,
+} from "@openshapeforge/plugin-runtime";
 import { sql, type Transaction } from "kysely";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -524,6 +530,7 @@ type CatalogDiscoveryTool = {
   description: string;
   entity: string;
   table: string;
+  compatibility?: { plugin: string; operation: string };
 };
 
 type CatalogTestTool = {
@@ -531,6 +538,7 @@ type CatalogTestTool = {
   description: string;
   entity: string;
   table: string;
+  compatibility?: { plugin: string; operation: string };
 };
 
 type Catalog = {
@@ -560,6 +568,14 @@ type Catalog = {
   discoveryTools?: CatalogDiscoveryTool[];
   testTools?: CatalogTestTool[];
   guideTools?: CatalogGuideTool[];
+  executionCompatibility?: Array<{
+    plugin: string;
+    operation: string;
+    toolName: string;
+    auth:
+      | { mode: "public" }
+      | { mode: "session"; roles: string[]; scopes?: string[] };
+  }>;
 };
 const catalog = rawCatalog as unknown as Catalog;
 
@@ -856,10 +872,21 @@ function resourcesForSession(
 
 const catalogDerivedTools: DerivedToolsCatalogEntry[] =
   catalog.derivedTools ?? [];
+const projectedDerivedTools = catalogDerivedTools.filter(
+  (entry) => !entry.compatibility,
+);
 const catalogDiscoveryTools: CatalogDiscoveryTool[] =
   catalog.discoveryTools ?? [];
 const catalogTestTools: CatalogTestTool[] = catalog.testTools ?? [];
 const catalogGuideTools: CatalogGuideTool[] = catalog.guideTools ?? [];
+
+const compatibilityOperations = catalog.executionCompatibility ?? [];
+const compatibilityOperationByKey = new Map(
+  compatibilityOperations.map((entry) => [entry.operation, entry]),
+);
+const compatibilityToolNames = new Set(
+  compatibilityOperations.map((entry) => entry.toolName),
+);
 
 function coreOwnsStaticToolName(name: string): boolean {
   return [
@@ -894,6 +921,7 @@ function discoveryToolsForSession(
   tables: Map<string, GeneratedTable>,
 ): CatalogDiscoveryTool[] {
   return catalogDiscoveryTools.filter((tool) =>
+    !tool.compatibility &&
     sessionMayInvoke(tables.get(tool.table), "get", session),
   );
 }
@@ -904,6 +932,7 @@ function testToolsForSession(
   tables: Map<string, GeneratedTable>,
 ): CatalogTestTool[] {
   return catalogTestTools.filter((tool) =>
+    !tool.compatibility &&
     sessionMayInvoke(tables.get(tool.table), "get", session),
   );
 }
@@ -944,6 +973,7 @@ async function derivedToolsForSession(
   const reserved = new Set(catalog.tools.map((tool) => tool.name));
   const tools: DerivedTool[] = [];
   for (const entry of catalogDerivedTools) {
+    if (entry.compatibility) continue;
     if (!sessionInAudience(entry, session.roles)) continue;
     const table = tables.get(entry.table);
     if (!table) continue;
@@ -2066,6 +2096,25 @@ type ToolResult = {
   _meta?: Record<string, unknown>;
 };
 
+type RuntimeDeclarativeServiceExecutor = (
+  request: RuntimeDeclarativeServiceRequest,
+  requestId: string | number,
+  assertInvocationActive?: () => void,
+  signal?: AbortSignal,
+) => Promise<RuntimeOperationExecutionResult>;
+
+type RuntimeHostOperationExecutor = (
+  request: RuntimeHostOperationRequest,
+  requestId: string | number,
+  assertInvocationActive?: () => void,
+  signal?: AbortSignal,
+) => Promise<RuntimeOperationExecutionResult>;
+
+const runtimeDeclarativeServiceExecutors =
+  new WeakMap<Server, RuntimeDeclarativeServiceExecutor>();
+const runtimeHostOperationExecutors =
+  new WeakMap<Server, RuntimeHostOperationExecutor>();
+
 /**
  * A success carries its payload as `structuredContent` too when it is a
  * plain object: a Service that aggregates several query bindings reads the
@@ -2372,6 +2421,71 @@ function failed(error: unknown, canonical = true): ToolResult {
     ],
     structuredContent: body,
     isError: true,
+  };
+}
+
+function runtimeOperationResult(
+  result: {
+    content: CallToolResult["content"];
+    structuredContent?: Record<string, unknown> | undefined;
+    isError?: boolean | undefined;
+  },
+): RuntimeOperationExecutionResult {
+  const structured = result.structuredContent;
+  if (result.isError) {
+    const candidate = structured?.error as Record<string, unknown> | undefined;
+    return {
+      error: {
+        code: typeof candidate?.code === "string" ? candidate.code : "OPERATION_FAILED",
+        message: typeof candidate?.message === "string"
+          ? candidate.message
+          : "The declarative Service failed.",
+        ...(typeof candidate?.detail === "string"
+          ? { detail: candidate.detail }
+          : {}),
+        retryable: candidate?.retryable === true,
+        ...(typeof candidate?.retryAt === "string"
+          ? { retryAt: candidate.retryAt }
+          : {}),
+      },
+    };
+  }
+  if (
+    structured &&
+    Object.hasOwn(structured, "data") &&
+    Array.isArray(structured.operations)
+  ) {
+    const resources = result.content.flatMap((block) =>
+      block.type === "resource_link"
+        ? [{
+            uri: block.uri,
+            name: block.name,
+            ...(block.title ? { title: block.title } : {}),
+            ...(block.description ? { description: block.description } : {}),
+            ...(block.mimeType ? { mimeType: block.mimeType } : {}),
+          }]
+        : []
+    );
+    return {
+      ...(structured as RuntimeOperationExecutionResult),
+      ...(resources.length > 0 ? { resources } : {}),
+    };
+  }
+  const resources = result.content.flatMap((block) =>
+    block.type === "resource_link"
+      ? [{
+          uri: block.uri,
+          name: block.name,
+          ...(block.title ? { title: block.title } : {}),
+          ...(block.description ? { description: block.description } : {}),
+          ...(block.mimeType ? { mimeType: block.mimeType } : {}),
+        }]
+      : []
+  );
+  return {
+    data: structured ?? { content: result.content },
+    operations: [],
+    ...(resources.length > 0 ? { resources } : {}),
   };
 }
 
@@ -2842,6 +2956,13 @@ async function invokeTool(
             ["get", "update", "delete"].filter((intent) =>
               offerIntents.includes(intent as McpOperation),
             ) as McpOperation[],
+            {},
+            {
+              id: String(data.id ?? ""),
+              ...(typeof data.updatedAt === "string"
+                ? { version: data.updatedAt }
+                : {}),
+            },
           ),
         });
       }
@@ -2992,13 +3113,15 @@ function buildServer(
    * session has no person to name.
    */
   opening: string | null = null,
+  /** Core-internal: reuse an already live Operation capability verbatim. */
+  moduleSessionOverride?: TrustedSessionContext,
 ): Server {
   const runtimeModules = modules ?? [];
   // Resolved once, here: the server's `instructions` are written at build time
   // and every authored label this session projects is read through the same
   // answer, so a second resolution could only disagree with the first.
   const locale = sessionLocale(session);
-  const moduleSession = createModuleSessionCapability(session);
+  const moduleSession = moduleSessionOverride ?? createModuleSessionCapability(session);
   const hasDynamicModuleTools = hasDynamicModuleToolProjection(runtimeModules);
   const hasDynamicModuleResources = runtimeModules.some(
     (module) =>
@@ -3011,7 +3134,7 @@ function buildServer(
       // listChanged is advertised only when the tool list can actually change
       // mid-session — i.e. when stored rows project as tools.
       tools:
-        catalogDerivedTools.length > 0 || hasDynamicModuleTools
+        projectedDerivedTools.length > 0 || hasDynamicModuleTools
           ? { listChanged: true }
           : {},
       resources: hasDynamicModuleResources ? { listChanged: true } : {},
@@ -3025,7 +3148,7 @@ function buildServer(
     // knows; without a public origin it says that, instead of failing.
     instructions: buildServerInstructions({
       opening,
-      hasConnectors: catalogDerivedTools.some((entry) => entry.connect),
+      hasConnectors: projectedDerivedTools.some((entry) => entry.connect),
       oauthCallbackUrl: oauthCallbackUrlForInstructions(),
       guidesBeforeCreate: catalogGuideTools
         .filter((guide) => guide.requireBeforeCreate)
@@ -3035,20 +3158,23 @@ function buildServer(
     }),
   });
   const tables = tableOverride ?? tablesByName();
-  const projectedEntityOperationIds = toolsForSession(session, tables)
-    .map(({ tool }) => tool.operationId)
-    .filter((operationId): operationId is string => Boolean(operationId));
-  const editLeaseOperationIds = editLeaseOperationIdsForSession(
-    session,
-    projectedEntityOperationIds,
-  );
-  const allowedEditLeaseOperationIds = new Set(editLeaseOperationIds);
   // The same rule REST boot applies (roles/api.ts): with no operation module
   // in the process there are no operation tools, rather than a 500 on every
   // request because the catalog names a handler nothing loaded.
   const operations = operationModulesConfigured(runtimeModules)
     ? bindOperationHandlers(runtimeModules)
     : new Map();
+  const projectedEntityOperationIds = toolsForSession(session, tables)
+    .map(({ tool }) => tool.operationId)
+    .filter((operationId): operationId is string => Boolean(operationId));
+  const projectedPluginOperationIds = [...operations.values()]
+    .filter(({ operation }) => operation.transports.mcp.enabled)
+    .map(({ operation }) => operation.key);
+  const editLeaseOperationIds = editLeaseOperationIdsForSession(
+    session,
+    [...projectedEntityOperationIds, ...projectedPluginOperationIds],
+  );
+  const allowedEditLeaseOperationIds = new Set(editLeaseOperationIds);
   const sourceVault = new InvocationSourceVault();
 
   const projectionContext = (): McpProjectionContext => {
@@ -3166,9 +3292,9 @@ function buildServer(
 
   const coreOwnsDerivedToolName = async (toolName: string): Promise<boolean> => {
     if (coreOwnsStaticToolName(toolName)) return true;
-    if (!session.tenantId || catalogDerivedTools.length === 0) return false;
+    if (!session.tenantId || projectedDerivedTools.length === 0) return false;
     return withDbSession(db, session, async (trx) => {
-      for (const entry of catalogDerivedTools) {
+      for (const entry of projectedDerivedTools) {
         if ((await snapshotDefinitionsByToolName(trx, entry, toolName)).length > 0) {
           return true;
         }
@@ -3188,12 +3314,12 @@ function buildServer(
         );
       }
     }
-    if (!session.tenantId || catalogDerivedTools.length === 0 || tools.length === 0) {
+    if (!session.tenantId || projectedDerivedTools.length === 0 || tools.length === 0) {
       return;
     }
     await withDbSession(db, session, async (trx) => {
       for (const { tool } of tools) {
-        for (const entry of catalogDerivedTools) {
+        for (const entry of projectedDerivedTools) {
           if (
             (await snapshotDefinitionsByToolName(trx, entry, tool.name)).length >
             0
@@ -3245,6 +3371,43 @@ function buildServer(
       }
       return undefined;
     });
+  };
+
+  /**
+   * Re-read one canonical provider definition through generated internal
+   * compatibility metadata. This deliberately does not project the row as an
+   * MCP tool; the runtime Operation provider owns public listing and lookup.
+   */
+  const compatibilityDefinition = async (
+    request: RuntimeDeclarativeServiceRequest,
+  ): Promise<
+    | { entry: DerivedToolsCatalogEntry; row: Record<string, unknown> }
+    | undefined
+  > => {
+    for (const entry of catalogDerivedTools) {
+      if (
+        !entry.compatibility ||
+        entry.entity !== request.definition.entity ||
+        !sessionInAudience(entry, session.roles)
+      ) continue;
+      const row = await runtimeRowByFilter(db, session, tables, entry.table, {
+        id: request.definition.id,
+      });
+      if (!row) continue;
+      const publiclyAvailable = derivedToolsFromRows(
+        entry,
+        [row],
+        new Set(),
+        session.roles,
+        locale,
+      ).length === 1;
+      if (
+        !publiclyAvailable &&
+        !isAuthorizedInternalDerivedRow(entry, row, session.roles)
+      ) continue;
+      return { entry, row };
+    }
+    return undefined;
   };
 
   const authorizedSources = async (
@@ -3625,7 +3788,7 @@ function buildServer(
     db,
     session,
     tables,
-    derivedEntries: catalogDerivedTools,
+    derivedEntries: projectedDerivedTools,
     projectedTools: () => derivedToolsForSession(db, session, tables, locale),
     guideTools: () => guideToolsForSession(session),
     guidesCalled,
@@ -3656,7 +3819,7 @@ function buildServer(
   // the person's own stored instructions, joined with the platform's notices. ----
   const updateNotices = {
     session,
-    derivedEntries: catalogDerivedTools,
+    derivedEntries: projectedDerivedTools,
     rowsByFilter: (
       table: string,
       filter: Record<string, unknown>,
@@ -3855,7 +4018,7 @@ function buildServer(
       SESSION_INFO_TOOL, // session-info (whoami / osf://session): every authenticated session
       ...crudToolsForSession(session, tables),
       ...editLeaseToolsForOperationIds(editLeaseOperationIds),
-      ...catalogDerivedTools
+      ...projectedDerivedTools
         .filter(
           (entry) => entry.connect && sessionInAudience(entry, session.roles),
         )
@@ -3886,7 +4049,7 @@ function buildServer(
             idempotentHint: true,
           },
         })),
-      ...catalogDerivedTools
+      ...projectedDerivedTools
         .filter(
           (entry) =>
             entry.personalization && sessionInAudience(entry, session.roles),
@@ -3918,7 +4081,7 @@ function buildServer(
             idempotentHint: true,
           },
         })),
-      ...catalogDerivedTools
+      ...projectedDerivedTools
         .filter(
           (entry) =>
             entry.dryRun &&
@@ -4112,6 +4275,9 @@ function buildServer(
     selectedOptions?: ModuleToolExecutionOptions,
     assertParentInvocationActive?: () => void,
     signal?: AbortSignal,
+    bypassInterceptors = false,
+    idempotencyKey?: string,
+    compatibilityCall = false,
   ): Promise<ModuleToolExecutionResult> => {
     signal?.throwIfAborted();
     assertParentInvocationActive?.();
@@ -5901,6 +6067,11 @@ function buildServer(
                   });
                 }
 
+                const stepIdempotencyKey = idempotencyKey
+                  ? createHash("sha256")
+                      .update(`${idempotencyKey}\0${order}\0${operationLabel}`)
+                      .digest("hex")
+                  : undefined;
                 let outputs;
                 try {
                   assertParentInvocationActive?.();
@@ -5940,7 +6111,16 @@ function buildServer(
                           );
                         }
                         requireOperationAuthorization(bound.operation, moduleSession);
-                        const produced = await invokeOperation(bound, inputs, {
+                        const operationInputs =
+                          stepIdempotencyKey &&
+                            bound.operation.idempotency.mode === "idempotency-key"
+                            ? {
+                                ...inputs,
+                                [bound.operation.idempotency.inputField!]:
+                                  stepIdempotencyKey,
+                              }
+                            : inputs;
+                        const produced = await invokeOperation(bound, operationInputs, {
                           db,
                           session: moduleSession,
                           transport: "mcp",
@@ -5987,6 +6167,9 @@ function buildServer(
                       ...(stepEgressSource ? { source: stepEgressSource } : {}),
                     },
                     ...(signal ? { signal } : {}),
+                    ...(stepIdempotencyKey
+                      ? { idempotencyKey: stepIdempotencyKey }
+                      : {}),
                   });
                 } catch (error) {
                   if (error instanceof SecretError && oauthConnectionAudit) {
@@ -6409,7 +6592,16 @@ function buildServer(
         }
       } else {
         signal?.throwIfAborted();
-        current = (await listedTools()).find((entry) => entry.tool.name === name);
+        current = compatibilityCall && compatibilityToolNames.has(name)
+          ? {
+              source: "operation",
+              tool: {
+                name,
+                description: "Internal compatibility implementation.",
+                inputSchema: { type: "object", additionalProperties: true },
+              },
+            }
+          : (await listedTools()).find((entry) => entry.tool.name === name);
         signal?.throwIfAborted();
       }
     } catch (error) {
@@ -6533,18 +6725,19 @@ function buildServer(
       };
     };
     try {
-      const run = () =>
-        interceptMcpToolCall(
-          runtimeModules,
-          {
-            name,
-            source: current.source,
-            arguments: (request.params.arguments ?? {}) as Record<string, unknown>,
-            ctx,
-          },
-          (options = selectedOptions, assertActive) =>
-            invoke(options, assertActive),
-        );
+      const run = () => bypassInterceptors
+        ? invoke(selectedOptions, assertParentInvocationActive)
+        : interceptMcpToolCall(
+            runtimeModules,
+            {
+              name,
+              source: current.source,
+              arguments: (request.params.arguments ?? {}) as Record<string, unknown>,
+              ctx,
+            },
+            (options = selectedOptions, assertActive) =>
+              invoke(options, assertActive),
+          );
       assertParentInvocationActive?.();
       signal?.throwIfAborted();
       return modulePlatform
@@ -6569,6 +6762,100 @@ function buildServer(
     );
     return outcome.result;
   });
+
+  const executeDeclarativeService: RuntimeDeclarativeServiceExecutor = async (
+    request,
+    requestId,
+    assertInvocationActive,
+    signal,
+  ) => {
+    signal?.throwIfAborted();
+    assertInvocationActive?.();
+    const toolName = deriveToolName(request.definition.key);
+    if (!toolName) {
+      return runtimeOperationResult(failed(
+        new HttpError(404, "OPERATION_NOT_FOUND", "The declarative Service is unavailable."),
+      ));
+    }
+    const current = await compatibilityDefinition(request) ??
+      await derivedDefinition(toolName, true);
+    if (!current) {
+      return runtimeOperationResult(failed(
+        new HttpError(404, "OPERATION_NOT_FOUND", "The declarative Service is unavailable."),
+      ));
+    }
+    const definition = definitionFor(current.entry, current.row);
+    if (
+      definition.kind !== request.definition.entity ||
+      definition.id !== request.definition.id ||
+      String(definition.version) !== String(request.definition.version) ||
+      String(current.row[current.entry.keyField] ?? "") !== request.definition.key
+    ) {
+      return runtimeOperationResult(failed(
+        new HttpError(404, "OPERATION_NOT_FOUND", "The declarative Service is unavailable."),
+      ));
+    }
+    const selectedOptions = request.sourceReference
+      ? {
+          sourceReference: request.sourceReference,
+          expectedDefinition: definition,
+        }
+      : undefined;
+    const outcome = await dispatchTool(
+      toolName,
+      request.input ?? {},
+      requestId,
+      true,
+      selectedOptions,
+      assertInvocationActive,
+      signal,
+      true,
+      request.idempotencyKey,
+    );
+    return runtimeOperationResult(outcome.result);
+  };
+  runtimeDeclarativeServiceExecutors.set(server, executeDeclarativeService);
+
+  const executeHostOperation: RuntimeHostOperationExecutor = async (
+    request,
+    requestId,
+    assertInvocationActive,
+    signal,
+  ) => {
+    signal?.throwIfAborted();
+    assertInvocationActive?.();
+    const implementation = compatibilityOperationByKey.get(request.operation);
+    if (!implementation) {
+      return runtimeOperationResult(failed(
+        new HttpError(404, "OPERATION_NOT_FOUND", "The host Operation is unavailable."),
+      ));
+    }
+    const roles = new Set(session.roles);
+    const scopes = new Set(session.oauthScopes ?? []);
+    if (
+      implementation.auth.mode !== "session" ||
+      !implementation.auth.roles.some((role) => roles.has(role)) ||
+      !(implementation.auth.scopes ?? []).every((scope) => scopes.has(scope))
+    ) {
+      return runtimeOperationResult(failed(
+        new HttpError(404, "OPERATION_NOT_FOUND", "The host Operation is unavailable."),
+      ));
+    }
+    const outcome = await dispatchTool(
+      implementation.toolName,
+      request.input ?? {},
+      requestId,
+      true,
+      undefined,
+      assertInvocationActive,
+      signal,
+      true,
+      request.idempotencyKey,
+      true,
+    );
+    return runtimeOperationResult(outcome.result);
+  };
+  runtimeHostOperationExecutors.set(server, executeHostOperation);
 
   modulePlatform?.registerServer({
     server,
@@ -6760,6 +7047,92 @@ function buildServer(
   });
 
   return server;
+}
+
+/**
+ * Host adapter around the one declarative engine. It creates no protocol
+ * transport: the temporary server object only scopes the existing core
+ * catalog/execution closure, while the caller's exact live Operation session
+ * remains the authority for database, OAuth, egress and nested Operations.
+ */
+export function createRuntimeDeclarativeServiceExecutor(input: {
+  db: OpenShapeForgeDatabase;
+  modules: readonly RuntimeModule[];
+  modulePlatform: ModulePlatformRuntime;
+  egressOwner?: RuntimeModule["egress"];
+}): (
+  session: TrustedSessionContext,
+  request: RuntimeDeclarativeServiceRequest,
+  options?: RuntimeOperationExecutionOptions,
+) => Promise<RuntimeOperationExecutionResult> {
+  return async (session, request, options) => {
+    const server = buildServer(
+      input.db,
+      session,
+      input.modules,
+      input.modulePlatform,
+      input.egressOwner,
+      undefined,
+      false,
+      undefined,
+      null,
+      session,
+    );
+    const execute = runtimeDeclarativeServiceExecutors.get(server);
+    if (!execute) {
+      input.modulePlatform.unregisterServer(server);
+      throw new Error("The core declarative Service executor did not initialise.");
+    }
+    try {
+      return await execute(request, randomUUID(), undefined, options?.signal);
+    } finally {
+      input.modulePlatform.unregisterServer(server);
+      runtimeDeclarativeServiceExecutors.delete(server);
+    }
+  };
+}
+
+/**
+ * Executes a generated internal compatibility handler by canonical Operation
+ * key. The temporary Server scopes existing core state only; no MCP transport
+ * or model-visible tool name is created.
+ */
+export function createRuntimeHostOperationExecutor(input: {
+  db: OpenShapeForgeDatabase;
+  modules: readonly RuntimeModule[];
+  modulePlatform: ModulePlatformRuntime;
+  egressOwner?: RuntimeModule["egress"];
+}): (
+  session: TrustedSessionContext,
+  request: RuntimeHostOperationRequest,
+  options?: RuntimeOperationExecutionOptions,
+) => Promise<RuntimeOperationExecutionResult> {
+  return async (session, request, options) => {
+    const server = buildServer(
+      input.db,
+      session,
+      input.modules,
+      input.modulePlatform,
+      input.egressOwner,
+      undefined,
+      false,
+      undefined,
+      null,
+      session,
+    );
+    const execute = runtimeHostOperationExecutors.get(server);
+    if (!execute) {
+      input.modulePlatform.unregisterServer(server);
+      throw new Error("The core host Operation executor did not initialise.");
+    }
+    try {
+      return await execute(request, randomUUID(), undefined, options?.signal);
+    } finally {
+      input.modulePlatform.unregisterServer(server);
+      runtimeHostOperationExecutors.delete(server);
+      runtimeDeclarativeServiceExecutors.delete(server);
+    }
+  };
 }
 
 /** Direct in-memory transport seam for adversarial runtime-module tests. */

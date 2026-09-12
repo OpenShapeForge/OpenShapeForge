@@ -28,9 +28,12 @@ import {
 import { buildModuleRegistry, MODULE_REGISTRY_PATH, renderModuleRegistry } from "./generate-modules.js";
 import { MAX_DEDICATED_TOOLS, renderMcpCatalog, type McpCatalogInput } from "./generate-mcp.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
+import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
 import {
   auditOperationSurfaceCollisions,
   assertOperationRuntimeModules,
+  collectAuthoredEntityPluginOperations,
+  collectAuthoredModulePluginOperations,
   collectEntityOperations,
   collectPluginOperations,
   renderOperationCatalog,
@@ -55,11 +58,26 @@ export type {
   FieldDefinitionVariableMode,
   FieldDefinitionWorkflowInspector,
   FieldV2,
+  CompiledEntityOperation,
   McpDeclarativeAdapterUrls,
   McpDeclarativeOperationUrl,
   McpDeclarativeRequestHeaderMapping,
   McpDeclarativeRequestMapping,
 } from "./authoring/types.js";
+export type {
+  CompilerPlugin,
+  CompiledEntityInfo,
+  EntityOperationCatalog,
+  JsonSchema,
+  JsonValue,
+  PluginBaseContext,
+  PluginGenerateContext,
+  PluginExecutionCompatibility,
+  PluginOperationAuth,
+  PluginOperationContract,
+  PluginOperationError,
+  PluginSchemaMigration,
+} from "./plugins.js";
 export { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
 export type {
   WebCollectionView,
@@ -224,15 +242,45 @@ export async function collectAllArtifacts(
     authoringDir,
     webPresent,
   });
-  const operations = collectPluginOperations(plugins, {
+  const operationContext = {
     repoRoot,
     authoringDir,
     webPresent,
-  });
+  };
+  const moduleOperationCatalogs = loadOperationCatalogs(authoringDir)
+    .map(({ document }) => document);
+  const operations = [
+    ...collectPluginOperations(plugins, operationContext),
+    ...collectAuthoredEntityPluginOperations(entities, operationContext),
+    ...collectAuthoredModulePluginOperations(moduleOperationCatalogs, operationContext),
+  ].sort((left, right) => left.key.localeCompare(right.key));
+  for (let index = 1; index < operations.length; index += 1) {
+    if (operations[index - 1]!.key === operations[index]!.key) {
+      throw new Error(
+        `Duplicate canonical Operation key "${operations[index]!.key}". ` +
+          "Keep its metadata in exactly one YAML or compiler contribution.",
+      );
+    }
+  }
   const entityOperations = collectEntityOperations(entities);
   const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries);
   assertOperationRuntimeModules(operations, moduleRegistry.modules.map((module) => module.name));
   auditOperationSurfaceCollisions(operations, manifest, connectors, MAX_DEDICATED_TOOLS);
+  const operationCatalog = { version: 1 as const, operations: entityOperations };
+  const context = {
+    repoRoot,
+    authoringDir,
+    webPresent,
+    manifest,
+    entities,
+    operationCatalog,
+  };
+  const executionCompatibility = plugins.flatMap((plugin) => {
+    const authored = typeof plugin.executionCompatibility === "function"
+      ? plugin.executionCompatibility(context)
+      : plugin.executionCompatibility;
+    return authored ? [{ plugin: plugin.name, contribution: authored }] : [];
+  });
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, {
       source: activeManifestSource,
@@ -266,6 +314,7 @@ export async function collectAllArtifacts(
           activeManifestSource,
           referentiedata,
           operations,
+          executionCompatibility,
         ),
       },
     ],
@@ -329,7 +378,6 @@ export async function collectAllArtifacts(
     plugins: [],
   };
 
-  const context = { repoRoot, authoringDir, webPresent, manifest, entities };
   for (const plugin of plugins) {
     if (plugin.generate) {
       groups.plugins.push({ name: plugin.name, artifacts: await plugin.generate(context) });

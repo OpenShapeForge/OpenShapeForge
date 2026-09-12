@@ -504,29 +504,105 @@ export interface McpConfig {
  */
 export type EntityOperationAction = CrudOperationKey;
 
+/**
+ * Transport-neutral request for server-issued secure input on an Operation.
+ * The `into` field is server-owned: generated entity inputs must never accept
+ * it directly from a model, browser form, REST body or GraphQL mutation.
+ */
+export type EntityOperationSecureInput = {
+  type: "secureInput";
+  sourceField: string;
+  sourceEntity: string;
+  definitionsField: string;
+  into: string;
+  message?: string;
+};
+
 export interface EntityOperationDefinition {
+  /** Stable canonical id for a plugin Operation; defaults to `<Entity>.<key>`. */
+  id?: string;
   name: string | LocalizedText;
   description: string | LocalizedText;
   guidance?: { assistant?: string | LocalizedText };
-  implementation: {
-    type: "entity";
-    action: EntityOperationAction;
+  implementation:
+    | {
+        type: "entity";
+        action: EntityOperationAction;
+      }
+    | {
+        /** Runtime code only; the YAML remains the canonical contract. */
+        type: "plugin";
+        plugin: string;
+        handler: string;
+      };
+  /** How a record-scoped plugin Operation binds the current record to input. */
+  target?:
+    | { scope: "collection" }
+    | { scope: "record"; inputField: string };
+  input?: { schema: Record<string, unknown> };
+  output?: { schema: Record<string, unknown> };
+  errors?: Array<{
+    status: number;
+    code: string;
+    description: string;
+    schema?: Record<string, unknown>;
+    rest?: { body?: unknown; contentType?: string };
+  }>;
+  auth?:
+    | { mode: "public" }
+    | { mode: "session"; roles: string[]; scopes?: string[] };
+  tenancy?: {
+    mode: "required" | "derived" | "none";
+    description?: string;
   };
   effects: {
     data: "read" | "write" | "delete";
     external: "none" | "read" | "write";
   };
   reliability: {
-    idempotency: { mode: "natural" | "keyed" | "none" };
+    idempotency: {
+      mode: "natural" | "keyed" | "none";
+      /** Required for keyed plugin Operations; populated from Idempotency-Key on REST. */
+      inputField?: string;
+      header?: string;
+    };
   };
   concurrency?: OperationConcurrency;
   confirmation: OperationConfirmation;
+  interaction?: EntityOperationSecureInput;
 }
 
-export interface EntityInterfaceOperationProjection {
+export interface EntityInterfaceOperationProjectionConfig {
   /** MCP-only wording may refine, but never redefine, the operation. */
   instructions?: string | LocalizedText;
 }
+
+export interface EntityRestOperationProjectionConfig
+  extends EntityInterfaceOperationProjectionConfig {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  path?: string;
+  response?: {
+    status?: number;
+    kind: "json" | "binary" | "stream";
+    contentType?: string;
+  };
+}
+
+export interface EntityMcpOperationProjectionConfig
+  extends EntityInterfaceOperationProjectionConfig {
+  name?: string;
+}
+
+export interface EntityGraphqlOperationProjectionConfig
+  extends EntityInterfaceOperationProjectionConfig {
+  kind?: "query" | "mutation";
+  field?: string;
+}
+
+/** `false` is an explicit interface-local exclusion; omission inherits projection. */
+export type EntityInterfaceOperationProjection =
+  | false
+  | EntityInterfaceOperationProjectionConfig;
 
 export interface EntityWebViewDefinition {
   collection: {
@@ -549,16 +625,37 @@ export interface EntityWebViewDefinition {
 }
 
 export interface EntityInterfacesDefinition {
-  rest?: { operations: Record<string, EntityInterfaceOperationProjection> };
-  graphql?: { operations: Record<string, EntityInterfaceOperationProjection> };
+  rest?: {
+    operations?: Record<
+      string,
+      false | EntityRestOperationProjectionConfig
+    >;
+  };
+  graphql?: {
+    operations?: Record<
+      string,
+      false | EntityGraphqlOperationProjectionConfig
+    >;
+  };
   mcp?: {
-    operations: Record<string, EntityInterfaceOperationProjection>;
+    /** Technical tool projection; defaults to one dedicated tool per operation. */
+    tools?: McpToolStyle;
+    operations?: Record<string, false | EntityMcpOperationProjectionConfig>;
     resource?: McpResourceConfig;
   };
   web?: {
-    operations: Record<string, EntityInterfaceOperationProjection>;
+    operations?: Record<string, EntityInterfaceOperationProjection>;
     views: EntityWebViewDefinition;
   };
+}
+
+/** YAML-owned module/global Operations that have no honest entity target. */
+export interface OperationCatalogDefinition {
+  schemaVersion: 1;
+  kind: "operationCatalog";
+  plugin: string;
+  operations: Record<string, EntityOperationDefinition>;
+  interfaces: Omit<EntityInterfacesDefinition, "web">;
 }
 
 export interface CoreEntity {
@@ -808,6 +905,20 @@ export interface AuthorizationRealmRole {
   includes?: string[];
 }
 
+/**
+ * A client role that groups roles from one or more resource clients.
+ *
+ * This is the audience-scoped counterpart of a realm-role composite: hosts can
+ * expose product personas on their own API audience without promoting those
+ * personas to realm-global roles.
+ */
+export interface AuthorizationClientRoleComposite {
+  description?: string;
+  attributes?: Record<string, string[]>;
+  /** Per-client composite role mapping: {clientId: [roleName, ...]}. */
+  composites: Record<string, string[]>;
+}
+
 export interface AuthorizationRealmSettings {
   // Legacy v1 fields (still honored).
   eventsEnabled?: boolean;
@@ -970,6 +1081,7 @@ export interface AuthorizationIdentityProvider {
 export interface AuthorizationGroupNode {
   name: string;
   realmRoles?: string[];
+  clientRoles?: Record<string, string[]>;
   subGroups?: AuthorizationGroupNode[];
 }
 
@@ -1017,6 +1129,15 @@ export interface AuthorizationConfigFile {
 
   /** v2 hand-authored client roles per clientId (merged with entity-derived). */
   clientRoles?: Record<string, string[]>;
+
+  /**
+   * v2 audience-scoped composite roles, keyed first by owning clientId and then
+   * by role name. Their grants may target any declared client role set.
+   */
+  clientRoleComposites?: Record<
+    string,
+    Record<string, AuthorizationClientRoleComposite>
+  >;
 
   /**
    * v2 Keycloak group hierarchy for dev/demo (organizational labels, optional

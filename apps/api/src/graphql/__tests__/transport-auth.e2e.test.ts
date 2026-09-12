@@ -29,15 +29,15 @@ registerSuiteLifecycle();
 const keycloakToken = await getKeycloakToken();
 const rolelessToken = await getRolelessKeycloakToken();
 // Same role, different tenant — the pair that isolates tenancy from authorization.
-const acmeToken = await keycloakTokenFor("acme-verhuurconsulent");
-const betaToken = await keycloakTokenFor("beta-verhuurconsulent");
+const tenantAToken = await keycloakTokenFor("tenant-a-user");
+const tenantBToken = await keycloakTokenFor("tenant-b-user");
 
 beforeAll(() =>
   ensureKeycloakTokenPeople([
     keycloakToken,
     rolelessToken,
-    acmeToken,
-    betaToken,
+    tenantAToken,
+    tenantBToken,
   ]),
 );
 
@@ -57,9 +57,9 @@ function tokenRoles(token: string): Set<string> {
 
 /**
  * A table the token's roles can create AND read. tables[0] is whatever sorts
- * first in the manifest — since the ERP catalog (#403) that is a RealEstate
- * entity, which verhuurconsulent can only read, so the cross-tenant spec must
- * pick its entity by the token's actual grants instead of by position.
+ * first in the manifest — since the complete catalog contains entities the
+ * focused test role can only read, the cross-tenant spec must pick its entity
+ * by the token's actual grants instead of by position.
  */
 function tableWritableWith(token: string) {
   const roles = tokenRoles(token);
@@ -194,10 +194,10 @@ describe("transport and authentication", () => {
   // tenant separation. The assertions below therefore insist the refusal is NOT
   // a FORBIDDEN — a role rejection would be the wrong mechanism, and would mask
   // an RLS policy that had stopped filtering.
-  test.skipIf(!acmeToken || !betaToken)(
+  test.skipIf(!tenantAToken || !tenantBToken)(
     "a token from another tenant cannot see this tenant's row",
     async () => {
-      const table = tableWritableWith(acmeToken!)!;
+      const table = tableWritableWith(tenantAToken!)!;
       expect(table).toBeTruthy();
       const graphql = table.source!.graphql!;
 
@@ -217,7 +217,7 @@ describe("transport and authentication", () => {
            ${graphql.createMutationName}(input: $input) { id }
          }`,
         { input },
-        { bearer: acmeToken! },
+        { bearer: tenantAToken! },
       );
       expect(created.errors ?? []).toEqual([]);
       const id = created.data?.[graphql.createMutationName]?.id as string;
@@ -230,7 +230,7 @@ describe("transport and authentication", () => {
           null,
           `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
           { id },
-          { bearer: betaToken! },
+          { bearer: tenantBToken! },
         );
         expect(crossRead.errors?.[0]?.extensions?.code).not.toBe("FORBIDDEN");
         expect(crossRead.data?.[graphql.singleQueryName]).toBeNull();
@@ -241,7 +241,7 @@ describe("transport and authentication", () => {
           null,
           `{ ${graphql.listQueryName}(first: 100) { nodes { id } } }`,
           undefined,
-          { bearer: betaToken! },
+          { bearer: tenantBToken! },
         );
         const ids = (crossList.data?.[graphql.listQueryName]?.nodes ?? []).map(
           (n: { id: string }) => n.id,
@@ -254,7 +254,7 @@ describe("transport and authentication", () => {
           null,
           `query($id: ID!) { ${graphql.singleQueryName}(id: $id) { id } }`,
           { id },
-          { bearer: acmeToken! },
+          { bearer: tenantAToken! },
         );
         expect(ownRead.data?.[graphql.singleQueryName]?.id).toBe(id);
       } finally {
@@ -262,7 +262,7 @@ describe("transport and authentication", () => {
           null,
           `mutation($id: ID!) { ${graphql.deleteMutationName}(id: $id) }`,
           { id },
-          { bearer: acmeToken! },
+          { bearer: tenantAToken! },
         ).catch(() => {});
       }
     },

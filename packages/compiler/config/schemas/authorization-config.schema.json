@@ -17,6 +17,14 @@
           "type": "array",
           "items": { "type": "string", "minLength": 1 }
         },
+        "clientRoles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "minItems": 1
+          }
+        },
         "subGroups": {
           "type": "array",
           "items": { "$ref": "#/$defs/authorizationGroupNode" }
@@ -260,6 +268,38 @@
       "additionalProperties": {
         "type": "array",
         "items": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "clientRoleComposites": {
+      "type": "object",
+      "description": "Audience-scoped composite client roles, keyed by the client that owns the role and then by role name. Each composite groups roles from declared clients without creating a realm-global persona.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["composites"],
+          "properties": {
+            "description": { "type": "string" },
+            "attributes": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "composites": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 },
+                "minItems": 1
+              }
+            }
+          }
+        }
       }
     },
 

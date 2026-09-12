@@ -613,6 +613,10 @@
       "additionalProperties": false,
       "required": ["name", "description", "implementation", "effects", "reliability", "confirmation"],
       "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+        },
         "name": { "$ref": "#/$defs/localizedOrString" },
         "description": { "$ref": "#/$defs/localizedOrString" },
         "guidance": {
@@ -621,14 +625,53 @@
           "properties": { "assistant": { "$ref": "#/$defs/localizedOrString" } }
         },
         "implementation": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["type", "action"],
+              "properties": {
+                "type": { "const": "entity" },
+                "action": { "enum": ["list", "get", "create", "update", "delete"] }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["type", "plugin", "handler"],
+              "properties": {
+                "type": { "const": "plugin" },
+                "plugin": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9-]*$"
+                },
+                "handler": {
+                  "type": "string",
+                  "pattern": "^[_A-Za-z][_0-9A-Za-z]*$"
+                }
+              }
+            }
+          ]
+        },
+        "target": { "$ref": "#/$defs/operationTargetV2" },
+        "input": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "action"],
-          "properties": {
-            "type": { "const": "entity" },
-            "action": { "enum": ["list", "get", "create", "update", "delete"] }
-          }
+          "required": ["schema"],
+          "properties": { "schema": { "type": "object" } }
         },
+        "output": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema"],
+          "properties": { "schema": { "type": "object" } }
+        },
+        "errors": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/operationErrorV2" }
+        },
+        "auth": { "$ref": "#/$defs/operationAuthV2" },
+        "tenancy": { "$ref": "#/$defs/operationTenancyV2" },
         "effects": {
           "type": "object",
           "additionalProperties": false,
@@ -647,12 +690,135 @@
               "type": "object",
               "additionalProperties": false,
               "required": ["mode"],
-              "properties": { "mode": { "enum": ["natural", "keyed", "none"] } }
+              "properties": {
+                "mode": { "enum": ["natural", "keyed", "none"] },
+                "inputField": { "$ref": "#/$defs/fieldKey" },
+                "header": { "type": "string", "minLength": 1 }
+              }
             }
           }
         },
         "concurrency": { "$ref": "#/$defs/operationConcurrencyV2" },
-        "confirmation": { "$ref": "#/$defs/operationConfirmationV2" }
+        "confirmation": { "$ref": "#/$defs/operationConfirmationV2" },
+        "interaction": { "$ref": "#/$defs/operationInteractionV2" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "implementation": {
+                "properties": { "type": { "const": "plugin" } },
+                "required": ["type"]
+              }
+            },
+            "required": ["implementation"]
+          },
+          "then": {
+            "required": ["input", "output", "errors", "auth", "tenancy"]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                { "required": ["id"] },
+                { "required": ["target"] },
+                { "required": ["input"] },
+                { "required": ["output"] },
+                { "required": ["errors"] },
+                { "required": ["auth"] },
+                { "required": ["tenancy"] }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "operationTargetV2": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope"],
+          "properties": { "scope": { "const": "collection" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope", "inputField"],
+          "properties": {
+            "scope": { "const": "record" },
+            "inputField": { "$ref": "#/$defs/fieldKey" }
+          }
+        }
+      ]
+    },
+    "operationErrorV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "code", "description"],
+      "properties": {
+        "status": { "type": "integer", "minimum": 400, "maximum": 599 },
+        "code": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "schema": { "type": "object" },
+        "rest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "body": {},
+            "contentType": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "operationAuthV2": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": { "mode": { "const": "public" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode", "roles"],
+          "properties": {
+            "mode": { "const": "session" },
+            "roles": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "scopes": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      ]
+    },
+    "operationTenancyV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["required", "derived", "none"] },
+        "description": { "type": "string", "minLength": 1 }
+      }
+    },
+    "operationInteractionV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "sourceField", "sourceEntity", "definitionsField", "into"],
+      "properties": {
+        "type": { "const": "secureInput" },
+        "sourceField": { "$ref": "#/$defs/fieldKey" },
+        "sourceEntity": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
+        "definitionsField": { "$ref": "#/$defs/fieldKey" },
+        "into": { "$ref": "#/$defs/fieldKey" },
+        "message": { "type": "string", "minLength": 1 }
       }
     },
     "operationConcurrencyV2": {
@@ -740,16 +906,94 @@
       "additionalProperties": false,
       "properties": { "instructions": { "$ref": "#/$defs/localizedOrString" } }
     },
+    "restInterfaceOperationV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "instructions": { "$ref": "#/$defs/localizedOrString" },
+        "method": { "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"] },
+        "path": {
+          "type": "string",
+          "pattern": "^/api/[a-z][a-z0-9-]*(?:/(?::[_A-Za-z][_0-9A-Za-z]*|[a-z0-9][a-z0-9._-]*))*$"
+        },
+        "response": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "status": { "type": "integer", "minimum": 200, "maximum": 399 },
+            "kind": { "enum": ["json", "binary", "stream"] },
+            "contentType": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "mcpInterfaceOperationV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "instructions": { "$ref": "#/$defs/localizedOrString" },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,127}$"
+        }
+      }
+    },
+    "graphqlInterfaceOperationV2": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "instructions": { "$ref": "#/$defs/localizedOrString" },
+        "kind": { "enum": ["query", "mutation"] },
+        "field": {
+          "type": "string",
+          "pattern": "^[_A-Za-z][_0-9A-Za-z]*$"
+        }
+      }
+    },
     "interfaceOperationsV2": {
       "type": "object",
-      "minProperties": 1,
       "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
-      "additionalProperties": { "$ref": "#/$defs/interfaceOperationV2" }
+      "additionalProperties": {
+        "oneOf": [
+          { "const": false },
+          { "$ref": "#/$defs/interfaceOperationV2" }
+        ]
+      }
+    },
+    "restInterfaceOperationsV2": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "additionalProperties": {
+        "oneOf": [
+          { "const": false },
+          { "$ref": "#/$defs/restInterfaceOperationV2" }
+        ]
+      }
+    },
+    "mcpInterfaceOperationsV2": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "additionalProperties": {
+        "oneOf": [
+          { "const": false },
+          { "$ref": "#/$defs/mcpInterfaceOperationV2" }
+        ]
+      }
+    },
+    "graphqlInterfaceOperationsV2": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z][A-Za-z0-9]*$" },
+      "additionalProperties": {
+        "oneOf": [
+          { "const": false },
+          { "$ref": "#/$defs/graphqlInterfaceOperationV2" }
+        ]
+      }
     },
     "entityInterfaceV2": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["operations"],
       "properties": { "operations": { "$ref": "#/$defs/interfaceOperationsV2" } }
     },
     "entityInterfacesV2": {
@@ -757,21 +1001,33 @@
       "additionalProperties": false,
       "minProperties": 1,
       "properties": {
-        "rest": { "$ref": "#/$defs/entityInterfaceV2" },
-        "graphql": { "$ref": "#/$defs/entityInterfaceV2" },
+        "rest": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "operations": { "$ref": "#/$defs/restInterfaceOperationsV2" } }
+        },
+        "graphql": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "operations": { "$ref": "#/$defs/graphqlInterfaceOperationsV2" } }
+        },
         "mcp": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["operations"],
           "properties": {
-            "operations": { "$ref": "#/$defs/interfaceOperationsV2" },
+            "tools": {
+              "enum": ["dedicated", "generic"],
+              "default": "dedicated",
+              "description": "Technical MCP tool projection. Dedicated emits one tool per projected operation; generic routes through the five shared osf_* CRUD tools."
+            },
+            "operations": { "$ref": "#/$defs/mcpInterfaceOperationsV2" },
             "resource": { "$ref": "#/$defs/mcpResourceV2" }
           }
         },
         "web": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["operations", "views"],
+          "required": ["views"],
           "properties": {
             "operations": { "$ref": "#/$defs/interfaceOperationsV2" },
             "views": { "$ref": "#/$defs/webViewsV2" }

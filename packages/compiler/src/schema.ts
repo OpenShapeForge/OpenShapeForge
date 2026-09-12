@@ -344,6 +344,19 @@ export type TableSourceDefinition = {
     };
   };
   /**
+   * Transport-neutral secure-input policy compiled from the canonical create
+   * Operation. `into` is server-owned on every generated interface. The MCP
+   * sub-object below temporarily mirrors this metadata for its existing
+   * secure browser/client handoff runtime.
+   */
+  secureInputOnCreate?: {
+    sourceField: string;
+    sourceEntity: string;
+    definitionsField: string;
+    into: string;
+    message?: string;
+  };
+  /**
    * Opt-in generated REST exposure for this table. Present only when the
    * authoring entity declared a `rest:` block AND the table is generated-CRUD
    * enabled — the backend manifest fails compilation on the mismatch. The

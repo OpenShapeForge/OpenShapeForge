@@ -277,6 +277,63 @@ describe("generateKeycloakRealmArtifacts role-name collisions", () => {
   });
 });
 
+describe("audience-scoped client role composites", () => {
+  function compositeConfig(): AuthorizationConfigFile {
+    return {
+      schemaVersion: 2,
+      kind: "authorizationConfig",
+      realm: { name: "client-composite-test" },
+      keycloak: {
+        entityRoleClient: "resource-api",
+        clients: [
+          { id: "application-api", kind: "bearerOnly" },
+          { id: "resource-api", kind: "bearerOnly" },
+        ],
+      },
+      clientRoles: {
+        "resource-api": ["Data.All.Read", "Data.All.ReadWrite"],
+      },
+      clientRoleComposites: {
+        "application-api": {
+          "Application.Editor": {
+            description: "May edit application data",
+            composites: {
+              "resource-api": ["Data.All.Read", "Data.All.ReadWrite"],
+            },
+          },
+        },
+      },
+    };
+  }
+
+  test("projects a host-authored persona onto its audience client", () => {
+    const [artifact] = generateKeycloakRealmArtifacts([], compositeConfig());
+    const realm = JSON.parse(artifact!.contents) as {
+      roles: { client: Record<string, Array<Record<string, unknown>>> };
+    };
+    expect(realm.roles.client["application-api"]).toEqual([
+      {
+        name: "Application.Editor",
+        description: "May edit application data",
+        composite: true,
+        composites: {
+          client: {
+            "resource-api": ["Data.All.Read", "Data.All.ReadWrite"],
+          },
+        },
+      },
+    ]);
+  });
+
+  test("refuses a role declared as both plain and composite", () => {
+    const config = compositeConfig();
+    config.clientRoles!["application-api"] = ["Application.Editor"];
+    expect(() => generateKeycloakRealmArtifacts([], config)).toThrow(
+      /declared both as a plain client role and as a composite client role/,
+    );
+  });
+});
+
 // A dev realm (name suffixed "-dev"), so authoring a literal client secret in
 // these fixtures is permitted by the generator's non-dev-realm secret guard.
 // The intent here is to verify synthetic service-account emission, not secret
@@ -1252,7 +1309,7 @@ describe("identity providers — the documented examples in authorization.yaml",
     const yamlPath = join(import.meta.dir, "../../../config/authoring/authorization.yaml");
     const lines = readFileSync(yamlPath, "utf8").split("\n");
     const start = lines.findIndex((l) => l === "  # identityProviders:");
-    const end = lines.findIndex((l, i) => i > start && /^realmRoles:/.test(l));
+    const end = lines.findIndex((l, i) => i > start && /^clientRoles:/.test(l));
     expect(start).toBeGreaterThan(0);
     expect(end).toBeGreaterThan(start);
     const example = lines

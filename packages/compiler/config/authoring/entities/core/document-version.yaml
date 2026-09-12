@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 2
 kind: coreEntity
 module: core
 entity: DocumentVersion
@@ -26,13 +26,6 @@ indexes:
       - documentId
       - id
     unique: true
-crud:
-  operations:
-    create: false
-    update: false
-    delete: false
-rest: true
-mcp: true
 authorization:
   roles:
     read:
@@ -62,6 +55,7 @@ fields:
       storageClass: core
   - key: status
     valueType: string
+    semanticType: referenceDataCode
     required: true
     label:
       en: Status
@@ -69,11 +63,9 @@ fields:
     persisted:
       column: status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: DOCUMENTVERSIONSTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: DOCUMENTVERSIONSTATUS
   - key: createdBy
     valueType: string
     required: false
@@ -111,6 +103,7 @@ fields:
       storageClass: core
   - key: storageLocation
     valueType: string
+    semanticType: fileStorageLocation
     required: false
     label:
       en: File
@@ -120,12 +113,6 @@ fields:
     persisted:
       column: storage_location
       storageClass: core
-    render:
-      component: FileUpload
-      props:
-        fileNameField: fileName
-        mimeTypeField: mimeType
-        checksumField: checksum
   - key: checksum
     valueType: string
     required: false
@@ -150,6 +137,7 @@ fields:
       storageClass: core
   - key: changeSummary
     valueType: string
+    semanticType: multilineText
     required: false
     label:
       en: Change summary
@@ -159,11 +147,6 @@ fields:
     persisted:
       column: change_summary
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
   - key: documentId
     valueType: string
     required: true
@@ -196,11 +179,60 @@ relationships:
     label:
       en: Account
       nl: Account
-workflow:
-  nodes:
-    actions:
-      create: false
-      getOne: true
-      list: true
-      update: false
-      delete: false
+operations:
+  list:
+    name: { en: List document versions, nl: Documentversies tonen }
+    description:
+      en: Returns a filtered and sorted page of document versions.
+      nl: Geeft een gefilterde en gesorteerde pagina met documentversies terug.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  get:
+    name: { en: Get document version, nl: Documentversie ophalen }
+    description:
+      en: Returns one immutable document version by its canonical id.
+      nl: Geeft één onveranderlijke documentversie terug op basis van het canonieke id.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: {}
+  web:
+    views:
+      collection:
+        route: /document-versions
+        title: { en: Document versions, nl: Documentversies }
+        columns:
+          - { key: versionLabel, sortable: true }
+          - { key: status, sortable: true }
+          - { key: fileName, sortable: true }
+          - { key: createdBy, sortable: true }
+        defaultSort: { key: versionLabel, direction: asc }
+      record:
+        routes:
+          read: /document-versions/:id
+        title: "{{versionLabel}}"
+        subtitle: "{{status}}"
+        layout:
+          tabs:
+            - id: overview
+              label: { en: Overview, nl: Overzicht }
+              fields:
+                - versionLabel
+                - status
+                - createdBy
+                - fileName
+                - mimeType
+                - storageLocation
+                - checksum
+                - isMajorVersion
+                - changeSummary
+                - documentId

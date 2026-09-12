@@ -114,8 +114,11 @@ export function buildMcp(
     ? Object.fromEntries(
         MCP_OPERATION_KEYS.flatMap((action) => {
           const operationKey = v2OperationByAction(coreEntity)[action]?.[0];
-          const instructions = operationKey
-            ? coreEntity.interfaces?.mcp?.operations[operationKey]?.instructions
+          const projection = operationKey
+            ? coreEntity.interfaces?.mcp?.operations?.[operationKey]
+            : undefined;
+          const instructions = projection && typeof projection === "object"
+            ? projection.instructions
             : undefined;
           return instructions === undefined ? [] : [[action, instructions]];
         }),

@@ -1135,6 +1135,13 @@ export function compileAuthoringBackendManifest(
           : {}),
         generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
         crud: { operations: crudOperations },
+        ...(() => {
+          const secureInput = candidate.contract.entityOperations.create
+            ?.interaction.secureInput;
+          if (!secureInput) return {};
+          const { type: _type, ...secureInputOnCreate } = secureInput;
+          return { secureInputOnCreate };
+        })(),
         ...(candidate.contract.entity.labels
           ? { labels: candidate.contract.entity.labels }
           : {}),

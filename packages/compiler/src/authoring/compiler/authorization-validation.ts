@@ -52,6 +52,17 @@ function buildDeclaredRoleSet(authConfig: AuthorizationConfigFile): {
     perClient.set(client, set);
   }
 
+  for (const [client, definitions] of Object.entries(
+    authConfig.clientRoleComposites ?? {},
+  )) {
+    const set = perClient.get(client) ?? new Set<string>();
+    for (const role of Object.keys(definitions)) {
+      clientRoles.add(role);
+      set.add(role);
+    }
+    perClient.set(client, set);
+  }
+
   const realmRoleMap =
     authConfig.realmRoles ?? authConfig.keycloak?.realmRoles ?? {};
   const realmRoles = new Set<string>(Object.keys(realmRoleMap));
@@ -149,6 +160,34 @@ export function validateAuthorizationReferences(
             `realmRoles.${roleName}.composites.${client} references "${compositeRole}" ` +
               `which is not declared in authorization.yaml.clientRoles.${client}.`,
           );
+        }
+      }
+    }
+  }
+
+
+  // Validate audience-scoped composite client roles against the same declared
+  // per-client vocabulary as realm composites.
+  for (const [ownerClient, roleDefinitions] of Object.entries(
+    authConfig.clientRoleComposites ?? {},
+  )) {
+    for (const [roleName, roleDef] of Object.entries(roleDefinitions)) {
+      for (const [client, compositeRoleNames] of Object.entries(roleDef.composites)) {
+        const clientSet = perClient.get(client);
+        if (!clientSet) {
+          errors.push(
+            `clientRoleComposites.${ownerClient}.${roleName}.composites references ` +
+              `client "${client}" but authorization.yaml declares no roles for that client.`,
+          );
+          continue;
+        }
+        for (const compositeRole of compositeRoleNames) {
+          if (!clientSet.has(compositeRole)) {
+            errors.push(
+              `clientRoleComposites.${ownerClient}.${roleName}.composites.${client} ` +
+                `references "${compositeRole}" which is not declared for that client.`,
+            );
+          }
         }
       }
     }

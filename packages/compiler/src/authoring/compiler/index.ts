@@ -34,6 +34,7 @@ import { buildAuthorization } from "./authorization.js";
 import { buildEntityOperations } from "./entity-operations.js";
 import {
   isCoreEntityV2,
+  v2PluginOperations,
   v2WebOperationActions,
   v2WebUi,
 } from "../entity-v2.js";
@@ -145,6 +146,9 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     model: { fields: modelFields, relationships },
     crud,
     entityOperations,
+    ...(isCoreEntityV2(coreEntity)
+      ? { pluginOperations: v2PluginOperations(coreEntity) }
+      : {}),
     ...(isCoreEntityV2(coreEntity)
       ? {
           interfaces: {

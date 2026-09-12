@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 2
 kind: coreEntity
 module: core
 entity: PaymentDetail
@@ -12,8 +12,6 @@ labels:
   nl: Betaalgegevens
 domains:
   - relations
-rest: true
-mcp: true
 authorization:
   roles:
     read:
@@ -53,11 +51,9 @@ fields:
     persisted:
       column: type
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: PAYMENTDETAILTYPE
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: PAYMENTDETAILTYPE
   - key: iban
     valueType: string
     required: false
@@ -150,9 +146,6 @@ fields:
     persisted:
       column: valid_from
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: validUntil
     valueType: date
     required: false
@@ -165,13 +158,9 @@ fields:
     persisted:
       column: valid_until
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: relationId
     valueType: string
     required: false
-    readOnly: true
     # The provenance link to the owning relation. Settable when the payment
     # detail is created; refused afterwards, so bank details cannot be
     # re-pointed at a different subject inside the tenant (#177).
@@ -196,111 +185,134 @@ relationships:
     label:
       en: Relation
       nl: Relatie
-ui:
-  routes:
-    list:
-      en: /payment-details
-      nl: /betaalgegevens
-    detail:
-      en: /payment-details/:id
-      nl: /betaalgegevens/:id
-    create:
-      en: /payment-details/create
-      nl: /betaalgegevens/aanmaken
-    edit:
-      en: /payment-details/:id/edit
-      nl: /betaalgegevens/:id/bewerken
-    delete:
-      en: /payment-details/:id/delete
-      nl: /betaalgegevens/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Payment Details
-        nl: Betaalgegevens
-      columns:
-        - key: type
-          sortable: true
-        - key: iban
-          sortable: true
-        - key: accountHolder
-          sortable: true
-        - key: status
-          sortable: true
-      defaultSort:
-        key: type
-        direction: asc
-      rowLink:
-        en: /payment-details/:id
-        nl: /betaalgegevens/:id
-    detail:
-      header:
+operations:
+  list:
+    name: { en: List payment details, nl: Betaalgegevens tonen }
+    description:
+      en: Returns a filtered and sorted page of payment details.
+      nl: Geeft een gefilterde en gesorteerde pagina met betaalgegevens terug.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  get:
+    name: { en: Get payment detail, nl: Betaalgegeven ophalen }
+    description:
+      en: Returns one payment detail by its canonical id.
+      nl: Geeft een betaalgegeven terug op basis van het canonieke id.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  create:
+    name: { en: Create payment detail, nl: Betaalgegeven aanmaken }
+    description:
+      en: Creates one payment detail after validating its canonical fields.
+      nl: Maakt een betaalgegeven aan na validatie van de canonieke velden.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    confirmation: { mode: none }
+  update:
+    name: { en: Update payment detail, nl: Betaalgegeven wijzigen }
+    description:
+      en: Updates one payment detail while holding its server-issued edit lease and current version.
+      nl: Wijzigt een betaalgegeven met de server-uitgegeven bewerkingslease en actuele versie.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+    confirmation: { mode: none }
+  delete:
+    name: { en: Delete payment detail, nl: Betaalgegeven verwijderen }
+    description:
+      en: Permanently deletes one payment detail after a server-issued, version-bound confirmation challenge.
+      nl: Verwijdert een betaalgegeven definitief na een door de server uitgegeven, versiegebonden bevestigingsvraag.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+    confirmation:
+      mode: challenge
+      challenge:
+        kind: type-current-field
+        field: type
+        issuedBy: server
+        bindTo: [subject, tenant, operation, target.id, target.version]
+        expiresAfter: PT5M
+        singleUse: true
+
+interfaces:
+  rest:
+    operations:
+      list: {}
+      get: {}
+      create: {}
+      update: {}
+      delete: {}
+  mcp:
+    operations:
+      list: {}
+      get: {}
+      create: {}
+      update:
+        instructions:
+          en: Acquire an edit lease first and submit its token with the version returned by get.
+          nl: Vraag eerst een bewerkingslease aan en stuur het token mee met de versie uit get.
+      delete:
+        instructions:
+          en: Acquire an edit lease first; request the confirmation challenge and answer it with the exact current payment-detail type.
+          nl: Vraag eerst een bewerkingslease en bevestigingsvraag aan en beantwoord die met exact het actuele type betaalgegeven.
+    resource:
+      uri: app://payment-details
+      name: Payment details
+      description: Read the payment details available to the signed-in identity.
+      templateDescription: Read one payment detail by its canonical id.
+  web:
+    operations:
+      list: {}
+      get: {}
+      create: {}
+      update: {}
+      delete: {}
+    views:
+      collection:
+        route: { en: /payment-details, nl: /betaalgegevens }
+        title: { en: Payment details, nl: Betaalgegevens }
+        columns:
+          - { key: type, sortable: true }
+          - { key: iban, sortable: true }
+          - { key: accountHolder, sortable: true }
+          - { key: status, sortable: true }
+        defaultSort: { key: type, direction: asc }
+      record:
+        routes:
+          read: { en: /payment-details/:id, nl: /betaalgegevens/:id }
+          create: { en: /payment-details/new, nl: /betaalgegevens/nieuw }
         title: "{{iban}}"
         subtitle: "{{accountHolder}}"
-        badges:
-          - type
-          - status
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Payment information
-                nl: Betaalinformatie
-              fields:
-                - type
-                - iban
-                - bic
-                - accountHolder
-                - status
-                - isPrimary
-                - validFrom
-                - validUntil
-    form:
-      variants:
-        create:
-          title:
-            en: Create payment detail
-            nl: Betaalgegevens aanmaken
-          groups:
-            - title:
-                en: Payment information
-                nl: Betaalinformatie
-              fields:
-                - type
-                - iban
-                - bic
-                - accountHolder
-                - status
-                - isPrimary
-                - validFrom
-                - validUntil
-        edit:
-          extends: create
-          title:
-            en: Edit payment detail
-            nl: Betaalgegevens bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions: [update, delete]
+        layout:
+          tabs:
+            - id: overview
+              label: { en: Overview, nl: Overzicht }
+              groups:
+                - title: { en: Payment information, nl: Betaalinformatie }
+                  fields: [type, iban, bic, accountHolder, status, isPrimary, validFrom, validUntil]
+        modes:
+          create:
+            title: { en: Create payment detail, nl: Betaalgegeven aanmaken }
+            groups:
+              - title: { en: Payment information, nl: Betaalinformatie }
+                fields: [relationId, type, iban, bic, accountHolder, status, isPrimary, validFrom, validUntil]
+          update:
+            title: { en: Update payment detail, nl: Betaalgegeven wijzigen }

@@ -14,11 +14,12 @@ import {
 
 const repoRoot = process.cwd();
 const webPresent = existsSync(join(repoRoot, "apps/web"));
-// AgreementMilestone and the schemaVersion 2 Relation slice withhold part of
+// AgreementMilestone and the schemaVersion 2 Relation aggregate
+// (Relation, RelationGroup, ContactDetail and PaymentDetail) withhold part of
 // generic CRUD. The stock full-CRUD web UI is intentionally not generated for
-// either one (isGeneratedCrudUiEnabled requires every operation to be true).
-// Relation is instead projected through WebManifest for Hubble.
-const expectedGeneratedCrudEntityCount = 115;
+// these entities (isGeneratedCrudUiEnabled requires every operation to be
+// true). The aggregate is instead projected through WebManifest for hosts.
+const expectedGeneratedCrudEntityCount = 112;
 
 /**
  * The realms this repository authors, by name.

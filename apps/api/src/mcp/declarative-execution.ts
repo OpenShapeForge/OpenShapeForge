@@ -913,6 +913,8 @@ export type ExecuteBindingInput = {
   providerRow: JsonRecord;
   connectionValues: unknown;
   serviceInputs: JsonRecord;
+  /** Core-derived stable key for this exact Service step. */
+  idempotencyKey?: string;
   keyring?: SecretKeyring | undefined;
   fetchImpl?: typeof fetch;
   egress?: ModuleEgressDispatch | undefined;
@@ -1422,6 +1424,16 @@ export async function composeBindingRequest(
     // though publication/runtime validation rejects an authored collision.
     ...authHeaders,
   };
+  if (
+    mode === "acquire" &&
+    input.idempotencyKey &&
+    method !== "GET" &&
+    method !== "HEAD"
+  ) {
+    // Core owns retry identity. An authored header cannot replace it, and the
+    // value never enters a URL or response body.
+    headers["idempotency-key"] = input.idempotencyKey;
+  }
   let body: string | undefined;
   if (isGraphql) {
     headers["content-type"] = "application/json";

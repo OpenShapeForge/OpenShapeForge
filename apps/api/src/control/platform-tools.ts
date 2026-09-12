@@ -73,7 +73,7 @@ export const PLATFORM_SERVER_INSTRUCTIONS =
 
 export const PLATFORM_SESSION_RESOURCE_URI = "osf://platform-session";
 
-const KINDS: readonly CatalogKind[] = ["provider", "capability", "adapter", "service"];
+const KINDS: readonly CatalogKind[] = ["capability", "adapter", "service"];
 const AUTHORITIES: readonly CatalogAuthority[] = ["platform_release", "host", "tenant_shared"];
 const KEBAB = /^[a-z][a-z0-9-]*$/;
 const ISO_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
@@ -94,7 +94,7 @@ function isIsoDateTime(value: string): boolean {
 const kindProperty = {
   type: "string",
   enum: [...KINDS],
-  description: "provider, capability, adapter or service.",
+  description: "capability, adapter or service.",
 } as const;
 const keyProperty = {
   type: "string",

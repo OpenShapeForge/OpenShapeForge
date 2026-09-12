@@ -45,6 +45,7 @@ import type { CompiledEntityContract } from "../types/compiled.js";
 import type {
   AuthorizationConfigFile,
   AuthorizationClient,
+  AuthorizationClientRoleComposite,
   AuthorizationGroupNode,
   AuthorizationIdentityProvider,
   AuthorizationIdentityProviderMapper,
@@ -1104,6 +1105,25 @@ function buildRealmRole(
   return result;
 }
 
+function buildClientRoleComposite(
+  name: string,
+  def: AuthorizationClientRoleComposite,
+): KeycloakRole {
+  const composites = Object.fromEntries(
+    Object.entries(def.composites).map(([clientId, roles]) => [
+      clientId,
+      normalizeKeycloakRoleNames(roles),
+    ]),
+  );
+  return {
+    name: normalizeKeycloakRoleName(name),
+    description: def.description,
+    composite: true,
+    composites: { client: composites },
+    attributes: def.attributes,
+  };
+}
+
 function buildKeycloakGroupsFromAuthoring(nodes: AuthorizationGroupNode[], parentPath: string): KeycloakGroup[] {
   return nodes.map((node) => {
     const path = parentPath ? `${parentPath}/${node.name}` : `/${node.name}`;
@@ -1231,11 +1251,51 @@ export function generateKeycloakRealmArtifacts(
       clientRolesOut[clientId] = list;
     }
   }
+  if (authConfig.clientRoleComposites) {
+    for (const [clientId, definitions] of Object.entries(authConfig.clientRoleComposites)) {
+      const existing = clientRolesOut[clientId] ?? [];
+      const names = new Set(existing.map((role) => role.name));
+      const sourcesByNormalized = new Map<string, Set<string>>();
+      for (const [rawName, definition] of Object.entries(definitions)) {
+        const name = normalizeKeycloakRoleName(rawName);
+        const sources = sourcesByNormalized.get(name) ?? new Set<string>();
+        sources.add(rawName);
+        sourcesByNormalized.set(name, sources);
+        if (names.has(name)) {
+          throw new Error(
+            `Client role "${name}" on client "${clientId}" is declared both as a ` +
+              "plain client role and as a composite client role.",
+          );
+        }
+        names.add(name);
+        existing.push(buildClientRoleComposite(rawName, definition));
+      }
+      for (const [name, sources] of sourcesByNormalized) {
+        if (sources.size > 1) {
+          const spellings = [...sources].sort().map((source) => `"${source}"`).join(", ");
+          throw new Error(
+            `Keycloak role-name collision on client "${clientId}": ` +
+              `distinct authored composite roles ${spellings} all normalize to "${name}". ` +
+              "Use a single canonical spelling for this role.",
+          );
+        }
+      }
+      clientRolesOut[clientId] = existing;
+    }
+  }
   for (const [clientId, roles] of entityAggregate.clientRoles) {
     const existing = clientRolesOut[clientId] ?? [];
     const seen = new Set(existing.map((r) => r.name));
     for (const role of roles) {
-      if (!seen.has(role.name)) {
+      if (seen.has(role.name)) {
+        const authored = existing.find((candidate) => candidate.name === role.name);
+        if (authored?.composite) {
+          throw new Error(
+            `Client role "${role.name}" on client "${clientId}" is both an ` +
+              "authored composite client role and an entity-derived role.",
+          );
+        }
+      } else {
         existing.push(role);
         seen.add(role.name);
       }

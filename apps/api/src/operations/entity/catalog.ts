@@ -139,7 +139,9 @@ export function projectRows(
   const hasClassification = table.columns.some(
     (column) => column.classification,
   );
-  const hasElicitedOutput = table.source?.mcp?.elicitOnCreate !== undefined;
+  const hasElicitedOutput =
+    table.source?.secureInputOnCreate !== undefined ||
+    table.source?.mcp?.elicitOnCreate !== undefined;
   if (!hasClassification && !hasElicitedOutput) {
     return rows;
   }
@@ -149,7 +151,8 @@ export function projectRows(
 export function elicitedOutputColumn(
   table: GeneratedCrudTable,
 ): GeneratedCrudColumn | undefined {
-  const target = table.source?.mcp?.elicitOnCreate?.into;
+  const target = table.source?.secureInputOnCreate?.into ??
+    table.source?.mcp?.elicitOnCreate?.into;
   if (!target) return undefined;
   const column = table.columns.find(
     (candidate) => fieldNameForColumn(candidate) === target,

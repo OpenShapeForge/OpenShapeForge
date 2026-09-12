@@ -64,6 +64,158 @@ const binding = (
 });
 
 describe("runtime module platform session authority", () => {
+  it("exposes only canonical, safely classified database refusals", () => {
+    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const authored = Object.assign(
+      new Error("STATE_TRANSITION_REFUSED: This transition is not available."),
+      {
+        name: "PostgresError",
+        code: "P0001",
+        routine: "exec_stmt_raise",
+        detail: "Return the record to draft first.",
+      },
+    );
+    expect(runtime.services.errors.classifyDatabase(authored)).toEqual({
+      code: "STATE_TRANSITION_REFUSED",
+      message: "This transition is not available.",
+      detail: "Return the record to draft first.",
+      retryable: false,
+    });
+
+    const unsafe = Object.assign(new Error("password=must-not-leak"), {
+      name: "PostgresError",
+      code: "22P02",
+      detail: "secret database detail",
+    });
+    expect(runtime.services.errors.classifyDatabase(unsafe)).toBeUndefined();
+  });
+
+  it("includes static plugin Operations in the canonical registry and executor", async () => {
+    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const definition = {
+      id: "example.static.run",
+      key: "example.static.run",
+      intent: "invoke",
+      name: "Run static Operation",
+      description: "Runs a compiler-contributed Operation.",
+      input: { kind: "json-schema", schema: { type: "object" } },
+      output: { kind: "json-schema", schema: {} },
+      effects: { data: "read" as const, external: "none" as const },
+      reliability: { idempotency: { mode: "natural" as const } },
+    };
+    runtime.registerStaticOperations([{
+      definition,
+      available: (session) => session.roles.includes("reader"),
+      execute: async (_session, request) => ({
+        data: { operation: request.operation.id },
+        operations: [],
+      }),
+    }]);
+
+    await runtime.withActiveOperationSession(operationClaims(), async (session) => {
+      await expect(runtime.services.operations.list(session))
+        .resolves.toContainEqual(definition);
+      await expect(runtime.services.operations.get(session, definition.id))
+        .resolves.toEqual(definition);
+      await expect(runtime.services.operations.execute(session, {
+        operation: { id: definition.id, intent: "invoke" },
+      })).resolves.toEqual({
+        data: { operation: definition.id },
+        operations: [],
+      });
+    });
+  });
+
+  it("resolves and executes record-derived Operations only for a live capability", async () => {
+    const db = testDatabase();
+    const runtime = new ModulePlatformRuntime(db);
+    const definition = {
+      id: "example.record.invoke:one@1",
+      intent: "invoke",
+      name: "Invoke record",
+      description: "Invokes one published record.",
+      input: { kind: "json-schema", schema: { type: "object" } },
+      output: { kind: "json-schema", schema: {} },
+      effects: { data: "read" as const, external: "write" as const },
+      reliability: { idempotency: { mode: "keyed" as const } },
+    };
+    let declarativeSession: TrustedSessionContext | undefined;
+    runtime.registerDeclarativeServiceExecutor(async (session, request, options) => {
+      options?.signal?.throwIfAborted();
+      declarativeSession = session;
+      return {
+        data: {
+          definition: request.definition.id,
+          idempotencyKey: request.idempotencyKey,
+        },
+        operations: [],
+      };
+    });
+    runtime.registerOperationProviders([{
+      name: "example",
+      operationProviders: [{
+        id: "example.records",
+        list: async () => [definition],
+        get: async (_session, operationId) =>
+          operationId === definition.id ? definition : undefined,
+        execute: async (context, request) => context.invokeDeclarativeService({
+          definition: {
+            entity: "Service",
+            id: "service-one",
+            key: "service-one",
+            version: 1,
+          },
+          ...(request.input ? { input: request.input } : {}),
+          ...(request.idempotencyKey
+            ? { idempotencyKey: request.idempotencyKey }
+            : {}),
+        }),
+      }],
+    }]);
+    let retained!: TrustedSessionContext;
+    try {
+      await runtime.withActiveOperationSession(operationClaims(), async (active) => {
+        retained = active;
+        await expect(runtime.services.operations.get(active, definition.id))
+          .resolves.toEqual(definition);
+        await expect(runtime.services.operations.list(active))
+          .resolves.toContainEqual(definition);
+        await expect(runtime.services.operations.execute(active, {
+          operation: { id: definition.id, intent: definition.intent },
+          input: { value: "one" },
+          idempotencyKey: "attempt-1",
+        })).resolves.toEqual({
+          data: {
+            definition: "service-one",
+            idempotencyKey: "attempt-1",
+          },
+          operations: [],
+        });
+        expect(declarativeSession).toBe(active);
+      });
+      await expect(runtime.services.operations.get(retained, definition.id))
+        .rejects.toThrow(/live verified session/);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  it("refuses duplicate runtime Operation provider ids", async () => {
+    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const provider = {
+      id: "duplicate",
+      list: async () => [],
+      get: async () => undefined,
+      execute: async () => ({
+        error: { code: "NOOP", message: "No operation.", retryable: false },
+      }),
+    };
+    expect(() => runtime.registerOperationProviders([
+      { name: "one", operationProviders: [provider] },
+      { name: "two", operationProviders: [provider] },
+    ])).toThrow(/empty or duplicated/);
+  });
+
   it("authorizes a module-owned resource handle only for its exact live session", async () => {
     const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
     const active = createModuleSessionCapability(claims());

@@ -34,6 +34,15 @@ import {
 import { assertOperationAllowed } from "./generated-authz.js";
 import type { GraphqlContext } from "./context.js";
 import { projectGraphqlOperation } from "./operation-error.js";
+import {
+  entityOperationContract,
+  entityOperationRef,
+  executeEntityOperation,
+} from "../operations/entity/index.js";
+import type {
+  EntityOperationInput,
+  GeneratedCrudExposureOperation,
+} from "../operations/entity/types.js";
 
 type GeneratedTable = ReturnType<typeof getGeneratedCrudTables>[number];
 
@@ -93,29 +102,75 @@ function operationEnabled(table: GeneratedTable, operation: CrudOperation): bool
     isGeneratedCrudOperationEnabled(table, operation);
 }
 
+export function usesCanonicalGraphqlOperations(table: GeneratedTable): boolean {
+  return table.source?.authoringVersion === 2;
+}
+
+function projectedOperationIntents(table: GeneratedTable): GeneratedCrudExposureOperation[] {
+  const operations = table.source?.graphql?.operations ?? {} as Partial<
+    Record<GeneratedCrudExposureOperation, boolean>
+  >;
+  return (["list", "get", "create", "update", "delete"] as const)
+    .filter((intent) => operations[intent] !== false && operationEnabled(table, intent));
+}
+
+function operationControlFields(
+  table: GeneratedTable,
+  intent: "create" | "update" | "delete",
+): string[] {
+  if (!usesCanonicalGraphqlOperations(table) || !operationEnabled(table, intent)) return [];
+  const operation = entityOperationContract(entityOperationRef(table, intent).id);
+  return [
+    ...(operation.concurrency?.version ? ["      expectedVersion: String!"] : []),
+    ...(operation.concurrency?.editLease ? ["      leaseToken: String!"] : []),
+    ...(operation.interaction.confirmation.mode === "acknowledgement"
+      ? ["      confirmed: Boolean!"]
+      : []),
+    ...(operation.interaction.confirmation.mode === "challenge"
+      ? ["      confirmationToken: String", "      confirmationAnswer: String"]
+      : []),
+  ];
+}
+
+function canonicalRecordResultType(graphql: GraphqlMetadata): string {
+  return `${graphql.typeName}OperationResult`;
+}
+
+function canonicalCollectionResultType(graphql: GraphqlMetadata): string {
+  return `${graphql.typeName}CollectionOperationResult`;
+}
+
+function canonicalDeleteResultType(graphql: GraphqlMetadata): string {
+  return `${graphql.typeName}DeleteOperationResult`;
+}
+
 export function renderGeneratedQueryFields(table: GeneratedTable): string[] {
   const graphql = assertGraphqlMetadata(table);
+  const canonical = usesCanonicalGraphqlOperations(table);
   return [
     ...(operationEnabled(table, "get")
-      ? [`      ${graphql.singleQueryName}(id: ID!): ${graphql.typeName}`]
+      ? [`      ${graphql.singleQueryName}(id: ID!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
       : []),
     ...(operationEnabled(table, "list")
-      ? [`      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${graphql.typeName}Connection!`]
+      ? [`      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${canonical ? canonicalCollectionResultType(graphql) : `${graphql.typeName}Connection!`}`]
       : []),
   ];
 }
 
 export function renderGeneratedMutationFields(table: GeneratedTable): string[] {
   const graphql = assertGraphqlMetadata(table);
+  const canonical = usesCanonicalGraphqlOperations(table);
   return [
     ...(operationEnabled(table, "create")
-      ? [`      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${graphql.typeName}`]
+      ? [`      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
       : []),
     ...(operationEnabled(table, "update")
-      ? [`      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${graphql.typeName}`]
+      ? [`      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
       : []),
     ...(operationEnabled(table, "delete")
-      ? [`      ${graphql.deleteMutationName}(id: ID!): Boolean!`]
+      ? [canonical
+          ? `      ${graphql.deleteMutationName}(input: Delete${graphql.typeName}Input!): ${canonicalDeleteResultType(graphql)}`
+          : `      ${graphql.deleteMutationName}(id: ID!): Boolean!`]
       : []),
   ];
 }
@@ -254,6 +309,7 @@ export function renderTypeDefinition(
     documentationByGraphqlType,
 ) {
   const graphql = assertGraphqlMetadata(table);
+  const canonical = usesCanonicalGraphqlOperations(table);
   const documentation = documentationIndex.get(graphql.typeName);
   const fieldDocumentation = new Map(
     (documentation?.fields ?? []).map((field) => [field.name, field]),
@@ -302,7 +358,56 @@ export function renderTypeDefinition(
       return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
         `      ${field}: ${graphqlScalarForColumn(column)}`;
     }),
+    ...operationControlFields(table, "update"),
   ].join("\n");
+  const canonicalCreateInputBody = [
+    createInputBody,
+    ...operationControlFields(table, "create"),
+  ].join("\n");
+  const deleteInputBody = [
+    "      id: ID!",
+    ...operationControlFields(table, "delete"),
+  ].join("\n");
+  const canonicalResultTypes = canonical
+    ? `
+    type ${graphql.typeName}RecordEnvelope {
+      data: ${graphql.typeName}!
+      operations: [EntityOperationOffer!]!
+    }
+
+    type ${graphql.typeName}CollectionData {
+      items: [${graphql.typeName}RecordEnvelope!]!
+      nextCursor: String
+      totalCount: Int
+    }
+
+    type ${canonicalRecordResultType(graphql)} {
+      data: ${graphql.typeName}
+      operations: [EntityOperationOffer!]
+      error: EntityOperationError
+    }
+
+    type ${canonicalCollectionResultType(graphql)} {
+      data: ${graphql.typeName}CollectionData
+      operations: [EntityOperationOffer!]
+      error: EntityOperationError
+    }
+
+    type ${graphql.typeName}DeletionData {
+      deleted: Boolean!
+    }
+
+    type ${canonicalDeleteResultType(graphql)} {
+      data: ${graphql.typeName}DeletionData
+      operations: [EntityOperationOffer!]
+      error: EntityOperationError
+    }
+
+    input Delete${graphql.typeName}Input {
+${deleteInputBody}
+    }
+`
+    : "";
 
   return `
 ${renderDescription(documentation?.description, "    ")}
@@ -370,13 +475,14 @@ ${queryableColumns
 
 ${renderDescription(operationWrittenNote(table), "    ")}
     input Create${graphql.typeName}Input {
-${createInputBody}
+${canonicalCreateInputBody}
     }
 
 ${renderDescription(operationWrittenNote(table), "    ")}
     input Update${graphql.typeName}Input {
 ${updateInputBody}
     }
+${canonicalResultTypes}
   `;
 }
 
@@ -390,6 +496,59 @@ export const generatedEntityTypeDefs = /* GraphQL */ `
     count: Int!
   }
 
+  type EntityOperationReference {
+    id: String!
+    intent: String!
+  }
+
+  type EntityOperationViolation {
+    field: String
+    code: String!
+    message: String!
+    detail: String
+  }
+
+  type EntityOperationError {
+    code: String!
+    message: String!
+    detail: String
+    violations: [EntityOperationViolation!]
+    retryable: Boolean!
+    retryAt: String
+    data: JSON
+  }
+
+  type EntityOperationInteractionChoice {
+    value: String!
+    label: String!
+    description: String
+  }
+
+  type EntityOperationInteractionBinding {
+    tenant: String!
+    subject: String!
+    target: String
+    instance: String
+    node: String
+    version: String
+  }
+
+  type EntityOperationInteraction {
+    kind: String!
+    offerId: String!
+    expiresAt: String!
+    bindTo: EntityOperationInteractionBinding!
+    inputSchema: JSON
+    choices: [EntityOperationInteractionChoice!]
+  }
+
+  type EntityOperationOffer {
+    operation: EntityOperationReference!
+    available: Boolean!
+    interaction: EntityOperationInteraction
+    error: EntityOperationError
+  }
+
 ${tables.map((table) => renderTypeDefinition(table)).join("\n")}
 `;
 
@@ -397,18 +556,19 @@ export function renderQueryFields(
   table: GeneratedTable,
 ): string {
   const graphql = assertGraphqlMetadata(table);
+  const canonical = usesCanonicalGraphqlOperations(table);
   return [
     ...(operationEnabled(table, "get")
       ? [`${renderDescription(
           `Fetches one ${graphql.typeName} record by id.`,
           "      ",
-        )}      ${graphql.singleQueryName}(id: ID!): ${graphql.typeName}`]
+        )}      ${graphql.singleQueryName}(id: ID!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
       : []),
     ...(operationEnabled(table, "list")
       ? [`${renderDescription(
           `Returns a page of ${graphql.typeName} records.`,
           "      ",
-        )}      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${graphql.typeName}Connection!`]
+        )}      ${graphql.listQueryName}(filter: ${graphql.typeName}Filter, sort: ${graphql.typeName}Sort, first: Int, after: String): ${canonical ? canonicalCollectionResultType(graphql) : `${graphql.typeName}Connection!`}`]
       : []),
   ].join("\n");
 }
@@ -421,24 +581,27 @@ export function renderMutationFields(
   table: GeneratedTable,
 ): string {
   const graphql = assertGraphqlMetadata(table);
+  const canonical = usesCanonicalGraphqlOperations(table);
   return [
     ...(operationEnabled(table, "create")
       ? [`${renderDescription(
           `Creates a ${graphql.typeName} record.`,
           "      ",
-        )}      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${graphql.typeName}`]
+        )}      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
       : []),
     ...(operationEnabled(table, "update")
       ? [`${renderDescription(
           `Partially updates a ${graphql.typeName} record.`,
           "      ",
-        )}      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${graphql.typeName}`]
+        )}      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
       : []),
     ...(operationEnabled(table, "delete")
       ? [`${renderDescription(
           `Deletes a ${graphql.typeName} record by id.`,
           "      ",
-        )}      ${graphql.deleteMutationName}(id: ID!): Boolean!`]
+        )}      ${canonical
+          ? `${graphql.deleteMutationName}(input: Delete${graphql.typeName}Input!): ${canonicalDeleteResultType(graphql)}`
+          : `${graphql.deleteMutationName}(id: ID!): Boolean!`}`]
       : []),
   ].join("\n");
 }
@@ -520,6 +683,53 @@ function selectionIncludes(info: GraphQLResolveInfo, name: string): boolean {
   return info.fieldNodes.some((node) => walk(node.selectionSet));
 }
 
+const GRAPHQL_OPERATION_CONTROLS = new Set([
+  "expectedVersion",
+  "leaseToken",
+  "confirmed",
+  "confirmationToken",
+  "confirmationAnswer",
+]);
+
+/** Split transport controls from authored values before canonical dispatch. */
+export function splitCanonicalGraphqlMutationInput(
+  input: Record<string, unknown>,
+  includeId: boolean,
+): { id?: string; values: Record<string, unknown>; controls: EntityOperationInput } {
+  const values: Record<string, unknown> = {};
+  const controls: EntityOperationInput = {};
+  let id: string | undefined;
+  for (const [key, value] of Object.entries(input)) {
+    if (includeId && key === "id") {
+      if (typeof value === "string") id = value;
+    } else if (GRAPHQL_OPERATION_CONTROLS.has(key)) {
+      (controls as Record<string, unknown>)[key] = value;
+    } else {
+      values[key] = value;
+    }
+  }
+  return { ...(id === undefined ? {} : { id }), values, controls };
+}
+
+/**
+ * Canonical GraphQL adapter boundary, exported so tests and alternate schema
+ * composers can prove they dispatch the same request contract as REST/MCP.
+ */
+export function executeCanonicalGraphqlOperation(
+  table: GeneratedTable,
+  intent: GeneratedCrudExposureOperation,
+  input: EntityOperationInput,
+  context: GraphqlContext,
+  dispatcher: typeof executeEntityOperation = executeEntityOperation,
+) {
+  const db = requireGeneratedDb(context);
+  return dispatcher(db, context.session!, {
+    operation: entityOperationRef(table, intent),
+    offerIntents: projectedOperationIntents(table),
+    input,
+  });
+}
+
 const queryResolvers = Object.fromEntries(
   tables.flatMap((table) => {
     const graphql = assertGraphqlMetadata(table);
@@ -528,6 +738,14 @@ const queryResolvers = Object.fromEntries(
       ...(operationEnabled(table, "get") ? [[
         graphql.singleQueryName,
         async (_parent: unknown, args: { id: string }, context: GraphqlContext) => {
+          if (usesCanonicalGraphqlOperations(table)) {
+            return executeCanonicalGraphqlOperation(
+              table,
+              "get",
+              { id: args.id },
+              context,
+            );
+          }
           return projectGraphqlOperation(() => {
             const db = requireGeneratedDb(context);
             assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
@@ -551,6 +769,22 @@ const queryResolvers = Object.fromEntries(
           context: GraphqlContext,
           info: GraphQLResolveInfo,
         ) => {
+          if (usesCanonicalGraphqlOperations(table)) {
+            return executeCanonicalGraphqlOperation(
+              table,
+              "list",
+              {
+                ...(args.first === undefined ? {} : { limit: args.first }),
+                ...(args.after === undefined ? {} : { cursor: args.after }),
+                ...(args.filter === undefined ? {} : { filter: args.filter }),
+                ...(args.sort === undefined ? {} : { sort: args.sort }),
+                ...(selectionIncludes(info, "totalCount")
+                  ? { includeTotalCount: true as const }
+                  : {}),
+              },
+              context,
+            );
+          }
           return projectGraphqlOperation(async () => {
             const db = requireGeneratedDb(context);
             assertOperationAllowed(authorization, context.session, "read", graphql.typeName);
@@ -580,6 +814,18 @@ const mutationResolvers = Object.fromEntries(
       ...(operationEnabled(table, "create") ? [[
         graphql.createMutationName,
         async (_parent: unknown, args: { input: Record<string, unknown> }, context: GraphqlContext) => {
+          if (usesCanonicalGraphqlOperations(table)) {
+            const { values, controls } = splitCanonicalGraphqlMutationInput(
+              args.input,
+              false,
+            );
+            return executeCanonicalGraphqlOperation(
+              table,
+              "create",
+              { values, ...controls },
+              context,
+            );
+          }
           return projectGraphqlOperation(() => {
             const db = requireGeneratedDb(context);
             assertOperationAllowed(authorization, context.session, "create", graphql.typeName);
@@ -593,6 +839,18 @@ const mutationResolvers = Object.fromEntries(
       ...(operationEnabled(table, "update") ? [[
         graphql.updateMutationName,
         async (_parent: unknown, args: { input: Record<string, unknown> & { id: string } }, context: GraphqlContext) => {
+          if (usesCanonicalGraphqlOperations(table)) {
+            const { id, values, controls } = splitCanonicalGraphqlMutationInput(
+              args.input,
+              true,
+            );
+            return executeCanonicalGraphqlOperation(
+              table,
+              "update",
+              { ...(id === undefined ? {} : { id }), values, ...controls },
+              context,
+            );
+          }
           return projectGraphqlOperation(() => {
             const db = requireGeneratedDb(context);
             assertOperationAllowed(authorization, context.session, "update", graphql.typeName);
@@ -606,13 +864,29 @@ const mutationResolvers = Object.fromEntries(
       ]] : []),
       ...(operationEnabled(table, "delete") ? [[
         graphql.deleteMutationName,
-        async (_parent: unknown, args: { id: string }, context: GraphqlContext) => {
+        async (
+          _parent: unknown,
+          args: { id: string } | { input: Record<string, unknown> & { id: string } },
+          context: GraphqlContext,
+        ) => {
+          if (usesCanonicalGraphqlOperations(table)) {
+            const { id, controls } = splitCanonicalGraphqlMutationInput(
+              "input" in args ? args.input : args,
+              true,
+            );
+            return executeCanonicalGraphqlOperation(
+              table,
+              "delete",
+              { ...(id === undefined ? {} : { id }), ...controls },
+              context,
+            );
+          }
           return projectGraphqlOperation(() => {
             const db = requireGeneratedDb(context);
             assertOperationAllowed(authorization, context.session, "delete", graphql.typeName);
             return deleteGeneratedEntity(db, context.session, {
               table: table.name,
-              id: args.id,
+              id: "input" in args ? args.input.id : args.id,
             });
           });
         },

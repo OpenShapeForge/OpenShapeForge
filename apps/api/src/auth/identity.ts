@@ -374,8 +374,8 @@ async function verifyBearerIdentity(token: string) {
 
 /**
  * Effective roles for a bearer identity = realm roles ∪ every
- * `resource_access` client's roles. Keycloak expands realm composites (e.g.
- * `directie`) into per-client roles under `resource_access`, so entity roles
+ * `resource_access` client's roles. Keycloak expands realm and client
+ * composites into per-client roles under `resource_access`, so entity roles
  * like `Relations.All.ReadWrite` only exist there — realm_access alone would
  * deny every generated-entity operation once role enforcement runs. Merging
  * all clients is safe because the entity guard matches exact strings from

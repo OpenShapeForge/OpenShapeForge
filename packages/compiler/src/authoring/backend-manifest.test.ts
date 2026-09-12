@@ -331,6 +331,23 @@ describe("generated REST exposure (source.rest bridge)", () => {
     });
   });
 
+  it("emits canonical v2 secure input neutrally and mirrors it for the MCP handoff", () => {
+    const manifest = compileRestFixtures(["secure-input-v2"], {
+      generatedCrudAllowlist: ["secure-input-v2"],
+    });
+    const table = tableByName(manifest, "secure_input_v2s");
+    const expected = {
+      sourceField: "name",
+      sourceEntity: "SecureInputV2",
+      definitionsField: "configurationDefinitions",
+      into: "configurationValues",
+    };
+    expect(table?.source?.secureInputOnCreate).toEqual(expected);
+    expect(table?.source?.mcp?.elicitOnCreate).toEqual(expected);
+    expect(table?.source?.rest?.operations.create).toBe(true);
+    expect(table?.source?.graphql?.operations?.create).toBe(true);
+  });
+
   it("fails closed when a rest-enabled entity is not generated-CRUD allowlisted", () => {
     expect(() => compileRestFixtures(["rest-enabled"])).toThrow(
       /declares a rest: block but is not generated-CRUD enabled/,

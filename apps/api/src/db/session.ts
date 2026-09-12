@@ -41,6 +41,12 @@ const dbSessionHooks = new AsyncLocalStorage<{
   afterCommit: DbSessionAfterCommitHook[];
 }>();
 
+const activeDbSession = new AsyncLocalStorage<{
+  db: Kysely<unknown>;
+  trx: Transaction<unknown>;
+  session: DbSessionContext;
+}>();
+
 export function registerDbSessionAfterCommit(hook: DbSessionAfterCommitHook) {
   const store = dbSessionHooks.getStore();
   if (!store) return;
@@ -59,7 +65,7 @@ function assertUuid(value: string, label: string) {
 function normalizeGroups(groups: readonly string[] | null | undefined): readonly string[] {
   if (!groups || groups.length === 0) return [];
   // Trusted-context now propagates Keycloak group PATHS (e.g.
-  // "/openshapeforge-demo/tenant-acme/role-directie") for app-level authorization.
+  // "/customer/region/editors") for app-level authorization.
   // The DB session GUC `app.user_groups` only accepts UUIDs — path → org-unit
   // UUID translation is a separate concern. Silently filter the paths so the
   // session can still apply, while UUID groups (when present) flow through.
@@ -186,6 +192,23 @@ export async function withDbSession<TDatabase, TResult>(
   options: { isolationLevel?: "repeatable read" | "serializable" } = {},
 ): Promise<TResult> {
   const session = createDbSessionContext(input);
+  const active = activeDbSession.getStore();
+  if (active && active.db === db) {
+    const sameSession = active.session.tenantId === session.tenantId &&
+      active.session.userId === session.userId &&
+      active.session.scope === session.scope &&
+      active.session.roles.length === session.roles.length &&
+      active.session.roles.every((role, index) => role === session.roles[index]) &&
+      active.session.groups.length === session.groups.length &&
+      active.session.groups.every((group, index) => group === session.groups[index]);
+    if (!sameSession) {
+      throw new Error("Nested database work cannot replace the active session.");
+    }
+    return callback(
+      active.trx as Transaction<TDatabase>,
+      active.session,
+    );
+  }
   const hooks = { afterCommit: [] as DbSessionAfterCommitHook[] };
 
   const result = await dbSessionHooks.run(hooks, () => {
@@ -194,7 +217,14 @@ export async function withDbSession<TDatabase, TResult>(
       : db.transaction();
     return transaction.execute(async (trx) => {
       await applyDbSession(trx, session);
-      return callback(trx, session);
+      return activeDbSession.run(
+        {
+          db: db as Kysely<unknown>,
+          trx: trx as Transaction<unknown>,
+          session,
+        },
+        () => callback(trx, session),
+      );
     });
   });
 

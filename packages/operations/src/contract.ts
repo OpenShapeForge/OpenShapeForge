@@ -81,10 +81,71 @@ export type OperationError = {
   data?: Readonly<Record<string, unknown>>;
 };
 
+export type OperationInteractionChoice = {
+  value: string;
+  label: string;
+  description?: string;
+};
+
+export type OperationInteractionBinding = {
+  /** Server-verified tenant and subject bindings are mandatory. */
+  tenant: string;
+  subject: string;
+  target?: string;
+  instance?: string;
+  node?: string;
+  version?: string;
+};
+
+/**
+ * Server-derived record binding for an available Operation. Clients may use
+ * the input fragment as a form default, but the runtime re-resolves and
+ * authorizes the target before execution.
+ */
+export type OperationTargetBinding = {
+  target: {
+    entityId: string;
+    id: string;
+    version?: string;
+  };
+  input: Readonly<Record<string, unknown>>;
+};
+
+type OperationInteractionBase = {
+  /** Opaque, server-issued identifier; clients must never mint or reinterpret it. */
+  offerId: string;
+  expiresAt: string;
+  bindTo: OperationInteractionBinding;
+};
+
+/**
+ * Temporary, server-authored input carried by an available Operation offer.
+ * Secure input always has a schema; workflow user input may be schema-driven
+ * or a finite set of choices. Transports only render and return the answer.
+ */
+export type OperationInteraction =
+  | (OperationInteractionBase & {
+      kind: "secureInput";
+      inputSchema: Readonly<Record<string, unknown>>;
+      choices?: readonly OperationInteractionChoice[];
+    })
+  | (OperationInteractionBase & {
+      kind: "userInput";
+      inputSchema: Readonly<Record<string, unknown>>;
+      choices?: readonly OperationInteractionChoice[];
+    })
+  | (OperationInteractionBase & {
+      kind: "userInput";
+      choices: readonly OperationInteractionChoice[];
+      inputSchema?: Readonly<Record<string, unknown>>;
+    });
+
 export type OperationOffer<TIntent extends string = string> =
   | {
       operation: OperationReference<TIntent>;
       available: true;
+      binding?: OperationTargetBinding;
+      interaction?: OperationInteraction;
     }
   | {
       operation: OperationReference<TIntent>;
@@ -92,10 +153,21 @@ export type OperationOffer<TIntent extends string = string> =
       error: OperationError;
     };
 
+/** Transport-neutral reference to a server-authorized result artifact. */
+export type OperationResourceReference = {
+  uri: string;
+  name: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+};
+
 /** The canonical success envelope projected unchanged by every interface. */
 export type OperationEnvelope<TData, TIntent extends string = string> = {
   data: TData;
   operations: readonly OperationOffer<TIntent>[];
+  /** Optional bounded resources; adapters decide only how to render the links. */
+  resources?: readonly OperationResourceReference[];
 };
 
 /** Validation is one failure category in this same result contract. */

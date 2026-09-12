@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { assertV2Authoring } from "../entity-v2.js";
+import { assertV2Authoring, v2GraphqlOperationActions } from "../entity-v2.js";
 import { buildEntityOperations } from "./entity-operations.js";
 
 function relationSource(): Parameters<typeof buildEntityOperations>[0] {
@@ -88,6 +88,84 @@ describe("canonical entity operations", () => {
       reliability: { idempotency: { mode: "natural" } },
       interaction: { confirmation: { mode: "none" } },
     });
+  });
+
+  test("compiles secure input once on the canonical create Operation", () => {
+    const source = relationSource();
+    source.coreEntity = {
+      schemaVersion: 2,
+      kind: "coreEntity",
+      module: "core",
+      entity: "Connection",
+      title: "Connection",
+      language: "en",
+      fields: [
+        {
+          key: "adapterId",
+          valueType: "string",
+          persisted: { column: "adapter_id", storageClass: "core" },
+        },
+        {
+          key: "configurationValues",
+          valueType: "object",
+          persisted: { column: "configuration_values", storageClass: "core" },
+        },
+      ],
+      operations: {
+        create: {
+          name: "Create connection",
+          description: "Creates a connection from securely entered values.",
+          implementation: { type: "entity", action: "create" },
+          effects: { data: "write", external: "none" },
+          reliability: { idempotency: { mode: "none" } },
+          confirmation: { mode: "none" },
+          interaction: {
+            type: "secureInput",
+            sourceField: "adapterId",
+            sourceEntity: "Adapter",
+            definitionsField: "configurationFields",
+            into: "configurationValues",
+          },
+        },
+      },
+      interfaces: {
+        rest: {},
+        graphql: {},
+        mcp: {},
+        web: {
+          views: {
+            collection: { route: "/connections", columns: [{ key: "adapterId" }] },
+          },
+        },
+      },
+    };
+    source.entity = { id: "integrations.Connection", name: "Connection" };
+    source.crud.operations = {
+      list: false,
+      get: false,
+      create: true,
+      update: false,
+      delete: false,
+    };
+
+    expect(() => assertV2Authoring(source.coreEntity!, "connection.yaml")).not.toThrow();
+    expect(buildEntityOperations(source).create?.interaction).toEqual({
+      confirmation: { mode: "none" },
+      secureInput: {
+        type: "secureInput",
+        sourceField: "adapterId",
+        sourceEntity: "Adapter",
+        definitionsField: "configurationFields",
+        into: "configurationValues",
+      },
+    });
+
+    const createImplementation = source.coreEntity.operations!.create!.implementation;
+    if (createImplementation.type !== "entity") throw new Error("Expected entity implementation");
+    createImplementation.action = "update";
+    expect(() => assertV2Authoring(source.coreEntity!, "connection.yaml")).toThrow(
+      /secureInput.*supported only on create/,
+    );
   });
 
   test("preserves a server-issued version-bound challenge without interface translation", () => {
@@ -277,9 +355,11 @@ describe("canonical entity operations", () => {
     displayName.persisted = { column: "display_name", storageClass: "core" };
 
     delete source.coreEntity.operations!.update!.concurrency;
-    source.coreEntity.operations!.update!.implementation.action = "create";
+    const challengedImplementation = source.coreEntity.operations!.update!.implementation;
+    if (challengedImplementation.type !== "entity") throw new Error("Expected entity implementation");
+    challengedImplementation.action = "create";
     expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
-      /challenges require an existing target/,
+      /challenges require a mutable record target/,
     );
   });
 
@@ -337,7 +417,7 @@ describe("canonical entity operations", () => {
     };
     source.coreEntity.interfaces = { rest: { operations: { create: {} } } };
     expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
-      /version concurrency is allowed only on update or delete/,
+      /version concurrency requires a mutable record target/,
     );
 
     delete source.coreEntity.operations.create!.concurrency;
@@ -384,7 +464,7 @@ describe("canonical entity operations", () => {
     }
   });
 
-  test("fails closed for every v2 GraphQL projection until it is canonical", () => {
+  test("projects v2 GraphQL through canonical Operations and permits explicit exclusions", () => {
     const source = relationSource();
     source.coreEntity = {
       schemaVersion: 2,
@@ -404,7 +484,7 @@ describe("canonical entity operations", () => {
           confirmation: { mode: "none" },
         },
       },
-      interfaces: { graphql: { operations: { list: {} } } },
+      interfaces: { graphql: {} },
     };
     source.crud.operations = {
       list: true,
@@ -414,16 +494,23 @@ describe("canonical entity operations", () => {
       delete: false,
     };
 
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
-      /GraphQL adapter still exposes legacy direct CRUD and non-canonical response envelopes/,
-    );
-
-    source.coreEntity.schemaVersion = 1;
     expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    expect(v2GraphqlOperationActions(source.coreEntity!)).toEqual({
+      list: true,
+      get: false,
+      create: false,
+      update: false,
+      delete: false,
+    });
 
-    source.coreEntity.schemaVersion = 2;
-    source.coreEntity.interfaces = { rest: { operations: { list: {} } } };
-    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    source.coreEntity.interfaces = { graphql: { operations: { list: false } } };
+    expect(v2GraphqlOperationActions(source.coreEntity!)).toEqual({
+      list: false,
+      get: false,
+      create: false,
+      update: false,
+      delete: false,
+    });
   });
 
   test("validates version fields and edit-lease dependencies before compilation", () => {
@@ -498,16 +585,18 @@ describe("canonical entity operations", () => {
       storageClass: "core",
     };
 
-    source.coreEntity.operations!.update!.implementation.action = "create";
+    const updateImplementation = source.coreEntity.operations!.update!.implementation;
+    if (updateImplementation.type !== "entity") throw new Error("Expected entity implementation");
+    updateImplementation.action = "create";
     source.coreEntity.operations!.update!.concurrency = {
       version: { mode: "required", field: "updatedAt" },
       editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
     };
     expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
-      /version concurrency is allowed only on update or delete/,
+      /version concurrency requires a mutable record target/,
     );
 
-    source.coreEntity.operations!.update!.implementation.action = "update";
+    updateImplementation.action = "update";
     source.coreEntity.operations!.update!.concurrency = {
       version: { mode: "required", field: "updatedAt" },
       editLease: { mode: "required", expiresAfterInactivity: "P1M" },

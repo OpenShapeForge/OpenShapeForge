@@ -672,6 +672,7 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
       error: {
         code: "UNAUTHENTICATED",
         message: "Operation requires an authenticated bearer session.",
+        retryable: false,
       },
     });
 
@@ -728,7 +729,7 @@ test("the canonical REST route preserves authorization, tenancy, idempotency, in
       });
       expect(conflict.statusCode).toBe(409);
       expect(conflict.json() as unknown).toEqual({
-        error: { code: "CONFLICT", message: "Quote conflicts." },
+        error: { code: "CONFLICT", message: "Quote conflicts.", retryable: false },
       });
     }
 
@@ -935,7 +936,11 @@ test("REST applies the exact status-and-code fixed representation to core author
     });
     expect(handlerFailure.statusCode).toBe(403);
     expect(JSON.parse(handlerFailure.body)).toEqual({
-      error: { code: "FORBIDDEN", message: "Handler failure." },
+      error: {
+        code: "FORBIDDEN",
+        message: "Handler failure.",
+        retryable: false,
+      },
     });
   } finally {
     await app.close();

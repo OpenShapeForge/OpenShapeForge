@@ -1,10 +1,50 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { OperationReference } from "@openshapeforge/operations";
+import type {
+  OperationConcurrency,
+  OperationConfirmation,
+  OperationReference,
+} from "@openshapeforge/operations";
 
 export type LocalizedText = { en: string; nl: string };
 
 export type WebOperationIntent = "list" | "get" | "create" | "update" | "delete";
 export type WebOperationRef = OperationReference<WebOperationIntent>;
+export type WebCustomOperationRef = OperationReference<"invoke"> & {
+  /** Authored key inside the entity Operations map. */
+  key: string;
+  name: LocalizedText;
+  description: LocalizedText;
+  target: {
+    entityId: string;
+    entityName: string;
+    scope: "collection" | "record";
+    inputField?: string;
+  };
+  input: { kind: "json-schema"; schema: Readonly<Record<string, unknown>> };
+  output: { kind: "json-schema"; schema: Readonly<Record<string, unknown>> };
+  effects: {
+    data: "read" | "write" | "delete";
+    external: "none" | "read" | "write";
+  };
+  reliability: {
+    idempotency: {
+      mode: "natural" | "keyed" | "none";
+      inputField?: string;
+    };
+  };
+  concurrency?: OperationConcurrency;
+  confirmation: OperationConfirmation;
+  /** Authenticated browser execution endpoint, including honest binary output. */
+  rest?: {
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    path: string;
+    response: {
+      status?: number;
+      kind: "json" | "binary" | "stream";
+      contentType?: string;
+    };
+  };
+};
 export type WebViewMode = "read" | "create" | "update";
 
 export type WebVariableSource = {
@@ -103,6 +143,8 @@ export type WebRecordView = {
     create?: WebOperationRef;
     update?: WebOperationRef;
     delete?: WebOperationRef;
+    /** Ordered server-authored record actions shown by the browser. */
+    actions?: WebCustomOperationRef[];
   };
   titleTemplate: string;
   subtitleTemplate?: string;
@@ -126,7 +168,7 @@ export type WebEntityInterface = {
   entitySlug: string;
   title: LocalizedText;
   fields: Record<string, WebFieldProjection>;
-  operations: Partial<Record<WebOperationIntent, WebOperationRef>>;
+  operations: Record<string, WebOperationRef | WebCustomOperationRef>;
   views: {
     collection: WebCollectionView;
     record?: WebRecordView;

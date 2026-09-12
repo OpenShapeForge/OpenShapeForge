@@ -419,7 +419,7 @@ describe("buildMcpCatalog", () => {
     }
   });
 
-  it("routes generic-style entities through the shared osf_* tools", () => {
+  it("keeps the five shared osf_* tools for a generic strict-v2 projection", () => {
     const catalog = buildMcpCatalog(
       [
         input(
@@ -430,10 +430,10 @@ describe("buildMcpCatalog", () => {
               tools: "generic",
               operations: {
                 list: true,
-                get: false,
-                create: false,
-                update: false,
-                delete: false,
+                get: true,
+                create: true,
+                update: true,
+                delete: true,
               },
             },
           }),
@@ -441,7 +441,13 @@ describe("buildMcpCatalog", () => {
       ],
       "test",
     );
-    expect(catalog.tools[0]?.name).toBe("osf_list");
+    expect(catalog.tools.map((tool) => tool.name)).toEqual([
+      "osf_list",
+      "osf_get",
+      "osf_create",
+      "osf_update",
+      "osf_delete",
+    ]);
     const success = (
       catalog.tools[0]?.outputSchema!.oneOf as Record<string, unknown>[]
     )[0]!;

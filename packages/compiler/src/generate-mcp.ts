@@ -28,6 +28,7 @@ import type {
 } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import type { CompiledPluginOperation } from "./generate-operations.js";
+import type { PluginExecutionCompatibility } from "./plugins.js";
 import {
   compiledFieldSchema,
   compiledFieldSchemaWithoutDefinitions,
@@ -1077,6 +1078,14 @@ export type McpDerivedToolsDefinition = {
     instructionField: string;
     set: { name: string; description: string };
   };
+  /** Internal removal seam; never projected by an interface adapter. */
+  compatibility?: {
+    plugin: string;
+    providerId: string;
+    connectOperation?: string;
+    dryRunOperation?: string;
+    setPreferenceOperation?: string;
+  };
 };
 
 export type McpGuideToolDefinition = {
@@ -1095,6 +1104,7 @@ export type McpDiscoveryToolDefinition = {
   description: string;
   entity: string;
   table: string;
+  compatibility?: { plugin: string; operation: string };
 };
 
 export type McpTestToolDefinition = {
@@ -1102,6 +1112,12 @@ export type McpTestToolDefinition = {
   description: string;
   entity: string;
   table: string;
+  compatibility?: { plugin: string; operation: string };
+};
+
+export type ExecutionCompatibilityContribution = {
+  plugin: string;
+  contribution: PluginExecutionCompatibility;
 };
 
 export type McpCatalog = {
@@ -1124,6 +1140,13 @@ export type McpCatalog = {
     outputSchema: Record<string, unknown>;
     auth: CompiledPluginOperation["auth"];
     annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean };
+  }[];
+  /** Internal adapter-removal seam; never listed as an MCP tool. */
+  executionCompatibility: {
+    plugin: string;
+    operation: string;
+    toolName: string;
+    auth: CompiledPluginOperation["auth"];
   }[];
 };
 
@@ -1197,6 +1220,7 @@ export function buildMcpCatalog(
   source: string,
   referentiedata: CoreReferentiedataSnapshot = {},
   operations: readonly CompiledPluginOperation[] = [],
+  executionCompatibility: readonly ExecutionCompatibilityContribution[] = [],
 ): McpCatalog {
   const opted = inputs
     .filter((input) => input.contract.mcp !== undefined)
@@ -1211,6 +1235,7 @@ export function buildMcpCatalog(
   const discoveryTools: McpDiscoveryToolDefinition[] = [];
   const testTools: McpTestToolDefinition[] = [];
   const guideTools: McpGuideToolDefinition[] = [];
+  const executionCompatibilityOperations: McpCatalog["executionCompatibility"] = [];
 
   // Every entity in the input set is a possible relationship target, whether
   // or not it is MCP-exposed itself; only an exposed one has a list tool to
@@ -1501,6 +1526,275 @@ export function buildMcpCatalog(
     }
   }
 
+  const compatibilityNames = new Map<string, string>();
+  const compatibilityOperation = (
+    plugin: string,
+    key: string,
+  ): CompiledPluginOperation & {
+    auth: Extract<CompiledPluginOperation["auth"], { mode: "session" }>;
+  } => {
+    const operation = operations.find(
+      (candidate) => candidate.plugin === plugin && candidate.key === key,
+    );
+    if (!operation) {
+      throw new Error(
+        `Plugin "${plugin}" execution compatibility references unknown canonical ` +
+          `Operation "${key}".`,
+      );
+    }
+    if (operation.auth.mode !== "session") {
+      throw new Error(
+        `Plugin "${plugin}" compatibility Operation "${key}" must use session authorization.`,
+      );
+    }
+    return operation as CompiledPluginOperation & {
+      auth: Extract<CompiledPluginOperation["auth"], { mode: "session" }>;
+    };
+  };
+  const internalCompatibilityName = (
+    plugin: string,
+    operation: CompiledPluginOperation,
+  ) => {
+    const existing = compatibilityNames.get(operation.key);
+    if (existing) return existing;
+    const key = operation.key;
+    const name = `osf_internal_${plugin}_${key}`
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "_")
+      .slice(0, 128);
+    if ([...compatibilityNames.values()].includes(name)) {
+      throw new Error(
+        `Execution compatibility name collision for canonical Operation "${key}".`,
+      );
+    }
+    compatibilityNames.set(operation.key, name);
+    executionCompatibilityOperations.push({
+      plugin,
+      operation: operation.key,
+      toolName: name,
+      auth: operation.auth,
+    });
+    return name;
+  };
+  const compatibilityEntity = (plugin: string, entityName: string) => {
+    const found = inputs.find(
+      (candidate) => candidate.contract.entity.name === entityName,
+    );
+    if (!found) {
+      throw new Error(
+        `Plugin "${plugin}" execution compatibility references unknown entity ` +
+          `"${entityName}".`,
+      );
+    }
+    return found;
+  };
+  const assertCompatibilityField = (
+    plugin: string,
+    entityName: string,
+    field: string,
+    option: string,
+  ) => {
+    const entity = compatibilityEntity(plugin, entityName);
+    const fields = new Set(entity.contract.model.fields.map((candidate) => candidate.key));
+    if (!fields.has(field)) {
+      throw new Error(
+        `Plugin "${plugin}" execution compatibility ${option} references unknown ` +
+          `field "${entityName}.${field}".`,
+      );
+    }
+  };
+
+  for (const { plugin, contribution } of executionCompatibility) {
+    if (contribution.version !== 1) {
+      throw new Error(
+        `Plugin "${plugin}" execution compatibility must declare version 1.`,
+      );
+    }
+    for (const discovery of contribution.discovery ?? []) {
+      const operation = compatibilityOperation(plugin, discovery.operation);
+      const entity = compatibilityEntity(plugin, discovery.entity);
+      discoveryTools.push({
+        name: internalCompatibilityName(plugin, operation),
+        description: operation.description,
+        entity: discovery.entity,
+        table: entity.table,
+        compatibility: { plugin, operation: operation.key },
+      });
+    }
+    for (const test of contribution.tests ?? []) {
+      const operation = compatibilityOperation(plugin, test.operation);
+      const entity = compatibilityEntity(plugin, test.entity);
+      testTools.push({
+        name: internalCompatibilityName(plugin, operation),
+        description: operation.description,
+        entity: test.entity,
+        table: entity.table,
+        compatibility: { plugin, operation: operation.key },
+      });
+    }
+    for (const record of contribution.records ?? []) {
+      const entity = compatibilityEntity(plugin, record.entity);
+      const readOperation = entity.contract.entityOperations.get;
+      if (!readOperation) {
+        throw new Error(
+          `Plugin "${plugin}" execution compatibility record entity ` +
+            `"${record.entity}" must declare canonical get.`,
+        );
+      }
+      for (const [option, field] of [
+        ["keyField", record.keyField],
+        ["descriptionField", record.descriptionField],
+        ["inputFieldsField", record.inputFieldsField],
+        ["versionField", record.versionField],
+        ["bindingsField", record.execution.bindingsField],
+      ] as const) {
+        assertCompatibilityField(plugin, record.entity, field, option);
+      }
+      for (const field of [
+        record.titleField,
+        record.outputFieldsField,
+        record.visibleWhen?.field,
+        record.visibleToRolesField,
+        record.internalOnlyField,
+      ]) {
+        if (field) assertCompatibilityField(plugin, record.entity, field, "record field");
+      }
+      assertCompatibilityField(
+        plugin,
+        record.execution.operationEntity,
+        record.execution.providerRef,
+        "execution.providerRef",
+      );
+      assertCompatibilityField(
+        plugin,
+        record.execution.connectionEntity,
+        record.execution.connectionProviderRef,
+        "execution.connectionProviderRef",
+      );
+      assertCompatibilityField(
+        plugin,
+        record.execution.connectionEntity,
+        record.execution.connectionValuesField,
+        "execution.connectionValuesField",
+      );
+      const connect = record.connectOperation
+        ? compatibilityOperation(plugin, record.connectOperation)
+        : undefined;
+      const dryRun = record.dryRunOperation
+        ? compatibilityOperation(plugin, record.dryRunOperation)
+        : undefined;
+      const personalization = record.personalization
+        ? {
+            authored: record.personalization,
+            operation: compatibilityOperation(
+              plugin,
+              record.personalization.setOperation,
+            ),
+          }
+        : undefined;
+      if (personalization) {
+        assertCompatibilityField(
+          plugin,
+          personalization.authored.entity,
+          personalization.authored.serviceRef,
+          "personalization.serviceRef",
+        );
+        assertCompatibilityField(
+          plugin,
+          personalization.authored.entity,
+          personalization.authored.instructionField,
+          "personalization.instructionField",
+        );
+      }
+      derivedTools.push({
+        entity: record.entity,
+        table: entity.table,
+        roles: [...readOperation.authorization.roles],
+        keyField: record.keyField,
+        ...(record.titleField ? { titleField: record.titleField } : {}),
+        descriptionField: record.descriptionField,
+        inputFieldsField: record.inputFieldsField,
+        ...(record.outputFieldsField
+          ? { outputFieldsField: record.outputFieldsField }
+          : {}),
+        versionField: record.versionField,
+        ...(record.visibleWhen ? { visibleWhen: { ...record.visibleWhen } } : {}),
+        ...(record.visibleToRolesField
+          ? { visibleToRolesField: record.visibleToRolesField }
+          : {}),
+        ...(record.internalOnlyField
+          ? { internalOnlyField: record.internalOnlyField }
+          : {}),
+        ...(connect
+          ? {
+              connect: {
+                name: internalCompatibilityName(plugin, connect),
+                description: connect.description,
+                roles: [...connect.auth.roles],
+              },
+            }
+          : {}),
+        ...(dryRun
+          ? {
+              dryRun: {
+                name: internalCompatibilityName(plugin, dryRun),
+                description: dryRun.description,
+                roles: [...dryRun.auth.roles],
+              },
+            }
+          : {}),
+        ...(personalization
+          ? {
+              personalization: {
+                entity: personalization.authored.entity,
+                table: compatibilityEntity(
+                  plugin,
+                  personalization.authored.entity,
+                ).table,
+                serviceRef: personalization.authored.serviceRef,
+                instructionField: personalization.authored.instructionField,
+                set: {
+                  name: internalCompatibilityName(plugin, personalization.operation),
+                  description: personalization.operation.description,
+                },
+              },
+            }
+          : {}),
+        execution: {
+          bindingsField: record.execution.bindingsField,
+          operationRef: record.execution.operationRef,
+          operationEntity: record.execution.operationEntity,
+          operationTable: compatibilityEntity(
+            plugin,
+            record.execution.operationEntity,
+          ).table,
+          providerRef: record.execution.providerRef,
+          providerEntity: record.execution.providerEntity,
+          providerTable: compatibilityEntity(
+            plugin,
+            record.execution.providerEntity,
+          ).table,
+          connectionEntity: record.execution.connectionEntity,
+          connectionTable: compatibilityEntity(
+            plugin,
+            record.execution.connectionEntity,
+          ).table,
+          connectionProviderRef: record.execution.connectionProviderRef,
+          connectionValuesField: record.execution.connectionValuesField,
+        },
+        compatibility: {
+          plugin,
+          providerId: record.providerId,
+          ...(connect ? { connectOperation: connect.key } : {}),
+          ...(dryRun ? { dryRunOperation: dryRun.key } : {}),
+          ...(personalization
+            ? { setPreferenceOperation: personalization.operation.key }
+            : {}),
+        },
+      });
+    }
+  }
+
   const seenResourceUris = new Map<string, McpResourceDefinition>();
   for (const resource of resources) {
     const existing = seenResourceUris.get(resource.uri);
@@ -1587,8 +1881,12 @@ export function buildMcpCatalog(
       outputSchema: operation.outputSchema,
       auth: operation.auth,
       annotations: {
-        readOnlyHint: operation.transports.rest.method === "GET",
-        destructiveHint: operation.transports.rest.method === "DELETE",
+        readOnlyHint:
+          operation.effects?.data === "read" ||
+          (!operation.effects && operation.transports.rest.method === "GET"),
+        destructiveHint:
+          operation.effects?.data === "delete" ||
+          (!operation.effects && operation.transports.rest.method === "DELETE"),
         idempotentHint: operation.idempotency.mode !== "none",
       },
     }));
@@ -1616,6 +1914,7 @@ export function buildMcpCatalog(
     testTools,
     guideTools,
     operationTools,
+    executionCompatibility: executionCompatibilityOperations,
   };
 }
 
@@ -1624,6 +1923,13 @@ export function renderMcpCatalog(
   source: string,
   referentiedata: CoreReferentiedataSnapshot = {},
   operations: readonly CompiledPluginOperation[] = [],
+  executionCompatibility: readonly ExecutionCompatibilityContribution[] = [],
 ): string {
-  return `${JSON.stringify(buildMcpCatalog(inputs, source, referentiedata, operations), null, 2)}\n`;
+  return `${JSON.stringify(buildMcpCatalog(
+    inputs,
+    source,
+    referentiedata,
+    operations,
+    executionCompatibility,
+  ), null, 2)}\n`;
 }

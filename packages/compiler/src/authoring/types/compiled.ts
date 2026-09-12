@@ -38,6 +38,11 @@ import type {
 import type {
   AuthoredEntityIndex,
   CrudOperationKey,
+  EntityOperationDefinition,
+  EntityGraphqlOperationProjectionConfig,
+  EntityMcpOperationProjectionConfig,
+  EntityRestOperationProjectionConfig,
+  EntityInterfaceOperationProjectionConfig,
   FieldMapping,
   FieldRelationship,
   FieldSuggestions,
@@ -338,7 +343,17 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
   };
   reliability: { idempotency: { mode: "natural" | "keyed" | "none" } };
   concurrency?: OperationConcurrency;
-  interaction: { confirmation: OperationConfirmation };
+  interaction: {
+    confirmation: OperationConfirmation;
+    secureInput?: {
+      type: "secureInput";
+      sourceField: string;
+      sourceEntity: string;
+      definitionsField: string;
+      into: string;
+      message?: string;
+    };
+  };
 };
 
 export interface CompiledListView {
@@ -633,6 +648,20 @@ export interface CompiledEntityContract {
   crud: CrudSection;
   /** Canonical generated operations projected by REST, MCP, web and GraphQL. */
   entityOperations: Partial<Record<EntityOperationIntent, CompiledEntityOperation>>;
+  /** YAML-owned plugin Operations attached to this entity/record surface. */
+  pluginOperations?: Array<{
+    key: string;
+    id: string;
+    entityId: string;
+    entityName: string;
+    definition: EntityOperationDefinition;
+    interfaces: {
+      rest?: false | EntityRestOperationProjectionConfig;
+      graphql?: false | EntityGraphqlOperationProjectionConfig;
+      mcp?: false | EntityMcpOperationProjectionConfig;
+      web?: false | EntityInterfaceOperationProjectionConfig;
+    };
+  }>;
   /** Explicit v2 interface exposure; v1 contracts keep using legacy projections. */
   interfaces?: {
     web?: { operations: Partial<Record<EntityOperationIntent, boolean>> };

@@ -402,10 +402,10 @@ describe("coreEntity properties the compiler implements", () => {
       schemaVersion: 2,
       operations: { list: v2Operation("list"), get: v2Operation("get") },
       interfaces: {
-        rest: { operations: { list: {}, get: {} } },
-        mcp: { operations: { list: {}, get: {} } },
+        rest: {},
+        graphql: {},
+        mcp: { tools: "generic" },
         web: {
-          operations: { list: {}, get: {} },
           views: {
             collection: { route: "/billing-runs", columns: [{ key: "idempotencyKey" }] },
             record: {
@@ -418,6 +418,62 @@ describe("coreEntity properties the compiler implements", () => {
       },
     });
     expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+  });
+
+  it("accepts false as an explicit interface Operation exclusion", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { list: v2Operation("list"), get: v2Operation("get") },
+      interfaces: {
+        rest: { operations: { get: false } },
+        graphql: { operations: { list: false } },
+        mcp: { operations: { get: false } },
+      },
+    });
+
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+  });
+
+  it("accepts transport-neutral secure input on a v2 create Operation", () => {
+    const create = {
+      ...v2Operation("create"),
+      interaction: {
+        type: "secureInput",
+        sourceField: "adapterId",
+        sourceEntity: "Adapter",
+        definitionsField: "configurationFields",
+        into: "configurationValues",
+        message: "Enter the connection values securely.",
+      },
+    };
+    const document = coreEntity({
+      schemaVersion: 2,
+      fields: [
+        { key: "adapterId", valueType: "string" },
+        { key: "configurationValues", valueType: "object" },
+      ],
+      operations: { create },
+      interfaces: { rest: {}, graphql: {}, mcp: {} },
+    });
+
+    expect(validator.validate(document, "connection.yaml")).toBe(
+      "core-entity.schema.json",
+    );
+    create.interaction.type = "mcpElicitation";
+    expect(() => validator.validate(document, "connection.yaml")).toThrow(
+      /interaction/,
+    );
+  });
+
+  it("rejects an unknown strict v2 MCP tool projection", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      operations: { list: v2Operation("list") },
+      interfaces: {
+        mcp: { tools: "per-tenant", operations: { list: {} } },
+      },
+    });
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(/tools/);
   });
 
   it("accepts only the canonical server-issued, version-bound challenge shape", () => {

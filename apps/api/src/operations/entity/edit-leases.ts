@@ -30,7 +30,7 @@ export type LeaseProtectedOperation = {
   id: string;
   entityId: string;
   entityName: string;
-  intent: "update" | "delete";
+  intent: "update" | "delete" | "invoke";
   concurrency?: {
     version?: VersionRequirement;
     editLease?: EditLeaseRequirement;
@@ -118,6 +118,55 @@ async function currentVersionInTransaction(
   `.execute(trx);
   const version = result.rows[0]?.version;
   return version === undefined ? null : normalizeTimestampToken(String(version));
+}
+
+/**
+ * Lock a custom Operation's target row and prove its canonical version before
+ * any plugin write runs in the same transaction.
+ */
+export async function validateEntityVersionInTransaction(
+  trx: Transaction<DB>,
+  sessionInput: DbSessionInput,
+  input: {
+    operation: LeaseProtectedOperation;
+    table: GeneratedCrudTable;
+    targetId: string;
+    expectedVersion: string;
+  },
+): Promise<void> {
+  const requirement = input.operation.concurrency?.version;
+  if (!requirement) {
+    throw operationFailure({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "The operation's version contract is not available.",
+    });
+  }
+  const session = createDbSessionContext(sessionInput);
+  const column = versionColumn(input.table, requirement);
+  const tenantWhere = input.table.tenantScoped
+    ? sql`and ${sql.id("tenant_id")} = ${session.tenantId}::uuid`
+    : sql``;
+  const result = await sql<{ version: string }>`
+    select ${sql.id(column.name)}::text as version
+    from ${sql.id(input.table.schema, input.table.table)}
+    where ${sql.id(input.table.primaryKey!)}::text = ${input.targetId}
+      ${tenantWhere}
+    for update
+  `.execute(trx);
+  const current = result.rows[0]?.version;
+  if (current === undefined) {
+    throw operationFailure({ code: "NOT_FOUND", message: "Resource not found." });
+  }
+  if (
+    normalizeTimestampToken(String(current)) !==
+      normalizeTimestampToken(input.expectedVersion)
+  ) {
+    throw operationFailure({
+      code: "VERSION_CONFLICT",
+      message: "The record has changed since it was loaded.",
+      detail: "Reload the record before trying again.",
+    });
+  }
 }
 
 function lockedError(row: LeaseRow): OperationError {

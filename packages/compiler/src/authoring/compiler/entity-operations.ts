@@ -74,7 +74,10 @@ function compileOperation(
     effects: definition?.effects ?? defaultEffects(intent),
     reliability: definition?.reliability ?? defaultIdempotency(intent),
     ...(definition?.concurrency ? { concurrency: definition.concurrency } : {}),
-    interaction: { confirmation: definition?.confirmation ?? { mode: "none" as const } },
+    interaction: {
+      confirmation: definition?.confirmation ?? { mode: "none" as const },
+      ...(definition?.interaction ? { secureInput: definition.interaction } : {}),
+    },
   };
   switch (intent) {
     case "list":

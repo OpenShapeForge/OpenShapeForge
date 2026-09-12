@@ -139,6 +139,10 @@ export type PluginBaseContext = {
 export type PluginGenerateContext = PluginBaseContext & {
   manifest: PlatformSchemaManifest;   // full merged manifest
   entities: CompiledEntityInfo[];     // every compiled entity contract
+  operationCatalog: {
+    version: 1;
+    operations: readonly CompiledEntityOperation[];
+  };                                  // interface-neutral entity Operations
 };
 
 export type CompiledEntityInfo = {
@@ -153,6 +157,12 @@ export type GeneratedArtifact = { path: string; contents: string };
 
 A plugin module **default-exports** a `CompilerPlugin` with a non-empty
 string `name`; duplicate names across registered plugins are an error.
+
+`operationCatalog` is the public consumer boundary for plugins that derive
+workflow nodes, audit policy, or another product projection from entity
+Operations. It is compiled once from the resolved layers and is already
+sorted by stable Operation id. A plugin should consume this catalog instead
+of parsing entity YAML or inferring actions from transport routes.
 
 ### Registration
 

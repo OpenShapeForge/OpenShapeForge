@@ -23,6 +23,7 @@ export function v2OperationByAction(
 ): Partial<Record<CrudOperationKey, [string, EntityOperationDefinition]>> {
   const result: Partial<Record<CrudOperationKey, [string, EntityOperationDefinition]>> = {};
   for (const entry of v2OperationEntries(entity)) {
+    if (entry[1].implementation.type !== "entity") continue;
     const action = entry[1].implementation.action;
     if (result[action]) {
       throw new Error(
@@ -35,6 +36,31 @@ export function v2OperationByAction(
   return result;
 }
 
+export function v2PluginOperations(entity: CoreEntity) {
+  if (!isCoreEntityV2(entity)) return [];
+  return v2OperationEntries(entity).flatMap(([key, definition]) => {
+    if (definition.implementation.type !== "plugin") return [];
+    const projection = (name: "rest" | "graphql" | "mcp" | "web") => {
+      const contract = entity.interfaces?.[name];
+      if (!contract) return undefined;
+      return contract.operations?.[key] ?? {};
+    };
+    return [{
+      key,
+      id: definition.id ?? `${entity.entity}.${key}`,
+      entityId: `${entity.module}.${entity.entity}`,
+      entityName: entity.entity,
+      definition,
+      interfaces: {
+        ...(entity.interfaces?.rest ? { rest: projection("rest") } : {}),
+        ...(entity.interfaces?.graphql ? { graphql: projection("graphql") } : {}),
+        ...(entity.interfaces?.mcp ? { mcp: projection("mcp") } : {}),
+        ...(entity.interfaces?.web ? { web: projection("web") } : {}),
+      },
+    }];
+  });
+}
+
 function projectedActions(
   entity: CoreEntity,
   interfaceName: "rest" | "mcp" | "web" | "graphql",
@@ -42,6 +68,10 @@ function projectedActions(
   const operations = entity.interfaces?.[interfaceName]?.operations ?? {};
   const definitions = entity.operations ?? {};
   const result: Partial<Record<CrudOperationKey, boolean>> = {};
+  for (const definition of Object.values(definitions)) {
+    if (definition.implementation.type !== "entity") continue;
+    result[definition.implementation.action] = true;
+  }
   for (const operationKey of Object.keys(operations)) {
     const definition = definitions[operationKey];
     if (!definition) {
@@ -50,7 +80,9 @@ function projectedActions(
           "does not reference a canonical operation.",
       );
     }
-    result[definition.implementation.action] = true;
+    if (definition.implementation.type === "entity") {
+      result[definition.implementation.action] = operations[operationKey] !== false;
+    }
   }
   return result;
 }
@@ -96,8 +128,15 @@ export function v2McpConfig(entity: CoreEntity): McpConfig | undefined {
   const mcp = entity.interfaces?.mcp;
   if (!mcp) return undefined;
   return {
+    ...(mcp.tools ? { tools: mcp.tools } : {}),
     operations: completeProjectedActions(entity, "mcp"),
     ...(mcp.resource ? { resource: mcp.resource } : {}),
+    ...(() => {
+      const secureInput = v2OperationByAction(entity).create?.[1].interaction;
+      if (!secureInput) return {};
+      const { type: _type, ...elicitOnCreate } = secureInput;
+      return { elicitOnCreate };
+    })(),
   };
 }
 
@@ -141,14 +180,16 @@ export function v2WebUi(entity: CoreEntity): UIDefinition | undefined {
   if (record) {
     if (record.routes?.read) routes.detail = record.routes.read;
     if (record.routes?.create) routes.create = record.routes.create;
-    presentations.detail = {
+      presentations.detail = {
       type: "detail",
       header: {
         title: record.title,
         ...(record.subtitle ? { subtitle: record.subtitle } : {}),
       },
       actions: (record.actions ?? []).map((key) => {
-        const action = entity.operations![key]!.implementation.action;
+        const implementation = entity.operations![key]!.implementation;
+        if (implementation.type === "plugin") return { key, route: key };
+        const action = implementation.action;
         return action === "delete"
           ? { key, mutation: "delete" }
           : { key, route: action === "update" ? "edit" : key };
@@ -197,11 +238,90 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
   }
 
   for (const [operationKey, operation] of v2OperationEntries(entity)) {
-    const action = operation.implementation.action;
+    const action = operation.implementation.type === "entity"
+      ? operation.implementation.action
+      : undefined;
+    const operationKind = action ?? "plugin";
     const version = operation.concurrency?.version;
     const editLease = operation.concurrency?.editLease;
+    const secureInput = operation.interaction;
+    const mutableExistingTarget = action === "update" || action === "delete" ||
+      (operation.implementation.type === "plugin" &&
+        operation.target?.scope === "record" &&
+        operation.effects.data !== "read");
+    if (operation.implementation.type === "plugin") {
+      if (!operation.target || !operation.input || !operation.output ||
+        !operation.errors || !operation.auth || !operation.tenancy) {
+        throw new Error(
+          `${origin} plugin operation "${operationKey}" must declare target, input, ` +
+            "output, errors, auth and tenancy.",
+        );
+      }
+      if (operation.target.scope === "record") {
+        const properties = operation.input.schema.properties;
+        const required = operation.input.schema.required;
+        if (!properties || typeof properties !== "object" || Array.isArray(properties) ||
+          !(operation.target.inputField in properties) ||
+          !Array.isArray(required) || !required.includes(operation.target.inputField)) {
+          throw new Error(
+            `${origin} plugin operation "${operationKey}" target inputField ` +
+              `"${operation.target.inputField}" must be a required input.schema property.`,
+          );
+        }
+      }
+      if (operation.auth.mode === "session" && operation.auth.roles.length === 0) {
+        throw new Error(
+          `${origin} plugin operation "${operationKey}" session auth needs at least one role.`,
+        );
+      }
+      if (operation.interaction) {
+        throw new Error(
+          `${origin} plugin operation "${operationKey}" cannot declare entity secureInput; ` +
+            "a plugin handler must use a server-authored Operation interaction.",
+        );
+      }
+    }
+    if (secureInput) {
+      if (action !== "create") {
+        throw new Error(
+          `${origin} operation "${operationKey}" declares secureInput for entity ` +
+            `action "${operationKind}"; secure input is currently supported only on create.`,
+        );
+      }
+      for (const [option, fieldKey] of [
+        ["sourceField", secureInput.sourceField],
+        ["into", secureInput.into],
+      ] as const) {
+        const field = fieldsByKey.get(fieldKey);
+        if (!field) {
+          throw new Error(
+            `${origin} operation "${operationKey}" secureInput ${option} ` +
+              `"${fieldKey}" does not name an authored field.`,
+          );
+        }
+        if (!field.persisted) {
+          throw new Error(
+            `${origin} operation "${operationKey}" secureInput ${option} ` +
+              `"${fieldKey}" must resolve to a persisted runtime column.`,
+          );
+        }
+      }
+      if (secureInput.sourceField === secureInput.into) {
+        throw new Error(
+          `${origin} operation "${operationKey}" secureInput sourceField and into ` +
+            "must name different fields.",
+        );
+      }
+      if (!secureInput.sourceEntity || !secureInput.definitionsField) {
+        throw new Error(
+          `${origin} operation "${operationKey}" secureInput needs sourceEntity and ` +
+            "definitionsField naming where the secure field definitions live.",
+        );
+      }
+    }
     if (
-      (action === "list" || action === "get") &&
+      (action === "list" || action === "get" ||
+        (operation.implementation.type === "plugin" && operation.effects.data === "read")) &&
       (operation.concurrency || operation.confirmation.mode !== "none")
     ) {
       throw new Error(
@@ -210,10 +330,10 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
       );
     }
     if (version) {
-      if (action !== "update" && action !== "delete") {
+      if (!mutableExistingTarget) {
         throw new Error(
           `${origin} operation "${operationKey}" declares version concurrency for ` +
-            `entity action "${action}"; version concurrency is allowed only on update or delete.`,
+            `operation kind "${operationKind}"; version concurrency requires a mutable record target.`,
         );
       }
       if (version.field !== "updatedAt") {
@@ -244,10 +364,10 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
       }
     }
     if (editLease) {
-      if (action !== "update" && action !== "delete") {
+      if (!mutableExistingTarget) {
         throw new Error(
           `${origin} operation "${operationKey}" declares editLease for entity action ` +
-            `"${action}"; editLease is allowed only on update or delete.`,
+            `"${operationKind}"; editLease requires a mutable record target.`,
         );
       }
       if (!version) {
@@ -272,11 +392,10 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
       }
     }
     if (operation.confirmation.mode === "challenge") {
-      if (action !== "update" && action !== "delete") {
+      if (!mutableExistingTarget) {
         throw new Error(
           `${origin} operation "${operationKey}" declares a confirmation challenge for ` +
-            `entity action "${action}"; challenges require an existing target and are ` +
-            "allowed only on update or delete.",
+            `operation kind "${operationKind}"; challenges require a mutable record target.`,
         );
       }
       const challengeField = fieldsByKey.get(
@@ -308,7 +427,9 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
             "collection values cannot be compared as an exact current-field answer.",
         );
       }
-      const operationRoles = entity.authorization?.roles[action] ?? [];
+      const operationRoles: string[] = operation.implementation.type === "plugin"
+        ? operation.auth?.mode === "session" ? operation.auth.roles : []
+        : entity.authorization?.roles[action as "update" | "delete"] ?? [];
       const entityReadRoles = entity.authorization?.roles.read ?? [];
       const fieldReadRoles = challengeField.authorization?.roles.read ?? [];
       const effectiveReadRoles = fieldReadRoles.length > 0
@@ -347,22 +468,37 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
         );
       }
     }
-    if (operation.reliability.idempotency.mode === "keyed") {
+    if (
+      operation.implementation.type === "entity" &&
+      operation.reliability.idempotency.mode === "keyed"
+    ) {
       throw new Error(
         `${origin} operation "${operationKey}" declares keyed idempotency. The contract ` +
           "is reserved, but server-side key enforcement must land before it can compile.",
       );
     }
-    const expectedIdempotency = ["list", "get", "delete"].includes(
-      operation.implementation.action,
-    )
+    if (operation.implementation.type === "plugin" &&
+      operation.reliability.idempotency.mode === "keyed") {
+      const field = operation.reliability.idempotency.inputField;
+      const properties = operation.input?.schema.properties;
+      const required = operation.input?.schema.required;
+      if (!field || !properties || typeof properties !== "object" ||
+        Array.isArray(properties) || !(field in properties) ||
+        !Array.isArray(required) || !required.includes(field)) {
+        throw new Error(
+          `${origin} plugin operation "${operationKey}" keyed idempotency inputField ` +
+            "must name a required input.schema property.",
+        );
+      }
+    }
+    const expectedIdempotency = action && ["list", "get", "delete"].includes(action)
       ? "natural"
       : "none";
-    if (operation.reliability.idempotency.mode !== expectedIdempotency) {
+    if (action && operation.reliability.idempotency.mode !== expectedIdempotency) {
       throw new Error(
         `${origin} operation "${operationKey}" declares ` +
           `idempotency "${operation.reliability.idempotency.mode}", but generated entity ` +
-          `action "${operation.implementation.action}" currently requires ` +
+          `action "${action}" currently requires ` +
           `"${expectedIdempotency}" so interface metadata stays truthful.`,
       );
     }
@@ -387,15 +523,6 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
     if (entity.interfaces?.[interfaceName]) projectedActions(entity, interfaceName);
   }
 
-  if (entity.interfaces?.graphql) {
-    throw new Error(
-      `${origin} schemaVersion 2 interfaces.graphql projection is not supported: ` +
-        "the GraphQL adapter still exposes legacy direct CRUD and non-canonical " +
-        "response envelopes. Use a canonical REST, MCP, or web projection until " +
-        "the adapter supports the schemaVersion 2 Operation contract.",
-    );
-  }
-
   const web = entity.interfaces?.web;
   if (web) {
     for (const operationKey of web.views.record?.actions ?? []) {
@@ -405,7 +532,7 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
             `"${operationKey}".`,
         );
       }
-      if (!web.operations[operationKey]) {
+      if (web.operations?.[operationKey] === false) {
         throw new Error(
           `${origin} interfaces.web.views.record.actions operation "${operationKey}" ` +
             "must also be projected by interfaces.web.operations.",

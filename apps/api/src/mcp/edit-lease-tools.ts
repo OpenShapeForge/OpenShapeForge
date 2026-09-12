@@ -6,6 +6,7 @@ import type { DbSessionInput } from "../db/session.js";
 import {
   acquireEditLeaseForEntityOperation,
   getEntityOperationContracts,
+  pluginEditLeaseOperationIdsForSession,
   releaseEntityEditLease,
   renewEntityEditLease,
 } from "../operations/entity/index.js";
@@ -83,7 +84,7 @@ export function editLeaseOperationIdsForSession(
 ): string[] {
   const roles = new Set(session.roles ?? []);
   const projected = new Set(projectedOperationIds);
-  return getEntityOperationContracts()
+  const generated = getEntityOperationContracts()
     .filter(
       (operation) =>
         projected.has(operation.id) &&
@@ -91,6 +92,11 @@ export function editLeaseOperationIdsForSession(
         operation.authorization.roles.some((role) => roles.has(role)),
     )
     .map(({ id }) => id);
+  return [
+    ...generated,
+    ...pluginEditLeaseOperationIdsForSession(session, "mcp")
+      .filter((id) => projected.has(id)),
+  ];
 }
 
 export function editLeaseToolsForOperationIds(

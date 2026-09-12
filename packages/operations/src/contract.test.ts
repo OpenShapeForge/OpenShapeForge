@@ -6,6 +6,7 @@ import {
   operationFailure,
   type OperationConfirmation,
   type OperationConcurrency,
+  type OperationOffer,
   type OperationResult,
 } from "./index.js";
 
@@ -23,6 +24,32 @@ test("a challenge is server-issued, version-bound and single-use", () => {
   } satisfies OperationConfirmation;
 
   expect(confirmation.challenge.bindTo).toContain("target.version");
+});
+
+test("an available offer can carry a server-issued transport-neutral interaction", () => {
+  const offer = {
+    operation: { id: "workflow.interaction.respond", intent: "respond" },
+    available: true,
+    interaction: {
+      kind: "userInput",
+      offerId: "opaque-server-offer",
+      choices: [{ value: "approve", label: "Approve" }],
+      expiresAt: "2026-09-12T12:00:00.000Z",
+      bindTo: {
+        tenant: "tenant-1",
+        subject: "user-1",
+        instance: "workflow-1",
+        node: "approval",
+        version: "3",
+      },
+    },
+  } satisfies OperationOffer<"respond">;
+
+  expect(offer.interaction.bindTo).toMatchObject({
+    tenant: "tenant-1",
+    subject: "user-1",
+    instance: "workflow-1",
+  });
 });
 
 test("an acknowledgement is distinct from server-issued proof", () => {

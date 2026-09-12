@@ -15,11 +15,36 @@ import type {
   ModuleGraphqlContribution,
   ModuleOperationErrorResult,
   ModuleOperationHandler,
+  ModuleOperationResult,
   ModuleOperationSuccessResult,
   ModuleRuntimeContext,
   RuntimeModule,
 } from "../modules/contract.js";
-import { withModuleOperationSession } from "../modules/platform.js";
+import type {
+  RuntimeOperationDefinition,
+  RuntimeOperationExecutionResult,
+} from "@openshapeforge/plugin-runtime";
+import { operationFailure } from "@openshapeforge/operations";
+import {
+  invokeModuleDeclarativeService,
+  invokeModuleHostOperation,
+  withModuleOperationSession,
+  withModuleOperationTransaction,
+  type ModuleStaticOperationRegistration,
+} from "../modules/platform.js";
+import {
+  consumeEntityConfirmationInTransaction,
+  issueEntityConfirmationChallenge,
+  type ChallengeProtectedOperation,
+} from "./entity/confirmation-challenges.js";
+import {
+  consumeEntityEditLeaseInTransaction,
+  type LeaseProtectedOperation,
+  validateEntityVersionInTransaction,
+} from "./entity/edit-leases.js";
+import { getGeneratedCrudTables } from "./entity/catalog.js";
+import type { GeneratedCrudTable } from "./entity/types.js";
+import { normalizeTimestampToken } from "../db/timestamps.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 
 export type OperationContract = {
@@ -28,6 +53,12 @@ export type OperationContract = {
   title: string;
   description: string;
   handler: string;
+  target?: {
+    entityId: string;
+    entityName: string;
+    scope: "collection" | "record";
+    inputField?: string;
+  };
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;
   errors: {
@@ -43,6 +74,12 @@ export type OperationContract = {
     | { mode: "custom"; scheme: string; description: string; securityScheme: Record<string, unknown> };
   tenancy: { mode: "required" | "derived" | "none"; description?: string };
   idempotency: { mode: "none" | "intrinsic" | "idempotency-key"; header?: string; inputField?: string; description?: string };
+  effects?: {
+    data: "read" | "write" | "delete";
+    external: "none" | "read" | "write";
+  };
+  concurrency?: import("@openshapeforge/operations").OperationConcurrency;
+  confirmation?: import("@openshapeforge/operations").OperationConfirmation;
   transports: {
     rest: { method: string; path: string; response: { status?: number; kind: "json" | "binary" | "stream"; contentType?: string } };
     mcp: { enabled: boolean; name?: string; reason?: string };
@@ -142,6 +179,126 @@ export function listOperationContracts(): readonly OperationContract[] {
   return catalog.operations;
 }
 
+function runtimeOperationError(error: unknown) {
+  const projected = error instanceof DeclaredOperationError
+    ? error.body
+    : toHttpError(error).body;
+  const candidate = projected && typeof projected === "object"
+    ? (projected as { error?: Record<string, unknown> }).error
+    : undefined;
+  return {
+    code: typeof candidate?.code === "string"
+      ? candidate.code
+      : "OPERATION_FAILED",
+    message: typeof candidate?.message === "string"
+      ? candidate.message
+      : "The Operation failed.",
+    ...(typeof candidate?.detail === "string"
+      ? { detail: candidate.detail }
+      : {}),
+    retryable: candidate?.retryable === true,
+    ...(typeof candidate?.retryAt === "string"
+      ? { retryAt: candidate.retryAt }
+      : {}),
+    ...(candidate?.data && typeof candidate.data === "object"
+      ? { data: candidate.data as Record<string, unknown> }
+      : {}),
+  };
+}
+
+/** Bind compiler-contributed static Operations into the same runtime registry. */
+export function runtimeStaticOperationRegistrations(
+  modules: readonly RuntimeModule[],
+  runtime: ModuleRuntimeContext,
+  operations: readonly OperationContract[] = catalog.operations,
+): readonly ModuleStaticOperationRegistration[] {
+  const bound = bindOperationHandlers(modules, operations);
+  return [...bound.values()].map((entry) => {
+    const method = entry.operation.transports.rest.method;
+    const definition: RuntimeOperationDefinition = {
+      id: entry.operation.key,
+      key: entry.operation.key,
+      intent: "invoke",
+      name: entry.operation.title,
+      description: entry.operation.description,
+      ...(entry.operation.target ? { target: entry.operation.target } : {}),
+      input: { kind: "json-schema", schema: entry.operation.inputSchema },
+      output: { kind: "json-schema", schema: entry.operation.outputSchema },
+      effects: {
+        data: entry.operation.effects?.data ?? (method === "GET"
+          ? "read"
+          : method === "DELETE"
+            ? "delete"
+            : "write"),
+        external: entry.operation.effects?.external ?? (method === "GET" ? "read" : "write"),
+      },
+      reliability: {
+        idempotency: {
+          mode: entry.operation.idempotency.mode === "intrinsic"
+            ? "natural"
+            : entry.operation.idempotency.mode === "idempotency-key"
+              ? "keyed"
+              : "none",
+        },
+      },
+      ...(entry.operation.concurrency
+        ? { concurrency: entry.operation.concurrency }
+        : {}),
+      interaction: {
+        confirmation: entry.operation.confirmation ?? { mode: "none" },
+      },
+    };
+    return {
+      definition,
+      available: (session) => {
+        try {
+          requireOperationAuthorization(entry.operation, session);
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      execute: async (session, request, options): Promise<RuntimeOperationExecutionResult> => {
+        options?.signal?.throwIfAborted();
+        const input = { ...(request.input ?? {}) };
+        if (entry.operation.idempotency.mode === "idempotency-key") {
+          const field = entry.operation.idempotency.inputField!;
+          if (!request.idempotencyKey) {
+            return {
+              error: {
+                code: "IDEMPOTENCY_KEY_REQUIRED",
+                message: "This Operation requires an idempotency key.",
+                retryable: false,
+              },
+            };
+          }
+          if (field in input && input[field] !== request.idempotencyKey) {
+            return {
+              error: {
+                code: "BAD_USER_INPUT",
+                message: "The Operation input conflicts with its idempotency key.",
+                retryable: false,
+              },
+            };
+          }
+          input[field] = request.idempotencyKey;
+        }
+        try {
+          const result = await invokeOperation(entry, input, {
+            ...runtime,
+            transport: "operation",
+            session,
+          });
+          options?.signal?.throwIfAborted();
+          return { data: result.value, operations: [] };
+        } catch (error) {
+          return { error: runtimeOperationError(error) };
+        }
+      },
+    };
+  });
+}
+
 type Bound = { operation: OperationContract; handler: ModuleOperationHandler };
 const bindingCache = new WeakMap<readonly RuntimeModule[], Map<string, Bound>>();
 
@@ -228,6 +385,207 @@ function asInput(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+const CUSTOM_MUTATION_CONTROLS = [
+  "expectedVersion",
+  "leaseToken",
+  "confirmed",
+  "confirmationToken",
+  "confirmationAnswer",
+] as const;
+
+type CustomMutationControl = typeof CUSTOM_MUTATION_CONTROLS[number];
+
+function requireStringControl(
+  input: Readonly<Record<string, unknown>>,
+  key: Exclude<CustomMutationControl, "confirmed">,
+): string {
+  const value = input[key];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw operationFailure({
+      code: "VALIDATION",
+      message: "The supplied mutation control is not valid.",
+      detail: `${key} must be a non-empty string.`,
+      violations: [{ field: key, code: "INVALID_TYPE", message: `${key} must be a non-empty string.` }],
+    });
+  }
+  return value;
+}
+
+function targetTable(operation: OperationContract): GeneratedCrudTable {
+  const entityName = operation.target?.entityName;
+  const table = entityName
+    ? getGeneratedCrudTables().find((candidate) =>
+        candidate.source?.authoringEntityName === entityName
+      )
+    : undefined;
+  if (!table?.primaryKey) {
+    throw operationFailure({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "The Operation target is not available.",
+    });
+  }
+  return table;
+}
+
+function protectedCustomOperation(
+  operation: OperationContract,
+): ChallengeProtectedOperation & LeaseProtectedOperation {
+  if (!operation.target) {
+    throw operationFailure({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "The Operation target is not available.",
+    });
+  }
+  return {
+    id: operation.key,
+    entityId: operation.target.entityId,
+    entityName: operation.target.entityName,
+    intent: "invoke",
+    ...(operation.concurrency ? { concurrency: operation.concurrency } : {}),
+    interaction: { confirmation: operation.confirmation ?? { mode: "none" } },
+  };
+}
+
+function customHandlerInput(
+  operation: OperationContract,
+  input: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const stripped = { ...input };
+  if (operation.concurrency?.version) delete stripped.expectedVersion;
+  if (operation.concurrency?.editLease) delete stripped.leaseToken;
+  if (operation.confirmation?.mode === "acknowledgement") delete stripped.confirmed;
+  if (operation.confirmation?.mode === "challenge") {
+    delete stripped.confirmationToken;
+    delete stripped.confirmationAnswer;
+  }
+  return stripped;
+}
+
+async function invokeCustomOperationWithControls(
+  bound: Bound,
+  input: Readonly<Record<string, unknown>>,
+  context: Parameters<ModuleOperationHandler>[1],
+  invokeHandler: (handlerInput: Record<string, unknown>) => Promise<ModuleOperationSuccessResult>,
+): Promise<ModuleOperationSuccessResult> {
+  const operation = bound.operation;
+  const confirmation = operation.confirmation ?? { mode: "none" as const };
+  if (confirmation.mode === "acknowledgement" && input.confirmed !== true) {
+    throw operationFailure({
+      code: "CONFIRMATION_REQUIRED",
+      message: `Confirm ${operation.title} before continuing.`,
+      detail: "Retry the Operation with confirmed set to true.",
+      retryable: true,
+      data: { confirmation: { kind: "acknowledgement", requiredValue: true } },
+    });
+  }
+  const hasGuard = Boolean(operation.concurrency || confirmation.mode === "challenge");
+  if (!hasGuard) return invokeHandler(customHandlerInput(operation, input));
+  if (!operation.target || operation.target.scope !== "record" ||
+    !operation.target.inputField || !context.session || !context.db || !context.platform) {
+    throw operationFailure({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "The protected Operation contract is incomplete.",
+    });
+  }
+  const targetValue = input[operation.target.inputField];
+  if (typeof targetValue !== "string" || targetValue.trim() === "") {
+    throw operationFailure({
+      code: "VALIDATION",
+      message: "The Operation target is not valid.",
+      violations: [{
+        field: operation.target.inputField,
+        code: "REQUIRED",
+        message: `${operation.target.inputField} must be a non-empty string.`,
+      }],
+    });
+  }
+  const protectedOperation = protectedCustomOperation(operation);
+  const expectedVersion = operation.concurrency?.version
+    ? requireStringControl(input, "expectedVersion")
+    : undefined;
+  if (expectedVersion) {
+    try {
+      normalizeTimestampToken(expectedVersion);
+    } catch {
+      throw operationFailure({
+        code: "VALIDATION",
+        message: "The supplied record version is not valid.",
+        violations: [{
+          field: "expectedVersion",
+          code: "INVALID_DATETIME",
+          message: "Expected version must be a valid timestamp.",
+        }],
+      });
+    }
+  }
+  const leaseToken = operation.concurrency?.editLease
+    ? requireStringControl(input, "leaseToken")
+    : undefined;
+  let confirmationToken: string | undefined;
+  let confirmationAnswer: string | undefined;
+  if (confirmation.mode === "challenge") {
+    const hasToken = input.confirmationToken !== undefined;
+    const hasAnswer = input.confirmationAnswer !== undefined;
+    if (hasToken !== hasAnswer) {
+      throw operationFailure({
+        code: "VALIDATION",
+        message: "Confirmation token and answer must be supplied together.",
+      });
+    }
+    if (!hasToken) {
+      if (!expectedVersion) {
+        throw operationFailure({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "The confirmation version contract is incomplete.",
+        });
+      }
+      const error = await issueEntityConfirmationChallenge(context.db, context.session, {
+        operation: protectedOperation,
+        table: targetTable(operation),
+        targetId: targetValue,
+        expectedVersion,
+        ...(leaseToken ? { leaseToken } : {}),
+      });
+      throw operationFailure(error);
+    }
+    confirmationToken = requireStringControl(input, "confirmationToken");
+    confirmationAnswer = requireStringControl(input, "confirmationAnswer");
+  }
+  const table = targetTable(operation);
+  return withModuleOperationTransaction(
+    context.platform,
+    context.session,
+    async (trx) => {
+      if (expectedVersion) {
+        await validateEntityVersionInTransaction(trx, context.session!, {
+          operation: protectedOperation,
+          table,
+          targetId: targetValue,
+          expectedVersion,
+        });
+      }
+      if (leaseToken && expectedVersion) {
+        await consumeEntityEditLeaseInTransaction(trx, context.session!, {
+          operation: protectedOperation,
+          targetId: targetValue,
+          expectedVersion,
+          leaseToken,
+        });
+      }
+      if (confirmationToken && confirmationAnswer && expectedVersion) {
+        await consumeEntityConfirmationInTransaction(trx, context.session!, {
+          operation: protectedOperation,
+          targetId: targetValue,
+          expectedVersion,
+          confirmationToken,
+          confirmationAnswer,
+        });
+      }
+      return invokeHandler(customHandlerInput(operation, input));
+    },
+  );
+}
+
 const BASE64_BLOCK = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /**
@@ -289,115 +647,147 @@ function isJsonValue(value: unknown, seen = new Set<object>()): boolean {
 export async function invokeOperation(
   bound: Bound,
   inputValue: unknown,
-  context: Parameters<ModuleOperationHandler>[1],
+  context: Omit<
+    Parameters<ModuleOperationHandler>[1],
+    "invokeHostOperation" | "invokeDeclarativeService"
+  > & Partial<Pick<
+    Parameters<ModuleOperationHandler>[1],
+    "invokeHostOperation" | "invokeDeclarativeService"
+  >>,
 ): Promise<ModuleOperationSuccessResult> {
   const input = asInput(inputValue);
   const run = async (activeContext: Parameters<ModuleOperationHandler>[1]) => {
     requireOperationAuthorization(bound.operation, activeContext.session);
     const validation = validatorsFor(bound.operation);
-    if (!validation.input(input)) {
-      throw new HttpError(400, "BAD_USER_INPUT", "Operation input does not match its canonical schema.");
-    }
-    let result;
-    try {
-      result = await bound.handler(input, activeContext);
-    } catch (error) {
-      if (error instanceof DeclaredOperationError) {
-        throw new HttpError(
-          500,
-          "HANDLER_CONTRACT_VIOLATION",
-          "Operation handlers must return declared errors instead of forwarding a transport error.",
-        );
+    const invokeHandler = async (
+      handlerInput: Record<string, unknown>,
+    ): Promise<ModuleOperationSuccessResult> => {
+      if (!validation.input(handlerInput)) {
+        throw new HttpError(400, "BAD_USER_INPUT", "Operation input does not match its canonical schema.");
       }
-      throw error;
-    }
-    if (!result || typeof result !== "object" || Array.isArray(result)) {
-      throw new HttpError(
-        500,
-        "HANDLER_CONTRACT_VIOLATION",
-        "Operation handler must return an operation result object.",
-      );
-    }
-    if ("ok" in result && result.ok !== true && result.ok !== false) {
-      throw new HttpError(
-        500,
-        "HANDLER_CONTRACT_VIOLATION",
-        "Operation handler returned an invalid result discriminant.",
-      );
-    }
-    if (result.ok === false) {
-      const declaration = bound.operation.errors.find((error) =>
-        error.status === result.status && error.code === result.code
-      );
-      if (!declaration) {
-        throw new HttpError(
-          500,
-          "HANDLER_CONTRACT_VIOLATION",
-          "Operation handler returned an undeclared error status or code.",
-        );
-      }
-      if (!isJsonValue(result.body)) {
-        throw new HttpError(
-          500,
-          "HANDLER_CONTRACT_VIOLATION",
-          "Operation handler returned a non-serializable error body.",
-        );
-      }
-      const validate = validation.errors.get(errorKey(result.status, result.code))!;
-      if (!validate(result.body)) {
-        throw new HttpError(
-          500,
-          "HANDLER_CONTRACT_VIOLATION",
-          "Operation handler returned a body outside its declared error schema.",
-        );
-      }
-      if (!declaration.schema) {
-        const bodyCode = (result.body as { error?: { code?: unknown } }).error?.code;
-        if (bodyCode !== result.code) {
+      let result: ModuleOperationResult;
+      try {
+        result = await bound.handler(handlerInput, activeContext);
+      } catch (error) {
+        if (error instanceof DeclaredOperationError) {
           throw new HttpError(
             500,
             "HANDLER_CONTRACT_VIOLATION",
-            "Operation handler returned an error code inconsistent with the default error body.",
+            "Operation handlers must return declared errors instead of forwarding a transport error.",
           );
         }
+        throw error;
       }
-      const declaredContentType = declaration.rest?.contentType ?? "application/json";
-      const headerContentType = Object.entries(result.headers ?? {})
-        .find(([name]) => name.toLowerCase() === "content-type")?.[1];
-      if (
-        !isJsonContentType(declaredContentType) ||
-        (result.contentType !== undefined && result.contentType !== declaredContentType) ||
-        (headerContentType !== undefined && headerContentType !== declaredContentType)
-      ) {
+      if (!result || typeof result !== "object" || Array.isArray(result)) {
         throw new HttpError(
           500,
           "HANDLER_CONTRACT_VIOLATION",
-          "Operation handler returned an error content type outside its declaration.",
+          "Operation handler must return an operation result object.",
         );
       }
-      throw new DeclaredOperationError(declaration, result);
-    }
-    const declaredStatus = bound.operation.transports.rest.response.status ?? 200;
-    if (result.status !== undefined && result.status !== declaredStatus) {
-      throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned an undeclared success status.");
-    }
-    if (bound.operation.transports.rest.response.kind === "json" && !validation.output(result.value)) {
-      throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned a value outside its canonical output schema.");
-    }
-    if (result.mcp !== undefined && !isMcpProjection(result.mcp)) {
-      throw new HttpError(
-        500,
-        "HANDLER_CONTRACT_VIOLATION",
-        "Operation handler returned an MCP projection that is not a list of well-formed content blocks.",
-      );
-    }
-    return result;
+      if ("ok" in result && result.ok !== true && result.ok !== false) {
+        throw new HttpError(
+          500,
+          "HANDLER_CONTRACT_VIOLATION",
+          "Operation handler returned an invalid result discriminant.",
+        );
+      }
+      if (result.ok === false) {
+        const declaration = bound.operation.errors.find((error) =>
+          error.status === result.status && error.code === result.code
+        );
+        if (!declaration) {
+          throw new HttpError(
+            500,
+            "HANDLER_CONTRACT_VIOLATION",
+            "Operation handler returned an undeclared error status or code.",
+          );
+        }
+        if (!isJsonValue(result.body)) {
+          throw new HttpError(
+            500,
+            "HANDLER_CONTRACT_VIOLATION",
+            "Operation handler returned a non-serializable error body.",
+          );
+        }
+        const validate = validation.errors.get(errorKey(result.status, result.code))!;
+        if (!validate(result.body)) {
+          throw new HttpError(
+            500,
+            "HANDLER_CONTRACT_VIOLATION",
+            "Operation handler returned a body outside its declared error schema.",
+          );
+        }
+        if (!declaration.schema) {
+          const bodyCode = (result.body as { error?: { code?: unknown } }).error?.code;
+          if (bodyCode !== result.code) {
+            throw new HttpError(
+              500,
+              "HANDLER_CONTRACT_VIOLATION",
+              "Operation handler returned an error code inconsistent with the default error body.",
+            );
+          }
+        }
+        const declaredContentType = declaration.rest?.contentType ?? "application/json";
+        const headerContentType = Object.entries(result.headers ?? {})
+          .find(([name]) => name.toLowerCase() === "content-type")?.[1];
+        if (
+          !isJsonContentType(declaredContentType) ||
+          (result.contentType !== undefined && result.contentType !== declaredContentType) ||
+          (headerContentType !== undefined && headerContentType !== declaredContentType)
+        ) {
+          throw new HttpError(
+            500,
+            "HANDLER_CONTRACT_VIOLATION",
+            "Operation handler returned an error content type outside its declaration.",
+          );
+        }
+        throw new DeclaredOperationError(declaration, result);
+      }
+      const declaredStatus = bound.operation.transports.rest.response.status ?? 200;
+      if (result.status !== undefined && result.status !== declaredStatus) {
+        throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned an undeclared success status.");
+      }
+      if (bound.operation.transports.rest.response.kind === "json" && !validation.output(result.value)) {
+        throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned a value outside its canonical output schema.");
+      }
+      if (result.mcp !== undefined && !isMcpProjection(result.mcp)) {
+        throw new HttpError(
+          500,
+          "HANDLER_CONTRACT_VIOLATION",
+          "Operation handler returned an MCP projection that is not a list of well-formed content blocks.",
+        );
+      }
+      return result;
+    };
+    return invokeCustomOperationWithControls(
+      bound,
+      input,
+      activeContext,
+      invokeHandler,
+    );
   };
 
   return withModuleOperationSession(
     context.platform,
     context.session,
-    (session) => run({ ...context, ...(session ? { session } : {}) }),
+    (session) => run({
+      ...context,
+      ...(session ? { session } : {}),
+      invokeHostOperation: (request, options) => invokeModuleHostOperation(
+        context.platform,
+        session,
+        request,
+        options,
+      ),
+      invokeDeclarativeService: (request, options) =>
+        invokeModuleDeclarativeService(
+          context.platform,
+          session,
+          request,
+          options,
+        ),
+    }),
   );
 }
 
@@ -628,6 +1018,103 @@ export function registerOperationRestRoutes(
   }
 }
 
+/**
+ * Stable adapter for entity and record-derived Operations. Definitions stay
+ * dynamic and session-filtered; adding a stored Operation never adds a route.
+ */
+export function registerRuntimeOperationRestRoutes(
+  app: FastifyInstance,
+  runtime: ModuleRuntimeContext,
+): void {
+  if (!runtime.platform || !runtime.db) return;
+  const withSession = async <T>(
+    request: FastifyRequest,
+    work: (session: TrustedSessionContext) => Promise<T>,
+  ): Promise<T> => {
+    const session = await resolveSessionContext(
+      headersFromFastify(request.headers),
+      { db: runtime.db },
+    );
+    if (!session.userId || session.credential === "none") {
+      throw new HttpError(
+        401,
+        "UNAUTHENTICATED",
+        "Operation discovery requires an authenticated session.",
+      );
+    }
+    return withModuleOperationSession(
+      runtime.platform,
+      session,
+      (active) => work(active!),
+    );
+  };
+  const failed = (reply: FastifyReply, error: unknown) => {
+    const response = toHttpError(error);
+    return reply.status(response.status).send(response.body);
+  };
+
+  app.get("/api/operations", async (request, reply) => {
+    try {
+      return await withSession(
+        request,
+        (session) => runtime.platform!.operations.list(session),
+      );
+    } catch (error) {
+      return failed(reply, error);
+    }
+  });
+  app.get("/api/operations/:id", async (request, reply) => {
+    try {
+      const id = (request.params as { id?: unknown }).id;
+      if (typeof id !== "string" || id.length === 0) {
+        throw new HttpError(400, "BAD_USER_INPUT", "Operation id is required.");
+      }
+      const definition = await withSession(
+        request,
+        (session) => runtime.platform!.operations.get(session, id),
+      );
+      if (!definition) {
+        throw new HttpError(404, "NOT_FOUND", "Operation is not available.");
+      }
+      return definition;
+    } catch (error) {
+      return failed(reply, error);
+    }
+  });
+  app.post("/api/operations/:id/execute", async (request, reply) => {
+    try {
+      const id = (request.params as { id?: unknown }).id;
+      if (typeof id !== "string" || id.length === 0) {
+        throw new HttpError(400, "BAD_USER_INPUT", "Operation id is required.");
+      }
+      const body = asInput(request.body ?? {});
+      if (typeof body.intent !== "string" || body.intent.length === 0) {
+        throw new HttpError(400, "BAD_USER_INPUT", "Operation intent is required.");
+      }
+      const operationInput = body.input === undefined
+        ? undefined
+        : asInput(body.input);
+      const idempotencyKey = request.headers["idempotency-key"];
+      if (idempotencyKey !== undefined && typeof idempotencyKey !== "string") {
+        throw new HttpError(
+          400,
+          "BAD_USER_INPUT",
+          "Idempotency-Key must have exactly one value.",
+        );
+      }
+      return await withSession(request, (session) =>
+        runtime.platform!.operations.execute(session, {
+          operation: { id, intent: body.intent as string },
+          ...(operationInput ? { input: operationInput } : {}),
+          ...(idempotencyKey ? { idempotencyKey } : {}),
+        })
+      );
+    } catch (error) {
+      return failed(reply, error);
+    }
+  });
+}
+
 export function operationGraphqlContribution(
   modules: readonly RuntimeModule[],
   runtime: ModuleRuntimeContext,
@@ -636,11 +1123,86 @@ export function operationGraphqlContribution(
   const projected = catalog.operations.filter((operation) =>
     activePlugins.has(operation.plugin) && operation.transports.graphql.enabled
   );
-  if (projected.length === 0) return undefined;
-  const bound = bindOperationHandlers(modules);
-  const queryFields = projected.filter((operation) => operation.transports.graphql.kind === "query").map((operation) => `${operation.transports.graphql.field}(input: JSON!): JSON!`).join("\n");
-  const mutationFields = projected.filter((operation) => operation.transports.graphql.kind === "mutation").map((operation) => `${operation.transports.graphql.field}(input: JSON!): JSON!`).join("\n");
+  if (projected.length === 0 && !runtime.platform) return undefined;
+  const bound = projected.length > 0 ? bindOperationHandlers(modules) : new Map();
+  const runtimeQueryFields = runtime.platform
+    ? [
+        "operationCatalog: JSON!",
+        "operationDefinition(id: String!): JSON",
+      ]
+    : [];
+  const runtimeMutationFields = runtime.platform
+    ? [
+        "executeOperation(id: String!, intent: String!, input: JSON, idempotencyKey: String): JSON!",
+      ]
+    : [];
+  const queryFields = [
+    ...runtimeQueryFields,
+    ...projected
+      .filter((operation) => operation.transports.graphql.kind === "query")
+      .map((operation) => `${operation.transports.graphql.field}(input: JSON!): JSON!`),
+  ].join("\n");
+  const mutationFields = [
+    ...runtimeMutationFields,
+    ...projected
+      .filter((operation) => operation.transports.graphql.kind === "mutation")
+      .map((operation) => `${operation.transports.graphql.field}(input: JSON!): JSON!`),
+  ].join("\n");
   const resolvers = { Query: {} as Record<string, unknown>, Mutation: {} as Record<string, unknown> };
+  const withRuntimeSession = async <T>(
+    context: GraphqlContext,
+    work: (session: TrustedSessionContext) => Promise<T>,
+  ): Promise<T> => {
+    if (!runtime.platform || !context.session?.userId) {
+      throw new HttpError(
+        401,
+        "UNAUTHENTICATED",
+        "Operation discovery requires an authenticated session.",
+      );
+    }
+    return withModuleOperationSession(
+      runtime.platform,
+      context.session,
+      (session) => work(session!),
+    );
+  };
+  if (runtime.platform) {
+    resolvers.Query.operationCatalog = (
+      _parent: unknown,
+      _args: unknown,
+      context: GraphqlContext,
+    ) => withRuntimeSession(
+      context,
+      (session) => runtime.platform!.operations.list(session),
+    );
+    resolvers.Query.operationDefinition = (
+      _parent: unknown,
+      args: { id: string },
+      context: GraphqlContext,
+    ) => withRuntimeSession(
+      context,
+      (session) => runtime.platform!.operations.get(session, args.id),
+    );
+    resolvers.Mutation.executeOperation = (
+      _parent: unknown,
+      args: {
+        id: string;
+        intent: string;
+        input?: unknown;
+        idempotencyKey?: string;
+      },
+      context: GraphqlContext,
+    ) => withRuntimeSession(context, (session) => {
+      const input = args.input === undefined ? undefined : asInput(args.input);
+      return runtime.platform!.operations.execute(session, {
+        operation: { id: args.id, intent: args.intent },
+        ...(input ? { input } : {}),
+        ...(args.idempotencyKey
+          ? { idempotencyKey: args.idempotencyKey }
+          : {}),
+      });
+    });
+  }
   for (const operation of projected) {
     const target = operation.transports.graphql.kind === "query" ? resolvers.Query : resolvers.Mutation;
     target[operation.transports.graphql.field!] = async (_parent: unknown, args: { input: unknown }, context: GraphqlContext) => {

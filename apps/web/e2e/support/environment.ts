@@ -6,9 +6,9 @@
  * `apps/api/src/graphql/__tests__/e2e/harness.ts` already uses, spelled the same
  * way on purpose: `E2E_USER_PASSWORD_<USERNAME>` from the environment, with the
  * committed local-dev literal as the fallback. A development realm carries that
- * literal (`packages/compiler/config/authoring/authorization.yaml` authors it as
- * `${env:...:-test}`); a real realm carries a generated password and supplies it
- * through the variable. Nothing new is committed here.
+ * literal (the repository's test-only identity fixture authors it as
+ * `${env:...:-test}`); a real realm carries a generated password and supplies
+ * it through the variable. Nothing new is committed here.
  */
 import { join } from "node:path";
 
@@ -18,12 +18,11 @@ export const WEB_URL = process.env.E2E_WEB_URL ?? "http://localhost:3000";
 /**
  * The realm user the suite signs in as.
  *
- * `acme-directie` is the same default the API harness uses, and it is the one
- * seeded user with a role the web app accepts: the `signIn` callback refuses
- * anyone without an application realm role, so `acme-noaccess` would get as far
- * as Keycloak and no further.
+ * `tenant-a-admin` is the same neutral default the API harness uses. Web entry
+ * requires a tenant identity; generated operation authorization decides which
+ * navigation and actions are available after sign-in.
  */
-export const E2E_USERNAME = process.env.E2E_KEYCLOAK_USERNAME ?? "acme-directie";
+export const E2E_USERNAME = process.env.E2E_KEYCLOAK_USERNAME ?? "tenant-a-admin";
 
 /** Verbatim from the API harness, so one convention covers both suites. */
 export function passwordFor(username: string): string {

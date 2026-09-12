@@ -5,6 +5,9 @@
 # own authoring layers (see packages/compiler/src/plugins.ts).
 layers:
   - packages/compiler/config/authoring
+  # Neutral identities used only by this repository's local/e2e stack. The
+  # published compiler base contains no product personas or seeded users.
+  - test/fixtures/authoring/development-identities
   # One layer per connector, so a connector directory is self-contained: its
   # contract sits beside the package that implements it, and adding or dropping
   # an integration is one directory and one line here rather than an edit in

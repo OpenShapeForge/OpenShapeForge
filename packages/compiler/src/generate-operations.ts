@@ -9,6 +9,8 @@ import type {
 } from "./plugins.js";
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
 import type { CompiledEntityOperation } from "./authoring/types.js";
+import type { OperationCatalogDefinition } from "./authoring/types.js";
+import type { LocalizedText } from "./authoring/types.js";
 import type { CompiledEntityInfo } from "./plugins.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
@@ -491,6 +493,216 @@ export function collectPluginOperations(
     }
   }
   return operations.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+function authoredText(
+  value: string | LocalizedText,
+): string {
+  if (typeof value === "string") return value;
+  return value.en ?? value.nl ?? value.fr ?? "";
+}
+
+function kebab(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+}
+
+function snake(value: string): string {
+  return kebab(value).replace(/-/g, "_");
+}
+
+function lowerCamel(value: string): string {
+  const parts = kebab(value).split("-").filter(Boolean);
+  return parts.map((part, index) =>
+    index === 0 ? part : `${part[0]!.toUpperCase()}${part.slice(1)}`
+  ).join("");
+}
+
+/**
+ * Lower strict-v2 YAML plugin Operations to the established canonical static
+ * registry. YAML owns every contract field; the runtime module supplies only
+ * the named handler implementation.
+ */
+export function collectAuthoredEntityPluginOperations(
+  entities: readonly Pick<CompiledEntityInfo, "contract">[],
+  context: PluginBaseContext,
+): CompiledPluginOperation[] {
+  const byPlugin = new Map<string, PluginOperationContract[]>();
+  for (const { contract } of entities) {
+    for (const authored of contract.pluginOperations ?? []) {
+      const definition = authored.definition;
+      if (definition.implementation.type !== "plugin") continue;
+      const restProjection = authored.interfaces.rest;
+      if (restProjection === undefined || restProjection === false) {
+        throw new Error(
+          `Entity plugin Operation "${authored.id}" currently requires an ` +
+            "interfaces.rest projection so its existing static runtime handler has an address.",
+        );
+      }
+      const mcpProjection = authored.interfaces.mcp;
+      const graphqlProjection = authored.interfaces.graphql;
+      const restMethod = restProjection.method ??
+        (definition.effects.data === "read" ? "GET" : "POST");
+      const targetSegment = definition.target?.scope === "record"
+        ? `/:${definition.target.inputField}`
+        : "";
+      const inputSchema = definition.input!.schema;
+      const outputSchema = definition.output!.schema;
+      const idempotency = definition.reliability.idempotency;
+      const operation: PluginOperationContract = {
+        key: authored.id,
+        title: authoredText(definition.name),
+        description: authoredText(definition.description),
+        handler: definition.implementation.handler,
+        target: {
+          entityId: authored.entityId,
+          entityName: authored.entityName,
+          scope: definition.target!.scope,
+          ...(definition.target!.scope === "record"
+            ? { inputField: definition.target!.inputField }
+            : {}),
+        },
+        inputSchema,
+        outputSchema,
+        errors: definition.errors! as PluginOperationContract["errors"],
+        auth: definition.auth!,
+        tenancy: definition.tenancy!,
+        idempotency: idempotency.mode === "natural"
+          ? { mode: "intrinsic" }
+          : idempotency.mode === "keyed"
+            ? {
+                mode: "idempotency-key",
+                header: idempotency.header ?? "Idempotency-Key",
+                inputField: idempotency.inputField!,
+              }
+            : { mode: "none" },
+        effects: definition.effects,
+        ...(definition.concurrency ? { concurrency: definition.concurrency } : {}),
+        confirmation: definition.confirmation,
+        transports: {
+          rest: {
+            method: restMethod,
+            path: restProjection.path ??
+              `/api/${definition.implementation.plugin}/${kebab(authored.entityName)}` +
+                `${targetSegment}/${kebab(authored.key)}`,
+            response: restProjection.response ?? { kind: "json" },
+          },
+          mcp: mcpProjection === undefined || mcpProjection === false
+            ? {
+                enabled: false,
+                reason: "This entity interface does not project the Operation to MCP.",
+              }
+            : {
+                enabled: true,
+                name: mcpProjection.name ?? `${snake(authored.entityName)}_${snake(authored.key)}`,
+              },
+          graphql: graphqlProjection === undefined || graphqlProjection === false
+            ? {
+                enabled: false,
+                reason: "This entity interface does not project the Operation to GraphQL.",
+              }
+            : {
+                enabled: true,
+                kind: graphqlProjection.kind ??
+                  (definition.effects.data === "read" ? "query" : "mutation"),
+                field: graphqlProjection.field ??
+                  `${lowerCamel(authored.entityName)}${
+                    authored.key[0]!.toUpperCase()
+                  }${authored.key.slice(1)}`,
+              },
+          typescript: {
+            enabled: true,
+            functionName: `${lowerCamel(authored.entityName)}${
+              authored.key[0]!.toUpperCase()
+            }${authored.key.slice(1)}`,
+          },
+        },
+      };
+      const current = byPlugin.get(definition.implementation.plugin) ?? [];
+      current.push(operation);
+      byPlugin.set(definition.implementation.plugin, current);
+    }
+  }
+  const synthetic = [...byPlugin.entries()].map(([name, operations]) => ({
+    name,
+    operations,
+  } satisfies CompilerPlugin));
+  return collectPluginOperations(synthetic, context);
+}
+
+/** Lower module/global YAML Operations through the same static registry. */
+export function collectAuthoredModulePluginOperations(
+  catalogs: readonly OperationCatalogDefinition[],
+  context: PluginBaseContext,
+): CompiledPluginOperation[] {
+  const synthetic: CompilerPlugin[] = catalogs.map((catalog) => ({
+    name: catalog.plugin,
+    operations: Object.entries(catalog.operations).map(([key, definition]) => {
+      if (definition.implementation.type !== "plugin") {
+        throw new Error(`Module Operation "${key}" must use implementation.type plugin.`);
+      }
+      const restContract = catalog.interfaces.rest;
+      const rest = restContract ? restContract.operations?.[key] ?? {} : undefined;
+      if (rest === undefined || rest === false) {
+        throw new Error(
+          `Module Operation "${definition.id ?? key}" currently requires an ` +
+            "interfaces.rest projection so its existing static runtime handler has an address.",
+        );
+      }
+      const mcpContract = catalog.interfaces.mcp;
+      const mcp = mcpContract ? mcpContract.operations?.[key] ?? {} : undefined;
+      const graphqlContract = catalog.interfaces.graphql;
+      const graphql = graphqlContract
+        ? graphqlContract.operations?.[key] ?? {}
+        : undefined;
+      const idempotency = definition.reliability.idempotency;
+      const canonicalId = definition.id ?? `${catalog.plugin}.${key}`;
+      return {
+        key: canonicalId,
+        title: authoredText(definition.name),
+        description: authoredText(definition.description),
+        handler: definition.implementation.handler,
+        inputSchema: definition.input!.schema,
+        outputSchema: definition.output!.schema,
+        errors: definition.errors! as PluginOperationContract["errors"],
+        auth: definition.auth!,
+        tenancy: definition.tenancy!,
+        idempotency: idempotency.mode === "natural"
+          ? { mode: "intrinsic" as const }
+          : idempotency.mode === "keyed"
+            ? {
+                mode: "idempotency-key" as const,
+                header: idempotency.header ?? "Idempotency-Key",
+                inputField: idempotency.inputField!,
+              }
+            : { mode: "none" as const },
+        effects: definition.effects,
+        confirmation: definition.confirmation,
+        transports: {
+          rest: {
+            method: rest.method ?? (definition.effects.data === "read" ? "GET" : "POST"),
+            path: rest.path ?? `/api/${catalog.plugin}/${kebab(key)}`,
+            response: rest.response ?? { kind: "json" as const },
+          },
+          mcp: mcp === undefined || mcp === false
+            ? { enabled: false as const, reason: "The module interface does not project this Operation to MCP." }
+            : { enabled: true as const, name: mcp.name ?? snake(canonicalId) },
+          graphql: graphql === undefined || graphql === false
+            ? { enabled: false as const, reason: "The module interface does not project this Operation to GraphQL." }
+            : {
+                enabled: true as const,
+                kind: graphql.kind ?? (definition.effects.data === "read" ? "query" : "mutation"),
+                field: graphql.field ?? lowerCamel(canonicalId),
+              },
+          typescript: { enabled: true as const, functionName: lowerCamel(canonicalId) },
+        },
+      } satisfies PluginOperationContract;
+    }),
+  }));
+  return collectPluginOperations(synthetic, context);
 }
 
 export function collectEntityOperations(

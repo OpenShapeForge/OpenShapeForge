@@ -41,7 +41,11 @@ import { registerControlRestRoutes } from "../control/rest-routes.js";
 import { registerControlMcpServer } from "../mcp/control-mcp-server.js";
 import { registerAgreementMilestoneRestRoutes } from "../billing/rest-routes.js";
 import { registerDocumentRestRoutes } from "../documents/rest-routes.js";
-import { registerGeneratedMcpServer } from "../mcp/generated-mcp-server.js";
+import {
+  createRuntimeDeclarativeServiceExecutor,
+  createRuntimeHostOperationExecutor,
+  registerGeneratedMcpServer,
+} from "../mcp/generated-mcp-server.js";
 import {
   registerAuthorizationServerMetadataAliases,
   registerProtectedResourceMetadata,
@@ -73,7 +77,9 @@ import {
   bindOperationHandlers,
   operationModulesConfigured,
   listOperationContracts,
+  registerRuntimeOperationRestRoutes,
   registerOperationRestRoutes,
+  runtimeStaticOperationRegistrations,
   type OperationContract,
 } from "../operations/runtime.js";
 
@@ -330,7 +336,26 @@ export function createApiApp(options: {
     };
     const initialised = await initRuntimeModules(modules, moduleContext);
     initialisedModules = initialised.loaded;
+    modulePlatform?.registerOperationProviders(initialised.loaded);
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
+    if (modulePlatform) {
+      modulePlatform.registerDeclarativeServiceExecutor(
+        createRuntimeDeclarativeServiceExecutor({
+          db: databaseRuntime!.db,
+          modules: initialised.loaded,
+          modulePlatform,
+          ...(egressOwner ? { egressOwner } : {}),
+        }),
+      );
+      modulePlatform.registerHostOperationExecutor(
+        createRuntimeHostOperationExecutor({
+          db: databaseRuntime!.db,
+          modules: initialised.loaded,
+          modulePlatform,
+          ...(egressOwner ? { egressOwner } : {}),
+        }),
+      );
+    }
     // Ordinary runtime modules remain fail-soft. A canonical operation is a
     // stronger promise: every generated transport points at its handler, so a
     // load/init failure must stop boot instead of silently deleting the API.
@@ -339,7 +364,16 @@ export function createApiApp(options: {
       [...modules.loaded, ...modules.failures],
       operationContracts,
     );
-    if (operationsConfigured) bindOperationHandlers(initialised.loaded, operationContracts);
+    if (operationsConfigured) {
+      bindOperationHandlers(initialised.loaded, operationContracts);
+      modulePlatform?.registerStaticOperations(
+        runtimeStaticOperationRegistrations(
+          initialised.loaded,
+          moduleContext,
+          operationContracts,
+        ),
+      );
+    }
     // Read once, served twice: REST and GraphQL answer from the same
     // configuration, so a deployment cannot mint keys on one transport and
     // say NOT_CONFIGURED on the other.
@@ -454,6 +488,7 @@ export function createApiApp(options: {
       });
 
     registerGeneratedRestRoutes(routes, dbOptions);
+    registerRuntimeOperationRestRoutes(routes, moduleContext);
     registerEditLeaseRestRoutes(routes, dbOptions);
     registerDocumentRestRoutes(routes, dbOptions);
     registerAgreementMilestoneRestRoutes(routes, dbOptions);

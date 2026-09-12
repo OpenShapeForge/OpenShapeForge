@@ -32,6 +32,25 @@ not generated-CRUD enabled fails the build, exactly as `rest:` does — MCP tool
 delegate to the CRUD layer, so the authoring intent would otherwise evaporate
 silently.
 
+Strict-v2 entities keep this technical projection under `interfaces.mcp` and
+name canonical operations rather than CRUD action flags:
+
+```yaml
+interfaces:
+  mcp:
+    tools: generic # optional; omitted means dedicated
+    operations:
+      delete: false # the only authored entry: an interface-specific exclusion
+```
+
+Declaring an interface projects every canonical Operation declared by the
+entity. Do not write `operations: all` (there is no such sentinel) and do not
+repeat the common list. The optional `operations` map contains only real
+interface-specific instructions or `false` exclusions.
+
+`tools` changes only how the projected operations are advertised. It does not
+define a new operation, permission, workflow, or product concept.
+
 The common entity `crud.operations` policy is the upper bound. MCP operation
 flags may hide additional tools but cannot restore an operation disabled by
 that policy; the shared CRUD service enforces the same decision at invocation.
@@ -216,7 +235,8 @@ safe platform audit projection. See [api.md, "The platform administrator MCP"](a
 
 ## Tool surface
 
-Two catalog styles, chosen per entity:
+Two catalog styles, chosen per entity with either legacy `mcp.tools` or
+strict-v2 `interfaces.mcp.tools`:
 
 - **`dedicated`** (default) — one tool per enabled operation:
   `relation_list`, `relation_get`, `relation_create`, `relation_update`,

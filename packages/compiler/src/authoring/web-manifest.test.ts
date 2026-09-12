@@ -241,6 +241,118 @@ describe("web manifest projection", () => {
     expect(projected!.views.collection.route).toBe("/relations");
   });
 
+  test("keeps canonical secure-input targets server-owned in Web forms", () => {
+    const view = coreView();
+    const createGroup = view.form!.variants.create!.groups[0]!;
+    createGroup.fields!.push("configurationValues");
+    const connection = entity("Connection", "connection", [
+      field("adapterId"),
+      field("configurationValues", { valueType: "object" }),
+    ], view);
+    connection.contract.authoringVersion = 2;
+    connection.contract.interfaces = {
+      web: {
+        operations: {
+          list: true,
+          get: true,
+          create: true,
+          update: true,
+          delete: true,
+        },
+      },
+    };
+    connection.contract.entityOperations.create!.interaction.secureInput = {
+      type: "secureInput",
+      sourceField: "adapterId",
+      sourceEntity: "Adapter",
+      definitionsField: "configurationFields",
+      into: "configurationValues",
+    };
+
+    const projected = buildWebManifest([connection]).entities.Connection!;
+    expect(projected.fields.configurationValues?.supports).toEqual({
+      read: true,
+      create: false,
+      update: false,
+    });
+    expect(JSON.stringify(projected.views.record?.layout)).not.toContain(
+      "configurationValues",
+    );
+  });
+
+  test("projects YAML-owned record Operations as localized Web actions", () => {
+    const view = coreView();
+    view.detail!.actions = [{ key: "recalculate", route: "recalculate" }];
+    const deal = entity("Deal", "deal", [
+      field("id", { required: true, readOnly: true }),
+      field("updatedAt", { valueType: "datetime", readOnly: true }),
+    ], view);
+    deal.contract.authoringVersion = 2;
+    deal.contract.interfaces = {
+      web: { operations: { list: true, get: true } },
+    };
+    deal.contract.pluginOperations = [{
+      key: "recalculate",
+      id: "example.deal.recalculate",
+      entityId: "example.Deal",
+      entityName: "Deal",
+      definition: {
+        id: "example.deal.recalculate",
+        name: text("Recalculate", "Herberekenen"),
+        description: text("Recalculate this deal", "Bereken deze deal opnieuw"),
+        implementation: { type: "plugin", plugin: "example", handler: "recalculateDeal" },
+        target: { scope: "record", inputField: "dealId" },
+        input: {
+          schema: {
+            type: "object",
+            required: ["dealId"],
+            properties: { dealId: { type: "string" } },
+            additionalProperties: false,
+          },
+        },
+        output: { schema: { type: "object" } },
+        errors: [{ status: 409, code: "CONFLICT", description: "The deal changed." }],
+        auth: { mode: "session", roles: ["Deals.Calculate"] },
+        tenancy: { mode: "required" },
+        effects: { data: "write", external: "none" },
+        reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+        concurrency: {
+          version: { mode: "required", field: "updatedAt" },
+          editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+        },
+        confirmation: { mode: "acknowledgement" },
+      },
+      interfaces: {
+        rest: {
+          method: "POST",
+          path: "/api/example/deals/:dealId/recalculate",
+          response: { kind: "json" },
+        },
+        graphql: { kind: "mutation", field: "recalculateDeal" },
+        mcp: { name: "recalculate_deal" },
+        web: {},
+      },
+    }];
+
+    const projected = buildWebManifest([deal]).entities.Deal!;
+    expect(projected.operations.recalculate).toMatchObject({
+      id: "example.deal.recalculate",
+      intent: "invoke",
+      name: text("Recalculate", "Herberekenen"),
+      description: text("Recalculate this deal", "Bereken deze deal opnieuw"),
+      target: { entityId: "example.Deal", scope: "record", inputField: "dealId" },
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+      confirmation: { mode: "acknowledgement" },
+      rest: {
+        path: "/api/example/deals/:dealId/recalculate",
+        response: { kind: "json" },
+      },
+    });
+    expect(projected.views.record?.operations.actions).toEqual([
+      expect.objectContaining({ id: "example.deal.recalculate", intent: "invoke" }),
+    ]);
+  });
+
   test("does not widen the legacy v1 WebManifest beyond REST exposure", () => {
     const relation = entity("Relation", "relation", [field("displayName")], coreView());
     delete relation.contract.rest;

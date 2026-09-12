@@ -19,7 +19,10 @@
  */
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import type { CompiledEntityContract } from "./authoring/types.js";
+import type {
+  CompiledEntityContract,
+  CompiledEntityOperation,
+} from "./authoring/types.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
 import type { GeneratedArtifact, PlatformSchemaManifest, TableDefinition } from "./schema.js";
 
@@ -37,9 +40,66 @@ export type PluginBaseContext = {
   webPresent: boolean;
 };
 
+/**
+ * Stable, interface-neutral catalog exposed to compiler plugins.
+ *
+ * Consumers can derive workflow nodes, audit policy or other projections from
+ * the same canonical entity Operations as REST, MCP, GraphQL and Web without
+ * parsing authoring YAML or depending on a product-specific model.
+ */
+export type EntityOperationCatalog = {
+  version: 1;
+  operations: readonly CompiledEntityOperation[];
+};
+
 export type PluginGenerateContext = PluginBaseContext & {
   manifest: PlatformSchemaManifest;
   entities: CompiledEntityInfo[];
+  operationCatalog: EntityOperationCatalog;
+};
+
+/**
+ * Temporary, generated bridge for core execution code that predates the
+ * canonical Operation registry. It is internal runtime metadata, never an
+ * interface projection. A plugin supplies field identities once; operation
+ * labels, authorization and reliability are resolved from its canonical
+ * Operation contributions.
+ */
+export type PluginExecutionCompatibility = {
+  version: 1;
+  records?: Array<{
+    providerId: string;
+    entity: string;
+    keyField: string;
+    titleField?: string;
+    descriptionField: string;
+    inputFieldsField: string;
+    outputFieldsField?: string;
+    versionField: string;
+    visibleWhen?: { field: string; equals: string };
+    visibleToRolesField?: string;
+    internalOnlyField?: string;
+    execution: {
+      bindingsField: string;
+      operationRef: string;
+      operationEntity: string;
+      providerRef: string;
+      providerEntity: string;
+      connectionEntity: string;
+      connectionProviderRef: string;
+      connectionValuesField: string;
+    };
+    connectOperation?: string;
+    dryRunOperation?: string;
+    personalization?: {
+      entity: string;
+      serviceRef: string;
+      instructionField: string;
+      setOperation: string;
+    };
+  }>;
+  discovery?: Array<{ operation: string; entity: string }>;
+  tests?: Array<{ operation: string; entity: string }>;
 };
 
 export type PluginSchemaMigration = {
@@ -102,6 +162,13 @@ export type PluginOperationContract = {
   description: string;
   /** Key in the runtime module's `operationHandlers` map. */
   handler: string;
+  /** Optional entity attachment authored in strict-v2 YAML. */
+  target?: {
+    entityId: string;
+    entityName: string;
+    scope: "collection" | "record";
+    inputField?: string;
+  };
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;
   errors: PluginOperationError[];
@@ -117,6 +184,17 @@ export type PluginOperationContract = {
     inputField?: string;
     description?: string;
   };
+  /**
+   * Interface-neutral effects. Optional only for existing plugins; new
+   * contracts should declare it. The compiler keeps the historical HTTP
+   * method inference as a compatibility fallback until those plugins migrate.
+   */
+  effects?: {
+    data: "read" | "write" | "delete";
+    external: "none" | "read" | "write";
+  };
+  concurrency?: import("@openshapeforge/operations").OperationConcurrency;
+  confirmation?: import("@openshapeforge/operations").OperationConfirmation;
   transports: {
     rest: {
       method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -144,6 +222,14 @@ export type CompilerPlugin = {
   operations?:
     | PluginOperationContract[]
     | ((context: PluginBaseContext) => PluginOperationContract[]);
+  /**
+   * Removal seam while legacy execution engines are extracted from their old
+   * interface adapter. The compiler lowers this into an internal manifest;
+   * canonical Operations remain the only public source of truth.
+   */
+  executionCompatibility?:
+    | PluginExecutionCompatibility
+    | ((context: PluginGenerateContext) => PluginExecutionCompatibility);
   /**
    * Extra platform tables merged into the base manifest before authoring
    * entities are promoted (e.g. a workflow plugin's catalog/instance tables).

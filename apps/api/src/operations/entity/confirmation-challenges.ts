@@ -32,7 +32,7 @@ export type ChallengeProtectedOperation = {
   id: string;
   entityId: string;
   entityName: string;
-  intent: "update" | "delete";
+  intent: "update" | "delete" | "invoke";
   concurrency?: {
     version?: VersionRequirement;
     editLease?: EditLeaseRequirement;
@@ -185,7 +185,9 @@ export async function issueEntityConfirmationChallenge(
 
     return {
       code: "CONFIRMATION_REQUIRED",
-      message: `Confirmation is required before ${input.operation.entityName} can be ${input.operation.intent === "delete" ? "deleted" : "updated"}.`,
+      message: input.operation.intent === "invoke"
+        ? `Confirmation is required before ${input.operation.entityName} can be changed.`
+        : `Confirmation is required before ${input.operation.entityName} can be ${input.operation.intent === "delete" ? "deleted" : "updated"}.`,
       detail: `Type the current value of ${confirmation.challenge.field} to continue.`,
       retryable: true,
       data: {

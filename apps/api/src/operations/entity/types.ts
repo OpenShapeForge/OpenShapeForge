@@ -60,6 +60,13 @@ export type GeneratedCrudTable = {
     crud?: {
       operations: Record<GeneratedCrudExposureOperation, boolean>;
     };
+    secureInputOnCreate?: {
+      sourceField: string;
+      sourceEntity: string;
+      definitionsField: string;
+      into: string;
+      message?: string;
+    };
     graphql?: {
       typeName: string;
       singleQueryName: string;
@@ -114,8 +121,11 @@ export type CountedEntityConnection = GeneratedEntityConnection & {
 export type EntityOperationRef = OperationReference<GeneratedCrudExposureOperation>;
 
 export type EntityOperationContract = EntityOperationRef & {
+  key: string;
   entityId: string;
   entityName: string;
+  name: string | Readonly<Record<string, string>>;
+  description: string | Readonly<Record<string, string>>;
   input: Record<string, unknown>;
   output: Record<string, unknown>;
   authorization: {
@@ -126,7 +136,24 @@ export type EntityOperationContract = EntityOperationRef & {
     version?: { mode: "required"; field: string };
     editLease?: { mode: "required"; expiresAfterInactivity: string };
   };
-  interaction: { confirmation: OperationConfirmation };
+  effects: {
+    data: "read" | "write" | "delete";
+    external: "none" | "read" | "write";
+  };
+  reliability: {
+    idempotency: { mode: "natural" | "keyed" | "none" };
+  };
+  interaction: {
+    confirmation: OperationConfirmation;
+    secureInput?: {
+      type: "secureInput";
+      sourceField: string;
+      sourceEntity: string;
+      definitionsField: string;
+      into: string;
+      message?: string;
+    };
+  };
 };
 
 export type EntityOperationInput = ListPageInput & {
@@ -146,25 +173,28 @@ export type EntityOperationRequest = {
   offerIntents?: readonly GeneratedCrudExposureOperation[];
 };
 
-export type EntityOperationOffer = OperationOffer<GeneratedCrudExposureOperation>;
+export type EntityOperationOffer = OperationOffer<GeneratedCrudExposureOperation | "invoke">;
 export type EntityOperationError = OperationError;
 export type EntityRecordEnvelope = OperationEnvelope<
   GeneratedEntityRow | null,
-  GeneratedCrudExposureOperation
+  GeneratedCrudExposureOperation | "invoke"
 >;
 export type EntityCollectionData = {
-  items: OperationEnvelope<GeneratedEntityRow, GeneratedCrudExposureOperation>[];
+  items: OperationEnvelope<GeneratedEntityRow, GeneratedCrudExposureOperation | "invoke">[];
   nextCursor: string | null;
   totalCount: number | null;
 };
 
 export type EntityOperationResult =
-  | ({ intent: "list" } & OperationResult<EntityCollectionData, GeneratedCrudExposureOperation>)
+  | ({ intent: "list" } & OperationResult<
+      EntityCollectionData,
+      GeneratedCrudExposureOperation | "invoke"
+    >)
   | ({ intent: "get" | "create" | "update" } & OperationResult<
       GeneratedEntityRow | null,
-      GeneratedCrudExposureOperation
+      GeneratedCrudExposureOperation | "invoke"
     >)
   | ({ intent: "delete" } & OperationResult<
       { deleted: boolean },
-      GeneratedCrudExposureOperation
+      GeneratedCrudExposureOperation | "invoke"
     >);

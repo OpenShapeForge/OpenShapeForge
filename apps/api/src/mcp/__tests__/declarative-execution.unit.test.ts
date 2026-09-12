@@ -809,6 +809,7 @@ describe("executeBinding", () => {
         title: "Updated",
         notify: false,
       },
+      idempotencyKey: "stable-step-key",
       keyring: KEYRING,
       fetchImpl: spy.impl,
       secretScope: "erp.providers",
@@ -836,11 +837,15 @@ describe("executeBinding", () => {
       "https://acme.example.com/records/record-1?sendUpdates=false",
     );
     expect(new Headers(spy.calls[0]?.init.headers).get("if-match")).toBe('"etag-1"');
+    expect(new Headers(spy.calls[0]?.init.headers).get("idempotency-key"))
+      .toBe("stable-step-key");
     expect(JSON.parse(String(spy.calls[0]?.init.body))).toEqual({
       resource: { title: "Updated" },
     });
     expect(spy.calls[1]?.url).toBe("https://acme.example.com/records/record-2");
     expect(new Headers(spy.calls[1]?.init.headers).get("if-match")).toBe('"etag-2"');
+    expect(new Headers(spy.calls[1]?.init.headers).has("idempotency-key"))
+      .toBe(false);
     expect(spy.calls[1]?.init.body).toBeUndefined();
   });
 

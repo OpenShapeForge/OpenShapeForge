@@ -15,8 +15,8 @@ import {
   normalizeDefinitionAuthorization,
 } from "../definition-authorization.js";
 
-const writer = { userId: "u1", roles: ["directie"], groups: ["team-a"] };
-const reader = { userId: "u2", roles: ["controller"], groups: ["team-b"] };
+const writer = { userId: "u1", roles: ["workflow-admin"], groups: ["team-a"] };
+const reader = { userId: "u2", roles: ["workflow-viewer"], groups: ["team-b"] };
 
 const acl = (value: unknown) => normalizeDefinitionAuthorization(value);
 
@@ -30,8 +30,8 @@ describe("normalizeDefinitionAuthorization", () => {
   });
 
   test("non-string entries are discarded rather than trusted", () => {
-    const authorization = acl({ view: { roles: ["directie", 7, null, ""], users: "u1" } });
-    expect(authorization.view.roles).toEqual(["directie"]);
+    const authorization = acl({ view: { roles: ["workflow-admin", 7, null, ""], users: "u1" } });
+    expect(authorization.view.roles).toEqual(["workflow-admin"]);
     expect(authorization.view.users).toEqual([]);
   });
 });
@@ -43,7 +43,7 @@ describe("view", () => {
 
   test("a named user, role or group matches", () => {
     expect(canViewDefinition(acl({ view: { users: ["u2"] } }), reader)).toBe(true);
-    expect(canViewDefinition(acl({ view: { roles: ["controller"] } }), reader)).toBe(true);
+    expect(canViewDefinition(acl({ view: { roles: ["workflow-viewer"] } }), reader)).toBe(true);
     expect(canViewDefinition(acl({ view: { groups: ["team-b"] } }), reader)).toBe(true);
   });
 

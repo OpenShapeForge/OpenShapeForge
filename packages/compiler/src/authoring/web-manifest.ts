@@ -20,6 +20,7 @@ import type {
 import type {
   LocalizedText as WebLocalizedText,
   WebCollectionView,
+  WebCustomOperationRef,
   WebEntityInterface,
   WebFieldGroup,
   WebFieldProjection,
@@ -65,19 +66,86 @@ function operation(
   return source ? { id: source.id, intent: source.intent } : undefined;
 }
 
-function fieldKeys(group: CompiledViewGroup): string[] {
+function kebab(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/[^A-Za-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+}
+
+function customOperation(
+  source: NonNullable<CompiledEntityContract["pluginOperations"]>[number],
+): WebCustomOperationRef | undefined {
+  if (source.interfaces.web === false) return undefined;
+  const definition = source.definition;
+  if (definition.implementation.type !== "plugin" || !definition.target ||
+    !definition.input || !definition.output) return undefined;
+  const rest = source.interfaces.rest;
+  return {
+    id: source.id,
+    intent: "invoke",
+    key: source.key,
+    name: localized(definition.name, source.key),
+    description: localized(definition.description, ""),
+    target: {
+      entityId: source.entityId,
+      entityName: source.entityName,
+      scope: definition.target.scope,
+      ...(definition.target.scope === "record"
+        ? { inputField: definition.target.inputField }
+        : {}),
+    },
+    input: { kind: "json-schema", schema: definition.input.schema },
+    output: { kind: "json-schema", schema: definition.output.schema },
+    effects: definition.effects,
+    reliability: {
+      idempotency: {
+        mode: definition.reliability.idempotency.mode,
+        ...(definition.reliability.idempotency.inputField
+          ? { inputField: definition.reliability.idempotency.inputField }
+          : {}),
+      },
+    },
+    ...(definition.concurrency ? { concurrency: definition.concurrency } : {}),
+    confirmation: definition.confirmation,
+    ...(rest !== false && rest !== undefined
+      ? {
+          rest: {
+            method: rest.method ?? (definition.effects.data === "read" ? "GET" : "POST"),
+            path: rest.path ??
+              `/api/${definition.implementation.plugin}/${kebab(source.entityName)}` +
+                `${definition.target.scope === "record" ? `/:${definition.target.inputField}` : ""}` +
+                `/${kebab(source.key)}`,
+            response: rest.response ?? { kind: "json" as const },
+          },
+        }
+      : {}),
+  };
+}
+
+function fieldKeys(
+  group: CompiledViewGroup,
+  excluded: ReadonlySet<string> = new Set(),
+): string[] {
   return (group.fields ?? []).flatMap((entry) => {
-    if (typeof entry === "string") return [entry];
-    return entry.fieldDisplayMode === "hidden" ? [] : [entry.key];
+    if (typeof entry === "string") return excluded.has(entry) ? [] : [entry];
+    return entry.fieldDisplayMode === "hidden" || excluded.has(entry.key)
+      ? []
+      : [entry.key];
   });
 }
 
-function projectGroups(groups: readonly CompiledViewGroup[] | undefined): WebFieldGroup[] {
+function projectGroups(
+  groups: readonly CompiledViewGroup[] | undefined,
+  excluded: ReadonlySet<string> = new Set(),
+): WebFieldGroup[] {
   return (groups ?? []).flatMap((group) => {
-    const projected = fieldKeys(group).length > 0
-      ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: fieldKeys(group) }]
+    const keys = fieldKeys(group, excluded);
+    const projected = keys.length > 0
+      ? [{ id: group.id, title: localized(group.title ?? group.label, group.id), fields: keys }]
       : [];
-    return [...projected, ...projectGroups(group.groups)];
+    return [...projected, ...projectGroups(group.groups, excluded)];
   });
 }
 
@@ -94,10 +162,11 @@ function projectTabGroups(tab: CompiledViewGroup): WebFieldGroup[] {
 function formGroups(
   variant: CompiledFormVariant | undefined,
   fallback?: CompiledFormVariant,
+  excluded: ReadonlySet<string> = new Set(),
 ): WebFieldGroup[] {
   if (!variant) return [];
   const groups = variant.groups.length > 0 ? variant.groups : fallback?.groups;
-  return projectGroups(groups);
+  return projectGroups(groups, excluded);
 }
 
 function defaultColumnKeys(contract: CompiledEntityContract): string[] {
@@ -178,6 +247,7 @@ type ProjectableEntity = {
   route: string;
   routeLocale: "en" | "nl";
   operations: Partial<Record<WebOperationIntent, WebOperationRef>>;
+  customOperations: Record<string, WebCustomOperationRef>;
   collection: WebCollectionView;
 };
 
@@ -202,6 +272,12 @@ function projectableEntities(
         ])
         .filter((entry): entry is [WebOperationIntent, WebOperationRef] => Boolean(entry[1])),
     );
+    const customOperations = Object.fromEntries(
+      (contract.pluginOperations ?? []).flatMap((source) => {
+        const projected = customOperation(source);
+        return projected ? [[source.key, projected]] : [];
+      }),
+    );
     return [{
       slug,
       contract,
@@ -209,6 +285,7 @@ function projectableEntities(
       route: routeFor(contract, slug, view, options.routeLocale),
       routeLocale: options.routeLocale,
       operations,
+      customOperations,
       collection: collectionFor(
         contract.entity.name,
         contract,
@@ -229,12 +306,17 @@ function projectEntity(
   source: ProjectableEntity,
   all: ReadonlyMap<string, ProjectableEntity>,
 ): WebEntityInterface {
-  const { contract, view, operations } = source;
+  const { contract, view, operations, customOperations } = source;
   const entityName = contract.entity.name;
   const createVariant = view?.form?.variants.create;
   const updateVariant = view?.form?.variants.edit;
-  const createGroups = formGroups(createVariant);
-  const updateGroups = formGroups(updateVariant, createVariant);
+  const serverOwnedFields = new Set(
+    contract.entityOperations.create?.interaction.secureInput?.into
+      ? [contract.entityOperations.create.interaction.secureInput.into]
+      : [],
+  );
+  const createGroups = formGroups(createVariant, undefined, serverOwnedFields);
+  const updateGroups = formGroups(updateVariant, createVariant, serverOwnedFields);
   const createFields = new Set(createGroups.flatMap(({ fields }) => fields));
   const updateFields = new Set(updateGroups.flatMap(({ fields }) => fields));
   const fields = Object.fromEntries(contract.model.fields.map((field) => {
@@ -355,6 +437,13 @@ function projectEntity(
       ...(operations.delete && detail?.actions?.some(({ mutation }) => mutation === "delete")
         ? { delete: operations.delete }
         : {}),
+      ...(detail?.actions
+        ? {
+            actions: detail.actions.flatMap(({ key }) =>
+              customOperations[key] ? [customOperations[key]!] : []
+            ),
+          }
+        : {}),
     },
     titleTemplate: detail?.header.title ?? `{{${source.collection.displayField}}}`,
     ...(detail?.header.subtitle ? { subtitleTemplate: detail.header.subtitle } : {}),
@@ -391,7 +480,7 @@ function projectEntity(
     entitySlug: source.slug,
     title: source.collection.title,
     fields,
-    operations,
+    operations: { ...operations, ...customOperations },
     views: {
       collection: source.collection,
       ...(record ? { record } : {}),

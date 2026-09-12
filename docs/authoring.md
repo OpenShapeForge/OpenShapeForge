@@ -294,9 +294,9 @@ Catalog files under `catalogs/` merge across authoring layers automatically
 
 One file authors one whole Keycloak realm export: realm settings (token
 lifespans, org feature), clients (`gateway` / `bearerOnly` / `serviceAccount`
-kinds), realm roles with per-client composites, hand-authored client roles, a
-demo group hierarchy, and dev users with plain passwords and a `tid` (tenant
-UUID) attribute. Each is generated to `keycloak/<realm.name>-realm.json` and
+kinds), optional realm roles, hand-authored client roles, audience-scoped
+`clientRoleComposites`, groups, and users with a `tid` (tenant UUID) attribute.
+Each is generated to `keycloak/<realm.name>-realm.json` and
 mounted into the local Keycloak container, whose `--import-realm` imports every
 file in its import directory.
 
@@ -304,7 +304,9 @@ Two realms are authored here:
 
 - **`authorization.yaml`** — the tenant realm `openshapeforge`. Its
   `keycloak.entityRoleClient` (`erp-provider`) is the designated target for
-  entity-derived roles. See [api.md](api.md#local-stack) for the dev logins.
+  entity-derived roles. The reusable base contains no product personas, groups
+  or users; hosts author those, while this repository adds neutral identities
+  from `test/fixtures/authoring/development-identities` for local and e2e runs.
 - **`authorization.control.yaml`** — the control realm
   `openshapeforge-control`, the issuer `apps/admin` signs platform operators in
   against. Deliberately minimal: one gateway client, one `platform-operator`
@@ -323,7 +325,7 @@ realm does; see [identity-providers.md](identity-providers.md).
 
 A host that consumes the compiler as a package inherits these realm files and
 usually wants to change a few things in one of them — the audience client's
-name, an extra client, one more composite on a realm role — without forking
+name, an extra client, or a product role composed on that audience — without forking
 the whole file. Shipping a plain `authorization.yaml` in a later layer is a
 layer collision, and a second `authorization.<x>.yaml` naming the same realm
 is refused by the generator; the supported way is a **patch at the same
@@ -336,32 +338,35 @@ kind: authorizationPatch
 
 # 1. Optional. Moves one client id everywhere the base refers to it:
 #    keycloak.entityRoleClient, keycloak.clients[].id, the client keys of
-#    realmRoles.*.composites, clientRoles, users[].clientRoles and
-#    serviceAccountClientRoles. Only the id moves; the client's own fields
+#    realmRoles.*.composites, clientRoles, clientRoleComposites (owner and
+#    target ids), users[].clientRoles and serviceAccountClientRoles. Only the id moves; the client's own fields
 #    are set below, under the NEW id.
-renameClient: { from: erp-provider, to: hubble-api }
+renameClient: { from: erp-provider, to: application-api }
 
 # 2. Everything else strategic-merges onto the (renamed) base.
 keycloak:
   clients:
-    - id: hubble-api                      # merges by id into the renamed client
-      name: Hubble API
-      devSecret: hubble-api-secret
-      secret: ${env:KEYCLOAK_CLIENT_SECRET_HUBBLE_API}
-    - id: hubble-reporting                # unknown id: appended
+    - id: application-api                 # merges by id into the renamed client
+      name: Application API
+      devSecret: application-api-secret
+      secret: ${env:KEYCLOAK_CLIENT_SECRET_APPLICATION_API}
+    - id: application-reporting           # unknown id: appended
       kind: bearerOnly
     - id: openshapeforge-knowledge-base
       $delete: true                       # keyed-array delete
-realmRoles:
-  directie:
+clientRoleComposites:
+  application-api:
+    Application.Editor:
+      description: May edit application data
+      composites:
+        application-api: [Relations.All.ReadWrite]
+realmRoles:                               # only when realm-global is intended
+  support-operator:
+    description: Support operator
     composites:
-      hubble-api: [Pentest.All.ReadWrite] # role lists UNION: added, base kept
-  pentester:                              # new realm role
-    description: Pentester
-    composites:
-      hubble-api: [Pentest.All.ReadWrite, Pentest.All.Read]
+      application-api: [Relations.All.Read]
 clientRoles:
-  hubble-api: [Pentest.All.ReadWrite, Pentest.All.Read]
+  application-api: [Relations.All.ReadWrite, Relations.All.Read]
 ```
 
 Rules, in the order they apply:
@@ -377,6 +382,7 @@ Rules, in the order they apply:
    by `id` with `$delete: true`, other arrays (`users`, `groups`,
    `redirectUris`, …) replace wholesale.
 3. **Role-name lists union** instead of replacing: `clientRoles.<client>`,
+   `clientRoleComposites.<client>.<role>.composites.<client>`,
    `realmRoles.<role>.composites.<client>` and `realmRoles.<role>.includes`
    keep the base's grants in base order and append the patch's. A grant list
    is a set, and "add one composite" restating fifteen others is how a grant
@@ -386,7 +392,7 @@ Rules, in the order they apply:
    error names the patch file, not the merged file nobody wrote.
 
 A patch may carry `renameClient`, `realm`, `keycloak`, `realmRoles`,
-`clientRoles`, `groups` and `users`; `schemaVersion` is the base's and cannot
+`clientRoles`, `clientRoleComposites`, `groups` and `users`; `schemaVersion` is the base's and cannot
 be patched. Patching a realm no earlier layer defines is an error (a new
 realm is an `authorizationConfig` under its own filename), as is a patch
 filed anywhere but the layer root. Patches stack across layers in order.

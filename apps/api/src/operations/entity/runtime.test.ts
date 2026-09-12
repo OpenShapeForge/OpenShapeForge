@@ -9,6 +9,7 @@ import {
   requireCreateOperationConfirmation,
   requireOperationAcknowledgement,
   restEditLeaseOperationIdsForSession,
+  secureInputInteractionError,
   tableForEntityOperation,
 } from "./runtime.js";
 
@@ -191,6 +192,41 @@ describe("entity operation runtime", () => {
     );
   });
 
+  test("fails closed on non-interactive create when secure input is server-owned", () => {
+    const create = getEntityOperationContracts().find(
+      ({ id }) => id === "Relation.create",
+    )!;
+    const secureCreate = {
+      ...create,
+      interaction: {
+        ...create.interaction,
+        secureInput: {
+          type: "secureInput" as const,
+          sourceField: "adapterId",
+          sourceEntity: "Adapter",
+          definitionsField: "configurationFields",
+          into: "configurationValues",
+          message: "Enter the connection details securely.",
+        },
+      },
+    };
+
+    expect(secureInputInteractionError(secureCreate)).toEqual({
+      code: "INTERACTION_REQUIRED",
+      message: "Secure input is required before Relation.create can run.",
+      detail: "Enter the connection details securely.",
+      retryable: false,
+      data: {
+        interaction: {
+          kind: "secureInput",
+          sourceField: "adapterId",
+          sourceEntity: "Adapter",
+          definitionsField: "configurationFields",
+        },
+      },
+    });
+  });
+
   test("derives REST lease operations from both projection and session roles", () => {
     const update = getEntityOperationContracts().find(
       ({ id }) => id === "Relation.update",
@@ -200,7 +236,20 @@ describe("entity operation runtime", () => {
       restEditLeaseOperationIdsForSession({
         roles: [update.authorization.roles[0]!],
       }),
-    ).toEqual(["Relation.delete", "Relation.update"]);
+    ).toEqual([
+      "ContactDetail.delete",
+      "ContactDetail.update",
+      "PaymentDetail.delete",
+      "PaymentDetail.update",
+      "Relation.update",
+      "RelationGroup.delete",
+      "RelationGroup.update",
+    ]);
+    expect(
+      restEditLeaseOperationIdsForSession({
+        roles: ["Relations.All.Delete"],
+      }),
+    ).toEqual(["Relation.delete"]);
   });
 
   test("rejects mismatched and unavailable operation identities", () => {

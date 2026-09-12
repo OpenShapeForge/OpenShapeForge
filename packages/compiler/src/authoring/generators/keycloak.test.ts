@@ -419,13 +419,50 @@ describe("service-account client role grants", () => {
       serviceAccountClientRoles: { "erp-provider": ["Workflow.All.ReadWrite"] } }];
     const realm = JSON.parse(generateKeycloakRealmArtifacts([], config)[0]!.contents);
     const client = realm.clients.find((entry: any) => entry.clientId === "automatic-org");
-    expect(client.attributes).toEqual({ "osf.serviceAccountTenantId": "11111111-1111-4111-8111-111111111111", "osf.organizationAutomation": "true" });
+    expect(client.attributes).toEqual({
+      "oauth2.device.authorization.grant.enabled": "false",
+      "oidc.ciba.grant.enabled": "false",
+      "osf.serviceAccountTenantId": "11111111-1111-4111-8111-111111111111",
+      "osf.organizationAutomation": "true",
+    });
     expect(client.standardFlowEnabled).toBe(false);
+    expect(client.implicitFlowEnabled).toBe(false);
     expect(client.directAccessGrantsEnabled).toBe(false);
+    expect(client.redirectUris).toEqual([]);
+    expect(client.webOrigins).toEqual([]);
     expect(client.protocolMappers.some((entry: any) => entry.name === "tid-mapper")).toBe(true);
     expect(client.protocolMappers.some((entry: any) => entry.config["claim.name"] === "act")).toBe(false);
     expect(realm.users.find((entry: any) => entry.serviceAccountClientId === "automatic-org").attributes.tid)
       .toEqual(["11111111-1111-4111-8111-111111111111"]);
+  });
+
+  test("normalizes service-account tenant UUIDs before output and uniqueness checks", () => {
+    const config = baseConfig();
+    const client = {
+      id: "automatic-org",
+      kind: "serviceAccount" as const,
+      secret: "local-test",
+      serviceAccountTenantId: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+      organizationAutomation: true,
+      serviceAccountClientRoles: { "erp-provider": ["Workflow.All.Read"] },
+    };
+    config.keycloak.clients = [client];
+    const realm = JSON.parse(generateKeycloakRealmArtifacts([], config)[0]!.contents);
+    expect(realm.clients.find((entry: any) => entry.clientId === client.id)
+      .attributes["osf.serviceAccountTenantId"])
+      .toBe("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    expect(realm.users.find((entry: any) => entry.serviceAccountClientId === client.id)
+      .attributes.tid)
+      .toEqual(["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]);
+
+    config.keycloak.clients = [client, {
+      ...client,
+      id: "automatic-other",
+      serviceAccountTenantId: client.serviceAccountTenantId.toLowerCase(),
+    }];
+    expect(() => generateKeycloakRealmArtifacts([], config)).toThrow(
+      "only one automatic service identity",
+    );
   });
 
   test("rejects automatic identities without tenant/explicit grants and ambiguous tenant bindings", () => {

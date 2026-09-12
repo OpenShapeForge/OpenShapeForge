@@ -155,6 +155,7 @@ interface KeycloakClient {
   directAccessGrantsEnabled: boolean;
   serviceAccountsEnabled: boolean;
   standardFlowEnabled: boolean;
+  implicitFlowEnabled?: boolean;
   fullScopeAllowed?: boolean;
   redirectUris?: string[];
   webOrigins?: string[];
@@ -585,6 +586,9 @@ function buildClient(
         directAccessGrantsEnabled: false,
         serviceAccountsEnabled: true,
         standardFlowEnabled: false,
+        implicitFlowEnabled: false,
+        redirectUris: [],
+        webOrigins: [],
         ...(def.serviceAccountTenantId ? {
           defaultClientScopes: ["basic", "roles"],
           // Only the tenant and resource audiences: an automatic identity must
@@ -594,10 +598,17 @@ function buildClient(
             ...audienceMappers(resourceClientIds),
           ],
           attributes: {
+            "oauth2.device.authorization.grant.enabled": "false",
+            "oidc.ciba.grant.enabled": "false",
             "osf.serviceAccountTenantId": def.serviceAccountTenantId,
             ...(def.organizationAutomation ? { "osf.organizationAutomation": "true" } : {}),
           },
-        } : {}),
+        } : {
+          attributes: {
+            "oauth2.device.authorization.grant.enabled": "false",
+            "oidc.ciba.grant.enabled": "false",
+          },
+        }),
       };
   }
 }
@@ -1236,7 +1247,14 @@ export function generateKeycloakRealmArtifacts(
 
   const realmRolesDef = authConfig.realmRoles ?? authConfig.keycloak?.realmRoles ?? {};
 
-  const clientDefs = authConfig.keycloak?.clients ?? [];
+  const clientDefs = (authConfig.keycloak?.clients ?? []).map((client) =>
+    typeof client.serviceAccountTenantId === "string"
+      ? {
+          ...client,
+          serviceAccountTenantId: client.serviceAccountTenantId.toLowerCase(),
+        }
+      : client
+  );
   const resourceClientIds = clientDefs
     .filter((c) => c.kind === "bearerOnly")
     .map((c) => c.id);

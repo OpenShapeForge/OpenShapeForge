@@ -6,6 +6,14 @@ export type OrganizationServiceIdentity = {
   clientSecret: string;
 };
 
+const TENANT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function canonicalTenantId(value: unknown): string | undefined {
+  return typeof value === "string" && TENANT_UUID.test(value)
+    ? value.toLowerCase()
+    : undefined;
+}
+
 export function organizationServiceIdentities(
   env: NodeJS.ProcessEnv = process.env,
 ): readonly OrganizationServiceIdentity[] {
@@ -21,17 +29,18 @@ export function organizationServiceIdentities(
       throw new Error("Invalid organization service identity configuration.");
     }
     const entry = value as Record<string, unknown>;
+    const tenantId = canonicalTenantId(entry.tenantId);
     if (Object.keys(entry).some((key) => !["tenantId", "clientId", "clientSecret"].includes(key)) ||
-      typeof entry.tenantId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(entry.tenantId) ||
+      !tenantId ||
       typeof entry.clientId !== "string" || !entry.clientId.trim() ||
       typeof entry.clientSecret !== "string" || !entry.clientSecret) {
       throw new Error("Invalid organization service identity configuration.");
     }
-    if (tenants.has(entry.tenantId) || clients.has(entry.clientId)) {
+    if (tenants.has(tenantId) || clients.has(entry.clientId)) {
       throw new Error("Each organization and service identity must have one unambiguous binding.");
     }
-    tenants.add(entry.tenantId); clients.add(entry.clientId);
-    return Object.freeze({ tenantId: entry.tenantId, clientId: entry.clientId, clientSecret: entry.clientSecret });
+    tenants.add(tenantId); clients.add(entry.clientId);
+    return Object.freeze({ tenantId, clientId: entry.clientId, clientSecret: entry.clientSecret });
   });
 }
 
@@ -41,8 +50,9 @@ export function configuredOrganizationServiceAccount(
   tenantId: string | null,
   identities = organizationServiceIdentities(),
 ): OrganizationServiceIdentity | undefined {
-  if (!tenantId || typeof claims.sub !== "string" || !claims.sub) return undefined;
-  return identities.find((entry) => entry.tenantId === tenantId &&
+  const canonicalClaimTenantId = canonicalTenantId(tenantId);
+  if (!canonicalClaimTenantId || typeof claims.sub !== "string" || !claims.sub) return undefined;
+  return identities.find((entry) => canonicalTenantId(entry.tenantId) === canonicalClaimTenantId &&
     entry.clientId === claims.azp && claims.preferred_username === `service-account-${entry.clientId}`);
 }
 

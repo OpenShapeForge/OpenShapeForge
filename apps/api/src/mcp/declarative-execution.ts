@@ -1152,13 +1152,14 @@ export function describeAuthHeaders(auth: unknown): Record<string, string> {
   }
 }
 
-/** A generated entity tool (finding_create) or a plugin operation key. */
+/** A canonical entity Operation, legacy generated tool, or plugin operation key. */
 const NATIVE_OPERATION_KEY =
-  /^(?:[a-z][a-z0-9_]*|[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+)$/;
+  /^(?:[A-Z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*|[a-z][a-z0-9_]*|[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+)$/;
 
 /**
  * The in-process operation a native Capability binds to, validated: either a
- * generated entity tool name (`finding_create`) or a plugin operation's key
+ * canonical entity Operation id (`Finding.create`), legacy generated entity
+ * tool name (`finding_create`), or a plugin operation's key
  * (`osf-integration.mail.read-attachment`), which the native executor runs
  * through the operation runtime under the caller's session — so a plugin
  * operation that carries no dedicated MCP tool is still reachable as a
@@ -1171,8 +1172,9 @@ export function nativeOperationKey(operationRow: JsonRecord): string {
     throw new HttpError(
       400,
       "OPERATION_MISCONFIGURED",
-      "A native Capability must name operation.nativeOperation (a generated operation key such as " +
-        "finding_create, or a plugin operation key such as osf-integration.mail.read-attachment).",
+      "A native Capability must name operation.nativeOperation (a canonical entity Operation such as " +
+        "Finding.create, a legacy generated tool such as finding_create, or a plugin operation key such as " +
+        "osf-integration.mail.read-attachment).",
     );
   }
   return key;

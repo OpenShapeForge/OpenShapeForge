@@ -252,7 +252,7 @@ describe("composed mutation Service on the native provider", () => {
             (id, tenant_id, key, kind, provider_id, operation, response_mapping, required_scopes)
           values
             (${relationOperationId}::uuid, ${tenantId}::uuid, 'relation-create', 'mutation', ${nativeProviderId}::uuid,
-             '{"nativeOperation":"relation_create"}'::jsonb, '{}'::jsonb, '[]'::jsonb),
+             '{"nativeOperation":"Relation.create"}'::jsonb, '{}'::jsonb, '[]'::jsonb),
             (${contactOperationId}::uuid, ${tenantId}::uuid, 'contact-detail-create', 'mutation', ${nativeProviderId}::uuid,
              '{"nativeOperation":"contact_detail_create"}'::jsonb, '{}'::jsonb, '[]'::jsonb),
             (${elsewhereOperationId}::uuid, ${tenantId}::uuid, 'contact-detail-create-elsewhere', 'mutation', ${disconnectedProviderId}::uuid,
@@ -489,7 +489,7 @@ describe("composed mutation Service on the native provider", () => {
           expect(body.error.code).toBe("SERVICE_PARTIAL");
           expect(body.error.retryable).toBe(false);
           expect(body.completed).toHaveLength(1);
-          expect(body.completed[0]).toMatchObject({ binding: 1, operation: "relation_create" });
+          expect(body.completed[0]).toMatchObject({ binding: 1, operation: "Relation.create" });
           expect(body.completed[0]!.outputs.relationId).toMatch(/^[0-9a-f-]{36}$/);
           expect(body.failed).toMatchObject({ binding: 2, operation: "contact_detail_create" });
           expect(body.notRun).toEqual([]);

@@ -2000,9 +2000,9 @@ function withoutEntitySelector(
 }
 
 /**
- * The generated entity tool a native Service binding means, or undefined when
- * the key names no entity tool at all (the caller then resolves it against the
- * deployment's plugin operations by key).
+ * The generated entity tool a native Service binding means, resolved first by
+ * its exact canonical Operation id and then by its legacy MCP tool name. An
+ * unknown key falls through to the deployment's plugin operations by key.
  *
  * A dedicated name identifies one entry. A generic `osf_*` name is emitted per
  * entity, so the binding has to carry an `entity` input the same way an
@@ -2016,6 +2016,17 @@ function resolveNativeCrudTool(
   operationKey: string,
   inputs: Record<string, unknown>,
 ): CatalogTool | undefined {
+  const canonical = catalog.tools.filter(
+    (tool) => tool.operationId === operationKey,
+  );
+  if (canonical.length > 1) {
+    throw new HttpError(
+      400,
+      "OPERATION_MISCONFIGURED",
+      `Canonical native operation "${operationKey}" resolves to more than one generated operation.`,
+    );
+  }
+  if (canonical.length === 1) return canonical[0];
   const candidates = crudToolsNamed(operationKey);
   if (candidates.length <= 1) return candidates[0];
   const wanted = inputs.entity;
@@ -5417,7 +5428,10 @@ function buildServer(
                 : false;
             })
             .map((tool) => ({
-              nativeOperation: tool.name,
+              nativeOperation: tool.operationId ?? tool.name,
+              ...(tool.operationId && tool.operationId !== tool.name
+                ? { legacyNativeOperation: tool.name }
+                : {}),
               operation: tool.operation,
               entity: tool.entity,
               description: tool.description,

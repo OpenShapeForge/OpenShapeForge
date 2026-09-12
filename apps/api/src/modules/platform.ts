@@ -20,7 +20,9 @@ import type {
 import {
   executeEntityOperation,
   getEntityOperationContracts,
+  tableForEntityOperation,
 } from "../operations/entity/index.js";
+import { serializeEntityResult } from "../operations/entity/serialize-result.js";
 import type {
   McpInvocationContext,
   ModuleAuthorizationDecision,
@@ -537,10 +539,11 @@ export class ModulePlatformRuntime {
           },
         };
       }
-      return executeEntityOperation(this.#db, session, {
+      const result = await executeEntityOperation(this.#db, session, {
         operation: { id: entityOperation.id, intent: entityOperation.intent },
         ...(request.input ? { input: request.input as never } : {}),
       });
+      return serializeEntityResult(tableForEntityOperation(entityOperation), result);
     }
     const staticOperation = this.#staticOperations.get(request.operation.id);
     if (staticOperation) {

@@ -836,6 +836,38 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["mode", "scheme", "description", "securityScheme"],
+          "properties": {
+            "mode": { "const": "custom" },
+            "scheme": { "type": "string", "pattern": "^[a-zA-Z0-9._-]+$" },
+            "description": { "type": "string", "minLength": 1 },
+            "securityScheme": {
+              "oneOf": [
+                {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["type", "in", "name"],
+                  "properties": {
+                    "type": { "const": "apiKey" },
+                    "in": { "enum": ["header", "query", "cookie"] },
+                    "name": { "type": "string", "minLength": 1 }
+                  }
+                },
+                {
+                  "type": "object", "additionalProperties": false,
+                  "required": ["type", "scheme"],
+                  "properties": {
+                    "type": { "const": "http" },
+                    "scheme": { "type": "string", "minLength": 1 },
+                    "bearerFormat": { "type": "string", "minLength": 1 }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["mode"],
           "properties": { "mode": { "const": "public" } }
         },

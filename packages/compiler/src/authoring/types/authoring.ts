@@ -550,16 +550,7 @@ export interface EntityOperationDefinition {
     schema?: Record<string, unknown>;
     rest?: { body?: unknown; contentType?: string };
   }>;
-  auth?:
-    | { mode: "public" }
-    | {
-        mode: "session";
-        /** Omitted means any authenticated session; [] deliberately denies all. */
-        roles?: string[];
-        scopes?: string[];
-        /** Required action on the current target record, in addition to RBAC. */
-        recordPermission?: import("./common.js").RecordPermissionAction;
-      };
+  auth?: import("../../plugins.js").PluginOperationAuth;
   tenancy?: {
     mode: "required" | "derived" | "none";
     description?: string;

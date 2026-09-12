@@ -659,12 +659,16 @@ export async function invokeOperation(
   const run = async (activeContext: Parameters<ModuleOperationHandler>[1]) => {
     requireOperationAuthorization(bound.operation, activeContext.session);
     const validation = validatorsFor(bound.operation);
+    // The compiler augments a custom Operation's canonical schema with the
+    // platform-owned mutation controls. Validate that complete request before
+    // acknowledgement, lease, version or challenge handling can have side
+    // effects. The handler receives only authored business input below.
+    if (!validation.input(input)) {
+      throw new HttpError(400, "BAD_USER_INPUT", "Operation input does not match its canonical schema.");
+    }
     const invokeHandler = async (
       handlerInput: Record<string, unknown>,
     ): Promise<ModuleOperationSuccessResult> => {
-      if (!validation.input(handlerInput)) {
-        throw new HttpError(400, "BAD_USER_INPUT", "Operation input does not match its canonical schema.");
-      }
       let result: ModuleOperationResult;
       try {
         result = await bound.handler(handlerInput, activeContext);

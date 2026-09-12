@@ -116,10 +116,13 @@ describe("canonical operation database sessions", () => {
           },
           inputSchema: {
             type: "object",
-            required: ["relationId", "displayName"],
+            required: ["relationId", "displayName", "expectedVersion", "leaseToken"],
             properties: {
               relationId: { type: "string", format: "uuid" },
               displayName: { type: "string", minLength: 1 },
+              expectedVersion: { type: "string", format: "date-time" },
+              leaseToken: { type: "string", minLength: 1 },
+              confirmed: { type: "boolean" },
             },
             additionalProperties: false,
           },
@@ -228,6 +231,26 @@ describe("canonical operation database sessions", () => {
             },
           }),
         );
+
+        const missingControls = await withModuleOperationSession(
+          platform.services,
+          verifiedSession,
+          (active) => platform.services.operations.execute(active!, {
+            operation: { id: operation.key, intent: "invoke" },
+            input: {
+              relationId,
+              displayName: "After",
+              confirmed: true,
+            },
+          }),
+        );
+        expect(missingControls).toMatchObject({
+          error: { code: "BAD_USER_INPUT" },
+        });
+        expect((await sql<{ operation_id: string }>`
+          select operation_id from platform.entity_edit_leases
+          where operation_id = ${operation.key}
+        `.execute(admin)).rows).toHaveLength(1);
 
         const invalid = await execute();
         expect(invalid).toMatchObject({

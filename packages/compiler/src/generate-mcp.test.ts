@@ -12,6 +12,7 @@ import {
   MAX_DEDICATED_TOOLS,
   type McpCatalogInput,
 } from "./generate-mcp.js";
+import type { CompiledPluginOperation } from "./generate-operations.js";
 
 const field = (
   overrides: Partial<CompiledField> & { key: string },
@@ -100,6 +101,32 @@ const input = (
   slug,
   contract: c,
   table,
+});
+
+const staticOperation = (index: number): CompiledPluginOperation => ({
+  key: `demo.operation.${String(index).padStart(3, "0")}`,
+  id: `demo.operation.${String(index).padStart(3, "0")}`,
+  intent: "invoke",
+  plugin: "demo",
+  title: `Demo operation ${index}`,
+  description: `Runs demo operation ${index}.`,
+  handler: `operation${index}`,
+  inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  outputSchema: { type: "object", properties: {}, additionalProperties: false },
+  errors: [],
+  auth: { mode: "session", roles: ["Demo.Read"] },
+  tenancy: { mode: "required" },
+  idempotency: { mode: "none" },
+  transports: {
+    rest: {
+      method: "POST",
+      path: `/api/demo/operations/${index}`,
+      response: { status: 200, kind: "json" },
+    },
+    mcp: { enabled: true, name: `demo_operation_${index}` },
+    graphql: { enabled: false, reason: "Not exposed in this fixture." },
+    typescript: { enabled: false, reason: "Not exposed in this fixture." },
+  },
 });
 
 /** Read a named sub-schema, failing the test rather than returning undefined. */
@@ -1020,6 +1047,33 @@ describe("buildMcpCatalog", () => {
         ),
     );
     expect(() => buildMcpCatalog(many, "test")).toThrow(/over the 60 limit/);
+  });
+
+  it("retains every static Operation and switches the advertised projection over the limit", () => {
+    const operations = Array.from(
+      { length: MAX_DEDICATED_TOOLS + 1 },
+      (_unused, index) => staticOperation(index),
+    );
+    const catalog = buildMcpCatalog([], "test", {}, operations);
+
+    expect(catalog.operationTools).toHaveLength(MAX_DEDICATED_TOOLS + 1);
+    expect(new Set(catalog.operationTools.map((tool) => tool.key)).size)
+      .toBe(MAX_DEDICATED_TOOLS + 1);
+    expect(catalog.operationToolProjection).toEqual({
+      mode: "searchable",
+      search: "osf_search_operations",
+      execute: "osf_execute_operation",
+    });
+  });
+
+  it("keeps static Operations dedicated while the combined catalog fits", () => {
+    const catalog = buildMcpCatalog(
+      [],
+      "test",
+      {},
+      [staticOperation(1), staticOperation(2)],
+    );
+    expect(catalog.operationToolProjection.mode).toBe("dedicated");
   });
 });
 

@@ -367,6 +367,14 @@ import {
 // --- end the server's instructions ---
 // --- the person's language (mcp/locale.ts) ---
 import { localizedText, type ResolvedLocale } from "./locale.js";
+import {
+  canonicalRuntimeOperationSchema,
+  parseOperationExecuteArguments,
+  runtimeOperationEnvelopeSchema,
+  searchableOperationTools,
+  searchOperationDefinitions,
+  type SearchableOperationToolNames,
+} from "./operation-search.js";
 // --- end the person's language ---
 import {
   bindOperationHandlers,
@@ -460,57 +468,6 @@ type ProjectedRuntimeOperationTool = {
   tool: Tool;
 };
 
-function runtimeOperationJsonSchema(
-  value: Readonly<Record<string, unknown>>,
-  operationId: string,
-  side: "input" | "output",
-): Record<string, unknown> {
-  const schema = value.schema;
-  if (
-    value.kind !== "json-schema" ||
-    !schema ||
-    typeof schema !== "object" ||
-    Array.isArray(schema)
-  ) {
-    throw new Error(
-      `Runtime Operation ${JSON.stringify(operationId)} has no canonical JSON Schema ${side}.`,
-    );
-  }
-  return structuredClone(schema as Record<string, unknown>);
-}
-
-function runtimeOperationOutputSchema(
-  definition: RuntimeOperationDefinition,
-): Record<string, unknown> {
-  return {
-    type: "object",
-    properties: {
-      data: runtimeOperationJsonSchema(definition.output, definition.id, "output"),
-      operations: {
-        type: "array",
-        items: { type: "object" },
-      },
-      resources: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            uri: { type: "string" },
-            name: { type: "string" },
-            title: { type: "string" },
-            description: { type: "string" },
-            mimeType: { type: "string" },
-          },
-          required: ["uri", "name"],
-          additionalProperties: false,
-        },
-      },
-    },
-    required: ["data", "operations"],
-    additionalProperties: false,
-  };
-}
-
 function projectRuntimeOperationTool(
   definition: RuntimeOperationDefinition,
   locale: ResolvedLocale,
@@ -529,12 +486,12 @@ function projectRuntimeOperationTool(
       name,
       title,
       description,
-      inputSchema: runtimeOperationJsonSchema(
+      inputSchema: canonicalRuntimeOperationSchema(
         definition.input,
         definition.id,
         "input",
       ) as Tool["inputSchema"],
-      outputSchema: runtimeOperationOutputSchema(definition) as Tool["outputSchema"],
+      outputSchema: runtimeOperationEnvelopeSchema(definition) as Tool["outputSchema"],
       annotations: {
         title,
         readOnlyHint:
@@ -664,6 +621,11 @@ type Catalog = {
       idempotentHint: boolean;
     };
   }[];
+  operationToolProjection?: {
+    mode: "dedicated" | "searchable";
+    search: string;
+    execute: string;
+  };
   entities: CatalogEntity[];
   resources?: CatalogResource[];
   derivedTools?: DerivedToolsCatalogEntry[];
@@ -680,6 +642,13 @@ type Catalog = {
   }>;
 };
 const catalog = rawCatalog as unknown as Catalog;
+export type OperationToolProjection = NonNullable<Catalog["operationToolProjection"]>;
+const generatedOperationToolProjection: OperationToolProjection =
+  catalog.operationToolProjection ?? {
+    mode: "dedicated" as const,
+    search: "osf_search_operations",
+    execute: "osf_execute_operation",
+  };
 
 /** Which entity role an operation requires — mirrors the CRUD layer's gate. */
 const OPERATION_ROLE = {
@@ -990,7 +959,10 @@ const compatibilityToolNames = new Set(
   compatibilityOperations.map((entry) => entry.toolName),
 );
 
-function coreOwnsStaticToolName(name: string): boolean {
+function coreOwnsStaticToolName(
+  name: string,
+  projection: OperationToolProjection = generatedOperationToolProjection,
+): boolean {
   return [
     ...catalog.tools.map((tool) => tool.name),
     ...catalog.operationTools.map((tool) => tool.name),
@@ -1007,6 +979,9 @@ function coreOwnsStaticToolName(name: string): boolean {
     ...ONBOARDING_TOOL_NAMES, // first-use onboarding (mcp/onboarding.ts)
     ...UPDATE_TOOL_NAMES, // update notices (mcp/update-notices.ts)
     ...EDIT_LEASE_TOOL_NAMES, // central entity edit leases
+    ...(projection.mode === "searchable"
+      ? [projection.search, projection.execute]
+      : []),
   ].includes(name);
 }
 
@@ -3212,6 +3187,19 @@ function operationMayInvoke(
   );
 }
 
+function projectCatalogOperationTool(
+  tool: Catalog["operationTools"][number],
+): Tool {
+  return {
+    name: tool.name,
+    title: tool.title,
+    description: tool.description,
+    inputSchema: tool.inputSchema as Tool["inputSchema"],
+    outputSchema: tool.outputSchema as Tool["outputSchema"],
+    annotations: { title: tool.title, ...tool.annotations },
+  };
+}
+
 // ---- employee invitations: lazy Keycloak client ----
 // Built once, from the tenant control plane's own configuration
 // (control/config.ts) — the SAME service account and realm `invite_employee`
@@ -3268,6 +3256,8 @@ function buildServer(
   opening: string | null = null,
   /** Core-internal: reuse an already live Operation capability verbatim. */
   moduleSessionOverride?: TrustedSessionContext,
+  /** @internal Test-only projection override. */
+  operationToolProjectionOverride?: OperationToolProjection,
 ): Server {
   const runtimeModules = modules ?? [];
   // Resolved once, here: the server's `instructions` are written at build time
@@ -3275,6 +3265,12 @@ function buildServer(
   // answer, so a second resolution could only disagree with the first.
   const locale = sessionLocale(session);
   const moduleSession = moduleSessionOverride ?? createModuleSessionCapability(session);
+  const operationToolProjection =
+    operationToolProjectionOverride ?? generatedOperationToolProjection;
+  const searchableOperationToolNames: SearchableOperationToolNames = {
+    search: operationToolProjection.search,
+    execute: operationToolProjection.execute,
+  };
   const hasDynamicModuleTools =
     hasDynamicModuleToolProjection(runtimeModules) ||
     runtimeModules.some((module) => (module.operationProviders?.length ?? 0) > 0);
@@ -3319,6 +3315,11 @@ function buildServer(
   const operations = operationModulesConfigured(runtimeModules)
     ? bindOperationHandlers(runtimeModules)
     : new Map();
+  const searchableStaticOperationIds = new Set(
+    catalog.operationTools
+      .filter((tool) => operations.has(tool.key))
+      .map((tool) => tool.key),
+  );
   const projectedEntityOperationIds = toolsForSession(session, tables)
     .map(({ tool }) => tool.operationId)
     .filter((operationId): operationId is string => Boolean(operationId));
@@ -3446,7 +3447,7 @@ function buildServer(
   };
 
   const coreOwnsDerivedToolName = async (toolName: string): Promise<boolean> => {
-    if (coreOwnsStaticToolName(toolName)) return true;
+    if (coreOwnsStaticToolName(toolName, operationToolProjection)) return true;
     if (!session.tenantId || catalogDerivedTools.length === 0) return false;
     return withDbSession(db, session, async (trx) => {
       for (const entry of catalogDerivedTools) {
@@ -3463,7 +3464,7 @@ function buildServer(
   ): Promise<void> => {
     assertUniqueToolNames(tools);
     for (const { tool } of tools) {
-      if (coreOwnsStaticToolName(tool.name)) {
+      if (coreOwnsStaticToolName(tool.name, operationToolProjection)) {
         throw new Error(
           `MCP tool name ${JSON.stringify(tool.name)} is contributed more than once.`,
         );
@@ -4380,19 +4381,16 @@ function buildServer(
         inputSchema: tool.inputSchema,
         annotations: { title: tool.title, ...tool.annotations },
       })),
-      ...catalog.operationTools
-        .filter(
-          (tool) =>
-            operations.has(tool.key) && operationMayInvoke(tool, session),
-        )
-        .map((tool) => ({
-          name: tool.name,
-          title: tool.title,
-          description: tool.description,
-          inputSchema: tool.inputSchema,
-          outputSchema: tool.outputSchema,
-          annotations: { title: tool.title, ...tool.annotations },
-        })),
+      ...(operationToolProjection.mode === "dedicated"
+        ? catalog.operationTools
+            .filter(
+              (tool) =>
+                operations.has(tool.key) && operationMayInvoke(tool, session),
+            )
+            .map(projectCatalogOperationTool)
+        : modulePlatform && searchableStaticOperationIds.size > 0
+        ? searchableOperationTools(searchableOperationToolNames)
+        : []),
     ] as Tool[];
     const sourceOf = (name: string): McpToolCallSource => {
       if (name === SESSION_INFO_TOOL_NAME) return "operation"; // session-info
@@ -4401,6 +4399,11 @@ function buildServer(
       }
       if (catalog.tools.some((tool) => tool.name === name)) return "crud";
       if (catalog.operationTools.some((tool) => tool.name === name))
+        return "operation";
+      if (
+        operationToolProjection.mode === "searchable" &&
+        Object.values(searchableOperationToolNames).includes(name)
+      )
         return "operation";
       if (
         connectorToolsForSession(listConnectorContracts(), {
@@ -4496,6 +4499,83 @@ function buildServer(
       return "content" in editLeaseOutcome
         ? editLeaseOutcome as ToolResult
         : ok({ data: editLeaseOutcome, operations: [] });
+    }
+    if (
+      operationToolProjection.mode === "searchable" &&
+      name === searchableOperationToolNames.search
+    ) {
+      if (!modulePlatform) {
+        return failed(
+          new HttpError(
+            503,
+            "OPERATION_UNAVAILABLE",
+            "The canonical Operation runtime is unavailable.",
+          ),
+        );
+      }
+      try {
+        assertParentInvocationActive?.();
+        assertInterceptorActive?.();
+        const definitions = await modulePlatform.services.operations.list(
+          moduleSession,
+        );
+        return ok(searchOperationDefinitions({
+          definitions,
+          allowedIds: searchableStaticOperationIds,
+          arguments: request.params.arguments ?? {},
+          locale,
+        }));
+      } catch (error) {
+        return failed(error);
+      }
+    }
+    if (
+      operationToolProjection.mode === "searchable" &&
+      name === searchableOperationToolNames.execute
+    ) {
+      if (!modulePlatform) {
+        return failed(
+          new HttpError(
+            503,
+            "OPERATION_UNAVAILABLE",
+            "The canonical Operation runtime is unavailable.",
+          ),
+        );
+      }
+      try {
+        const parsed = parseOperationExecuteArguments(
+          request.params.arguments ?? {},
+        );
+        assertParentInvocationActive?.();
+        assertInterceptorActive?.();
+        const definition = searchableStaticOperationIds.has(parsed.operationId)
+          ? await modulePlatform.services.operations.get(
+              moduleSession,
+              parsed.operationId,
+            )
+          : undefined;
+        if (!definition || !searchableStaticOperationIds.has(definition.id)) {
+          throw new HttpError(
+            404,
+            "NOT_FOUND",
+            "The requested Operation is not available.",
+          );
+        }
+        const result = await modulePlatform.services.operations.execute(
+          moduleSession,
+          {
+            operation: { id: definition.id, intent: definition.intent },
+            input: parsed.input,
+            ...(parsed.idempotencyKey
+              ? { idempotencyKey: parsed.idempotencyKey }
+              : {}),
+          },
+          signal ? { signal } : {},
+        );
+        return runtimeOperationToolResult(result);
+      } catch (error) {
+        return failed(error);
+      }
     }
     if (current?.runtimeOperation) {
       if (!modulePlatform) {
@@ -6791,6 +6871,8 @@ function buildServer(
           catalogGuideTools.some((tool) => tool.name === name) ||
           (catalog.discoveryTools ?? []).some((tool) => tool.name === name) ||
           (catalog.testTools ?? []).some((tool) => tool.name === name) ||
+          (operationToolProjection.mode === "searchable" &&
+            Object.values(searchableOperationToolNames).includes(name)) ||
           resolveConnectorTool(listConnectorContracts(), name, {
             roles: session.roles ?? [],
           }) !== undefined;
@@ -6841,7 +6923,25 @@ function buildServer(
                 inputSchema: { type: "object", additionalProperties: true },
               },
             }
-          : (await listedTools()).find((entry) => entry.tool.name === name);
+          : await (async (): Promise<ListedTool | undefined> => {
+              const listed = (await listedTools()).find(
+                (entry) => entry.tool.name === name,
+              );
+              if (listed || operationToolProjection.mode !== "searchable") {
+                return listed;
+              }
+              // Searchable projection bounds tools/list, but a previously
+              // integrated client may still call the authored direct name.
+              // Reapply the same live availability guard before selecting it.
+              const direct = catalog.operationTools.find(
+                (tool) => tool.name === name,
+              );
+              return direct &&
+                  operations.has(direct.key) &&
+                  operationMayInvoke(direct, session)
+                ? { source: "operation", tool: projectCatalogOperationTool(direct) }
+                : undefined;
+            })();
         signal?.throwIfAborted();
       }
     } catch (error) {
@@ -7410,6 +7510,7 @@ export function __buildGeneratedMcpServerForTests(input: {
   egressOwner?: RuntimeModule["egress"];
   stateful?: boolean;
   tables?: Map<string, GeneratedTable>;
+  operationToolProjection?: OperationToolProjection;
 }): Server {
   return buildServer(
     input.db,
@@ -7420,6 +7521,9 @@ export function __buildGeneratedMcpServerForTests(input: {
     undefined,
     input.stateful ?? true,
     input.tables,
+    null,
+    undefined,
+    input.operationToolProjection,
   );
 }
 

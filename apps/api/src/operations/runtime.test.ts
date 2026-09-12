@@ -1342,6 +1342,164 @@ test("MCP projects a handler's content blocks next to the canonical value", asyn
   }
 });
 
+test("MCP searchable projection bounds tools/list while search, generic execute, and named calls stay canonical", async () => {
+  const value = {
+    status: "accepted",
+    instanceId: "11111111-1111-4111-8111-111111111111",
+    definitionId: "22222222-2222-4222-8222-222222222222",
+  };
+  const calls: unknown[] = [];
+  const module: RuntimeModule = {
+    name: "workflow",
+    operationHandlers: {
+      startWebhook: (input, context) => {
+        calls.push({ input, userId: context.session?.userId });
+        return { value };
+      },
+    },
+  };
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  platform.registerStaticOperations(runtimeStaticOperationRegistrations(
+    [module],
+    { db, platform: platform.services },
+  ));
+  const server = __buildGeneratedMcpServerForTests({
+    db,
+    session,
+    modules: [module],
+    modulePlatform: platform,
+    operationToolProjection: {
+      mode: "searchable",
+      search: "osf_search_operations",
+      execute: "osf_execute_operation",
+    },
+  });
+  const client = new Client(
+    { name: "searchable-operation-test", version: "1" },
+    { capabilities: {} },
+  );
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const listed = await client.listTools();
+    expect(listed.tools.map((tool) => tool.name)).toContain("osf_search_operations");
+    expect(listed.tools.map((tool) => tool.name)).toContain("osf_execute_operation");
+    expect(listed.tools.map((tool) => tool.name)).not.toContain("workflow_start_webhook");
+
+    const searched = await client.callTool({
+      name: "osf_search_operations",
+      arguments: { query: "webhook", limit: 20 },
+    });
+    expect(searched.isError).not.toBe(true);
+    expect(searched.structuredContent).toMatchObject({
+      operations: [{
+        operation: { id: "workflow.instance.webhook-start", intent: "invoke" },
+        inputSchema: expect.objectContaining({
+          required: ["definitionId", "idempotencyKey"],
+        }),
+      }],
+    });
+
+    const generic = await client.callTool({
+      name: "osf_execute_operation",
+      arguments: {
+        operationId: "workflow.instance.webhook-start",
+        input: { definitionId: value.definitionId },
+        idempotencyKey: "generic-attempt",
+      },
+    });
+    expect(generic.isError).not.toBe(true);
+    expect(generic.structuredContent).toEqual({ data: value, operations: [] });
+
+    const named = await client.callTool({
+      name: "workflow_start_webhook",
+      arguments: {
+        definitionId: value.definitionId,
+        idempotencyKey: "named-attempt",
+      },
+    });
+    expect(named.isError).not.toBe(true);
+    expect(named.structuredContent).toEqual(value);
+    expect(calls).toEqual([
+      {
+        input: {
+          definitionId: value.definitionId,
+          idempotencyKey: "generic-attempt",
+        },
+        userId: session.userId,
+      },
+      {
+        input: {
+          definitionId: value.definitionId,
+          idempotencyKey: "named-attempt",
+        },
+        userId: session.userId,
+      },
+    ]);
+
+    const deniedSession = { ...session, userId: "user-denied", roles: [] };
+    const deniedServer = __buildGeneratedMcpServerForTests({
+      db,
+      session: deniedSession,
+      modules: [module],
+      modulePlatform: platform,
+      operationToolProjection: {
+        mode: "searchable",
+        search: "osf_search_operations",
+        execute: "osf_execute_operation",
+      },
+    });
+    const deniedClient = new Client(
+      { name: "searchable-operation-denied-test", version: "1" },
+      { capabilities: {} },
+    );
+    const [deniedClientTransport, deniedServerTransport] =
+      InMemoryTransport.createLinkedPair();
+    try {
+      await deniedServer.connect(deniedServerTransport);
+      await deniedClient.connect(deniedClientTransport);
+      const hidden = await deniedClient.callTool({
+        name: "osf_search_operations",
+        arguments: { query: "webhook" },
+      });
+      expect(hidden.structuredContent).toEqual({ operations: [] });
+      const deniedGeneric = await deniedClient.callTool({
+        name: "osf_execute_operation",
+        arguments: {
+          operationId: "workflow.instance.webhook-start",
+          input: { definitionId: value.definitionId },
+          idempotencyKey: "denied-attempt",
+        },
+      });
+      expect(deniedGeneric).toMatchObject({
+        isError: true,
+        structuredContent: { error: { code: "NOT_FOUND" } },
+      });
+      const deniedNamed = await deniedClient.callTool({
+        name: "workflow_start_webhook",
+        arguments: {
+          definitionId: value.definitionId,
+          idempotencyKey: "denied-named-attempt",
+        },
+      });
+      expect(deniedNamed).toMatchObject({
+        isError: true,
+        structuredContent: { error: { code: "NOT_FOUND" } },
+      });
+      expect(calls).toHaveLength(2);
+    } finally {
+      await deniedClient.close();
+      await deniedServer.close();
+    }
+  } finally {
+    await client.close();
+    await server.close();
+    await db.destroy();
+  }
+});
+
 test("MCP projects and dispatches live runtime provider Operations canonically", async () => {
   const db = testDatabase();
   const platform = new ModulePlatformRuntime(db);

@@ -1182,6 +1182,35 @@ export type ExecutionCompatibilityContribution = {
   contribution: PluginExecutionCompatibility;
 };
 
+export const SEARCHABLE_OPERATION_TOOL_NAMES = {
+  search: "osf_search_operations",
+  execute: "osf_execute_operation",
+} as const;
+
+export type McpOperationToolProjection = "dedicated" | "searchable";
+
+/**
+ * Keep the fixed dedicated budget while retaining every canonical Operation.
+ * Entity/connector tools cannot be collapsed here; static Operations can use
+ * the two fixed searchable tools instead of an unstable truncated subset.
+ */
+export function selectOperationToolProjection(
+  dedicatedWithoutOperations: number,
+  operationCount: number,
+  maximum = MAX_DEDICATED_TOOLS,
+): McpOperationToolProjection {
+  if (dedicatedWithoutOperations > maximum) {
+    throw new Error(
+      `MCP tool catalog would advertise ${dedicatedWithoutOperations} dedicated non-Operation tools, ` +
+        `over the ${maximum} limit. Switch entities to \`mcp: { tools: generic }\` or disable ` +
+        "connector operations for MCP.",
+    );
+  }
+  return dedicatedWithoutOperations + operationCount > maximum
+    ? "searchable"
+    : "dedicated";
+}
+
 export type McpCatalog = {
   generatedBy: string;
   source: string;
@@ -1203,6 +1232,11 @@ export type McpCatalog = {
     auth: CompiledPluginOperation["auth"];
     annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean };
   }[];
+  operationToolProjection: {
+    mode: McpOperationToolProjection;
+    search: typeof SEARCHABLE_OPERATION_TOOL_NAMES.search;
+    execute: typeof SEARCHABLE_OPERATION_TOOL_NAMES.execute;
+  };
   /** Internal adapter-removal seam; never listed as an MCP tool. */
   executionCompatibility: {
     plugin: string;
@@ -1283,6 +1317,7 @@ export function buildMcpCatalog(
   referentiedata: CoreReferentiedataSnapshot = {},
   operations: readonly CompiledPluginOperation[] = [],
   executionCompatibility: readonly ExecutionCompatibilityContribution[] = [],
+  requestedOperationToolProjection?: McpOperationToolProjection,
 ): McpCatalog {
   const opted = inputs
     .filter((input) => input.contract.mcp !== undefined)
@@ -1958,18 +1993,15 @@ export function buildMcpCatalog(
         idempotentHint: operation.idempotency.mode !== "none",
       },
     }));
-  if (dedicatedCount + operationTools.length > MAX_DEDICATED_TOOLS) {
-    const offenders = opted
-      .filter((input) => input.contract.mcp!.tools === "dedicated")
-      .map((input) => input.slug)
-      .join(", ");
-    throw new Error(
-      `MCP tool catalog would advertise ${dedicatedCount + operationTools.length} dedicated tools, over the ` +
-        `${MAX_DEDICATED_TOOLS} limit. A model's tool selection degrades badly at that ` +
-        `size. Set \`mcp: { tools: generic }\` on some of these entities so they share ` +
-        `the osf_* tools instead: ${offenders}.`,
-    );
-  }
+  const locallyRequiredProjection = selectOperationToolProjection(
+    dedicatedCount,
+    operationTools.length,
+  );
+  const operationToolProjection =
+    locallyRequiredProjection === "searchable" ||
+      requestedOperationToolProjection === "searchable"
+      ? "searchable"
+      : "dedicated";
 
   return {
     generatedBy: "@openshapeforge/compiler",
@@ -1982,6 +2014,10 @@ export function buildMcpCatalog(
     testTools,
     guideTools,
     operationTools,
+    operationToolProjection: {
+      mode: operationToolProjection,
+      ...SEARCHABLE_OPERATION_TOOL_NAMES,
+    },
     executionCompatibility: executionCompatibilityOperations,
   };
 }
@@ -1992,6 +2028,7 @@ export function renderMcpCatalog(
   referentiedata: CoreReferentiedataSnapshot = {},
   operations: readonly CompiledPluginOperation[] = [],
   executionCompatibility: readonly ExecutionCompatibilityContribution[] = [],
+  operationToolProjection?: McpOperationToolProjection,
 ): string {
   return `${JSON.stringify(buildMcpCatalog(
     inputs,
@@ -1999,5 +2036,6 @@ export function renderMcpCatalog(
     referentiedata,
     operations,
     executionCompatibility,
+    operationToolProjection,
   ), null, 2)}\n`;
 }

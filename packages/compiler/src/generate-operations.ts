@@ -21,6 +21,11 @@ import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts
 import { entityOperationJsonSchemas } from "./entity-operation-json-schema.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
+import {
+  SEARCHABLE_OPERATION_TOOL_NAMES,
+  selectOperationToolProjection,
+  type McpOperationToolProjection,
+} from "./generate-mcp.js";
 
 export type { CompiledPluginOperation } from "./plugins.js";
 
@@ -429,7 +434,7 @@ export function auditOperationSurfaceCollisions(
   manifest: PlatformSchemaManifest,
   connectors: readonly CompiledConnectorContract[],
   maxDedicatedMcpTools: number,
-): void {
+): McpOperationToolProjection {
   const graphql = new Map<string, string>();
   const mcp = new Map<string, string>();
   // Core owns its internal precedence choices (for example a fixed route next
@@ -437,6 +442,7 @@ export function auditOperationSurfaceCollisions(
   // those route languages nor each other.
   const rest: RestRoute[] = [...CORE_API_ROUTES];
   let dedicatedMcpTools = 0;
+  let operationMcpTools = 0;
 
   const claimRest = (route: RestRoute): void => {
     const previous = rest.find((claimed) => restRoutesOverlap(claimed, route));
@@ -508,16 +514,30 @@ export function auditOperationSurfaceCollisions(
     }
     if (operation.transports.mcp.enabled) {
       claimSurface(mcp, "MCP tool", operation.transports.mcp.name, owner);
-      dedicatedMcpTools += 1;
+      operationMcpTools += 1;
     }
   }
 
-  if (dedicatedMcpTools > maxDedicatedMcpTools) {
-    throw new Error(
-      `The combined MCP catalog would advertise ${dedicatedMcpTools} dedicated tools, ` +
-      `over the ${maxDedicatedMcpTools} limit.`,
+  const projection = selectOperationToolProjection(
+    dedicatedMcpTools,
+    operationMcpTools,
+    maxDedicatedMcpTools,
+  );
+  if (projection === "searchable") {
+    claimSurface(
+      mcp,
+      "MCP tool",
+      SEARCHABLE_OPERATION_TOOL_NAMES.search,
+      "shared searchable Operation catalog",
+    );
+    claimSurface(
+      mcp,
+      "MCP tool",
+      SEARCHABLE_OPERATION_TOOL_NAMES.execute,
+      "shared searchable Operation executor",
     );
   }
+  return projection;
 }
 
 export function collectPluginOperations(

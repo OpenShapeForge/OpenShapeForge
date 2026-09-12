@@ -950,6 +950,42 @@ describe("first-class plugin operations", () => {
     const canonical = collectPluginOperations([{ name: "demo", operations: [operation] }], context);
     expect(() => auditOperationSurfaceCollisions(canonical, generatedManifest, [], 60))
       .not.toThrow();
+
+    const overflow = Array.from({ length: 61 }, (_unused, index) => {
+      const compiled = compiledOperation("POST", `/api/demo/overflow/${index}`);
+      return {
+        ...compiled,
+        key: `demo.overflow.${index}`,
+        id: `demo.overflow.${index}`,
+        transports: {
+          ...compiled.transports,
+          mcp: { enabled: true as const, name: `demo_overflow_${index}` },
+          graphql: { enabled: false as const, reason: "Not exposed in this fixture." },
+        },
+      };
+    });
+    expect(auditOperationSurfaceCollisions(overflow, { version: 1, tables: [] }, [], 60))
+      .toBe("searchable");
+
+    const genericNameCollision = overflow.map((candidate, index) =>
+      index === 0
+        ? {
+            ...candidate,
+            transports: {
+              ...candidate.transports,
+              mcp: { enabled: true as const, name: "osf_search_operations" },
+            },
+          }
+        : candidate
+    );
+    expect(() =>
+      auditOperationSurfaceCollisions(
+        genericNameCollision,
+        { version: 1, tables: [] },
+        [],
+        60,
+      )
+    ).toThrow(/osf_search_operations.*plugin operation.*shared searchable Operation catalog/);
   });
 
   test("rejects duplicate or invalid generated TypeScript function names", () => {

@@ -320,7 +320,12 @@ export async function collectAllArtifacts(
   const entityOperations = collectEntityOperations(entities);
   const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries);
   assertOperationRuntimeModules(operations, moduleRegistry.modules.map((module) => module.name));
-  auditOperationSurfaceCollisions(operations, manifest, connectors, MAX_DEDICATED_TOOLS);
+  const operationToolProjection = auditOperationSurfaceCollisions(
+    operations,
+    manifest,
+    connectors,
+    MAX_DEDICATED_TOOLS,
+  );
   const operationCatalog = buildStaticOperationCatalog(
     operations,
     entityOperations,
@@ -382,6 +387,7 @@ export async function collectAllArtifacts(
           referentiedata,
           operations,
           executionCompatibility,
+          operationToolProjection,
         ),
       },
     ],

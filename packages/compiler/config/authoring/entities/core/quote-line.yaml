@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 2
 kind: coreEntity
 module: core
 entity: QuoteLine
@@ -29,6 +29,7 @@ fields:
       storageClass: core
   - key: description
     valueType: string
+    semanticType: multilineText
     required: true
     label:
       en: Description
@@ -42,11 +43,6 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 3
-        maxLength: 2000
   - key: quantity
     valueType: number
     required: false
@@ -182,121 +178,115 @@ relationships:
     label:
       en: VAT dimension
       nl: BTW-dimensie
-ui:
-  routes:
-    list:
-      en: /quote-lines
-      nl: /offerteregels
-    detail:
-      en: /quote-lines/:id
-      nl: /offerteregels/:id
-    create:
-      en: /quote-lines/create
-      nl: /offerteregels/aanmaken
-    edit:
-      en: /quote-lines/:id/edit
-      nl: /offerteregels/:id/bewerken
-    delete:
-      en: /quote-lines/:id/delete
-      nl: /offerteregels/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Quote lines
-        nl: Offerteregels
-      columns:
-        - key: lineNumber
-          sortable: true
-        - key: description
-          sortable: true
-        - key: quantity
-          sortable: true
-        - key: unitPrice
-          sortable: true
-        - key: amountTotal
-          sortable: true
-      defaultSort:
-        key: lineNumber
-        direction: asc
-      rowLink:
-        en: /quote-lines/:id
-        nl: /offerteregels/:id
-    detail:
-      header:
+operations:
+  list:
+    name: { en: List quote lines, nl: Offerteregels tonen }
+    description: { en: Returns a filtered and sorted page of quote lines., nl: Geeft een gefilterde en gesorteerde pagina met offerteregels terug. }
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  get:
+    name: { en: Get quote line, nl: Offerteregel ophalen }
+    description: { en: Returns one quote line by its canonical id., nl: Geeft één offerteregel terug op basis van het canonieke id. }
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  create:
+    name: { en: Create quote line, nl: Offerteregel aanmaken }
+    description: { en: Creates one quote line after validating its canonical fields., nl: Maakt één offerteregel aan na validatie van de canonieke velden. }
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    confirmation: { mode: none }
+  update:
+    name: { en: Update quote line, nl: Offerteregel wijzigen }
+    description: { en: Updates one quote line while holding its server-issued edit lease and current version., nl: Wijzigt één offerteregel met de server-uitgegeven bewerkingslease en actuele versie. }
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+    confirmation: { mode: none }
+  delete:
+    name: { en: Delete quote line, nl: Offerteregel verwijderen }
+    description: { en: Permanently deletes one quote line after a server-issued version-bound confirmation challenge., nl: Verwijdert één offerteregel definitief na een server-uitgegeven versiegebonden bevestigingsvraag. }
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+    confirmation:
+      mode: challenge
+      challenge:
+        kind: type-current-field
+        field: description
+        issuedBy: server
+        bindTo: [subject, tenant, operation, target.id, target.version]
+        expiresAfter: PT5M
+        singleUse: true
+
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp:
+    tools: generic
+    resource:
+      uri: app://quote-lines
+      name: Quote lines
+      description: Read the quote lines available to the signed-in identity.
+      templateDescription: Read one quote line by its canonical id.
+  web:
+    views:
+      collection:
+        route: { en: /quote-lines, nl: /offerteregels }
+        title: { en: Quote lines, nl: Offerteregels }
+        columns:
+          - { key: lineNumber, sortable: true }
+          - { key: description, sortable: true }
+          - { key: quantity, sortable: true }
+          - { key: unitPrice, sortable: true }
+          - { key: amountTotal, sortable: true }
+        defaultSort: { key: lineNumber, direction: asc }
+      record:
+        routes:
+          read: { en: /quote-lines/:id, nl: /offerteregels/:id }
+          create: { en: /quote-lines/new, nl: /offerteregels/nieuw }
         title: "{{description}}"
         subtitle: "{{amountTotal}}"
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Line details
-                nl: Regelgegevens
-              fields:
-                - lineNumber
-                - description
-                - quantity
-                - unitId
-                - unitPrice
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - amountBase
-                - amountVat
-                - amountTotal
-    form:
-      variants:
-        create:
-          title:
-            en: Create quote line
-            nl: Offerteregel aanmaken
-          groups:
-            - title:
-                en: Line details
-                nl: Regelgegevens
-              fields:
-                - lineNumber
-                - description
-                - quantity
-                - unitId
-                - unitPrice
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - amountBase
-                - amountVat
-                - amountTotal
-        edit:
-          extends: create
-          title:
-            en: Edit quote line
-            nl: Offerteregel bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions: [update, delete]
+        layout:
+          tabs:
+            - id: overview
+              label: { en: Overview, nl: Overzicht }
+              groups:
+                - title: { en: Line details, nl: Regelgegevens }
+                  fields: [lineNumber, description, quantity, unitId, unitPrice]
+                - title: { en: Amounts, nl: Bedragen }
+                  fields: [amountBase, amountVat, amountTotal]
+        modes:
+          create:
+            title: { en: Create quote line, nl: Offerteregel aanmaken }
+            groups:
+              - title: { en: Line details, nl: Regelgegevens }
+                fields: [lineNumber, description, quantity, unitId, unitPrice]
+              - title: { en: Amounts, nl: Bedragen }
+                fields: [amountBase, amountVat, amountTotal]
+          update:
+            title: { en: Update quote line, nl: Offerteregel wijzigen }
+            groups:
+              - title: { en: Line details, nl: Regelgegevens }
+                fields: [lineNumber, description, quantity, unitId, unitPrice]
+              - title: { en: Amounts, nl: Bedragen }
+                fields: [amountBase, amountVat, amountTotal]
 # Finance.QuoteLines.Read / Finance.QuoteLines.ReadWrite are the per-entity roles the realm already
 # emits; listing them here is what makes them mean something. A caller that
 # writes quote lines without being all of Finance — a host-authored role or a

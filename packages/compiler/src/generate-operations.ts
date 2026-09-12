@@ -9,13 +9,81 @@ import type {
 } from "./plugins.js";
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
 import type { CompiledEntityOperation } from "./authoring/types.js";
-import type { OperationCatalogDefinition } from "./authoring/types.js";
+import type {
+  EntityOperationDefinition,
+  OperationCatalogDefinition,
+} from "./authoring/types.js";
 import type { LocalizedText } from "./authoring/types.js";
 import type { CompiledEntityInfo } from "./plugins.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
 
 export type CompiledPluginOperation = PluginOperationContract & { plugin: string };
+
+/**
+ * Platform-owned mutation controls are derived from the canonical Operation
+ * policy. Authors describe business input only; every adapter receives this
+ * one augmented schema and therefore asks for the same lease/version or
+ * confirmation values that the shared executor enforces.
+ */
+function withOperationControls(
+  inputSchema: JsonSchema,
+  definition: EntityOperationDefinition,
+): JsonSchema {
+  const properties = {
+    ...((inputSchema.properties ?? {}) as Record<string, unknown>),
+  };
+  const required = new Set(
+    Array.isArray(inputSchema.required) ? inputSchema.required as string[] : [],
+  );
+  const dependentRequired = {
+    ...((inputSchema.dependentRequired ?? {}) as Record<string, string[]>),
+  };
+
+  if (definition.concurrency?.version) {
+    properties.expectedVersion = {
+      type: "string",
+      format: "date-time",
+      description: `Version from the record's ${definition.concurrency.version.field} field.`,
+    };
+    required.add("expectedVersion");
+  }
+  if (definition.concurrency?.editLease) {
+    properties.leaseToken = {
+      type: "string",
+      minLength: 1,
+      description: "Opaque edit-lease token issued by the server for this Operation and record.",
+    };
+    required.add("leaseToken");
+  }
+  if (definition.confirmation.mode === "acknowledgement") {
+    properties.confirmed = {
+      type: "boolean",
+      description: "Set to true after the user explicitly acknowledges this Operation.",
+    };
+  }
+  if (definition.confirmation.mode === "challenge") {
+    properties.confirmationToken = {
+      type: "string",
+      minLength: 1,
+      description: "Opaque, single-use confirmation challenge token issued by the server.",
+    };
+    properties.confirmationAnswer = {
+      type: "string",
+      minLength: 1,
+      description: `Exact current value requested for ${definition.confirmation.challenge.field}.`,
+    };
+    dependentRequired.confirmationToken = ["confirmationAnswer"];
+    dependentRequired.confirmationAnswer = ["confirmationToken"];
+  }
+
+  return {
+    ...inputSchema,
+    properties,
+    ...(required.size > 0 ? { required: [...required] } : {}),
+    ...(Object.keys(dependentRequired).length > 0 ? { dependentRequired } : {}),
+  };
+}
 
 const KEY = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
 const IDENTIFIER = /^[_A-Za-z][_0-9A-Za-z]*$/;
@@ -549,7 +617,7 @@ export function collectAuthoredEntityPluginOperations(
       const targetSegment = definition.target?.scope === "record"
         ? `/:${definition.target.inputField}`
         : "";
-      const inputSchema = definition.input!.schema;
+      const inputSchema = withOperationControls(definition.input!.schema, definition);
       const outputSchema = definition.output!.schema;
       const idempotency = definition.reliability.idempotency;
       const operation: PluginOperationContract = {
@@ -665,7 +733,7 @@ export function collectAuthoredModulePluginOperations(
         title: authoredText(definition.name),
         description: authoredText(definition.description),
         handler: definition.implementation.handler,
-        inputSchema: definition.input!.schema,
+        inputSchema: withOperationControls(definition.input!.schema, definition),
         outputSchema: definition.output!.schema,
         errors: definition.errors! as PluginOperationContract["errors"],
         auth: definition.auth!,

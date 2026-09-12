@@ -5,6 +5,7 @@ import { renderOpenApiSpec } from "./generate-openapi.js";
 import {
   auditOperationSurfaceCollisions,
   assertOperationRuntimeModules,
+  collectAuthoredEntityPluginOperations,
   collectPluginOperations,
   collectEntityOperations,
   operationOpenApiPaths,
@@ -49,6 +50,60 @@ const operation: PluginOperationContract = {
 const context = { repoRoot: "/repo", authoringDir: "/repo/authoring", webPresent: false };
 
 describe("first-class plugin operations", () => {
+  test("derives custom write controls once for every adapter input schema", () => {
+    const [compiled] = collectAuthoredEntityPluginOperations([{
+      contract: {
+        pluginOperations: [{
+          key: "approve",
+          id: "demo.quote.approve",
+          entityId: "example.Quote",
+          entityName: "Quote",
+          definition: {
+            id: "demo.quote.approve",
+            name: "Approve quote",
+            description: "Approves a quote.",
+            implementation: { type: "plugin", plugin: "demo", handler: "approveQuote" },
+            target: { scope: "record", inputField: "quoteId" },
+            input: {
+              schema: {
+                type: "object",
+                required: ["quoteId"],
+                properties: { quoteId: { type: "string", format: "uuid" } },
+                additionalProperties: false,
+              },
+            },
+            output: { schema: { type: "object", properties: {} } },
+            errors: [],
+            auth: { mode: "session", roles: ["Quotes.All.Approve"] },
+            tenancy: { mode: "required" },
+            effects: { data: "write", external: "none" },
+            reliability: { idempotency: { mode: "natural" } },
+            concurrency: {
+              version: { mode: "required", field: "updatedAt" },
+              editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+            },
+            confirmation: { mode: "none" },
+          },
+          interfaces: {
+            rest: { method: "POST", path: "/api/demo/quotes/:quoteId/approve" },
+            graphql: { kind: "mutation", field: "approveQuote" },
+            mcp: { name: "approve_quote" },
+            web: {},
+          },
+        }],
+      },
+    }] as never, context);
+
+    expect(compiled!.inputSchema).toMatchObject({
+      required: ["quoteId", "expectedVersion", "leaseToken"],
+      properties: {
+        expectedVersion: { type: "string", format: "date-time" },
+        leaseToken: { type: "string", minLength: 1 },
+      },
+      additionalProperties: false,
+    });
+  });
+
   test("renders canonical entity operations beside plugin operations", () => {
   const entityOperation: CompiledEntityOperation = {
     key: "list",

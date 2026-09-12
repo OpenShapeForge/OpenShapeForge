@@ -608,6 +608,8 @@ export interface EntityWebViewDefinition {
   collection: {
     route: string | LocalizedText;
     title?: LocalizedText;
+    /** Ordered collection-scoped plugin Operations shown by Web consumers. */
+    actions?: string[];
     columns: { key: string; sortable?: boolean }[];
     defaultSort?: { key: string; direction: "asc" | "desc" };
   };

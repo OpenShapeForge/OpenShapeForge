@@ -664,7 +664,10 @@ export interface CompiledEntityContract {
   }>;
   /** Explicit v2 interface exposure; v1 contracts keep using legacy projections. */
   interfaces?: {
-    web?: { operations: Partial<Record<EntityOperationIntent, boolean>> };
+    web?: {
+      operations: Partial<Record<EntityOperationIntent, boolean>>;
+      collectionActions?: string[];
+    };
     graphql?: { operations: Partial<Record<EntityOperationIntent, boolean>> };
   };
   graphql: GraphQLSection;

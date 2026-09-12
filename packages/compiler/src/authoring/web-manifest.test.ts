@@ -280,7 +280,7 @@ describe("web manifest projection", () => {
     );
   });
 
-  test("projects YAML-owned record Operations as localized Web actions", () => {
+  test("projects YAML-owned record and collection Operations as localized Web actions", () => {
     const view = coreView();
     view.detail!.actions = [{ key: "recalculate", route: "recalculate" }];
     const deal = entity("Deal", "deal", [
@@ -289,7 +289,10 @@ describe("web manifest projection", () => {
     ], view);
     deal.contract.authoringVersion = 2;
     deal.contract.interfaces = {
-      web: { operations: { list: true, get: true } },
+      web: {
+        operations: { list: true, get: true },
+        collectionActions: ["compose"],
+      },
     };
     deal.contract.pluginOperations = [{
       key: "recalculate",
@@ -332,6 +335,25 @@ describe("web manifest projection", () => {
         mcp: { name: "recalculate_deal" },
         web: {},
       },
+    }, {
+      key: "compose",
+      id: "example.deal.compose",
+      entityId: "example.Deal",
+      entityName: "Deal",
+      definition: {
+        name: text("Compose deal", "Deal samenstellen"),
+        description: text("Compose a new deal", "Stel een nieuwe deal samen"),
+        implementation: { type: "plugin", plugin: "example", handler: "composeDeal" },
+        target: { scope: "collection" },
+        input: { schema: { type: "object", additionalProperties: false } },
+        output: { schema: { type: "object" } },
+        auth: { mode: "session", roles: ["Deals.Compose"] },
+        tenancy: { mode: "required" },
+        effects: { data: "write", external: "none" },
+        reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+        confirmation: { mode: "none" },
+      },
+      interfaces: { web: {} },
     }];
 
     const projected = buildWebManifest([deal]).entities.Deal!;
@@ -350,6 +372,9 @@ describe("web manifest projection", () => {
     });
     expect(projected.views.record?.operations.actions).toEqual([
       expect.objectContaining({ id: "example.deal.recalculate", intent: "invoke" }),
+    ]);
+    expect(projected.views.collection.operations.actions).toEqual([
+      expect.objectContaining({ id: "example.deal.compose", intent: "invoke" }),
     ]);
   });
 

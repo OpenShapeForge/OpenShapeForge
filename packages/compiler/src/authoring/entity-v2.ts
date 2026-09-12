@@ -525,18 +525,32 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
 
   const web = entity.interfaces?.web;
   if (web) {
-    for (const operationKey of web.views.record?.actions ?? []) {
-      if (!entity.operations[operationKey]) {
-        throw new Error(
-          `${origin} interfaces.web.views.record.actions references unknown operation ` +
-            `"${operationKey}".`,
-        );
-      }
-      if (web.operations?.[operationKey] === false) {
-        throw new Error(
-          `${origin} interfaces.web.views.record.actions operation "${operationKey}" ` +
-            "must also be projected by interfaces.web.operations.",
-        );
+    const actionLists = [
+      ["collection", web.views.collection.actions ?? []],
+      ["record", web.views.record?.actions ?? []],
+    ] as const;
+    for (const [scope, operationKeys] of actionLists) {
+      for (const operationKey of operationKeys) {
+        const operation = entity.operations[operationKey];
+        if (!operation) {
+          throw new Error(
+            `${origin} interfaces.web.views.${scope}.actions references unknown operation ` +
+              `"${operationKey}".`,
+          );
+        }
+        if (web.operations?.[operationKey] === false) {
+          throw new Error(
+            `${origin} interfaces.web.views.${scope}.actions operation "${operationKey}" ` +
+              "must also be projected by interfaces.web.operations.",
+          );
+        }
+        if (scope === "collection" &&
+          (operation.implementation.type !== "plugin" || operation.target?.scope !== "collection")) {
+          throw new Error(
+            `${origin} interfaces.web.views.collection.actions operation "${operationKey}" ` +
+              "must be a collection-scoped plugin Operation.",
+          );
+        }
       }
     }
   }

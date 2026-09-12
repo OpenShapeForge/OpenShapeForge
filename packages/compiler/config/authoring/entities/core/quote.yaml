@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 2
 kind: coreEntity
 module: core
 entity: Quote
@@ -15,6 +15,7 @@ domains:
 fields:
   - key: quoteStatus
     valueType: string
+    semanticType: referenceDataCode
     required: true
     label:
       en: Quote status
@@ -25,11 +26,9 @@ fields:
     persisted:
       column: quote_status
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: QUOTESTATUS
-        clearable: false
+    options:
+      type: referentiedata
+      referentieGroep: QUOTESTATUS
   - key: quoteNumber
     valueType: string
     required: true
@@ -57,9 +56,6 @@ fields:
     persisted:
       column: issue_date
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: expiresAt
     valueType: date
     required: false
@@ -72,9 +68,6 @@ fields:
     persisted:
       column: expires_at
       storageClass: core
-    render:
-      component: DatePicker
-      props: {}
   - key: currencyCode
     valueType: string
     required: true
@@ -132,6 +125,7 @@ fields:
       storageClass: core
   - key: description
     valueType: string
+    semanticType: multilineText
     required: false
     label:
       en: Description
@@ -144,11 +138,6 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 1000
   - key: externalCode
     valueType: string
     required: false
@@ -178,151 +167,127 @@ relationships:
     label:
       en: Agreement
       nl: Overeenkomst
-ui:
-  routes:
-    list:
-      en: /quotes
-      nl: /offertes
-    detail:
-      en: /quotes/:id
-      nl: /offertes/:id
-    create:
-      en: /quotes/create
-      nl: /offertes/aanmaken
-    edit:
-      en: /quotes/:id/edit
-      nl: /offertes/:id/bewerken
-    delete:
-      en: /quotes/:id/delete
-      nl: /offertes/:id/verwijderen
-  presentations:
-    list:
-      title:
-        en: Quotes
-        nl: Offertes
-      columns:
-        - key: quoteNumber
-          sortable: true
-        - key: quoteStatus
-          sortable: true
-        - key: issueDate
-          sortable: true
-        - key: expiresAt
-          sortable: true
-        - key: amountTotal
-          sortable: true
-      defaultSort:
-        key: issueDate
-        direction: desc
-      rowLink:
-        en: /quotes/:id
-        nl: /offertes/:id
-    detail:
-      header:
+operations:
+  list:
+    name: { en: List quotes, nl: Offertes tonen }
+    description: { en: Returns a filtered and sorted page of quotes., nl: Geeft een gefilterde en gesorteerde pagina met offertes terug. }
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  get:
+    name: { en: Get quote, nl: Offerte ophalen }
+    description: { en: Returns one quote by its canonical id., nl: Geeft één offerte terug op basis van het canonieke id. }
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    confirmation: { mode: none }
+  create:
+    name: { en: Create quote, nl: Offerte aanmaken }
+    description: { en: Creates one quote after validating its canonical fields., nl: Maakt één offerte aan na validatie van de canonieke velden. }
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    confirmation: { mode: none }
+  update:
+    name: { en: Update quote, nl: Offerte wijzigen }
+    description: { en: Updates one quote while holding its server-issued edit lease and current version., nl: Wijzigt één offerte met de server-uitgegeven bewerkingslease en actuele versie. }
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+    confirmation: { mode: none }
+  delete:
+    name: { en: Delete quote, nl: Offerte verwijderen }
+    description: { en: Permanently deletes one quote after a server-issued version-bound confirmation challenge., nl: Verwijdert één offerte definitief na een server-uitgegeven versiegebonden bevestigingsvraag. }
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability:
+      idempotency: { mode: natural }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+    confirmation:
+      mode: challenge
+      challenge:
+        kind: type-current-field
+        field: quoteNumber
+        issuedBy: server
+        bindTo: [subject, tenant, operation, target.id, target.version]
+        expiresAfter: PT5M
+        singleUse: true
+
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp:
+    tools: generic
+    resource:
+      uri: app://quotes
+      name: Quotes
+      description: Read the quotes available to the signed-in identity.
+      templateDescription: Read one quote by its canonical id.
+  web:
+    views:
+      collection:
+        route: { en: /quotes, nl: /offertes }
+        title: { en: Quotes, nl: Offertes }
+        columns:
+          - { key: quoteNumber, sortable: true }
+          - { key: quoteStatus, sortable: true }
+          - { key: issueDate, sortable: true }
+          - { key: expiresAt, sortable: true }
+          - { key: amountTotal, sortable: true }
+        defaultSort: { key: issueDate, direction: desc }
+      record:
+        routes:
+          read: { en: /quotes/:id, nl: /offertes/:id }
+          create: { en: /quotes/new, nl: /offertes/nieuw }
         title: "{{quoteNumber}}"
         subtitle: "{{amountTotal}}"
-        badges:
-          - quoteStatus
-      actions:
-        - key: edit
-          label:
-            en: Edit
-            nl: Bewerken
-          route: edit
-        - key: delete
-          label:
-            en: Delete
-            nl: Verwijderen
-          confirm:
-            en: Are you sure?
-            nl: Weet je het zeker?
-          mutation: delete
-      groups:
-        - id: overview
-          label:
-            en: Overview
-            nl: Overzicht
-          groups:
-            - title:
-                en: Quote details
-                nl: Offertegegevens
-              fields:
-                - quoteStatus
-                - quoteNumber
-                - issueDate
-                - expiresAt
-                - currencyCode
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - amountBase
-                - amountVat
-                - amountTotal
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-    form:
-      variants:
-        create:
-          title:
-            en: Create quote
-            nl: Offerte aanmaken
-          groups:
-            - title:
-                en: Quote details
-                nl: Offertegegevens
-              fields:
-                - quoteStatus
-                - quoteNumber
-                - issueDate
-                - expiresAt
-                - currencyCode
-            - title:
-                en: Amounts
-                nl: Bedragen
-              fields:
-                - amountBase
-                - amountVat
-                - amountTotal
-            - title:
-                en: Description
-                nl: Omschrijving
-              fields:
-                - description
-            - title:
-                en: Source
-                nl: Herkomst
-              fields:
-                - externalId
-                - externalCode
-                - sourceAuthority
-                - sourceOrganization
-                - sourceAdministration
-        edit:
-          extends: create
-          title:
-            en: Edit quote
-            nl: Offerte bewerken
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+        actions: [update, delete]
+        layout:
+          tabs:
+            - id: overview
+              label: { en: Overview, nl: Overzicht }
+              groups:
+                - title: { en: Quote details, nl: Offertegegevens }
+                  fields: [quoteStatus, quoteNumber, issueDate, expiresAt, currencyCode]
+                - title: { en: Amounts, nl: Bedragen }
+                  fields: [amountBase, amountVat, amountTotal]
+                - title: { en: Description, nl: Omschrijving }
+                  fields: [description]
+                - title: { en: Source, nl: Herkomst }
+                  fields: [externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration]
+        modes:
+          create:
+            title: { en: Create quote, nl: Offerte aanmaken }
+            groups:
+              - title: { en: Quote details, nl: Offertegegevens }
+                fields: [quoteStatus, quoteNumber, issueDate, expiresAt, currencyCode]
+              - title: { en: Amounts, nl: Bedragen }
+                fields: [amountBase, amountVat, amountTotal]
+              - title: { en: Description, nl: Omschrijving }
+                fields: [description]
+              - title: { en: Source, nl: Herkomst }
+                fields: [externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration]
+          update:
+            title: { en: Update quote, nl: Offerte wijzigen }
+            groups:
+              - title: { en: Quote details, nl: Offertegegevens }
+                fields: [quoteStatus, quoteNumber, issueDate, expiresAt, currencyCode]
+              - title: { en: Amounts, nl: Bedragen }
+                fields: [amountBase, amountVat, amountTotal]
+              - title: { en: Description, nl: Omschrijving }
+                fields: [description]
+              - title: { en: Source, nl: Herkomst }
+                fields: [externalId, externalCode, sourceAuthority, sourceOrganization, sourceAdministration]
 # Finance.Quotes.Read / Finance.Quotes.ReadWrite are the per-entity roles the realm already
 # emits; listing them here is what makes them mean something. A caller that
 # writes quotes without being all of Finance — a host-authored role or a plugin

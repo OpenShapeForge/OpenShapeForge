@@ -153,7 +153,18 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
       ? {
           interfaces: {
             ...(coreEntity.interfaces?.web
-              ? { web: { operations: v2WebOperationActions(coreEntity)! } }
+              ? {
+                  web: {
+                    operations: v2WebOperationActions(coreEntity)!,
+                    ...(coreEntity.interfaces.web.views.collection.actions?.length
+                      ? {
+                          collectionActions: [
+                            ...coreEntity.interfaces.web.views.collection.actions,
+                          ],
+                        }
+                      : {}),
+                  },
+                }
               : {}),
           },
         }

@@ -49,6 +49,7 @@ import type {
   AuthorizationGroupNode,
   AuthorizationIdentityProvider,
   AuthorizationIdentityProviderMapper,
+  OperationCatalogDefinition,
   AuthorizationRealmConfig,
   AuthorizationRealmRole,
 } from "../types/authoring.js";
@@ -907,6 +908,7 @@ interface EntityRoleAggregate {
 function aggregateFromEntities(
   contracts: CompiledEntityContract[],
   entityRoleClient: string,
+  operationCatalogs: readonly OperationCatalogDefinition[] = [],
 ): EntityRoleAggregate {
   const clientRoles = new Map<string, KeycloakRole[]>();
   const entityComposites = new Map<string, { entity: string; roles: string[] }>();
@@ -939,6 +941,20 @@ function aggregateFromEntities(
         : undefined,
     });
     clientRoles.set(clientId, list);
+  };
+
+  const pushOperationRoles = (
+    operationId: string,
+    auth: { mode: string; roles?: readonly string[] },
+  ) => {
+    if (auth.mode !== "session") return;
+    for (const role of auth.roles ?? []) {
+      push(entityRoleClient, {
+        name: role,
+        description: `Invoke ${operationId}`,
+        composite: false,
+      });
+    }
   };
 
   for (const contract of contracts) {
@@ -1001,6 +1017,16 @@ function aggregateFromEntities(
         entity: auth.entitySlug,
         roles: normalizeKeycloakRoleNames(composite.composites ?? []),
       });
+    }
+
+    for (const operation of contract.pluginOperations ?? []) {
+      pushOperationRoles(operation.id, operation.definition.auth);
+    }
+  }
+
+  for (const catalog of operationCatalogs) {
+    for (const [key, operation] of Object.entries(catalog.operations)) {
+      pushOperationRoles(operation.id ?? `${catalog.plugin}.${key}`, operation.auth);
     }
   }
 
@@ -1168,6 +1194,7 @@ export function generateKeycloakRealmArtifacts(
   // committed secrets are refused, and a security rule that can only be
   // exercised by mutating global state is a rule that stops being tested.
   mode: RealmMode = resolveRealmMode(),
+  operationCatalogs: readonly OperationCatalogDefinition[] = [],
 ): KeycloakRealmArtifact[] {
   if (!authConfig) {
     return [];
@@ -1202,7 +1229,7 @@ export function generateKeycloakRealmArtifacts(
   const dev = isDevRealm(authConfig.realm, mode);
 
   const entityAggregate = entityRoleClient
-    ? aggregateFromEntities(contracts, entityRoleClient)
+    ? aggregateFromEntities(contracts, entityRoleClient, operationCatalogs)
     : { clientRoles: new Map(), entityComposites: new Map() };
 
   const identityProviderDefs = authConfig.keycloak?.identityProviders ?? [];
@@ -1445,12 +1472,18 @@ export function generateAllKeycloakRealmArtifacts(
   contracts: CompiledEntityContract[],
   authConfigs: readonly (AuthorizationConfigFile | null | undefined)[],
   mode: RealmMode = resolveRealmMode(),
+  operationCatalogs: readonly OperationCatalogDefinition[] = [],
 ): KeycloakRealmArtifact[] {
   const artifacts: KeycloakRealmArtifact[] = [];
   const seenPaths = new Set<string>();
 
   for (const authConfig of authConfigs) {
-    for (const artifact of generateKeycloakRealmArtifacts(contracts, authConfig, mode)) {
+    for (const artifact of generateKeycloakRealmArtifacts(
+      contracts,
+      authConfig,
+      mode,
+      operationCatalogs,
+    )) {
       if (seenPaths.has(artifact.path)) {
         throw new Error(
           `Two authorizationConfig documents declare realm "${authConfig?.realm?.name ?? DEFAULT_REALM_NAME}". ` +

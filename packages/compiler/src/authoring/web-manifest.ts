@@ -209,6 +209,8 @@ function collectionFor(
   route: string,
   listOperation: WebOperationRef,
   createOperation: WebOperationRef | undefined,
+  customOperations: Readonly<Record<string, WebCustomOperationRef>> = {},
+  actionKeys: readonly string[] = [],
 ): WebCollectionView {
   const list = view?.list;
   const fieldByKey = new Map(contract.model.fields.map((field) => [field.key, field]));
@@ -224,6 +226,13 @@ function collectionFor(
     operations: {
       read: listOperation,
       ...(createOperation ? { create: createOperation } : {}),
+      ...(actionKeys.length > 0
+        ? {
+            actions: actionKeys.flatMap((key) =>
+              customOperations[key] ? [customOperations[key]!] : []
+            ),
+          }
+        : {}),
     },
     title,
     searchPlaceholder: localized(
@@ -293,6 +302,8 @@ function projectableEntities(
         routeFor(contract, slug, view, options.routeLocale),
         operations.list!,
         operations.create,
+        customOperations,
+        contract.interfaces?.web?.collectionActions,
       ),
     }];
   }).sort((left, right) => left.contract.entity.name.localeCompare(right.contract.entity.name));

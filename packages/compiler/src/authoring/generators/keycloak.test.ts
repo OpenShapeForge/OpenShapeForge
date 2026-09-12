@@ -10,7 +10,10 @@ import {
   normalizeKeycloakRoleName,
   resolveClientSecret,
 } from "./keycloak.js";
-import type { AuthorizationConfigFile } from "../types/authoring.js";
+import type {
+  AuthorizationConfigFile,
+  OperationCatalogDefinition,
+} from "../types/authoring.js";
 import type { CompiledEntityContract } from "../types/compiled.js";
 
 function devConfig(
@@ -333,6 +336,54 @@ describe("audience-scoped client role composites", () => {
     );
   });
 });
+
+describe("canonical Operation roles", () => {
+  test("emits session roles authored by a module Operation catalog", () => {
+    const config = compositeConfigForOperationRole();
+    const catalog = {
+      schemaVersion: 1,
+      kind: "operationCatalog",
+      plugin: "example",
+      operations: {
+        manage: {
+          id: "example.manage",
+          name: { en: "Manage", nl: "Beheren" },
+          description: { en: "Manage examples", nl: "Beheer voorbeelden" },
+          implementation: { type: "plugin", plugin: "example", handler: "manage" },
+          input: { schema: { type: "object" } },
+          output: { schema: { type: "object" } },
+          errors: [],
+          auth: { mode: "session", roles: ["Example.All.Manage"] },
+          tenancy: { mode: "required" },
+          effects: { data: "write", external: "none" },
+          reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+          confirmation: { mode: "none" },
+        },
+      },
+      interfaces: { rest: {}, graphql: {}, mcp: {} },
+    } satisfies OperationCatalogDefinition;
+
+    const realm = JSON.parse(
+      generateKeycloakRealmArtifacts([], config, "development", [catalog])[0]!.contents,
+    ) as { roles: { client: Record<string, Array<{ name: string }>> } };
+
+    expect(realm.roles.client["application-api"]!.map(({ name }) => name)).toContain(
+      "Example.All.Manage",
+    );
+  });
+});
+
+function compositeConfigForOperationRole(): AuthorizationConfigFile {
+  return {
+    schemaVersion: 2,
+    kind: "authorizationConfig",
+    realm: { name: "operation-role-test-dev" },
+    keycloak: {
+      entityRoleClient: "application-api",
+      clients: [{ id: "application-api", kind: "bearerOnly" }],
+    },
+  };
+}
 
 // A dev realm (name suffixed "-dev"), so authoring a literal client secret in
 // these fixtures is permitted by the generator's non-dev-realm secret guard.

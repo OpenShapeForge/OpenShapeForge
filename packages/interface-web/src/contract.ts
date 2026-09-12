@@ -100,6 +100,8 @@ export type WebCollectionView = {
   operations: {
     read: WebOperationRef;
     create?: WebOperationRef;
+    /** Ordered server-authored collection actions shown by the browser. */
+    actions?: WebCustomOperationRef[];
   };
   title: LocalizedText;
   searchPlaceholder: LocalizedText;

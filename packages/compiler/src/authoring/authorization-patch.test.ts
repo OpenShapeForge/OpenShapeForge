@@ -402,6 +402,55 @@ describe("resolveAuthoringLayers — authorizationPatch", () => {
     });
   });
 
+  test("module Operation roles reach a clean generated realm through the resolved authoring tree", () => {
+    const root = makeRepo();
+    const realm = baseRealm();
+    const composites = realm.clientRoleComposites["erp-provider"] as Record<
+      string,
+      { composites: Record<string, string[]> }
+    >;
+    composites["Application.Operator"] = {
+      composites: { "erp-provider": ["Example.All.Manage"] },
+    };
+    writeYaml(root, "base/authorization.yaml", realm);
+    writeYaml(root, "base/operations/example.yaml", {
+      schemaVersion: 1,
+      kind: "operationCatalog",
+      plugin: "example",
+      operations: {
+        manage: {
+          id: "example.manage",
+          name: { en: "Manage", nl: "Beheren" },
+          description: { en: "Manage examples", nl: "Beheer voorbeelden" },
+          implementation: { type: "plugin", plugin: "example", handler: "manage" },
+          input: { schema: { type: "object", additionalProperties: false } },
+          output: { schema: { type: "object" } },
+          errors: [],
+          auth: { mode: "session", roles: ["Example.All.Manage"] },
+          tenancy: { mode: "required" },
+          effects: { data: "write", external: "none" },
+          reliability: { idempotency: { mode: "natural" } },
+          confirmation: { mode: "none" },
+        },
+      },
+      interfaces: { rest: {}, graphql: {}, mcp: {} },
+    });
+    configureLayers(root, ["base"]);
+
+    const resolved = resolveAuthoringLayers(root);
+    const [artifact] = generateAuthoringKeycloakArtifacts(resolved);
+    const generated = JSON.parse(artifact!.contents);
+    const roles = generated.roles.client["erp-provider"] as Array<{
+      name: string;
+      composites?: { client: Record<string, string[]> };
+    }>;
+
+    expect(roles.map(({ name }) => name)).toContain("Example.All.Manage");
+    expect(
+      roles.find(({ name }) => name === "Application.Operator")!.composites!.client,
+    ).toEqual({ "erp-provider": ["Example.All.Manage"] });
+  });
+
   test("resolution is deterministic: two runs materialize byte-identical realm files", () => {
     const root = makeRepo();
     writeYaml(root, "base/authorization.yaml", baseRealm());

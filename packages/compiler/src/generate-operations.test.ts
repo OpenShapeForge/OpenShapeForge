@@ -1042,6 +1042,8 @@ describe("first-class plugin operations", () => {
     };
     const collected = collectPluginOperations([{ name: "demo", operations: [operation] }], context);
     expect(() => auditOperationSurfaceCollisions(collected, manifest, [], 60)).toThrow(/GraphQL root field/);
+    manifest.tables[0]!.source!.graphql!.operations = { get: true, list: true, create: false, update: false, delete: false };
+    expect(() => auditOperationSurfaceCollisions(collected, manifest, [], 60)).not.toThrow();
     manifest.tables[0]!.source!.graphql!.createMutationName = "createQuote";
     if (collected[0]!.transports.mcp.enabled) collected[0]!.transports.mcp.name = "demo_publish_create";
     expect(() => auditOperationSurfaceCollisions(collected, manifest, [], 60)).toThrow(/MCP tool/);

@@ -278,12 +278,14 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
   }
   const restPath = operation.transports.rest.path;
   const apiNamespace = authored ? operation.key.split(".")[0]! : plugin;
-  if (RESERVED_API_NAMESPACES.has(apiNamespace)) {
-    throw new Error(`${where} uses reserved API namespace "${apiNamespace}".`);
+  const reservedNamespace = [apiNamespace, plugin].find(value => RESERVED_API_NAMESPACES.has(value));
+  if (reservedNamespace) {
+    throw new Error(`${where} uses reserved API namespace "${reservedNamespace}".`);
   }
   const pluginRoot = `/api/${apiNamespace}`;
+  const allowedRoots = authored ? [pluginRoot, `/api/${plugin}`] : [pluginRoot];
   if (!REST_PATH.test(restPath) ||
-      (restPath !== pluginRoot && !restPath.startsWith(`${pluginRoot}/`))) {
+      !allowedRoots.some(root => restPath === root || restPath.startsWith(`${root}/`))) {
     throw new Error(
       `${where} REST path must be the safe plugin root "${pluginRoot}" or a nested ${pluginRoot}/ path.`,
     );
@@ -474,13 +476,15 @@ export function auditOperationSurfaceCollisions(
     }
     const entityGraphql = table.source?.graphql;
     if (entityGraphql) {
-      for (const name of [
-        entityGraphql.singleQueryName,
-        entityGraphql.listQueryName,
-        entityGraphql.createMutationName,
-        entityGraphql.updateMutationName,
-        entityGraphql.deleteMutationName,
-      ]) claimSurface(graphql, "GraphQL root field", name, owner);
+      for (const [intent, name] of [
+        ["get", entityGraphql.singleQueryName],
+        ["list", entityGraphql.listQueryName],
+        ["create", entityGraphql.createMutationName],
+        ["update", entityGraphql.updateMutationName],
+        ["delete", entityGraphql.deleteMutationName],
+      ] as const) {
+        if (entityGraphql.operations?.[intent] !== false) claimSurface(graphql, "GraphQL root field", name, owner);
+      }
     }
     const entityMcp = table.source?.mcp;
     if (entityMcp) {

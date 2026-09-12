@@ -10,9 +10,10 @@ const compiler = createRuntimeFieldSchemaCompiler({
     additionalProperties: false,
     properties: {
       key: { type: "string", minLength: 1 },
-      valueType: { enum: ["string", "integer"] },
+      valueType: { enum: ["string", "integer", "object"] },
       semanticType: { type: "string" },
       required: { type: "boolean" },
+      cardinality: { enum: ["single", "collection"] },
     },
   },
   semanticTypes: {
@@ -20,6 +21,17 @@ const compiler = createRuntimeFieldSchemaCompiler({
       valueType: "string",
       label: { en: "Code" },
       validation: { minLength: 2, maxLength: 12 },
+    },
+    fieldDefinition: { valueType: "object", label: { en: "Field" } },
+  },
+  fieldDefinitionDefinitions: {
+    fieldDefinition: {
+      type: "object", required: ["key", "valueType"], additionalProperties: false,
+      properties: {
+        key: { type: "string", minLength: 1 },
+        valueType: { enum: ["string", "object"] },
+        children: { type: "array", items: { $ref: "#/$defs/fieldDefinition" } },
+      },
     },
   },
 });
@@ -51,12 +63,34 @@ test("JSON validation covers format, recursive local refs and collection bounds"
   }
 });
 
+test("host-projected FieldDefinition values retain recursive local references", () => {
+  const fields = [{
+    key: "formFields", valueType: "object", semanticType: "fieldDefinition",
+    cardinality: "collection", required: true,
+  }];
+  const values = { formFields: [{
+    key: "address", valueType: "object",
+    children: [{ key: "street", valueType: "string" }],
+  }] };
+  expect(compiler.validateObject(fields, values)).toEqual({ valid: true });
+  expect(compiler.validateObject(fields, { formFields: [{ key: "address", valueType: "object", children: [{ key: "street" }] }] }))
+    .toMatchObject({ valid: false, error: { code: "VALIDATION_FAILED" } });
+});
+
 test("JSON validation neither fills defaults nor loads external refs or asynchronous schemas", () => {
   const values = {};
   expect(runtimeJsonSchemas.validate({ type: "object", properties: { code: { type: "string", default: "filled" } } }, values))
     .toEqual({ valid: true });
   expect(values).toEqual({});
-  for (const schema of [{ $ref: "https://invalid.example.test/schema.json" }, { type: "unknown" }, { $async: true, type: "string" }]) {
+  for (const schema of [
+    { $ref: "https://invalid.example.test/schema.json" },
+    { type: "unknown" },
+    { type: "string", format: "unsupported-format" },
+    { type: "string", minLenght: 2 },
+    { type: "object", properties: { code: { $async: true, type: "string" } } },
+    { $ref: "#/$defs/code", $defs: { code: { $async: true, type: "string" } } },
+    { $async: true, type: "string" },
+  ]) {
     expect(runtimeJsonSchemas.validate(schema, "PRIVATE_VALUE"))
       .toMatchObject({ valid: false, error: { code: "INVALID_DEFINITION", retryable: false } });
   }

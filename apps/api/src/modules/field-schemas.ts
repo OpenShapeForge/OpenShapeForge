@@ -19,7 +19,7 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
   validate(schema, values) {
     // A short-lived compiler avoids retaining every stored/dynamic form forever.
     // No async loader, coercion, removal or defaults: validation never rewrites input.
-    const ajv = new Ajv2020.default({ allErrors: true, strict: false });
+    const ajv = new Ajv2020.default({ allErrors: true, strict: false, strictSchema: true });
     addFormats.default(ajv);
     try {
       if (schema.$async === true) return invalidDefinition();

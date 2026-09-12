@@ -255,6 +255,90 @@ function quotedLiteralEnd(value: string): number {
 }
 
 /**
+ * Canonical JSON for the small, losslessly representable subset that can be
+ * compared in JavaScript without changing Postgres jsonb semantics. Object
+ * keys are sorted because jsonb does not preserve their authored order.
+ *
+ * Non-integer and unsafe integer numbers deliberately fail closed. Parsing
+ * either through a JS number could collapse distinct numeric lexemes (for
+ * example 9007199254740992 and 9007199254740993) into the same value. In that
+ * case the caller keeps the original SQL text and drift remains visible.
+ */
+function canonicalizeSafeJson(value: unknown, depth = 0): string | undefined {
+  if (depth > 100) return undefined;
+  if (value === null) return "null";
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) ? JSON.stringify(value) : undefined;
+  }
+  if (Array.isArray(value)) {
+    const entries: string[] = [];
+    for (const entry of value) {
+      const canonical = canonicalizeSafeJson(entry, depth + 1);
+      if (canonical === undefined) return undefined;
+      entries.push(canonical);
+    }
+    return `[${entries.join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const entries: string[] = [];
+    for (const [key, entry] of Object.entries(value).sort(([left], [right]) =>
+      left < right ? -1 : left > right ? 1 : 0,
+    )) {
+      const canonical = canonicalizeSafeJson(entry, depth + 1);
+      if (canonical === undefined) return undefined;
+      entries.push(`${JSON.stringify(key)}:${canonical}`);
+    }
+    return `{${entries.join(",")}}`;
+  }
+  return undefined;
+}
+
+function canonicalizeJsonbLiteral(literal: string): string | undefined {
+  try {
+    const sqlContent = literal.slice(1, -1).replaceAll("''", "'");
+    const canonical = canonicalizeSafeJson(JSON.parse(sqlContent));
+    return canonical === undefined ? undefined : `jsonb:${canonical}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Postgres may add one pair of parentheses around a zero-argument function
+ * before rendering its cast (`fn()::text` -> `(fn())::text`). Strip only that
+ * provably redundant pair, and only for a cast to the column's own type.
+ */
+function normalizeZeroArgumentFunctionCast(
+  value: string,
+  columnType: string,
+): string {
+  const cast = /^(.*)::\s*([a-zA-Z_][a-zA-Z0-9_]*(?:\s+[a-zA-Z_][a-zA-Z0-9_]*)*)$/.exec(
+    value,
+  );
+  if (cast === null) return value;
+  const operandText = cast[1];
+  const castTargetText = cast[2];
+  if (operandText === undefined || castTargetText === undefined) return value;
+
+  const castTarget = castTargetText.trim().toLowerCase().replace(/\s+/g, " ");
+  if (redundantCastTargets[columnType]?.has(castTarget) !== true) return value;
+
+  const functionCall =
+    /^([a-zA-Z_][a-zA-Z0-9_$]*(?:\.[a-zA-Z_][a-zA-Z0-9_$]*)*)\s*\(\s*\)$/;
+  let operand = operandText.trim();
+  if (operand.startsWith("(") && operand.endsWith(")")) {
+    const inner = operand.slice(1, -1).trim();
+    if (functionCall.test(inner)) operand = inner;
+  }
+
+  const functionMatch = functionCall.exec(operand);
+  if (functionMatch === null) return value;
+  return `${functionMatch[1]}()::${castTarget}`;
+}
+
+/**
  * Normalize a SQL default expression for drift comparison.
  *
  * The manifest records the verbatim authoring default (`now()`, `'{}'::jsonb`,
@@ -265,21 +349,23 @@ function quotedLiteralEnd(value: string): number {
  * `'process'::text` are the same default, and comparing them verbatim reports
  * drift that does not exist (issue #210).
  *
- * The only rewrite performed is therefore: drop a trailing `::<type>` cast from
- * an expression that is EXACTLY one single-quoted literal followed by that
- * cast, and only when the cast names the column's own type. That case is
- * provably a no-op — an unadorned literal in a DEFAULT is coerced to the column
- * type anyway — and it is applied to both sides, so either spelling compares
- * equal to either spelling.
+ * The narrow rewrites are: drop a trailing `::<type>` cast from an expression
+ * that is EXACTLY one single-quoted literal followed by that cast; compare
+ * losslessly representable jsonb literals independent of object-key order and
+ * whitespace; and remove one redundant pair of parentheses that Postgres adds
+ * around a zero-argument function before a cast. Casts must always name the
+ * column's own type.
  *
  * Everything else stays strict, because a normalizer that accepts real drift is
  * worse than the bug it fixes:
- * - anything that is not a lone literal (`now()`, `gen_random_uuid()`,
- *   `CURRENT_DATE`, `now() - interval '1 day'`, `upper('x'::text)`,
- *   `('a'::text || 'b'::text)`, a parenthesised or dollar-quoted expression);
+ * - anything that is not a lone literal or zero-argument function cast
+ *   (`now() - interval '1 day'`, `upper('x'::text)`,
+ *   `('a'::text || 'b'::text)`, a dollar-quoted expression);
  * - a cast naming any other type (`'x'::character varying` on a text column),
  *   or a chain of casts;
- * - the literal's own content, which is compared byte for byte.
+ * - non-jsonb literal content, which is compared byte for byte; jsonb numeric
+ *   content that is not losslessly representable as a safe integer also stays
+ *   byte-strict and therefore fails closed.
  *
  * Two Postgres canonicalisations are deliberately NOT papered over, since
  * neither is a redundant cast and both would need the literal itself
@@ -297,15 +383,26 @@ function normalizeDefault(
   if (trimmed === null) return null;
 
   const literalEnd = quotedLiteralEnd(trimmed);
-  if (literalEnd === -1) return trimmed;
+  if (literalEnd === -1) {
+    return normalizeZeroArgumentFunctionCast(trimmed, columnType);
+  }
 
   const rest = trimmed.slice(literalEnd).trim();
-  if (!rest.startsWith("::")) return trimmed;
+  const bareLiteral = rest.length === 0;
+  if (!bareLiteral && !rest.startsWith("::")) return trimmed;
 
-  const castTarget = rest.slice(2).trim().toLowerCase().replace(/\s+/g, " ");
-  if (redundantCastTargets[columnType]?.has(castTarget) !== true) return trimmed;
+  if (!bareLiteral) {
+    const castTarget = rest.slice(2).trim().toLowerCase().replace(/\s+/g, " ");
+    if (redundantCastTargets[columnType]?.has(castTarget) !== true) return trimmed;
+  }
 
-  return trimmed.slice(0, literalEnd);
+  const literal = trimmed.slice(0, literalEnd);
+  if (columnType === "jsonb") {
+    const canonical = canonicalizeJsonbLiteral(literal);
+    if (canonical !== undefined) return canonical;
+  }
+
+  return literal;
 }
 
 /**

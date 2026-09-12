@@ -524,8 +524,10 @@ describe("generated schema column defaults", () => {
               quoted_label text not null default 'it''s',
               external_ref uuid not null default '00000000-0000-0000-0000-000000000001',
               payload jsonb not null default '{}',
+              execution_state jsonb not null default '{"version":1,"branches":[],"groups":[],"joins":[],"primaryOutput":null}'::jsonb,
               effective_on date not null default '2020-01-01',
               instance_key text not null default 'default',
+              wait_token text not null default (gen_random_uuid())::text,
               created_at timestamptz not null default now(),
               enabled boolean not null default false,
               attempts integer not null default 0
@@ -550,10 +552,19 @@ describe("generated schema column defaults", () => {
                 "'00000000-0000-0000-0000-000000000001'",
               ),
               probeColumn("payload", "jsonb", "'{}'"),
+              // jsonb discards object-key order and authored whitespace.
+              probeColumn(
+                "execution_state",
+                "jsonb",
+                "'{\"primaryOutput\":null, \"joins\":[], \"groups\":[], \"branches\":[], \"version\":1}'::jsonb",
+              ),
               probeColumn("effective_on", "date", "'2020-01-01'"),
               // The other direction: authored WITH the cast, live column
               // created bare. Either spelling must compare equal to either.
               probeColumn("instance_key", "text", "'default'::text"),
+              // Postgres may render the function operand with one extra pair
+              // of parentheses before the same column-type cast.
+              probeColumn("wait_token", "text", "gen_random_uuid()::text"),
               // Non-literal defaults are untouched and still match.
               probeColumn("created_at", "timestamptz", "now()"),
               probeColumn("enabled", "boolean", "false"),
@@ -584,6 +595,8 @@ describe("generated schema column defaults", () => {
               foreign_cast text not null default 'process'::varchar,
               concatenated text not null default 'a' || '',
               shifted_clock timestamptz not null default now() - interval '1 day',
+              changed_json jsonb not null default '{"version":2,"branches":[]}',
+              precise_json jsonb not null default '{"amount":9007199254740993}',
               unchanged text not null default 'process'
             )
           `.execute(db);
@@ -600,6 +613,18 @@ describe("generated schema column defaults", () => {
               probeColumn("foreign_cast", "text", "'process'"),
               probeColumn("concatenated", "text", "'a'"),
               probeColumn("shifted_clock", "timestamptz", "now()"),
+              probeColumn(
+                "changed_json",
+                "jsonb",
+                "'{\"branches\":[],\"version\":1}'::jsonb",
+              ),
+              // Distinct jsonb numerics outside JavaScript's safe integer
+              // range must never collapse to equality during normalization.
+              probeColumn(
+                "precise_json",
+                "jsonb",
+                "'{\"amount\":9007199254740992}'::jsonb",
+              ),
               // Control: proves the five above are not drifting for some
               // unrelated reason.
               probeColumn("unchanged", "text", "'process'"),
@@ -608,13 +633,15 @@ describe("generated schema column defaults", () => {
 
           const diff = await diffManifestAgainstDatabase(db, [table]);
           const drifted = diff.nonAdditive;
-          expect(drifted).toHaveLength(5);
+          expect(drifted).toHaveLength(7);
           for (const column of [
             "changed_literal",
             "wrapped_call",
             "foreign_cast",
             "concatenated",
             "shifted_clock",
+            "changed_json",
+            "precise_json",
           ]) {
             expect(
               drifted.some((line) =>

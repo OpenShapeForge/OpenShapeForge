@@ -55,6 +55,29 @@ describe("canonical entity operations", () => {
     expect(operations.delete).toBeUndefined();
   });
 
+  test("projects action-specific record permissions from one entity policy", () => {
+    const source = relationSource();
+    source.crud.operations.delete = true;
+    source.authorization.rowAccess = {
+      enabled: true,
+      empty: "public",
+      recordPermissions: {
+        field: "authorization",
+        column: "authorization",
+        empty: "public",
+        createRequires: ["view", "edit"],
+        defaultValue: {},
+      },
+    };
+
+    const operations = buildEntityOperations(source);
+    expect(operations.list?.authorization.recordPermissions).toEqual(["view"]);
+    expect(operations.get?.authorization.recordPermissions).toEqual(["view"]);
+    expect(operations.create?.authorization.recordPermissions).toEqual(["view", "edit"]);
+    expect(operations.update?.authorization.recordPermissions).toEqual(["edit"]);
+    expect(operations.delete?.authorization.recordPermissions).toEqual(["delete"]);
+  });
+
   test("uses v2 operation identity and canonical metadata", () => {
     const source = relationSource();
     source.coreEntity = {
@@ -609,6 +632,81 @@ describe("canonical entity operations", () => {
       "PT5S";
     expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
       /fixed ISO-8601 duration between PT30S and P1D/,
+    );
+  });
+
+  test("allows record permission only on a record-scoped plugin Operation with an entity ACL", () => {
+    const source = relationSource();
+    source.coreEntity = {
+      schemaVersion: 2,
+      kind: "coreEntity",
+      module: "core",
+      entity: "Relation",
+      title: "Relation",
+      language: "en",
+      fields: [{
+        key: "authorization",
+        valueType: "object",
+        required: true,
+        defaultValue: {},
+        persisted: { column: "authorization", storageClass: "core" },
+      }],
+      authorization: {
+        roles: {
+          read: ["Relations.Read"],
+          create: ["Relations.Write"],
+          update: ["Relations.Write"],
+          delete: ["Relations.Delete"],
+        },
+        rowAccess: {
+          enabled: true,
+          recordPermissions: {
+            field: "authorization",
+            empty: "public",
+            createRequires: ["view", "edit"],
+          },
+        },
+      },
+      operations: {
+        archive: {
+          name: "Archive relation",
+          description: "Archives one relation.",
+          implementation: { type: "plugin", plugin: "example", handler: "archive" },
+          target: { scope: "record", inputField: "id" },
+          input: {
+            schema: {
+              type: "object",
+              properties: { id: { type: "string", format: "uuid" } },
+              required: ["id"],
+              additionalProperties: false,
+            },
+          },
+          output: { schema: { type: "object", additionalProperties: true } },
+          errors: [],
+          auth: {
+            mode: "session",
+            roles: ["Relations.Write"],
+            recordPermission: "delete",
+          },
+          tenancy: { mode: "required" },
+          effects: { data: "write", external: "none" },
+          reliability: { idempotency: { mode: "natural" } },
+          confirmation: { mode: "none" },
+        },
+      },
+      interfaces: { rest: { operations: { archive: {} } } },
+    };
+    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+
+    source.coreEntity.operations!.archive!.target = { scope: "collection" };
+    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+      /recordPermission requires a record target/,
+    );
+
+    source.coreEntity.operations!.archive!.target = { scope: "record", inputField: "id" };
+    delete source.coreEntity.authorization!.rowAccess!.recordPermissions;
+    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+      /entity has no authorization\.rowAccess\.recordPermissions policy/,
     );
   });
 

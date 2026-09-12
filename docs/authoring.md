@@ -125,6 +125,46 @@ crud:                       # common upper bound for every generated surface
 rest: true                   # opt-in generated REST exposure (see below)
 ```
 
+### Action-specific record permissions
+
+An entity can let one persisted JSON field further narrow its ordinary tenant
+and role authorization. The shape is fixed: optional `view`, `edit`, and
+`delete` objects, each containing optional `users`, `groups`, and `roles`
+string arrays. A valid empty subject set follows the authored `empty` rule;
+malformed JSON always denies access.
+
+```yaml
+authorization:
+  roles:                    # still required: a record ACL never grants a role
+    read: [Records.All.Read]
+    create: [Records.All.Manage]
+    update: [Records.All.Manage]
+    delete: [Records.All.Delete]
+  rowAccess:
+    enabled: true
+    empty: public
+    recordPermissions:
+      field: authorization
+      empty: public
+      createRequires: [view, edit]
+
+fields:
+  - key: authorization
+    valueType: object
+    required: true
+    defaultValue: {}
+    persisted: { column: authorization, storageClass: core }
+```
+
+Generated list/get require `view`, update requires `view` and `edit`, and
+delete requires `view` and `delete`. Create checks the submitted/default ACL
+against `createRequires`, preventing an author from creating a record they
+cannot reopen. A record-scoped plugin Operation can add
+`auth.recordPermission: view|edit|delete`; this is checked before challenges
+or leases are issued and again inside the write transaction. This semantic
+action is independent of its SQL verb, so an archive implemented with UPDATE
+can truthfully require `delete`.
+
 Notes on what the compiler does with this:
 
 - **Only `persisted` fields produce columns.** A field without a `persisted`

@@ -44,6 +44,11 @@ import {
 } from "./entity/edit-leases.js";
 import { getGeneratedCrudTables } from "./entity/catalog.js";
 import type { GeneratedCrudTable } from "./entity/types.js";
+import {
+  assertRecordPermission,
+  assertRecordPermissionInTransaction,
+  type RecordPermissionAction,
+} from "./entity/record-permissions.js";
 import { normalizeTimestampToken } from "../db/timestamps.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 
@@ -70,7 +75,12 @@ export type OperationContract = {
   }[];
   auth:
     | { mode: "public" }
-    | { mode: "session"; roles: string[]; scopes?: string[] }
+    | {
+        mode: "session";
+        roles: string[];
+        scopes?: string[];
+        recordPermission?: RecordPermissionAction;
+      }
     | { mode: "custom"; scheme: string; description: string; securityScheme: Record<string, unknown> };
   tenancy: { mode: "required" | "derived" | "none"; description?: string };
   idempotency: { mode: "none" | "intrinsic" | "idempotency-key"; header?: string; inputField?: string; description?: string };
@@ -480,7 +490,14 @@ async function invokeCustomOperationWithControls(
       data: { confirmation: { kind: "acknowledgement", requiredValue: true } },
     });
   }
-  const hasGuard = Boolean(operation.concurrency || confirmation.mode === "challenge");
+  const recordPermission = operation.auth.mode === "session"
+    ? operation.auth.recordPermission
+    : undefined;
+  const hasGuard = Boolean(
+    operation.concurrency ||
+    confirmation.mode === "challenge" ||
+    recordPermission,
+  );
   if (!hasGuard) return invokeHandler(customHandlerInput(operation, input));
   if (!operation.target || operation.target.scope !== "record" ||
     !operation.target.inputField || !context.session || !context.db || !context.platform) {
@@ -523,6 +540,16 @@ async function invokeCustomOperationWithControls(
   const leaseToken = operation.concurrency?.editLease
     ? requireStringControl(input, "leaseToken")
     : undefined;
+  const table = targetTable(operation);
+  if (recordPermission) {
+    await assertRecordPermission(
+      context.db,
+      context.session,
+      table,
+      targetValue,
+      recordPermission,
+    );
+  }
   let confirmationToken: string | undefined;
   let confirmationAnswer: string | undefined;
   if (confirmation.mode === "challenge") {
@@ -543,7 +570,7 @@ async function invokeCustomOperationWithControls(
       }
       const error = await issueEntityConfirmationChallenge(context.db, context.session, {
         operation: protectedOperation,
-        table: targetTable(operation),
+        table,
         targetId: targetValue,
         expectedVersion,
         ...(leaseToken ? { leaseToken } : {}),
@@ -553,11 +580,19 @@ async function invokeCustomOperationWithControls(
     confirmationToken = requireStringControl(input, "confirmationToken");
     confirmationAnswer = requireStringControl(input, "confirmationAnswer");
   }
-  const table = targetTable(operation);
   return withModuleOperationTransaction(
     context.platform,
     context.session,
     async (trx) => {
+      if (recordPermission) {
+        await assertRecordPermissionInTransaction(
+          trx,
+          context.session!,
+          table,
+          targetValue,
+          recordPermission,
+        );
+      }
       if (expectedVersion) {
         await validateEntityVersionInTransaction(trx, context.session!, {
           operation: protectedOperation,

@@ -122,6 +122,15 @@ export type RowScopePolicy = {
    * at session establishment.
    */
   bypassRoles?: string[];
+  /**
+   * Persisted action ACL. The SELECT policy composes its `view` decision with
+   * the tenant/owner/group predicate; edit/delete stay Operation-semantic
+   * runtime checks because SQL UPDATE also implements actions such as archive.
+   */
+  recordPermissions?: {
+    column: string;
+    empty: "public" | "restricted";
+  };
 };
 
 export type RetentionAction = "retain" | "archive" | "redact" | "delete";
@@ -428,6 +437,13 @@ export type TableSourceDefinition = {
       create: string[];
       update: string[];
       delete: string[];
+    };
+    recordPermissions?: {
+      field: string;
+      column: string;
+      empty: "public" | "restricted";
+      createRequires: import("./authoring/types/common.js").RecordPermissionAction[];
+      defaultValue?: Record<string, unknown>;
     };
   };
   relationshipStatus?: {

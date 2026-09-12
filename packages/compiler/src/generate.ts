@@ -327,6 +327,7 @@ function renderTenantRegistryPolicy(table: TableDefinition): string[] | undefine
 function renderRowScopePredicate(
   table: TableDefinition,
   workerAccess: string,
+  includeRecordPermissions = true,
 ): string | undefined {
   const scope = table.rowScope;
   if (!scope) return undefined;
@@ -377,16 +378,23 @@ function renderRowScopePredicate(
     branches.push(`${quoteIdent(nullVisibleColumn)} IS NULL`);
   }
 
-  // Tenant predicate is always required when rowScope is set.
-  const tenant = "tenant_id = app.current_tenant()";
-
-  if (branches.length === 0) {
-    // Caller declared rowScope with no group/user axes — degenerate case;
-    // behave the same as plain tenant scoping.
-    return `app.bypass_rls()${workerAccess} OR (${tenant})`;
+  let recordPermission: string | undefined;
+  if (scope.recordPermissions) {
+    if (!present.has(scope.recordPermissions.column)) {
+      throw new Error(
+        `Table ${table.schema}.${table.name} declares rowScope.recordPermissions.column "${scope.recordPermissions.column}" but the column is not defined.`,
+      );
+    }
+    recordPermission = `app.record_permission_allows(${quoteIdent(scope.recordPermissions.column)}, 'view', ${scope.recordPermissions.empty === "public" ? "true" : "false"})`;
   }
 
-  return `app.bypass_rls()${workerAccess} OR (${tenant} AND (${branches.join(" OR ")}))`;
+  // Tenant predicate is always required when rowScope is set.
+  const tenant = "tenant_id = app.current_tenant()";
+  const rowAxes = branches.length > 0 ? ` AND (${branches.join(" OR ")})` : "";
+  const acl = includeRecordPermissions && recordPermission
+    ? ` AND ${recordPermission}`
+    : "";
+  return `app.bypass_rls()${workerAccess} OR (${tenant}${rowAxes}${acl})`;
 }
 
 function deriveRowScopeIndexes(table: TableDefinition): Array<{
@@ -454,6 +462,9 @@ function renderTableSql(table: TableDefinition): string {
   if (table.tenantScoped) {
     const rowScopePredicate = renderRowScopePredicate(table, workerAccess);
     if (rowScopePredicate) {
+      const rowScopeWritePredicate = table.rowScope?.recordPermissions
+        ? renderRowScopePredicate(table, workerAccess, false)!
+        : rowScopePredicate;
       const policyName = quoteIdent(`${table.name}_row_scope`);
       lines.push(
         "",
@@ -462,7 +473,7 @@ function renderTableSql(table: TableDefinition): string {
         `DROP POLICY IF EXISTS ${policyName} ON ${tableIdent(table)};`,
         `CREATE POLICY ${policyName} ON ${tableIdent(table)}`,
         `  USING (${rowScopePredicate})`,
-        `  WITH CHECK (${rowScopePredicate});`,
+        `  WITH CHECK (${rowScopeWritePredicate});`,
       );
     } else {
       const policyName = quoteIdent(`${table.name}_tenant_isolation`);

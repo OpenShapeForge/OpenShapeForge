@@ -75,7 +75,11 @@ describe("first-class plugin operations", () => {
             },
             output: { schema: { type: "object", properties: {} } },
             errors: [],
-            auth: { mode: "session", roles: ["Quotes.All.Approve"] },
+            auth: {
+              mode: "session",
+              roles: ["Quotes.All.Approve"],
+              recordPermission: "edit",
+            },
             tenancy: { mode: "required" },
             effects: { data: "write", external: "none" },
             reliability: { idempotency: { mode: "natural" } },
@@ -102,6 +106,11 @@ describe("first-class plugin operations", () => {
         leaseToken: { type: "string", minLength: 1 },
       },
       additionalProperties: false,
+    });
+    expect(compiled!.auth).toEqual({
+      mode: "session",
+      roles: ["Quotes.All.Approve"],
+      recordPermission: "edit",
     });
   });
 

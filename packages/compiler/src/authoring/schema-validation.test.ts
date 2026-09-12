@@ -425,6 +425,64 @@ describe("coreEntity properties the compiler implements", () => {
     expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
   });
 
+  it("accepts action-specific record ACL authoring and plugin enforcement", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      fields: [{
+        key: "authorization",
+        valueType: "object",
+        required: true,
+        defaultValue: {},
+        persisted: { column: "authorization", storageClass: "core" },
+      }],
+      authorization: {
+        roles: {
+          read: ["Records.All.Read"],
+          create: ["Records.All.Manage"],
+          update: ["Records.All.Manage"],
+          delete: ["Records.All.Delete"],
+        },
+        rowAccess: {
+          enabled: true,
+          recordPermissions: {
+            field: "authorization",
+            empty: "public",
+            createRequires: ["view", "edit"],
+          },
+        },
+      },
+      operations: {
+        archive: {
+          name: "Archive record",
+          description: "Archives one record.",
+          implementation: { type: "plugin", plugin: "example", handler: "archive" },
+          target: { scope: "record", inputField: "id" },
+          input: {
+            schema: {
+              type: "object",
+              properties: { id: { type: "string", format: "uuid" } },
+              required: ["id"],
+              additionalProperties: false,
+            },
+          },
+          output: { schema: { type: "object", additionalProperties: true } },
+          errors: [],
+          auth: {
+            mode: "session",
+            roles: ["Records.All.Manage"],
+            recordPermission: "delete",
+          },
+          tenancy: { mode: "required" },
+          effects: { data: "write", external: "none" },
+          reliability: { idempotency: { mode: "natural" } },
+          confirmation: { mode: "none" },
+        },
+      },
+      interfaces: { rest: { operations: { archive: {} } } },
+    });
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+  });
+
   it("rejects malformed strict v2 Web renderer registry keys", () => {
     const document = coreEntity({
       schemaVersion: 2,

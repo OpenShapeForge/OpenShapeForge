@@ -169,7 +169,13 @@ export type PluginOperationError = {
 
 export type PluginOperationAuth =
   | { mode: "public" }
-  | { mode: "session"; roles: string[]; scopes?: string[] }
+  | {
+      mode: "session";
+      roles: string[];
+      scopes?: string[];
+      /** Current target-record permission checked in addition to roles. */
+      recordPermission?: import("./authoring/types/common.js").RecordPermissionAction;
+    }
   | {
       mode: "custom";
       /** OpenAPI components.securitySchemes key. */

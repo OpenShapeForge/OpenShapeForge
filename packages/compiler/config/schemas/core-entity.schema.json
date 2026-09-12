@@ -228,6 +228,29 @@
                   "description": "How the user's directly-bound org units expand against the closure at session setup: descendants=see rows of child units, ancestors=see parents', exact=only direct units. Resolved into the per-mode GUC set before the query; the policy compares to the already-expanded set."
                 }
               }
+            },
+            "recordPermissions": {
+              "type": "object",
+              "description": "Action-specific record authorization stored in one persisted JSON object. The object has fixed view/edit/delete members containing users/groups/roles arrays. RBAC remains mandatory; this ACL only narrows it.",
+              "additionalProperties": false,
+              "required": ["field", "empty", "createRequires"],
+              "properties": {
+                "field": {
+                  "$ref": "#/$defs/fieldKey",
+                  "description": "Authored key of a required, persisted, single object field holding the record ACL."
+                },
+                "empty": {
+                  "enum": ["public", "restricted"],
+                  "description": "Meaning of a valid subject set whose users/groups/roles arrays are all empty. Malformed ACL data always fails closed."
+                },
+                "createRequires": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "enum": ["view", "edit", "delete"] },
+                  "description": "Record permissions the creator must hold in the submitted ACL before insert."
+                }
+              }
             }
           }
         }
@@ -794,6 +817,10 @@
               "type": "array",
               "uniqueItems": true,
               "items": { "type": "string", "minLength": 1 }
+            },
+            "recordPermission": {
+              "enum": ["view", "edit", "delete"],
+              "description": "Required permission on the current record target, in addition to roles and scopes."
             }
           }
         }

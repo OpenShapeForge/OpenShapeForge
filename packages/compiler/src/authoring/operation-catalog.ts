@@ -37,6 +37,11 @@ export function loadOperationCatalogs(authoringDir: string): LoadedOperationCata
       if (operation.target) {
         throw new Error(`${path} module operation "${key}" cannot declare an entity target.`);
       }
+      if (operation.auth?.mode === "session" && operation.auth.recordPermission) {
+        throw new Error(
+          `${path} module operation "${key}" cannot declare recordPermission without an entity record target.`,
+        );
+      }
       if (operation.concurrency || operation.confirmation.mode === "challenge") {
         throw new Error(
           `${path} module operation "${key}" cannot declare record concurrency or a target-bound challenge.`,

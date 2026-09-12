@@ -342,6 +342,15 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
   if (operation.auth.mode === "session" && operation.auth.roles.length === 0) {
     throw new Error(`${where} session auth must declare at least one role.`);
   }
+  if (
+    operation.auth.mode === "session" &&
+    operation.auth.recordPermission !== undefined &&
+    (operation.target?.scope !== "record" || !operation.target.inputField)
+  ) {
+    throw new Error(
+      `${where} recordPermission requires a record target with inputField.`,
+    );
+  }
   if (operation.auth.mode === "custom") {
     nonEmpty(operation.auth.scheme, `${where} custom auth scheme`);
     nonEmpty(operation.auth.description, `${where} custom auth description`);

@@ -341,6 +341,8 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
   authorization: {
     action: "read" | "create" | "update" | "delete";
     roles: string[];
+    /** Every listed record permission must pass; RBAC remains the outer gate. */
+    recordPermissions?: import("./common.js").RecordPermissionAction[];
   };
   effects: {
     data: "read" | "write" | "delete";
@@ -618,6 +620,13 @@ export interface CompiledAuthorization {
     group?: {
       column: string;
       expand: "descendants" | "ancestors" | "exact";
+    };
+    recordPermissions?: {
+      field: string;
+      column: string;
+      empty: "public" | "restricted";
+      createRequires: import("./common.js").RecordPermissionAction[];
+      defaultValue?: Record<string, unknown>;
     };
   };
 }

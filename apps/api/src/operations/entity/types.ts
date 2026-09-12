@@ -14,6 +14,13 @@ export type GeneratedCrudExposureOperation = "list" | "get" | "create" | "update
 
 export type GeneratedCrudAuthorization = {
   roles: Record<GeneratedCrudOperation, string[]>;
+  recordPermissions?: {
+    field: string;
+    column: string;
+    empty: "public" | "restricted";
+    createRequires: Array<"view" | "edit" | "delete">;
+    defaultValue?: Record<string, unknown>;
+  };
 };
 
 export type GeneratedCrudColumn = {
@@ -132,6 +139,7 @@ export type EntityOperationContract = EntityOperationRef & {
   authorization: {
     action: GeneratedCrudOperation;
     roles: string[];
+    recordPermissions?: Array<"view" | "edit" | "delete">;
   };
   concurrency?: OperationConcurrency;
   effects: {

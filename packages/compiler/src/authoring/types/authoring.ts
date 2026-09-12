@@ -550,7 +550,13 @@ export interface EntityOperationDefinition {
   }>;
   auth?:
     | { mode: "public" }
-    | { mode: "session"; roles: string[]; scopes?: string[] };
+    | {
+        mode: "session";
+        roles: string[];
+        scopes?: string[];
+        /** Required action on the current target record, in addition to RBAC. */
+        recordPermission?: import("./common.js").RecordPermissionAction;
+      };
   tenancy?: {
     mode: "required" | "derived" | "none";
     description?: string;
@@ -1014,6 +1020,10 @@ export interface AuthorizationClient {
    * require (e.g. `{ "realm-management": ["manage-realm"] }`).
    */
   serviceAccountClientRoles?: Record<string, string[]>;
+  /** Tenant fixed to this service-account client by host-owned authorization. */
+  serviceAccountTenantId?: string;
+  /** Marks the client as an organization automation identity, never a human login. */
+  organizationAutomation?: boolean;
 }
 
 /**

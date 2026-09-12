@@ -276,6 +276,21 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
           `${origin} plugin operation "${operationKey}" session auth needs at least one role.`,
         );
       }
+      if (
+        operation.auth.mode === "session" &&
+        operation.auth.recordPermission !== undefined
+      ) {
+        if (operation.target.scope !== "record") {
+          throw new Error(
+            `${origin} plugin operation "${operationKey}" recordPermission requires a record target.`,
+          );
+        }
+        if (!entity.authorization?.rowAccess?.recordPermissions) {
+          throw new Error(
+            `${origin} plugin operation "${operationKey}" declares recordPermission, but the entity has no authorization.rowAccess.recordPermissions policy.`,
+          );
+        }
+      }
       if (operation.interaction) {
         throw new Error(
           `${origin} plugin operation "${operationKey}" cannot declare entity secureInput; ` +

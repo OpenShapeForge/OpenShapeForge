@@ -103,6 +103,7 @@ import {
   mergeGeneratedEntityObjectForTable,
   invalidExpectedVersionFailure,
   invalidMutationControlTypeFailure,
+  assertRecordPermission,
   requireCreateOperationConfirmation,
   updateGeneratedEntityForTable,
 } from "../operations/entity/index.js";
@@ -7146,7 +7147,29 @@ function buildServer(
             id: subject.id,
           });
           if (!row) return { allowed: false, code: "NOT_FOUND" };
-          if (operation !== "get") return { allowed: true };
+          if (operation !== "get") {
+            const permission = operation === "update" ? "edit" : "delete";
+            if (table.source?.authorization?.recordPermissions) {
+              try {
+                await assertRecordPermission(
+                  db,
+                  session,
+                  table,
+                  subject.id,
+                  permission,
+                );
+              } catch (error) {
+                if (
+                  error instanceof OperationFailure &&
+                  error.operationError.code === "FORBIDDEN"
+                ) {
+                  return { allowed: false, code: "FORBIDDEN" };
+                }
+                throw error;
+              }
+            }
+            return { allowed: true };
+          }
           const includeClassified = canReadClassifiedColumns(
             table.source?.authorization,
             session,

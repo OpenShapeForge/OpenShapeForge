@@ -77,4 +77,13 @@ describe("module Operation catalog authoring", () => {
       ),
     ))).toThrow(/must NOT be valid|cannot declare an entity target/);
   });
+
+  test("rejects record permission on a module-global Operation", () => {
+    expect(() => loadOperationCatalogs(authoringRoot(
+      operation.replace(
+        "auth: { mode: session, roles: [Example.Read] }",
+        "auth: { mode: session, roles: [Example.Read], recordPermission: view }",
+      ),
+    ))).toThrow(/cannot declare recordPermission without an entity record target/);
+  });
 });

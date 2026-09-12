@@ -41,6 +41,11 @@ import type {
   GeneratedCrudTable,
 } from "./types.js";
 import { fieldNameForColumn } from "./columns.js";
+import {
+  assertRecordPermission,
+  recordPermissionsAllowRow,
+  type RecordPermissionAction,
+} from "./record-permissions.js";
 
 const COLLECTION_OFFER_INTENTS: readonly GeneratedCrudExposureOperation[] = [
   "list",
@@ -64,7 +69,12 @@ const operationCatalog = rawOperationCatalog as unknown as {
     };
     auth:
       | { mode: "public" }
-      | { mode: "session"; roles: string[]; scopes?: string[] }
+      | {
+          mode: "session";
+          roles: string[];
+          scopes?: string[];
+          recordPermission?: RecordPermissionAction;
+        }
       | { mode: "custom" };
     concurrency?: OperationConcurrency;
     confirmation?: import("@openshapeforge/operations").OperationConfirmation;
@@ -473,6 +483,15 @@ export async function acquireEditLeaseForEntityOperation(
         "INTERNAL_SERVER_ERROR",
       );
     }
+    if (custom.auth.mode === "session" && custom.auth.recordPermission) {
+      await assertRecordPermission(
+        db,
+        session,
+        table,
+        input.targetId,
+        custom.auth.recordPermission,
+      );
+    }
     return acquireEntityEditLease(db, session, {
       operation: {
         id: custom.key,
@@ -494,6 +513,9 @@ export async function acquireEditLeaseForEntityOperation(
   }
   const table = tableForEntityOperation({ id: operation.id, intent: operation.intent });
   requireEntityOperation(table, operation.intent, session);
+  for (const permission of operation.authorization.recordPermissions ?? []) {
+    await assertRecordPermission(db, session, table, input.targetId, permission);
+  }
   return acquireEntityEditLease(db, session, {
     operation: operation as LeaseProtectedOperation,
     table,
@@ -510,15 +532,30 @@ export function getEntityOperationOffers(
   session: Pick<DbSessionInput, "roles">,
   intents: readonly GeneratedCrudExposureOperation[],
   unavailable: Readonly<Record<string, OperationError | undefined>> = {},
-  target?: { id: string; version?: string },
+  target?: { id: string; version?: string; row?: Readonly<Record<string, unknown>> },
 ): EntityOperationOffer[] {
   const heldRoles = new Set(session.roles ?? []);
+  const table = target
+    ? getGeneratedCrudTables().find((candidate) =>
+        candidate.source?.authoringEntityName === entityName
+      )
+    : undefined;
+  const hasRecordPermissions = (
+    permissions: readonly RecordPermissionAction[] | undefined,
+  ) =>
+    !permissions?.length ||
+    Boolean(
+      table &&
+      target?.row &&
+      recordPermissionsAllowRow(table, target.row, permissions, session),
+    );
   const generatedOffers = entityOperations
     .filter(
       (operation) =>
         operation.entityName === entityName &&
         intents.includes(operation.intent) &&
-        operation.authorization.roles.some((role) => heldRoles.has(role)),
+        operation.authorization.roles.some((role) => heldRoles.has(role)) &&
+        (!target || hasRecordPermissions(operation.authorization.recordPermissions)),
     )
     .map((operation) => {
       const error = unavailable[operation.id];
@@ -538,7 +575,11 @@ export function getEntityOperationOffers(
       operation.target.scope === scope &&
       (operation.auth.mode === "public" ||
         (operation.auth.mode === "session" &&
-          operation.auth.roles.some((role) => heldRoles.has(role))))
+          operation.auth.roles.some((role) => heldRoles.has(role)))) &&
+      (!target ||
+        operation.auth.mode !== "session" ||
+        !operation.auth.recordPermission ||
+        hasRecordPermissions([operation.auth.recordPermission]))
     )
     .map((operation) => {
       const error = unavailable[operation.key];
@@ -568,13 +609,14 @@ export function getEntityOperationOffers(
 function offerTarget(
   row: Readonly<Record<string, unknown>>,
   table: GeneratedCrudTable,
-): { id: string; version?: string } {
+): { id: string; version?: string; row: Readonly<Record<string, unknown>> } {
   const primaryColumn = table.columns.find(({ name }) => name === table.primaryKey);
   const idKey = primaryColumn ? fieldNameForColumn(primaryColumn) : table.primaryKey!;
   const id = String(row[idKey] ?? "");
   const version = row.updatedAt;
   return {
     id,
+    row,
     ...(typeof version === "string" && version ? { version } : {}),
   };
 }
@@ -694,6 +736,15 @@ export async function executeEntityOperation(
       }
       case "update": {
         const operation = entityOperationContract(request.operation.id);
+        for (const permission of operation.authorization.recordPermissions ?? []) {
+          await assertRecordPermission(
+            db,
+            session,
+            table,
+            requireId(request.input),
+            permission,
+          );
+        }
         const concurrencyGuard = mutationConcurrencyGuard(operation, request.input);
         const confirmation = await prepareMutationConfirmation(
           db,
@@ -738,6 +789,15 @@ export async function executeEntityOperation(
       }
       case "delete": {
         const operation = entityOperationContract(request.operation.id);
+        for (const permission of operation.authorization.recordPermissions ?? []) {
+          await assertRecordPermission(
+            db,
+            session,
+            table,
+            requireId(request.input),
+            permission,
+          );
+        }
         const concurrencyGuard = mutationConcurrencyGuard(operation, request.input);
         const confirmation = await prepareMutationConfirmation(
           db,

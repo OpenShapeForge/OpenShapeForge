@@ -35,6 +35,10 @@ import {
   normalizeWritableValues,
   writableColumnMap,
 } from "./write-policy.js";
+import {
+  assertCreateRecordPermissions,
+  assertRecordPermissionInTransaction,
+} from "./record-permissions.js";
 
 async function fetchGeneratedRowInTransaction(
   trx: Transaction<DB>,
@@ -69,6 +73,7 @@ export async function createGeneratedEntityForTable(
   table: GeneratedCrudTable,
   rawValues: Record<string, unknown>,
 ): Promise<GeneratedEntityRow> {
+  assertCreateRecordPermissions(table, session, rawValues);
   const values = normalizeWritableValues(table, rawValues, "create");
   return insertGeneratedRow(db, session, table, values);
 }
@@ -138,6 +143,7 @@ export async function createGeneratedEntityAfterElicitation(
       "INTERNAL_SERVER_ERROR",
     );
   }
+  assertCreateRecordPermissions(table, session, input.values);
   const values = normalizeWritableValues(table, input.values, "create");
   return insertGeneratedRow(db, session, table, values);
 }
@@ -153,6 +159,7 @@ export async function createGeneratedEntity(
   const table = readGeneratedCrudTable(input.table, "create", session);
   assertNoCallerElicitedOutput(table, input.values);
   assertNoOperationWrittenValues(table, input.values);
+  assertCreateRecordPermissions(table, session, input.values);
   const values = normalizeWritableValues(table, input.values, "create");
   return insertGeneratedRow(db, session, table, values);
 }
@@ -239,7 +246,11 @@ async function applyGeneratedRowUpdate(
     assignments.push(sql`${sql.id(updatedAt.name)} = now()`);
   }
 
-  if (assignments.length === 0 && !guard) {
+  if (
+    assignments.length === 0 &&
+    !guard &&
+    !table.source?.authorization?.recordPermissions
+  ) {
     // Already authorized as an update above; an empty-body update must not
     // additionally require the read role, so fetch without re-gating and then
     // apply the same output projection as every other return path.
@@ -248,6 +259,9 @@ async function applyGeneratedRowUpdate(
   }
 
   return withDbSession(db, session, async (trx) => {
+    if (table.source?.authorization?.recordPermissions) {
+      await assertRecordPermissionInTransaction(trx, session, table, id, "edit");
+    }
     if (guard?.operation.concurrency?.editLease) {
       if (!guard.leaseToken) {
         throw generatedCrudError(
@@ -357,6 +371,9 @@ export async function deleteGeneratedEntity(
   const table = readGeneratedCrudTable(input.table, "delete", session);
 
   return withDbSession(db, session, async (trx) => {
+    if (table.source?.authorization?.recordPermissions) {
+      await assertRecordPermissionInTransaction(trx, session, table, input.id, "delete");
+    }
     if (input.guard?.operation.concurrency?.editLease) {
       if (!input.guard.leaseToken) {
         throw generatedCrudError(

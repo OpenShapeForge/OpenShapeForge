@@ -193,6 +193,36 @@ describe("platform schema generator", () => {
     expect(sql).not.toContain('CREATE POLICY "cases_tenant_isolation"');
   });
 
+  it("ANDs record view permission into USING but keeps ACL handoff out of WITH CHECK", () => {
+    const manifest: PlatformSchemaManifest = {
+      version: 1,
+      tables: [{
+        schema: "erp",
+        name: "protected_records",
+        tenantScoped: true,
+        columns: [
+          { name: "id", type: "uuid", primaryKey: true },
+          { name: "tenant_id", type: "uuid", required: true },
+          { name: "authorization", type: "jsonb", required: true },
+        ],
+        rowScope: {
+          recordPermissions: { column: "authorization", empty: "public" },
+        },
+      }],
+    };
+    const contents = generateArtifacts(manifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql")
+    )?.contents ?? "";
+
+    expect(contents).toContain(
+      `USING (app.bypass_rls() OR (tenant_id = app.current_tenant() AND app.record_permission_allows("authorization", 'view', true)))`,
+    );
+    expect(contents).toContain(
+      `WITH CHECK (app.bypass_rls() OR (tenant_id = app.current_tenant()));`,
+    );
+    expect(contents.match(/record_permission_allows/g)?.length).toBe(1);
+  });
+
   it("fails compile if a rowScope column is missing from the table", () => {
     const badManifest: PlatformSchemaManifest = {
       version: 1,

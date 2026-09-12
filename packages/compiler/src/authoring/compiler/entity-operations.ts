@@ -51,6 +51,25 @@ function authorizationAction(
   return intent === "list" || intent === "get" ? "read" : intent;
 }
 
+function recordPermissions(
+  authorization: CompiledAuthorization,
+  intent: EntityOperationIntent,
+): NonNullable<CompiledEntityOperation["authorization"]["recordPermissions"]> | undefined {
+  const policy = authorization.rowAccess?.recordPermissions;
+  if (!policy) return undefined;
+  switch (intent) {
+    case "list":
+    case "get":
+      return ["view"];
+    case "create":
+      return [...policy.createRequires];
+    case "update":
+      return ["edit"];
+    case "delete":
+      return ["delete"];
+  }
+}
+
 function compileOperation(
   source: OperationSource,
   intent: EntityOperationIntent,
@@ -70,7 +89,14 @@ function compileOperation(
     name: definition?.name ?? `${source.entity.name} ${intent}`,
     description: definition?.description ?? `${intent} ${source.entity.name}`,
     ...(definition?.guidance ? { guidance: definition.guidance } : {}),
-    authorization: { action, roles: [...source.authorization.roles[action]] },
+    authorization: {
+      action,
+      roles: [...source.authorization.roles[action]],
+      ...(() => {
+        const permissions = recordPermissions(source.authorization, intent);
+        return permissions ? { recordPermissions: permissions } : {};
+      })(),
+    },
     effects: definition?.effects ?? defaultEffects(intent),
     reliability: definition?.reliability ?? defaultIdempotency(intent),
     ...(definition?.concurrency ? { concurrency: definition.concurrency } : {}),

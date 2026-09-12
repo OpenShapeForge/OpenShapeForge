@@ -300,8 +300,9 @@ function filterRelationshipRegisterForTables(
  * time. `empty: restricted` with no axis is guarded at the call site (§C.2),
  * not here.
  *
- * Returns undefined when there is no restriction axis (owner and group both
- * absent) — today's `empty: public` + no-owner + no-group entities are
+ * Returns undefined when there is no restriction axis (owner, group and
+ * record permissions all absent) — today's `empty: public` entities without
+ * any such axis are
  * explicitly NOT a restriction and compile to plain tenant scoping (documented
  * no-op), so the 3 shipped entities stay byte-identical.
  */
@@ -315,6 +316,7 @@ export function deriveRowScope(
   const userColumns: string[] = [];
   const nullVisibleColumns: string[] = [];
   let group: RowScopePolicy["group"] | undefined;
+  let recordPermissions: RowScopePolicy["recordPermissions"] | undefined;
 
   const requireColumn = (col: string, axis: string) => {
     const c = columnsByName.get(col);
@@ -345,13 +347,32 @@ export function deriveRowScope(
     if (rowAccess.empty === "public") nullVisibleColumns.push(rowAccess.group.column);
   }
 
+  if (rowAccess.recordPermissions) {
+    const column = columnsByName.get(rowAccess.recordPermissions.column);
+    if (!column) {
+      throw new Error(
+        `[${entityName}] authorization.rowAccess.recordPermissions field "${rowAccess.recordPermissions.field}" references column "${rowAccess.recordPermissions.column}", but that column was not emitted.`,
+      );
+    }
+    if (column.type !== "jsonb") {
+      throw new Error(
+        `[${entityName}] authorization.rowAccess.recordPermissions field "${rowAccess.recordPermissions.field}" must persist as jsonb, found ${column.type}.`,
+      );
+    }
+    recordPermissions = {
+      column: rowAccess.recordPermissions.column,
+      empty: rowAccess.recordPermissions.empty,
+    };
+  }
+
   // No restriction axis declared → plain tenant scoping (documented no-op).
-  if (userColumns.length === 0 && !group) return undefined;
+  if (userColumns.length === 0 && !group && !recordPermissions) return undefined;
 
   return {
     ...(group ? { group } : {}),
     ...(userColumns.length > 0 ? { userColumns } : {}),
     ...(nullVisibleColumns.length > 0 ? { nullVisibleColumns } : {}),
+    ...(recordPermissions ? { recordPermissions } : {}),
     // bypassRoles wired in a later phase (see §E.3 note); omitted for now.
   };
 }
@@ -1094,19 +1115,21 @@ export function compileAuthoringBackendManifest(
     // Row-level access → rowScope translation (§B.3) + fail-closed guards (§C).
     const rowAccess = candidate.contract.authorization?.rowAccess;
     // §C.2 fail-closed: `empty: restricted` only makes sense when there is an
-    // owner/group column that can be NULL. Without any axis, "restricted" would
+    // owner/group column that can be NULL or an action-specific record ACL.
+    // Without any axis, "restricted" would
     // hide every row or silently degrade to tenant scoping — a declared-but-
     // unemitted confidentiality. Convert to a hard build failure.
     if (
       rowAccess?.enabled &&
       rowAccess.empty === "restricted" &&
       !rowAccess.owner &&
-      !rowAccess.group
+      !rowAccess.group &&
+      !rowAccess.recordPermissions
     ) {
       throw new Error(
-        `[${candidate.contract.entity.name}] authorization.rowAccess.empty: restricted requires an owner or group axis — ` +
-          `otherwise the entity has no confidentiality column and "restricted" would hide every row ` +
-          `or silently degrade to tenant scoping. Add an owner/group axis or set empty: public.`,
+        `[${candidate.contract.entity.name}] authorization.rowAccess.empty: restricted requires an owner, group or record-permissions axis — ` +
+          `otherwise the entity has no confidentiality predicate and "restricted" would hide every row ` +
+          `or silently degrade to tenant scoping. Add a restriction axis or set empty: public.`,
       );
     }
     const rowScope = deriveRowScope(
@@ -1187,7 +1210,18 @@ export function compileAuthoringBackendManifest(
         // either way (bearer token or trusted context) matches by plain set
         // intersection.
         ...(candidate.contract.authorization
-          ? { authorization: { roles: bridgeAuthorizationRoles(candidate.contract.authorization.roles) } }
+          ? {
+              authorization: {
+                roles: bridgeAuthorizationRoles(candidate.contract.authorization.roles),
+                ...(candidate.contract.authorization.rowAccess?.recordPermissions
+                  ? {
+                      recordPermissions: {
+                        ...candidate.contract.authorization.rowAccess.recordPermissions,
+                      },
+                    }
+                  : {}),
+              },
+            }
           : {}),
         relationshipStatus: {
           emittedReferences,

@@ -83,6 +83,14 @@ describe("rowAccess → rowScope translation (§B.3)", () => {
     });
     expect(table?.rowScope?.nullVisibleColumns).toBeUndefined();
   });
+
+  it("record permissions are a complete restricted row-access axis", () => {
+    const manifest = compileFixtures(["rowaccess-record-permissions"]);
+    const table = tableByName(manifest, "row_access_record_permissionses");
+    expect(table?.rowScope).toEqual({
+      recordPermissions: { column: "authorization", empty: "public" },
+    });
+  });
 });
 
 describe("rowAccess fail-closed compile guards (§B.1, §C)", () => {
@@ -94,9 +102,9 @@ describe("rowAccess fail-closed compile guards (§B.1, §C)", () => {
     );
   });
 
-  it("empty:restricted with no owner/group axis throws (§C.2)", () => {
+  it("empty:restricted with no owner/group/record-permissions axis throws (§C.2)", () => {
     expect(() => compileFixtures(["rowaccess-restricted-noaxis"])).toThrow(
-      /authorization\.rowAccess\.empty: restricted requires an owner or group axis/,
+      /authorization\.rowAccess\.empty: restricted requires an owner, group or record-permissions axis/,
     );
   });
 
@@ -150,6 +158,52 @@ describe("deriveRowScope unit guards (§C.1 emit-time fail-closed)", () => {
     expect(
       deriveRowScope({ enabled: true, empty: "restricted", owner }, "X", columns),
     ).toEqual({ userColumns: ["owner_id"] });
+  });
+
+  it("maps a jsonb record-permission field without inventing an owner axis", () => {
+    const columns = new Map<string, ColumnDefinition>([
+      ["authorization", { name: "authorization", type: "jsonb", required: true }],
+    ]);
+    expect(
+      deriveRowScope(
+        {
+          enabled: true,
+          empty: "public",
+          recordPermissions: {
+            field: "authorization",
+            column: "authorization",
+            empty: "restricted",
+            createRequires: ["view", "edit"],
+          },
+        },
+        "ProtectedRecord",
+        columns,
+      ),
+    ).toEqual({
+      recordPermissions: { column: "authorization", empty: "restricted" },
+    });
+  });
+
+  it("refuses a record-permission field that is not jsonb", () => {
+    const columns = new Map<string, ColumnDefinition>([
+      ["authorization", { name: "authorization", type: "text", required: true }],
+    ]);
+    expect(() =>
+      deriveRowScope(
+        {
+          enabled: true,
+          empty: "public",
+          recordPermissions: {
+            field: "authorization",
+            column: "authorization",
+            empty: "public",
+            createRequires: ["view", "edit"],
+          },
+        },
+        "ProtectedRecord",
+        columns,
+      )
+    ).toThrow(/must persist as jsonb/);
   });
 
   // ── group axis unit guards (Phase 2) ──

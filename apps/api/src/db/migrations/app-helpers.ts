@@ -73,6 +73,102 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
       select nullif(current_setting('app.worker_role', true), '')
     $$;
 
+    -- Validate the complete action-ACL document before any subject match. A
+    -- malformed member must never be mistaken for a valid empty set, because
+    -- entities may explicitly choose empty=public for a well-formed ACL.
+    create or replace function app.record_permissions_valid(document jsonb)
+    returns boolean
+    language plpgsql immutable parallel safe
+    as $$
+    declare
+      action_key text;
+      subjects jsonb;
+      subject_key text;
+      entries jsonb;
+      entry jsonb;
+    begin
+      if document is null or jsonb_typeof(document) <> 'object' then
+        return false;
+      end if;
+      for action_key, subjects in select key, value from jsonb_each(document)
+      loop
+        if action_key not in ('view', 'edit', 'delete')
+          or jsonb_typeof(subjects) <> 'object' then
+          return false;
+        end if;
+        for subject_key, entries in select key, value from jsonb_each(subjects)
+        loop
+          if subject_key not in ('users', 'groups', 'roles')
+            or jsonb_typeof(entries) <> 'array' then
+            return false;
+          end if;
+          for entry in select value from jsonb_array_elements(entries)
+          loop
+            if jsonb_typeof(entry) <> 'string' or entry #>> '{}' = '' then
+              return false;
+            end if;
+          end loop;
+        end loop;
+      end loop;
+      return true;
+    end
+    $$;
+
+    create or replace function app.record_permission_subject_allows(
+      subjects jsonb,
+      empty_is_public boolean
+    ) returns boolean
+    language sql stable parallel safe
+    as $$
+      select case
+        when jsonb_array_length(coalesce(subjects -> 'users', '[]'::jsonb))
+           + jsonb_array_length(coalesce(subjects -> 'groups', '[]'::jsonb))
+           + jsonb_array_length(coalesce(subjects -> 'roles', '[]'::jsonb)) = 0
+          then empty_is_public
+        else
+          coalesce((subjects -> 'users') ? app.current_user_id()::text, false)
+          or coalesce(
+            (subjects -> 'roles') ?| string_to_array(
+              coalesce(current_setting('app.roles', true), ''), ','
+            ),
+            false
+          )
+          or coalesce(
+            (subjects -> 'groups') ?| array(
+              select group_id::text from unnest(app.current_groups_exact()) as group_id
+            ),
+            false
+          )
+      end
+    $$;
+
+    -- Edit and delete deliberately include view. This is the canonical
+    -- action meaning; SQL verbs cannot express it because an archive action is
+    -- physically an UPDATE but semantically requires delete permission.
+    create or replace function app.record_permission_allows(
+      document jsonb,
+      action text,
+      empty_is_public boolean
+    ) returns boolean
+    language sql stable parallel safe
+    as $$
+      select case
+        when action is null or action not in ('view', 'edit', 'delete')
+          or not app.record_permissions_valid(document) then false
+        when action = 'view' then
+          app.record_permission_subject_allows(
+            coalesce(document -> 'view', '{}'::jsonb), empty_is_public
+          )
+        else
+          app.record_permission_subject_allows(
+            coalesce(document -> 'view', '{}'::jsonb), empty_is_public
+          )
+          and app.record_permission_subject_allows(
+            coalesce(document -> action, '{}'::jsonb), empty_is_public
+          )
+      end
+    $$;
+
     -- The one registry read that happens BEFORE a session has a tenant: turning
     -- a verified Keycloak Organization membership into the tenant it belongs
     -- to (apps/api src/auth/identity.ts). platform.tenants is fenced by

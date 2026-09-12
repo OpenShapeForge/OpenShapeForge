@@ -192,14 +192,31 @@ fields:
     persisted:
       column: business_context
       storageClass: core
-relationships:
-  - key: relationGroup
-    kind: belongsTo
-    target: RelationGroup
-    foreignKey: relation_group_id
+  - key: relationGroupId
+    valueType: string
+    required: false
+    readOnly: true
+    immutable: true
+    semanticType: relationGroupId
     label:
-      en: Relation group
-      nl: Relatiegroep
+      en: Legacy relation group ID
+      nl: Legacy relatiegroep-ID
+    description:
+      en: Retained legacy single-group reference. New and updated memberships use RelationGroupMembership instead.
+      nl: Behouden verouderde verwijzing naar één relatiegroep. Nieuwe en gewijzigde lidmaatschappen gebruiken RelationGroupMembership.
+    validation:
+      format: uuid
+    persisted:
+      column: relation_group_id
+      storageClass: core
+relationships:
+  - key: groupMemberships
+    kind: hasMany
+    target: RelationGroupMembership
+    foreignKey: relation_id
+    label:
+      en: Group memberships
+      nl: Groepslidmaatschappen
   - key: roles
     kind: hasMany
     target: RelationRole
@@ -442,6 +459,9 @@ interfaces:
             - id: tasks
               label: { en: Tasks, nl: Taken }
               relationship: tasks
+            - id: group-memberships
+              label: { en: Groups, nl: Groepen }
+              relationship: groupMemberships
         modes:
           create:
             title: { en: Create relation, nl: Relatie aanmaken }

@@ -22,6 +22,66 @@
       }
     }
   ],
+  "RELATIONGROUPTYPE": [
+    {
+      "value": "general",
+      "label": {
+        "nl": "Algemeen",
+        "en": "General"
+      }
+    },
+    {
+      "value": "department",
+      "label": {
+        "nl": "Afdeling",
+        "en": "Department"
+      }
+    },
+    {
+      "value": "team",
+      "label": {
+        "nl": "Team",
+        "en": "Team"
+      }
+    },
+    {
+      "value": "project",
+      "label": {
+        "nl": "Project",
+        "en": "Project"
+      }
+    },
+    {
+      "value": "committee",
+      "label": {
+        "nl": "Commissie",
+        "en": "Committee"
+      }
+    },
+    {
+      "value": "other",
+      "label": {
+        "nl": "Overig",
+        "en": "Other"
+      }
+    }
+  ],
+  "RELATIONGROUPSTATUS": [
+    {
+      "value": "active",
+      "label": {
+        "nl": "Actief",
+        "en": "Active"
+      }
+    },
+    {
+      "value": "inactive",
+      "label": {
+        "nl": "Inactief",
+        "en": "Inactive"
+      }
+    }
+  ],
   "COMMUNICATIONTYPE": [
     {
       "value": "appointment_reminder",

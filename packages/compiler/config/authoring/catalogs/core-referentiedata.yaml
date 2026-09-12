@@ -11,6 +11,30 @@ groepen:
         label: { nl: Organisatie, en: Organization, fr: Organisation }
       - value: group
         label: { nl: Groep, en: Group, fr: Groupe }
+  RELATIONGROUPTYPE:
+    description: Kerncodetabel voor de functionele classificatie van relatiegroepen.
+    items:
+      - value: general
+        label: { nl: Algemeen, en: General, fr: General }
+      - value: department
+        label: { nl: Afdeling, en: Department, fr: Departement }
+      - value: team
+        label: { nl: Team, en: Team, fr: Equipe }
+      - value: project
+        label: { nl: Project, en: Project, fr: Projet }
+      - value: committee
+        label: { nl: Commissie, en: Committee, fr: Comite }
+      - value: other
+        label: { nl: Overig, en: Other, fr: Autre }
+
+  RELATIONGROUPSTATUS:
+    description: Kerncodetabel voor de levenscyclus van een relatiegroep of groepslidmaatschap.
+    items:
+      - value: active
+        label: { nl: Actief, en: Active, fr: Actif }
+      - value: inactive
+        label: { nl: Inactief, en: Inactive, fr: Inactif }
+
   COMMUNICATIONTYPE:
     description: Kerncodetabel voor functionele communicatiedoelen en berichttypen.
     items:

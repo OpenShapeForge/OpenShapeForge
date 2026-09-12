@@ -176,8 +176,10 @@ describe("generated schema migration", () => {
         // that later grows the table. 0007 installs the authoritative document
         // version constraints and commands. 0008 adds the encrypted MCP browser
         // handoff store before the generated schema grants are applied. 0009
-        // makes a billing run item's period optional. A fresh install applies
-        // all eight in order; the list mirrors the registry in
+        // makes a billing run item's period optional. 0010 introduces typed
+        // RelationGroups and the canonical many-to-many membership table,
+        // backfilling only the old Relation.relation_group_id link on upgrades.
+        // A fresh install applies all nine in order; the list mirrors the registry in
         // migrations/versioned/index.ts.
         expect(first.versionedApplied).toEqual([
           "0002_org-unit-closure-trigger",
@@ -188,6 +190,7 @@ describe("generated schema migration", () => {
           "0007_document-version-authority",
           "0008_mcp-handoffs",
           "0009_billing-run-item-period-optional",
+          "0010_relation-group-memberships",
         ]);
 
         await withDb(url, async (db) => {

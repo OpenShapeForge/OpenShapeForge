@@ -15,7 +15,8 @@ import {
 const repoRoot = process.cwd();
 const webPresent = existsSync(join(repoRoot, "apps/web"));
 // AgreementMilestone and the schemaVersion 2 Relation aggregate
-// (Relation, RelationGroup, ContactDetail and PaymentDetail) withhold part of
+// (Relation, RelationGroup, RelationGroupMembership, ContactDetail and
+// PaymentDetail) withhold part of
 // generic CRUD. The stock full-CRUD web UI is intentionally not generated for
 // these entities (isGeneratedCrudUiEnabled requires every operation to be
 // true). The aggregate is instead projected through WebManifest for hosts.

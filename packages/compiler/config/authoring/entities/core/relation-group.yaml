@@ -17,12 +17,13 @@ authorization:
     read:
       - Relations.All.Read
       - Relations.All.ReadWrite
+      - Relations.RelationGroups.ReadWrite
     create:
-      - Relations.All.ReadWrite
+      - Relations.RelationGroups.ReadWrite
     update:
-      - Relations.All.ReadWrite
+      - Relations.RelationGroups.ReadWrite
     delete:
-      - Relations.All.ReadWrite
+      - Relations.RelationGroups.ReadWrite
   rowAccess:
     enabled: true
     empty: public
@@ -56,20 +57,37 @@ fields:
     persisted:
       column: description
       storageClass: core
+  - key: groupType
+    valueType: string
+    required: true
+    label:
+      en: Group type
+      nl: Groepstype
+    description:
+      en: Classification of this group, such as a department, team, project, or committee.
+      nl: Classificatie van deze groep, zoals een afdeling, team, project of commissie.
+    persisted:
+      column: group_type
+      storageClass: core
+    options:
+      type: referentiedata
+      referentieGroep: RELATIONGROUPTYPE
   - key: status
     valueType: string
-    required: false
+    required: true
+    defaultValue: active
     label:
       en: Status
       nl: Status
     description:
       en: Lifecycle status of the relation group.
       nl: Levenscyclusstatus van de relatiegroep.
-    validation:
-      maxLength: 50
     persisted:
       column: status
       storageClass: core
+    options:
+      type: referentiedata
+      referentieGroep: RELATIONGROUPSTATUS
   - key: externalCode
     valueType: string
     required: false
@@ -92,13 +110,13 @@ relationships:
     label:
       en: Relation
       nl: Relatie
-  - key: members
+  - key: memberships
     kind: hasMany
-    target: Relation
+    target: RelationGroupMembership
     foreignKey: relation_group_id
     label:
-      en: Members
-      nl: Leden
+      en: Memberships
+      nl: Lidmaatschappen
   - key: orgUnit
     kind: belongsTo
     target: OrgUnit
@@ -180,6 +198,7 @@ interfaces:
       create: {}
       update: {}
       delete: {}
+  graphql: {}
   mcp:
     operations:
       list: {}
@@ -211,6 +230,7 @@ interfaces:
         title: { en: Relation groups, nl: Relatiegroepen }
         columns:
           - { key: name, sortable: true }
+          - { key: groupType, sortable: true }
           - { key: status, sortable: true }
         defaultSort: { key: name, direction: asc }
       record:
@@ -225,23 +245,30 @@ interfaces:
               label: { en: Overview, nl: Overzicht }
               groups:
                 - title: { en: General, nl: Algemeen }
-                  fields: [name, status]
+                  fields: [name, groupType, status]
                 - title: { en: Description, nl: Omschrijving }
                   fields: [description]
                 - title: { en: Source, nl: Herkomst }
                   fields: [externalId, externalCode]
-            - id: members
-              label: { en: Members, nl: Leden }
-              relationship: members
+            - id: memberships
+              label: { en: Memberships, nl: Lidmaatschappen }
+              relationship: memberships
         modes:
           create:
             title: { en: Create relation group, nl: Relatiegroep aanmaken }
             groups:
               - title: { en: General, nl: Algemeen }
-                fields: [name, status]
+                fields: [name, groupType, status]
               - title: { en: Description, nl: Omschrijving }
                 fields: [description]
               - title: { en: Source, nl: Herkomst }
                 fields: [externalId, externalCode]
           update:
             title: { en: Update relation group, nl: Relatiegroep wijzigen }
+            groups:
+              - title: { en: General, nl: Algemeen }
+                fields: [name, groupType, status]
+              - title: { en: Description, nl: Omschrijving }
+                fields: [description]
+              - title: { en: Source, nl: Herkomst }
+                fields: [externalCode]

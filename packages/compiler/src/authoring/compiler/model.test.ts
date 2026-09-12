@@ -16,6 +16,35 @@ const catalog: ComponentCatalog = {
 };
 
 describe("semantic renderer mapping", () => {
+  test("retains authored and semantic collection bounds after normalization", () => {
+    const semanticTypes: Record<string, SemanticTypeDefinition> = {
+      boundedTags: {
+        label: { en: "Tags" },
+        valueType: "string",
+        cardinality: { min: 1, max: 3 },
+      },
+    };
+
+    const [semantic, authored] = resolveModelFields([
+      { key: "tags", valueType: "string", semanticType: "boundedTags" },
+      {
+        key: "steps",
+        valueType: "object",
+        cardinality: { min: 2, max: "unbounded" },
+        item: { key: "step", valueType: "object" },
+      },
+    ], catalog, semanticTypes);
+
+    expect(semantic).toMatchObject({
+      cardinality: "collection",
+      cardinalityBounds: { min: 1, max: 3 },
+    });
+    expect(authored).toMatchObject({
+      cardinality: "collection",
+      cardinalityBounds: { min: 2, max: "unbounded" },
+    });
+  });
+
   test("resolves input component and props centrally while preserving field options", () => {
     const semanticTypes: Record<string, SemanticTypeDefinition> = {
       referenceDataCode: {

@@ -82,6 +82,11 @@ export interface CompiledField {
     | "datetime"
     | "object";
   cardinality: "single" | "collection";
+  /** Exact authored collection bounds retained after cardinality normalization. */
+  cardinalityBounds?: {
+    min?: number;
+    max?: number | "unbounded";
+  };
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
   required: boolean;

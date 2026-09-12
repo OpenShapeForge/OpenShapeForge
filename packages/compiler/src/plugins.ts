@@ -23,6 +23,7 @@ import type {
   CompiledEntityContract,
   CompiledEntityOperation,
 } from "./authoring/types.js";
+import type { FieldSchemaCompiler } from "./field-json-schema.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
 import type { GeneratedArtifact, PlatformSchemaManifest, TableDefinition } from "./schema.js";
 
@@ -56,6 +57,8 @@ export type PluginGenerateContext = PluginBaseContext & {
   manifest: PlatformSchemaManifest;
   entities: CompiledEntityInfo[];
   operationCatalog: EntityOperationCatalog;
+  /** Canonical build-time FieldDefinition -> compiled field/JSON Schema projection. */
+  fieldSchemas: FieldSchemaCompiler;
 };
 
 /**

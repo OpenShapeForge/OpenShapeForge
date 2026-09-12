@@ -43,6 +43,8 @@ import type { CompiledEntityInfo } from "./plugins.js";
 import type { CompiledField } from "./authoring/types.js";
 import { renderEmptyApiPersistedOperationArtifact } from "./persisted-operations.js";
 import { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
+import { loadFieldCompilationCatalogs } from "./authoring/loader.js";
+import { createFieldSchemaCompiler } from "./field-json-schema.js";
 
 export type {
   FieldDefinition,
@@ -58,11 +60,14 @@ export type {
   FieldDefinitionVariableMode,
   FieldDefinitionWorkflowInspector,
   FieldV2,
+  CompiledField,
   CompiledEntityOperation,
+  ComponentCatalog,
   McpDeclarativeAdapterUrls,
   McpDeclarativeOperationUrl,
   McpDeclarativeRequestHeaderMapping,
   McpDeclarativeRequestMapping,
+  SemanticTypeDefinition,
 } from "./authoring/types.js";
 export type {
   CompilerPlugin,
@@ -79,6 +84,16 @@ export type {
   PluginSchemaMigration,
 } from "./plugins.js";
 export { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
+export { resolveModelFields } from "./authoring/compiler/model.js";
+export {
+  compiledFieldSchema,
+  compiledObjectSchema,
+  createFieldSchemaCompiler,
+} from "./field-json-schema.js";
+export type {
+  CompiledFieldSchemaOptions,
+  FieldSchemaCompiler,
+} from "./field-json-schema.js";
 export type {
   WebCollectionView,
   WebEntityView,
@@ -267,6 +282,10 @@ export async function collectAllArtifacts(
   assertOperationRuntimeModules(operations, moduleRegistry.modules.map((module) => module.name));
   auditOperationSurfaceCollisions(operations, manifest, connectors, MAX_DEDICATED_TOOLS);
   const operationCatalog = { version: 1 as const, operations: entityOperations };
+  const fieldSchemas = createFieldSchemaCompiler({
+    ...loadFieldCompilationCatalogs(authoringDir),
+    referentiedata,
+  });
   const context = {
     repoRoot,
     authoringDir,
@@ -274,6 +293,7 @@ export async function collectAllArtifacts(
     manifest,
     entities,
     operationCatalog,
+    fieldSchemas,
   };
   const executionCompatibility = plugins.flatMap((plugin) => {
     const authored = typeof plugin.executionCompatibility === "function"

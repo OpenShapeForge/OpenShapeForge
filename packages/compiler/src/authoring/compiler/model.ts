@@ -32,11 +32,17 @@ export function resolveModelFields(
 ): CompiledField[] {
   return coreFields.map((field) => {
     const semType = field.semanticType ? semanticTypes?.[field.semanticType] : undefined;
+    const authoredCardinality = field.cardinality ?? semType?.cardinality;
+    const cardinality = fieldCardinality({ cardinality: authoredCardinality });
 
     const compiled: CompiledField = {
       key: field.key,
       valueType: field.valueType,
-      cardinality: fieldCardinality(field),
+      cardinality,
+      ...(authoredCardinality && typeof authoredCardinality === "object" &&
+        cardinality === "collection"
+        ? { cardinalityBounds: { ...authoredCardinality } }
+        : {}),
       required: field.required ?? false,
       label: field.label ?? semType?.label ?? { en: field.key, nl: field.key },
       render: resolveRender(field, componentCatalog, semType),

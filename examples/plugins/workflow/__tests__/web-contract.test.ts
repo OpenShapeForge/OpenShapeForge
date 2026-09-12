@@ -20,6 +20,8 @@ import type {
 } from "../../../../packages/compiler/src/plugins.js";
 import type { PlatformSchemaManifest } from "../../../../packages/compiler/src/schema.js";
 import { resolveAuthoringLayers } from "../../../../packages/compiler/src/authoring/layers.js";
+import { loadFieldCompilationCatalogs } from "../../../../packages/compiler/src/authoring/loader.js";
+import { createFieldSchemaCompiler } from "../../../../packages/compiler/src/field-json-schema.js";
 import plugin from "../index.js";
 
 const repoRoot = resolve(import.meta.dir, "../../../..");
@@ -34,13 +36,17 @@ const DEFINITION_ROUTE_PATH = "apps/web/src/app/(plugins)/workflow/[id]/page.tsx
  * is the thing that breaks, which is the correct place for it to break.
  */
 function context(webPresent: boolean): PluginGenerateContext {
+  const authoringDir = resolveAuthoringLayers(repoRoot);
   return {
     repoRoot,
-    authoringDir: resolveAuthoringLayers(repoRoot),
+    authoringDir,
     webPresent,
     manifest: { tables: [] } as unknown as PlatformSchemaManifest,
     entities: [],
     operationCatalog: { version: 1, operations: [] },
+    fieldSchemas: createFieldSchemaCompiler(
+      loadFieldCompilationCatalogs(authoringDir),
+    ),
   };
 }
 

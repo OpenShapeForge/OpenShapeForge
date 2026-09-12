@@ -6,15 +6,30 @@ import {
   compiledFieldSchema,
   compiledFieldSchemaWithoutDefinitions,
   compiledObjectSchema,
+  createFieldSchemaCompiler,
   rebaseJsonSchemaReferences,
 } from "./field-json-schema.js";
 import type {
+  ComponentCatalog,
   FieldDefinition,
   FieldDefinitionSemanticTypeKind,
   McpDeclarativeAdapterUrls,
   McpDeclarativeOperationUrl,
   McpDeclarativeRequestMapping,
 } from "./index.js";
+
+const componentCatalog: ComponentCatalog = {
+  schemaVersion: 1,
+  kind: "componentCatalog",
+  defaults: {
+    string: { component: "Input" },
+    boolean: { component: "Checkbox" },
+    object: { component: "ObjectEditor" },
+    collection: { component: "CollectionEditor" },
+  },
+  viewDefaults: {},
+  components: {},
+};
 
 const packageRootFieldDefinition = {
   key: "definition",
@@ -300,5 +315,69 @@ describe("compiled field JSON Schema projection", () => {
     expect(properties.definitions?.items).toEqual({ $ref: "#/$defs/fieldDefinition" });
     expect(Object.keys(schema.$defs as object).filter((key) => key === "fieldDefinition")).toHaveLength(1);
     expect(() => new Ajv2020.default({ strict: false }).compile(schema)).not.toThrow();
+  });
+
+  it("gives compiler plugins the canonical recursive FieldDefinition projector", () => {
+    const fieldSchemas = createFieldSchemaCompiler({ componentCatalog });
+    const schema = fieldSchemas.object([
+      {
+        key: "actions",
+        valueType: "object",
+        cardinality: { min: 2, max: 4 },
+        required: true,
+        item: {
+          key: "action",
+          valueType: "object",
+          children: [
+            {
+              key: "kind",
+              valueType: "string",
+              required: true,
+              validation: { maxLength: 12 },
+              options: {
+                type: "static",
+                items: [
+                  { value: "task", label: { en: "Task" } },
+                  { value: "wait", label: { en: "Wait" } },
+                ],
+              },
+            },
+            {
+              key: "enabled",
+              valueType: "boolean",
+              defaultValue: true,
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(schema.required).toEqual(["actions"]);
+    expect(schema.properties).toMatchObject({
+      actions: {
+        type: "array",
+        minItems: 2,
+        maxItems: 4,
+        items: {
+          allOf: [
+            { type: "object" },
+            {
+              type: "object",
+              required: ["kind"],
+              additionalProperties: false,
+              properties: {
+                kind: { type: "string", maxLength: 12, enum: ["task", "wait"] },
+                enabled: { type: "boolean", default: true },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const validate = new Ajv2020.default({ strict: false }).compile(schema);
+    expect(validate({ actions: [{ kind: "task" }, { kind: "wait" }] })).toBe(true);
+    expect(validate({ actions: [{ kind: "unknown" }] })).toBe(false);
+    expect(validate({ actions: Array.from({ length: 5 }, () => ({ kind: "task" })) })).toBe(false);
   });
 });

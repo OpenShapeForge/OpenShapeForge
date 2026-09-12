@@ -143,6 +143,7 @@ export type PluginGenerateContext = PluginBaseContext & {
     version: 1;
     operations: readonly CompiledEntityOperation[];
   };                                  // interface-neutral entity Operations
+  fieldSchemas: FieldSchemaCompiler;  // canonical FieldDefinition projector
 };
 
 export type CompiledEntityInfo = {
@@ -163,6 +164,16 @@ workflow nodes, audit policy, or another product projection from entity
 Operations. It is compiled once from the resolved layers and is already
 sorted by stable Operation id. A plugin should consume this catalog instead
 of parsing entity YAML or inferring actions from transport routes.
+
+`fieldSchemas` is bound to the resolved component, semantic-type and reference-
+data catalogs for the current host. A generator that publishes configurable
+fields can call `fieldSchemas.field(definition)` for one value schema or
+`fieldSchemas.object(definitions)` for a strict object schema. Both paths use
+the entity field compiler, including nested `children`/`item`, defaults,
+options, shared validation and collection cardinality bounds. The pure
+`createFieldSchemaCompiler`, `compiledFieldSchema`, `compiledObjectSchema` and
+`resolveModelFields` helpers are also exported from the compiler package root
+for build-time tooling; runtime renderers should consume the generated schema.
 
 ### Registration
 
@@ -287,11 +298,17 @@ deterministically sorted and covered by the compiler's stale, orphan, and
 double-generation gates. With no contributions the file is absent, preserving
 the existing generated output byte-for-byte.
 
-`db:migrate` applies the registry after the generated tables and before the
-grant sweep. Each migration and its ledger write run in one transaction under
-`plugin:<plugin>:<version>` in `platform.schema_migrations`. The ledger stores
-the exact SQL checksum. A rerun skips an identical entry; changing its SQL or
-checksum fails migration and readiness. Ledger entries absent from an older
+`db:migrate` applies `beforeGenerated` entries after host migrations but before
+generated-schema drift is evaluated. This phase is reserved for versioned,
+data-preserving ownership cutovers that make the live schema compatible with
+the new generated manifest. Entries with omitted phase (and explicit
+`afterGenerated`) retain the historical position after generated tables and
+before the grant sweep. Each migration and its ledger write run in one
+transaction under `plugin:<plugin>:<version>` in `platform.schema_migrations`.
+The ledger stores the exact SQL checksum; `beforeGenerated` additionally binds
+its phase into that checksum. A rerun skips an identical entry; changing its
+phase, SQL or checksum fails migration and readiness. Legacy post-generated
+checksums remain byte-compatible. Ledger entries absent from an older
 registry are reported as unexpected but tolerated so an image rollback remains
 serviceable. Applied contributions are still immutable: retain old entries in
 forward builds and add a new version for an additive roll-forward.

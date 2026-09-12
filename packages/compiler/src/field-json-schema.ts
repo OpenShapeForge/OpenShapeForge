@@ -14,9 +14,16 @@
  * reference-data snapshot.
  */
 
-import type { CompiledField } from "./authoring/types.js";
+import type {
+  CompiledField,
+  ComponentCatalog,
+  Field,
+  FieldDefinition,
+  SemanticTypeDefinition,
+} from "./authoring/types.js";
 import type { LocalizedText } from "./authoring/types/common.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
+import { resolveModelFields } from "./authoring/compiler/model.js";
 import fieldDefinitionAuthoringSchema from "../config/schemas/field-definition.schema.json" with {
   type: "json",
 };
@@ -56,6 +63,10 @@ export type SchemaSourceField = {
   key: string;
   valueType?: string;
   cardinality?: unknown;
+  cardinalityBounds?: {
+    min?: number;
+    max?: number | "unbounded";
+  };
   required?: boolean;
   defaultValue?: unknown;
   semanticType?: string;
@@ -220,6 +231,23 @@ export function isCollection(field: SchemaSourceField): boolean {
   return field.cardinality === "collection";
 }
 
+function applyCollectionBounds(
+  array: JsonObject,
+  field: SchemaSourceField,
+): JsonObject {
+  const minItems = numericRule(field.validation?.minItems);
+  const cardinalityMin = field.cardinalityBounds?.min;
+  const effectiveMin = minItems === undefined
+    ? cardinalityMin
+    : cardinalityMin === undefined
+      ? minItems
+      : Math.max(minItems, cardinalityMin);
+  if (effectiveMin !== undefined) array.minItems = effectiveMin;
+  const cardinalityMax = field.cardinalityBounds?.max;
+  if (typeof cardinalityMax === "number") array.maxItems = cardinalityMax;
+  return array;
+}
+
 /**
  * Wrap a finished scalar schema as an array. The scalar shape becomes the item
  * shape; a description on the array itself is more useful than one buried in
@@ -232,9 +260,7 @@ export function applyCollectionShape(
   const { description, ...items } = scalar;
   const array: JsonObject = { type: "array", items };
   if (description !== undefined) array.description = description;
-  const minItems = numericRule(field.validation?.minItems);
-  if (minItems !== undefined) array.minItems = minItems;
-  return array;
+  return applyCollectionBounds(array, field);
 }
 
 /**
@@ -485,9 +511,7 @@ export function compiledFieldSchemaWithoutDefinitions(
       array.items = items;
     }
   }
-  const minItems = numericRule(field.validation?.minItems);
-  if (minItems !== undefined) array.minItems = minItems;
-  return array;
+  return applyCollectionBounds(array, field);
 }
 
 /** Project one resolved entity field and bundle reusable definitions at the schema root. */
@@ -523,4 +547,51 @@ export function compiledObjectSchema(
   return bundleFieldDefinitionSchema(
     compiledObjectSchemaWithoutDefinitions(fields, referentiedata, options),
   );
+}
+
+export type FieldSchemaCompiler = {
+  /** Resolve semantic defaults and nested fields exactly like entity compilation. */
+  compile(fields: readonly FieldDefinition[]): CompiledField[];
+  /** Compile and project one authored field to its complete value schema. */
+  field(field: FieldDefinition, options?: CompiledFieldSchemaOptions): JsonObject;
+  /** Compile and project an authored field list to a strict object schema. */
+  object(
+    fields: readonly FieldDefinition[],
+    options?: CompiledFieldSchemaOptions & { requireRequired?: boolean },
+  ): JsonObject;
+};
+
+/**
+ * Bind the canonical field compiler to the resolved authoring catalogs once.
+ * Compiler plugins use this build-time capability instead of implementing a
+ * second FieldDefinition-to-JSON-Schema normalizer.
+ */
+export function createFieldSchemaCompiler(input: {
+  componentCatalog: ComponentCatalog;
+  semanticTypes?: Record<string, SemanticTypeDefinition>;
+  referentiedata?: CoreReferentiedataSnapshot;
+}): FieldSchemaCompiler {
+  const compile = (fields: readonly FieldDefinition[]) =>
+    resolveModelFields(
+      fields.map((field) => field as Field),
+      input.componentCatalog,
+      input.semanticTypes,
+    );
+  return {
+    compile,
+    field: (field, options) =>
+      compiledFieldSchema(
+        compile([field])[0]!,
+        input.referentiedata ?? {},
+        options,
+      ),
+    object: (fields, options = {}) => {
+      const { requireRequired = true, ...schemaOptions } = options;
+      return compiledObjectSchema(
+        compile(fields),
+        input.referentiedata ?? {},
+        { ...schemaOptions, requireRequired },
+      );
+    },
+  };
 }

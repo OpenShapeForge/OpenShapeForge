@@ -46,6 +46,19 @@ export interface LoadedArtifacts {
   viewDefinition: ViewDefinition | null;
 }
 
+/** Catalogs that bind the public build-time FieldDefinition schema compiler. */
+export function loadFieldCompilationCatalogs(authoringDir: string): {
+  componentCatalog: ComponentCatalog;
+  semanticTypes: Record<string, SemanticTypeDefinition>;
+} {
+  return {
+    componentCatalog: loadYaml<ComponentCatalog>(
+      join(authoringDir, "catalogs", "components.yaml"),
+    ),
+    semanticTypes: loadSemanticTypes(authoringDir),
+  };
+}
+
 const SAFE_IDENTIFIER = /^[a-z][a-z0-9-]*$/i;
 
 function validateIdentifier(name: string, context: string): void {

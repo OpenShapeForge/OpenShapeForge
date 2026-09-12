@@ -412,6 +412,34 @@ function realmFrom(config: AuthorizationConfigFile) {
 }
 
 describe("service-account client role grants", () => {
+  test("projects one tenant-bound automatic identity with explicit roles, not employee claims", () => {
+    const config = baseConfig();
+    config.keycloak.clients = [{ id: "automatic-org", kind: "serviceAccount", secret: "local-test",
+      serviceAccountTenantId: "11111111-1111-4111-8111-111111111111", organizationAutomation: true,
+      serviceAccountClientRoles: { "erp-provider": ["Workflow.All.ReadWrite"] } }];
+    const realm = JSON.parse(generateKeycloakRealmArtifacts([], config)[0]!.contents);
+    const client = realm.clients.find((entry: any) => entry.clientId === "automatic-org");
+    expect(client.attributes).toEqual({ "osf.serviceAccountTenantId": "11111111-1111-4111-8111-111111111111", "osf.organizationAutomation": "true" });
+    expect(client.standardFlowEnabled).toBe(false);
+    expect(client.directAccessGrantsEnabled).toBe(false);
+    expect(client.protocolMappers.some((entry: any) => entry.name === "tid-mapper")).toBe(true);
+    expect(client.protocolMappers.some((entry: any) => entry.config["claim.name"] === "act")).toBe(false);
+    expect(realm.users.find((entry: any) => entry.serviceAccountClientId === "automatic-org").attributes.tid)
+      .toEqual(["11111111-1111-4111-8111-111111111111"]);
+  });
+
+  test("rejects automatic identities without tenant/explicit grants and ambiguous tenant bindings", () => {
+    const config = baseConfig();
+    const client = { id: "automatic-org", kind: "serviceAccount" as const, secret: "local-test", organizationAutomation: true };
+    config.keycloak.clients = [client];
+    expect(() => generateKeycloakRealmArtifacts([], config)).toThrow("explicit tenant");
+    const valid = { ...client, serviceAccountTenantId: "11111111-1111-4111-8111-111111111111", serviceAccountClientRoles: { "erp-provider": ["Workflow.All.Read"] } };
+    config.keycloak.clients = [valid, { ...valid, id: "other" }];
+    expect(() => generateKeycloakRealmArtifacts([], config)).toThrow("only one");
+    config.keycloak.clients = [{ ...valid, kind: "gateway" }];
+    expect(() => generateKeycloakRealmArtifacts([], config)).toThrow("require kind serviceAccount");
+  });
+
   test("emits a synthetic service-account user carrying the realm-management role", () => {
     const config = baseConfig();
     config.keycloak.clients = [

@@ -160,6 +160,7 @@ interface KeycloakClient {
   webOrigins?: string[];
   defaultClientScopes?: string[];
   protocolMappers?: KeycloakProtocolMapper[];
+  attributes?: Record<string, string>;
 }
 
 interface KeycloakIdentityProvider {
@@ -584,6 +585,19 @@ function buildClient(
         directAccessGrantsEnabled: false,
         serviceAccountsEnabled: true,
         standardFlowEnabled: false,
+        ...(def.serviceAccountTenantId ? {
+          defaultClientScopes: ["basic", "roles"],
+          // Only the tenant and resource audiences: an automatic identity must
+          // not carry the gateway's employee/organization-person claims.
+          protocolMappers: [
+            ...gatewayProtocolMappers([]).filter((mapper) => mapper.name === "tid-mapper"),
+            ...audienceMappers(resourceClientIds),
+          ],
+          attributes: {
+            "osf.serviceAccountTenantId": def.serviceAccountTenantId,
+            ...(def.organizationAutomation ? { "osf.organizationAutomation": "true" } : {}),
+          },
+        } : {}),
       };
   }
 }
@@ -1330,6 +1344,23 @@ export function generateKeycloakRealmArtifacts(
     clientRolesOut[clientId] = existing;
   }
 
+  const automationTenants = new Set<string>();
+  for (const client of clientDefs) {
+    if ((client.serviceAccountTenantId || client.organizationAutomation) && client.kind !== "serviceAccount") {
+      throw new Error(`Client ${client.id}: organization identity settings require kind serviceAccount.`);
+    }
+    if (client.serviceAccountTenantId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(client.serviceAccountTenantId)) {
+      throw new Error(`Client ${client.id}: serviceAccountTenantId must be a tenant UUID.`);
+    }
+    if (client.organizationAutomation) {
+      if (!client.serviceAccountTenantId || !client.serviceAccountClientRoles ||
+          Object.values(client.serviceAccountClientRoles).every((roles) => roles.length === 0)) {
+        throw new Error(`Client ${client.id}: automatic Operations require an explicit tenant and service account role grants.`);
+      }
+      if (automationTenants.has(client.serviceAccountTenantId)) throw new Error("An organization may have only one automatic service identity.");
+      automationTenants.add(client.serviceAccountTenantId);
+    }
+  }
   const clients = clientDefs.map((c) => buildClient(c, resourceClientIds, dev));
 
   // External identity providers: host-authored, emitted unchanged, none by
@@ -1374,14 +1405,15 @@ export function generateKeycloakRealmArtifacts(
     .filter(
       (c) =>
         c.kind === "serviceAccount" &&
-        c.serviceAccountClientRoles &&
-        Object.keys(c.serviceAccountClientRoles).length > 0,
+        (c.serviceAccountTenantId || (c.serviceAccountClientRoles &&
+        Object.keys(c.serviceAccountClientRoles).length > 0)),
     )
     .map((c) => ({
       username: `service-account-${c.id}`,
       enabled: true,
       serviceAccountClientId: c.id,
       clientRoles: c.serviceAccountClientRoles,
+      ...(c.serviceAccountTenantId ? { attributes: { tid: [c.serviceAccountTenantId] } } : {}),
     }));
 
   const legacyEvents = authConfig.keycloak?.realm;

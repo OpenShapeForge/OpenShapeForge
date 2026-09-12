@@ -23,6 +23,8 @@ export type PluginSessionCredential =
 export type PluginSessionContext = {
   tenantId: string | null;
   userId: string | null;
+  /** Opaque host binding to the verified bearer login session, when available. */
+  loginSessionBinding?: string;
   userDisplayName?: string | null;
   roles: string[];
   oauthScopes?: string[];
@@ -190,6 +192,10 @@ export type PluginDatabase = {
 };
 
 export type PluginPlatformServices = {
+  /** Server configuration, never a service identity selected in operation input. */
+  durableOperations?: {
+    organizationServiceIdentity(session: PluginSessionContext): Promise<{ serviceIdentityId: string }>;
+  };
   db: PluginDatabase;
   schemas: {
     fields: RuntimeFieldSchemaCompiler;
@@ -258,6 +264,23 @@ export type RuntimeWorkerOperationExecutor = {
   ): Promise<RuntimeOperationExecutionResult>;
 };
 
+/** References only: core resolves all authority and operation input from the claimed work. */
+export type RuntimeDurableWorkReference = {
+  workId: string;
+  attempt: number;
+  workerId: string;
+};
+
+export type RuntimeResolvedOperationWork = {
+  tenantId: string;
+  serviceIdentityId: string;
+  operation: { id: string; input?: Record<string, unknown>; idempotencyKey: string };
+};
+
+export type RuntimeWorkerOperationBroker = RuntimeWorkerOperationExecutor & {
+  authorize(reference: RuntimeDurableWorkReference): Promise<RuntimeDurableOperationRequest>;
+};
+
 /** Minimal structured logger shared by every contributed worker. */
 export type RuntimeWorkerLogger = {
   info(payload: Record<string, unknown>, message: string): void;
@@ -270,12 +293,15 @@ export type RuntimeWorkerLogger = {
  *
  * The database is deliberately generic: core supplies its worker-role Kysely
  * connection, while this public package exposes no generated application
- * schema. Durable Operation authority is not part of this lifecycle context;
- * it remains a separate core-minted capability boundary.
+ * schema. The optional broker crosses into canonical Operations using a fresh
+ * organization service identity; it never widens this queue-only DB connection.
  */
 export type RuntimeWorkerContextContract<Database> = {
   db: Database;
   log: RuntimeWorkerLogger;
+  /** The host's active generated registries, with no database or identity authority. */
+  schemas?: PluginPlatformServices["schemas"];
+  durableOperations?: RuntimeWorkerOperationBroker;
 };
 
 export type RuntimeWorkerHandle = {
@@ -285,6 +311,15 @@ export type RuntimeWorkerHandle = {
 
 export type RuntimeWorkerContract<Context> = {
   start(context: Context): RuntimeWorkerHandle | Promise<RuntimeWorkerHandle>;
+  /**
+   * Core calls the registered implementation, not a callback supplied by the
+   * poll loop. Read the exact current claim and active owning work from DB;
+   * reject a different worker, attempt, cancelled owner or absent identity.
+   */
+  resolveOperationWork?(
+    context: Context,
+    reference: RuntimeDurableWorkReference,
+  ): Promise<RuntimeResolvedOperationWork | undefined>;
 };
 
 export type ModuleRuntimeContextContract<Database, Platform> = {

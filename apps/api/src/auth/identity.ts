@@ -22,6 +22,8 @@ import {
 } from "./identity-link.js";
 // ---- end identity ↔ Relation link ----
 import { resolveApiKeySession } from "./api-key/resolve.js";
+import { loginSessionBindingFromClaims } from "./login-session-binding.js";
+import { configuredOrganizationServiceAccount } from "./organization-service-identities.js";
 import {
   bindOrganizationResource,
   OrganizationBindingError,
@@ -518,8 +520,11 @@ export async function resolveSessionContext(
       // A person's first session in a tenant links (or records) the Relation
       // they act as; later sessions read it back. Never blocks authentication.
       const personClaims = identityClaimsFromToken(claims as Record<string, unknown>);
+      // An explicitly configured client-credentials identity is not a person.
+      // Never infer this from a username prefix alone or from unverified input.
+      const serviceAccount = configuredOrganizationServiceAccount(claims as Record<string, unknown>, tenantId);
       const relation =
-        tenantId && identity.userId && options.db && personClaims
+        !serviceAccount && tenantId && identity.userId && options.db && personClaims
           ? await resolveIdentityLink(
               options.db,
               { tenantId, userId: identity.userId, roles, groups, scope },
@@ -545,10 +550,14 @@ export async function resolveSessionContext(
         relation?.needsRoleAssignment || invitedRoles.length > 0
           ? resolveScope(effectiveRoles, groups)
           : scope;
+      const loginSessionBinding = loginSessionBindingFromClaims(
+        claims as Record<string, unknown>,
+      );
       // ---- end identity ↔ Relation link ----
       return {
         tenantId,
         userId: identity.userId,
+        ...(loginSessionBinding ? { loginSessionBinding } : {}),
         userDisplayName: relation?.displayName ?? null,
         roles: effectiveRoles,
         oauthScopes: identity.scopes ?? [],

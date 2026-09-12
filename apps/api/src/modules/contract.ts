@@ -283,6 +283,9 @@ export type ModuleConnectionResolution =
     };
 
 export type ModulePlatformServices = {
+  durableOperations?: {
+    organizationServiceIdentity(session: TrustedSessionContext): Promise<{ serviceIdentityId: string }>;
+  };
   db: {
     withSession<T>(
       session: TrustedSessionContext,

@@ -24,6 +24,8 @@ export type SessionCredential = "none" | "bearer" | "api-key" | "trusted-context
 export type TrustedSessionContext = {
   tenantId: string | null;
   userId: string | null;
+  /** Opaque core binding to the verified bearer login session, when available. */
+  loginSessionBinding?: string;
   /** Verified tenant-local Relation label; display only, never authorization. */
   userDisplayName?: string | null;
   roles: string[];

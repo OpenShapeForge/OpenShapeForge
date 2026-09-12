@@ -27,6 +27,8 @@
  */
 import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js";
 import { WORKER_ROLE } from "../db/migrations/worker-role.js";
+import { configuredDurableWorkerBroker } from "../operations/durable-worker.js";
+import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
 import type { ModuleWorker, ModuleWorkerHandle, ModuleWorkerLogger } from "../modules/contract.js";
 import {
   closeRuntimeModules,
@@ -207,9 +209,15 @@ export async function startWorkerRole(
       );
     }
 
+    const context = { db: databaseRuntime.db, log,
+      schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas } };
+    const resolver = resolved.worker.resolveOperationWork;
+    const durableOperations = resolver
+      ? configuredDurableWorkerBroker((reference) => resolver(context, reference), options.env)
+      : undefined;
     const handle: ModuleWorkerHandle = await resolved.worker.start({
-      db: databaseRuntime.db,
-      log,
+      ...context,
+      ...(durableOperations ? { durableOperations } : {}),
     });
     log.info({ role, module: resolved.module }, `Worker role "${role}" started.`);
 

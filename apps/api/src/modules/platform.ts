@@ -40,6 +40,7 @@ import { resolveConnectionValues } from "./connection-secrets.js";
 import { connectSocket } from "./socket-egress.js";
 import { classifyDatabaseError } from "../db/database-refusals.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "./field-schemas.js";
+import { organizationServiceIdentities } from "../auth/organization-service-identities.js";
 
 /**
  * Narrow a module's selector to exactly one form before it reaches a query.
@@ -232,6 +233,16 @@ export class ModulePlatformRuntime {
   constructor(db: OpenShapeForgeDatabase) {
     this.#db = db;
     this.services = {
+      durableOperations: {
+        organizationServiceIdentity: async (session) => {
+          if (!this.#acceptsScopedSession(session) || !session.tenantId || !session.userId) {
+            throw new Error("Service identity resolution requires a live verified organization session.");
+          }
+          const identity = organizationServiceIdentities().find((entry) => entry.tenantId === session.tenantId);
+          if (!identity) throw new Error("No automatic service identity is configured for this organization.");
+          return { serviceIdentityId: identity.clientId };
+        },
+      },
       db: {
         withSession: (session, fn) => {
           if (!this.#acceptsScopedSession(session)) {

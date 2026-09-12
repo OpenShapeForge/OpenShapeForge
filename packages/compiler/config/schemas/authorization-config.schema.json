@@ -162,6 +162,15 @@
                 "description": "Explicit CORS web-origin allow-list for gateway clients. Wildcards ('*') are forbidden.",
                 "items": { "type": "string", "minLength": 1, "not": { "pattern": "\\*" } }
               },
+              "serviceAccountTenantId": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                "description": "Tenant bound to this service account, emitted as its verified tid claim. Only serviceAccount clients may declare this."
+              },
+              "organizationAutomation": {
+                "type": "boolean",
+                "description": "Designate this tenant service account for automatic Operations. At most one per tenant; requires explicit tenant and client role grants."
+              },
               "serviceAccountClientRoles": {
                 "type": "object",
                 "description": "Client roles granted to this client's own service account (serviceAccount kind only), keyed by clientId. Emitted as a synthetic service-account-<id> user in the realm export.",

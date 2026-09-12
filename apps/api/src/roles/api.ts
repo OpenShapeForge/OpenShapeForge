@@ -75,6 +75,7 @@ import {
 } from "./api-readiness.js";
 import {
   bindOperationHandlers,
+  entityPluginOperationContracts,
   operationModulesConfigured,
   listOperationContracts,
   registerRuntimeOperationRestRoutes,
@@ -82,6 +83,10 @@ import {
   runtimeStaticOperationRegistrations,
   type OperationContract,
 } from "../operations/runtime.js";
+import {
+  createEntityPluginExecutor,
+  registerEntityPluginExecutor,
+} from "../operations/entity/plugin-executor.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -360,12 +365,23 @@ export function createApiApp(options: {
     // stronger promise: every generated transport points at its handler, so a
     // load/init failure must stop boot instead of silently deleting the API.
     // A failed module counts as configured for exactly that reason.
+    const entityPluginContracts = entityPluginOperationContracts();
+    const allOperationContracts = [...operationContracts, ...entityPluginContracts];
     const operationsConfigured = operationModulesConfigured(
       [...modules.loaded, ...modules.failures],
-      operationContracts,
+      allOperationContracts,
     );
-    if (operationsConfigured) {
-      bindOperationHandlers(initialised.loaded, operationContracts);
+    if (operationsConfigured || entityPluginContracts.length > 0) {
+      const bindings = bindOperationHandlers(
+        initialised.loaded,
+        allOperationContracts,
+      );
+      if (databaseRuntime && entityPluginContracts.length > 0) {
+        registerEntityPluginExecutor(
+          databaseRuntime.db,
+          createEntityPluginExecutor({ bindings, runtime: moduleContext }),
+        );
+      }
       modulePlatform?.registerStaticOperations(
         runtimeStaticOperationRegistrations(
           initialised.loaded,

@@ -135,8 +135,26 @@ export type EntityOperationContract = EntityOperationRef & {
   entityName: string;
   name: string | Readonly<Record<string, string>>;
   description: string | Readonly<Record<string, string>>;
+  implementation?: { type: "entity" } | { type: "plugin"; plugin: string; handler: string };
+  target?:
+    | { entityId: string; entityName: string; scope: "collection" }
+    | { entityId: string; entityName: string; scope: "record"; inputField: string };
+  errors?: import("../runtime.js").OperationContract["errors"];
+  interfaces?: {
+    rest?: false | {
+      method?: string;
+      path?: string;
+      response?: { status?: number; kind?: "json" | "binary" | "stream"; contentType?: string };
+    };
+    graphql?: false | { field?: string; kind?: "query" | "mutation" };
+    mcp?: false | { name?: string };
+    web?: false | Record<string, unknown>;
+  };
   input: Record<string, unknown>;
   output: Record<string, unknown>;
+  /** Concrete compiler projections, including platform mutation controls. */
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
   authorization: {
     action: GeneratedCrudOperation;
     roles: string[];
@@ -148,7 +166,7 @@ export type EntityOperationContract = EntityOperationRef & {
     external: "none" | "read" | "write";
   };
   reliability: {
-    idempotency: { mode: "natural" | "keyed" | "none" };
+    idempotency: { mode: "natural" | "keyed" | "none"; inputField?: string };
   };
   prerequisites?: readonly OperationPrerequisite[];
   interaction: {
@@ -165,6 +183,8 @@ export type EntityOperationContract = EntityOperationRef & {
 };
 
 export type EntityOperationInput = ListPageInput & {
+  /** Plugin-backed CRUD takes its canonical authored input, not forced values. */
+  [key: string]: unknown;
   id?: string;
   values?: Record<string, unknown>;
   expectedVersion?: string;

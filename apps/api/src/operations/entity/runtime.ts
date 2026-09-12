@@ -4,6 +4,7 @@ import {
   operationErrorOf,
   type OperationConcurrency,
   type OperationError,
+  type OperationTargetBinding,
 } from "@openshapeforge/operations";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DbSessionInput } from "../../db/session.js";
@@ -48,6 +49,7 @@ import {
 } from "./record-permissions.js";
 import { sessionOperationRolesAllow } from "../session-authorization.js";
 import { requireOperationPrerequisites } from "../prerequisite-receipts.js";
+import { executeEntityPlugin } from "./plugin-executor.js";
 
 const COLLECTION_OFFER_INTENTS: readonly GeneratedCrudExposureOperation[] = [
   "list",
@@ -566,6 +568,7 @@ export function getEntityOperationOffers(
             operation: reference,
             available: true as const,
             ...(operation.concurrency ? { concurrency: operation.concurrency } : {}),
+            ...entityPluginOfferBinding(operation, target),
           };
     });
   const scope = target ? "record" : "collection";
@@ -604,6 +607,32 @@ export function getEntityOperationOffers(
       };
     });
   return [...generatedOffers, ...customOffers];
+}
+
+/** Bind a plugin-backed record mutation to its authorized target. */
+export function entityPluginOfferBinding(
+  operation: EntityOperationContract,
+  target?: { id: string; version?: string },
+): { binding: OperationTargetBinding } | Record<string, never> {
+  if (
+    !target ||
+    operation.implementation?.type !== "plugin" ||
+    operation.intent !== "update" ||
+    operation.target?.scope !== "record" ||
+    !operation.target.inputField
+  ) {
+    return {};
+  }
+  return {
+    binding: {
+      target: {
+        entityId: operation.target.entityId,
+        id: target.id,
+        ...(target.version ? { version: target.version } : {}),
+      },
+      input: { [operation.target.inputField]: target.id },
+    },
+  };
 }
 
 function offerTarget(
@@ -651,6 +680,28 @@ export async function executeEntityOperation(
     // even though the underlying mutation still refuses the write later.
     requireEntityOperation(table, request.operation.intent, session);
     const entityName = authoredEntityId(table);
+    const operation = entityOperationContract(request.operation.id);
+    if (operation.implementation?.type === "plugin") {
+      if (operation.intent !== "create" && operation.intent !== "update") {
+        throw generatedCrudError(
+          `Entity operation ${operation.id} has an unsupported plugin-backed intent.`,
+          "INTERNAL_SERVER_ERROR",
+        );
+      }
+      await requireOperationPrerequisites(db, session, operation);
+      const data = await executeEntityPlugin(db, session, operation, request.input ?? {});
+      return {
+        intent: operation.intent,
+        data,
+        operations: getEntityOperationOffers(
+          entityName,
+          session,
+          projectedOfferIntents(request, RECORD_OFFER_INTENTS),
+          {},
+          offerTarget(data, table),
+        ),
+      };
+    }
     switch (request.operation.intent) {
       case "list": {
         const connection = await listGeneratedEntities(db, session, {
@@ -718,7 +769,6 @@ export async function executeEntityOperation(
         };
       }
       case "create": {
-        const operation = entityOperationContract(request.operation.id);
         await requireOperationPrerequisites(db, session, operation);
         requireCreateOperationConfirmation(operation, request.input);
         const interactionError = secureInputInteractionError(operation);
@@ -740,7 +790,6 @@ export async function executeEntityOperation(
         };
       }
       case "update": {
-        const operation = entityOperationContract(request.operation.id);
         for (const permission of operation.authorization.recordPermissions ?? []) {
           await assertRecordPermission(
             db,
@@ -793,7 +842,6 @@ export async function executeEntityOperation(
         };
       }
       case "delete": {
-        const operation = entityOperationContract(request.operation.id);
         for (const permission of operation.authorization.recordPermissions ?? []) {
           await assertRecordPermission(
             db,

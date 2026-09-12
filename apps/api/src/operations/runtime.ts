@@ -25,7 +25,12 @@ import type {
   RuntimeOperationDefinition,
   RuntimeOperationExecutionResult,
 } from "@openshapeforge/plugin-runtime";
-import { operationFailure, type OperationEnvelope } from "@openshapeforge/operations";
+import {
+  operationFailure,
+  type OperationEnvelope,
+  type OperationError,
+  type OperationPrerequisite,
+} from "@openshapeforge/operations";
 import {
   invokeModuleDeclarativeService,
   invokeModuleHostOperation,
@@ -44,8 +49,7 @@ import {
   validateEntityVersionInTransaction,
 } from "./entity/edit-leases.js";
 import { getGeneratedCrudTables } from "./entity/catalog.js";
-import { getEntityOperationContracts } from "./entity/runtime.js";
-import type { GeneratedCrudTable } from "./entity/types.js";
+import type { EntityOperationContract, GeneratedCrudTable } from "./entity/types.js";
 import {
   assertRecordPermission,
   assertRecordPermissionInTransaction,
@@ -61,6 +65,8 @@ import type { DB } from "../generated/db/types.js";
 
 export type OperationContract = {
   key: string;
+  /** Static Operations default to invoke; Entity-backed handlers retain CRUD intent. */
+  intent?: "invoke" | "create" | "update";
   plugin: string;
   title: string;
   description: string;
@@ -87,6 +93,7 @@ export type OperationContract = {
         roles?: string[];
         scopes?: string[];
         recordPermission?: RecordPermissionAction;
+        recordPermissions?: readonly RecordPermissionAction[];
       }
     | { mode: "custom"; scheme: string; description: string; securityScheme: Record<string, unknown> };
   tenancy: { mode: "required" | "derived" | "none"; description?: string };
@@ -97,6 +104,7 @@ export type OperationContract = {
   };
   concurrency?: import("@openshapeforge/operations").OperationConcurrency;
   confirmation?: import("@openshapeforge/operations").OperationConfirmation;
+  prerequisites?: readonly OperationPrerequisite[];
   transports: {
     rest: { method: string; path: string; response: { status?: number; kind: "json" | "binary" | "stream"; contentType?: string } };
     mcp: { enabled: boolean; name?: string; reason?: string };
@@ -105,10 +113,17 @@ export type OperationContract = {
   };
 };
 
-const catalog = rawCatalog as unknown as { version: number; operations: OperationContract[] };
+const catalog = rawCatalog as unknown as {
+  version: number;
+  operations: OperationContract[];
+  entityOperations?: EntityOperationContract[];
+};
 function operationAjv(coerceTypes = false) {
   const instance = new Ajv2020.default({ strict: true, allErrors: true, coerceTypes });
   (addFormats as unknown as (target: typeof instance) => unknown)(instance);
+  // Presentation-only binding used by generated forms. It does not validate
+  // or authorize a value, but strict AJV must recognize the canonical keyword.
+  instance.addKeyword({ keyword: "x-osf-sourceField", schemaType: "string", valid: true });
   return instance;
 }
 
@@ -196,12 +211,155 @@ export function listOperationContracts(): readonly OperationContract[] {
   return catalog.operations;
 }
 
+function operationText(
+  value: string | Readonly<Record<string, string>>,
+  fallback: string,
+): string {
+  if (typeof value === "string") return value;
+  return value.en ?? value.nl ??
+    Object.entries(value).sort(([left], [right]) => left.localeCompare(right))[0]?.[1] ??
+    fallback;
+}
+
+/**
+ * Adapt plugin-backed Entity CRUD into the existing module handler boundary.
+ * These contracts are execution-only: entity REST/GraphQL/MCP projections
+ * remain the sole public discovery surface for the canonical Entity Operation.
+ */
+export function entityPluginOperationContracts(): readonly OperationContract[] {
+  return (catalog.entityOperations ?? [])
+    .filter((operation) => operation.implementation?.type === "plugin")
+    .map((operation) => {
+      const table = getGeneratedCrudTables().find(
+        (candidate) => candidate.source?.authoringEntityName === operation.entityName,
+      );
+      if (!table) {
+        throw new Error(
+          `Plugin-backed entity Operation "${operation.id}" has no generated table.`,
+        );
+      }
+      return entityPluginOperationContract(operation, table);
+    });
+}
+
+/** Pure adapter exported for focused compiler/runtime contract tests. */
+export function entityPluginOperationContract(
+  operation: EntityOperationContract,
+  table: GeneratedCrudTable,
+): OperationContract {
+  const implementation = operation.implementation;
+  const target = operation.target;
+  if (!implementation || implementation.type !== "plugin" || !target) {
+    throw new Error(
+      `Plugin-backed entity Operation "${operation.id}" has an incomplete runtime target.`,
+    );
+  }
+  if (
+    target.entityId !== operation.entityId ||
+    target.entityName !== operation.entityName ||
+    (operation.intent === "create" && target.scope !== "collection") ||
+    (operation.intent === "update" && target.scope !== "record") ||
+    (operation.intent !== "create" && operation.intent !== "update")
+  ) {
+    throw new Error(
+      `Plugin-backed entity Operation "${operation.id}" has an invalid CRUD target.`,
+    );
+  }
+  if (!operation.inputSchema || !operation.outputSchema) {
+    throw new Error(
+      `Plugin-backed entity Operation "${operation.id}" has no concrete JSON schemas.`,
+    );
+  }
+  const rest = operation.interfaces?.rest === false ? undefined : operation.interfaces?.rest;
+  const graphql = operation.interfaces?.graphql;
+  const mcp = operation.interfaces?.mcp;
+  const idempotency = operation.reliability.idempotency;
+  if (idempotency.mode === "keyed" && !idempotency.inputField) {
+    throw new Error(
+      `Plugin-backed entity Operation "${operation.id}" has no idempotency input field.`,
+    );
+  }
+  const idempotencyInputField = idempotency.inputField;
+  return {
+    key: operation.id,
+    intent: operation.intent,
+    plugin: implementation.plugin,
+    title: operationText(operation.name, operation.id),
+    description: operationText(operation.description, operation.id),
+    handler: implementation.handler,
+    target,
+    inputSchema: operation.inputSchema,
+    outputSchema: operation.outputSchema,
+    errors: operation.errors ?? [],
+    auth: {
+      mode: "session",
+      roles: operation.authorization.roles,
+      ...(operation.intent === "update" &&
+      operation.authorization.recordPermissions?.length
+        ? { recordPermissions: operation.authorization.recordPermissions }
+        : {}),
+    },
+    tenancy: { mode: table.tenantScoped ? "required" : "none" },
+    idempotency: idempotency.mode === "keyed"
+      ? {
+        mode: "idempotency-key",
+        header: "Idempotency-Key",
+        inputField: idempotencyInputField!,
+      }
+      : idempotency.mode === "natural"
+      ? { mode: "intrinsic" }
+      : { mode: "none" },
+    effects: operation.effects,
+    ...(operation.concurrency ? { concurrency: operation.concurrency } : {}),
+    confirmation: operation.interaction.confirmation,
+    ...(operation.prerequisites ? { prerequisites: operation.prerequisites } : {}),
+    transports: {
+      rest: {
+        method: rest && rest.method
+          ? rest.method
+          : operation.intent === "create"
+          ? "POST"
+          : "PATCH",
+        path: rest && rest.path
+          ? rest.path
+          : `/api/operations/${operation.id}/execute`,
+        response: {
+          ...(rest?.response?.status !== undefined
+            ? { status: rest.response.status }
+            : { status: operation.intent === "create" ? 201 : 200 }),
+          kind: rest ? (rest.response?.kind ?? "json") : "json",
+          ...(rest && rest.response?.contentType
+            ? { contentType: rest.response.contentType }
+            : {}),
+        },
+      },
+      mcp: mcp === false
+        ? { enabled: false, reason: "Disabled by the entity interface contract." }
+        : { enabled: true, ...(mcp?.name ? { name: mcp.name } : {}) },
+      graphql: graphql === false
+        ? { enabled: false, reason: "Disabled by the entity interface contract." }
+        : {
+          enabled: true,
+          kind: graphql?.kind ?? "mutation",
+          ...(graphql?.field ? { field: graphql.field } : {}),
+        },
+      typescript: { enabled: false, reason: "Entity adapters own this Operation." },
+    },
+  } satisfies OperationContract;
+}
+
+function operationIntent(
+  operation: OperationContract,
+): "invoke" | "create" | "update" {
+  return operation.intent ?? "invoke";
+}
+
 function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
   const method = entry.operation.transports.rest.method;
   return {
     id: entry.operation.key,
     key: entry.operation.key,
-    intent: "invoke",
+    intent: operationIntent(entry.operation),
     name: entry.operation.title,
     description: entry.operation.description,
     ...(entry.operation.target ? { target: entry.operation.target } : {}),
@@ -224,6 +382,9 @@ function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
             : "none",
       },
     },
+    ...(entry.operation.prerequisites
+      ? { prerequisites: entry.operation.prerequisites }
+      : {}),
     ...(entry.operation.concurrency
       ? { concurrency: entry.operation.concurrency }
       : {}),
@@ -233,7 +394,7 @@ function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
   };
 }
 
-function runtimeOperationError(error: unknown) {
+export function runtimeOperationError(error: unknown) {
   const projected = error instanceof DeclaredOperationError
     ? error.body
     : toHttpError(error).body;
@@ -243,9 +404,13 @@ function runtimeOperationError(error: unknown) {
   return {
     code: typeof candidate?.code === "string"
       ? candidate.code
+      : error instanceof DeclaredOperationError
+      ? error.code
       : "OPERATION_FAILED",
     message: typeof candidate?.message === "string"
       ? candidate.message
+      : error instanceof DeclaredOperationError
+      ? error.message
       : "The Operation failed.",
     ...(typeof candidate?.detail === "string"
       ? { detail: candidate.detail }
@@ -256,6 +421,11 @@ function runtimeOperationError(error: unknown) {
       : {}),
     ...(candidate?.data && typeof candidate.data === "object"
       ? { data: candidate.data as Record<string, unknown> }
+      : {}),
+    ...(Array.isArray(candidate?.violations)
+      ? {
+        violations: candidate.violations as NonNullable<OperationError["violations"]>,
+      }
       : {}),
   };
 }
@@ -322,7 +492,11 @@ export function runtimeStaticOperationRegistrations(
   });
 }
 
-type Bound = { operation: OperationContract; handler: ModuleOperationHandler };
+export type BoundOperation = {
+  operation: OperationContract;
+  handler: ModuleOperationHandler;
+};
+type Bound = BoundOperation;
 const bindingCache = new WeakMap<readonly RuntimeModule[], Map<string, Bound>>();
 
 /**
@@ -354,7 +528,15 @@ export function bindOperationHandlers(
   if (cached) return cached;
   const modulesByName = new Map(modules.map((module) => [module.name, module]));
   const bound = new Map<string, Bound>();
+  const knownOperations = usesGeneratedCatalog
+    ? [...catalog.operations, ...entityPluginOperationContracts()]
+    : operations;
   for (const operation of operations) {
+    if (bound.has(operation.key)) {
+      throw new Error(
+        `Canonical operation id "${operation.key}" is duplicated at runtime.`,
+      );
+    }
     const module = modulesByName.get(operation.plugin);
     if (!module) {
       throw new Error(`Canonical operation "${operation.key}" has no loaded runtime module "${operation.plugin}".`);
@@ -366,7 +548,11 @@ export function bindOperationHandlers(
     bound.set(operation.key, { operation, handler });
   }
   for (const module of modules) {
-    const declared = new Set(operations.filter((operation) => operation.plugin === module.name).map((operation) => operation.handler));
+    const declared = new Set(
+      knownOperations
+        .filter((operation) => operation.plugin === module.name)
+        .map((operation) => operation.handler),
+    );
     const extras = Object.keys(module.operationHandlers ?? {}).filter((handler) => !declared.has(handler));
     if (extras.length > 0) {
       throw new Error(`Runtime module "${module.name}" has operation handlers absent from its compiler contract: ${extras.sort().join(", ")}.`);
@@ -455,10 +641,8 @@ async function assertCurrentRecordPermission(
   context: Parameters<ModuleOperationHandler>[1],
   trx: Transaction<DB>,
 ): Promise<void> {
-  const recordPermission = operation.auth.mode === "session"
-    ? operation.auth.recordPermission
-    : undefined;
-  if (!recordPermission) return;
+  const recordPermissions = operationRecordPermissions(operation);
+  if (recordPermissions.length === 0) return;
   if (!operation.target || operation.target.scope !== "record" ||
     !operation.target.inputField || !context.session || !context.db) {
     throw operationFailure({
@@ -478,19 +662,30 @@ async function assertCurrentRecordPermission(
       }],
     });
   }
-  await assertRecordPermissionInTransaction(
-    trx,
-    context.session,
-    targetTable(operation),
-    targetValue,
-    recordPermission,
-  );
+  for (const permission of recordPermissions) {
+    await assertRecordPermissionInTransaction(
+      trx,
+      context.session,
+      targetTable(operation),
+      targetValue,
+      permission,
+    );
+  }
+}
+
+function operationRecordPermissions(
+  operation: OperationContract,
+): readonly RecordPermissionAction[] {
+  if (operation.auth.mode !== "session") return [];
+  return operation.auth.recordPermissions ??
+    (operation.auth.recordPermission ? [operation.auth.recordPermission] : []);
 }
 
 function protectedCustomOperation(
   operation: OperationContract,
 ): ChallengeProtectedOperation & LeaseProtectedOperation {
-  if (!operation.target) {
+  const intent = operationIntent(operation);
+  if (!operation.target || intent === "create") {
     throw operationFailure({
       code: "INTERNAL_SERVER_ERROR",
       message: "The Operation target is not available.",
@@ -500,7 +695,7 @@ function protectedCustomOperation(
     id: operation.key,
     entityId: operation.target.entityId,
     entityName: operation.target.entityName,
-    intent: "invoke",
+    intent,
     ...(operation.concurrency ? { concurrency: operation.concurrency } : {}),
     interaction: { confirmation: operation.confirmation ?? { mode: "none" } },
   };
@@ -538,15 +733,34 @@ async function invokeCustomOperationWithControls(
       data: { confirmation: { kind: "acknowledgement", requiredValue: true } },
     });
   }
-  const recordPermission = operation.auth.mode === "session"
-    ? operation.auth.recordPermission
-    : undefined;
+  const recordPermissions = operationRecordPermissions(operation);
+  const forcesTransaction = operationIntent(operation) !== "invoke";
   const hasGuard = Boolean(
     operation.concurrency ||
     confirmation.mode === "challenge" ||
-    recordPermission,
+    recordPermissions.length > 0 ||
+    forcesTransaction,
   );
   if (!hasGuard) return invokeHandler(customHandlerInput(operation, input));
+  if (
+    forcesTransaction &&
+    operation.target?.scope === "collection" &&
+    !operation.concurrency &&
+    confirmation.mode !== "challenge" &&
+    recordPermissions.length === 0
+  ) {
+    if (!context.session || !context.db || !context.platform) {
+      throw operationFailure({
+        code: "INTERNAL_SERVER_ERROR",
+        message: "The Entity Operation transaction is unavailable.",
+      });
+    }
+    return withModuleOperationTransaction(
+      context.platform,
+      context.session,
+      () => invokeHandler(customHandlerInput(operation, input)),
+    );
+  }
   if (!operation.target || operation.target.scope !== "record" ||
     !operation.target.inputField || !context.session || !context.db || !context.platform) {
     throw operationFailure({
@@ -589,13 +803,13 @@ async function invokeCustomOperationWithControls(
     ? requireStringControl(input, "leaseToken")
     : undefined;
   const table = targetTable(operation);
-  if (recordPermission) {
+  for (const permission of recordPermissions) {
     await assertRecordPermission(
       context.db,
       context.session,
       table,
       targetValue,
-      recordPermission,
+      permission,
     );
   }
   let confirmationToken: string | undefined;
@@ -632,13 +846,13 @@ async function invokeCustomOperationWithControls(
     context.platform,
     context.session,
     async (trx) => {
-      if (recordPermission) {
+      for (const permission of recordPermissions) {
         await assertRecordPermissionInTransaction(
           trx,
           context.session!,
           table,
           targetValue,
-          recordPermission,
+          permission,
         );
       }
       if (expectedVersion) {
@@ -781,6 +995,14 @@ function decodedOperationSuccess(
   return result;
 }
 
+export type InvokeOperationOptions = {
+  /** Core-owned normalization that runs inside the guarded write transaction. */
+  prepareSuccess?: (
+    result: ModuleOperationSuccessResult,
+    context: Parameters<ModuleOperationHandler>[1],
+  ) => Promise<ModuleOperationSuccessResult> | ModuleOperationSuccessResult;
+};
+
 export async function invokeOperation(
   bound: Bound,
   inputValue: unknown,
@@ -791,6 +1013,7 @@ export async function invokeOperation(
     Parameters<ModuleOperationHandler>[1],
     "invokeHostOperation" | "invokeDeclarativeService"
   >>,
+  options: InvokeOperationOptions = {},
 ): Promise<ModuleOperationSuccessResult> {
   const input = asInput(inputValue);
   const run = async (activeContext: Parameters<ModuleOperationHandler>[1]) => {
@@ -885,25 +1108,36 @@ export async function invokeOperation(
         }
         throw new DeclaredOperationError(declaration, result);
       }
-      if (result.resultKind !== undefined &&
-        (result.resultKind !== "operation-envelope" || !isCanonicalSuccessEnvelope(result.value))) {
+      let success = result as ModuleOperationSuccessResult;
+      if (options.prepareSuccess) {
+        success = await options.prepareSuccess(success, activeContext);
+        if (!success || typeof success !== "object" || Array.isArray(success)) {
+          throw new HttpError(
+            500,
+            "HANDLER_CONTRACT_VIOLATION",
+            "Core Operation result normalization returned an invalid success result.",
+          );
+        }
+      }
+      if (success.resultKind !== undefined &&
+        (success.resultKind !== "operation-envelope" || !isCanonicalSuccessEnvelope(success.value))) {
         throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned an invalid canonical success envelope.");
       }
       const declaredStatus = bound.operation.transports.rest.response.status ?? 200;
-      if (result.status !== undefined && result.status !== declaredStatus) {
+      if (success.status !== undefined && success.status !== declaredStatus) {
         throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned an undeclared success status.");
       }
-      if (bound.operation.transports.rest.response.kind === "json" && !validation.output(result.value)) {
+      if (bound.operation.transports.rest.response.kind === "json" && !validation.output(success.value)) {
         throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned a value outside its canonical output schema.");
       }
-      if (result.mcp !== undefined && !isMcpProjection(result.mcp)) {
+      if (success.mcp !== undefined && !isMcpProjection(success.mcp)) {
         throw new HttpError(
           500,
           "HANDLER_CONTRACT_VIOLATION",
           "Operation handler returned an MCP projection that is not a list of well-formed content blocks.",
         );
       }
-      return result;
+      return success;
     };
     const execute = async (markEffectsAdmitted: () => void) => {
       const result = await invokeCustomOperationWithControls(
@@ -915,7 +1149,7 @@ export async function invokeOperation(
           return invokeHandler(handlerInput);
         },
       );
-      const prerequisiteTargets = getEntityOperationContracts().filter((operation) =>
+      const prerequisiteTargets = (catalog.entityOperations ?? []).filter((operation) =>
         operation.prerequisites?.some((prerequisite) =>
           prerequisite.operation === bound.operation.key
         )
@@ -968,7 +1202,7 @@ export async function invokeOperation(
     }
     const field = bound.operation.idempotency.inputField!;
     return executeKeyedOperation(activeContext.db, activeContext.session, {
-      operation: { id: bound.operation.key, intent: "invoke" },
+      operation: { id: bound.operation.key, intent: operationIntent(bound.operation) },
       idempotencyKey: typeof input[field] === "string" ? input[field] : "",
       input,
       idempotencyInputField: field,

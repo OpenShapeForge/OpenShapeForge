@@ -16,6 +16,29 @@ test("describes the portable runtime-module boundary", () => {
   expect(module.name).toBe("example");
 });
 
+test("describes host-started workers through the public module contract", async () => {
+  const events: string[] = [];
+  const module = {
+    name: "worker-probe",
+    workers: {
+      probe: {
+        start({ log }) {
+          log.info({}, "started");
+          events.push("start");
+          return { stop: async () => void events.push("stop") };
+        },
+      },
+    },
+  } satisfies RuntimeModule;
+
+  const handle = await module.workers.probe.start({
+    db: {} as never,
+    log: { info() {}, warn() {}, error() {} },
+  });
+  await handle.stop();
+  expect(events).toEqual(["start", "stop"]);
+});
+
 test("describes record-derived Operations without transport-specific names", async () => {
   const provider = {
     id: "example.records",

@@ -42,6 +42,10 @@ import type {
   RuntimeOperationProvider,
   RuntimeOperationRequest,
   RuntimeModuleContract,
+  RuntimeWorkerContextContract,
+  RuntimeWorkerContract,
+  RuntimeWorkerHandle,
+  RuntimeWorkerLogger,
 } from "@openshapeforge/plugin-runtime";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Kysely, Transaction } from "kysely";
@@ -452,11 +456,7 @@ export type ModuleReadinessCheck = PublicModuleReadinessCheck;
  * Fastify — or, worse, reach for `console` and land outside the process's log
  * stream.
  */
-export type ModuleWorkerLogger = {
-  info(payload: Record<string, unknown>, message: string): void;
-  warn(payload: Record<string, unknown>, message: string): void;
-  error(payload: Record<string, unknown>, message: string): void;
-};
+export type ModuleWorkerLogger = RuntimeWorkerLogger;
 
 /**
  * What a worker may read when it starts.
@@ -466,22 +466,11 @@ export type ModuleWorkerLogger = {
  * DATABASE_NOT_CONFIGURED; a queue-draining worker with no database has nothing
  * to do at all, so the worker role refuses to start rather than idling.
  */
-export type ModuleWorkerContext = {
-  db: OpenShapeForgeDatabase;
-  log: ModuleWorkerLogger;
-};
+export type ModuleWorkerContext = RuntimeWorkerContextContract<
+  OpenShapeForgeDatabase
+>;
 
-export type ModuleWorkerHandle = {
-  /**
-   * Stop, and settle only AFTER the in-flight tick has finished.
-   *
-   * A `stop()` that returns while a command is still claimed leaves the row
-   * `processing` until the visibility timeout reclaims it — a shutdown that
-   * costs the next worker a delay and an attempt, every time, which is exactly
-   * the sort of thing nobody notices until the retry bound is reached.
-   */
-  stop(): Promise<void>;
-};
+export type ModuleWorkerHandle = RuntimeWorkerHandle;
 
 /**
  * A long-running process a module contributes, run by the `worker` role rather
@@ -494,9 +483,7 @@ export type ModuleWorkerHandle = {
  * own OPENSHAPEFORGE_WORKER_DATABASE_URL, never the API's) and presents
  * `app.worker_role` on top, and the queue policies check both.
  */
-export type ModuleWorker = {
-  start(context: ModuleWorkerContext): ModuleWorkerHandle | Promise<ModuleWorkerHandle>;
-};
+export type ModuleWorker = RuntimeWorkerContract<ModuleWorkerContext>;
 
 export type ModuleOperationSuccessResult = PublicModuleOperationSuccessResult<
   CallToolResult["content"]
@@ -526,16 +513,10 @@ export type RuntimeModule = RuntimeModuleContract<
   ModuleOperationHandler,
   FastifyInstance,
   ModuleSeed,
-  RuntimeOperationProvider
+  RuntimeOperationProvider,
+  ModuleWorker
 > & {
   graphql?(context: ModuleRuntimeContext): ModuleGraphqlContribution;
-  /**
-   * Worker roles this module contributes, keyed by role name — the value
-   * `OPENSHAPEFORGE_ROLE` selects. A role name colliding across two modules is
-   * refused at boot rather than silently last-wins, exactly as a GraphQL field
-   * name is.
-   */
-  workers?: Record<string, ModuleWorker>;
   /** Dynamic MCP projection and invocation hooks, evaluated per request. */
   mcp?: RuntimeMcpContribution;
   /** At most one loaded module may own final outbound request execution. */

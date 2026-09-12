@@ -231,6 +231,35 @@ export type RuntimeWorkerOperationExecutor = {
   ): Promise<RuntimeOperationExecutionResult>;
 };
 
+/** Minimal structured logger shared by every contributed worker. */
+export type RuntimeWorkerLogger = {
+  info(payload: Record<string, unknown>, message: string): void;
+  warn(payload: Record<string, unknown>, message: string): void;
+  error(payload: Record<string, unknown>, message: string): void;
+};
+
+/**
+ * Host resources supplied when a contributed worker starts.
+ *
+ * The database is deliberately generic: core supplies its worker-role Kysely
+ * connection, while this public package exposes no generated application
+ * schema. Durable Operation authority is not part of this lifecycle context;
+ * it remains a separate core-minted capability boundary.
+ */
+export type RuntimeWorkerContextContract<Database> = {
+  db: Database;
+  log: RuntimeWorkerLogger;
+};
+
+export type RuntimeWorkerHandle = {
+  /** Settle only after any in-flight claim has stopped using host resources. */
+  stop(): Promise<void>;
+};
+
+export type RuntimeWorkerContract<Context> = {
+  start(context: Context): RuntimeWorkerHandle | Promise<RuntimeWorkerHandle>;
+};
+
 export type ModuleRuntimeContextContract<Database, Platform> = {
   /** Absent in database-free API roles; plugins must degrade safely. */
   db?: Database | undefined;
@@ -321,6 +350,9 @@ export type RuntimeModuleContract<
   Routes,
   Seed,
   OperationProvider = RuntimeOperationProvider,
+  Worker = RuntimeWorkerContract<
+    RuntimeWorkerContextContract<Kysely<PluginDatabaseSchema>>
+  >,
 > = {
   /** Must match the compiler plugin name. */
   name: string;
@@ -330,6 +362,7 @@ export type RuntimeModuleContract<
   restRoutes?(routes: Routes, context: RuntimeContext): void;
   operationHandlers?: Record<string, OperationHandler>;
   operationProviders?: readonly OperationProvider[];
+  workers?: Record<string, Worker>;
   seeds?: Seed[];
 };
 

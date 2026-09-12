@@ -34,6 +34,12 @@ export function loadOperationCatalogs(authoringDir: string): LoadedOperationCata
             `"${operation.implementation.plugin}" must match catalog plugin "${catalog.plugin}".`,
         );
       }
+      if (operation.implementation.action) {
+        throw new Error(
+          `${path} module operation "${key}" cannot claim entity CRUD action ` +
+            `"${operation.implementation.action}".`,
+        );
+      }
       if (operation.target) {
         throw new Error(`${path} module operation "${key}" cannot declare an entity target.`);
       }

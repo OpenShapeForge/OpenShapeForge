@@ -268,10 +268,6 @@ export function entityOperationJsonSchemas(
     format: "uuid",
     description: `Identifier of the ${entityLabel(contract)}.`,
   };
-  const relationships = entityRelationshipKeys(
-    contract,
-    relationshipTargets(contracts),
-  );
   const controls = entityOperationControlSchema(operation);
   const secureInputTarget = contract.entityOperations.create
     ?.interaction.secureInput?.into;
@@ -284,6 +280,45 @@ export function entityOperationJsonSchemas(
       ? { dependentRequired: controls.dependentRequired }
       : {}),
   });
+  if (operation.input.kind === "json-schema") {
+    if (operation.output.kind !== "json-schema") {
+      throw new Error(
+        `Entity Operation "${operation.id}" has mismatched plugin-backed input/output contracts.`,
+      );
+    }
+    const authored = operation.input.schema;
+    const properties = authored.properties;
+    const required = authored.required;
+    if (
+      authored.type !== "object" || !properties || typeof properties !== "object" ||
+      Array.isArray(properties) || (required !== undefined && !Array.isArray(required))
+    ) {
+      throw new Error(
+        `Plugin-backed entity Operation "${operation.id}" input must be an object JSON Schema.`,
+      );
+    }
+    return {
+      inputSchema: {
+        ...authored,
+        properties: { ...properties, ...controls.properties },
+        required: [...((required as string[] | undefined) ?? []), ...controls.required],
+        ...(controls.dependentRequired
+          ? {
+              dependentRequired: {
+                ...((authored.dependentRequired as Record<string, string[]> | undefined) ?? {}),
+                ...controls.dependentRequired,
+              },
+            }
+          : {}),
+      },
+      outputSchema: operation.output.schema,
+    };
+  }
+
+  const relationships = entityRelationshipKeys(
+    contract,
+    relationshipTargets(contracts),
+  );
   const record = entityRecordOutputSchema(contract);
   const nullableRecord = { anyOf: [record, { type: "null" }] };
 

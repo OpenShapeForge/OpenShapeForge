@@ -464,6 +464,76 @@ describe("buildMcpCatalog", () => {
     expect(itemData).toEqual({ type: "object", additionalProperties: true });
   });
 
+  it("keeps plugin-backed CRUD schemas under the canonical generic tools", () => {
+    const pluginBacked = contract({
+      authoringVersion: 2,
+      mcp: {
+        toolPrefix: "widget",
+        tools: "generic",
+        operations: {
+          list: true,
+          get: true,
+          create: true,
+          update: true,
+          delete: true,
+        },
+      },
+    });
+    pluginBacked.entityOperations.create = {
+      ...pluginBacked.entityOperations.create!,
+      implementation: { type: "plugin", plugin: "example", handler: "createWidget" },
+      target: {
+        entityId: pluginBacked.entity.id,
+        entityName: pluginBacked.entity.name,
+        scope: "collection",
+      },
+      input: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["requestKey", "definition"],
+          properties: {
+            requestKey: { type: "string", format: "uuid" },
+            definition: { type: "object", "x-osf-sourceField": "name" },
+          },
+        },
+      },
+      output: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "name"],
+          properties: {
+            id: { type: "string", format: "uuid" },
+            name: { type: "string" },
+          },
+        },
+      },
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+    };
+
+    const catalog = buildMcpCatalog([input(pluginBacked)], "test");
+    const create = catalog.tools.find((tool) => tool.name === "osf_create")!;
+    expect(create.operationId).toBe("Widget.create");
+    expect(create.inputSchema).toMatchObject({
+      required: ["requestKey", "definition"],
+      properties: {
+        requestKey: { type: "string", format: "uuid" },
+        definition: { type: "object", "x-osf-sourceField": "name" },
+      },
+    });
+    expect(create.inputSchema.properties).not.toHaveProperty("values");
+    expect(create.annotations).toMatchObject({ idempotentHint: true });
+    const success = (create.outputSchema!.oneOf as Record<string, unknown>[])[0]!;
+    expect((success.properties as Record<string, unknown>).data).toEqual(
+      pluginBacked.entityOperations.create.output.kind === "json-schema"
+        ? pluginBacked.entityOperations.create.output.schema
+        : undefined,
+    );
+  });
+
   describe("field-level schema", () => {
     it("maps authored validation onto JSON Schema keywords", () => {
       const catalog = buildMcpCatalog(

@@ -691,8 +691,13 @@ function buildToolsForEntity(
     contract,
     mcp.tools === "generic",
   );
-  const outputSchema = (operation: McpToolDefinition["operation"]) =>
-    entityToolOutputSchema(operation, output);
+  const outputSchema = (operation: McpToolDefinition["operation"]) => {
+    const canonicalOutput = contract.entityOperations[operation]?.output;
+    return entityToolOutputSchema(
+      operation,
+      canonicalOutput?.kind === "json-schema" ? canonicalOutput.schema : output,
+    );
+  };
   const v2Contract = contract.authoringVersion === 2;
 
   const idSchema: JsonObject = {
@@ -757,6 +762,12 @@ function buildToolsForEntity(
   ) => contract.authoringVersion === 2
     ? (localizedText(contract.entityOperations[operation]?.name) ?? fallback)
     : fallback;
+  const entityAnnotations = (operation: McpToolDefinition["operation"]) => ({
+    ...annotationsFor(operation),
+    ...(contract.entityOperations[operation]?.reliability.idempotency.mode === "keyed"
+      ? { idempotentHint: true }
+      : {}),
+  });
 
   if (mcp.operations.list) {
     const filterProperties: JsonObject = {};
@@ -826,7 +837,7 @@ function buildToolsForEntity(
         additionalProperties: false,
       },
       ...(v2Contract ? { outputSchema: outputSchema("list") } : {}),
-      annotations: annotationsFor("list"),
+      annotations: entityAnnotations("list"),
     });
   }
 
@@ -844,20 +855,23 @@ function buildToolsForEntity(
       ),
       inputSchema: idSchema,
       ...(v2Contract ? { outputSchema: outputSchema("get") } : {}),
-      annotations: annotationsFor("get"),
+      annotations: entityAnnotations("get"),
     });
   }
 
   if (mcp.operations.create) {
-    const inputSchema = withRelationshipKeys(
-      compiledObjectSchema(creatable, referentiedata, {
-        requireRequired: true,
-        defaultsAreMaterialized: true,
-        ...MCP_FIELD_SCHEMA_OPTIONS,
-      }),
-      relationships,
-      true,
-    );
+    const canonicalCreate = contract.entityOperations.create;
+    const inputSchema = canonicalCreate?.input.kind === "json-schema"
+      ? canonicalCreate.input.schema
+      : withRelationshipKeys(
+          compiledObjectSchema(creatable, referentiedata, {
+            requireRequired: true,
+            defaultsAreMaterialized: true,
+            ...MCP_FIELD_SCHEMA_OPTIONS,
+          }),
+          relationships,
+          true,
+        );
     const controls = v2Contract
       ? operationControlSchema(contract.entityOperations.create)
       : { properties: {}, required: [] };
@@ -889,13 +903,14 @@ function buildToolsForEntity(
           }
         : inputSchema,
       ...(v2Contract ? { outputSchema: outputSchema("create") } : {}),
-      annotations: annotationsFor("create"),
+      annotations: entityAnnotations("create"),
     });
   }
 
   if (mcp.operations.update) {
     // Entity values are a partial: omitting one means "leave it alone", not
     // "clear it". Canonical concurrency controls remain required separately.
+    const canonicalUpdate = contract.entityOperations.update;
     const { schema: patch, definitions } = splitBundledDefinitions(
       withRelationshipKeys(
         compiledObjectSchema(updatable, referentiedata, {
@@ -922,26 +937,48 @@ function buildToolsForEntity(
         `${description} Partially updates a record; omitted fields are left unchanged.` +
           writerNote,
       ),
-      inputSchema: {
-        type: "object",
-        properties: {
-          id: {
-            type: "string",
-            format: "uuid",
-            description: `Identifier of the ${label}.`,
+      inputSchema: canonicalUpdate?.input.kind === "json-schema"
+        ? {
+            ...canonicalUpdate.input.schema,
+            properties: {
+              ...((canonicalUpdate.input.schema.properties as JsonObject | undefined) ?? {}),
+              ...controls.properties,
+            },
+            required: [
+              ...((canonicalUpdate.input.schema.required as string[] | undefined) ?? []),
+              ...controls.required,
+            ],
+            ...(controls.dependentRequired
+              ? {
+                  dependentRequired: {
+                    ...((canonicalUpdate.input.schema.dependentRequired as
+                      | Record<string, string[]>
+                      | undefined) ?? {}),
+                    ...controls.dependentRequired,
+                  },
+                }
+              : {}),
+          }
+        : {
+            type: "object",
+            properties: {
+              id: {
+                type: "string",
+                format: "uuid",
+                description: `Identifier of the ${label}.`,
+              },
+              values: patch,
+              ...controls.properties,
+            },
+            required: ["id", "values", ...controls.required],
+            additionalProperties: false,
+            ...(controls.dependentRequired
+              ? { dependentRequired: controls.dependentRequired }
+              : {}),
+            ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
           },
-          values: patch,
-          ...controls.properties,
-        },
-        required: ["id", "values", ...controls.required],
-        additionalProperties: false,
-        ...(controls.dependentRequired
-          ? { dependentRequired: controls.dependentRequired }
-          : {}),
-        ...(Object.keys(definitions).length > 0 ? { $defs: definitions } : {}),
-      },
       ...(v2Contract ? { outputSchema: outputSchema("update") } : {}),
-      annotations: annotationsFor("update"),
+      annotations: entityAnnotations("update"),
     });
   }
 
@@ -975,7 +1012,7 @@ function buildToolsForEntity(
           }
         : idSchema,
       ...(v2Contract ? { outputSchema: outputSchema("delete") } : {}),
-      annotations: annotationsFor("delete"),
+      annotations: entityAnnotations("delete"),
     });
   }
 

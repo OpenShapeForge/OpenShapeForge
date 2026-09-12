@@ -677,7 +677,8 @@
                 "handler": {
                   "type": "string",
                   "pattern": "^[_A-Za-z][_0-9A-Za-z]*$"
-                }
+                },
+                "action": { "enum": ["create", "update"] }
               }
             }
           ]
@@ -736,16 +737,13 @@
           "if": {
             "properties": {
               "implementation": {
-                "properties": { "type": { "const": "plugin" } },
+                "properties": { "type": { "const": "entity" } },
                 "required": ["type"]
               }
             },
             "required": ["implementation"]
           },
           "then": {
-            "required": ["input", "output", "errors", "auth", "tenancy"]
-          },
-          "else": {
             "not": {
               "anyOf": [
                 { "required": ["id"] },
@@ -757,6 +755,43 @@
                 { "required": ["tenancy"] }
               ]
             }
+          },
+          "else": {
+            "required": ["input", "output", "errors"]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "implementation": {
+                "properties": {
+                  "type": { "const": "plugin" },
+                  "action": { "enum": ["create", "update"] }
+                },
+                "required": ["type", "action"]
+              }
+            },
+            "required": ["implementation"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["auth"] },
+                { "required": ["tenancy"] }
+              ]
+            }
+          },
+          "else": {
+            "if": {
+              "properties": {
+                "implementation": {
+                  "properties": { "type": { "const": "plugin" } },
+                  "required": ["type"]
+                }
+              },
+              "required": ["implementation"]
+            },
+            "then": { "required": ["auth", "tenancy"] }
           }
         },
         {
@@ -767,7 +802,7 @@
                 "type": "object",
                 "required": ["type", "action"],
                 "properties": {
-                  "type": { "const": "entity" },
+                  "type": { "enum": ["entity", "plugin"] },
                   "action": { "const": "create" }
                 }
               }

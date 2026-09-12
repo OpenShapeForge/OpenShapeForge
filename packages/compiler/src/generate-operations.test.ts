@@ -143,6 +143,7 @@ describe("first-class plugin operations", () => {
     entityName: "Relation",
     name: "List Relation",
     description: "List Relation",
+    implementation: { type: "entity" },
     effects: { data: "read", external: "none" },
     reliability: { idempotency: { mode: "natural" } },
       intent: "list",
@@ -227,6 +228,7 @@ describe("first-class plugin operations", () => {
       entityName: "Adapter",
       name: "Create adapter",
       description: "Create adapter",
+      implementation: { type: "entity" },
       prerequisites: [{
         operation: "osf-integration.provider.setup-guide",
         receipt: { binding: "loginSession" },

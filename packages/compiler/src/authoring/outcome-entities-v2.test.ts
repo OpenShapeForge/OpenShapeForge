@@ -2,6 +2,10 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { CompiledEntityInfo } from "../plugins.js";
+import {
+  buildStaticOperationCatalog,
+  collectEntityOperations,
+} from "../generate-operations.js";
 import { compile } from "./compiler/index.js";
 import { assertV2Authoring } from "./entity-v2.js";
 import { loadEntity } from "./loader.js";
@@ -226,5 +230,176 @@ describe("strict-v2 outcome entities", () => {
     expect(projected.views.collection.operations.actions).toEqual([
       expect.objectContaining({ id: "example.quote.compose", intent: "invoke" }),
     ]);
+  });
+
+  test("keeps a plugin-backed create as the one canonical entity Operation", () => {
+    const artifacts = loadEntity(authoringDir, "quote");
+    artifacts.coreEntity.operations!.create = {
+      id: "example.quotes.create",
+      name: { en: "Create governed quote", nl: "Beheerde offerte aanmaken" },
+      description: "Validates a source definition and creates its entity head atomically.",
+      implementation: {
+        type: "plugin",
+        plugin: "example",
+        handler: "createGovernedQuote",
+        action: "create",
+      },
+      target: { scope: "collection" },
+      input: {
+        schema: {
+          type: "object",
+          required: ["requestKey", "definition"],
+          additionalProperties: false,
+          properties: {
+            requestKey: { type: "string", minLength: 1 },
+            definition: {
+              type: "object",
+              additionalProperties: true,
+              "x-osf-sourceField": "description",
+            },
+          },
+        },
+      },
+      output: {
+        schema: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+          additionalProperties: true,
+        },
+      },
+      errors: [{ status: 400, code: "INVALID_SOURCE", description: "The source is invalid." }],
+      effects: { data: "write", external: "none" },
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+      confirmation: { mode: "none" },
+    };
+    assertV2Authoring(artifacts.coreEntity, "quote.yaml");
+
+    const contract = compile(artifacts);
+    expect(contract.entityOperations.create).toMatchObject({
+      id: "example.quotes.create",
+      key: "create",
+      intent: "create",
+      implementation: { type: "plugin", plugin: "example", handler: "createGovernedQuote" },
+      target: { entityId: "core.Quote", entityName: "Quote", scope: "collection" },
+      input: {
+        kind: "json-schema",
+        schema: { required: ["requestKey", "definition"] },
+      },
+      output: {
+        kind: "json-schema",
+        schema: { required: ["id"] },
+      },
+      authorization: {
+        action: "create",
+        roles: ["Finance.All.ReadWrite", "Finance.Quotes.ReadWrite"],
+      },
+      effects: { data: "write", external: "none" },
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+    });
+    expect(contract.pluginOperations?.some(({ key }) => key === "create")).toBe(false);
+
+    const web = buildWebManifest([{ slug: "quote", contract }]).entities.Quote!;
+    expect(web.views.record).toMatchObject({
+      modes: ["read", "create", "update"],
+      routes: { create: "/quotes/new" },
+      operations: {
+        create: {
+          id: "example.quotes.create",
+          intent: "create",
+          implementation: { type: "plugin", plugin: "example", handler: "createGovernedQuote" },
+          input: {
+            kind: "json-schema",
+            schema: {
+              required: ["requestKey", "definition"],
+              properties: {
+                definition: { "x-osf-sourceField": "description" },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const operations = collectEntityOperations([{ contract }]);
+    const catalog = buildStaticOperationCatalog([], operations, [{ contract }], {});
+    const create = catalog.operations.find(({ id }) => id === "example.quotes.create");
+    expect(create).toMatchObject({
+      intent: "create",
+      implementation: { type: "plugin" },
+      inputSchema: { required: ["requestKey", "definition"] },
+      outputSchema: { required: ["id"] },
+    });
+    expect(catalog.operations.filter(({ id }) => id === "example.quotes.create")).toHaveLength(1);
+  });
+
+  test("rejects duplicate policy and non-record output on plugin-backed CRUD", () => {
+    const artifacts = loadEntity(authoringDir, "quote");
+    const create = artifacts.coreEntity.operations!.create!;
+    create.implementation = {
+      type: "plugin",
+      plugin: "example",
+      handler: "createGovernedQuote",
+      action: "create",
+    };
+    create.target = { scope: "collection" };
+    create.input = {
+      schema: {
+        type: "object",
+        required: ["requestKey"],
+        properties: { requestKey: { type: "string" } },
+      },
+    };
+    create.output = { schema: { type: "object", additionalProperties: true } };
+    create.errors = [];
+    create.auth = { mode: "session", roles: ["Finance.Quotes.ReadWrite"] };
+    create.tenancy = { mode: "required" };
+    create.reliability = { idempotency: { mode: "keyed", inputField: "requestKey" } };
+
+    expect(() => assertV2Authoring(artifacts.coreEntity, "quote.yaml")).toThrow(
+      /derives authorization and tenancy from the entity/,
+    );
+    delete create.auth;
+    delete create.tenancy;
+    expect(() => assertV2Authoring(artifacts.coreEntity, "quote.yaml")).toThrow(
+      /required string id for the canonical entity head/,
+    );
+    create.output = {
+      schema: {
+        type: "object",
+        required: ["id"],
+        properties: { id: { type: "string" } },
+      },
+    };
+    ((create.input.schema.properties as Record<string, Record<string, unknown>>).requestKey!)[
+      "x-osf-sourceField"
+    ] = "missingField";
+    expect(() => assertV2Authoring(artifacts.coreEntity, "quote.yaml")).toThrow(
+      /references unknown entity field "missingField"/,
+    );
+    delete ((create.input.schema.properties as Record<string, Record<string, unknown>>).requestKey!)[
+      "x-osf-sourceField"
+    ];
+    artifacts.coreEntity.interfaces!.rest = {
+      operations: { create: { method: "GET" } },
+    };
+    expect(() => assertV2Authoring(artifacts.coreEntity, "quote.yaml")).toThrow(
+      /cannot project REST method GET/,
+    );
+    artifacts.coreEntity.interfaces!.rest.operations!.create = {
+      method: "POST",
+      path: "/api/example/quotes/:id",
+    };
+    expect(() => assertV2Authoring(artifacts.coreEntity, "quote.yaml")).toThrow(
+      /cannot bind record parameters in its collection REST path/,
+    );
+    artifacts.coreEntity.interfaces!.rest.operations!.create = {
+      method: "POST",
+      path: "/api/example/quotes",
+      response: { kind: "binary" },
+    };
+    expect(() => assertV2Authoring(artifacts.coreEntity, "quote.yaml")).toThrow(
+      /must project a JSON REST response/,
+    );
   });
 });

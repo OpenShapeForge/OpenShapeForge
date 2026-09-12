@@ -18,13 +18,20 @@ export function v2OperationEntries(
   return Object.entries(entity.operations ?? {});
 }
 
+/** Entity CRUD intent, including a plugin handler that implements that intent. */
+export function v2OperationAction(
+  definition: EntityOperationDefinition,
+): CrudOperationKey | undefined {
+  return definition.implementation.action;
+}
+
 export function v2OperationByAction(
   entity: CoreEntity,
 ): Partial<Record<CrudOperationKey, [string, EntityOperationDefinition]>> {
   const result: Partial<Record<CrudOperationKey, [string, EntityOperationDefinition]>> = {};
   for (const entry of v2OperationEntries(entity)) {
-    if (entry[1].implementation.type !== "entity") continue;
-    const action = entry[1].implementation.action;
+    const action = v2OperationAction(entry[1]);
+    if (!action) continue;
     if (result[action]) {
       throw new Error(
         `[${entity.entity}] schemaVersion 2 currently supports one generated entity operation per action; ` +
@@ -39,7 +46,7 @@ export function v2OperationByAction(
 export function v2PluginOperations(entity: CoreEntity) {
   if (!isCoreEntityV2(entity)) return [];
   return v2OperationEntries(entity).flatMap(([key, definition]) => {
-    if (definition.implementation.type !== "plugin") return [];
+    if (definition.implementation.type !== "plugin" || definition.implementation.action) return [];
     const projection = (name: "rest" | "graphql" | "mcp" | "web") => {
       const contract = entity.interfaces?.[name];
       if (!contract) return undefined;
@@ -69,8 +76,9 @@ function projectedActions(
   const definitions = entity.operations ?? {};
   const result: Partial<Record<CrudOperationKey, boolean>> = {};
   for (const definition of Object.values(definitions)) {
-    if (definition.implementation.type !== "entity") continue;
-    result[definition.implementation.action] = true;
+    const action = v2OperationAction(definition);
+    if (!action) continue;
+    result[action] = true;
   }
   for (const operationKey of Object.keys(operations)) {
     const definition = definitions[operationKey];
@@ -80,9 +88,8 @@ function projectedActions(
           "does not reference a canonical operation.",
       );
     }
-    if (definition.implementation.type === "entity") {
-      result[definition.implementation.action] = operations[operationKey] !== false;
-    }
+    const action = v2OperationAction(definition);
+    if (action) result[action] = operations[operationKey] !== false;
   }
   return result;
 }
@@ -190,8 +197,8 @@ export function v2WebUi(entity: CoreEntity): UIDefinition | undefined {
       },
       actions: (record.actions ?? []).map((key) => {
         const implementation = entity.operations![key]!.implementation;
-        if (implementation.type === "plugin") return { key, route: key };
         const action = implementation.action;
+        if (!action) return { key, route: key };
         return action === "delete"
           ? { key, mutation: "delete" }
           : { key, route: action === "update" ? "edit" : key };
@@ -240,9 +247,7 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
   }
 
   for (const [operationKey, operation] of v2OperationEntries(entity)) {
-    const action = operation.implementation.type === "entity"
-      ? operation.implementation.action
-      : undefined;
+    const action = v2OperationAction(operation);
     const operationKind = action ?? "plugin";
     const version = operation.concurrency?.version;
     const editLease = operation.concurrency?.editLease;
@@ -256,7 +261,7 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
         throw new Error(
           `${origin} operation "${operationKey}" declares prerequisites for ` +
             `operation kind "${operationKind}"; prerequisites are currently ` +
-            "supported only on generated entity create Operations.",
+            "supported only on canonical entity create Operations.",
         );
       }
       const sourceIds = new Set<string>();
@@ -272,11 +277,115 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
     }
     if (operation.implementation.type === "plugin") {
       if (!operation.target || !operation.input || !operation.output ||
-        !operation.errors || !operation.auth || !operation.tenancy) {
+        !operation.errors) {
         throw new Error(
           `${origin} plugin operation "${operationKey}" must declare target, input, ` +
-            "output, errors, auth and tenancy.",
+            "output and errors.",
         );
+      }
+      if (action) {
+        if (operation.auth || operation.tenancy) {
+          throw new Error(
+            `${origin} plugin-backed entity ${action} Operation "${operationKey}" ` +
+              "derives authorization and tenancy from the entity; remove duplicate auth or tenancy.",
+          );
+        }
+        const expectedScope = action === "create" ? "collection" : "record";
+        if (operation.target.scope !== expectedScope) {
+          throw new Error(
+            `${origin} plugin-backed entity ${action} Operation "${operationKey}" ` +
+              `must use a ${expectedScope}-scoped target.`,
+          );
+        }
+        if (operation.effects.data !== "write") {
+          throw new Error(
+            `${origin} plugin-backed entity ${action} Operation "${operationKey}" ` +
+              "must declare write data effects.",
+          );
+        }
+        const inputProperties = operation.input.schema.properties;
+        if (!inputProperties || typeof inputProperties !== "object" ||
+          Array.isArray(inputProperties)) {
+          throw new Error(
+            `${origin} plugin-backed entity ${action} Operation "${operationKey}" ` +
+              "must use an object input schema with declared properties.",
+          );
+        }
+        const entityFields = new Set(entity.fields.map((field) => field.key));
+        for (const [inputKey, inputProperty] of Object.entries(inputProperties)) {
+          if (!inputProperty || typeof inputProperty !== "object" ||
+            Array.isArray(inputProperty) ||
+            !("x-osf-sourceField" in inputProperty)) continue;
+          const sourceField = (inputProperty as Record<string, unknown>)["x-osf-sourceField"];
+          if (typeof sourceField !== "string" || !entityFields.has(sourceField)) {
+            throw new Error(
+              `${origin} plugin-backed entity ${action} Operation "${operationKey}" ` +
+                `input property "${inputKey}" references unknown entity field ` +
+                `"${String(sourceField)}" through x-osf-sourceField.`,
+            );
+          }
+        }
+        const outputProperties = operation.output.schema.properties;
+        const outputRequired = operation.output.schema.required;
+        const outputId = outputProperties && typeof outputProperties === "object" &&
+            !Array.isArray(outputProperties)
+          ? (outputProperties as Record<string, unknown>).id
+          : undefined;
+        if (
+          operation.output.schema.type !== "object" ||
+          !outputId || typeof outputId !== "object" || Array.isArray(outputId) ||
+          (outputId as { type?: unknown }).type !== "string" ||
+          !Array.isArray(outputRequired) || !outputRequired.includes("id")
+        ) {
+          throw new Error(
+            `${origin} plugin-backed entity ${action} Operation "${operationKey}" ` +
+              "must return an object schema with a required string id for the canonical entity head.",
+          );
+        }
+      } else if (!operation.auth || !operation.tenancy) {
+        throw new Error(
+          `${origin} invoke plugin operation "${operationKey}" must declare auth and tenancy.`,
+        );
+      }
+
+      const restProjection = entity.interfaces?.rest?.operations?.[operationKey];
+      if (action && restProjection && restProjection.method) {
+        const allowed = action === "create" ? ["POST"] : ["PATCH", "PUT"];
+        if (!allowed.includes(restProjection.method)) {
+          throw new Error(
+            `${origin} plugin-backed entity ${action} Operation "${operationKey}" ` +
+              `cannot project REST method ${restProjection.method}; use ${allowed.join(" or ")}.`,
+          );
+        }
+      }
+      if (action && restProjection && restProjection.response?.kind &&
+        restProjection.response.kind !== "json") {
+        throw new Error(
+          `${origin} plugin-backed entity ${action} Operation "${operationKey}" ` +
+            "must project a JSON REST response for the canonical entity envelope.",
+        );
+      }
+      if (action && restProjection && restProjection.path) {
+        const parameters = [...restProjection.path.matchAll(
+          /:([_A-Za-z][_0-9A-Za-z]*)/g,
+        )].map((match) => match[1]!);
+        if (action === "create" && parameters.length > 0) {
+          throw new Error(
+            `${origin} plugin-backed entity create Operation "${operationKey}" ` +
+              "cannot bind record parameters in its collection REST path.",
+          );
+        }
+        const recordInputField = operation.target.scope === "record"
+          ? operation.target.inputField
+          : undefined;
+        if (action === "update" &&
+          (recordInputField === undefined || parameters.length !== 1 ||
+            parameters[0] !== recordInputField)) {
+          throw new Error(
+            `${origin} plugin-backed entity update Operation "${operationKey}" ` +
+              `REST path must bind exactly :${recordInputField ?? "recordId"}.`,
+          );
+        }
       }
       if (operation.target.scope === "record") {
         const properties = operation.input.schema.properties;
@@ -290,9 +399,10 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
           );
         }
       }
-      if (
-        operation.auth.mode === "session" &&
-        operation.auth.recordPermission !== undefined
+      const operationAuth = operation.auth;
+      if (!action &&
+        operationAuth?.mode === "session" &&
+        operationAuth.recordPermission !== undefined
       ) {
         if (operation.target.scope !== "record") {
           throw new Error(
@@ -458,9 +568,9 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
             "collection values cannot be compared as an exact current-field answer.",
         );
       }
-      const operationRoles: string[] | undefined = operation.implementation.type === "plugin"
-        ? operation.auth?.mode === "session" ? operation.auth.roles : []
-        : entity.authorization?.roles[action as "update" | "delete"] ?? [];
+      const operationRoles: string[] | undefined = action
+        ? entity.authorization?.roles[action as "update" | "delete"] ?? []
+        : operation.auth?.mode === "session" ? operation.auth.roles : [];
       const entityReadRoles = entity.authorization?.roles.read ?? [];
       const fieldReadRoles = challengeField.authorization?.roles.read ?? [];
       const effectiveReadRoles = fieldReadRoles.length > 0
@@ -505,10 +615,8 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
         );
       }
     }
-    if (
-      operation.implementation.type === "entity" &&
-      operation.reliability.idempotency.mode === "keyed"
-    ) {
+    if (operation.implementation.type === "entity" &&
+      operation.reliability.idempotency.mode === "keyed") {
       throw new Error(
         `${origin} operation "${operationKey}" declares keyed idempotency. The contract ` +
           "is reserved, but server-side key enforcement must land before it can compile.",
@@ -528,10 +636,12 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
         );
       }
     }
-    const expectedIdempotency = action && ["list", "get", "delete"].includes(action)
+    const expectedIdempotency = action && operation.implementation.type === "entity" &&
+        ["list", "get", "delete"].includes(action)
       ? "natural"
       : "none";
-    if (action && operation.reliability.idempotency.mode !== expectedIdempotency) {
+    if (action && operation.implementation.type === "entity" &&
+      operation.reliability.idempotency.mode !== expectedIdempotency) {
       throw new Error(
         `${origin} operation "${operationKey}" declares ` +
           `idempotency "${operation.reliability.idempotency.mode}", but generated entity ` +
@@ -594,7 +704,8 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
           );
         }
         if (scope === "collection" &&
-          (operation.implementation.type !== "plugin" || operation.target?.scope !== "collection")) {
+          (operation.implementation.type !== "plugin" || operation.implementation.action ||
+            operation.target?.scope !== "collection")) {
           throw new Error(
             `${origin} interfaces.web.views.collection.actions operation "${operationKey}" ` +
               "must be a collection-scoped plugin Operation.",

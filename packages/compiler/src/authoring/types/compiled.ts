@@ -322,12 +322,14 @@ export type EntityOperationInput =
       kind: "entity-update";
       entityId: string;
       identityField: "id";
-    };
+    }
+  | { kind: "json-schema"; schema: Record<string, unknown> };
 
 export type EntityOperationOutput =
   | { kind: "entity-connection"; entityId: string }
   | { kind: "entity-record"; entityId: string; nullable: boolean }
-  | { kind: "deletion-result" };
+  | { kind: "deletion-result" }
+  | { kind: "json-schema"; schema: Record<string, unknown> };
 
 export type CompiledEntityOperation = OperationReference<EntityOperationIntent> & {
   /** Stable interface-neutral identity, e.g. `Relation.update`. */
@@ -336,6 +338,23 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
   entityName: string;
   name: string | LocalizedText;
   description: string | LocalizedText;
+  /** Core storage execution or a plugin handler for the same CRUD intent. */
+  implementation:
+    | { type: "entity" }
+    | { type: "plugin"; plugin: string; handler: string };
+  /** Canonical binding for a plugin-backed CRUD Operation. */
+  target?:
+    | { entityId: string; entityName: string; scope: "collection" }
+    | { entityId: string; entityName: string; scope: "record"; inputField: string };
+  /** Declared handler failures; platform failures remain core-owned. */
+  errors?: EntityOperationDefinition["errors"];
+  /** Interface aliases retained without creating a second Operation. */
+  interfaces?: {
+    rest?: false | EntityRestOperationProjectionConfig;
+    graphql?: false | EntityGraphqlOperationProjectionConfig;
+    mcp?: false | EntityMcpOperationProjectionConfig;
+    web?: false | EntityInterfaceOperationProjectionConfig;
+  };
   guidance?: { assistant?: string | LocalizedText };
   prerequisites?: readonly OperationPrerequisite[];
   input: EntityOperationInput;
@@ -350,7 +369,12 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
     data: "read" | "write" | "delete";
     external: "none" | "read" | "write";
   };
-  reliability: { idempotency: { mode: "natural" | "keyed" | "none" } };
+  reliability: {
+    idempotency: {
+      mode: "natural" | "keyed" | "none";
+      inputField?: string;
+    };
+  };
   concurrency?: OperationConcurrency;
   interaction: {
     confirmation: OperationConfirmation;

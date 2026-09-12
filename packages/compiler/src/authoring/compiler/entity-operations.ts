@@ -80,14 +80,45 @@ function compileOperation(
     : undefined;
   const key = authored?.[0] ?? intent;
   const definition = authored?.[1];
+  const pluginImplementation = definition?.implementation.type === "plugin"
+    ? definition.implementation
+    : undefined;
   const shared = {
-    id: `${source.entity.name}.${key}`,
+    id: definition?.id ?? `${source.entity.name}.${key}`,
     key,
     entityId: source.entity.id,
     entityName: source.entity.name,
     intent,
     name: definition?.name ?? `${source.entity.name} ${intent}`,
     description: definition?.description ?? `${intent} ${source.entity.name}`,
+    implementation: pluginImplementation
+      ? {
+          type: "plugin" as const,
+          plugin: pluginImplementation.plugin,
+          handler: pluginImplementation.handler,
+        }
+      : { type: "entity" as const },
+    ...(pluginImplementation && definition?.target
+      ? {
+          target: {
+            entityId: source.entity.id,
+            entityName: source.entity.name,
+            ...definition.target,
+          },
+        }
+      : {}),
+    ...(pluginImplementation && definition?.errors ? { errors: definition.errors } : {}),
+    ...(pluginImplementation && source.coreEntity?.interfaces
+      ? {
+          interfaces: Object.fromEntries(
+            (["rest", "graphql", "mcp", "web"] as const).flatMap((name) => {
+              const contract = source.coreEntity!.interfaces?.[name];
+              if (!contract) return [];
+              return [[name, contract.operations?.[key] ?? {}]];
+            }),
+          ),
+        }
+      : {}),
     ...(definition?.guidance ? { guidance: definition.guidance } : {}),
     ...(definition?.prerequisites
       ? { prerequisites: definition.prerequisites.map((prerequisite) => ({
@@ -133,18 +164,26 @@ function compileOperation(
     case "create":
       return {
         ...shared,
-        input: { kind: "entity-create", entityId: source.entity.id },
-        output: { kind: "entity-record", entityId: source.entity.id, nullable: false },
+        input: pluginImplementation
+          ? { kind: "json-schema", schema: definition!.input!.schema }
+          : { kind: "entity-create", entityId: source.entity.id },
+        output: pluginImplementation
+          ? { kind: "json-schema", schema: definition!.output!.schema }
+          : { kind: "entity-record", entityId: source.entity.id, nullable: false },
       };
     case "update":
       return {
         ...shared,
-        input: {
-          kind: "entity-update",
-          entityId: source.entity.id,
-          identityField: "id",
-        },
-        output: { kind: "entity-record", entityId: source.entity.id, nullable: true },
+        input: pluginImplementation
+          ? { kind: "json-schema", schema: definition!.input!.schema }
+          : {
+              kind: "entity-update",
+              entityId: source.entity.id,
+              identityField: "id",
+            },
+        output: pluginImplementation
+          ? { kind: "json-schema", schema: definition!.output!.schema }
+          : { kind: "entity-record", entityId: source.entity.id, nullable: true },
       };
     case "delete":
       return {

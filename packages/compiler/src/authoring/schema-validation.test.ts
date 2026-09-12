@@ -425,6 +425,65 @@ describe("coreEntity properties the compiler implements", () => {
     expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
   });
 
+  it("accepts plugin-backed CRUD without a second authorization policy", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      authorization: {
+        roles: {
+          read: ["BillingRuns.Read"],
+          create: ["BillingRuns.Write"],
+          update: ["BillingRuns.Write"],
+          delete: ["BillingRuns.Delete"],
+        },
+      },
+      operations: {
+        create: {
+          name: "Create a billing run",
+          description: "Validates the definition and creates its canonical head.",
+          implementation: {
+            type: "plugin",
+            plugin: "example",
+            handler: "createBillingRun",
+            action: "create",
+          },
+          target: { scope: "collection" },
+          input: {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["idempotencyKey"],
+              properties: { idempotencyKey: { type: "string", format: "uuid" } },
+            },
+          },
+          output: {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              required: ["id"],
+              properties: { id: { type: "string", format: "uuid" } },
+            },
+          },
+          errors: [],
+          effects: { data: "write", external: "none" },
+          reliability: {
+            idempotency: { mode: "keyed", inputField: "idempotencyKey" },
+          },
+          confirmation: { mode: "none" },
+        },
+      },
+      interfaces: { rest: {}, graphql: {}, mcp: { tools: "generic" } },
+    });
+
+    expect(validator.validate(document, "billing-run.yaml")).toBe(
+      "core-entity.schema.json",
+    );
+    const create = (document.operations as Record<string, any>).create;
+    create.auth = { mode: "session", roles: ["BillingRuns.Write"] };
+    expect(() => validator.validate(document, "billing-run.yaml")).toThrow(
+      /must NOT be valid/,
+    );
+  });
+
   it("accepts action-specific record ACL authoring and plugin enforcement", () => {
     const document = coreEntity({
       schemaVersion: 2,

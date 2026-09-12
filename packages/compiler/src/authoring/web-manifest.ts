@@ -63,14 +63,50 @@ function contextFor(contract: CompiledEntityContract, preferred: string): Compil
 function operation(
   source: CompiledEntityOperation | undefined,
 ): WebOperationRef | undefined {
-  return source
-    ? {
-        id: source.id,
-        intent: source.intent,
-        ...(source.concurrency ? { concurrency: source.concurrency } : {}),
-        ...(source.prerequisites ? { prerequisites: source.prerequisites } : {}),
-      }
-    : undefined;
+  if (!source) return undefined;
+  if (source.implementation.type === "entity") {
+    return {
+      id: source.id,
+      intent: source.intent,
+      ...(source.concurrency ? { concurrency: source.concurrency } : {}),
+      ...(source.prerequisites ? { prerequisites: source.prerequisites } : {}),
+    };
+  }
+  if (
+    (source.intent !== "create" && source.intent !== "update") ||
+    source.input.kind !== "json-schema" || source.output.kind !== "json-schema" ||
+    !source.target
+  ) {
+    throw new Error(
+      `Plugin-backed entity Operation "${source.id}" has an incomplete Web contract.`,
+    );
+  }
+  const rest = source.interfaces?.rest;
+  return {
+    id: source.id,
+    intent: source.intent,
+    key: source.key,
+    name: localized(source.name, source.key),
+    description: localized(source.description, ""),
+    implementation: source.implementation,
+    target: source.target,
+    input: source.input,
+    output: source.output,
+    effects: source.effects,
+    reliability: source.reliability,
+    ...(source.concurrency ? { concurrency: source.concurrency } : {}),
+    ...(source.prerequisites ? { prerequisites: source.prerequisites } : {}),
+    confirmation: source.interaction.confirmation,
+    ...(rest !== false && rest?.path
+      ? {
+          rest: {
+            method: rest.method ?? (source.intent === "create" ? "POST" : "PATCH"),
+            path: rest.path,
+            response: rest.response ?? { kind: "json" },
+          },
+        }
+      : {}),
+  };
 }
 
 function kebab(value: string): string {

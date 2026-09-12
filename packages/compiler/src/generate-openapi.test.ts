@@ -718,6 +718,177 @@ describe("rich generated REST OpenAPI", () => {
     expect(update.properties.metadata).toBeUndefined();
   });
 
+  it("projects authored JSON schemas for plugin-backed canonical CRUD", () => {
+    const pluginContract = structuredClone(contract) as CompiledEntityContract;
+    pluginContract.entityOperations.create = {
+      ...pluginContract.entityOperations.create!,
+      key: "create",
+      entityId: "relation",
+      entityName: "Relation",
+      name: "Create relation atomically",
+      description: "Validate and create the canonical relation head.",
+      implementation: {
+        type: "plugin",
+        plugin: "example",
+        handler: "createRelation",
+      },
+      target: {
+        entityId: "relation",
+        entityName: "Relation",
+        scope: "collection",
+      },
+      input: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["requestKey", "definition"],
+          properties: {
+            requestKey: { type: "string", format: "uuid" },
+            definition: { type: "object" },
+          },
+        },
+      },
+      output: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "displayName"],
+          properties: {
+            id: { type: "string", format: "uuid" },
+            displayName: { type: "string" },
+          },
+        },
+      },
+      authorization: { action: "create", roles: ["Relations.Write"] },
+      effects: { data: "write", external: "none" },
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+      interaction: { confirmation: { mode: "acknowledgement" } },
+      interfaces: {
+        rest: {
+          method: "POST",
+          path: "/api/example/relations",
+          response: { status: 202, kind: "json" },
+        },
+      },
+    };
+    pluginContract.entityOperations.update = {
+      ...pluginContract.entityOperations.update!,
+      key: "update",
+      entityId: "relation",
+      entityName: "Relation",
+      name: "Update relation atomically",
+      description: "Validate and update the canonical relation head.",
+      implementation: {
+        type: "plugin",
+        plugin: "example",
+        handler: "updateRelation",
+      },
+      target: {
+        entityId: "relation",
+        entityName: "Relation",
+        scope: "record",
+        inputField: "relationId",
+      },
+      input: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["relationId", "requestKey", "definition"],
+          properties: {
+            relationId: { type: "string", format: "uuid" },
+            requestKey: { type: "string", format: "uuid" },
+            definition: { type: "object" },
+          },
+        },
+      },
+      output: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id", "displayName"],
+          properties: {
+            id: { type: "string", format: "uuid" },
+            displayName: { type: "string" },
+          },
+        },
+      },
+      authorization: { action: "update", roles: ["Relations.Write"] },
+      effects: { data: "write", external: "none" },
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+      interaction: { confirmation: { mode: "none" } },
+      interfaces: {
+        rest: {
+          method: "PUT",
+          path: "/api/example/relations/:relationId",
+          response: { kind: "json" },
+        },
+      },
+    };
+
+    const generated = JSON.parse(
+      renderOpenApiSpec(manifest, "fixture", {
+        entities: [{ contract: pluginContract }],
+      }),
+    ) as any;
+
+    expect(generated.components.schemas.RelationInput).toMatchObject({
+      required: ["requestKey", "definition"],
+      properties: {
+        requestKey: { type: "string", format: "uuid" },
+        definition: { type: "object" },
+        confirmed: { type: "boolean" },
+      },
+    });
+    expect(generated.components.schemas.RelationInput.properties).not.toHaveProperty(
+      "relationType",
+    );
+    expect(generated.components.schemas.RelationUpdateInput).toMatchObject({
+      required: [
+        "relationId",
+        "requestKey",
+        "definition",
+        "expectedVersion",
+        "leaseToken",
+      ],
+      properties: {
+        relationId: { type: "string", format: "uuid" },
+        expectedVersion: { type: "string", format: "date-time" },
+        leaseToken: { type: "string" },
+      },
+    });
+    expect(
+      generated.paths["/api/example/relations"].post.responses["202"].content[
+        "application/json"
+      ].schema,
+    ).toEqual({ $ref: "#/components/schemas/RelationCreateResult" });
+    expect(generated.components.schemas.RelationCreateResult.properties.data)
+      .toEqual({
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "displayName"],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          displayName: { type: "string" },
+        },
+      });
+    expect(
+      generated.paths["/api/example/relations/{relationId}"].put.responses["200"].content[
+        "application/json"
+      ].schema,
+    ).toEqual({ $ref: "#/components/schemas/RelationUpdateResult" });
+    expect(generated.paths["/api/rest/v1/relations"].post).toBeUndefined();
+    expect(generated.paths["/api/rest/v1/relations/{id}"].patch).toBeUndefined();
+    expect(
+      generated.paths["/api/example/relations/{relationId}"].parameters,
+    ).toEqual([
+      expect.objectContaining({ name: "relationId", in: "path", required: true }),
+    ]);
+  });
+
   it("documents version-bound server confirmation controls for delete", () => {
     const generated = spec();
     const deletion = generated.components.schemas.RelationDeleteInput as {

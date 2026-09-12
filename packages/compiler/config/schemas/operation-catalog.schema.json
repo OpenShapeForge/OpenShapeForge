@@ -23,7 +23,17 @@
                 "required": ["type"]
               }
             },
-            "not": { "required": ["target"] }
+            "allOf": [
+              { "not": { "required": ["target"] } },
+              {
+                "not": {
+                  "properties": {
+                    "implementation": { "required": ["action"] }
+                  },
+                  "required": ["implementation"]
+                }
+              }
+            ]
           }
         ]
       }

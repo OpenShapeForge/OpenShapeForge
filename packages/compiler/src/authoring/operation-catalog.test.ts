@@ -86,4 +86,13 @@ describe("module Operation catalog authoring", () => {
       ),
     ))).toThrow(/cannot declare recordPermission without an entity record target/);
   });
+
+  test("reserves plugin CRUD actions for entity-owned Operations", () => {
+    expect(() => loadOperationCatalogs(authoringRoot(
+      operation.replace(
+        "implementation: { type: plugin, plugin: example, handler: guide }",
+        "implementation: { type: plugin, plugin: example, handler: guide, action: create }",
+      ),
+    ))).toThrow(/must NOT be valid|cannot claim entity CRUD action/);
+  });
 });

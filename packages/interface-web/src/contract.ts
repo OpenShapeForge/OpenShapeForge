@@ -10,13 +10,17 @@ export type LocalizedText = { en: string; nl: string };
 
 export type WebOperationIntent = "list" | "get" | "create" | "update" | "delete";
 export type WebOperationPrerequisite = OperationPrerequisite;
-export type WebOperationRef = OperationReference<WebOperationIntent> & {
+export type WebBuiltinOperationRef = OperationReference<WebOperationIntent> & {
   /** Canonical server-enforced controls; browsers derive lease timing from this value. */
   concurrency?: OperationConcurrency;
   /** Canonical server-enforced instructions that must be completed first. */
   prerequisites?: readonly WebOperationPrerequisite[];
 };
-export type WebCustomOperationRef = OperationReference<"invoke"> & {
+
+/** Full JSON-schema contract shared by invoke and plugin-backed CRUD forms. */
+export type WebSchemaOperationRef<
+  TIntent extends "invoke" | "create" | "update" = "invoke" | "create" | "update",
+> = OperationReference<TIntent> & {
   /** Authored key inside the entity Operations map. */
   key: string;
   name: LocalizedText;
@@ -52,6 +56,13 @@ export type WebCustomOperationRef = OperationReference<"invoke"> & {
     };
   };
 };
+
+export type WebCustomOperationRef = WebSchemaOperationRef<"invoke">;
+export type WebEntityPluginOperationRef = WebSchemaOperationRef<"create" | "update"> & {
+  implementation: { type: "plugin"; plugin: string; handler: string };
+  prerequisites?: readonly WebOperationPrerequisite[];
+};
+export type WebOperationRef = WebBuiltinOperationRef | WebEntityPluginOperationRef;
 export type WebViewMode = "read" | "create" | "update";
 
 /** Opaque layout-renderer registry key. A host must reject unknown keys clearly. */

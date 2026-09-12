@@ -282,8 +282,7 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
       `${where} REST path must be the safe plugin root "${pluginRoot}" or a nested ${pluginRoot}/ path.`,
     );
   }
-  const ajv = new Ajv2020.default({ strict: true, allErrors: true });
-  (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
+  const ajv = operationSchemaValidator();
   assertSchema(ajv, operation.inputSchema, `${where} inputSchema`);
   assertSchema(ajv, operation.outputSchema, `${where} outputSchema`);
   if (operation.inputSchema.type !== "object" ||
@@ -398,6 +397,17 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
       throw new Error(`${where} idempotency input field "${field}" must be a required inputSchema property.`);
     }
   }
+}
+
+function operationSchemaValidator() {
+  const ajv = new Ajv2020.default({ strict: true, allErrors: true });
+  (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
+  ajv.addKeyword({
+    keyword: "x-osf-sourceField",
+    schemaType: "string",
+    valid: true,
+  });
+  return ajv;
 }
 
 function claimSurface(
@@ -811,6 +821,17 @@ export function buildStaticOperationCatalog(
 ): import("./plugins.js").StaticOperationCatalog {
   const contracts = entities.map(({ contract }) => contract);
   const byEntityId = new Map(contracts.map((contract) => [contract.entity.id, contract]));
+  const declaredIds = [...pluginOperations, ...entityOperations]
+    .map((operation) => operation.id)
+    .sort((left, right) => left.localeCompare(right));
+  for (let index = 1; index < declaredIds.length; index += 1) {
+    if (declaredIds[index - 1] === declaredIds[index]) {
+      throw new Error(
+        `Duplicate canonical Operation id "${declaredIds[index]}". ` +
+          "Keep its metadata in exactly one entity or plugin/module declaration.",
+      );
+    }
+  }
   const concreteEntityOperations = entityOperations.map((operation) => {
     const contract = byEntityId.get(operation.entityId);
     if (!contract) {
@@ -819,21 +840,19 @@ export function buildStaticOperationCatalog(
           `"${operation.entityId}" while building its concrete schemas.`,
       );
     }
-    return {
+    const concrete = {
       ...operation,
       ...entityOperationJsonSchemas(contract, operation, contracts, referentiedata),
     };
+    if (operation.implementation.type === "plugin") {
+      const ajv = operationSchemaValidator();
+      assertSchema(ajv, concrete.inputSchema, `Entity Operation "${operation.id}" inputSchema`);
+      assertSchema(ajv, concrete.outputSchema, `Entity Operation "${operation.id}" outputSchema`);
+    }
+    return concrete;
   });
   const operations = [...pluginOperations, ...concreteEntityOperations]
     .sort((left, right) => left.id.localeCompare(right.id));
-  for (let index = 1; index < operations.length; index += 1) {
-    if (operations[index - 1]!.id === operations[index]!.id) {
-      throw new Error(
-        `Duplicate canonical Operation id "${operations[index]!.id}". ` +
-          "Keep its metadata in exactly one entity or plugin/module declaration.",
-      );
-    }
-  }
   const byId = new Map(operations.map((operation) => [operation.id, operation]));
   for (const target of concreteEntityOperations) {
     for (const prerequisite of target.prerequisites ?? []) {

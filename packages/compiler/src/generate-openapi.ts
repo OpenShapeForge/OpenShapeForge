@@ -40,6 +40,7 @@ import {
   operationOpenApiPaths,
   type CompiledPluginOperation,
 } from "./generate-operations.js";
+import { entityOperationJsonSchemas } from "./entity-operation-json-schema.js";
 
 const REST_MOUNT = "/api/rest/v1";
 const FIELD_DEFINITION_COMPONENT = "OpenShapeForgeFieldDefinition";
@@ -967,6 +968,25 @@ export function renderOpenApiSpec(
     const createOperation = contract?.entityOperations.create;
     const updateOperation = contract?.entityOperations.update;
     const deleteOperation = contract?.entityOperations.delete;
+    const compiledContracts = [...contractsByEntityName.values()];
+    const createPluginSchemas = canonical && contract &&
+        createOperation?.implementation?.type === "plugin"
+      ? entityOperationJsonSchemas(
+          contract,
+          createOperation,
+          compiledContracts,
+          referentiedata,
+        )
+      : undefined;
+    const updatePluginSchemas = canonical && contract &&
+        updateOperation?.implementation?.type === "plugin"
+      ? entityOperationJsonSchemas(
+          contract,
+          updateOperation,
+          compiledContracts,
+          referentiedata,
+        )
+      : undefined;
     const createRequiresConfirmation =
       createOperation?.interaction?.confirmation.mode !== undefined &&
       createOperation.interaction.confirmation.mode !== "none";
@@ -1009,9 +1029,27 @@ export function renderOpenApiSpec(
           },
         },
       };
+      for (const [intent, pluginSchemas] of [
+        ["Create", createPluginSchemas],
+        ["Update", updatePluginSchemas],
+      ] as const) {
+        if (!pluginSchemas) continue;
+        schemas[`${name}${intent}Result`] = {
+          type: "object",
+          additionalProperties: false,
+          required: ["data", "operations"],
+          properties: {
+            data: pluginSchemas.outputSchema,
+            operations: {
+              type: "array",
+              items: { $ref: "#/components/schemas/OperationOffer" },
+            },
+          },
+        };
+      }
     }
     const writerNote = operationWrittenNote(table);
-    schemas[`${name}Input`] = {
+    schemas[`${name}Input`] = createPluginSchemas?.inputSchema ?? {
       type: "object",
       description: `Create body for ${label}.${writerNote}`,
       additionalProperties: false,
@@ -1020,7 +1058,7 @@ export function renderOpenApiSpec(
         ? { required: [...creatable.required, ...createControls.required] }
         : {}),
     };
-    schemas[updateSchemaName] = {
+    schemas[updateSchemaName] = updatePluginSchemas?.inputSchema ?? {
       type: "object",
       additionalProperties: false,
       properties: { ...updatable.properties, ...updateControls.properties },
@@ -1113,7 +1151,11 @@ export function renderOpenApiSpec(
       };
     }
     if (rest.operations.create) {
-      collectionPath.post = {
+      const projection = createOperation?.implementation?.type === "plugin"
+        ? createOperation.interfaces?.rest
+        : undefined;
+      const successStatus = projection ? projection.response?.status ?? 201 : 201;
+      const createRoute: JsonObject = {
         operationId: `create${name}`,
         ...(canonical
           ? { "x-osf-operation-id": canonicalOperationId("create") }
@@ -1130,8 +1172,10 @@ export function renderOpenApiSpec(
           },
         },
         responses: {
-          "201": entityResponse(
-            canonical ? `${name}Result` : name,
+          [String(successStatus)]: entityResponse(
+            createPluginSchemas
+              ? `${name}CreateResult`
+              : canonical ? `${name}Result` : name,
             canonical ? `Created ${label} and available operations` : `Created ${label}`,
           ),
           "400": errorResponse("Invalid request body", canonical),
@@ -1147,9 +1191,32 @@ export function renderOpenApiSpec(
             : {}),
         },
       };
+      if (projection && projection.path) {
+        const method = (projection.method ?? "POST").toLowerCase();
+        const openApiPath = projection.path.replace(
+          /:([_A-Za-z][_0-9A-Za-z]*)/g,
+          "{$1}",
+        );
+        const existing = (paths[openApiPath] ?? {}) as JsonObject;
+        if (method in existing) {
+          throw new Error(
+            `Duplicate canonical entity OpenAPI route "${method.toUpperCase()} ${openApiPath}".`,
+          );
+        }
+        paths[openApiPath] = {
+          ...existing,
+          [method]: createRoute,
+        };
+      } else {
+        collectionPath.post = createRoute;
+      }
     }
     if (Object.keys(collectionPath).length > 0) {
-      paths[`${REST_MOUNT}/${rest.basePath}`] = collectionPath;
+      const basePath = `${REST_MOUNT}/${rest.basePath}`;
+      paths[basePath] = {
+        ...((paths[basePath] ?? {}) as JsonObject),
+        ...collectionPath,
+      };
     }
 
     const itemPath: JsonObject = {
@@ -1184,7 +1251,11 @@ export function renderOpenApiSpec(
       };
     }
     if (rest.operations.update) {
-      itemPath.patch = {
+      const projection = updateOperation?.implementation?.type === "plugin"
+        ? updateOperation.interfaces?.rest
+        : undefined;
+      const successStatus = projection ? projection.response?.status ?? 200 : 200;
+      const updateRoute: JsonObject = {
         operationId: `update${name}`,
         ...(canonical
           ? { "x-osf-operation-id": canonicalOperationId("update") }
@@ -1201,8 +1272,10 @@ export function renderOpenApiSpec(
           },
         },
         responses: {
-          "200": entityResponse(
-            canonical ? `${name}Result` : name,
+          [String(successStatus)]: entityResponse(
+            updatePluginSchemas
+              ? `${name}UpdateResult`
+              : canonical ? `${name}Result` : name,
             canonical ? `Updated ${label} and available operations` : `Updated ${label}`,
           ),
           "400": errorResponse("Invalid request body", canonical),
@@ -1239,6 +1312,39 @@ export function renderOpenApiSpec(
             : {}),
         },
       };
+      if (projection && projection.path) {
+        const method = (projection.method ?? "PATCH").toLowerCase();
+        const openApiPath = projection.path.replace(
+          /:([_A-Za-z][_0-9A-Za-z]*)/g,
+          "{$1}",
+        );
+        const target = updateOperation?.target;
+        const existing = (paths[openApiPath] ?? {}) as JsonObject;
+        if (method in existing) {
+          throw new Error(
+            `Duplicate canonical entity OpenAPI route "${method.toUpperCase()} ${openApiPath}".`,
+          );
+        }
+        paths[openApiPath] = {
+          ...existing,
+          ...("parameters" in existing
+            ? {}
+            : {
+                parameters: target?.scope === "record"
+                  ? [{
+                      name: target.inputField,
+                      in: "path",
+                      required: true,
+                      description: `Unique identifier of the ${label} record.`,
+                      schema: { type: "string", format: "uuid" },
+                    }]
+                  : [],
+              }),
+          [method]: updateRoute,
+        };
+      } else {
+        itemPath.patch = updateRoute;
+      }
     }
     if (rest.operations.delete) {
       itemPath.delete = {
@@ -1308,7 +1414,11 @@ export function renderOpenApiSpec(
       };
     }
     if (Object.keys(itemPath).some((key) => key !== "parameters")) {
-      paths[`${REST_MOUNT}/${rest.basePath}/{id}`] = itemPath;
+      const baseItemPath = `${REST_MOUNT}/${rest.basePath}/{id}`;
+      paths[baseItemPath] = {
+        ...((paths[baseItemPath] ?? {}) as JsonObject),
+        ...itemPath,
+      };
     }
   }
 

@@ -127,12 +127,29 @@ describe("first-class plugin operations", () => {
       authorization: { action: "read", roles: ["Relations.Read"] },
       interaction: { confirmation: { mode: "none" } },
     };
-    const entities = [{ contract: { entityOperations: { list: entityOperation } } }] as never;
+    const entities = [{
+      contract: {
+        entity: {
+          id: "hubble.Relation",
+          name: "Relation",
+          title: "Relation",
+        },
+        model: { fields: [], relationships: [] },
+        storage: { columns: [] },
+        entityOperations: { list: entityOperation },
+      },
+    }] as never;
 
     const collected = collectEntityOperations(entities);
     expect(collected).toEqual([entityOperation]);
-    const catalog = buildStaticOperationCatalog([], collected);
-    expect(catalog.operations).toEqual([entityOperation]);
+    const catalog = buildStaticOperationCatalog([], collected, entities, {});
+    expect(catalog.operations).toEqual([
+      expect.objectContaining({
+        ...entityOperation,
+        inputSchema: expect.any(Object),
+        outputSchema: expect.any(Object),
+      }),
+    ]);
     expect(JSON.parse(renderOperationCatalog(catalog))).toMatchObject({
       version: 1,
       operations: [],
@@ -149,16 +166,32 @@ describe("first-class plugin operations", () => {
       id: operation.key,
       key: "create",
       intent: "create",
+      entityId: "hubble.Relation",
+      entityName: "Relation",
+      interaction: { confirmation: { mode: "none" } },
     } as CompiledEntityOperation;
 
-    expect(() => buildStaticOperationCatalog([compiledPlugin!], [entityOperation]))
+    const entities = [{
+      contract: {
+        entity: { id: "hubble.Relation", name: "Relation", title: "Relation" },
+        model: { fields: [], relationships: [] },
+        storage: { columns: [] },
+        entityOperations: { create: entityOperation },
+      },
+    }] as never;
+    expect(() => buildStaticOperationCatalog(
+      [compiledPlugin!],
+      [entityOperation],
+      entities,
+      {},
+    ))
       .toThrow(/Duplicate canonical Operation id/);
   });
 
   test("collects deterministic canonical contracts and OpenAPI path parameters", () => {
     const plugins: CompilerPlugin[] = [{ name: "demo", operations: [operation] }];
     const collected = collectPluginOperations(plugins, context);
-    const catalog = buildStaticOperationCatalog(collected, []);
+    const catalog = buildStaticOperationCatalog(collected, [], [], {});
     expect(catalog.operations[0]).toMatchObject({
       id: operation.key,
       key: operation.key,
@@ -720,8 +753,8 @@ describe("first-class plugin operations", () => {
     expect(first[0]!.transports.rest.path).toBe("/api/session");
     expect((operationOpenApiPaths(first) as Record<string, Record<string, unknown>>)["/api/session"])
       .toHaveProperty("get");
-    expect(renderOperationCatalog(buildStaticOperationCatalog(first, []))).toBe(
-      renderOperationCatalog(buildStaticOperationCatalog(second, [])),
+    expect(renderOperationCatalog(buildStaticOperationCatalog(first, [], [], {}))).toBe(
+      renderOperationCatalog(buildStaticOperationCatalog(second, [], [], {})),
     );
 
     const hyphenated = collectPluginOperations([{ name: "user-session", operations: [{

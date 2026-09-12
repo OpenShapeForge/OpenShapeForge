@@ -74,6 +74,7 @@ export type {
   CompilerPlugin,
   CompiledEntityInfo,
   CompiledPluginOperation,
+  CompiledStaticEntityOperation,
   CompiledStaticOperation,
   EntityOperationCatalog,
   JsonSchema,
@@ -89,6 +90,19 @@ export type {
 } from "./plugins.js";
 export { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
 export { resolveModelFields } from "./authoring/compiler/model.js";
+export {
+  entityOperationControlSchema,
+  entityOperationJsonSchemas,
+  entityRecordOutputSchema,
+  entityRelationshipColumn,
+  entityRelationshipKeys,
+  withEntityRelationshipKeys,
+  writableEntityFields,
+} from "./entity-operation-json-schema.js";
+export type {
+  EntityRelationshipKey,
+  EntityRelationshipTarget,
+} from "./entity-operation-json-schema.js";
 export {
   compiledFieldSchema,
   compiledObjectSchema,
@@ -285,7 +299,12 @@ export async function collectAllArtifacts(
   const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries);
   assertOperationRuntimeModules(operations, moduleRegistry.modules.map((module) => module.name));
   auditOperationSurfaceCollisions(operations, manifest, connectors, MAX_DEDICATED_TOOLS);
-  const operationCatalog = buildStaticOperationCatalog(operations, entityOperations);
+  const operationCatalog = buildStaticOperationCatalog(
+    operations,
+    entityOperations,
+    entities,
+    referentiedata,
+  );
   const fieldSchemas = createFieldSchemaCompiler({
     ...loadFieldCompilationCatalogs(authoringDir),
     referentiedata,

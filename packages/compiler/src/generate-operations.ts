@@ -4,6 +4,7 @@ import addFormats from "ajv-formats";
 import type {
   CompilerPlugin,
   CompiledPluginOperation,
+  CompiledStaticEntityOperation,
   JsonSchema,
   PluginBaseContext,
   PluginOperationContract,
@@ -16,6 +17,8 @@ import type {
 } from "./authoring/types.js";
 import type { LocalizedText } from "./authoring/types.js";
 import type { CompiledEntityInfo } from "./plugins.js";
+import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
+import { entityOperationJsonSchemas } from "./entity-operation-json-schema.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
 
@@ -797,8 +800,25 @@ export function collectEntityOperations(
 export function buildStaticOperationCatalog(
   pluginOperations: readonly CompiledPluginOperation[],
   entityOperations: readonly CompiledEntityOperation[],
+  entities: readonly Pick<CompiledEntityInfo, "contract">[],
+  referentiedata: CoreReferentiedataSnapshot,
 ): import("./plugins.js").StaticOperationCatalog {
-  const operations = [...pluginOperations, ...entityOperations]
+  const contracts = entities.map(({ contract }) => contract);
+  const byEntityId = new Map(contracts.map((contract) => [contract.entity.id, contract]));
+  const concreteEntityOperations = entityOperations.map((operation) => {
+    const contract = byEntityId.get(operation.entityId);
+    if (!contract) {
+      throw new Error(
+        `Canonical entity Operation "${operation.id}" references missing entity ` +
+          `"${operation.entityId}" while building its concrete schemas.`,
+      );
+    }
+    return {
+      ...operation,
+      ...entityOperationJsonSchemas(contract, operation, contracts, referentiedata),
+    };
+  });
+  const operations = [...pluginOperations, ...concreteEntityOperations]
     .sort((left, right) => left.id.localeCompare(right.id));
   for (let index = 1; index < operations.length; index += 1) {
     if (operations[index - 1]!.id === operations[index]!.id) {
@@ -818,7 +838,7 @@ export function renderOperationCatalog(
     (operation): operation is CompiledPluginOperation => operation.intent === "invoke",
   );
   const entityOperations = catalog.operations.filter(
-    (operation): operation is CompiledEntityOperation => operation.intent !== "invoke",
+    (operation): operation is CompiledStaticEntityOperation => operation.intent !== "invoke",
   );
   return `${JSON.stringify({ version: 1, operations, entityOperations }, null, 2)}\n`;
 }

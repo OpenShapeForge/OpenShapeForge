@@ -49,8 +49,15 @@ export type CompiledPluginOperation = PluginOperationContract & {
   intent: "invoke";
 };
 
+export type CompiledStaticEntityOperation = CompiledEntityOperation & {
+  /** Concrete input accepted by platform.operations.execute. */
+  inputSchema: JsonSchema;
+  /** Concrete success data returned by platform.operations.execute. */
+  outputSchema: JsonSchema;
+};
+
 export type CompiledStaticOperation =
-  | CompiledEntityOperation
+  | CompiledStaticEntityOperation
   | CompiledPluginOperation;
 
 /**

@@ -142,7 +142,7 @@ export type PluginGenerateContext = PluginBaseContext & {
   operationCatalog: {
     version: 1;
     operations: readonly (
-      | CompiledEntityOperation
+      | CompiledStaticEntityOperation
       | CompiledPluginOperation
     )[];
   };                                  // complete static Operation catalog
@@ -168,8 +168,13 @@ compiled once from the resolved layers, contains both canonical entity CRUD
 and authored entity/module plugin Operations, rejects duplicate ids across
 those sources, and is sorted by stable Operation id. Plugin Operations carry
 `id === key` and `intent: "invoke"`; entity Operations keep their canonical
-CRUD intent and symbolic entity input/output contract. A plugin should consume
-this catalog instead of parsing entity YAML or inferring actions from transport
+CRUD intent and symbolic entity input/output contract, and additionally carry
+concrete `inputSchema`/`outputSchema` for build-time consumers. Those schemas
+describe the shared executor boundary (`values` plus platform-owned mutation
+controls), not a flattened transport request. They are projected from the same
+compiled field-schema helpers as the generated interfaces, including writable
+field eligibility and implicit relationship keys. A plugin should consume this
+catalog instead of parsing entity YAML or inferring actions from transport
 routes.
 
 `fieldSchemas` is bound to the resolved component, semantic-type and reference-

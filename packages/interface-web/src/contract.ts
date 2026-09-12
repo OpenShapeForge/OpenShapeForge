@@ -95,6 +95,8 @@ export type WebFieldProjection = {
   optionSource?: WebFieldOptionSource;
   cardinality: "one" | "many";
   required: boolean;
+  /** Authored literal create default; never replaces an existing record value. */
+  defaultValue?: unknown;
   /** Static capabilities only. Effective rights arrive in operation offers. */
   supports: { read: boolean; create: boolean; update: boolean };
 };

@@ -150,6 +150,15 @@ function entity(
 }
 
 describe("web manifest projection", () => {
+  test("preserves authored defaults including false, zero, null and structured values", () => {
+    const defaults = [true, false, 0, "active", null, { mode: "manual" }, []];
+    const definition = entity("Sample", "sample", [field("unset"),
+      ...defaults.map((value, index) => field(`field${index}`, { defaultValue: value })),
+    ], coreView());
+    const projected = buildWebManifest([definition]).entities.Sample!.fields;
+    expect(projected.unset).not.toHaveProperty("defaultValue");
+    for (const [index, value] of defaults.entries()) expect(projected[`field${index}`]!.defaultValue).toEqual(value);
+  });
   test("projects views, supported modes and direct relationships without REST paths", () => {
     const contactView = coreView();
     contactView.list = { ...contactView.list!, title: text("Contact details", "Contactgegevens") };

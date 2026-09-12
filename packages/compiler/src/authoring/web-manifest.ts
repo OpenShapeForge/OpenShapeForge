@@ -370,6 +370,7 @@ function projectEntity(
         : {}),
       cardinality: field.cardinality === "collection" ? "many" : "one",
       required: field.required,
+      ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),
       supports: {
         read: true,
         create: !field.readOnly && createFields.has(field.key),

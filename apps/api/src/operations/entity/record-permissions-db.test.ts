@@ -60,7 +60,7 @@ beforeAll(async () => {
         id uuid primary key,
         tenant_id uuid not null,
         marker text not null,
-        authorization jsonb not null
+        "authorization" jsonb not null
       )
     `.execute(conn);
     await sql`alter table erp.record_permission_fixture enable row level security`.execute(conn);
@@ -71,7 +71,7 @@ beforeAll(async () => {
       using (
         app.bypass_rls() or (
           tenant_id = app.current_tenant()
-          and app.record_permission_allows(authorization, 'view', true)
+          and app.record_permission_allows("authorization", 'view', true)
         )
       )
       with check (app.bypass_rls() or tenant_id = app.current_tenant())
@@ -90,12 +90,12 @@ beforeAll(async () => {
     ];
     for (const row of rows) {
       await sql`
-        insert into erp.record_permission_fixture (id, tenant_id, marker, authorization)
+        insert into erp.record_permission_fixture (id, tenant_id, marker, "authorization")
         values (
           ${randomUUID()}::uuid,
           ${tenantId}::uuid,
           ${row.marker},
-          ${JSON.stringify(row.authorization)}::jsonb
+          ${row.authorization}::jsonb
         )
       `.execute(conn);
     }
@@ -143,17 +143,17 @@ describe("record-permission RLS", () => {
       }>`
         select
           app.record_permission_allows(
-            ${JSON.stringify({ edit: { users: [userA] } })}::jsonb, 'edit', false
+            ${{ edit: { users: [userA] } }}::jsonb, 'edit', false
           ) as edit_only,
           app.record_permission_allows(
-            ${JSON.stringify({ view: { users: [userA] }, edit: { users: [userA] } })}::jsonb,
+            ${{ view: { users: [userA] }, edit: { users: [userA] } }}::jsonb,
             'edit', false
           ) as view_edit,
           app.record_permission_allows(
-            ${JSON.stringify({ delete: { users: [userA] } })}::jsonb, 'delete', false
+            ${{ delete: { users: [userA] } }}::jsonb, 'delete', false
           ) as delete_only,
           app.record_permission_allows(
-            ${JSON.stringify({ view: { users: [userA] }, delete: { users: [userA] } })}::jsonb,
+            ${{ view: { users: [userA] }, delete: { users: [userA] } }}::jsonb,
             'delete', false
           ) as view_delete,
           app.record_permission_allows('{}'::jsonb, null, true) as unknown_action

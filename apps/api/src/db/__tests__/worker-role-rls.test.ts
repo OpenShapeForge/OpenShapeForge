@@ -497,7 +497,7 @@ describe("worker-role RLS axis", () => {
                 await sql`select 1 from ${sql.raw(table)} limit 1`.execute(conn);
                 return true;
               } catch (error) {
-                if (/permission denied for table/i.test(String(error))) return false;
+                if (/permission denied for (?:table|schema)/i.test(String(error))) return false;
                 throw error;
               }
             };

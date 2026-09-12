@@ -34,6 +34,15 @@ export type PluginSessionContext = {
 
 export type PluginDatabaseSchema = Record<string, unknown>;
 
+export type RuntimeSchemaValidationResult =
+  | { valid: true }
+  | { valid: false; error: OperationError };
+
+export type RuntimeJsonSchemaValidator = {
+  /** Host validation without coercion, defaults, mutation or external reference loading. */
+  validate(schema: Readonly<Record<string, unknown>>, values: unknown): RuntimeSchemaValidationResult;
+};
+
 export type RuntimeFieldSchemaCompiler = {
   /**
    * Validate canonical stored FieldDefinitions and project their value object
@@ -42,6 +51,10 @@ export type RuntimeFieldSchemaCompiler = {
   object(
     fields: readonly Readonly<Record<string, unknown>>[],
   ): Readonly<Record<string, unknown>>;
+  /** Validate values against the same active FieldDefinitions used for rendering. */
+  validateObject(
+    fields: readonly Readonly<Record<string, unknown>>[], values: unknown,
+  ): RuntimeSchemaValidationResult;
 };
 
 export type RuntimeOperationDefinition = OperationReference & {
@@ -180,6 +193,7 @@ export type PluginPlatformServices = {
   db: PluginDatabase;
   schemas: {
     fields: RuntimeFieldSchemaCompiler;
+    json: RuntimeJsonSchemaValidator;
   };
   events: {
     append(

@@ -42,6 +42,7 @@ import type {
   RuntimeOperationProvider,
   RuntimeOperationRequest,
   RuntimeFieldSchemaCompiler,
+  RuntimeJsonSchemaValidator,
   RuntimeModuleContract,
   RuntimeWorkerContextContract,
   RuntimeWorkerContract,
@@ -290,6 +291,7 @@ export type ModulePlatformServices = {
   };
   schemas: {
     fields: RuntimeFieldSchemaCompiler;
+    json: RuntimeJsonSchemaValidator;
   };
   events: {
     append(

@@ -8,7 +8,35 @@ import {
   type OperationFieldDefinition,
   type OperationFieldSchemaRegistry,
 } from "@openshapeforge/operations";
-import type { RuntimeFieldSchemaCompiler } from "@openshapeforge/plugin-runtime";
+import type { RuntimeFieldSchemaCompiler, RuntimeJsonSchemaValidator, RuntimeSchemaValidationResult } from "@openshapeforge/plugin-runtime";
+
+function invalidDefinition(): RuntimeSchemaValidationResult {
+  return { valid: false, error: { code: "INVALID_DEFINITION", message: "De invoerbeschrijving is ongeldig.",
+    detail: "De gegevens zijn niet verwerkt. Laat de formulierinstellingen controleren.", retryable: false } };
+}
+
+export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
+  validate(schema, values) {
+    // A short-lived compiler avoids retaining every stored/dynamic form forever.
+    // No async loader, coercion, removal or defaults: validation never rewrites input.
+    const ajv = new Ajv2020.default({ allErrors: true, strict: false });
+    addFormats.default(ajv);
+    try {
+      const validate = ajv.compile(schema);
+      if (validate.$async) return invalidDefinition();
+      if (validate(values)) return { valid: true };
+      return { valid: false, error: {
+        code: "VALIDATION_FAILED", message: "Controleer de ingevulde gegevens.", retryable: false,
+        violations: (validate.errors ?? []).map((error) => ({
+          field: error.instancePath || "/", code: error.keyword.toUpperCase(),
+          message: error.keyword === "required" ? "Vul de verplichte gegevens in." : "Vul een geldige waarde in.",
+          // Only schema paths/rules, never raw values or validator exception text.
+          detail: `${error.instancePath || "/"}: ${error.keyword}`,
+        })),
+      } };
+    } catch { return invalidDefinition(); }
+  },
+});
 
 export type GeneratedRuntimeFieldSchemaRegistry = OperationFieldSchemaRegistry & {
   version: 1;
@@ -33,7 +61,7 @@ export function createRuntimeFieldSchemaCompiler(
   const ajv = new Ajv2020.default({ allErrors: true, strict: false });
   addFormats.default(ajv);
   const validate = ajv.compile(registry.fieldDefinitionSchema);
-  return Object.freeze({
+  const compiler: RuntimeFieldSchemaCompiler = {
     object(fields: readonly Readonly<Record<string, unknown>>[]) {
       if (!Array.isArray(fields)) {
         throw new Error("FieldDefinitions must be an array.");
@@ -54,7 +82,12 @@ export function createRuntimeFieldSchemaCompiler(
         registry,
       );
     },
-  });
+    validateObject(fields, values) {
+      try { return runtimeJsonSchemas.validate(compiler.object(fields), values); }
+      catch { return invalidDefinition(); }
+    },
+  };
+  return Object.freeze(compiler);
 }
 
 let generatedCompiler: RuntimeFieldSchemaCompiler | undefined;
@@ -71,5 +104,9 @@ export const generatedRuntimeFieldSchemas: RuntimeFieldSchemaCompiler = Object.f
       generatedCompiler = createRuntimeFieldSchemaCompiler(registry);
     }
     return generatedCompiler.object(fields);
+  },
+  validateObject(fields, values) {
+    try { return runtimeJsonSchemas.validate(generatedRuntimeFieldSchemas.object(fields), values); }
+    catch { return invalidDefinition(); }
   },
 });

@@ -328,6 +328,7 @@ import {
   sameInvocationSourceReference,
 } from "../modules/source-reference.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
+import { sameStatefulMcpAuthorization } from "./stateful-session-authorization.js";
 // --- session-info (whoami / osf://session) — see ./session-info.ts ---
 import {
   SESSION_INFO_TOOL,
@@ -7566,20 +7567,12 @@ export function registerGeneratedMcpServer(
       roles: string[];
       oauthScopes: string[];
       groups: string[];
-      scope: DbSessionInput["scope"];
+      scope: TrustedSessionContext["scope"];
       credential: TrustedSessionContext["credential"];
+      loginSessionBinding?: string;
       lastSeenMs: number;
     };
     const mcpSessions = new Map<string, McpSessionEntry>();
-    const sameClaims = (
-      left: readonly string[],
-      right: readonly string[],
-    ): boolean => {
-      if (left.length !== right.length) return false;
-      const sortedLeft = [...left].sort();
-      const sortedRight = [...right].sort();
-      return sortedLeft.every((value, index) => value === sortedRight[index]);
-    };
     const SESSION_IDLE_LIMIT_MS = 30 * 60 * 1000;
     const sweep = setInterval(() => {
       const now = Date.now();
@@ -8071,13 +8064,7 @@ export function registerGeneratedMcpServer(
             "MCP session belongs to another identity.",
           );
         }
-        if (
-          !sameClaims(existing.roles, session.roles ?? []) ||
-          !sameClaims(existing.oauthScopes, session.oauthScopes ?? []) ||
-          !sameClaims(existing.groups, session.groups ?? []) ||
-          existing.scope !== session.scope ||
-          existing.credential !== session.credential
-        ) {
+        if (!sameStatefulMcpAuthorization(existing, session)) {
           mcpSessions.delete(sessionId);
           options.modulePlatform?.unregisterServer(existing.server);
           void existing.transport.close();
@@ -8134,6 +8121,9 @@ export function registerGeneratedMcpServer(
               groups: [...(session.groups ?? [])],
               scope: session.scope,
               credential: session.credential,
+              ...(session.loginSessionBinding !== undefined
+                ? { loginSessionBinding: session.loginSessionBinding }
+                : {}),
               lastSeenMs: Date.now(),
             });
           },

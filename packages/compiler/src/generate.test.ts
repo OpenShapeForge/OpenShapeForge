@@ -191,6 +191,41 @@ describe("platform schema generator", () => {
     // The plain tenant-isolation policy should NOT be emitted alongside the
     // row-scope policy; rowScope subsumes it.
     expect(sql).not.toContain('CREATE POLICY "cases_tenant_isolation"');
+    expect(sql).toContain(
+      'DROP POLICY IF EXISTS "cases_tenant_isolation" ON "erp"."cases";',
+    );
+    expect(sql.indexOf('DROP POLICY IF EXISTS "cases_tenant_isolation"')).toBeLessThan(
+      sql.indexOf('CREATE POLICY "cases_row_scope"'),
+    );
+  });
+
+  it("drops the generated row-scope policy when a table returns to tenant isolation", () => {
+    const tenantOnlyManifest: PlatformSchemaManifest = {
+      version: 1,
+      tables: [
+        {
+          schema: "erp",
+          name: "cases",
+          tenantScoped: true,
+          columns: [
+            { name: "id", type: "uuid", primaryKey: true },
+            { name: "tenant_id", type: "uuid", required: true },
+          ],
+        },
+      ],
+    };
+
+    const sql = generateArtifacts(tenantOnlyManifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql"),
+    )?.contents ?? "";
+
+    expect(sql).toContain(
+      'DROP POLICY IF EXISTS "cases_row_scope" ON "erp"."cases";',
+    );
+    expect(sql.indexOf('DROP POLICY IF EXISTS "cases_row_scope"')).toBeLessThan(
+      sql.indexOf('CREATE POLICY "cases_tenant_isolation"'),
+    );
+    expect(sql).not.toContain('CREATE POLICY "cases_row_scope"');
   });
 
   it("ANDs record view permission into USING but keeps ACL handoff out of WITH CHECK", () => {

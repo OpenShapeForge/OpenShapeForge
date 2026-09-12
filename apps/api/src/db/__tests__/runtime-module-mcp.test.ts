@@ -17,7 +17,10 @@ import type {
   RuntimeModule,
 } from "../../modules/contract.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
-import { __buildGeneratedMcpServerForTests } from "../../mcp/generated-mcp-server.js";
+import {
+  __buildGeneratedMcpServerForTests,
+  createRuntimeDeclarativeServiceExecutor,
+} from "../../mcp/generated-mcp-server.js";
 import { connectionTokenSecretScope } from "../../mcp/entity-oauth.js";
 import { encryptSecret, keyringFromEnv } from "../../platform/secrets.js";
 
@@ -1467,6 +1470,50 @@ describe("generated MCP runtime module security boundary", () => {
             await sql`delete from public.module_connection_test
              where id in (${secondConnectionId}::uuid, ${sharedConnectionId}::uuid)
             `.execute(trx);
+          });
+
+          // Strict-v2 providers expose this same stored Service through the
+          // canonical Operation catalog. Its compatibility entry stays out of
+          // public MCP listing, while REST/GraphQL/workers can still execute
+          // the exact id/key/version through the transport-neutral engine.
+          (entry as typeof entry & {
+            compatibility?: { plugin: string; providerId: string };
+          }).compatibility = {
+            plugin: "example",
+            providerId: "example.services",
+          };
+          expect((await client.listTools()).tools.map((tool) => tool.name))
+            .not.toContain("public_read");
+          const directExecutor = createRuntimeDeclarativeServiceExecutor({
+            db,
+            modules: [workflowModule, module],
+            modulePlatform: platform,
+            egressOwner: module.egress,
+            tablesForTests: tables,
+          });
+          const direct = await platform.withActiveOperationSession(
+            {
+              tenantId,
+              userId,
+              roles: ["reader"],
+              groups: [],
+              oauthScopes: [],
+              scope: "self",
+              credential: "bearer",
+            },
+            (active) => directExecutor(active, {
+              definition: {
+                entity: "Definition",
+                id: publicDefinitionId,
+                key: "public_read",
+                version: 1,
+              },
+              input: {},
+            }),
+          );
+          expect(direct).toMatchObject({
+            data: { value: "ok" },
+            operations: [],
           });
 
           const beforeCollisionRead = moduleReads;

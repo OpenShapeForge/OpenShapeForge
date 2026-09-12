@@ -371,11 +371,7 @@ export class ModulePlatformRuntime {
     const staticOperations = [...this.#staticOperations.values()]
       .filter((registration) => registration.available(session))
       .map((registration) => registration.definition);
-    const provided = (await Promise.all(
-      [...this.#operationProviders.values()].map((provider) =>
-        provider.list(session)
-      ),
-    )).flat();
+    const provided = await this.listRuntimeProviderOperations(session);
     const byId = new Map<string, RuntimeOperationDefinition>();
     for (const definition of [
       ...entityOperations,
@@ -390,6 +386,46 @@ export class ModulePlatformRuntime {
       byId.set(definition.id, definition);
     }
     return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  /**
+   * Core adapter seam for record-derived Operations only. Entity and authored
+   * static Operations already have their own adapter projections, so exposing
+   * them here would duplicate names and handlers in MCP.
+   */
+  async listRuntimeProviderOperations(
+    session: TrustedSessionContext,
+  ): Promise<readonly RuntimeOperationDefinition[]> {
+    if (!this.#acceptsScopedSession(session)) {
+      throw new Error(
+        "Runtime provider Operation listing requires a live verified session.",
+      );
+    }
+    const definitions = (await Promise.all(
+      [...this.#operationProviders.values()].map((provider) =>
+        provider.list(session)
+      ),
+    )).flat();
+    const reservedIds = new Set([
+      ...getEntityOperationContracts().map((operation) => operation.id),
+      ...this.#staticOperations.keys(),
+    ]);
+    const byId = new Map<string, RuntimeOperationDefinition>();
+    for (const definition of definitions) {
+      if (
+        !definition.id ||
+        reservedIds.has(definition.id) ||
+        byId.has(definition.id)
+      ) {
+        throw new Error(
+          `Runtime provider Operation id ${JSON.stringify(definition.id)} is empty or duplicated.`,
+        );
+      }
+      byId.set(definition.id, definition);
+    }
+    return [...byId.values()].sort((left, right) =>
+      left.id.localeCompare(right.id)
+    );
   }
 
   /** Activate only providers from modules that loaded and initialised cleanly. */

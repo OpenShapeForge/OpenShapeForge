@@ -1160,6 +1160,180 @@ test("MCP projects a handler's content blocks next to the canonical value", asyn
   }
 });
 
+test("MCP projects and dispatches live runtime provider Operations canonically", async () => {
+  const db = testDatabase();
+  const platform = new ModulePlatformRuntime(db);
+  const definition = {
+    id: "example.service.invoke:service-one@1",
+    intent: "invoke",
+    key: "find-tickets",
+    entityId: "service-one",
+    entityName: "Service",
+    name: "Find tickets",
+    description: "Find the tickets visible to this person.",
+    input: {
+      kind: "json-schema",
+      schema: {
+        type: "object",
+        properties: { query: { type: "string" } },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+    output: {
+      kind: "json-schema",
+      schema: {
+        type: "object",
+        properties: { found: { type: "number" } },
+        required: ["found"],
+        additionalProperties: false,
+      },
+    },
+    effects: { data: "read" as const, external: "read" as const },
+    reliability: { idempotency: { mode: "natural" as const } },
+  };
+  const calls: unknown[] = [];
+  const providerModule: RuntimeModule = {
+    name: "example",
+    operationProviders: [{
+      id: "example.services",
+      list: async (active) => active.userId === session.userId ? [definition] : [],
+      get: async (active, operationId) =>
+        active.userId === session.userId && operationId === definition.id
+          ? definition
+          : undefined,
+      execute: async (context, request) => {
+        calls.push({ session: context.session, request });
+        return {
+          data: { found: request.input?.query === "open" ? 2 : 0 },
+          operations: [],
+          resources: [{
+            uri: "osf://tickets/result-one",
+            name: "ticket-result",
+            mimeType: "application/json",
+          }],
+        };
+      },
+    }],
+  };
+  platform.registerOperationProviders([providerModule]);
+  const server = __buildGeneratedMcpServerForTests({
+    db,
+    session,
+    modules: [providerModule],
+    modulePlatform: platform,
+  });
+  const client = new Client(
+    { name: "runtime-operation-provider-test", version: "1" },
+    { capabilities: {} },
+  );
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  try {
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    const listed = await client.listTools();
+    expect(listed.tools).toContainEqual(expect.objectContaining({
+      name: "find_tickets",
+      title: "Find tickets",
+      description: "Find the tickets visible to this person.",
+      inputSchema: definition.input.schema,
+      outputSchema: expect.objectContaining({
+        required: ["data", "operations"],
+        properties: expect.objectContaining({ data: definition.output.schema }),
+      }),
+      annotations: expect.objectContaining({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+      }),
+    }));
+
+    const result = await client.callTool({
+      name: "find_tickets",
+      arguments: { query: "open" },
+    });
+    expect(result.isError).not.toBe(true);
+    expect(result.structuredContent).toEqual({
+      data: { found: 2 },
+      operations: [],
+      resources: [{
+        uri: "osf://tickets/result-one",
+        name: "ticket-result",
+        mimeType: "application/json",
+      }],
+    });
+    expect(result.content).toContainEqual({
+      type: "resource_link",
+      uri: "osf://tickets/result-one",
+      name: "ticket-result",
+      mimeType: "application/json",
+    });
+    expect(calls).toEqual([{
+      session: expect.objectContaining({
+        tenantId: session.tenantId,
+        userId: session.userId,
+      }),
+      request: {
+        operation: { id: definition.id, intent: definition.intent },
+        input: { query: "open" },
+      },
+    }]);
+  } finally {
+    await client.close();
+    await server.close();
+    await db.destroy();
+  }
+});
+
+test("MCP refuses unusable or colliding runtime provider tool keys", async () => {
+  for (const key of ["Find Tickets", "whoami"]) {
+    const db = testDatabase();
+    const platform = new ModulePlatformRuntime(db);
+    const providerModule: RuntimeModule = {
+      name: "example",
+      operationProviders: [{
+        id: `example.${key}`,
+        list: async () => [{
+          id: `example.invoke:${key}`,
+          intent: "invoke",
+          key,
+          name: key,
+          description: key,
+          input: { kind: "json-schema", schema: { type: "object" } },
+          output: { kind: "json-schema", schema: { type: "object" } },
+          effects: { data: "read", external: "none" },
+          reliability: { idempotency: { mode: "natural" } },
+        }],
+        get: async () => undefined,
+        execute: async () => ({ data: {}, operations: [] }),
+      }],
+    };
+    platform.registerOperationProviders([providerModule]);
+    const server = __buildGeneratedMcpServerForTests({
+      db,
+      session,
+      modules: [providerModule],
+      modulePlatform: platform,
+    });
+    const client = new Client(
+      { name: "runtime-operation-collision-test", version: "1" },
+      { capabilities: {} },
+    );
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      await expect(client.listTools()).rejects.toThrow(
+        key === "whoami" ? /contributed more than once/ : /no usable MCP key/,
+      );
+    } finally {
+      await client.close();
+      await server.close();
+      await db.destroy();
+    }
+  }
+});
+
 test("rejects an MCP projection that is not well-formed content", async () => {
   const value = {
     status: "accepted",

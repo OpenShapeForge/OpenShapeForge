@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import Fastify from "fastify";
 import { GraphQLError } from "graphql";
 import {
@@ -30,6 +31,7 @@ import {
   type ModuleMcpServerBinding,
 } from "../modules/platform.js";
 import { HttpError } from "../rest/http-error.js";
+import { operationContractFingerprint } from "./contract-fingerprint.js";
 import {
   bindOperationHandlers,
   DeclaredOperationError,
@@ -840,11 +842,23 @@ test("the generic runtime Operation route parses JSON inside a raw-buffer parent
     groups: [],
   }, { secret });
   try {
+    const discovered = await app.inject({
+      method: "GET",
+      url: `/api/operations/${restOperation.key}`,
+      headers: Object.fromEntries(headers),
+    });
+    expect(discovered.statusCode).toBe(200);
+    const definition = discovered.json() as RuntimeOperationDefinition;
+    const expectedContractFingerprint = operationContractFingerprint(definition);
     const response = await app.inject({
       method: "POST",
       url: `/api/operations/${restOperation.key}/execute`,
       headers: Object.fromEntries(headers),
-      payload: { intent: "invoke", input: { quoteId: "quote-raw-buffer" } },
+      payload: {
+        intent: "invoke",
+        input: { quoteId: "quote-raw-buffer" },
+        expectedContractFingerprint,
+      },
     });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
@@ -859,6 +873,33 @@ test("the generic runtime Operation route parses JSON inside a raw-buffer parent
       quoteId: "quote-raw-buffer",
       idempotencyKey: "request-raw-buffer",
     }]);
+
+    platform.registerStaticOperations([{
+      definition: {
+        ...definition,
+        reliability: { idempotency: { mode: "none" } },
+      },
+      available: () => true,
+      execute: async () => {
+        seen.push("changed-contract-executed");
+        return { data: {}, operations: [] };
+      },
+    }]);
+    const changed = await app.inject({
+      method: "POST",
+      url: `/api/operations/${restOperation.key}/execute`,
+      headers: Object.fromEntries(headers),
+      payload: {
+        intent: "invoke",
+        input: { quoteId: "must-not-run" },
+        expectedContractFingerprint,
+      },
+    });
+    expect(changed.statusCode).toBe(200);
+    expect(changed.json()).toMatchObject({
+      error: { code: "OPERATION_CONTRACT_CHANGED", retryable: false },
+    });
+    expect(seen).toHaveLength(1);
 
     const malformed = await app.inject({
       method: "POST",

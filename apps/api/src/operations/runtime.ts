@@ -1201,6 +1201,16 @@ export function registerRuntimeOperationRestRoutes(
         const operationInput = body.input === undefined
           ? undefined
           : asInput(body.input);
+        const expectedContractFingerprint = body.expectedContractFingerprint;
+        if (expectedContractFingerprint !== undefined &&
+          (typeof expectedContractFingerprint !== "string" ||
+            !/^sha256:[0-9a-f]{64}$/.test(expectedContractFingerprint))) {
+          throw new HttpError(
+            400,
+            "BAD_USER_INPUT",
+            "Expected Operation contract fingerprint is invalid.",
+          );
+        }
         const idempotencyKey = request.headers["idempotency-key"];
         if (idempotencyKey !== undefined && typeof idempotencyKey !== "string") {
           throw new HttpError(
@@ -1214,6 +1224,9 @@ export function registerRuntimeOperationRestRoutes(
             operation: { id, intent: body.intent as string },
             ...(operationInput ? { input: operationInput } : {}),
             ...(idempotencyKey ? { idempotencyKey } : {}),
+            ...(expectedContractFingerprint
+              ? { expectedContractFingerprint }
+              : {}),
           })
         );
       } catch (error) {

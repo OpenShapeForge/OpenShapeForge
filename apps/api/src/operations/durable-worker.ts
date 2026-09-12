@@ -9,6 +9,7 @@ import { resolveSessionContext } from "../auth/identity.js";
 import {
   organizationServiceIdentities, serviceIdentityEndpoint, type OrganizationServiceIdentity,
 } from "../auth/organization-service-identities.js";
+import { operationContractFingerprint } from "./contract-fingerprint.js";
 
 const failure = (code: string, message: string, retryable = false): RuntimeOperationExecutionResult =>
   ({ error: { code, message, retryable } });
@@ -24,27 +25,6 @@ function fingerprint(value: unknown): string {
     return Object.fromEntries(Object.keys(item).sort().map((key) => [key, sorted((item as Record<string, unknown>)[key])]));
   }
   return createHash("sha256").update(JSON.stringify(sorted(value))).digest("hex");
-}
-
-/**
- * Stable execution semantics only. Localised presentation can change without
- * changing an already claimed command, while every server control or schema
- * that can change what the command does remains part of the persisted pin.
- */
-function operationContractFingerprint(definition: RuntimeOperationDefinition): string {
-  return `sha256:${fingerprint({
-    version: 1,
-    id: definition.id,
-    intent: definition.intent,
-    target: definition.target,
-    input: definition.input,
-    output: definition.output,
-    effects: definition.effects,
-    reliability: definition.reliability,
-    prerequisites: definition.prerequisites,
-    concurrency: definition.concurrency,
-    interaction: definition.interaction,
-  })}`;
 }
 
 function workFingerprint(work: RuntimeResolvedOperationWork): string {
@@ -253,7 +233,11 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
         const response = await request(new URL(`/api/operations/${encodeURIComponent(definition.id)}/execute`, api), {
           method: "POST", redirect: "error", signal,
           headers: { ...headers, "content-type": "application/json", "idempotency-key": work.operation.idempotencyKey },
-          body: JSON.stringify({ intent: definition.intent, input: work.operation.input ?? {} }),
+          body: JSON.stringify({
+            intent: definition.intent,
+            input: work.operation.input ?? {},
+            expectedContractFingerprint: minted.contractFingerprint,
+          }),
         });
         const result = await response.json() as RuntimeOperationExecutionResult;
         if (!result || typeof result !== "object" || !("data" in result || "error" in result)) throw new Error("Invalid canonical response");

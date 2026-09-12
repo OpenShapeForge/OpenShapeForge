@@ -13,6 +13,8 @@ import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
 import type { McpInvocationContext, RuntimeModule } from "../contract.js";
 import { authorizeMcpRequest } from "../mcp-hooks.js";
+import { getEntityOperationContracts } from "../../operations/entity/index.js";
+import { operationContractFingerprint } from "../../operations/contract-fingerprint.js";
 import type { ModuleMcpServerBinding } from "../platform.js";
 import {
   __assertSecretFreeModuleEventForTests,
@@ -119,11 +121,37 @@ describe("runtime module platform session authority", () => {
         .resolves.toEqual(definition);
       await expect(runtime.services.operations.execute(session, {
         operation: { id: definition.id, intent: "invoke" },
+        expectedContractFingerprint: operationContractFingerprint(definition),
       })).resolves.toEqual({
         data: { operation: definition.id },
         operations: [],
       });
+      await expect(runtime.services.operations.execute(session, {
+        operation: { id: definition.id, intent: "invoke" },
+        expectedContractFingerprint: `sha256:${"0".repeat(64)}`,
+      })).resolves.toMatchObject({
+        error: { code: "OPERATION_CONTRACT_CHANGED", retryable: false },
+      });
     });
+  });
+
+  it("checks generated entity Operation preconditions before database effects", async () => {
+    const db = testDatabase();
+    const runtime = new ModulePlatformRuntime(db);
+    const definition = getEntityOperationContracts()[0];
+    expect(definition).toBeDefined();
+    try {
+      await runtime.withActiveOperationSession(operationClaims(), async (session) => {
+        await expect(runtime.services.operations.execute(session, {
+          operation: { id: definition!.id, intent: definition!.intent },
+          expectedContractFingerprint: `sha256:${"0".repeat(64)}`,
+        })).resolves.toMatchObject({
+          error: { code: "OPERATION_CONTRACT_CHANGED", retryable: false },
+        });
+      });
+    } finally {
+      await db.destroy();
+    }
   });
 
   it("resolves and executes record-derived Operations only for a live capability", async () => {
@@ -140,6 +168,7 @@ describe("runtime module platform session authority", () => {
       reliability: { idempotency: { mode: "keyed" as const } },
     };
     let declarativeSession: TrustedSessionContext | undefined;
+    let providerExecutions = 0;
     runtime.registerDeclarativeServiceExecutor(async (session, request, options) => {
       options?.signal?.throwIfAborted();
       declarativeSession = session;
@@ -158,18 +187,21 @@ describe("runtime module platform session authority", () => {
         list: async () => [definition],
         get: async (_session, operationId) =>
           operationId === definition.id ? definition : undefined,
-        execute: async (context, request) => context.invokeDeclarativeService({
-          definition: {
-            entity: "Service",
-            id: "service-one",
-            key: "service-one",
-            version: 1,
-          },
-          ...(request.input ? { input: request.input } : {}),
-          ...(request.idempotencyKey
-            ? { idempotencyKey: request.idempotencyKey }
-            : {}),
-        }),
+        execute: async (context, request) => {
+          providerExecutions += 1;
+          return context.invokeDeclarativeService({
+            definition: {
+              entity: "Service",
+              id: "service-one",
+              key: "service-one",
+              version: 1,
+            },
+            ...(request.input ? { input: request.input } : {}),
+            ...(request.idempotencyKey
+              ? { idempotencyKey: request.idempotencyKey }
+              : {}),
+          });
+        },
       }],
     }]);
     let retained!: TrustedSessionContext;
@@ -184,6 +216,7 @@ describe("runtime module platform session authority", () => {
           operation: { id: definition.id, intent: definition.intent },
           input: { value: "one" },
           idempotencyKey: "attempt-1",
+          expectedContractFingerprint: operationContractFingerprint(definition),
         })).resolves.toEqual({
           data: {
             definition: "service-one",
@@ -191,6 +224,14 @@ describe("runtime module platform session authority", () => {
           },
           operations: [],
         });
+        expect(providerExecutions).toBe(1);
+        await expect(runtime.services.operations.execute(active, {
+          operation: { id: definition.id, intent: definition.intent },
+          expectedContractFingerprint: `sha256:${"0".repeat(64)}`,
+        })).resolves.toMatchObject({
+          error: { code: "OPERATION_CONTRACT_CHANGED", retryable: false },
+        });
+        expect(providerExecutions).toBe(1);
         expect(declarativeSession).toBe(active);
       });
       await expect(runtime.services.operations.get(retained, definition.id))

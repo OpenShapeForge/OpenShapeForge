@@ -52,7 +52,11 @@ test("core resolves exact work, mints opaque authority, and uses fresh identity 
   expect(await f.broker.execute(request)).toEqual({ data: { id: "created" }, operations: [] });
   expect(f.calls.filter((call) => call.url.endsWith("/token"))).toHaveLength(2);
   expect(f.calls.every((call) => call.redirect === "error")).toBe(true);
-  expect(f.calls.find((call) => call.url.endsWith("/execute"))?.body).toBe(JSON.stringify({ intent: "Note.create", input: { value: "requested" } }));
+  expect(f.calls.find((call) => call.url.endsWith("/execute"))?.body).toBe(JSON.stringify({
+    intent: "Note.create",
+    input: { value: "requested" },
+    expectedContractFingerprint: f.work().operationContractFingerprint,
+  }));
   expect(await f.broker.execute(request)).toMatchObject({ error: { code: "DURABLE_CAPABILITY_REQUIRED" } });
 });
 

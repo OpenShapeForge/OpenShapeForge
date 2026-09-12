@@ -106,6 +106,8 @@ export type RuntimeOperationRequest = {
   input?: Record<string, unknown>;
   /** Durable engines persist and reuse this value across retries. */
   idempotencyKey?: string;
+  /** Optional optimistic precondition over canonical execution semantics. */
+  expectedContractFingerprint?: string;
 };
 
 export type RuntimeOperationExecutionOptions = {

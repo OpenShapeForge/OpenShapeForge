@@ -41,6 +41,24 @@ import { connectSocket } from "./socket-egress.js";
 import { classifyDatabaseError } from "../db/database-refusals.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "./field-schemas.js";
 import { organizationServiceIdentities } from "../auth/organization-service-identities.js";
+import { operationContractFingerprint } from "../operations/contract-fingerprint.js";
+
+function contractPreconditionFailure(
+  definition: RuntimeOperationDefinition,
+  request: RuntimeOperationRequest,
+): RuntimeOperationExecutionResult | undefined {
+  if (request.expectedContractFingerprint === undefined ||
+    request.expectedContractFingerprint === operationContractFingerprint(definition)) {
+    return undefined;
+  }
+  return {
+    error: {
+      code: "OPERATION_CONTRACT_CHANGED",
+      message: "The Operation contract changed after it was authorized.",
+      retryable: false,
+    },
+  };
+}
 
 /**
  * Narrow a module's selector to exactly one form before it reaches a query.
@@ -555,6 +573,8 @@ export class ModulePlatformRuntime {
           },
         };
       }
+      const contractFailure = contractPreconditionFailure(entityOperation, request);
+      if (contractFailure) return contractFailure;
       const result = await executeEntityOperation(this.#db, session, {
         operation: { id: entityOperation.id, intent: entityOperation.intent },
         ...(request.input ? { input: request.input as never } : {}),
@@ -575,6 +595,11 @@ export class ModulePlatformRuntime {
           },
         };
       }
+      const contractFailure = contractPreconditionFailure(
+        staticOperation.definition,
+        request,
+      );
+      if (contractFailure) return contractFailure;
       const staticStack = this.#operationCallStack.getStore() ?? [];
       if (staticStack.includes(request.operation.id)) {
         return {
@@ -629,6 +654,8 @@ export class ModulePlatformRuntime {
         },
       };
     }
+    const contractFailure = contractPreconditionFailure(match.definition, request);
+    if (contractFailure) return contractFailure;
     const stack = this.#operationCallStack.getStore() ?? [];
     if (stack.includes(request.operation.id)) {
       return {

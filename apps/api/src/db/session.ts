@@ -20,6 +20,12 @@ const MAX_EXPANDED_SESSION_GROUPS = 4096;
 export type DbSessionInput = {
   tenantId?: string | null;
   userId?: string | null;
+  /**
+   * Opaque binding to a verified interactive login session. This is control
+   * metadata for canonical Operations and is deliberately not projected into
+   * a PostgreSQL GUC or used as database authority.
+   */
+  loginSessionBinding?: string;
   /** Server-derived display label used only in safe, tenant-local messages. */
   userDisplayName?: string | null;
   roles?: readonly string[] | null;

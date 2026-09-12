@@ -20,6 +20,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { OperationFailure } from "@openshapeforge/operations";
 import openApiSpec from "../generated/rest/openapi.json" with { type: "json" };
 import { resolveSessionContext } from "../auth/identity.js";
+import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
@@ -327,6 +328,13 @@ type RestRequestContext = {
   session: DbSessionInput;
 };
 
+/** Keep all verified session metadata available to canonical entity controls. */
+export function generatedRestSession(
+  resolved: TrustedSessionContext,
+): DbSessionInput {
+  return { ...resolved };
+}
+
 export function registerGeneratedRestRoutes(
   app: FastifyInstance,
   options: { db?: OpenShapeForgeDatabase | undefined } = {},
@@ -365,14 +373,7 @@ export function registerGeneratedRestRoutes(
     }
     return {
       db: options.db,
-      session: {
-        tenantId: resolved.tenantId,
-        userId: resolved.userId,
-        userDisplayName: resolved.userDisplayName ?? null,
-        roles: [...resolved.roles],
-        groups: [...resolved.groups],
-        scope: resolved.scope,
-      },
+      session: generatedRestSession(resolved),
     };
   }
 

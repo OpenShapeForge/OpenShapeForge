@@ -27,10 +27,6 @@ export type OperationPrerequisiteReceiptIdentity = {
   targetOperationId: string;
 };
 
-type OperationPrerequisiteSession = DbSessionInput & {
-  loginSessionBinding?: string;
-};
-
 function canonicalReceiptIdentity(identity: OperationPrerequisiteReceiptIdentity): string {
   return JSON.stringify([
     1,
@@ -71,7 +67,7 @@ function sameReceipt(left: string, right: string): boolean {
 }
 
 function receiptIdentity(
-  session: OperationPrerequisiteSession,
+  session: DbSessionInput,
   sourceOperationId: string,
   targetOperationId: string,
 ): OperationPrerequisiteReceiptIdentity | undefined {
@@ -103,7 +99,7 @@ function unavailable(): never {
 }
 
 function receiptFor(
-  session: OperationPrerequisiteSession,
+  session: DbSessionInput,
   sourceOperationId: string,
   targetOperationId: string,
 ): string {
@@ -115,7 +111,7 @@ function receiptFor(
 
 export async function issueOperationPrerequisiteReceipt(
   db: OpenShapeForgeDatabase,
-  session: OperationPrerequisiteSession,
+  session: DbSessionInput,
   input: { sourceOperationId: string; targetOperationId: string },
 ): Promise<void> {
   const receipt = receiptFor(
@@ -138,7 +134,7 @@ export async function issueOperationPrerequisiteReceipt(
 
 export async function hasOperationPrerequisiteReceipt(
   db: OpenShapeForgeDatabase,
-  session: OperationPrerequisiteSession,
+  session: DbSessionInput,
   input: { sourceOperationId: string; targetOperationId: string },
 ): Promise<boolean> {
   const receipt = receiptFor(
@@ -166,7 +162,7 @@ export async function hasOperationPrerequisiteReceipt(
 
 export async function requireOperationPrerequisites(
   db: OpenShapeForgeDatabase,
-  session: OperationPrerequisiteSession,
+  session: DbSessionInput,
   operation: PrerequisiteProtectedOperation,
 ): Promise<void> {
   for (const prerequisite of operation.prerequisites ?? []) {

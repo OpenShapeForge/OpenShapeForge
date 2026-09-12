@@ -10,6 +10,8 @@ import type {
 export type GraphqlSessionContext = {
   tenantId: string | null;
   userId: string | null;
+  /** Opaque binding to the verified interactive login session, when present. */
+  loginSessionBinding?: string;
   roles: string[];
   /** OAuth scopes from a verified bearer or API-key identity. */
   oauthScopes?: string[];
@@ -55,6 +57,9 @@ export async function createGraphqlContext(
   const session: GraphqlSessionContext = {
     tenantId: resolved.tenantId,
     userId: resolved.userId,
+    ...(resolved.loginSessionBinding
+      ? { loginSessionBinding: resolved.loginSessionBinding }
+      : {}),
     roles: [...resolved.roles],
     oauthScopes: [...(resolved.oauthScopes ?? [])],
     groups: [...resolved.groups],

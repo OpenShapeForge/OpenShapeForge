@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { getGeneratedCrudTables } from "./catalog.js";
 import {
   entityOperationRef,
+  executeEntityOperation,
   getEntityOperationContracts,
   getEntityOperationOffers,
   mutationConcurrencyGuard,
@@ -275,6 +276,32 @@ describe("entity operation runtime", () => {
         ["get", "update", "delete"],
     ).map((offer) => offer.operation.id),
     ).toEqual(["Relation.get"]);
+  });
+
+  test("refuses an unauthorized mutation before inspecting its controls", async () => {
+    const result = await executeEntityOperation(
+      {} as never,
+      {
+        tenantId: "11111111-1111-4111-8111-111111111111",
+        userId: "22222222-2222-4222-8222-222222222222",
+        roles: ["Relations.All.ReadWrite"],
+        groups: [],
+        scope: "tenant",
+      },
+      {
+        operation: { id: "Relation.delete", intent: "delete" },
+        input: {
+          id: "00000000-0000-4000-8000-000000000001",
+          expectedVersion: "2026-01-01T00:00:00.000Z",
+          leaseToken: "not-a-valid-lease",
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      intent: "delete",
+      error: expect.objectContaining({ code: "FORBIDDEN", retryable: false }),
+    });
   });
 
   test("projects canonical lease timing into available write offers only", () => {

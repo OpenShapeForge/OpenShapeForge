@@ -646,6 +646,10 @@ export async function executeEntityOperation(
 ): Promise<EntityOperationResult> {
   try {
     const table = tableForEntityOperation(request.operation);
+    // Authorization precedes request controls and database access. Otherwise
+    // an unauthorized caller can distinguish lease/version/challenge state
+    // even though the underlying mutation still refuses the write later.
+    requireEntityOperation(table, request.operation.intent, session);
     const entityName = authoredEntityId(table);
     switch (request.operation.intent) {
       case "list": {

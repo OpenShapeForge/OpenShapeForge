@@ -14,9 +14,9 @@ export type StatefulMcpAuthorization = Pick<
 >;
 
 function sameClaims(left: readonly string[] = [], right: readonly string[] = []): boolean {
-  if (left.length !== right.length) return false;
-  const sortedLeft = [...left].sort();
-  const sortedRight = [...right].sort();
+  const sortedLeft = [...new Set(left)].sort();
+  const sortedRight = [...new Set(right)].sort();
+  if (sortedLeft.length !== sortedRight.length) return false;
   return sortedLeft.every((value, index) => value === sortedRight[index]);
 }
 

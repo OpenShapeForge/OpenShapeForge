@@ -26,7 +26,9 @@ describe("sameStatefulMcpAuthorization", () => {
         authorization(),
         authorization({
           roles: ["Workflow.All.Read", "org_employee"],
-          oauthScopes: ["profile", "openid"],
+          // Keycloak may repeat a default scope on a refresh grant. Claims
+          // are authorization sets; duplicates do not widen authority.
+          oauthScopes: ["profile", "openid", "openid"],
         }),
       ),
     ).toBe(true);

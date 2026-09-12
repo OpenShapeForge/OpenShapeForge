@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
-import Ajv2020 from "ajv/dist/2020.js";
-import schema from "../config/schemas/core-entity.schema.json";
+import { Ajv2020 } from "ajv/dist/2020.js";
+import schema from "../config/schemas/core-entity.schema.json" with { type: "json" };
 import { collectAuthoredEntityPluginOperations, operationOpenApiPaths } from "./generate-operations.js";
 
 const auth = {
@@ -25,7 +25,7 @@ function compile(projections: Record<string, unknown> = {}) {
       entityId: "example.Record", entityName: "Record", definition,
       interfaces: { rest: { method: "GET", path: "/api/example/recipient" }, ...projections },
     }] },
-  }] as never);
+  }] as never, { repoRoot: "/example", authoringDir: "/example/authoring", webPresent: false });
 }
 
 test("strict YAML accepts existing custom HTTP and API-key authentication without changing its contract", () => {
@@ -42,7 +42,8 @@ test("custom auth stays REST-only and its security requirement reaches OpenAPI",
   expect(compiled[0]!.auth).toEqual(auth);
   expect(compiled[0]!.transports.mcp.enabled).toBe(false);
   expect(compiled[0]!.transports.graphql.enabled).toBe(false);
-  expect(operationOpenApiPaths(compiled)["/api/example/recipient"]!.get!.security).toEqual([{ RecipientToken: [] }]);
+  const paths = operationOpenApiPaths(compiled) as Record<string, { get: { security: unknown } }>;
+  expect(paths["/api/example/recipient"]!.get.security).toEqual([{ RecipientToken: [] }]);
   expect(() => compile({ mcp: {} })).toThrow("custom auth can only project to REST");
   expect(() => compile({ graphql: {} })).toThrow("custom auth can only project to REST");
 });

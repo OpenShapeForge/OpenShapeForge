@@ -57,6 +57,34 @@ describe("compiler plugins", () => {
     });
     expect(runtimeFieldSchemas.semanticTypes).toHaveProperty("fieldDefinition");
     expect(Object.keys(runtimeFieldSchemas.referentiedata).length).toBeGreaterThan(0);
+    const fieldAuthoringRegistry = JSON.parse(first.groups.operations.find((artifact) =>
+      artifact.path === "apps/api/src/generated/compiler/field-authoring-registry.json",
+    )!.contents) as {
+      version: number;
+      fieldAuthoringProfiles: Record<string, Record<string, unknown>>;
+      semanticTypes: Record<string, Record<string, unknown>>;
+      referentiedata: Record<string, {
+        description?: string;
+        items?: Array<{ label?: Record<string, string> }>;
+      }>;
+    };
+    expect(fieldAuthoringRegistry.version).toBe(1);
+    expect(fieldAuthoringRegistry.fieldAuthoringProfiles.workflowInputField).toMatchObject({
+      keyBehavior: "hiddenGeneratedStable",
+      typePickerUsage: "requestInput",
+    });
+    expect(fieldAuthoringRegistry.semanticTypes.email).toMatchObject({
+      valueType: "string",
+      classification: { sensitivity: "pii" },
+    });
+    expect(fieldAuthoringRegistry.referentiedata.RELATIONTYPE).toMatchObject({
+      description: expect.any(String),
+    });
+    expect(fieldAuthoringRegistry.referentiedata.RELATIONTYPE?.items?.[0]?.label).toEqual({
+      nl: "Persoon",
+      en: "Person",
+      fr: "Personne",
+    });
     const openApi = JSON.parse(first.groups.db.find((artifact) =>
       artifact.path.endsWith("rest/openapi.json"),
     )!.contents) as { paths: Record<string, Record<string, { operationId?: string }>> };
@@ -77,6 +105,7 @@ describe("compiler plugins", () => {
       field: "workflowStartWebhook",
     }));
     expect(compilerOwnedGeneratedRoots).toContain("apps/api/src/generated/operations");
+    expect(compilerOwnedGeneratedRoots).toContain("apps/api/src/generated/compiler");
     const manifest = JSON.parse(
       first.groups.db.find((artifact) => artifact.path.endsWith("manifest.json"))!
         .contents,

@@ -192,6 +192,17 @@ definitions against the generated authoring schema and binds the same projector
 to its active semantic-type and reference-data registries; plugins neither
 import the compiler at runtime nor supply a fallback catalog.
 
+The compiler also emits
+`apps/api/src/generated/compiler/field-authoring-registry.json` for a host that
+mounts a shared FieldDefinition editor. Its stable envelope is
+`{ version: 1, fieldAuthoringProfiles, semanticTypes, referentiedata }`. These
+are the raw, layer-resolved catalog values: profile and semantic-type extension
+properties, reference-group metadata, and multilingual item labels are kept
+intact. A host may inject this JSON into an interface-specific renderer; the
+renderer must not parse authoring YAML or maintain a second field-schema
+compiler. The artifact lives API-side so it is available to headless and
+`apps/product-web` hosts without implying an `apps/web` implementation.
+
 ### Registration
 
 In `authoring.config.yaml`:

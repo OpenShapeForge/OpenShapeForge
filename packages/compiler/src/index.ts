@@ -13,8 +13,9 @@ import {
   resolveActiveAuthoringDir,
 } from "./active-manifest.js";
 import {
+  buildCoreReferentiedataSnapshot,
   generateCoreReferentiedataArtifacts,
-  loadCoreReferentiedataSnapshot,
+  loadCoreReferentiedataCatalog,
   type CoreReferentiedataSnapshot,
 } from "./core-referentiedata-artifacts.js";
 import { generateArtifacts } from "./generate.js";
@@ -44,11 +45,19 @@ import type { CompiledEntityInfo } from "./plugins.js";
 import type { CompiledField } from "./authoring/types.js";
 import { renderEmptyApiPersistedOperationArtifact } from "./persisted-operations.js";
 import { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
-import { loadFieldCompilationCatalogs } from "./authoring/loader.js";
+import {
+  loadFieldAuthoringProfiles,
+  loadFieldCompilationCatalogs,
+} from "./authoring/loader.js";
 import {
   createFieldSchemaCompiler,
   renderRuntimeFieldSchemaRegistry,
 } from "./field-json-schema.js";
+import {
+  buildFieldAuthoringRegistry,
+  FIELD_AUTHORING_REGISTRY_PATH,
+  renderFieldAuthoringRegistry,
+} from "./field-authoring-registry.js";
 
 export type {
   FieldDefinition,
@@ -113,6 +122,13 @@ export {
   renderRuntimeFieldSchemaRegistry,
   runtimeFieldSchemaRegistry,
 } from "./field-json-schema.js";
+export {
+  buildFieldAuthoringRegistry,
+  FIELD_AUTHORING_REGISTRY_PATH,
+  renderFieldAuthoringRegistry,
+} from "./field-authoring-registry.js";
+export type { FieldAuthoringRegistry } from "./field-authoring-registry.js";
+export type { FieldAuthoringProfile } from "./authoring/loader.js";
 export type {
   CompiledFieldSchemaOptions,
   FieldSchemaCompiler,
@@ -273,7 +289,8 @@ export async function collectAllArtifacts(
   // Built once, as a value, and shared by everything that needs it. Reading the
   // emitted snapshot back off disk would see the PREVIOUS run's file, since
   // artifacts are written only after every generator has produced its contents.
-  const referentiedata = await loadCoreReferentiedataSnapshot(repoRoot);
+  const referentiedataCatalog = await loadCoreReferentiedataCatalog(repoRoot);
+  const referentiedata = buildCoreReferentiedataSnapshot(referentiedataCatalog);
   assertReferentieGroepsResolve(entities, referentiedata);
   const pluginMigrationRegistry = collectPluginMigrationRegistry(manifest, plugins, {
     repoRoot,
@@ -311,6 +328,7 @@ export async function collectAllArtifacts(
     referentiedata,
   );
   const fieldCompilationCatalogs = loadFieldCompilationCatalogs(authoringDir);
+  const fieldAuthoringProfiles = loadFieldAuthoringProfiles(authoringDir);
   const fieldSchemas = createFieldSchemaCompiler({
     ...fieldCompilationCatalogs,
     referentiedata,
@@ -378,6 +396,14 @@ export async function collectAllArtifacts(
           semanticTypes: fieldCompilationCatalogs.semanticTypes,
           referentiedata,
         }),
+      },
+      {
+        path: FIELD_AUTHORING_REGISTRY_PATH,
+        contents: renderFieldAuthoringRegistry(buildFieldAuthoringRegistry({
+          fieldAuthoringProfiles,
+          semanticTypes: fieldCompilationCatalogs.semanticTypes,
+          referentiedataCatalog,
+        })),
       },
       {
         path: "apps/api/src/generated/compiler/canonical-condition.ts",

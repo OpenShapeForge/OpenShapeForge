@@ -46,6 +46,48 @@ export interface LoadedArtifacts {
   viewDefinition: ViewDefinition | null;
 }
 
+export type FieldAuthoringProfile = Record<string, unknown> & {
+  label?: Record<string, string>;
+  description?: Record<string, string>;
+  keyBehavior?: string;
+  excludedFieldTypes?: string[];
+  typePickerUsage?: string;
+  controls?: Record<string, unknown>;
+  lockedVisibleProperties?: string[];
+};
+
+type FieldAuthoringProfileCatalog = {
+  schemaVersion: number;
+  kind: "fieldAuthoringProfileCatalog";
+  profiles: Record<string, FieldAuthoringProfile>;
+};
+
+/** Load the resolved, unnormalized field-authoring presets for build-time UI consumers. */
+export function loadFieldAuthoringProfiles(
+  authoringDir: string,
+): Record<string, FieldAuthoringProfile> {
+  const path = join(authoringDir, "catalogs", "field-authoring-profiles.yaml");
+  const catalog = loadYaml<FieldAuthoringProfileCatalog>(path);
+  if (
+    catalog.schemaVersion !== 1 ||
+    catalog.kind !== "fieldAuthoringProfileCatalog" ||
+    !catalog.profiles ||
+    typeof catalog.profiles !== "object" ||
+    Array.isArray(catalog.profiles)
+  ) {
+    throw new Error(
+      `${path} must be a schemaVersion 1 fieldAuthoringProfileCatalog with a profiles object.`,
+    );
+  }
+  for (const [key, profile] of Object.entries(catalog.profiles)) {
+    validateContentIdentifier(key, FIELD_KEY_PATTERN, "field authoring profile key", path);
+    if (!profile || typeof profile !== "object" || Array.isArray(profile)) {
+      throw new Error(`Field authoring profile "${key}" in ${path} must be an object.`);
+    }
+  }
+  return catalog.profiles;
+}
+
 /** Catalogs that bind the public build-time FieldDefinition schema compiler. */
 export function loadFieldCompilationCatalogs(authoringDir: string): {
   componentCatalog: ComponentCatalog;

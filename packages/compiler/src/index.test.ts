@@ -46,6 +46,80 @@ describe("compiler host artifact assembly", () => {
     expect(second.all).toEqual(first.all);
   }, 60_000);
 
+  test("headless hosts receive the merged raw field-authoring registries", async () => {
+    const root = await hostRoot();
+    const overlay = join(root, "authoring-overlay", "catalogs");
+    await mkdir(overlay, { recursive: true });
+    await writeFile(
+      join(overlay, "field-authoring-profiles.yaml"),
+      [
+        "profiles:",
+        "  hostProfile:",
+        "    label: { nl: Hostprofiel, en: Host profile }",
+        "    futureProfileProperty: keep-me",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(overlay, "semantic-types.yaml"),
+      [
+        "types:",
+        "  hostType:",
+        "    label: { nl: Hosttype, en: Host type }",
+        "    valueType: string",
+        "    futureSemanticProperty: keep-me",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(overlay, "core-referentiedata.yaml"),
+      [
+        "groepen:",
+        "  HOST_GROUP:",
+        "    description: Keep raw group metadata",
+        "    futureGroupProperty: keep-me",
+        "    items:",
+        "      - value: host-value",
+        "        label: { nl: Hostwaarde, en: Host value }",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(root, "authoring.config.yaml"),
+      [
+        "layers:",
+        "  - packages/compiler/config/authoring",
+        "  - authoring-overlay",
+        "",
+      ].join("\n"),
+    );
+
+    const { groups } = await collectAllArtifacts(root);
+    const artifact = groups.operations.find(
+      (entry) =>
+        entry.path === "apps/api/src/generated/compiler/field-authoring-registry.json",
+    );
+    expect(artifact).toBeDefined();
+    expect(JSON.parse(artifact!.contents)).toMatchObject({
+      version: 1,
+      fieldAuthoringProfiles: {
+        workflowInputField: { typePickerUsage: "requestInput" },
+        hostProfile: { futureProfileProperty: "keep-me" },
+      },
+      semanticTypes: {
+        email: { valueType: "string" },
+        hostType: { futureSemanticProperty: "keep-me" },
+      },
+      referentiedata: {
+        RELATIONTYPE: { description: expect.any(String) },
+        HOST_GROUP: {
+          description: "Keep raw group metadata",
+          futureGroupProperty: "keep-me",
+        },
+      },
+    });
+  }, 60_000);
+
   test("web hosts retain persisted operations and receive a web interface manifest", async () => {
     const root = await hostRoot({ web: true });
     const { all } = await collectAllArtifacts(root);

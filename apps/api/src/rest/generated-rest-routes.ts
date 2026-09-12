@@ -25,6 +25,7 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import {
   entityOperationRef,
+  entityOperationContract,
   executeEntityOperation,
   fieldNameForColumn,
   getGeneratedCrudTables,
@@ -34,6 +35,7 @@ import {
   operationWrittenRefusal,
 } from "../operations/entity/index.js";
 import { headersFromFastify } from "../http/headers.js";
+import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import { HttpError, toHttpError } from "./http-error.js";
 import { serializeGeneratedRestRow } from "./serialize-generated-row.js";
 
@@ -491,17 +493,23 @@ export function registerGeneratedRestRoutes(
       }
 
       if (rest.operations.create) {
-        instance.post(base, async (request, reply) => {
+        const operation = entityOperationContract(entityOperationRef(table, "create").id);
+        const projection = operation.implementation?.type === "plugin" ? operation.interfaces?.rest : undefined;
+        const path = projection && projection.path ? projection.path : base;
+        instance.post(path, async (request, reply) => {
           const context = await requireRestContext(request);
           const { valuesBody, controls } = splitMutationBody(
             request.body ?? {},
             canonical,
           );
-          const values = assertWritableBody(table, valuesBody, "create");
+          const input = operation.implementation?.type === "plugin"
+            ? pluginEntityTransportInput(operation, request.body ?? {}, undefined,
+                typeof request.headers["idempotency-key"] === "string" ? request.headers["idempotency-key"] : undefined)
+            : { values: assertWritableBody(table, valuesBody, "create"), ...controls };
           const result = await executeEntityOperation(context.db, context.session, {
             operation: entityOperationRef(table, "create"),
             offerIntents,
-            input: { values, ...controls },
+            input,
           });
           if (result.intent !== "create") throw new Error("Unexpected entity result.");
           if ("error" in result) throw new OperationFailure(result.error);
@@ -510,7 +518,7 @@ export function registerGeneratedRestRoutes(
           if (!canonical) {
             return reply.status(201).send(serializeGeneratedRestRow(table, row));
           }
-          return reply.status(201).send({
+          return reply.status(projection && projection.response?.status ? projection.response.status : 201).send({
             data: serializeGeneratedRestRow(table, row),
             operations: result.operations,
           });
@@ -518,18 +526,28 @@ export function registerGeneratedRestRoutes(
       }
 
       if (rest.operations.update) {
-        instance.patch(`${base}/:id`, async (request, reply) => {
+        const operation = entityOperationContract(entityOperationRef(table, "update").id);
+        const projection = operation.implementation?.type === "plugin" ? operation.interfaces?.rest : undefined;
+        const path = projection && projection.path ? projection.path : `${base}/:id`;
+        const method = projection && projection.method === "PUT" ? "PUT" : "PATCH";
+        instance.route({ method, url: path, handler: async (request, reply) => {
           const context = await requireRestContext(request);
-          const { id } = request.params as { id: string };
+          const targetField = operation.target?.scope === "record" ? operation.target.inputField : "id";
+          const params = request.params as Record<string, string>;
+          const id = params[targetField] ?? params.id;
+          if (!id) throw new HttpError(400, "BAD_USER_INPUT", "The record identifier is missing.");
           const { valuesBody, controls } = splitMutationBody(
             request.body ?? {},
             canonical,
           );
-          const values = assertWritableBody(table, valuesBody, "update");
+          const input = operation.implementation?.type === "plugin"
+            ? pluginEntityTransportInput(operation, request.body ?? {}, id,
+                typeof request.headers["idempotency-key"] === "string" ? request.headers["idempotency-key"] : undefined)
+            : { id, values: assertWritableBody(table, valuesBody, "update"), ...controls };
           const result = await executeEntityOperation(context.db, context.session, {
             operation: entityOperationRef(table, "update"),
             offerIntents,
-            input: { id, values, ...controls },
+            input,
           });
           if (result.intent !== "update") throw new Error("Unexpected entity result.");
           if ("error" in result) throw new OperationFailure(result.error);
@@ -538,11 +556,11 @@ export function registerGeneratedRestRoutes(
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
           }
           if (!canonical) return reply.send(serializeGeneratedRestRow(table, row));
-          return reply.send({
+          return reply.status(projection && projection.response?.status ? projection.response.status : 200).send({
             data: serializeGeneratedRestRow(table, row),
             operations: result.operations,
           });
-        });
+        } });
       }
 
       if (rest.operations.delete) {

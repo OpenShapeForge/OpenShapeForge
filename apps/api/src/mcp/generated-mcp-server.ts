@@ -118,6 +118,7 @@ import {
   type DerivedToolsCatalogEntry,
 } from "./derived-tools.js";
 import { collectElicitedValues, type ElicitOnCreateEntry } from "./elicitation.js";
+import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import {
   consumeConfiguration,
   consumeConfigurationForSession,
@@ -3041,6 +3042,17 @@ async function invokeTool(
     }
 
     case "create": {
+      const operation = entityOperationContract(operationRef("create").id);
+      if (canonical && operation.implementation?.type === "plugin") {
+        const result = await executeEntityOperation(db, session, {
+          operation: operationRef("create"), offerIntents,
+          input: pluginEntityTransportInput(operation, args),
+        });
+        if (result.intent !== "create") throw new Error("Unexpected entity result.");
+        if ("error" in result) throw new OperationFailure(result.error);
+        if (!result.data) throw new Error("Create operation returned no record.");
+        return ok({ data: serializeRowForEntity(entity, table, result.data), operations: result.operations });
+      }
       const values = canonical
         ? Object.fromEntries(
             Object.entries(requireArguments(args)).filter(
@@ -3120,6 +3132,17 @@ async function invokeTool(
     }
 
     case "update": {
+      const operation = entityOperationContract(operationRef("update").id);
+      if (canonical && operation.implementation?.type === "plugin") {
+        const result = await executeEntityOperation(db, session, {
+          operation: operationRef("update"), offerIntents,
+          input: pluginEntityTransportInput(operation, args),
+        });
+        if (result.intent !== "update") throw new Error("Unexpected entity result.");
+        if ("error" in result) throw new OperationFailure(result.error);
+        if (!result.data) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
+        return ok({ data: serializeRowForEntity(entity, table, result.data), operations: result.operations });
+      }
       const id = requireId(args);
       assertDeclaredProperties(tool.inputSchema, args, "argument");
       const values = requireArguments(args.values);

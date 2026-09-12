@@ -136,6 +136,12 @@ function canonicalRecordResultType(graphql: GraphqlMetadata): string {
   return `${graphql.typeName}OperationResult`;
 }
 
+function mutationInputType(table: GeneratedTable, intent: "create" | "update"): string {
+  const graphql = assertGraphqlMetadata(table);
+  if (usesCanonicalGraphqlOperations(table) && entityOperationContract(entityOperationRef(table, intent).id).implementation?.type === "plugin") return "JSON";
+  return `${intent === "create" ? "Create" : "Update"}${graphql.typeName}Input`;
+}
+
 function canonicalCollectionResultType(graphql: GraphqlMetadata): string {
   return `${graphql.typeName}CollectionOperationResult`;
 }
@@ -162,10 +168,10 @@ export function renderGeneratedMutationFields(table: GeneratedTable): string[] {
   const canonical = usesCanonicalGraphqlOperations(table);
   return [
     ...(operationEnabled(table, "create")
-      ? [`      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
+      ? [`      ${graphql.createMutationName}(input: ${mutationInputType(table, "create")}!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
       : []),
     ...(operationEnabled(table, "update")
-      ? [`      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
+      ? [`      ${graphql.updateMutationName}(input: ${mutationInputType(table, "update")}!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
       : []),
     ...(operationEnabled(table, "delete")
       ? [canonical
@@ -605,13 +611,13 @@ export function renderMutationFields(
       ? [`${renderDescription(
           `Creates a ${graphql.typeName} record.`,
           "      ",
-        )}      ${graphql.createMutationName}(input: Create${graphql.typeName}Input!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
+        )}      ${graphql.createMutationName}(input: ${mutationInputType(table, "create")}!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
       : []),
     ...(operationEnabled(table, "update")
       ? [`${renderDescription(
           `Partially updates a ${graphql.typeName} record.`,
           "      ",
-        )}      ${graphql.updateMutationName}(input: Update${graphql.typeName}Input!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
+        )}      ${graphql.updateMutationName}(input: ${mutationInputType(table, "update")}!): ${canonical ? canonicalRecordResultType(graphql) : graphql.typeName}`]
       : []),
     ...(operationEnabled(table, "delete")
       ? [`${renderDescription(
@@ -833,6 +839,9 @@ const mutationResolvers = Object.fromEntries(
         graphql.createMutationName,
         async (_parent: unknown, args: { input: Record<string, unknown> }, context: GraphqlContext) => {
           if (usesCanonicalGraphqlOperations(table)) {
+            if (entityOperationContract(entityOperationRef(table, "create").id).implementation?.type === "plugin") {
+              return executeCanonicalGraphqlOperation(table, "create", args.input, context);
+            }
             const { values, controls } = splitCanonicalGraphqlMutationInput(
               args.input,
               false,
@@ -858,6 +867,9 @@ const mutationResolvers = Object.fromEntries(
         graphql.updateMutationName,
         async (_parent: unknown, args: { input: Record<string, unknown> & { id: string } }, context: GraphqlContext) => {
           if (usesCanonicalGraphqlOperations(table)) {
+            if (entityOperationContract(entityOperationRef(table, "update").id).implementation?.type === "plugin") {
+              return executeCanonicalGraphqlOperation(table, "update", args.input, context);
+            }
             const { id, values, controls } = splitCanonicalGraphqlMutationInput(
               args.input,
               true,

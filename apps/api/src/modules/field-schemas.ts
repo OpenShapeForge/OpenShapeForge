@@ -22,8 +22,8 @@ export const runtimeJsonSchemas: RuntimeJsonSchemaValidator = Object.freeze({
     const ajv = new Ajv2020.default({ allErrors: true, strict: false });
     addFormats.default(ajv);
     try {
+      if (schema.$async === true) return invalidDefinition();
       const validate = ajv.compile(schema);
-      if (validate.$async) return invalidDefinition();
       if (validate(values)) return { valid: true };
       return { valid: false, error: {
         code: "VALIDATION_FAILED", message: "Controleer de ingevulde gegevens.", retryable: false,

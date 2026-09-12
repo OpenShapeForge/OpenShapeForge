@@ -51,6 +51,27 @@ const operation: PluginOperationContract = {
 const context = { repoRoot: "/repo", authoringDir: "/repo/authoring", webPresent: false };
 
 describe("first-class plugin operations", () => {
+  test("distinguishes authenticated-session auth from an explicit deny-all role list", () => {
+    const authenticated = {
+      ...operation,
+      auth: { mode: "session" as const },
+    } satisfies PluginOperationContract;
+    const denied = {
+      ...operation,
+      key: "demo.quote.denied",
+      transports: {
+        ...operation.transports,
+        rest: { ...operation.transports.rest, path: "/api/demo/quotes/:quoteId/denied" },
+      },
+      auth: { mode: "session" as const, roles: [] },
+    } satisfies PluginOperationContract;
+
+    expect(collectPluginOperations([{ name: "demo", operations: [authenticated] }], context)[0]!.auth)
+      .toEqual({ mode: "session" });
+    expect(collectPluginOperations([{ name: "demo", operations: [denied] }], context)[0]!.auth)
+      .toEqual({ mode: "session", roles: [] });
+  });
+
   test("derives custom write controls once for every adapter input schema", () => {
     const [compiled] = collectAuthoredEntityPluginOperations([{
       contract: {

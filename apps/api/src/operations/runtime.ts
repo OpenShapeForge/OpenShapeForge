@@ -53,6 +53,7 @@ import {
 import { normalizeTimestampToken } from "../db/timestamps.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import { issueOperationPrerequisiteReceipt } from "./prerequisite-receipts.js";
+import { sessionOperationRolesAllow } from "./session-authorization.js";
 
 export type OperationContract = {
   key: string;
@@ -79,7 +80,7 @@ export type OperationContract = {
     | { mode: "public" }
     | {
         mode: "session";
-        roles: string[];
+        roles?: string[];
         scopes?: string[];
         recordPermission?: RecordPermissionAction;
       }
@@ -378,8 +379,7 @@ export function requireOperationAuthorization(
   if (operation.tenancy.mode === "required" && !session.tenantId) {
     throw new HttpError(401, "TENANT_REQUIRED", "Operation requires an authenticated tenant context.");
   }
-  const heldRoles = new Set(session.roles);
-  if (!operation.auth.roles.some((role) => heldRoles.has(role))) {
+  if (!sessionOperationRolesAllow(operation.auth.roles, session.roles)) {
     throw new HttpError(403, "FORBIDDEN", "Session lacks a required operation role.");
   }
   const requiredScopes = operation.auth.scopes ?? [];

@@ -481,6 +481,12 @@ describe("coreEntity properties the compiler implements", () => {
       interfaces: { rest: { operations: { archive: {} } } },
     });
     expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+
+    const sessionAuth = (document.operations as Record<string, any>).archive.auth;
+    delete sessionAuth.roles;
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+    sessionAuth.roles = [];
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
   });
 
   it("rejects malformed strict v2 Web renderer registry keys", () => {

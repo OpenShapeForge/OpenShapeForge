@@ -46,6 +46,7 @@ import {
   recordPermissionsAllowRow,
   type RecordPermissionAction,
 } from "./record-permissions.js";
+import { sessionOperationRolesAllow } from "../session-authorization.js";
 import { requireOperationPrerequisites } from "../prerequisite-receipts.js";
 
 const COLLECTION_OFFER_INTENTS: readonly GeneratedCrudExposureOperation[] = [
@@ -72,7 +73,7 @@ const operationCatalog = rawOperationCatalog as unknown as {
       | { mode: "public" }
       | {
           mode: "session";
-          roles: string[];
+          roles?: string[];
           scopes?: string[];
           recordPermission?: RecordPermissionAction;
         }
@@ -430,14 +431,13 @@ export function pluginEditLeaseOperationIdsForSession(
   session: Pick<DbSessionInput, "roles">,
   transport: "rest" | "mcp",
 ): string[] {
-  const heldRoles = new Set(session.roles ?? []);
   return pluginOperations
     .filter((operation) =>
       operation.target?.scope === "record" &&
       operation.concurrency?.version?.mode === "required" &&
       operation.concurrency.editLease?.mode === "required" &&
       operation.auth.mode === "session" &&
-      operation.auth.roles.some((role) => heldRoles.has(role)) &&
+      sessionOperationRolesAllow(operation.auth.roles, session.roles ?? []) &&
       (transport === "rest" || operation.transports.mcp.enabled)
     )
     .map(({ key }) => key);
@@ -462,11 +462,10 @@ export async function acquireEditLeaseForEntityOperation(
 ): Promise<EntityEditLease> {
   const custom = pluginOperations.find((operation) => operation.key === input.operationId);
   if (custom) {
-    const heldRoles = new Set(session.roles ?? []);
     if (
       custom.target?.scope !== "record" ||
       custom.auth.mode !== "session" ||
-      !custom.auth.roles.some((role) => heldRoles.has(role)) ||
+      !sessionOperationRolesAllow(custom.auth.roles, session.roles ?? []) ||
       !custom.concurrency?.version ||
       !custom.concurrency.editLease
     ) {
@@ -576,7 +575,7 @@ export function getEntityOperationOffers(
       operation.target.scope === scope &&
       (operation.auth.mode === "public" ||
         (operation.auth.mode === "session" &&
-          operation.auth.roles.some((role) => heldRoles.has(role)))) &&
+          sessionOperationRolesAllow(operation.auth.roles, session.roles ?? []))) &&
       (!target ||
         operation.auth.mode !== "session" ||
         !operation.auth.recordPermission ||

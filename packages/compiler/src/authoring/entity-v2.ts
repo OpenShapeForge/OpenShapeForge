@@ -290,11 +290,6 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
           );
         }
       }
-      if (operation.auth.mode === "session" && operation.auth.roles.length === 0) {
-        throw new Error(
-          `${origin} plugin operation "${operationKey}" session auth needs at least one role.`,
-        );
-      }
       if (
         operation.auth.mode === "session" &&
         operation.auth.recordPermission !== undefined
@@ -463,7 +458,7 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
             "collection values cannot be compared as an exact current-field answer.",
         );
       }
-      const operationRoles: string[] = operation.implementation.type === "plugin"
+      const operationRoles: string[] | undefined = operation.implementation.type === "plugin"
         ? operation.auth?.mode === "session" ? operation.auth.roles : []
         : entity.authorization?.roles[action as "update" | "delete"] ?? [];
       const entityReadRoles = entity.authorization?.roles.read ?? [];
@@ -471,6 +466,12 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
       const effectiveReadRoles = fieldReadRoles.length > 0
         ? entityReadRoles.filter((role) => fieldReadRoles.includes(role))
         : entityReadRoles;
+      if (operationRoles === undefined) {
+        throw new Error(
+          `${origin} operation "${operationKey}" uses a current-field confirmation ` +
+            "challenge with unrestricted session roles; declare roles so challenge-field read access can be proven.",
+        );
+      }
       const rolesWithoutChallengeRead = operationRoles.filter(
         (role) => !effectiveReadRoles.includes(role),
       );

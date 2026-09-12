@@ -171,7 +171,8 @@ export type PluginOperationAuth =
   | { mode: "public" }
   | {
       mode: "session";
-      roles: string[];
+      /** Omitted means any authenticated session; [] deliberately denies all. */
+      roles?: string[];
       scopes?: string[];
       /** Current target-record permission checked in addition to roles. */
       recordPermission?: import("./authoring/types/common.js").RecordPermissionAction;

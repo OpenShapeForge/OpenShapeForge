@@ -1552,12 +1552,15 @@ export function buildMcpCatalog(
   }
 
   const compatibilityNames = new Map<string, string>();
+  type CompatibilityOperation = CompiledPluginOperation & {
+    auth: Extract<CompiledPluginOperation["auth"], { mode: "session" }> & {
+      roles: string[];
+    };
+  };
   const compatibilityOperation = (
     plugin: string,
     key: string,
-  ): CompiledPluginOperation & {
-    auth: Extract<CompiledPluginOperation["auth"], { mode: "session" }>;
-  } => {
+  ): CompatibilityOperation => {
     const operation = operations.find(
       (candidate) => candidate.plugin === plugin && candidate.key === key,
     );
@@ -1572,13 +1575,16 @@ export function buildMcpCatalog(
         `Plugin "${plugin}" compatibility Operation "${key}" must use session authorization.`,
       );
     }
-    return operation as CompiledPluginOperation & {
-      auth: Extract<CompiledPluginOperation["auth"], { mode: "session" }>;
-    };
+    if (!operation.auth.roles?.length) {
+      throw new Error(
+        `Plugin "${plugin}" compatibility Operation "${key}" must declare at least one role.`,
+      );
+    }
+    return operation as CompatibilityOperation;
   };
   const internalCompatibilityName = (
     plugin: string,
-    operation: CompiledPluginOperation,
+    operation: CompatibilityOperation,
   ) => {
     const existing = compatibilityNames.get(operation.key);
     if (existing) return existing;

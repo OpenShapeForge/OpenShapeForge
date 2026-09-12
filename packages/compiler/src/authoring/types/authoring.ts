@@ -554,7 +554,8 @@ export interface EntityOperationDefinition {
     | { mode: "public" }
     | {
         mode: "session";
-        roles: string[];
+        /** Omitted means any authenticated session; [] deliberately denies all. */
+        roles?: string[];
         scopes?: string[];
         /** Required action on the current target record, in addition to RBAC. */
         recordPermission?: import("./common.js").RecordPermissionAction;

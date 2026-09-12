@@ -455,6 +455,63 @@ describe("canonical operation runtime", () => {
     })).toThrow(/cannot be invoked with an API key/);
   });
 
+  test("allows an authenticated tenant session when roles are omitted and keeps empty fail-closed", () => {
+    const authenticated: OperationContract = {
+      ...restOperation,
+      auth: { mode: "session" },
+    };
+    expect(() => requireOperationAuthorization(authenticated, {
+      ...session,
+      roles: [],
+    })).not.toThrow();
+    expect(() => requireOperationAuthorization(authenticated, undefined))
+      .toThrow(/authenticated bearer session/);
+    expect(() => requireOperationAuthorization(authenticated, {
+      ...session,
+      credential: "none",
+      roles: [],
+    })).toThrow(/authenticated bearer session/);
+    expect(() => requireOperationAuthorization(authenticated, {
+      ...session,
+      tenantId: null as never,
+      roles: [],
+    })).toThrow(/tenant context/);
+
+    const denied: OperationContract = {
+      ...authenticated,
+      auth: { mode: "session", roles: [] },
+    };
+    expect(() => requireOperationAuthorization(denied, session))
+      .toThrow(/required operation role/);
+    expect(() => requireOperationAuthorization(restOperation, session))
+      .toThrow(/required operation role/);
+    expect(() => requireOperationAuthorization(restOperation, {
+      ...session,
+      roles: ["quote-publisher"],
+    })).not.toThrow();
+
+    const scoped: OperationContract = {
+      ...authenticated,
+      auth: { mode: "session", scopes: ["session:read"] },
+    };
+    expect(() => requireOperationAuthorization(scoped, { ...session, roles: [] }))
+      .toThrow(/OAuth scope/);
+    expect(() => requireOperationAuthorization(scoped, {
+      ...session,
+      roles: [],
+      oauthScopes: ["session:read"],
+    })).not.toThrow();
+
+    const module: RuntimeModule = {
+      name: "demo",
+      operationHandlers: { publishQuote: async () => ({ value: {} }) },
+    };
+    const [available] = runtimeStaticOperationRegistrations([module], {}, [authenticated]);
+    const [unavailable] = runtimeStaticOperationRegistrations([module], {}, [denied]);
+    expect(available!.available({ ...session, roles: [] })).toBe(true);
+    expect(unavailable!.available({ ...session, roles: ["admin"] })).toBe(false);
+  });
+
   test("rejects a success status that differs from the canonical contract", async () => {
     const bound = bindOperationHandlers([{
       name: "workflow",

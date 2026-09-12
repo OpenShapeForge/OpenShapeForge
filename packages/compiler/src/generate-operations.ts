@@ -339,9 +339,6 @@ function validateOperation(plugin: string, operation: PluginOperationContract): 
       }
     }
   }
-  if (operation.auth.mode === "session" && operation.auth.roles.length === 0) {
-    throw new Error(`${where} session auth must declare at least one role.`);
-  }
   if (
     operation.auth.mode === "session" &&
     operation.auth.recordPermission !== undefined &&

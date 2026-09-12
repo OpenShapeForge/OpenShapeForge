@@ -747,6 +747,13 @@ describe("canonical entity operations", () => {
     };
     expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
 
+    const auth = source.coreEntity.operations!.archive!.auth;
+    if (auth?.mode !== "session") throw new Error("Expected session auth");
+    delete auth.roles;
+    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    auth.roles = [];
+    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+
     source.coreEntity.operations!.archive!.target = { scope: "collection" };
     expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
       /recordPermission requires a record target/,

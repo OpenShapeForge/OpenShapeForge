@@ -338,7 +338,7 @@ describe("canonical operation database sessions", () => {
         const operation = listOperationContracts().find((entry) =>
           entry.transports.mcp.enabled && entry.transports.graphql.enabled
         );
-        if (!operation || operation.auth.mode !== "session") {
+        if (!operation || operation.auth.mode !== "session" || !operation.auth.roles?.length) {
           throw new Error("Expected a session-authenticated operation on every transport.");
         }
         const role = operation.auth.roles[0]!;

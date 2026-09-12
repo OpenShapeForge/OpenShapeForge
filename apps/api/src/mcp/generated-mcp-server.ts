@@ -370,6 +370,7 @@ import {
   isMcpProjection,
   requireOperationAuthorization,
 } from "../operations/runtime.js";
+import { sessionOperationRolesAllow } from "../operations/session-authorization.js";
 
 export { MCP_MOUNT_PATH, ORGANIZATION_MCP_PATH_PREFIX } from "./organization-resource.js";
 
@@ -650,7 +651,7 @@ type Catalog = {
     outputSchema: Record<string, unknown>;
     auth:
       | { mode: "public" }
-      | { mode: "session"; roles: string[]; scopes?: string[] };
+      | { mode: "session"; roles?: string[]; scopes?: string[] };
     annotations: {
       readOnlyHint: boolean;
       destructiveHint: boolean;
@@ -3176,10 +3177,9 @@ function operationMayInvoke(
   if (tool.auth.mode === "public") return true;
   if (session.credential === "api-key" && (tool.auth.scopes ?? []).length > 0)
     return false;
-  const roles = new Set(session.roles);
   const scopes = new Set(session.oauthScopes ?? []);
   return (
-    tool.auth.roles.some((role) => roles.has(role)) &&
+    sessionOperationRolesAllow(tool.auth.roles, session.roles) &&
     (tool.auth.scopes ?? []).every((scope) => scopes.has(scope))
   );
 }

@@ -323,6 +323,7 @@ describe("rich generated REST OpenAPI", () => {
     expect(rendered.info.description).not.toContain("Pick an entity");
     expect(rendered.info.description).toContain("public or custom authentication");
     expect(rendered.info.description).toContain("session-authenticated entity or operation");
+    expect(rendered.info.description).toContain("satisfy any declared role");
     expect(rendered.info.description).not.toContain("Every operation needs a bearer token");
     expect(rendered.info.description).not.toContain("For a protected operation, the caller's roles");
     expect(rendered.info.description).toContain("Do not invent");

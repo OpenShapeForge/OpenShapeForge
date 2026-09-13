@@ -120,6 +120,10 @@ describe("first-class plugin operations", () => {
       },
     }];
     const [compiled] = collectAuthoredEntityPluginOperations(authored as never, context);
+    const logicalDocument = structuredClone(authored);
+    logicalDocument[0]!.contract.pluginOperations[0]!.id = "documents.create";
+    logicalDocument[0]!.contract.pluginOperations[0]!.definition.id = "documents.create";
+    expect(collectAuthoredEntityPluginOperations(logicalDocument as never, context)[0]!.key).toBe("documents.create");
 
     for (const path of ["/api/mcp", "/api/health/x", "/api/demo/../secret", "/api/demo?query=secret"]) {
       const invalid = structuredClone(authored);

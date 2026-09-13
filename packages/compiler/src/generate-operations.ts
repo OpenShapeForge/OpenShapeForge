@@ -281,7 +281,8 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
   const restPath = operation.transports.rest.path;
   const apiNamespace = authored ? operation.key.split(".")[0]! : plugin;
   const routeNamespace = restPath.split("/")[2] ?? "";
-  const reservedNamespace = [apiNamespace, plugin, routeNamespace].find(value => RESERVED_API_NAMESPACES.has(value.toLowerCase()));
+  const reservedNamespace = (authored ? [routeNamespace] : [apiNamespace, plugin, routeNamespace])
+    .find(value => RESERVED_API_NAMESPACES.has(value.toLowerCase()));
   if (reservedNamespace) {
     throw new Error(`${where} uses reserved API namespace "${reservedNamespace}".`);
   }

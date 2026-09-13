@@ -143,7 +143,7 @@ function validation(message: string): never {
   throw operationFailure({ code: "VALIDATION", message, retryable: false });
 }
 
-function artifactVersionInput(input: JsonObject, version: JsonObject): {
+function artifactInput(input: JsonObject, version: JsonObject): {
   logicalVersion: JsonObject;
   binding?: ArtifactBinding;
 } {
@@ -152,7 +152,10 @@ function artifactVersionInput(input: JsonObject, version: JsonObject): {
       (field) => Object.hasOwn(input, field) || Object.hasOwn(version, field),
     ) ||
     Object.hasOwn(input, "artifactId") ||
-    Object.hasOwn(input, "expectedArtifactVersion")
+    Object.hasOwn(input, "expectedArtifactVersion") ||
+    Object.hasOwn(version, "artifactId") ||
+    Object.hasOwn(version, "expectedArtifactVersion") ||
+    Object.hasOwn(version, "artifact")
   ) {
     throw operationFailure({
       code: "VALIDATION",
@@ -161,30 +164,31 @@ function artifactVersionInput(input: JsonObject, version: JsonObject): {
     });
   }
 
-  const hasArtifactId = Object.hasOwn(version, "artifactId");
-  const hasExpectedVersion = Object.hasOwn(version, "expectedArtifactVersion");
-  if (hasArtifactId !== hasExpectedVersion) {
+  if (!Object.hasOwn(input, "artifact")) return { logicalVersion: version };
+  const artifact = inputObject(input, "artifact");
+  const invalidField = Object.keys(artifact).find(
+    (field) => field !== "artifactId" && field !== "expectedArtifactVersion",
+  );
+  if (invalidField) validation(`artifact.${invalidField} is not accepted.`);
+  if (!Object.hasOwn(artifact, "artifactId") || !Object.hasOwn(artifact, "expectedArtifactVersion")) {
     validation("artifactId and expectedArtifactVersion must be supplied together.");
   }
-  if (!hasArtifactId) return { logicalVersion: version };
 
-  const artifactId = version.artifactId;
-  const expectedArtifactVersion = version.expectedArtifactVersion;
+  const artifactId = artifact.artifactId;
+  const expectedArtifactVersion = artifact.expectedArtifactVersion;
   if (typeof artifactId !== "string" || !UUID.test(artifactId)) {
-    validation("version.artifactId must be a UUID.");
+    validation("artifact.artifactId must be a UUID.");
   }
   if (
     typeof expectedArtifactVersion !== "number" ||
     !Number.isSafeInteger(expectedArtifactVersion) ||
     expectedArtifactVersion < 1
   ) {
-    validation("version.expectedArtifactVersion must be a positive safe integer.");
+    validation("artifact.expectedArtifactVersion must be a positive safe integer.");
   }
 
-  const { artifactId: _artifactId, expectedArtifactVersion: _expected, ...logicalVersion } =
-    version;
   return {
-    logicalVersion,
+    logicalVersion: version,
     binding: { artifactId, expectedArtifactVersion },
   };
 }
@@ -293,7 +297,7 @@ export const createDocument: ModuleOperationHandler = async (input, context) => 
   const { platform, session } = contextServices(context);
   const document = inputObject(input, "document");
   const version = inputObject(input, "version");
-  const { logicalVersion, binding } = artifactVersionInput(input, version);
+  const { logicalVersion, binding } = artifactInput(input, version);
 
   const value = await translateDatabaseError(platform, () =>
     platform.db.withSession(session, async (transaction) => {
@@ -335,7 +339,7 @@ export const createDocumentVersion: ModuleOperationHandler = async (input, conte
   const { platform, session } = contextServices(context);
   const documentId = inputUuid(input, "documentId");
   const version = inputObject(input, "version");
-  const { logicalVersion, binding } = artifactVersionInput(input, version);
+  const { logicalVersion, binding } = artifactInput(input, version);
 
   const value = await translateDatabaseError(platform, () =>
     platform.db.withSession(session, async (transaction) => {

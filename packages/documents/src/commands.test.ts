@@ -193,6 +193,7 @@ describe("Document commands", () => {
     expect(fixture.executed[0]?.sql).toContain("document_internal.create_with_first_version");
     expect(fixture.executed[0]?.parameters).toEqual([document, version]);
     expect(fixture.executed[1]?.parameters).toEqual([documentId]);
+    expect(fixture.artifactBindings).toEqual([]);
     expect(fixture.executed.flatMap((entry) => entry.parameters)).not.toContain(
       "core-owned-control",
     );
@@ -219,15 +220,18 @@ describe("Document commands", () => {
     expect(fixture.events.slice(0, 3)).toEqual(["transaction", "access", "query"]);
     expect(fixture.executed[0]?.sql).toContain("document_internal.append_version");
     expect(fixture.executed[0]?.parameters).toEqual([documentId, nextVersion]);
+    expect(fixture.artifactBindings).toEqual([]);
   });
 
   test("binds an opaque artifact in the same create transaction and never trusts file facts", async () => {
-    const artifactVersion = { ...version, artifactId, expectedArtifactVersion: 2 };
     const fixture = context({
       results: [[{ documentId, documentVersionId }], [], [documentRow()]],
     });
 
-    await createDocument({ document, version: artifactVersion }, fixture.operationContext);
+    await createDocument(
+      { document, version, artifact: { artifactId, expectedArtifactVersion: 2 } },
+      fixture.operationContext,
+    );
 
     expect(fixture.events).toEqual(["transaction", "query", "bind", "query", "query"]);
     expect(fixture.executed[0]?.sql).toContain("create_with_first_version_and_artifact");
@@ -258,8 +262,6 @@ describe("Document commands", () => {
       ...version,
       versionLabel: "2",
       changeSummary: "File added",
-      artifactId,
-      expectedArtifactVersion: 2,
     };
     const storedVersion = {
       ...versionRow(),
@@ -275,7 +277,11 @@ describe("Document commands", () => {
     });
 
     const result = await createDocumentVersion(
-      { documentId, version: nextVersion },
+      {
+        documentId,
+        version: nextVersion,
+        artifact: { artifactId, expectedArtifactVersion: 2 },
+      },
       fixture.operationContext,
     );
 
@@ -316,7 +322,12 @@ describe("Document commands", () => {
       { documentId, version: { ...version, fileName: "untrusted.pdf" } },
       { document, version: { ...version, artifactId } },
       { document, version: { ...version, expectedArtifactVersion: 2 } },
-      { document, version: { ...version, artifactId, expectedArtifactVersion: 1.5 } },
+      { document, version: { ...version, artifactId, expectedArtifactVersion: 2 } },
+      { document, version, artifact: { artifactId } },
+      { document, version, artifact: { expectedArtifactVersion: 2 } },
+      { document, version, artifact: { artifactId, expectedArtifactVersion: 1.5 } },
+      { document, version, artifact: { artifactId, expectedArtifactVersion: 2, fileName: "x" } },
+      { document, version, artifact: "not-an-object" },
     ]) {
       const fixture = context();
       const run = Object.hasOwn(input, "document")
@@ -339,7 +350,7 @@ describe("Document commands", () => {
     });
     await failure(
       createDocument(
-        { document, version: { ...version, artifactId, expectedArtifactVersion: 2 } },
+        { document, version, artifact: { artifactId, expectedArtifactVersion: 2 } },
         fixture.operationContext,
       ),
       "ARTIFACT_STATE_CONFLICT",

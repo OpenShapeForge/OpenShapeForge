@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, mock, test } from "bun:test";
 import { operationErrorOf } from "@openshapeforge/operations";
-import type {
-  RuntimeArtifactDescriptor,
-  RuntimeModule,
-} from "@openshapeforge/plugin-runtime";
+import type { RuntimeArtifactDescriptor } from "@openshapeforge/plugin-runtime";
 import {
   DummyDriver,
   Kysely,
@@ -17,6 +14,7 @@ import {
 } from "kysely";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { DB } from "../generated/db/types.js";
+import type { RuntimeModule } from "./contract.js";
 
 const providerId = "test-artifact-provider";
 

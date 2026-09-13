@@ -13,6 +13,7 @@ import {
   redactRow,
 } from "../../graphql/generated-authz.js";
 import { fieldNameForColumn, tableColumnMap } from "./columns.js";
+import { normalizeEntityStorageRow } from "./serialize-result.js";
 import type {
   GeneratedCrudColumn,
   GeneratedCrudExposureOperation,
@@ -142,7 +143,8 @@ export function projectRows(
   const hasElicitedOutput =
     table.source?.secureInputOnCreate !== undefined ||
     table.source?.mcp?.elicitOnCreate !== undefined;
-  if (!hasClassification && !hasElicitedOutput) {
+  const hasBigint = table.columns.some((column) => column.type === "bigint");
+  if (!hasClassification && !hasElicitedOutput && !hasBigint) {
     return rows;
   }
   return rows.map((row) => projectGeneratedEntityRow(table, session, row));
@@ -178,8 +180,9 @@ export function projectGeneratedEntityRow(
   session: DbSessionInput,
   row: GeneratedEntityRow,
 ): GeneratedEntityRow {
+  const normalized = normalizeEntityStorageRow(table, row);
   const classified = redactRow(
-    row,
+    normalized,
     table.columns,
     table.source?.authorization,
     session,

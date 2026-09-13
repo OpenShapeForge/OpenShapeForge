@@ -514,7 +514,17 @@ export function createApiApp(options: {
     if (modulePlatform) {
       registerArtifactRestRoutes(routes, {
         ...dbOptions,
-        artifacts: modulePlatform.services.artifacts,
+        artifacts: {
+          stage: (session, input) => modulePlatform.withActiveOperationSession(
+            session, (activeSession) => modulePlatform.services.artifacts.stage(activeSession, input),
+          ),
+          bind: (session, input) => modulePlatform.withActiveOperationSession(
+            session, (activeSession) => modulePlatform.services.artifacts.bind(activeSession, input),
+          ),
+          read: (session, input) => modulePlatform.withActiveOperationSession(
+            session, (activeSession) => modulePlatform.services.artifacts.read(activeSession, input),
+          ),
+        },
       });
     }
     registerAgreementMilestoneRestRoutes(routes, dbOptions);

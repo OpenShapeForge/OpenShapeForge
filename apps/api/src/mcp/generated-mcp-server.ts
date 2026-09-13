@@ -138,6 +138,15 @@ import {
   findExistingConfiguration,
   mergeConfigurationValues,
 } from "./configuration-handoff.js";
+import {
+  ARTIFACT_UPLOAD_APP_URI,
+  ARTIFACT_UPLOAD_PATH,
+  ARTIFACT_UPLOAD_TOOL_NAME,
+  claimArtifactUpload,
+  mintArtifactUpload,
+  renderArtifactUploadApp,
+  renderArtifactUploadPage,
+} from "./artifact-upload.js";
 import { renderEntityOAuthCallbackPage } from "./browser-pages.js";
 import {
   callEditLeaseTool,
@@ -1198,6 +1207,12 @@ export const ENTITY_CONFIGURATION_PATH = "/api/entity-configuration";
 export const ENTITY_CONFIGURATION_APP_URI = "ui://openshapeforge/configuration";
 const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 const MCP_APP_EXTENSION_ID = "io.modelcontextprotocol/ui";
+
+function schemaUsesArtifactUpload(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  if ((value as Record<string, unknown>)["x-osf-control"] === "artifact-upload") return true;
+  return Object.values(value as Record<string, unknown>).some(schemaUsesArtifactUpload);
+}
 
 /**
  * Whether a failed elicitation should fall back to the browser handoff.
@@ -3312,6 +3327,10 @@ function buildServer(
     }),
   });
   const tables = tableOverride ?? tablesByName();
+  const hasArtifactStorage = runtimeModules.some((module) => module.artifactStorage !== undefined);
+  const canUploadArtifacts = hasArtifactStorage && crudToolsForSession(session, tables).some(
+    (tool) => schemaUsesArtifactUpload(tool.inputSchema),
+  );
   // The same rule REST boot applies (roles/api.ts): with no operation module
   // in the process there are no operation tools, rather than a 500 on every
   // request because the catalog names a handler nothing loaded.
@@ -3366,6 +3385,7 @@ function buildServer(
     exact: [
       ENTITY_CATALOG_URI,
       ENTITY_CONFIGURATION_APP_URI,
+      ARTIFACT_UPLOAD_APP_URI,
       ...ONBOARDING_RESOURCE_URIS,
       ...catalog.entities.map(entityResourceUri),
       ...catalogResources.map((resource) => resource.uri),
@@ -3932,6 +3952,17 @@ function buildServer(
               },
             ]
           : []),
+        ...(canUploadArtifacts && supportsMcpApp(server)
+          ? [
+              {
+                uri: ARTIFACT_UPLOAD_APP_URI,
+                name: "document-upload-app",
+                title: "Document upload",
+                description: "Private file picker for document bytes that must not pass through the model.",
+                mimeType: MCP_APP_MIME_TYPE,
+              },
+            ]
+          : []),
         ...(await moduleResources(
           runtimeModules,
           projectionContext(),
@@ -4079,6 +4110,23 @@ function buildServer(
         ],
       };
     }
+    if (request.params.uri === ARTIFACT_UPLOAD_APP_URI && canUploadArtifacts) {
+      return {
+        contents: [
+          {
+            uri: request.params.uri,
+            mimeType: MCP_APP_MIME_TYPE,
+            text: await renderArtifactUploadApp(),
+            _meta: {
+              ui: {
+                csp: { connectDomains: [callbackOrigin()] },
+                prefersBorder: true,
+              },
+            },
+          },
+        ],
+      };
+    }
     const entries = entitiesForSession(session, tables);
     let payload: unknown;
     if (request.params.uri === ENTITY_CATALOG_URI) {
@@ -4187,6 +4235,23 @@ function buildServer(
     const runtimeOperationTools = await runtimeProviderToolsForSession();
     const coreTools = [
       SESSION_INFO_TOOL, // session-info (whoami / osf://session): every authenticated session
+      ...(canUploadArtifacts
+        ? [{
+            name: ARTIFACT_UPLOAD_TOOL_NAME,
+            title: "Upload document file",
+            description:
+              "Open a private file picker so the person can upload document bytes directly to Hubble. Use the returned artifactId in the requested create operation.",
+            inputSchema: { type: "object", properties: {}, additionalProperties: false },
+            annotations: {
+              readOnlyHint: false,
+              destructiveHint: false,
+              idempotentHint: false,
+            },
+            ...(supportsMcpApp(server) && publicOriginIsHttps()
+              ? { _meta: { ui: { resourceUri: ARTIFACT_UPLOAD_APP_URI } } }
+              : {}),
+          }]
+        : []),
       ...crudToolsForSession(session, tables),
       ...editLeaseToolsForOperationIds(editLeaseOperationIds),
       ...projectedDerivedTools
@@ -4480,6 +4545,46 @@ function buildServer(
     if (name === SESSION_INFO_TOOL_NAME) {
       try {
         return sessionInfoToolResult(await sessionInfo());
+      } catch (error) {
+        return failed(error);
+      }
+    }
+    if (name === ARTIFACT_UPLOAD_TOOL_NAME && canUploadArtifacts) {
+      try {
+        const keyring = elicitedKeyring();
+        if (!keyring) {
+          throw new HttpError(
+            503,
+            "SECRET_STORAGE_NOT_CONFIGURED",
+            "Secure upload handoffs are not configured.",
+          );
+        }
+        const minted = await mintArtifactUpload({
+          db,
+          keyring,
+          session,
+          origin: callbackOrigin(),
+        });
+        if (supportsMcpApp(server) && publicOriginIsHttps()) {
+          return {
+            content: [{ type: "text", text: "A private document upload control is ready." }],
+            _meta: {
+              uploadUrl: minted.uploadUrl,
+              expiresAt: minted.expiresAt,
+            },
+          };
+        }
+        return {
+          content: [{
+            type: "text",
+            text: `This MCP client cannot show the private file picker. Ask the person to open ${minted.uploadUrl}; the one-time link expires at ${minted.expiresAt}.`,
+          }],
+          structuredContent: {
+            pending: true,
+            uploadUrl: minted.uploadUrl,
+            expiresAt: minted.expiresAt,
+          },
+        };
       } catch (error) {
         return failed(error);
       }
@@ -7644,6 +7749,73 @@ export function registerGeneratedMcpServer(
         }
       },
     );
+
+    if (options.modulePlatform && options.modules?.some((module) => module.artifactStorage !== undefined)) {
+      instance.addContentTypeParser(
+        "application/octet-stream",
+        (_request, payload, done) => done(null, payload),
+      );
+      instance.get(`${ARTIFACT_UPLOAD_PATH}/:token`, async (request, reply) => {
+        const token = (request.params as { token?: string }).token;
+        const uploadUrl = `${callbackOrigin()}${ARTIFACT_UPLOAD_PATH}/${encodeURIComponent(token ?? "")}`;
+        return reply.type("text/html").send(renderArtifactUploadPage(uploadUrl));
+      });
+      instance.post(
+        `${ARTIFACT_UPLOAD_PATH}/:token`,
+        { bodyLimit: 64 * 1024 * 1024 },
+        async (request, reply) => {
+          const keyring = elicitedKeyring();
+          if (!keyring) {
+            throw new HttpError(
+              503,
+              "SECRET_STORAGE_NOT_CONFIGURED",
+              "Secure upload handoffs are not configured.",
+            );
+          }
+          const pending = await claimArtifactUpload({
+            db: options.db!,
+            keyring,
+            token: (request.params as { token?: string }).token,
+          });
+          if (!pending) {
+            throw new HttpError(404, "NOT_FOUND", "This upload is unavailable, expired, or already used.");
+          }
+          const rawName = request.headers["x-file-name"];
+          if (typeof rawName !== "string") {
+            throw new HttpError(400, "BAD_USER_INPUT", "Header x-file-name is required.");
+          }
+          let fileName: string;
+          try {
+            fileName = decodeURIComponent(rawName);
+          } catch {
+            throw new HttpError(400, "BAD_USER_INPUT", "The file name is not valid UTF-8.");
+          }
+          if (!fileName || fileName.length > 255 || /[\r\n\0/\\]/.test(fileName)) {
+            throw new HttpError(400, "BAD_USER_INPUT", "The file name is invalid.");
+          }
+          const source = request.body as AsyncIterable<Uint8Array> | undefined;
+          if (!source || typeof source[Symbol.asyncIterator] !== "function") {
+            throw new HttpError(400, "BAD_USER_INPUT", "A file body is required.");
+          }
+          const uploadSession: TrustedSessionContext = {
+            tenantId: pending.tenantId,
+            userId: pending.userId,
+            roles: pending.roles,
+            groups: pending.groups,
+            scope: pending.scope,
+            credential: pending.credential,
+          };
+          const descriptor = await options.modulePlatform!.withActiveOperationSession(
+            uploadSession,
+            (activeSession) => options.modulePlatform!.services.artifacts.stage(
+              activeSession,
+              { purpose: "document-upload", fileName, source },
+            ),
+          );
+          return reply.status(201).send({ data: descriptor, operations: [] });
+        },
+      );
+    }
 
     instance.setErrorHandler((error, request, reply) => {
       const { status, body } = toHttpError(

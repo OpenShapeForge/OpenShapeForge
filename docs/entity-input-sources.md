@@ -31,6 +31,9 @@ A source node may add a title or description but cannot override constraints.
 The resolved schema reaches the canonical Operation catalog and every interface;
 the source keyword itself is never shipped to clients. Server-side handlers
 remain responsible for their domain transaction and declared effects.
+Resolution happens in `loadActivePlatformCompile` before contracts are cached,
+so a host that calls `buildWebManifest` directly receives the same schema without
+first running the all-artifact generator.
 
 Document creation currently uses this to create a logical Document and first
 DocumentVersion atomically. File upload/binding, managed document types and

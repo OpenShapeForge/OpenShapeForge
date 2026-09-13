@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import { collectAllArtifacts } from "./index.js";
+import { loadActivePlatformCompile } from "./active-manifest.js";
+import { buildWebManifest } from "./authoring/web-manifest.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -71,6 +73,15 @@ test("canonical entity input sources reach every generated operation interface",
       "layers:\n  - packages/compiler/config/authoring\n",
     );
     await mkdir(join(root, "apps/product-web"), { recursive: true });
+
+    // A host can generate its frontend directly from the public compile API,
+    // before (or without) running the all-artifact generator.
+    const active = await loadActivePlatformCompile(root);
+    const directWeb = buildWebManifest(active.entities);
+    const directCreate = object(JSON.parse(JSON.stringify(directWeb.entities.Document!.operations.create)));
+    expect(object(directCreate.input).kind).toBe("json-schema");
+    assertCanonicalDocumentInput(object(object(directCreate.input).schema));
+    expect(JSON.stringify(directWeb)).not.toContain("x-osf-entityInput");
 
     const artifacts = await collectAllArtifacts(root);
     const parse = (path: string): JsonObject => {

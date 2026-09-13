@@ -20,6 +20,8 @@ import {
   type LoadedCompilerPlugin,
 } from "./plugins.js";
 import type { PlatformSchemaManifest, TableDefinition } from "./schema.js";
+import { buildCoreReferentiedataSnapshot, loadCoreReferentiedataCatalog } from "./core-referentiedata-artifacts.js";
+import { materializeEntityInputSources } from "./entity-input-sources.js";
 
 export const activeManifestSource =
   "packages/compiler/config/platform-schema.yaml + authoring layers (entities + contexts/*/full)";
@@ -142,6 +144,11 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
           onCandidate: (candidate) => entities.push(candidate),
         },
       );
+
+      // Public compile consumers must receive executable schemas too, not just
+      // consumers of collectAllArtifacts. Resolve once before caching contracts.
+      const referentiedata = buildCoreReferentiedataSnapshot(await loadCoreReferentiedataCatalog(repoRoot));
+      materializeEntityInputSources(entities.map(entity => entity.contract), referentiedata);
 
       return {
         manifest: mergePromotedTables(baseManifest, promotedManifest),

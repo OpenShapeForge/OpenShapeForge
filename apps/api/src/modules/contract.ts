@@ -27,6 +27,7 @@
  * that only surfaced at boot.
  */
 import type { Duplex } from "node:stream";
+import type { RuntimeSettingsService } from "@openshapeforge/plugin-runtime";
 import type {
   ModuleOperationErrorResult as PublicModuleOperationErrorResult,
   ModuleOperationContextContract,
@@ -286,6 +287,7 @@ export type ModuleConnectionResolution =
     };
 
 export type ModulePlatformServices = {
+  readonly settings: RuntimeSettingsService;
   readonly artifacts: RuntimeArtifactServices<TrustedSessionContext>;
   durableOperations?: {
     organizationServiceIdentity(session: TrustedSessionContext): Promise<{ serviceIdentityId: string }>;

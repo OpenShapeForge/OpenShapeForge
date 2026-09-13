@@ -6,6 +6,8 @@ import type {
 } from "fastify";
 import type { Kysely, Transaction } from "kysely";
 import type { RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
+import type { RuntimeSettingsService } from "./settings.js";
+export type { RuntimeSettingValue, RuntimeSettingsService } from "./settings.js";
 export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
   RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type {
@@ -202,6 +204,7 @@ export type PluginDatabase = {
 };
 
 export type PluginPlatformServices = {
+  readonly settings: RuntimeSettingsService;
   readonly artifacts: RuntimeArtifactServices<PluginSessionContext>;
   /** Server configuration, never a service identity selected in operation input. */
   durableOperations?: {

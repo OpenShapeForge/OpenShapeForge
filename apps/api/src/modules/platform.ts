@@ -45,6 +45,7 @@ import { operationContractFingerprint } from "../operations/contract-fingerprint
 import { executeKeyedOperation } from "../operations/execution-receipts.js";
 import { operationErrorOf } from "@openshapeforge/operations";
 import { ArtifactStorageRuntime } from "./artifact-storage.js";
+import { runtimeSettings } from "./settings.js";
 
 function contractPreconditionFailure(
   definition: RuntimeOperationDefinition,
@@ -298,6 +299,7 @@ export class ModulePlatformRuntime {
       },
     });
     this.services = {
+      settings: runtimeSettings,
       artifacts: this.#artifactStorage.services,
       durableOperations: {
         organizationServiceIdentity: async (session) => {
@@ -441,6 +443,7 @@ export class ModulePlatformRuntime {
     };
     platformRuntimes.set(this.services, this);
     Object.defineProperty(this.services, "artifacts", { writable: false, configurable: false });
+    Object.defineProperty(this.services, "settings", { writable: false, configurable: false });
   }
 
   registerArtifactStorage(modules: readonly RuntimeModule[]): void {

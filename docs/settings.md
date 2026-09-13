@@ -105,3 +105,11 @@ a policy override channel.
 Settings are not an authorization model. Roles, permissions, operation
 controls, retention rules, credentials, endpoints, and secret values do not
 belong in this contract. Those retain their canonical owners and validators.
+
+Runtime modules read the immutable compiled projection through
+`platform.settings.get(fullyQualifiedKey)` and verify selected provider
+capabilities with `platform.settings.providerSupports(id, capability)`.
+Missing keys remain missing: core supplies no environment or code defaults.
+The runtime snapshots values at boot, rejects malformed compiled values and
+provider-capability drift, and never exposes mutable compiler objects to a
+module. Authoring and narrowing rules remain owned by the compiler.

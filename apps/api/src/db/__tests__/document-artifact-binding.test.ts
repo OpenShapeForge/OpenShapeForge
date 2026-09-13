@@ -11,8 +11,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
-import { createDocumentArtifactAuthorization } from "@openshapeforge/documents/artifact-authorization";
-import { sql, type Transaction } from "kysely";
+import { createDocumentArtifactAuthorization, type DocumentArtifactSqlExecutor } from "@openshapeforge/documents/artifact-authorization";
+import { CompiledQuery, sql, type Transaction } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
@@ -246,15 +246,15 @@ describe("Document artifact binding migration", () => {
     const artifactId = randomUUID();
     const otherUser = randomUUID();
     const checked: string[] = [];
-    const policySession = { ...session, tenantId, userId, groups: [], credential: "bearer" as const };
+    const policySession = { tenantId, userId, roles: [], groups: [], scope: "tenant" as const, credential: "bearer" as const };
     const records = { assertAccess: async (_session: unknown, input: { entityName: string }) => {
       checked.push(input.entityName);
     } };
     const policy = createDocumentArtifactAuthorization({ session: policySession, records });
     const created = await withDbSession(restricted.db, session, async trx => {
       const ids = await createWithArtifact(trx, "Policy association", artifactId);
-      const executor = { executeQuery: async (query: Parameters<typeof trx.executeQuery>[0]) =>
-        ({ rows: (await trx.executeQuery(query)).rows as Record<string, unknown>[] }) };
+      const executor: DocumentArtifactSqlExecutor = { executeQuery: async query =>
+        ({ rows: (await trx.executeQuery<Record<string, unknown>>(CompiledQuery.raw(query.sql, [...query.parameters]))).rows }) };
       const input = { action: "bind" as const, artifactId,
         owner: { entity: "DocumentVersion" as const, recordId: ids.documentVersionId } };
       expect(await policy.resolveDocumentVersionArtifactAccess(executor, input)).toMatchObject({ artifactId, tenantId });
@@ -270,8 +270,8 @@ describe("Document artifact binding migration", () => {
       return ids;
     });
     await withDbSession(restricted.db, { ...session, userId: otherUser }, async trx => {
-      const executor = { executeQuery: async (query: Parameters<typeof trx.executeQuery>[0]) =>
-        ({ rows: (await trx.executeQuery(query)).rows as Record<string, unknown>[] }) };
+      const executor: DocumentArtifactSqlExecutor = { executeQuery: async query =>
+        ({ rows: (await trx.executeQuery<Record<string, unknown>>(CompiledQuery.raw(query.sql, [...query.parameters]))).rows }) };
       const reader = createDocumentArtifactAuthorization({ session: { ...policySession, userId: otherUser }, records });
       expect(await reader.resolveDocumentVersionArtifactAccess(executor, {
         action: "open", artifactId,

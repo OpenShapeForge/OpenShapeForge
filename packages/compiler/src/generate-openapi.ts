@@ -583,6 +583,8 @@ export function renderOpenApiSpec(
     }),
   )].sort();
   const hasCanonicalEditLease = restEditLeaseOperationIds.length > 0;
+  const hasArtifactTransport = contractsByEntityName.has("Document") &&
+    contractsByEntityName.has("DocumentVersion");
 
   const schemas: JsonObject = {
     Error: {
@@ -830,6 +832,86 @@ export function renderOpenApiSpec(
   };
   const paths: JsonObject = {};
   const tags: JsonObject[] = [];
+
+  if (hasArtifactTransport) {
+  tags.push({
+    name: "Files",
+    description: "Authenticated streaming transport for temporary and document-bound files. Storage policy and authorization remain server-side.",
+  });
+  paths["/api/artifacts"] = {
+    post: {
+      operationId: "stageArtifact",
+      summary: "Upload a temporary document file",
+      description: "Streams bytes into the configured storage provider. Use the returned opaque handle in Document.create or DocumentVersion.create before it expires.",
+      tags: ["Files"],
+      parameters: [{
+        name: "x-file-name",
+        in: "header",
+        required: true,
+        description: "Percent-encoded UTF-8 file name.",
+        schema: { type: "string", minLength: 1, maxLength: 765 },
+      }],
+      requestBody: {
+        required: true,
+        content: {
+          "application/octet-stream": {
+            schema: { type: "string", format: "binary" },
+          },
+        },
+      },
+      responses: {
+        "201": {
+          description: "File staged and inspected",
+          content: { "application/json": { schema: {
+            type: "object", additionalProperties: false, required: ["data", "operations"],
+            properties: {
+              data: {
+                type: "object", additionalProperties: false,
+                required: ["artifactId", "version", "fileName", "mediaType", "sha256", "byteSize"],
+                properties: {
+                  artifactId: { type: "string", format: "uuid" },
+                  version: { type: "integer", minimum: 1 },
+                  fileName: { type: "string" },
+                  mediaType: { type: "string" },
+                  sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+                  byteSize: { type: "integer", minimum: 0 },
+                },
+              },
+              operations: { type: "array", maxItems: 0, items: { $ref: "#/components/schemas/OperationOffer" } },
+            },
+          } } },
+        },
+        "400": errorResponse("Invalid file request", true),
+        "401": errorResponse("Missing or invalid credentials", true),
+        "413": errorResponse("File exceeds the configured size limit", true),
+        "415": errorResponse("File type is not permitted", true),
+        "503": errorResponse("Storage is unavailable", true),
+      },
+    },
+  };
+  paths["/api/artifacts/{artifactId}/contents"] = {
+    get: {
+      operationId: "downloadArtifact",
+      summary: "Download a document-version file",
+      description: "Returns bytes only when this exact artifact is bound to the supplied authorized DocumentVersion.",
+      tags: ["Files"],
+      parameters: [
+        { name: "artifactId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        { name: "documentVersionId", in: "query", required: true, schema: { type: "string", format: "uuid" } },
+      ],
+      responses: {
+        "200": { description: "Authorized file contents", headers: {
+          "Content-Disposition": { schema: { type: "string" } },
+        }, content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } } },
+        "400": errorResponse("Invalid file or owner identity", true),
+        "401": errorResponse("Missing or invalid credentials", true),
+        "403": errorResponse("File access is not authorized", true),
+        "404": errorResponse("File is not available", true),
+        "503": errorResponse("Storage is unavailable", true),
+      },
+    },
+  };
+  }
 
   if (hasCanonicalEditLease) {
     tags.push({

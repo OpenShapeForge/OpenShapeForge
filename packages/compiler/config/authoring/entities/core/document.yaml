@@ -324,6 +324,7 @@ operations:
           idempotencyKey: { type: string, minLength: 1, maxLength: 200 }
           artifact:
             type: object
+            x-osf-control: artifact-upload
             description: Optional storage-issued handle; file facts are verified server-side.
             required: [artifactId, expectedArtifactVersion]
             additionalProperties: false

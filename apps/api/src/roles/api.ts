@@ -42,6 +42,7 @@ import { registerControlRestRoutes } from "../control/rest-routes.js";
 import { registerControlMcpServer } from "../mcp/control-mcp-server.js";
 import { registerAgreementMilestoneRestRoutes } from "../billing/rest-routes.js";
 import { registerDocumentRestRoutes } from "../documents/rest-routes.js";
+import { registerArtifactRestRoutes } from "../artifacts/rest-routes.js";
 import {
   createRuntimeDeclarativeServiceExecutor,
   createRuntimeHostOperationExecutor,
@@ -510,6 +511,12 @@ export function createApiApp(options: {
     registerRuntimeOperationRestRoutes(routes, moduleContext);
     registerEditLeaseRestRoutes(routes, dbOptions);
     registerDocumentRestRoutes(routes, dbOptions);
+    if (modulePlatform) {
+      registerArtifactRestRoutes(routes, {
+        ...dbOptions,
+        artifacts: modulePlatform.services.artifacts,
+      });
+    }
     registerAgreementMilestoneRestRoutes(routes, dbOptions);
     registerConnectorRestRoutes(routes, {
       ...dbOptions,

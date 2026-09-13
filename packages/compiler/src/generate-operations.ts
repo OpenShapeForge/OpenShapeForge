@@ -160,6 +160,8 @@ const CORE_API_ROUTES: readonly RestRoute[] = [
   { method: "GET", path: "/api/rest/docs/oauth2-redirect.js", owner: "core REST OAuth callback" },
   { method: "POST", path: "/api/documents", owner: "core document commands" },
   { method: "POST", path: "/api/documents/:documentId/versions", owner: "core document commands" },
+  { method: "POST", path: "/api/artifacts", owner: "core artifact transport" },
+  { method: "GET", path: "/api/artifacts/:artifactId/contents", owner: "core artifact transport" },
   { method: "GET", path: "/api/rest/v1/connectors", owner: "core connector catalog" },
   { method: "GET", path: "/api/rest/v1/connectors/:slug", owner: "core connector catalog" },
   { method: "PUT", path: "/api/rest/v1/connectors/:slug/installations/:instanceKey", owner: "core connector configuration" },
@@ -420,6 +422,11 @@ function operationSchemaValidator() {
   (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
   ajv.addKeyword({
     keyword: "x-osf-sourceField",
+    schemaType: "string",
+    valid: true,
+  });
+  ajv.addKeyword({
+    keyword: "x-osf-control",
     schemaType: "string",
     valid: true,
   });

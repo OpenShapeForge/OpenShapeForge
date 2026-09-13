@@ -320,6 +320,8 @@ export type RuntimeWorkerContextContract<Database> = {
   log: RuntimeWorkerLogger;
   /** The host's active generated registries, with no database or identity authority. */
   schemas?: PluginPlatformServices["schemas"];
+  /** The same immutable compiled policy as the API; grants no session authority. */
+  readonly settings?: RuntimeSettingsService;
   durableOperations?: RuntimeWorkerOperationBroker;
 };
 

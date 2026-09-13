@@ -28,7 +28,20 @@ provider path, credential or storage location is part of the
 public descriptor. A retained session/transaction wrapper cannot be reused
 after its request ends.
 
-This port is not an upload transport or an enabled Document implementation.
-The owning Operations, compiler settings, storage module initialization and
-interface upload handling must still be composed and proven together. It does
-not define new retention, legal-hold, file-size or expiry defaults.
+## Document Operations
+
+`Document.create` and `DocumentVersion.create` accept an optional top-level
+`artifact: { artifactId, expectedArtifactVersion }` alongside their logical
+input. They create a provisional version inside the canonical transaction,
+bind the storage-issued handle, and persist only the inspected descriptor.
+The database refuses to commit an incomplete association. A failed binding
+rolls back the new version and current-version pointer together. Omitting
+`artifact` keeps metadata-only creation usable without a storage provider.
+
+Descriptor fields on a version are read-only. A caller cannot replace them
+with a filename, MIME type, checksum, byte size or provider path. Reads do not
+require an edit lease.
+
+This port is not an upload transport. Compiler settings, storage module
+initialization and interface upload handling must still be composed and proven
+together. It defines no new retention, legal-hold, file-size or expiry defaults.

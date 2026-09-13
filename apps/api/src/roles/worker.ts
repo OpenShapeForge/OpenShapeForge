@@ -29,6 +29,7 @@ import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js
 import { WORKER_ROLE } from "../db/migrations/worker-role.js";
 import { configuredDurableWorkerBroker } from "../operations/durable-worker.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
+import { runtimeSettings } from "../modules/settings.js";
 import type { ModuleWorker, ModuleWorkerHandle, ModuleWorkerLogger } from "../modules/contract.js";
 import {
   closeRuntimeModules,
@@ -209,7 +210,7 @@ export async function startWorkerRole(
       );
     }
 
-    const context = { db: databaseRuntime.db, log,
+    const context = { db: databaseRuntime.db, log, settings: runtimeSettings,
       schemas: { fields: generatedRuntimeFieldSchemas, json: runtimeJsonSchemas } };
     const resolver = resolved.worker.resolveOperationWork;
     const pinner = resolved.worker.pinOperationContract;

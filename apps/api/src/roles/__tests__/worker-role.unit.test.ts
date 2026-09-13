@@ -17,6 +17,7 @@ import type {
 } from "../../modules/contract.js";
 import type { ModuleRegistry } from "../../modules/registry.js";
 import { WORKER_ROLE } from "../../db/migrations/worker-role.js";
+import { runtimeSettings } from "../../modules/settings.js";
 import { indexModuleWorkers, resolveWorkerDatabaseUrl, startWorkerRole } from "../worker.js";
 
 const silentLog: ModuleWorkerLogger = {
@@ -229,6 +230,10 @@ describe("startWorkerRole", () => {
     // NO_BRIDGE — spending the retry bound on a configuration problem.
     expect(order).toEqual(["init", "start"]);
     expect(started).not.toBeNull();
+    const workerContext = started as ModuleWorkerContext | null;
+    expect(workerContext?.settings).toBe(runtimeSettings);
+    expect(Object.isFrozen(workerContext?.settings)).toBe(true);
+    expect(workerContext).not.toHaveProperty("platform");
     expect(handle).toMatchObject({ role: "probe", module: "probe-module" });
 
     await handle.stop();

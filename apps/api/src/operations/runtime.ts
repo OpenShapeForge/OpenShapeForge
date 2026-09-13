@@ -69,7 +69,7 @@ import { evaluateOperationAvailability } from "./availability.js";
 export type OperationContract = {
   key: string;
   /** Static Operations default to invoke; Entity-backed handlers retain CRUD intent. */
-  intent?: "invoke" | "create" | "update";
+  intent?: "invoke" | "create" | "update" | "delete";
   plugin: string;
   title: string;
   description: string;
@@ -262,8 +262,10 @@ export function entityPluginOperationContract(
     target.entityId !== operation.entityId ||
     target.entityName !== operation.entityName ||
     (operation.intent === "create" && target.scope !== "collection") ||
-    (operation.intent === "update" && target.scope !== "record") ||
-    (operation.intent !== "create" && operation.intent !== "update")
+    ((operation.intent === "update" || operation.intent === "delete") &&
+      target.scope !== "record") ||
+    (operation.intent !== "create" && operation.intent !== "update" &&
+      operation.intent !== "delete")
   ) {
     throw new Error(
       `Plugin-backed entity Operation "${operation.id}" has an invalid CRUD target.`,
@@ -298,7 +300,7 @@ export function entityPluginOperationContract(
     auth: {
       mode: "session",
       roles: operation.authorization.roles,
-      ...(operation.intent === "update" &&
+      ...((operation.intent === "update" || operation.intent === "delete") &&
       operation.authorization.recordPermissions?.length
         ? { recordPermissions: operation.authorization.recordPermissions }
         : {}),
@@ -323,6 +325,8 @@ export function entityPluginOperationContract(
           ? rest.method
           : operation.intent === "create"
           ? "POST"
+          : operation.intent === "delete"
+          ? "DELETE"
           : "PATCH",
         path: rest && rest.path
           ? rest.path
@@ -354,7 +358,7 @@ export function entityPluginOperationContract(
 
 function operationIntent(
   operation: OperationContract,
-): "invoke" | "create" | "update" {
+): "invoke" | "create" | "update" | "delete" {
   return operation.intent ?? "invoke";
 }
 
@@ -1243,15 +1247,21 @@ export async function invokeOperation(
       contractFingerprint: operationContractFingerprint(runtimeDefinition(bound)),
       externalWrite: runtimeDefinition(bound).effects.external === "write",
       // Record ACL is current authorization, not a one-shot mutation control.
-      // Re-evaluate it in the same transaction that selects a replay;
-      // version, lease and confirmation remain inside execute() and are
-      // deliberately skipped for a completed receipt.
-      authorizeReplay: (trx) => assertCurrentRecordPermission(
-        bound.operation,
-        input,
-        activeContext,
-        trx,
-      ),
+      // Re-evaluate it in the same transaction that selects a replay. A
+      // completed delete has no record left to authorize, while its receipt
+      // is still bound to the exact tenant, actor, Operation and input and
+      // returns only the canonical boolean deletion result. The initial
+      // delete continues to check record ACL inside execute() before effects.
+      ...(operationIntent(bound.operation) === "delete"
+        ? {}
+        : {
+            authorizeReplay: (trx: Transaction<DB>) => assertCurrentRecordPermission(
+              bound.operation,
+              input,
+              activeContext,
+              trx,
+            ),
+          }),
       execute,
       encode: (result) => result,
       decode: (stored) => decodedOperationSuccess(bound.operation, validation, stored),

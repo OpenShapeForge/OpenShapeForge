@@ -556,6 +556,70 @@ describe("coreEntity properties the compiler implements", () => {
     );
   });
 
+  it("accepts plugin-backed delete only with its canonical destructive contract", () => {
+    const document = coreEntity({
+      schemaVersion: 2,
+      authorization: {
+        roles: {
+          read: ["BillingRuns.Read", "BillingRuns.Delete"],
+          create: ["BillingRuns.Write"],
+          update: ["BillingRuns.Write"],
+          delete: ["BillingRuns.Delete"],
+        },
+      },
+      operations: {
+        remove: {
+          name: "Delete billing run",
+          description: "Deletes a billing run through its owning module.",
+          implementation: {
+            type: "plugin",
+            plugin: "example",
+            handler: "deleteBillingRun",
+            action: "delete",
+          },
+          target: { scope: "record", inputField: "billingRunId" },
+          input: {
+            schema: {
+              type: "object",
+              properties: { billingRunId: { type: "string", format: "uuid" } },
+              required: ["billingRunId"],
+              additionalProperties: false,
+            },
+          },
+          output: {
+            schema: {
+              type: "object",
+              properties: { deleted: { type: "boolean" } },
+              required: ["deleted"],
+              additionalProperties: false,
+            },
+          },
+          errors: [],
+          effects: { data: "delete", external: "none" },
+          reliability: { idempotency: { mode: "natural" } },
+          confirmation: { mode: "acknowledgement" },
+        },
+      },
+      interfaces: {
+        rest: {
+          operations: {
+            remove: { method: "DELETE", path: "/api/example/billing-runs/:billingRunId" },
+          },
+        },
+        graphql: { operations: { remove: {} } },
+        mcp: { operations: { remove: {} } },
+        web: {
+          operations: { remove: {} },
+          views: {
+            collection: { route: "/billing-runs", columns: [{ key: "idempotencyKey" }] },
+          },
+        },
+      },
+    });
+
+    expect(validator.validate(document, "billing-run.yaml")).toBe("core-entity.schema.json");
+  });
+
   it("accepts action-specific record ACL authoring and plugin enforcement", () => {
     const document = coreEntity({
       schemaVersion: 2,

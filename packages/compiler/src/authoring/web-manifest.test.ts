@@ -350,6 +350,77 @@ describe("web manifest projection", () => {
     );
   });
 
+  test("projects a plugin-backed entity delete without turning it into an invoke action", () => {
+    const relation = entity("Relation", "relation", [
+      field("id", { required: true, readOnly: true }),
+      field("displayName"),
+    ], coreView());
+    relation.contract.authoringVersion = 2;
+    relation.contract.interfaces = {
+      web: { operations: { list: true, get: true, delete: true } },
+    };
+    relation.contract.entityOperations.delete = {
+      key: "remove",
+      id: "Relation.remove",
+      entityId: "core.Relation",
+      entityName: "Relation",
+      name: text("Delete relation", "Relatie verwijderen"),
+      description: text("Delete this relation", "Verwijder deze relatie"),
+      intent: "delete",
+      implementation: { type: "plugin", plugin: "example", handler: "deleteRelation" },
+      target: {
+        entityId: "core.Relation",
+        entityName: "Relation",
+        scope: "record",
+        inputField: "relationId",
+      },
+      input: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          properties: { relationId: { type: "string", format: "uuid" } },
+          required: ["relationId"],
+          additionalProperties: false,
+        },
+      },
+      output: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          properties: { deleted: { type: "boolean" } },
+          required: ["deleted"],
+          additionalProperties: false,
+        },
+      },
+      authorization: { action: "delete", roles: ["entity:write"] },
+      effects: { data: "delete", external: "none" },
+      reliability: { idempotency: { mode: "natural" } },
+      interaction: { confirmation: { mode: "acknowledgement" } },
+      interfaces: {
+        rest: {
+          method: "DELETE",
+          path: "/api/example/relations/:relationId",
+          response: { kind: "json" },
+        },
+        web: {},
+      },
+    };
+
+    const projected = buildWebManifest([relation]).entities.Relation!;
+    expect(projected.operations.delete).toMatchObject({
+      id: "Relation.remove",
+      key: "remove",
+      intent: "delete",
+      implementation: { type: "plugin", plugin: "example", handler: "deleteRelation" },
+      target: { scope: "record", inputField: "relationId" },
+      output: { kind: "json-schema", schema: { required: ["deleted"] } },
+      effects: { data: "delete", external: "none" },
+      confirmation: { mode: "acknowledgement" },
+      rest: { method: "DELETE", path: "/api/example/relations/:relationId" },
+    });
+    expect(projected.views.record?.operations.delete?.intent).toBe("delete");
+  });
+
   test("keeps canonical secure-input targets server-owned in Web forms", () => {
     const view = coreView();
     const createGroup = view.form!.variants.create!.groups[0]!;

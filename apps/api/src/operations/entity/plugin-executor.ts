@@ -18,7 +18,7 @@ type Executor = (
   session: DbSessionInput,
   operation: EntityOperationContract,
   input: Readonly<Record<string, unknown>>,
-) => Promise<GeneratedEntityRow>;
+) => Promise<GeneratedEntityRow | { deleted: boolean }>;
 
 // Core boot owns this binding. Modules receive neither this registry nor a
 // facility to substitute a handler/identity through an Operation request.
@@ -113,6 +113,18 @@ function storageRow(
   return projectGeneratedEntityRow(table, session, row);
 }
 
+function deletionResult(value: unknown): { deleted: boolean } {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+    typeof (value as { deleted?: unknown }).deleted !== "boolean") {
+    throw operationFailure({
+      code: "HANDLER_CONTRACT_VIOLATION",
+      message: "Entity delete handler must return a boolean deleted result.",
+      retryable: false,
+    });
+  }
+  return { deleted: (value as { deleted: boolean }).deleted };
+}
+
 /** Build the core-only executor after every runtime module has initialized. */
 export function createEntityPluginExecutor(options: {
   bindings: ReadonlyMap<string, BoundOperation>;
@@ -125,7 +137,8 @@ export function createEntityPluginExecutor(options: {
       !bound ||
       bound.operation.key !== entityOperation.id ||
       bound.operation.intent !== entityOperation.intent ||
-      (entityOperation.intent !== "create" && entityOperation.intent !== "update")
+      (entityOperation.intent !== "create" && entityOperation.intent !== "update" &&
+        entityOperation.intent !== "delete")
     ) {
       throw operationFailure({
         code: "OPERATION_UNAVAILABLE",
@@ -148,6 +161,9 @@ export function createEntityPluginExecutor(options: {
                 message: "Entity Operation handler returned an incompatible result envelope.",
                 retryable: false,
               });
+            }
+            if (entityOperation.intent === "delete") {
+              return { ...success, value: deletionResult(success.value) };
             }
             const head = authoredHead(table, success.value);
             const id = primaryId(table, head);
@@ -172,6 +188,9 @@ export function createEntityPluginExecutor(options: {
     } catch (error) {
       throw operationFailure(runtimeOperationError(error));
     }
+    if (entityOperation.intent === "delete") {
+      return deletionResult(result.value);
+    }
     const head = result.value as Record<string, unknown>;
     // Replays skip consumed mutation controls by design. Recheck the created
     // record's authored ACL against the current actor before returning it.
@@ -189,12 +208,24 @@ export function registerEntityPluginExecutor(db: OpenShapeForgeDatabase, executo
   executors.set(db, executor);
 }
 
+export function executeEntityPlugin(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  operation: EntityOperationContract & { intent: "delete" },
+  input: Readonly<Record<string, unknown>>,
+): Promise<{ deleted: boolean }>;
+export function executeEntityPlugin(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  operation: EntityOperationContract & { intent: "create" | "update" },
+  input: Readonly<Record<string, unknown>>,
+): Promise<GeneratedEntityRow>;
 export async function executeEntityPlugin(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   operation: EntityOperationContract,
   input: Readonly<Record<string, unknown>>,
-): Promise<GeneratedEntityRow> {
+): Promise<GeneratedEntityRow | { deleted: boolean }> {
   const executor = executors.get(db);
   if (!executor) {
     throw operationFailure({

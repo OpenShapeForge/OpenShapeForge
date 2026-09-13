@@ -537,7 +537,7 @@ export interface EntityOperationDefinition {
         plugin: string;
         handler: string;
         /** Canonical entity CRUD intent implemented by this handler. */
-        action?: "create" | "update";
+        action?: "create" | "update" | "delete";
       };
   /** How a record-scoped plugin Operation binds the current record to input. */
   target?:

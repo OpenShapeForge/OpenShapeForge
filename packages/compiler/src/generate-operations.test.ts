@@ -212,6 +212,102 @@ describe("first-class plugin operations", () => {
     });
   });
 
+  test("materializes platform controls for a plugin-backed entity delete", () => {
+    const entityOperation: CompiledEntityOperation = {
+      key: "remove",
+      id: "Relation.remove",
+      entityId: "hubble.Relation",
+      entityName: "Relation",
+      name: "Delete relation",
+      description: "Deletes a relation through its owning module.",
+      implementation: { type: "plugin", plugin: "example", handler: "deleteRelation" },
+      target: {
+        entityId: "hubble.Relation",
+        entityName: "Relation",
+        scope: "record",
+        inputField: "relationId",
+      },
+      effects: { data: "delete", external: "none" },
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+      intent: "delete",
+      input: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          properties: {
+            relationId: { type: "string", format: "uuid" },
+            requestKey: { type: "string", minLength: 1 },
+          },
+          required: ["relationId", "requestKey"],
+          additionalProperties: false,
+        },
+      },
+      output: {
+        kind: "json-schema",
+        schema: {
+          type: "object",
+          properties: { deleted: { type: "boolean" } },
+          required: ["deleted"],
+          additionalProperties: false,
+        },
+      },
+      authorization: { action: "delete", roles: ["Relations.Delete"] },
+      concurrency: {
+        version: { mode: "required", field: "updatedAt" },
+        editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+      },
+      interaction: {
+        confirmation: {
+          mode: "challenge",
+          challenge: {
+            kind: "type-current-field",
+            field: "displayName",
+            issuedBy: "server",
+            bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+            expiresAfter: "PT5M",
+            singleUse: true,
+          },
+        },
+      },
+    };
+    const entities = [{
+      contract: {
+        entity: { id: "hubble.Relation", name: "Relation", title: "Relation" },
+        model: { fields: [], relationships: [] },
+        storage: { columns: [] },
+        entityOperations: { delete: entityOperation },
+      },
+    }] as never;
+
+    const [compiled] = buildStaticOperationCatalog([], [entityOperation], entities, {})
+      .operations;
+    expect(compiled).toMatchObject({
+      id: "Relation.remove",
+      intent: "delete",
+      inputSchema: {
+        properties: {
+          relationId: { type: "string", format: "uuid" },
+          requestKey: { type: "string", minLength: 1 },
+          expectedVersion: { type: "string", format: "date-time" },
+          leaseToken: { type: "string", minLength: 1 },
+          confirmationToken: { type: "string", minLength: 1 },
+          confirmationAnswer: { type: "string", minLength: 1 },
+        },
+        required: ["relationId", "requestKey", "expectedVersion", "leaseToken"],
+        dependentRequired: {
+          confirmationToken: ["confirmationAnswer"],
+          confirmationAnswer: ["confirmationToken"],
+        },
+        additionalProperties: false,
+      },
+      outputSchema: {
+        properties: { deleted: { type: "boolean" } },
+        required: ["deleted"],
+        additionalProperties: false,
+      },
+    });
+  });
+
   test("rejects a duplicate id across entity and plugin/module Operations", () => {
     const [compiledPlugin] = collectPluginOperations(
       [{ name: "demo", operations: [operation] }],

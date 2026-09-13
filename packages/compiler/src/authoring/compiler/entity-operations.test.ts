@@ -78,6 +78,158 @@ describe("canonical entity operations", () => {
     expect(operations.delete?.authorization.recordPermissions).toEqual(["delete"]);
   });
 
+  test("preserves a plugin-backed delete as the canonical entity delete Operation", () => {
+    const source = relationSource();
+    source.coreEntity = {
+      schemaVersion: 2,
+      kind: "coreEntity",
+      module: "core",
+      entity: "Relation",
+      title: "Relation",
+      language: "en",
+      fields: [
+        {
+          key: "displayName",
+          valueType: "string",
+          persisted: { column: "display_name", storageClass: "core" },
+        },
+        {
+          key: "updatedAt",
+          valueType: "datetime",
+          readOnly: true,
+          persisted: { column: "updated_at", storageClass: "core" },
+        },
+      ],
+      authorization: {
+        roles: {
+          read: ["Relations.Read", "Relations.Delete"],
+          create: ["Relations.Write"],
+          update: ["Relations.Write"],
+          delete: ["Relations.Delete"],
+        },
+      },
+      operations: {
+        remove: {
+          name: "Delete relation",
+          description: "Deletes a relation through its owning module.",
+          implementation: {
+            type: "plugin",
+            plugin: "example",
+            handler: "deleteRelation",
+            action: "delete",
+          },
+          target: { scope: "record", inputField: "relationId" },
+          input: {
+            schema: {
+              type: "object",
+              properties: {
+                relationId: { type: "string", format: "uuid" },
+                requestKey: { type: "string", minLength: 1 },
+              },
+              required: ["relationId", "requestKey"],
+              additionalProperties: false,
+            },
+          },
+          output: {
+            schema: {
+              type: "object",
+              properties: { deleted: { type: "boolean" } },
+              required: ["deleted"],
+              additionalProperties: false,
+            },
+          },
+          errors: [],
+          effects: { data: "delete", external: "none" },
+          reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+          concurrency: {
+            version: { mode: "required", field: "updatedAt" },
+            editLease: { mode: "required", expiresAfterInactivity: "PT15M" },
+          },
+          confirmation: {
+            mode: "challenge",
+            challenge: {
+              kind: "type-current-field",
+              field: "displayName",
+              issuedBy: "server",
+              bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+              expiresAfter: "PT5M",
+              singleUse: true,
+            },
+          },
+        },
+      },
+      interfaces: {
+        rest: {
+          operations: {
+            remove: { method: "DELETE", path: "/api/example/relations/:relationId" },
+          },
+        },
+        graphql: { operations: { remove: {} } },
+        mcp: { operations: { remove: {} } },
+        web: {
+          operations: { remove: {} },
+          views: {
+            collection: { route: "/relations", columns: [{ key: "displayName" }] },
+          },
+        },
+      },
+    };
+    source.authorization.roles = {
+      read: ["Relations.Read", "Relations.Delete"],
+      create: ["Relations.Write"],
+      update: ["Relations.Write"],
+      delete: ["Relations.Delete"],
+    };
+    source.crud.operations = {
+      list: false,
+      get: false,
+      create: false,
+      update: false,
+      delete: true,
+    };
+
+    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).not.toThrow();
+    const remove = source.coreEntity.operations!.remove!;
+    expect(buildEntityOperations(source).delete).toMatchObject({
+      id: "Relation.remove",
+      key: "remove",
+      intent: "delete",
+      implementation: { type: "plugin", plugin: "example", handler: "deleteRelation" },
+      target: {
+        entityId: "hubble.Relation",
+        entityName: "Relation",
+        scope: "record",
+        inputField: "relationId",
+      },
+      input: { kind: "json-schema", schema: remove.input!.schema },
+      output: { kind: "json-schema", schema: remove.output!.schema },
+      authorization: { action: "delete", roles: ["Relations.Delete"] },
+      effects: { data: "delete", external: "none" },
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+      concurrency: remove.concurrency,
+      interaction: { confirmation: remove.confirmation },
+    });
+
+    remove.effects.data = "write";
+    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+      /must declare delete data effects/,
+    );
+    remove.effects.data = "delete";
+    (remove.output!.schema.properties as Record<string, { type: string }>).deleted!.type =
+      "string";
+    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+      /required boolean deleted result/,
+    );
+    (remove.output!.schema.properties as Record<string, { type: string }>).deleted!.type =
+      "boolean";
+    const rest = source.coreEntity.interfaces!.rest!.operations!.remove;
+    if (!rest) throw new Error("Expected a REST projection");
+    rest.method = "PATCH";
+    expect(() => assertV2Authoring(source.coreEntity!, "relation.yaml")).toThrow(
+      /use DELETE/,
+    );
+  });
+
   test("uses v2 operation identity and canonical metadata", () => {
     const source = relationSource();
     source.coreEntity = {

@@ -683,7 +683,7 @@
                   "type": "string",
                   "pattern": "^[_A-Za-z][_0-9A-Za-z]*$"
                 },
-                "action": { "enum": ["create", "update"] }
+                "action": { "enum": ["create", "update", "delete"] }
               }
             }
           ]
@@ -771,7 +771,7 @@
               "implementation": {
                 "properties": {
                   "type": { "const": "plugin" },
-                  "action": { "enum": ["create", "update"] }
+                  "action": { "enum": ["create", "update", "delete"] }
                 },
                 "required": ["type", "action"]
               }

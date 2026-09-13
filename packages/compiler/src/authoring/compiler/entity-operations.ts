@@ -188,8 +188,12 @@ function compileOperation(
     case "delete":
       return {
         ...shared,
-        input: { kind: "identity", identityField: "id" },
-        output: { kind: "deletion-result" },
+        input: pluginImplementation
+          ? { kind: "json-schema", schema: definition!.input!.schema }
+          : { kind: "identity", identityField: "id" },
+        output: pluginImplementation
+          ? { kind: "json-schema", schema: definition!.output!.schema }
+          : { kind: "deletion-result" },
       };
   }
 }

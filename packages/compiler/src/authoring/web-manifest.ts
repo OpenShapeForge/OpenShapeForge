@@ -73,7 +73,7 @@ function operation(
     };
   }
   if (
-    (source.intent !== "create" && source.intent !== "update") ||
+    (source.intent !== "create" && source.intent !== "update" && source.intent !== "delete") ||
     source.input.kind !== "json-schema" || source.output.kind !== "json-schema" ||
     !source.target
   ) {
@@ -100,7 +100,11 @@ function operation(
     ...(rest !== false && rest?.path
       ? {
           rest: {
-            method: rest.method ?? (source.intent === "create" ? "POST" : "PATCH"),
+            method: rest.method ?? (source.intent === "create"
+              ? "POST"
+              : source.intent === "delete"
+                ? "DELETE"
+                : "PATCH"),
             path: rest.path,
             response: rest.response ?? { kind: "json" },
           },

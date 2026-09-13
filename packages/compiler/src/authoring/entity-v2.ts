@@ -297,10 +297,11 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
               `must use a ${expectedScope}-scoped target.`,
           );
         }
-        if (operation.effects.data !== "write") {
+        const expectedDataEffect = action === "delete" ? "delete" : "write";
+        if (operation.effects.data !== expectedDataEffect) {
           throw new Error(
             `${origin} plugin-backed entity ${action} Operation "${operationKey}" ` +
-              "must declare write data effects.",
+              `must declare ${expectedDataEffect} data effects.`,
           );
         }
         const inputProperties = operation.input.schema.properties;
@@ -331,7 +332,23 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
             !Array.isArray(outputProperties)
           ? (outputProperties as Record<string, unknown>).id
           : undefined;
-        if (
+        if (action === "delete") {
+          const outputDeleted = outputProperties && typeof outputProperties === "object" &&
+              !Array.isArray(outputProperties)
+            ? (outputProperties as Record<string, unknown>).deleted
+            : undefined;
+          if (
+            operation.output.schema.type !== "object" ||
+            !outputDeleted || typeof outputDeleted !== "object" || Array.isArray(outputDeleted) ||
+            (outputDeleted as { type?: unknown }).type !== "boolean" ||
+            !Array.isArray(outputRequired) || !outputRequired.includes("deleted")
+          ) {
+            throw new Error(
+              `${origin} plugin-backed entity delete Operation "${operationKey}" ` +
+                "must return an object schema with a required boolean deleted result.",
+            );
+          }
+        } else if (
           operation.output.schema.type !== "object" ||
           !outputId || typeof outputId !== "object" || Array.isArray(outputId) ||
           (outputId as { type?: unknown }).type !== "string" ||
@@ -350,7 +367,11 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
 
       const restProjection = entity.interfaces?.rest?.operations?.[operationKey];
       if (action && restProjection && restProjection.method) {
-        const allowed = action === "create" ? ["POST"] : ["PATCH", "PUT"];
+        const allowed = action === "create"
+          ? ["POST"]
+          : action === "delete"
+            ? ["DELETE"]
+            : ["PATCH", "PUT"];
         if (!allowed.includes(restProjection.method)) {
           throw new Error(
             `${origin} plugin-backed entity ${action} Operation "${operationKey}" ` +
@@ -378,11 +399,11 @@ export function assertV2Authoring(entity: CoreEntity, origin: string): void {
         const recordInputField = operation.target.scope === "record"
           ? operation.target.inputField
           : undefined;
-        if (action === "update" &&
+        if ((action === "update" || action === "delete") &&
           (recordInputField === undefined || parameters.length !== 1 ||
             parameters[0] !== recordInputField)) {
           throw new Error(
-            `${origin} plugin-backed entity update Operation "${operationKey}" ` +
+            `${origin} plugin-backed entity ${action} Operation "${operationKey}" ` +
               `REST path must bind exactly :${recordInputField ?? "recordId"}.`,
           );
         }

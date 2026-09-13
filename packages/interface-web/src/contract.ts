@@ -19,7 +19,8 @@ export type WebBuiltinOperationRef = OperationReference<WebOperationIntent> & {
 
 /** Full JSON-schema contract shared by invoke and plugin-backed CRUD forms. */
 export type WebSchemaOperationRef<
-  TIntent extends "invoke" | "create" | "update" = "invoke" | "create" | "update",
+  TIntent extends "invoke" | "create" | "update" | "delete" =
+    "invoke" | "create" | "update" | "delete",
 > = OperationReference<TIntent> & {
   /** Authored key inside the entity Operations map. */
   key: string;
@@ -58,7 +59,7 @@ export type WebSchemaOperationRef<
 };
 
 export type WebCustomOperationRef = WebSchemaOperationRef<"invoke">;
-export type WebEntityPluginOperationRef = WebSchemaOperationRef<"create" | "update"> & {
+export type WebEntityPluginOperationRef = WebSchemaOperationRef<"create" | "update" | "delete"> & {
   implementation: { type: "plugin"; plugin: string; handler: string };
   prerequisites?: readonly WebOperationPrerequisite[];
 };

@@ -40,8 +40,8 @@ function relationTable() {
   return getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === "Relation")!;
 }
 
-function entityOperation(intent: "create" | "update"): EntityOperationContract {
-  const inputField = intent === "update" ? "relationId" : undefined;
+function entityOperation(intent: "create" | "update" | "delete"): EntityOperationContract {
+  const inputField = intent === "create" ? undefined : "relationId";
   return {
     id: `example.relations.${intent}`,
     key: intent,
@@ -80,25 +80,32 @@ function entityOperation(intent: "create" | "update"): EntityOperationContract {
       },
       additionalProperties: false,
     },
-    outputSchema: {
-      type: "object",
-      required: ["id", "tenantId", "displayName", "createdAt", "updatedAt"],
-      properties: {
-        id: { type: "string", format: "uuid" },
-        tenantId: { type: "string", format: "uuid" },
-        displayName: { type: "string" },
-        createdAt: { type: "string", format: "date-time" },
-        updatedAt: { type: "string", format: "date-time" },
-      },
-      additionalProperties: false,
-    },
+    outputSchema: intent === "delete"
+      ? {
+          type: "object",
+          required: ["deleted"],
+          properties: { deleted: { type: "boolean" } },
+          additionalProperties: false,
+        }
+      : {
+          type: "object",
+          required: ["id", "tenantId", "displayName", "createdAt", "updatedAt"],
+          properties: {
+            id: { type: "string", format: "uuid" },
+            tenantId: { type: "string", format: "uuid" },
+            displayName: { type: "string" },
+            createdAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+          additionalProperties: false,
+        },
     authorization: { action: intent, roles: ["Relations.All.ReadWrite"] },
-    effects: { data: "write", external: "none" },
+    effects: { data: intent === "delete" ? "delete" : "write", external: "none" },
     reliability: { idempotency: { mode: "natural" } },
     interaction: { confirmation: { mode: "none" } },
     interfaces: {
       rest: {
-        method: intent === "create" ? "POST" : "PATCH",
+        method: intent === "create" ? "POST" : intent === "delete" ? "DELETE" : "PATCH",
         path: `/api/example/relations${intent === "create" ? "" : "/:relationId"}`,
         response: { status: intent === "create" ? 201 : 200, kind: "json" },
       },
@@ -134,6 +141,25 @@ describe("plugin-backed Entity Operation runtime", () => {
     expect(adapted.inputSchema.properties).toMatchObject({
       displayName: { "x-osf-sourceField": "displayName" },
     });
+
+    const deletion = entityPluginOperationContract({
+      ...entityOperation("delete"),
+      authorization: {
+        action: "delete",
+        roles: ["Relations.All.Delete"],
+        recordPermissions: ["delete"],
+      },
+    }, relationTable());
+    expect(deletion).toMatchObject({
+      intent: "delete",
+      auth: {
+        mode: "session",
+        roles: ["Relations.All.Delete"],
+        recordPermissions: ["delete"],
+      },
+      effects: { data: "delete", external: "none" },
+      transports: { rest: { method: "DELETE", response: { status: 200, kind: "json" } } },
+    });
   });
 
   test("binds plugin update offers to the authored target input", () => {
@@ -152,7 +178,56 @@ describe("plugin-backed Entity Operation runtime", () => {
         input: { relationId: recordId },
       },
     });
+    expect(
+      entityPluginOfferBinding(entityOperation("delete"), {
+        id: recordId,
+        version: "2026-09-13T10:01:00.000Z",
+      }),
+    ).toEqual({
+      binding: {
+        target: {
+          entityId: "example-relation",
+          id: recordId,
+          version: "2026-09-13T10:01:00.000Z",
+        },
+        input: { relationId: recordId },
+      },
+    });
     expect(entityPluginOfferBinding(entityOperation("create"), { id: recordId })).toEqual({});
+  });
+
+  test("returns a canonical delete result without requiring or fabricating a record head", async () => {
+    const db = database();
+    const platform = new ModulePlatformRuntime(db);
+    const operation = entityOperation("delete");
+    const adapted = entityPluginOperationContract(operation, relationTable());
+    const bindings = bindOperationHandlers(
+      [{
+        name: "example",
+        operationHandlers: {
+          deleteRelation: async (input) => {
+            expect(input).toEqual({ relationId: recordId, displayName: "Unused" });
+            return {
+              status: 200,
+              value: { deleted: true },
+            };
+          },
+        },
+      }],
+      [adapted],
+    );
+    const execute = createEntityPluginExecutor({
+      bindings,
+      runtime: { db, platform: platform.services },
+    });
+    try {
+      await expect(execute(session, operation, {
+        relationId: recordId,
+        displayName: "Unused",
+      })).resolves.toEqual({ deleted: true });
+    } finally {
+      await db.destroy();
+    }
   });
 
   test("runs create in the live module transaction and returns only DB row fields", async () => {
@@ -246,6 +321,132 @@ describe("plugin-backed Entity Operation runtime", () => {
       ).resolves.toMatchObject({ id: recordId });
       expect(receiptIntent).toBe("create");
     } finally {
+      __setOperationExecutionReceiptExecutorForTests(db, undefined);
+      await db.destroy();
+    }
+  });
+
+  test("binds keyed receipts and replay data to the canonical delete intent", async () => {
+    const db = database();
+    const platform = new ModulePlatformRuntime(db);
+    const base = entityOperation("delete");
+    const operation: EntityOperationContract = {
+      ...base,
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+      inputSchema: {
+        ...base.inputSchema,
+        required: ["relationId", "displayName", "requestKey"],
+        properties: {
+          ...(base.inputSchema?.properties as Record<string, unknown>),
+          requestKey: { type: "string", minLength: 1 },
+        },
+      },
+    };
+    const adapted = entityPluginOperationContract(operation, relationTable());
+    const bindings = bindOperationHandlers(
+      [{
+        name: "example",
+        operationHandlers: {
+          deleteRelation: async () => ({ value: { deleted: true } }),
+        },
+      }],
+      [adapted],
+    );
+    let receiptIntent: string | undefined;
+    __setOperationExecutionReceiptExecutorForTests(db, async (_active, options) => {
+      receiptIntent = options.operation.intent;
+      expect(options.authorizeReplay).toBeUndefined();
+      const executed = await options.execute(() => undefined);
+      return options.decode(options.encode(executed));
+    });
+    const execute = createEntityPluginExecutor({
+      bindings,
+      runtime: { db, platform: platform.services },
+    });
+    try {
+      await expect(execute(session, operation, {
+        relationId: recordId,
+        displayName: "Unused",
+        requestKey: "delete-one",
+      })).resolves.toEqual({ deleted: true });
+      expect(receiptIntent).toBe("delete");
+    } finally {
+      __setOperationExecutionReceiptExecutorForTests(db, undefined);
+      await db.destroy();
+    }
+  });
+
+  test("still checks record delete permission when a keyed receipt selects initial execution", async () => {
+    const db = database();
+    const platform = new ModulePlatformRuntime(db);
+    const table = relationTable();
+    const authorization = table.source!.authorization!;
+    const previousRecordPermissions = authorization.recordPermissions;
+    authorization.recordPermissions = {
+      field: "authorization",
+      column: "authorization",
+      empty: "restricted",
+      createRequires: ["view"],
+    };
+    const base = entityOperation("delete");
+    const operation: EntityOperationContract = {
+      ...base,
+      authorization: {
+        action: "delete",
+        roles: ["Relations.All.ReadWrite"],
+        recordPermissions: ["delete"],
+      },
+      reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+      inputSchema: {
+        ...base.inputSchema,
+        required: ["relationId", "displayName", "requestKey"],
+        properties: {
+          ...(base.inputSchema?.properties as Record<string, unknown>),
+          requestKey: { type: "string", minLength: 1 },
+        },
+      },
+    };
+    const adapted = entityPluginOperationContract(operation, table);
+    let invoked = 0;
+    const bindings = bindOperationHandlers(
+      [{
+        name: "example",
+        operationHandlers: {
+          deleteRelation: async () => {
+            invoked += 1;
+            return { value: { deleted: true } };
+          },
+        },
+      }],
+      [adapted],
+    );
+    __setOperationExecutionReceiptExecutorForTests(db, async (_active, options) => {
+      expect(options.authorizeReplay).toBeUndefined();
+      return options.execute(() => undefined);
+    });
+    const execute = createEntityPluginExecutor({
+      bindings,
+      runtime: { db, platform: platform.services },
+    });
+    try {
+      let error: unknown;
+      try {
+        await execute(session, operation, {
+          relationId: recordId,
+          displayName: "Unused",
+          requestKey: "delete-missing-receipt",
+        });
+      } catch (cause) {
+        error = cause;
+      }
+      expect(operationErrorOf(error)?.code).toBe("FORBIDDEN");
+      expect(invoked).toBe(0);
+    } finally {
+      if (previousRecordPermissions) {
+        authorization.recordPermissions = previousRecordPermissions;
+      } else {
+        delete authorization.recordPermissions;
+      }
       __setOperationExecutionReceiptExecutorForTests(db, undefined);
       await db.destroy();
     }

@@ -646,7 +646,7 @@ export function entityPluginOfferBinding(
   if (
     !target ||
     operation.implementation?.type !== "plugin" ||
-    operation.intent !== "update" ||
+    (operation.intent !== "update" && operation.intent !== "delete") ||
     operation.target?.scope !== "record" ||
     !operation.target.inputField
   ) {
@@ -711,14 +711,37 @@ export async function executeEntityOperation(
     const entityName = authoredEntityId(table);
     const operation = entityOperationContract(request.operation.id);
     if (operation.implementation?.type === "plugin") {
-      if (operation.intent !== "create" && operation.intent !== "update") {
+      if (operation.intent !== "create" && operation.intent !== "update" &&
+        operation.intent !== "delete") {
         throw generatedCrudError(
           `Entity operation ${operation.id} has an unsupported plugin-backed intent.`,
           "INTERNAL_SERVER_ERROR",
         );
       }
       await requireOperationPrerequisites(db, session, operation);
-      const data = await executeEntityPlugin(db, session, operation, request.input ?? {});
+      if (operation.intent === "delete") {
+        const data = await executeEntityPlugin(
+          db,
+          session,
+          operation as EntityOperationContract & { intent: "delete" },
+          request.input ?? {},
+        );
+        return {
+          intent: "delete",
+          data,
+          operations: getEntityOperationOffers(
+            entityName,
+            session,
+            projectedOfferIntents(request, COLLECTION_OFFER_INTENTS),
+          ),
+        };
+      }
+      const data = await executeEntityPlugin(
+        db,
+        session,
+        operation as EntityOperationContract & { intent: "create" | "update" },
+        request.input ?? {},
+      );
       return {
         intent: operation.intent,
         data,

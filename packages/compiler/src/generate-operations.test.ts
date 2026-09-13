@@ -90,7 +90,8 @@ describe("first-class plugin operations", () => {
               schema: {
                 type: "object",
                 required: ["quoteId"],
-                properties: { quoteId: { type: "string", format: "uuid" } },
+                properties: { quoteId: { type: "string", format: "uuid",
+                  "x-osf-reference": { entity: "Quote", valueField: "id", recordIdSourceField: "quoteId" } } },
                 additionalProperties: false,
               },
             },
@@ -133,6 +134,15 @@ describe("first-class plugin operations", () => {
 
     expect(compiled!.key).toBe("quoteVersions.approve");
     expect(compiled!.plugin).toBe("new-owner");
+    expect(compiled!.inputSchema).toMatchObject({ properties: { quoteId: {
+      "x-osf-reference": { entity: "Quote", valueField: "id", recordIdSourceField: "quoteId" },
+    } },
+    });
+    for (const reference of [{}, { entity: "" }, { entity: "Quote", unknown: true }, { entity: "Quote", valueField: "../id" }]) {
+      const invalid = structuredClone(authored);
+      invalid[0]!.contract.pluginOperations[0]!.definition.input.schema.properties.quoteId["x-osf-reference"] = reference as never;
+      expect(() => collectAuthoredEntityPluginOperations(invalid as never, context)).toThrow();
+    }
 
     expect(compiled!.inputSchema).toMatchObject({
       required: ["quoteId", "expectedVersion", "leaseToken"],

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import { operationReferenceKeyword } from "@openshapeforge/operations";
 import { GraphQLError } from "graphql";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Transaction } from "kysely";
@@ -124,6 +125,7 @@ function operationAjv(coerceTypes = false) {
   // Presentation-only binding used by generated forms. It does not validate
   // or authorize a value, but strict AJV must recognize the canonical keyword.
   instance.addKeyword({ keyword: "x-osf-sourceField", schemaType: "string", valid: true });
+  instance.addKeyword(operationReferenceKeyword);
   return instance;
 }
 

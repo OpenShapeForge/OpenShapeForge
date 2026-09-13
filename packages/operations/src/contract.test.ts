@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   isOperationFailure,
   operationErrorOf,
   operationFailure,
+  OperationFailure,
   type OperationConfirmation,
   type OperationConcurrency,
   type OperationOffer,
@@ -139,4 +144,32 @@ test("OperationFailure carries only interface-neutral failure meaning", () => {
     retryable: true,
     retryAt: "2026-09-11T15:15:00.000Z",
   });
+});
+
+test("canonical failures survive separately loaded package copies in both directions", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "osf-operation-copy-"));
+  try {
+    const target = join(directory, "contract.ts");
+    await copyFile(new URL("./contract.ts", import.meta.url), target);
+    const other = await import(pathToFileURL(target).href);
+    const meaning = { code: "ALREADY_EXISTS", message: "This version already exists.", retryable: false };
+    const foreign = other.operationFailure(meaning);
+    expect(foreign instanceof OperationFailure).toBe(false);
+    expect(operationErrorOf(foreign)).toEqual(meaning);
+    expect(other.operationErrorOf(operationFailure(meaning))).toEqual(meaning);
+    expect(Object.keys(foreign)).not.toContain("openshapeforge.OperationFailure.v1");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("plain errors and JSON-shaped failures never acquire canonical authority", () => {
+  const meaning = { code: "FORBIDDEN", message: "Private driver detail", retryable: false };
+  expect(operationErrorOf({ name: "OperationFailure", operationError: meaning })).toBeUndefined();
+  const unbranded = Object.assign(new Error("Private driver detail"), { name: "OperationFailure", operationError: meaning });
+  expect(operationErrorOf(unbranded)).toBeUndefined();
+  const malformed = new Error("Invalid branded value");
+  Object.defineProperty(malformed, Symbol.for("openshapeforge.OperationFailure.v1"), { value: true });
+  Object.defineProperty(malformed, "operationError", { value: { code: 1, message: "invalid" } });
+  expect(operationErrorOf(malformed)).toBeUndefined();
 });

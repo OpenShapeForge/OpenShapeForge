@@ -202,6 +202,8 @@ export type OperationResult<TData, TIntent extends string = string> =
  * Internal control flow for code below the OperationResult boundary. It carries
  * only canonical failure meaning; transports attach protocol status/codes.
  */
+const OPERATION_FAILURE_BRAND = Symbol.for("openshapeforge.OperationFailure.v1");
+
 export class OperationFailure extends Error {
   readonly operationError: OperationError;
 
@@ -209,6 +211,7 @@ export class OperationFailure extends Error {
     super(error.message);
     this.name = "OperationFailure";
     this.operationError = error;
+    Object.defineProperty(this, OPERATION_FAILURE_BRAND, { value: true });
   }
 }
 
@@ -219,7 +222,21 @@ export function operationFailure(
 }
 
 export function operationErrorOf(error: unknown): OperationError | undefined {
-  return error instanceof OperationFailure ? error.operationError : undefined;
+  if (!(error instanceof Error)) return undefined;
+  // A packaged plugin and its host can load separate copies of this package.
+  // Constructor identity is local to a copy; the non-JSON brand is shared.
+  if (
+    !(error instanceof OperationFailure) &&
+    Object.getOwnPropertyDescriptor(error, OPERATION_FAILURE_BRAND)?.value !== true
+  ) return undefined;
+  const value: unknown = Object.getOwnPropertyDescriptor(error, "operationError")?.value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as OperationError;
+  return typeof candidate.code === "string" &&
+    typeof candidate.message === "string" &&
+    typeof candidate.retryable === "boolean"
+    ? candidate
+    : undefined;
 }
 
 export function isOperationFailure<TData, TIntent extends string>(

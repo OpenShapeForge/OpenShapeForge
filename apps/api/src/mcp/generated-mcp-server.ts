@@ -34,6 +34,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   OperationFailure,
+  operationErrorOf,
   type OperationError,
 } from "@openshapeforge/operations";
 import type {
@@ -7290,8 +7291,7 @@ function buildServer(
                 );
               } catch (error) {
                 if (
-                  error instanceof OperationFailure &&
-                  error.operationError.code === "FORBIDDEN"
+                  operationErrorOf(error)?.code === "FORBIDDEN"
                 ) {
                   return { allowed: false, code: "FORBIDDEN" };
                 }

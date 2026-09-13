@@ -6,6 +6,7 @@ import type {
   ModuleOperationHandler,
   PluginPlatformServices,
   PluginSessionContext,
+  RuntimeArtifactDescriptor,
 } from "@openshapeforge/plugin-runtime";
 
 type JsonObject = Readonly<Record<string, unknown>>;
@@ -25,9 +26,7 @@ type RawTransaction = {
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const ARTIFACT_INPUT_FIELDS = [
-  "artifactId",
-  "expectedArtifactVersion",
+const ARTIFACT_DESCRIPTOR_FIELDS = [
   "fileName",
   "mimeType",
   "mediaType",
@@ -44,6 +43,26 @@ const CREATE_DOCUMENT_SQL = `
 
 const APPEND_DOCUMENT_VERSION_SQL = `
   select document_internal.append_version($1::uuid, $2::jsonb) as "documentVersionId"
+`;
+
+const CREATE_DOCUMENT_WITH_ARTIFACT_SQL = `
+  select document_id as "documentId", document_version_id as "documentVersionId"
+  from document_internal.create_with_first_version_and_artifact(
+    $1::jsonb, $2::jsonb, $3::uuid, $4::bigint
+  )
+`;
+
+const APPEND_DOCUMENT_VERSION_WITH_ARTIFACT_SQL = `
+  select document_internal.append_version_with_artifact(
+    $1::uuid, $2::jsonb, $3::uuid, $4::bigint
+  ) as "documentVersionId"
+`;
+
+const FINALIZE_ARTIFACT_BINDING_SQL = `
+  select document_internal.finalize_artifact_binding(
+    $1::uuid, $2::uuid, $3::bigint, $4::bigint,
+    $5::text, $6::text, $7::text, $8::bigint
+  )
 `;
 
 const READ_DOCUMENT_SQL = `
@@ -67,7 +86,8 @@ const READ_DOCUMENT_VERSION_SQL = `
     source_organization as "sourceOrganization", source_administration as "sourceAdministration",
     version_label as "versionLabel", status, created_by as "createdBy",
     file_name as "fileName", mime_type as "mimeType", storage_location as "storageLocation",
-    checksum, is_major_version as "isMajorVersion", change_summary as "changeSummary",
+    checksum, artifact_id as "artifactId", artifact_version as "artifactVersion",
+    byte_size as "byteSize", is_major_version as "isMajorVersion", change_summary as "changeSummary",
     document_id as "documentId", account_id as "accountId"
   from erp.document_versions
   where tenant_id = app.current_tenant() and id = $1::uuid
@@ -114,18 +134,84 @@ function inputUuid(input: JsonObject, field: string): string {
   return value;
 }
 
-function rejectArtifactInput(input: JsonObject, version: JsonObject): void {
+type ArtifactBinding = Readonly<{
+  artifactId: string;
+  expectedArtifactVersion: number;
+}>;
+
+function validation(message: string): never {
+  throw operationFailure({ code: "VALIDATION", message, retryable: false });
+}
+
+function artifactVersionInput(input: JsonObject, version: JsonObject): {
+  logicalVersion: JsonObject;
+  binding?: ArtifactBinding;
+} {
   if (
-    ARTIFACT_INPUT_FIELDS.some(
+    ARTIFACT_DESCRIPTOR_FIELDS.some(
       (field) => Object.hasOwn(input, field) || Object.hasOwn(version, field),
-    )
+    ) ||
+    Object.hasOwn(input, "artifactId") ||
+    Object.hasOwn(input, "expectedArtifactVersion")
   ) {
     throw operationFailure({
-      code: "ARTIFACT_BIND_UNSUPPORTED",
-      message: "This Document command currently accepts logical versions without a file.",
+      code: "VALIDATION",
+      message: "Artifact descriptors are storage-managed and cannot be supplied by callers.",
       retryable: false,
     });
   }
+
+  const hasArtifactId = Object.hasOwn(version, "artifactId");
+  const hasExpectedVersion = Object.hasOwn(version, "expectedArtifactVersion");
+  if (hasArtifactId !== hasExpectedVersion) {
+    validation("artifactId and expectedArtifactVersion must be supplied together.");
+  }
+  if (!hasArtifactId) return { logicalVersion: version };
+
+  const artifactId = version.artifactId;
+  const expectedArtifactVersion = version.expectedArtifactVersion;
+  if (typeof artifactId !== "string" || !UUID.test(artifactId)) {
+    validation("version.artifactId must be a UUID.");
+  }
+  if (
+    typeof expectedArtifactVersion !== "number" ||
+    !Number.isSafeInteger(expectedArtifactVersion) ||
+    expectedArtifactVersion < 1
+  ) {
+    validation("version.expectedArtifactVersion must be a positive safe integer.");
+  }
+
+  const { artifactId: _artifactId, expectedArtifactVersion: _expected, ...logicalVersion } =
+    version;
+  return {
+    logicalVersion,
+    binding: { artifactId, expectedArtifactVersion },
+  };
+}
+
+async function finalizeArtifactBinding(
+  transaction: unknown,
+  platform: PluginPlatformServices,
+  session: PluginSessionContext,
+  documentVersionId: string,
+  binding: ArtifactBinding,
+): Promise<RuntimeArtifactDescriptor> {
+  const descriptor = await platform.artifacts.bind(session, {
+    artifactId: binding.artifactId,
+    documentVersionId,
+    expectedArtifactVersion: binding.expectedArtifactVersion,
+  });
+  await rows(transaction, FINALIZE_ARTIFACT_BINDING_SQL, [
+    documentVersionId,
+    binding.artifactId,
+    binding.expectedArtifactVersion,
+    descriptor.version,
+    descriptor.fileName,
+    descriptor.mediaType,
+    descriptor.sha256,
+    descriptor.byteSize,
+  ]);
+  return descriptor;
 }
 
 function contextServices(context: ModuleOperationContext): {
@@ -172,6 +258,20 @@ function authoredRow(
     const value = projected[field];
     if (value instanceof Date) projected[field] = value.toISOString();
   }
+  for (const field of ["artifactVersion", "byteSize"]) {
+    const value = projected[field];
+    if (typeof value === "string") {
+      const number = Number(value);
+      if (!Number.isSafeInteger(number) || number < 0) {
+        throw operationFailure({
+          code: "HANDLER_CONTRACT_VIOLATION",
+          message: "The Document command returned invalid artifact facts.",
+          retryable: false,
+        });
+      }
+      projected[field] = number;
+    }
+  }
   return projected;
 }
 
@@ -193,15 +293,17 @@ export const createDocument: ModuleOperationHandler = async (input, context) => 
   const { platform, session } = contextServices(context);
   const document = inputObject(input, "document");
   const version = inputObject(input, "version");
-  rejectArtifactInput(input, version);
+  const { logicalVersion, binding } = artifactVersionInput(input, version);
 
   const value = await translateDatabaseError(platform, () =>
     platform.db.withSession(session, async (transaction) => {
       const created = (
         await rows<{ documentId: string; documentVersionId: string }>(
           transaction,
-          CREATE_DOCUMENT_SQL,
-          [document, version],
+          binding ? CREATE_DOCUMENT_WITH_ARTIFACT_SQL : CREATE_DOCUMENT_SQL,
+          binding
+            ? [document, logicalVersion, binding.artifactId, binding.expectedArtifactVersion]
+            : [document, logicalVersion],
         )
       )[0];
       if (!created || !UUID.test(created.documentId) || !UUID.test(created.documentVersionId)) {
@@ -210,6 +312,15 @@ export const createDocument: ModuleOperationHandler = async (input, context) => 
           message: "The Document create command returned invalid record identities.",
           retryable: false,
         });
+      }
+      if (binding) {
+        await finalizeArtifactBinding(
+          transaction,
+          platform,
+          session,
+          created.documentVersionId,
+          binding,
+        );
       }
       const row = (
         await rows<Record<string, unknown>>(transaction, READ_DOCUMENT_SQL, [created.documentId])
@@ -224,7 +335,7 @@ export const createDocumentVersion: ModuleOperationHandler = async (input, conte
   const { platform, session } = contextServices(context);
   const documentId = inputUuid(input, "documentId");
   const version = inputObject(input, "version");
-  rejectArtifactInput(input, version);
+  const { logicalVersion, binding } = artifactVersionInput(input, version);
 
   const value = await translateDatabaseError(platform, () =>
     platform.db.withSession(session, async (transaction) => {
@@ -234,10 +345,18 @@ export const createDocumentVersion: ModuleOperationHandler = async (input, conte
         intent: "update",
       });
       const created = (
-        await rows<{ documentVersionId: string }>(transaction, APPEND_DOCUMENT_VERSION_SQL, [
-          documentId,
-          version,
-        ])
+        await rows<{ documentVersionId: string }>(
+          transaction,
+          binding ? APPEND_DOCUMENT_VERSION_WITH_ARTIFACT_SQL : APPEND_DOCUMENT_VERSION_SQL,
+          binding
+            ? [
+                documentId,
+                logicalVersion,
+                binding.artifactId,
+                binding.expectedArtifactVersion,
+              ]
+            : [documentId, logicalVersion],
+        )
       )[0];
       if (!created || !UUID.test(created.documentVersionId)) {
         throw operationFailure({
@@ -245,6 +364,15 @@ export const createDocumentVersion: ModuleOperationHandler = async (input, conte
           message: "The DocumentVersion create command returned an invalid record identity.",
           retryable: false,
         });
+      }
+      if (binding) {
+        await finalizeArtifactBinding(
+          transaction,
+          platform,
+          session,
+          created.documentVersionId,
+          binding,
+        );
       }
       const row = (
         await rows<Record<string, unknown>>(transaction, READ_DOCUMENT_VERSION_SQL, [

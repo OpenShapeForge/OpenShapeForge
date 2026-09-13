@@ -87,6 +87,87 @@ describe("resolveAuthoringLayers", () => {
     },
   };
 
+  const securedEntity = {
+    ...baseEntity,
+    schemaVersion: 2,
+    authorization: {
+      roles: {
+        read: ["Widgets.Read", "Widgets.Manage"],
+        create: ["Widgets.Create", "Widgets.Manage"],
+        update: ["Widgets.Edit", "Widgets.Manage"],
+        delete: ["Widgets.Delete", "Widgets.Manage"],
+      },
+      rowAccess: {
+        enabled: true,
+        empty: "restricted",
+        owner: { column: "owner_id", session: "app.current_user_id" },
+        group: { column: "group_id", expand: "exact" },
+        recordPermissions: {
+          field: "authorization",
+          empty: "restricted",
+          createRequires: ["view"],
+        },
+      },
+    },
+    fields: [
+      ...baseEntity.fields,
+      {
+        key: "authorization",
+        valueType: "object",
+        required: true,
+        immutable: true,
+        writtenBy: ["widget.approve", "widget.publish"],
+        defaultValue: {
+          view: { users: [], groups: [], roles: [] },
+          edit: { users: [], groups: [], roles: [] },
+          delete: { users: [], groups: [], roles: [] },
+        },
+        authorization: { roles: { read: ["Widgets.Read", "Widgets.Manage"] } },
+      },
+    ],
+    workerAccess: "widget-worker",
+    operations: {
+      approve: {
+        name: "Approve",
+        description: "Approve a widget",
+        implementation: { type: "plugin", plugin: "widgets", handler: "approve" },
+        target: { scope: "record", inputField: "widgetId" },
+        input: { schema: { type: "object", properties: { widgetId: { type: "string" } } } },
+        output: { schema: { type: "object" } },
+        errors: [],
+        auth: {
+          mode: "session",
+          roles: ["Widgets.Approve", "Widgets.Manage"],
+          scopes: ["widgets:write"],
+          recordPermission: "edit",
+        },
+        tenancy: { mode: "required" },
+        effects: { data: "write", external: "none" },
+        reliability: { idempotency: { mode: "keyed", inputField: "requestKey" } },
+        concurrency: {
+          version: { mode: "required", field: "updatedAt" },
+          editLease: { mode: "required", expiresAfterInactivity: "PT5M" },
+        },
+        confirmation: { mode: "acknowledgement" },
+        prerequisites: [
+          { operation: "widgets.review", receipt: { binding: "loginSession" } },
+        ],
+        interaction: {
+          type: "secureInput",
+          sourceField: "questions",
+          sourceEntity: "Widget",
+          definitionsField: "definitions",
+          into: "answers",
+        },
+      },
+    },
+    interfaces: {
+      rest: { operations: { approve: false } },
+      mcp: { operations: { approve: {} } },
+      web: { views: {}, operations: { approve: {} } },
+    },
+  };
+
   test("single layer resolves to the layer directory itself (fast path)", () => {
     const root = makeRepo();
     writeYaml(root, "base/entities/core/widget.yaml", baseEntity);
@@ -172,6 +253,170 @@ describe("resolveAuthoringLayers", () => {
     configureLayers(root, ["base", "overlay"]);
 
     expect(() => resolveAuthoringLayers(root)).toThrow(/widens crud\.operations/);
+  });
+
+  test("entity patches may narrow OR roles and add AND requirements", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", securedEntity);
+    writeYaml(root, "overlay/entities/core/widget.yaml", {
+      kind: "entityPatch",
+      authorization: {
+        roles: { read: ["Widgets.Read"] },
+        rowAccess: {
+          recordPermissions: { createRequires: ["view", "edit"] },
+        },
+      },
+      operations: {
+        approve: {
+          auth: { roles: ["Widgets.Approve"], scopes: ["widgets:write", "widgets:approve"] },
+          prerequisites: [
+            { operation: "widgets.review", receipt: { binding: "loginSession" } },
+            { operation: "widgets.train", receipt: { binding: "loginSession" } },
+          ],
+          confirmation: { mode: "challenge", challenge: { kind: "type-current-field" } },
+        },
+      },
+    });
+    configureLayers(root, ["base", "overlay"]);
+
+    const resolved = resolveAuthoringLayers(root);
+    const merged = YAML.parse(readFileSync(join(resolved, "entities/core/widget.yaml"), "utf8"));
+    expect(merged.authorization.roles.read).toEqual(["Widgets.Read"]);
+    expect(merged.operations.approve.auth.scopes).toEqual(["widgets:write", "widgets:approve"]);
+    expect(merged.operations.approve.confirmation.mode).toBe("challenge");
+  });
+
+  test("entity patches cannot add an OR role or remove an AND scope", () => {
+    for (const [name, patch, error] of [
+      [
+        "role",
+        { authorization: { roles: { read: ["Widgets.Read", "Widgets.Manage", "Widgets.Admin"] } } },
+        /widens authorization\.roles\.read/,
+      ],
+      [
+        "scope",
+        { operations: { approve: { auth: { scopes: [] } } } },
+        /widens operations\.approve\.auth\.scopes/,
+      ],
+    ] as const) {
+      const root = makeRepo();
+      writeYaml(root, "base/entities/core/widget.yaml", securedEntity);
+      writeYaml(root, "overlay/entities/core/widget.yaml", { kind: "entityPatch", ...patch });
+      configureLayers(root, ["base", "overlay"]);
+      expect(() => resolveAuthoringLayers(root), name).toThrow(error);
+    }
+  });
+
+  test("entity patches cannot remove or rewrite owner operation controls", () => {
+    for (const [patch, error] of [
+      [{ operations: { approve: { confirmation: { mode: "none" } } } }, /weakens operations\.approve\.confirmation/],
+      [{ operations: { approve: { concurrency: null } } }, /changes operations\.approve\.concurrency\.version/],
+      [{ operations: { approve: { input: { schema: { properties: null } } } } }, /changes operations\.approve\.input/],
+      [{ operations: { approve: { interaction: null } } }, /changes operations\.approve\.interaction/],
+      [{ operations: { approve: { prerequisites: [] } } }, /widens operations\.approve\.prerequisites/],
+      [{ operations: { approve: { auth: { mode: "public" } } } }, /widens operations\.approve\.auth/],
+      [{ operations: { approve: null } }, /removes operations\.approve/],
+    ] as const) {
+      const root = makeRepo();
+      writeYaml(root, "base/entities/core/widget.yaml", securedEntity);
+      writeYaml(root, "overlay/entities/core/widget.yaml", { kind: "entityPatch", ...patch });
+      configureLayers(root, ["base", "overlay"]);
+      expect(() => resolveAuthoringLayers(root)).toThrow(error);
+    }
+  });
+
+  test("entity patches cannot broaden row access or record ACL defaults", () => {
+    for (const [patch, error] of [
+      [
+        { authorization: { rowAccess: { owner: null, group: null } } },
+        /widens authorization\.rowAccess owner\/group OR branches/,
+      ],
+      [
+        { authorization: { rowAccess: { recordPermissions: { empty: "public" } } } },
+        /recordPermissions\.empty from restricted to public/,
+      ],
+      [
+        { authorization: { rowAccess: { recordPermissions: null } } },
+        /removes authorization\.rowAccess\.recordPermissions/,
+      ],
+      [
+        { fields: [{ key: "authorization", defaultValue: { view: { roles: ["Public"] } } }] },
+        /fields\.authorization\.defaultValue/,
+      ],
+    ] as const) {
+      const root = makeRepo();
+      writeYaml(root, "base/entities/core/widget.yaml", securedEntity);
+      writeYaml(root, "overlay/entities/core/widget.yaml", { kind: "entityPatch", ...patch });
+      configureLayers(root, ["base", "overlay"]);
+      expect(() => resolveAuthoringLayers(root)).toThrow(error);
+    }
+  });
+
+  test("entity patches cannot revive interfaces or widen worker and field write controls", () => {
+    for (const [patch, error] of [
+      [
+        { interfaces: { rest: { operations: { approve: {} } } } },
+        /re-enables interfaces\.rest\.operations\.approve/,
+      ],
+      [
+        { interfaces: { graphql: { operations: { approve: {} } } } },
+        /re-enables interfaces\.graphql\.operations\.approve/,
+      ],
+      [{ workerAccess: "other-worker" }, /changes workerAccess/],
+      [{ fields: [{ key: "authorization", immutable: false }] }, /removes fields\.authorization\.immutable/],
+      [
+        { fields: [{ key: "authorization", writtenBy: ["widget.approve", "widget.publish", "widget.edit"] }] },
+        /widens fields\.authorization\.writtenBy/,
+      ],
+    ] as const) {
+      const root = makeRepo();
+      writeYaml(root, "base/entities/core/widget.yaml", securedEntity);
+      writeYaml(root, "overlay/entities/core/widget.yaml", { kind: "entityPatch", ...patch });
+      configureLayers(root, ["base", "overlay"]);
+      expect(() => resolveAuthoringLayers(root)).toThrow(error);
+    }
+  });
+
+  test("entity patches may add a new plugin operation without changing owner operations", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", securedEntity);
+    writeYaml(root, "overlay/entities/core/widget.yaml", {
+      kind: "entityPatch",
+      operations: {
+        publish: {
+          name: "Publish",
+          description: "Publish a widget",
+          implementation: { type: "plugin", plugin: "widgets", handler: "publish" },
+          input: { schema: { type: "object" } },
+          output: { schema: { type: "object" } },
+          errors: [],
+          auth: { mode: "session", roles: ["Widgets.Publish"] },
+          tenancy: { mode: "required" },
+          effects: { data: "write", external: "none" },
+          reliability: { idempotency: { mode: "natural" } },
+          confirmation: { mode: "acknowledgement" },
+        },
+      },
+    });
+    configureLayers(root, ["base", "overlay"]);
+
+    const resolved = resolveAuthoringLayers(root);
+    const merged = YAML.parse(readFileSync(join(resolved, "entities/core/widget.yaml"), "utf8"));
+    expect(Object.keys(merged.operations)).toEqual(["approve", "publish"]);
+  });
+
+  test("entity patches cannot enable legacy interface or worker capability exposure", () => {
+    for (const [base, patch, error] of [
+      [{ ...baseEntity, rest: false }, { rest: true }, /widens rest exposure/],
+      [{ ...baseEntity, mcp: { enabled: false } }, { mcp: true }, /widens mcp exposure/],
+      [baseEntity, { workerAccess: "widget-worker" }, /enables workerAccess/],
+    ] as const) {
+      const root = makeRepo();
+      writeYaml(root, "base/entities/core/widget.yaml", base);
+      writeYaml(root, "overlay/entities/core/widget.yaml", { kind: "entityPatch", ...patch });
+      configureLayers(root, ["base", "overlay"]);
+      expect(() => resolveAuthoringLayers(root)).toThrow(error);
+    }
   });
 
   test("overlays can add new entities and files", () => {

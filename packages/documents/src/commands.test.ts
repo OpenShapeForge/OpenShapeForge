@@ -119,7 +119,6 @@ function versionRow(): Record<string, unknown> {
     changeSummary: "Clarified",
     documentId,
     accountId: null,
-    artifactId: null,
   };
 }
 

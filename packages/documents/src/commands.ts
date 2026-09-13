@@ -68,7 +68,7 @@ const READ_DOCUMENT_VERSION_SQL = `
     version_label as "versionLabel", status, created_by as "createdBy",
     file_name as "fileName", mime_type as "mimeType", storage_location as "storageLocation",
     checksum, is_major_version as "isMajorVersion", change_summary as "changeSummary",
-    document_id as "documentId", account_id as "accountId", artifact_id as "artifactId"
+    document_id as "documentId", account_id as "accountId"
   from erp.document_versions
   where tenant_id = app.current_tenant() and id = $1::uuid
 `;

@@ -342,6 +342,7 @@ export function createApiApp(options: {
     };
     const initialised = await initRuntimeModules(modules, moduleContext);
     initialisedModules = initialised.loaded;
+    modulePlatform?.registerArtifactStorage(initialised.loaded);
     modulePlatform?.registerOperationProviders(initialised.loaded);
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
     if (modulePlatform) {

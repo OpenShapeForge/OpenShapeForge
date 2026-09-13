@@ -15,6 +15,7 @@ import type { McpInvocationContext, RuntimeModule } from "../contract.js";
 import { authorizeMcpRequest } from "../mcp-hooks.js";
 import { getEntityOperationContracts } from "../../operations/entity/index.js";
 import { operationContractFingerprint } from "../../operations/contract-fingerprint.js";
+import { __setOperationExecutionReceiptExecutorForTests } from "../../operations/execution-receipts.js";
 import type { ModuleMcpServerBinding } from "../platform.js";
 import {
   __assertSecretFreeModuleEventForTests,
@@ -170,6 +171,10 @@ describe("runtime module platform session authority", () => {
 
   it("resolves and executes record-derived Operations only for a live capability", async () => {
     const db = testDatabase();
+    // DummyDriver does not persist receipt rows. This test exercises provider
+    // dispatch and session lifetime; receipt persistence has its own DB tests.
+    __setOperationExecutionReceiptExecutorForTests(db, async (_session, options) =>
+      options.execute(() => {}));
     const runtime = new ModulePlatformRuntime(db);
     const definition = {
       id: "example.record.invoke:one@1",
@@ -251,6 +256,7 @@ describe("runtime module platform session authority", () => {
       await expect(runtime.services.operations.get(retained, definition.id))
         .rejects.toThrow(/live verified session/);
     } finally {
+      __setOperationExecutionReceiptExecutorForTests(db, undefined);
       await db.destroy();
     }
   });

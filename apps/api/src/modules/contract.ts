@@ -45,6 +45,8 @@ import type {
   RuntimeFieldSchemaCompiler,
   RuntimeJsonSchemaValidator,
   RuntimeModuleContract,
+  RuntimeArtifactServices,
+  RuntimeArtifactStorageContribution,
   RuntimeWorkerContextContract,
   RuntimeWorkerContract,
   RuntimeWorkerHandle,
@@ -284,6 +286,7 @@ export type ModuleConnectionResolution =
     };
 
 export type ModulePlatformServices = {
+  readonly artifacts: RuntimeArtifactServices<TrustedSessionContext>;
   durableOperations?: {
     organizationServiceIdentity(session: TrustedSessionContext): Promise<{ serviceIdentityId: string }>;
   };
@@ -529,7 +532,8 @@ export type RuntimeModule = RuntimeModuleContract<
   ModuleSeed,
   RuntimeOperationProvider,
   ModuleWorker,
-  ModuleOperationAvailabilityHandler
+  ModuleOperationAvailabilityHandler,
+  RuntimeArtifactStorageContribution<TrustedSessionContext, Transaction<DB>>
 > & {
   graphql?(context: ModuleRuntimeContext): ModuleGraphqlContribution;
   /** Dynamic MCP projection and invocation hooks, evaluated per request. */

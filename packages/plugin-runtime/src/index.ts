@@ -5,6 +5,9 @@ import type {
   FastifyRequest,
 } from "fastify";
 import type { Kysely, Transaction } from "kysely";
+import type { RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
+export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
+  RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type {
   OperationConfirmation,
   OperationError,
@@ -199,6 +202,7 @@ export type PluginDatabase = {
 };
 
 export type PluginPlatformServices = {
+  readonly artifacts: RuntimeArtifactServices<PluginSessionContext>;
   /** Server configuration, never a service identity selected in operation input. */
   durableOperations?: {
     organizationServiceIdentity(session: PluginSessionContext): Promise<{ serviceIdentityId: string }>;
@@ -448,6 +452,7 @@ export type RuntimeModuleContract<
     RuntimeWorkerContextContract<Kysely<PluginDatabaseSchema>>
   >,
   AvailabilityHandler = ModuleOperationAvailabilityHandler,
+  ArtifactStorage = RuntimeArtifactStorageContribution<PluginSessionContext, Transaction<PluginDatabaseSchema>>,
 > = {
   /** Must match the compiler plugin name. */
   name: string;
@@ -458,6 +463,8 @@ export type RuntimeModuleContract<
   operationHandlers?: Record<string, OperationHandler>;
   /** Same compiler-owned handler keys; core rechecks these policies before execution. */
   operationAvailabilityHandlers?: Record<string, AvailabilityHandler>;
+  /** At most one configured module supplies the internal provider-neutral storage port. */
+  artifactStorage?: ArtifactStorage;
   operationProviders?: readonly OperationProvider[];
   workers?: Record<string, Worker>;
   seeds?: Seed[];

@@ -44,6 +44,7 @@ import { organizationServiceIdentities } from "../auth/organization-service-iden
 import { operationContractFingerprint } from "../operations/contract-fingerprint.js";
 import { executeKeyedOperation } from "../operations/execution-receipts.js";
 import { operationErrorOf } from "@openshapeforge/operations";
+import { ArtifactStorageRuntime } from "./artifact-storage.js";
 
 function contractPreconditionFailure(
   definition: RuntimeOperationDefinition,
@@ -259,6 +260,7 @@ export function createModuleSessionCapability(
 export class ModulePlatformRuntime {
   readonly services: ModulePlatformServices;
   readonly #db: OpenShapeForgeDatabase;
+  readonly #artifactStorage: ArtifactStorageRuntime<TrustedSessionContext, Transaction<DB>>;
   readonly #servers = new Map<Server, ModuleMcpServerBinding>();
   readonly #activeOperationSessions = new WeakSet<ActiveOperationSession>();
   readonly #activeInvocations = new WeakMap<McpInvocationContext, number>();
@@ -280,7 +282,23 @@ export class ModulePlatformRuntime {
 
   constructor(db: OpenShapeForgeDatabase) {
     this.#db = db;
+    this.#artifactStorage = new ArtifactStorageRuntime({
+      acceptsSession: (session) => this.#acceptsScopedSession(session),
+      currentTransaction: (session) => {
+        const active = this.#operationTransactionStorage.getStore();
+        return active?.session === session ? active.trx : undefined;
+      },
+      withTransaction: (session, work) => {
+        const active = this.#operationTransactionStorage.getStore();
+        if (active) {
+          if (active.session !== session) throw new Error("Artifact transaction belongs to another session.");
+          return work(active.trx);
+        }
+        return withDbSession(this.#db, session, work);
+      },
+    });
     this.services = {
+      artifacts: this.#artifactStorage.services,
       durableOperations: {
         organizationServiceIdentity: async (session) => {
           if (!this.#acceptsScopedSession(session) || !session.tenantId || !session.userId) {
@@ -422,6 +440,11 @@ export class ModulePlatformRuntime {
       },
     };
     platformRuntimes.set(this.services, this);
+    Object.defineProperty(this.services, "artifacts", { writable: false, configurable: false });
+  }
+
+  registerArtifactStorage(modules: readonly RuntimeModule[]): void {
+    this.#artifactStorage.configure(modules);
   }
 
   async #listOperations(

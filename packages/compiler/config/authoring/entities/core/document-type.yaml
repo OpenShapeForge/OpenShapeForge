@@ -1,4 +1,4 @@
-schemaVersion: 1
+schemaVersion: 2
 kind: coreEntity
 module: core
 entity: DocumentType
@@ -18,12 +18,13 @@ authorization:
     read:
       - CaseFile.All.Read
       - CaseFile.All.ReadWrite
+      - DocumentTypes.All.Delete
     create:
-      - Organization.All.ReadWrite
+      - CaseFile.All.ReadWrite
     update:
-      - Organization.All.ReadWrite
+      - CaseFile.All.ReadWrite
     delete:
-      - Organization.All.ReadWrite
+      - DocumentTypes.All.Delete
   rowAccess:
     enabled: true
     empty: public
@@ -54,6 +55,7 @@ fields:
       storageClass: core
   - key: description
     valueType: string
+    semanticType: multilineText
     required: false
     label:
       en: Description
@@ -63,13 +65,9 @@ fields:
     persisted:
       column: description
       storageClass: core
-    render:
-      component: Textarea
-      props:
-        rows: 4
-        maxLength: 4000
   - key: defaultConfidentiality
     valueType: string
+    semanticType: referenceDataCode
     required: false
     label:
       en: Default confidentiality
@@ -77,11 +75,7 @@ fields:
     persisted:
       column: default_confidentiality
       storageClass: core
-    render:
-      component: ReferenceSelect
-      props:
-        referentieGroep: DOCUMENTCONFIDENTIALITY
-        clearable: true
+    options: { type: referentiedata, referentieGroep: DOCUMENTCONFIDENTIALITY }
   - key: requiresRegistration
     valueType: boolean
     required: true
@@ -102,11 +96,70 @@ fields:
     persisted:
       column: allows_external_publication
       storageClass: core
-workflow:
-  nodes:
-    actions:
-      create: true
-      getOne: true
-      list: true
-      update: true
-      delete: true
+operations:
+  list:
+    name: { en: List document types, nl: Documenttypen tonen }
+    description: Returns the document type catalog visible to this identity.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: { en: Get document type, nl: Documenttype ophalen }
+    description: Returns one document type and its available actions.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: { en: Create document type, nl: Documenttype aanmaken }
+    description: Creates a managed document type with its authored defaults.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: { en: Update document type, nl: Documenttype wijzigen }
+    description: Updates a managed document type.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  delete:
+    name: { en: Delete document type, nl: Documenttype verwijderen }
+    description: Deletes an unreferenced document type with the separate delete right.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: {}
+  web:
+    views:
+      collection:
+        route: /document-types
+        title: { en: Document types, nl: Documenttypen }
+        columns:
+          - { key: name, sortable: true }
+          - { key: code, sortable: true }
+        defaultSort: { key: name, direction: asc }
+      record:
+        routes:
+          read: /document-types/:id
+          edit: /document-types/:id/edit
+          create: /document-types/new
+        title: "{{name}}"
+        subtitle: "{{code}}"
+        layout:
+          tabs:
+            - id: overview
+              label: { en: Overview, nl: Overzicht }
+              fields: [code, name, description, defaultConfidentiality, requiresRegistration, allowsExternalPublication]
+        modes:
+          create:
+            title: { en: Create document type, nl: Documenttype aanmaken }
+            groups:
+              - title: { en: Document type, nl: Documenttype }
+                fields: [code, name, description, defaultConfidentiality, requiresRegistration, allowsExternalPublication]

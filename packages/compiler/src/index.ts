@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { pruneGeneratedUiShards } from "./prune-generated-ui-shards.js";
 import { dirname, join, resolve } from "node:path";
 import {
   generateAuthoringUiArtifacts,
@@ -518,6 +519,7 @@ export async function runCompiler(options: RunCompilerOptions = {}) {
     await writeFile(target, artifact.contents, "utf8");
   }
 
+  await pruneGeneratedUiShards(repoRoot, new Set(all.map((artifact) => artifact.path)));
   return all.map((artifact) => artifact.path);
 }
 

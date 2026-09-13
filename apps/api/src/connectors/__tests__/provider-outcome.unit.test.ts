@@ -6,6 +6,7 @@
  * piece is wired in; this one pins what the pieces mean.
  */
 import { describe, expect, it } from "bun:test";
+import { operationFailure } from "@openshapeforge/operations";
 import {
   HTTP_STATUS_BY_CODE,
   PROVIDER_FAILURE_METRIC_LABELS,
@@ -288,6 +289,13 @@ describe("observations", () => {
 });
 
 describe("the one status table", () => {
+  it("reports absent file storage as unavailable rather than a record conflict", () => {
+    const failure = operationFailure({ code: "STORAGE_UNAVAILABLE", message: "File storage is not configured.", retryable: false });
+    expect(toHttpError(failure)).toEqual({
+      status: 503,
+      body: { error: { code: "STORAGE_UNAVAILABLE", message: "File storage is not configured.", retryable: false } },
+    });
+  });
   // Every code any connector surface can answer with, so a code added
   // anywhere without a decision here fails this test rather than becoming a
   // silent 500. Extend the list when adding a code, not the other way round.
@@ -321,6 +329,7 @@ describe("the one status table", () => {
     "GENERATED_CRUD_NOT_ENABLED",
     "GENERATED_CRUD_OPERATION_NOT_ENABLED",
     "DATABASE_NOT_CONFIGURED",
+    "STORAGE_UNAVAILABLE",
     // Database refusals (db/database-refusals.ts), answered on every transport.
     "NOT_PUBLISHABLE",
     "OPERATION_REFUSED",

@@ -1,0 +1,52 @@
+schemaVersion: 1
+kind: coreEntity
+module: core
+entity: WideInteger
+title: Wide Integer
+description: Test fixture for canonical storage type propagation into the backend manifest.
+language: en
+displayTemplate: "{{label}}"
+filterField: label
+labels:
+  en: Wide Integer
+domains:
+  - governance
+authorization:
+  roles:
+    read: [Records.All.Read]
+    create: [Records.All.Manage]
+    update: [Records.All.Manage]
+    delete: [Records.All.Manage]
+fields:
+  - key: label
+    valueType: string
+    required: true
+    label: { en: Label }
+    persisted: { column: label, storageClass: core }
+  - key: ordinaryInteger
+    valueType: integer
+    required: true
+    validation: { min: -2147483648, max: 2147483647 }
+    label: { en: Ordinary integer }
+    persisted: { column: ordinary_integer, storageClass: core }
+  - key: directWideInteger
+    valueType: integer
+    required: true
+    validation: { min: 0, max: 9007199254740991 }
+    label: { en: Direct wide integer }
+    persisted: { column: direct_wide_integer, storageClass: core }
+  - key: ruledWideInteger
+    valueType: integer
+    required: false
+    validation:
+      min:
+        value: -2147483649
+        message: { en: Below the int4 boundary. }
+    label: { en: Ruled wide integer }
+    persisted: { column: ruled_wide_integer, storageClass: core }
+  - key: referenceId
+    valueType: string
+    required: false
+    validation: { format: uuid }
+    label: { en: External identity }
+    persisted: { column: reference_id, storageClass: core }

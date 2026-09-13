@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
+import { generateArtifacts } from "../generate.js";
 import type { ColumnDefinition, PlatformSchemaManifest } from "../schema.js";
 import {
   compileAuthoringBackendManifest,
@@ -90,6 +91,26 @@ describe("rowAccess → rowScope translation (§B.3)", () => {
     expect(table?.rowScope).toEqual({
       recordPermissions: { column: "authorization", empty: "public" },
     });
+  });
+});
+
+describe("canonical storage type propagation", () => {
+  it("keeps compiled wide integers intact through the backend manifest and SQL generator", () => {
+    const manifest = compileFixtures(["wide-integer"]);
+    const table = tableByName(manifest, "wide_integers");
+    const types = new Map(table?.columns.map((column) => [column.name, column.type]));
+
+    expect(types.get("ordinary_integer")).toBe("integer");
+    expect(types.get("direct_wide_integer")).toBe("bigint");
+    expect(types.get("ruled_wide_integer")).toBe("bigint");
+    expect(types.get("reference_id")).toBe("uuid");
+
+    const schema = generateArtifacts(manifest).find((artifact) =>
+      artifact.path.endsWith("schema.sql"),
+    )?.contents;
+    expect(schema).toContain('"direct_wide_integer" bigint NOT NULL');
+    expect(schema).toContain('"ruled_wide_integer" bigint');
+    expect(schema).not.toContain('"direct_wide_integer" integer');
   });
 });
 

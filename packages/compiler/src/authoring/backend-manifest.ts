@@ -2,7 +2,6 @@
 import { join, relative } from "node:path";
 import { compile } from "./compiler/index.js";
 import type { CompiledEntityContract } from "./types/compiled.js";
-import { isCollectionField } from "./compiler/helpers.js";
 import {
   discoverContextEntities,
   listEntityFiles,
@@ -26,7 +25,6 @@ import type {
   RetentionAction,
   RetentionDefinition,
   RowScopePolicy,
-  ScalarType,
   TableDefinition,
 } from "../schema.js";
 import { isGeneratedCrudEligible } from "../schema.js";
@@ -177,33 +175,6 @@ function flattenFields(fields: Field[] | undefined, result = new Map<string, Fie
     }
   }
   return result;
-}
-
-function serviceScalarForField(field: Field): ScalarType {
-  if (isCollectionField(field)) {
-    return "jsonb";
-  }
-  if (field.valueType === "string" && field.validation?.format === "uuid") {
-    return "uuid";
-  }
-  switch (field.valueType) {
-    case "string":
-      return "text";
-    case "integer":
-      return "integer";
-    case "number":
-      return "numeric";
-    case "boolean":
-      return "boolean";
-    case "date":
-      return "date";
-    case "datetime":
-      return "timestamptz";
-    case "object":
-      return "jsonb";
-    default:
-      throw new Error(`Unsupported authoring field valueType "${field.valueType}".`);
-  }
 }
 
 function defaultSql(field: Field | undefined, column: ColumnDefinition): string | undefined {
@@ -1023,7 +994,10 @@ export function compileAuthoringBackendManifest(
       const sensitivity = fieldSensitivities.get(storageColumn.field);
       const column: ColumnDefinition = {
         name: storageColumn.column,
-        type: field ? serviceScalarForField(field) : storageColumn.type === "text" ? "text" : "uuid",
+        // Storage compilation is the single field-to-SQL type authority. Do
+        // not reconstruct it here: doing so silently collapsed bounded wide
+        // integers back to int4 after the entity contract already chose int8.
+        type: storageColumn.type as ColumnDefinition["type"],
         ...(primaryKey ? { primaryKey: true } : {}),
         ...(primaryKey || !storageColumn.nullable ? { required: true } : {}),
         sourceField: storageColumn.field,

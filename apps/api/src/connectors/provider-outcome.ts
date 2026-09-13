@@ -527,6 +527,7 @@ export const HTTP_STATUS_BY_CODE = {
   GENERATED_CRUD_NOT_ENABLED: 404,
   GENERATED_CRUD_OPERATION_NOT_ENABLED: 404,
   DATABASE_NOT_CONFIGURED: 503,
+  STORAGE_UNAVAILABLE: 503,
   // Database refusals (db/database-refusals.ts). NOT_PUBLISHABLE is the same
   // code core's publication validation answers with, so a trigger saying it
   // gets the same 400. A rule that refuses the requested state is a conflict

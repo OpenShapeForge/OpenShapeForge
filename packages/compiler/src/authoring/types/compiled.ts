@@ -658,6 +658,7 @@ export interface CompiledAuthorization {
 }
 
 export interface CompiledEntityContract {
+  workerAccess?: string;
   authoringVersion: 1 | 2;
   contractVersion: number;
   kind: "compiledEntityContract";

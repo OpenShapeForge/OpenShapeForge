@@ -1143,6 +1143,7 @@ export function compileAuthoringBackendManifest(
       name,
       tenantScoped,
       domainInternal,
+      ...(candidate.contract.workerAccess ? { workerAccess: candidate.contract.workerAccess } : {}),
       generatedCrudEligible,
       generatedCrud,
       columns,

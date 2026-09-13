@@ -667,6 +667,8 @@ export interface OperationCatalogDefinition {
 }
 
 export interface CoreEntity {
+  /** Named cross-tenant worker; enforced together with the dedicated DB role. */
+  workerAccess?: string;
   schemaVersion: number;
   kind: "coreEntity";
   module: string;

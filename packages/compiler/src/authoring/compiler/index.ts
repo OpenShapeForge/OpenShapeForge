@@ -143,6 +143,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
         : {}),
     },
     storage: { table: tableName, columns },
+    ...(coreEntity.workerAccess ? { workerAccess: coreEntity.workerAccess } : {}),
     model: { fields: modelFields, relationships },
     crud,
     entityOperations,

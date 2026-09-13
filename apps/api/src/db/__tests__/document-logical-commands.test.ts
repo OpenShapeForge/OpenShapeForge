@@ -14,15 +14,9 @@ import { SQL } from "bun";
 import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
-import {
-  APP_ROLE,
-  DEV_APP_ROLE_PASSWORD_DEFAULT,
-} from "../migrations/app-role.js";
-import {
-  DEV_WORKER_ROLE_PASSWORD_DEFAULT,
-  WORKER_ROLE,
-} from "../migrations/worker-role.js";
-import { withDbSession, type DbSessionInput } from "../session.js";
+import { APP_ROLE, DEV_APP_ROLE_PASSWORD_DEFAULT } from "../migrations/app-role.js";
+import { DEV_WORKER_ROLE_PASSWORD_DEFAULT, WORKER_ROLE } from "../migrations/worker-role.js";
+import { type DbSessionInput, withDbSession } from "../session.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -191,6 +185,8 @@ describe("logical Document database commands", () => {
       worker_create: boolean;
       worker_append: boolean;
       public_grants: string;
+      legacy_create: string | null;
+      legacy_append: string | null;
     }>`
       select
         has_schema_privilege(${APP_ROLE}, 'document_internal', 'USAGE') as app_usage,
@@ -219,7 +215,11 @@ describe("logical Document database commands", () => {
           select count(*)::text
           from information_schema.routine_privileges
           where routine_schema = 'document_internal' and grantee = 'PUBLIC'
-        ) as public_grants
+        ) as public_grants,
+        to_regprocedure('app.create_document_with_first_version(jsonb,jsonb)')::text
+          as legacy_create,
+        to_regprocedure('app.append_document_version(uuid,jsonb)')::text
+          as legacy_append
     `.execute(privileged.db);
     expect(privileges.rows[0]).toEqual({
       app_usage: true,
@@ -229,6 +229,8 @@ describe("logical Document database commands", () => {
       worker_create: false,
       worker_append: false,
       public_grants: "0",
+      legacy_create: null,
+      legacy_append: null,
     });
 
     const denied = await rejection(
@@ -240,6 +242,19 @@ describe("logical Document database commands", () => {
       `.execute(worker.db),
     );
     expect(sqlState(denied)).toBe("42501");
+
+    // applyWorkerRoleGrants() deliberately grants EXECUTE on every surviving
+    // app.* helper. Removing the old functions, rather than merely revoking
+    // them once, is what prevents that sweep from restoring this bypass.
+    const retired = await rejection(
+      sql`
+        select app.create_document_with_first_version(
+          '{}'::jsonb,
+          '{}'::jsonb
+        )
+      `.execute(worker.db),
+    );
+    expect(sqlState(retired)).toBe("42883");
   });
 
   test("creates the container, first logical version and pointer atomically", async () => {

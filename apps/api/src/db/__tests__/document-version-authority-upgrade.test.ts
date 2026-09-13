@@ -2,11 +2,12 @@
 import { describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
-import { sql, type Kysely } from "kysely";
+import { type Kysely, sql } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { applyAppHelpersMigration } from "../migrations/app-helpers.js";
 import documentVersionAuthority from "../migrations/versioned/0007_document-version-authority.js";
+import retireLegacyDocumentCommands from "../migrations/versioned/0013_retire-legacy-document-commands.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -102,13 +103,64 @@ async function columnNames(db: Kysely<DB>, table: string): Promise<string[]> {
 }
 
 describe("DocumentVersion authority legacy upgrade", () => {
-  test("backfills ownership, preserves the artifact, and removes duplicate Document fields", async () => {
-    const tenantId = randomUUID();
-    const documentId = randomUUID();
-    const versionId = randomUUID();
-    await withLegacyDatabase(
-      async (db) => {
-        await sql`
+  test(
+    "forward retirement drops only the two exact legacy command signatures",
+    async () => {
+      await withLegacyDatabase(
+        async () => undefined,
+        async (db) => {
+          await db.transaction().execute((trx) => documentVersionAuthority.up(trx));
+          const before = await sql<{
+            create_command: string | null;
+            append_command: string | null;
+            document_guard: string | null;
+          }>`
+          select
+            to_regprocedure('app.create_document_with_first_version(jsonb,jsonb)')::text
+              as create_command,
+            to_regprocedure('app.append_document_version(uuid,jsonb)')::text
+              as append_command,
+            to_regprocedure('app.enforce_document_authority()')::text as document_guard
+        `.execute(db);
+          expect(before.rows[0]).toEqual({
+            create_command: "app.create_document_with_first_version(jsonb,jsonb)",
+            append_command: "app.append_document_version(uuid,jsonb)",
+            document_guard: "app.enforce_document_authority()",
+          });
+
+          await db.transaction().execute((trx) => retireLegacyDocumentCommands.up(trx));
+          const after = await sql<{
+            create_command: string | null;
+            append_command: string | null;
+            document_guard: string | null;
+          }>`
+          select
+            to_regprocedure('app.create_document_with_first_version(jsonb,jsonb)')::text
+              as create_command,
+            to_regprocedure('app.append_document_version(uuid,jsonb)')::text
+              as append_command,
+            to_regprocedure('app.enforce_document_authority()')::text as document_guard
+        `.execute(db);
+          expect(after.rows[0]).toEqual({
+            create_command: null,
+            append_command: null,
+            document_guard: "app.enforce_document_authority()",
+          });
+        },
+      );
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "backfills ownership, preserves the artifact, and removes duplicate Document fields",
+    async () => {
+      const tenantId = randomUUID();
+      const documentId = randomUUID();
+      const versionId = randomUUID();
+      await withLegacyDatabase(
+        async (db) => {
+          await sql`
           insert into erp.document_versions (
             id, tenant_id, version_label, status, file_name, mime_type,
             storage_location, checksum
@@ -117,7 +169,7 @@ describe("DocumentVersion authority legacy upgrade", () => {
             'legacy.pdf', 'application/pdf', 'legacy/offer.pdf', 'sha256:legacy'
           )
         `.execute(db);
-        await sql`
+          await sql`
           insert into erp.documents (
             id, tenant_id, title, document_type, status, current_version_id,
             file_name, mime_type, storage_location, version_label, checksum
@@ -127,61 +179,79 @@ describe("DocumentVersion authority legacy upgrade", () => {
             'legacy/offer.pdf', '1.0', 'sha256:legacy'
           )
         `.execute(db);
-      },
-      async (db) => {
-        await db.transaction().execute((trx) => documentVersionAuthority.up(trx));
-        const migrated = await sql<{ document_id: string; checksum: string }>`
+        },
+        async (db) => {
+          await db.transaction().execute((trx) => documentVersionAuthority.up(trx));
+          const migrated = await sql<{ document_id: string; checksum: string }>`
           select document_id, checksum
           from erp.document_versions
           where id = ${versionId}::uuid
         `.execute(db);
-        expect(migrated.rows[0]).toEqual({
-          document_id: documentId,
-          checksum: "sha256:legacy",
-        });
-        const documentColumns = await columnNames(db, "documents");
-        for (const removed of ["file_name", "mime_type", "storage_location", "version_label", "checksum"]) {
-          expect(documentColumns).not.toContain(removed);
-        }
-        const nullable = await sql<{ is_nullable: string }>`
+          expect(migrated.rows[0]).toEqual({
+            document_id: documentId,
+            checksum: "sha256:legacy",
+          });
+          const documentColumns = await columnNames(db, "documents");
+          for (const removed of [
+            "file_name",
+            "mime_type",
+            "storage_location",
+            "version_label",
+            "checksum",
+          ]) {
+            expect(documentColumns).not.toContain(removed);
+          }
+          const nullable = await sql<{ is_nullable: string }>`
           select is_nullable from information_schema.columns
           where table_schema = 'erp'
             and table_name = 'document_versions'
             and column_name = 'document_id'
         `.execute(db);
-        expect(nullable.rows[0]?.is_nullable).toBe("NO");
-      },
-    );
-  }, TEST_TIMEOUT);
+          expect(nullable.rows[0]?.is_nullable).toBe("NO");
+        },
+      );
+    },
+    TEST_TIMEOUT,
+  );
 
-  test("orphan preflight rolls the destructive upgrade back completely", async () => {
-    const tenantId = randomUUID();
-    const orphanId = randomUUID();
-    await withLegacyDatabase(
-      async (db) => {
-        await sql`
+  test(
+    "orphan preflight rolls the destructive upgrade back completely",
+    async () => {
+      const tenantId = randomUUID();
+      const orphanId = randomUUID();
+      await withLegacyDatabase(
+        async (db) => {
+          await sql`
           insert into erp.document_versions (id, tenant_id, version_label, status, checksum)
           values (${orphanId}::uuid, ${tenantId}::uuid, 'orphan', 'draft', 'sha256:orphan')
         `.execute(db);
-      },
-      async (db) => {
-        let failure: unknown;
-        try {
-          await db.transaction().execute((trx) => documentVersionAuthority.up(trx));
-        } catch (error) {
-          failure = error;
-        }
-        expect((failure as Error).message).toContain("orphan versions exist");
-        expect(await columnNames(db, "document_versions")).not.toContain("document_id");
-        const documentColumns = await columnNames(db, "documents");
-        for (const preserved of ["file_name", "mime_type", "storage_location", "version_label", "checksum"]) {
-          expect(documentColumns).toContain(preserved);
-        }
-        const orphan = await sql<{ checksum: string }>`
+        },
+        async (db) => {
+          let failure: unknown;
+          try {
+            await db.transaction().execute((trx) => documentVersionAuthority.up(trx));
+          } catch (error) {
+            failure = error;
+          }
+          expect((failure as Error).message).toContain("orphan versions exist");
+          expect(await columnNames(db, "document_versions")).not.toContain("document_id");
+          const documentColumns = await columnNames(db, "documents");
+          for (const preserved of [
+            "file_name",
+            "mime_type",
+            "storage_location",
+            "version_label",
+            "checksum",
+          ]) {
+            expect(documentColumns).toContain(preserved);
+          }
+          const orphan = await sql<{ checksum: string }>`
           select checksum from erp.document_versions where id = ${orphanId}::uuid
         `.execute(db);
-        expect(orphan.rows[0]?.checksum).toBe("sha256:orphan");
-      },
-    );
-  }, TEST_TIMEOUT);
+          expect(orphan.rows[0]?.checksum).toBe("sha256:orphan");
+        },
+      );
+    },
+    TEST_TIMEOUT,
+  );
 });

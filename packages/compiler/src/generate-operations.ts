@@ -95,6 +95,7 @@ function withOperationControls(
 }
 
 const KEY = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
+const AUTHORED_KEY = /^[a-zA-Z][a-zA-Z0-9]*(?:[.-][a-zA-Z0-9]+)*$/;
 const IDENTIFIER = /^[_A-Za-z][_0-9A-Za-z]*$/;
 const MCP_NAME = /^[a-zA-Z][a-zA-Z0-9_-]{0,127}$/;
 const GRAPHQL_FIELD = /^[_A-Za-z][_0-9A-Za-z]*$/;
@@ -267,8 +268,9 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
   if (!operation.transports?.typescript) {
     throw new Error(`${where} must declare an explicit TypeScript projection or disabled reason.`);
   }
-  if (!KEY.test(operation.key) || (!authored && !operation.key.startsWith(`${plugin}.`))) {
-    throw new Error(`${where} must use a stable lowercase key prefixed with "${plugin}.".`);
+  if (!(authored ? AUTHORED_KEY : KEY).test(operation.key) || (!authored && !operation.key.startsWith(`${plugin}.`))) {
+    throw new Error(authored ? `${where} must use a stable alphanumeric identifier separated by dots or hyphens.`
+      : `${where} must use a stable lowercase key prefixed with "${plugin}.".`);
   }
   nonEmpty(operation.title, `${where} title`);
   nonEmpty(operation.description, `${where} description`);
@@ -278,14 +280,18 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
   }
   const restPath = operation.transports.rest.path;
   const apiNamespace = authored ? operation.key.split(".")[0]! : plugin;
-  const reservedNamespace = [apiNamespace, plugin].find(value => RESERVED_API_NAMESPACES.has(value));
+  const routeNamespace = restPath.split("/")[2] ?? "";
+  const reservedNamespace = [apiNamespace, plugin, routeNamespace].find(value => RESERVED_API_NAMESPACES.has(value.toLowerCase()));
   if (reservedNamespace) {
     throw new Error(`${where} uses reserved API namespace "${reservedNamespace}".`);
   }
   const pluginRoot = `/api/${apiNamespace}`;
   const allowedRoots = authored ? [pluginRoot, `/api/${plugin}`] : [pluginRoot];
+  // Authored projections own explicit safe paths; identity and implementation
+  // ownership do not rename existing endpoints. Global route collision audits
+  // remain authoritative, while imperative plugins keep their prefix boundary.
   if (!REST_PATH.test(restPath) ||
-      !allowedRoots.some(root => restPath === root || restPath.startsWith(`${root}/`))) {
+      (!authored && !allowedRoots.some(root => restPath === root || restPath.startsWith(`${root}/`)))) {
     throw new Error(
       `${where} REST path must be the safe plugin root "${pluginRoot}" or a nested ${pluginRoot}/ path.`,
     );

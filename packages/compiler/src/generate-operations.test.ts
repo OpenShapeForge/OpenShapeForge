@@ -73,15 +73,15 @@ describe("first-class plugin operations", () => {
   });
 
   test("derives custom write controls once for every adapter input schema", () => {
-    const [compiled] = collectAuthoredEntityPluginOperations([{
+    const authored = [{
       contract: {
         pluginOperations: [{
           key: "approve",
-          id: "demo.quote.approve",
+          id: "quoteVersions.approve",
           entityId: "example.Quote",
           entityName: "Quote",
           definition: {
-            id: "demo.quote.approve",
+            id: "quoteVersions.approve",
             name: "Approve quote",
             description: "Approves a quote.",
             implementation: { type: "plugin", plugin: "new-owner", handler: "approveQuote" },
@@ -118,9 +118,16 @@ describe("first-class plugin operations", () => {
           },
         }],
       },
-    }] as never, context);
+    }];
+    const [compiled] = collectAuthoredEntityPluginOperations(authored as never, context);
 
-    expect(compiled!.key).toBe("demo.quote.approve");
+    for (const path of ["/api/mcp", "/api/health/x", "/api/demo/../secret", "/api/demo?query=secret"]) {
+      const invalid = structuredClone(authored);
+      invalid[0]!.contract.pluginOperations[0]!.interfaces.rest.path = path;
+      expect(() => collectAuthoredEntityPluginOperations(invalid as never, context)).toThrow();
+    }
+
+    expect(compiled!.key).toBe("quoteVersions.approve");
     expect(compiled!.plugin).toBe("new-owner");
 
     expect(compiled!.inputSchema).toMatchObject({

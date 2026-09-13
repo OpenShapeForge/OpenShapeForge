@@ -127,6 +127,7 @@ function operationAjv(coerceTypes = false) {
   // Presentation-only binding used by generated forms. It does not validate
   // or authorize a value, but strict AJV must recognize the canonical keyword.
   instance.addKeyword({ keyword: "x-osf-sourceField", schemaType: "string", valid: true });
+  instance.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
   instance.addKeyword(operationReferenceKeyword);
   return instance;
 }

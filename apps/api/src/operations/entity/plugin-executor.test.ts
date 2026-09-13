@@ -66,7 +66,11 @@ function entityOperation(intent: "create" | "update" | "delete"): EntityOperatio
         type: "object",
         properties: {
           ...(inputField ? { [inputField]: { type: "string", format: "uuid" } } : {}),
-          displayName: { type: "string", "x-osf-sourceField": "displayName" },
+          displayName: {
+            type: "string",
+            "x-osf-sourceField": "displayName",
+            "x-osf-control": "artifact-upload",
+          },
         },
       },
     },
@@ -76,7 +80,11 @@ function entityOperation(intent: "create" | "update" | "delete"): EntityOperatio
       required: [...(inputField ? [inputField] : []), "displayName"],
       properties: {
         ...(inputField ? { [inputField]: { type: "string", format: "uuid" } } : {}),
-        displayName: { type: "string", "x-osf-sourceField": "displayName" },
+        displayName: {
+          type: "string",
+          "x-osf-sourceField": "displayName",
+          "x-osf-control": "artifact-upload",
+        },
       },
       additionalProperties: false,
     },

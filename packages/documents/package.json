@@ -11,6 +11,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./artifact-authorization": "./src/artifact-authorization.ts",
     "./runtime": "./src/runtime.ts",
     "./seed": "./src/seed.ts",
     "./package.json": "./package.json"

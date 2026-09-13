@@ -279,6 +279,10 @@ export class ModulePlatformRuntime {
     session: TrustedSessionContext;
     trx: Transaction<DB>;
   }>();
+  readonly #recordAccessTransactionStorage = new AsyncLocalStorage<{
+    session: TrustedSessionContext;
+    trx: Transaction<DB>;
+  }>();
   #declarativeServiceExecutor: ModuleDeclarativeServiceExecutor | undefined;
   #hostOperationExecutor: ModuleHostOperationExecutor | undefined;
 
@@ -287,11 +291,13 @@ export class ModulePlatformRuntime {
     const records = new RecordAccessRuntime({
       acceptsSession: (session) => this.#acceptsScopedSession(session),
       currentTransaction: (session) => {
-        const active = this.#operationTransactionStorage.getStore();
+        const active = this.#operationTransactionStorage.getStore() ??
+          this.#recordAccessTransactionStorage.getStore();
         return active?.session === session ? active.trx : undefined;
       },
       withSession: (session, work) => {
-        const active = this.#operationTransactionStorage.getStore();
+        const active = this.#operationTransactionStorage.getStore() ??
+          this.#recordAccessTransactionStorage.getStore();
         if (active) {
           if (active.session !== session) throw new Error("Record authorization transaction belongs to another session.");
           return work(active.trx);
@@ -311,7 +317,9 @@ export class ModulePlatformRuntime {
           if (active.session !== session) throw new Error("Artifact transaction belongs to another session.");
           return work(active.trx);
         }
-        return withDbSession(this.#db, session, work);
+        return withDbSession(this.#db, session, async (trx) =>
+          this.#recordAccessTransactionStorage.run({ session, trx }, () => work(trx))
+        );
       },
     });
     this.services = {

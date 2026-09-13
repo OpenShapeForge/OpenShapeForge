@@ -14,6 +14,7 @@ type Transaction = { readonly id: string };
 const artifactId = "10000000-0000-4000-8000-000000000001";
 const otherArtifactId = "10000000-0000-4000-8000-000000000002";
 const documentVersionId = "20000000-0000-4000-8000-000000000001";
+const providerId = "test-provider";
 const descriptor: RuntimeArtifactDescriptor = {
   artifactId,
   version: 1,
@@ -41,6 +42,7 @@ function provider(
   overrides: Partial<RuntimeArtifactStorageContribution<Session, Transaction>> = {},
 ): RuntimeArtifactStorageContribution<Session, Transaction> {
   return {
+    providerId,
     stage: async () => descriptor,
     bind: async () => descriptor,
     read: async () => ({ descriptor, bytes: Uint8Array.of(1, 2, 3) }),
@@ -90,7 +92,7 @@ describe("ArtifactStorageRuntime", () => {
     let calls = 0;
     runtime.configure([{ name: "storage", artifactStorage: provider({
       stage: async () => { calls += 1; return descriptor; },
-    }) }]);
+    }) }], [providerId]);
 
     live.add(session);
     await expect(runtime.services.stage(session, stageInput)).resolves.toEqual(descriptor);
@@ -106,7 +108,7 @@ describe("ArtifactStorageRuntime", () => {
     let retained: RuntimeArtifactSessionContext<Session, Transaction> | undefined;
     runtime.configure([{ name: "storage", artifactStorage: provider({
       stage: async context => { retained = context; return descriptor; },
-    }) }]);
+    }) }], [providerId]);
 
     live.add(session);
     await runtime.services.stage(session, stageInput);
@@ -122,22 +124,40 @@ describe("ArtifactStorageRuntime", () => {
     const absent = harness();
     const session = { id: "session-a" };
     absent.live.add(session);
-    absent.runtime.configure([]);
+    absent.runtime.configure([], []);
     await expectFailure(absent.runtime.services.stage(session, stageInput), "STORAGE_UNAVAILABLE");
-    expect(() => absent.runtime.configure([{ name: "late", artifactStorage: provider() }]))
+    expect(() => absent.runtime.configure([{ name: "late", artifactStorage: provider() }], [providerId]))
       .toThrow("already configured");
+
+    const selectedButAbsent = harness();
+    expect(() => selectedButAbsent.runtime.configure([], [providerId]))
+      .toThrow("Selected artifact storage provider is unavailable");
+
+    const contributedButDisabled = harness();
+    expect(() => contributedButDisabled.runtime.configure([
+      { name: "storage", artifactStorage: provider() },
+    ], [])).toThrow("does not match the compiled provider selection");
+
+    const mismatchedSelection = harness();
+    expect(() => mismatchedSelection.runtime.configure([
+      { name: "storage", artifactStorage: provider() },
+    ], ["other-provider"])).toThrow("does not match the compiled provider selection");
+
+    const duplicateSelection = harness();
+    expect(() => duplicateSelection.runtime.configure([], [providerId, "other-provider"]))
+      .toThrow("Only one artifact storage provider may be selected");
 
     const duplicate = harness();
     expect(() => duplicate.runtime.configure([
       { name: "first", artifactStorage: provider() },
       { name: "second", artifactStorage: provider() },
-    ])).toThrow("Only one runtime module");
+    ], [providerId])).toThrow("Only one runtime module");
 
     const incomplete = harness();
     expect(() => incomplete.runtime.configure([{
       name: "incomplete",
-      artifactStorage: { stage: async () => descriptor } as never,
-    }])).toThrow("contribution is incomplete");
+      artifactStorage: { providerId, stage: async () => descriptor } as never,
+    }], [providerId])).toThrow("contribution is incomplete");
   });
 
   test("bind requires the active transaction of the same live session", async () => {
@@ -154,7 +174,7 @@ describe("ArtifactStorageRuntime", () => {
         boundInput = input;
         return { ...descriptor, version: descriptor.version + 1 };
       },
-    }) }]);
+    }) }], [providerId]);
     live.add(session);
     live.add(otherSession);
     await runtime.services.stage(session, stageInput);
@@ -176,7 +196,7 @@ describe("ArtifactStorageRuntime", () => {
     mismatched.runtime.configure([{ name: "storage", artifactStorage: provider({
       stage: async context => { mismatchedContext = context; return descriptor; },
       bind: async () => ({ ...descriptor, artifactId: otherArtifactId }),
-    }) }]);
+    }) }], [providerId]);
     await mismatched.runtime.services.stage(session, stageInput);
     await mismatchedContext!.withTransaction(async () => {
       await expectFailure(
@@ -194,7 +214,7 @@ describe("ArtifactStorageRuntime", () => {
     runtime.configure([{ name: "storage", artifactStorage: provider({
       stage: async context => { retained = context; return descriptor; },
       bind: async () => { bindCalls += 1; return descriptor; },
-    }) }]);
+    }) }], [providerId]);
     live.add(session);
     await runtime.services.stage(session, stageInput);
 
@@ -220,7 +240,7 @@ describe("ArtifactStorageRuntime", () => {
         providerObjectKey: "private/object/key",
         providerObjectVersion: "private-version",
       } as RuntimeArtifactDescriptor),
-    }) }]);
+    }) }], [providerId]);
     const safe = await projected.runtime.services.stage(session, stageInput);
     expect(safe).toEqual(descriptor);
     expect(safe).not.toHaveProperty("tenantId");
@@ -243,7 +263,7 @@ describe("ArtifactStorageRuntime", () => {
       current.live.add(session);
       current.runtime.configure([{ name: "storage", artifactStorage: provider({
         stage: async () => invalid,
-      }) }]);
+      }) }], [providerId]);
       await expectFailure(
         current.runtime.services.stage(session, stageInput),
         "HANDLER_CONTRACT_VIOLATION",
@@ -263,7 +283,7 @@ describe("ArtifactStorageRuntime", () => {
       current.live.add(session);
       current.runtime.configure([{ name: "storage", artifactStorage: provider({
         read: async () => contents,
-      }) }]);
+      }) }], [providerId]);
       await expectFailure(
         current.runtime.services.read(session, ownerInput),
         "HANDLER_CONTRACT_VIOLATION",

@@ -72,17 +72,22 @@ export class ArtifactStorageRuntime<Session, Transaction> {
     });
   }
 
-  configure(modules: readonly { name: string; artifactStorage?: RuntimeArtifactStorageContribution<Session, Transaction> }[]): void {
+  configure(modules: readonly { name: string; artifactStorage?: RuntimeArtifactStorageContribution<Session, Transaction> }[], selectedProviderIds: readonly string[]): void {
     if (this.#configured) throw new Error("Artifact storage was already configured.");
     const candidates = modules.filter(module => module.artifactStorage !== undefined);
     if (candidates.length > 1) throw new Error("Only one runtime module may provide artifact storage.");
+    if (selectedProviderIds.length > 1) throw new Error("Only one artifact storage provider may be selected.");
+    if (selectedProviderIds.length && !candidates.length) throw new Error("Selected artifact storage provider is unavailable.");
     const contribution = candidates[0]?.artifactStorage;
     if (candidates.length) {
       if (!contribution) throw new Error("Artifact storage contribution is incomplete.");
+      if (!contribution.providerId || contribution.providerId !== selectedProviderIds[0]) {
+        throw new Error("Artifact storage contribution does not match the compiled provider selection.");
+      }
       if ([contribution.stage, contribution.bind, contribution.read].some(method => typeof method !== "function")) {
         throw new Error("Artifact storage contribution is incomplete.");
       }
-      this.#provider = Object.freeze({ stage: contribution.stage.bind(contribution),
+      this.#provider = Object.freeze({ providerId: contribution.providerId, stage: contribution.stage.bind(contribution),
         bind: contribution.bind.bind(contribution), read: contribution.read.bind(contribution) });
     }
     this.#configured = true;

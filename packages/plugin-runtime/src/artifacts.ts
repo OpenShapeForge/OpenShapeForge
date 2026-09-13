@@ -26,6 +26,7 @@ export type RuntimeArtifactSessionContext<Session, Transaction> = {
 
 /** Private storage implements this contribution; public core never imports its implementation. */
 export type RuntimeArtifactStorageContribution<Session, Transaction> = {
+  readonly providerId: string;
   stage(context: RuntimeArtifactSessionContext<Session, Transaction>, input: RuntimeArtifactStageInput): Promise<RuntimeArtifactDescriptor>;
   bind(context: { session: Session; transaction: Transaction }, input: RuntimeArtifactBindInput): Promise<RuntimeArtifactDescriptor>;
   read(context: RuntimeArtifactSessionContext<Session, Transaction>, input: RuntimeArtifactOwnerInput): Promise<RuntimeArtifactContents>;

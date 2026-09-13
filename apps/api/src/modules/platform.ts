@@ -46,6 +46,7 @@ import { executeKeyedOperation } from "../operations/execution-receipts.js";
 import { operationErrorOf } from "@openshapeforge/operations";
 import { ArtifactStorageRuntime } from "./artifact-storage.js";
 import { runtimeSettings } from "./settings.js";
+import { RecordAccessRuntime } from "./record-access.js";
 
 function contractPreconditionFailure(
   definition: RuntimeOperationDefinition,
@@ -283,6 +284,21 @@ export class ModulePlatformRuntime {
 
   constructor(db: OpenShapeForgeDatabase) {
     this.#db = db;
+    const records = new RecordAccessRuntime({
+      acceptsSession: (session) => this.#acceptsScopedSession(session),
+      currentTransaction: (session) => {
+        const active = this.#operationTransactionStorage.getStore();
+        return active?.session === session ? active.trx : undefined;
+      },
+      withSession: (session, work) => {
+        const active = this.#operationTransactionStorage.getStore();
+        if (active) {
+          if (active.session !== session) throw new Error("Record authorization transaction belongs to another session.");
+          return work(active.trx);
+        }
+        return withDbSession(this.#db, session, work);
+      },
+    });
     this.#artifactStorage = new ArtifactStorageRuntime({
       acceptsSession: (session) => this.#acceptsScopedSession(session),
       currentTransaction: (session) => {
@@ -299,6 +315,7 @@ export class ModulePlatformRuntime {
       },
     });
     this.services = {
+      records: records.services,
       settings: runtimeSettings,
       artifacts: this.#artifactStorage.services,
       durableOperations: {
@@ -444,10 +461,11 @@ export class ModulePlatformRuntime {
     platformRuntimes.set(this.services, this);
     Object.defineProperty(this.services, "artifacts", { writable: false, configurable: false });
     Object.defineProperty(this.services, "settings", { writable: false, configurable: false });
+    Object.defineProperty(this.services, "records", { writable: false, configurable: false });
   }
 
   registerArtifactStorage(modules: readonly RuntimeModule[]): void {
-    this.#artifactStorage.configure(modules);
+    this.#artifactStorage.configure(modules, runtimeSettings.selectedProviders("artifact-storage"));
   }
 
   async #listOperations(

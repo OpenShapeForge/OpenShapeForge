@@ -21,8 +21,10 @@ exposes a non-replaceable `platform.artifacts` service to runtime modules.
 - There is deliberately no physical-delete method. Destructive storage work
   requires a durable OSF policy decision and a separate worker boundary.
 
-A missing provider fails closed when used. Invalid or duplicate contributions
-fail startup. No provider path, credential or storage location is part of the
+A provider selected by compiled YAML must have exactly one matching runtime
+contribution. A missing, disabled, mismatched or duplicate contribution fails
+startup. With no selection and no contribution, file calls fail closed. No
+provider path, credential or storage location is part of the
 public descriptor. A retained session/transaction wrapper cannot be reused
 after its request ends.
 

@@ -7,6 +7,8 @@ import type {
 import type { Kysely, Transaction } from "kysely";
 import type { RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type { RuntimeSettingsService } from "./settings.js";
+import type { RuntimeRecordAccessServices } from "./record-access.js";
+export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessIntent } from "./record-access.js";
 export type { RuntimeSettingValue, RuntimeSettingsService } from "./settings.js";
 export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
   RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
@@ -204,6 +206,7 @@ export type PluginDatabase = {
 };
 
 export type PluginPlatformServices = {
+  readonly records: RuntimeRecordAccessServices<PluginSessionContext>;
   readonly settings: RuntimeSettingsService;
   readonly artifacts: RuntimeArtifactServices<PluginSessionContext>;
   /** Server configuration, never a service identity selected in operation input. */

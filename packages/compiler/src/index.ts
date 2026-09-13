@@ -41,6 +41,7 @@ import {
   collectPluginOperations,
   renderOperationCatalog,
 } from "./generate-operations.js";
+import { materializeEntityInputSources } from "./entity-input-sources.js";
 import type { GeneratedArtifact, PlatformSchemaManifest } from "./schema.js";
 import type { CompiledEntityInfo } from "./plugins.js";
 import type { CompiledField } from "./authoring/types.js";
@@ -325,6 +326,7 @@ export async function collectAllArtifacts(
   const referentiedataCatalog = await loadCoreReferentiedataCatalog(repoRoot);
   const referentiedata = buildCoreReferentiedataSnapshot(referentiedataCatalog);
   assertReferentieGroepsResolve(entities, referentiedata);
+  materializeEntityInputSources(entities.map(entity => entity.contract), referentiedata);
   const pluginMigrationRegistry = collectPluginMigrationRegistry(manifest, plugins, {
     repoRoot,
     authoringDir,

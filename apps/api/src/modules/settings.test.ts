@@ -26,6 +26,9 @@ test("runtime settings are an immutable snapshot of compiled values without fall
   expect(service.get("__proto__")).toBeUndefined();
   expect(service.providerSupports("filesystem", "artifact-storage")).toBe(true);
   expect(service.providerSupports("filesystem", "unknown")).toBe(false);
+  expect(service.selectedProviders("artifact-storage")).toEqual(["filesystem"]);
+  expect(Object.isFrozen(service.selectedProviders("artifact-storage"))).toBe(true);
+  expect(service.selectedProviders("unknown")).toEqual([]);
 });
 
 test("malformed values and missing provider capability fail startup", () => {

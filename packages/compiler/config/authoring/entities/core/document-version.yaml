@@ -201,6 +201,41 @@ operations:
       idempotency: { mode: natural }
     confirmation: { mode: none }
 
+  create:
+    name: { en: Add document version, nl: Documentversie toevoegen }
+    description: Adds a logical version and advances the owning document pointer atomically.
+    implementation: { type: plugin, plugin: documents, handler: createDocumentVersion, action: create }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        required: [documentId, version, idempotencyKey]
+        additionalProperties: false
+        properties:
+          idempotencyKey: { type: string, minLength: 1, maxLength: 200 }
+          documentId: { type: string, format: uuid, x-osf-reference: { entity: Document } }
+          version:
+            x-osf-entityInput:
+              entity: DocumentVersion
+              fields: [versionLabel, status, isMajorVersion, changeSummary, accountId]
+    output:
+      schema:
+        type: object
+        required: [id, documentId]
+        properties:
+          id: { type: string, format: uuid }
+          documentId: { type: string, format: uuid }
+        additionalProperties: true
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: keyed, inputField: idempotencyKey } }
+    confirmation: { mode: none }
+    errors:
+      - { status: 400, code: VALIDATION, description: The version input is invalid. }
+      - { status: 403, code: FORBIDDEN, description: The owning document is not accessible. }
+      - { status: 409, code: ARTIFACT_BIND_UNSUPPORTED, description: This operation currently accepts logical versions only. }
+      - { status: 409, code: ALREADY_EXISTS, description: The document version label already exists. }
+      - { status: 409, code: INVALID_REFERENCE, description: A referenced record is unavailable. }
+
 interfaces:
   rest: {}
   graphql: {}
@@ -219,6 +254,7 @@ interfaces:
       record:
         routes:
           read: /document-versions/:id
+          create: /document-versions/new
         title: "{{versionLabel}}"
         subtitle: "{{status}}"
         layout:
@@ -236,3 +272,9 @@ interfaces:
                 - isMajorVersion
                 - changeSummary
                 - documentId
+        modes:
+          create:
+            title: { en: Add document version, nl: Documentversie toevoegen }
+            groups:
+              - title: { en: Version, nl: Versie }
+                fields: [versionLabel, status, changeSummary]

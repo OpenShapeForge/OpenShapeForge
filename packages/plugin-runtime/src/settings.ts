@@ -5,4 +5,5 @@ export type RuntimeSettingValue = boolean | number | string | readonly string[] 
 export type RuntimeSettingsService = Readonly<{
   get(key: string): RuntimeSettingValue | undefined;
   providerSupports(providerId: string, capability: string): boolean;
+  selectedProviders(capability: string): readonly string[];
 }>;

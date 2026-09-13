@@ -19,6 +19,7 @@ export function createRuntimeSettings(input: unknown): RuntimeSettingsService {
   if (policy.version !== 1) throw new Error("Unsupported compiled settings policy.");
   const values = new Map<string, RuntimeSettingValue>();
   const providers = new Map<string, ReadonlySet<string>>();
+  const selected = new Map<string, Set<string>>();
   for (const [id, raw] of Object.entries(record(policy.providers))) {
     const provider = record(raw);
     provenance(provider);
@@ -39,10 +40,16 @@ export function createRuntimeSettings(input: unknown): RuntimeSettingsService {
       : entry.type === "provider" && typeof entry.capability === "string" && (value === null || (typeof value === "string" && providers.get(value)?.has(entry.capability)));
     if (!valid) throw new Error("Invalid compiled setting.");
     values.set(key, Array.isArray(value) ? Object.freeze([...value]) : value as RuntimeSettingValue);
+    if (entry.type === "provider" && typeof value === "string" && typeof entry.capability === "string") {
+      const ids = selected.get(entry.capability) ?? new Set<string>();
+      ids.add(value);
+      selected.set(entry.capability, ids);
+    }
   }
   return Object.freeze({
     get: (key: string) => values.get(key),
     providerSupports: (id: string, capability: string) => providers.get(id)?.has(capability) ?? false,
+    selectedProviders: (capability: string) => Object.freeze([...(selected.get(capability) ?? [])].sort()),
   });
 }
 

@@ -12,6 +12,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./runtime": "./src/runtime.ts",
+    "./seed": "./src/seed.ts",
     "./package.json": "./package.json"
   },
   "files": [
@@ -27,7 +28,8 @@
     "@openshapeforge/plugin-runtime": ">=0.1.0 <0.2.0"
   },
   "dependencies": {
-    "@openshapeforge/operations": "workspace:*"
+    "@openshapeforge/operations": "workspace:*",
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@types/bun": "^1.3.5",

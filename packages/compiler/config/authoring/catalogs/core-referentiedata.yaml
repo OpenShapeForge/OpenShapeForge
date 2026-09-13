@@ -786,28 +786,6 @@ groepen:
       - value: destroyed
         label: { nl: Vernietigd, en: Destroyed, fr: Détruit }
 
-  DOCUMENTTYPE:
-    description: Kerncodetabel voor hoofdtypen van documenten.
-    items:
-      - value: incoming_mail
-        label: { nl: Inkomende post, en: Incoming mail, fr: Courrier entrant }
-      - value: outgoing_mail
-        label: { nl: Uitgaande post, en: Outgoing mail, fr: Courrier sortant }
-      - value: note
-        label: { nl: Notitie, en: Note, fr: Note }
-      - value: decision
-        label: { nl: Besluit, en: Decision, fr: Décision }
-      - value: attachment
-        label: { nl: Bijlage, en: Attachment, fr: Pièce jointe }
-      - value: form
-        label: { nl: Formulier, en: Form, fr: Formulaire }
-      - value: evidence
-        label: { nl: Bewijsstuk, en: Evidence, fr: Preuve }
-      - value: contract
-        label: { nl: Contract, en: Contract, fr: Contrat }
-      - value: report
-        label: { nl: Rapport, en: Report, fr: Rapport }
-
   DOCUMENTSTATUS:
     description: Kerncodetabel voor de levenscyclus van documenten.
     items:

@@ -113,7 +113,7 @@ fields:
     persisted:
       column: document_type
       storageClass: core
-    options: { type: referentiedata, referentieGroep: DOCUMENTTYPE }
+    options: { type: entity, source: DocumentType, valueField: code }
   - key: status
     valueType: string
     semanticType: referenceDataCode
@@ -312,7 +312,7 @@ operations:
     confirmation: { mode: none }
   create:
     name: { en: Create document, nl: Document aanmaken }
-    description: Creates a document and its first logical version together.
+    description: Creates a document and its first logical version together, optionally binding a staged artifact.
     implementation: { type: plugin, plugin: documents, handler: createDocument, action: create }
     target: { scope: collection }
     input:
@@ -322,6 +322,14 @@ operations:
         additionalProperties: false
         properties:
           idempotencyKey: { type: string, minLength: 1, maxLength: 200 }
+          artifact:
+            type: object
+            description: Optional storage-issued handle; file facts are verified server-side.
+            required: [artifactId, expectedArtifactVersion]
+            additionalProperties: false
+            properties:
+              artifactId: { type: string, format: uuid }
+              expectedArtifactVersion: { type: integer, minimum: 1, maximum: 9007199254740991 }
           document:
             x-osf-entityInput:
               entity: Document
@@ -344,9 +352,9 @@ operations:
     errors:
       - { status: 400, code: VALIDATION, description: The document or version input is invalid. }
       - { status: 403, code: FORBIDDEN, description: The document is not accessible. }
-      - { status: 409, code: ARTIFACT_BIND_UNSUPPORTED, description: This operation currently accepts logical versions only. }
+      - { status: 503, code: STORAGE_UNAVAILABLE, description: No artifact storage provider is available. }
       - { status: 409, code: ALREADY_EXISTS, description: The document version label already exists. }
-      - { status: 409, code: INVALID_REFERENCE, description: A referenced record is unavailable. }
+      - { status: 404, code: REFERENCE_NOT_FOUND, description: A referenced record is unavailable. }
   update:
     name: { en: Update document, nl: Document wijzigen }
     description: Updates the document metadata without changing its version pointer.

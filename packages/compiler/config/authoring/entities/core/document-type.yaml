@@ -13,6 +13,13 @@ labels:
 domains:
   - cases
   - governance
+indexes:
+  - name: document_types_tenant_code_uidx
+    fields: [tenantId, code]
+    unique: true
+  - name: document_types_tenant_identity_uidx
+    fields: [tenantId, id]
+    unique: true
 authorization:
   roles:
     read:

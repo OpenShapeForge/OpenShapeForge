@@ -29,6 +29,19 @@ function assertCanonicalDocumentInput(schema: JsonObject): void {
   const documentProperties = object(document.properties);
   const version = object(properties.version);
   const versionProperties = object(version.properties);
+  expect(schema.required).not.toContain("artifact");
+  expect(properties.artifact).toMatchObject({
+    type: "object",
+    additionalProperties: false,
+    required: ["artifactId", "expectedArtifactVersion"],
+    properties: {
+      artifactId: { type: "string", format: "uuid" },
+      expectedArtifactVersion: { type: "integer", minimum: 1, maximum: 9007199254740991 },
+    },
+  });
+  for (const field of ["artifactId", "artifactVersion", "byteSize", "storageLocation"]) {
+    expect(versionProperties[field]).toBeUndefined();
+  }
 
   expect(document.required).toEqual(["title", "documentType", "status"]);
   expect(documentProperties.title).toMatchObject({
@@ -38,8 +51,9 @@ function assertCanonicalDocumentInput(schema: JsonObject): void {
   });
   expect(documentProperties.documentType).toMatchObject({
     type: "string",
-    enum: expect.arrayContaining(["incoming_mail", "contract", "report"]),
+    "x-osf-reference": { entity: "DocumentType", valueField: "code" },
   });
+  expect(object(documentProperties.documentType).enum).toBeUndefined();
   expect(documentProperties.caseFileId).toMatchObject({
     type: "string",
     format: "uuid",

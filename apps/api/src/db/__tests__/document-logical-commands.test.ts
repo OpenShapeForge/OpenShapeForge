@@ -144,6 +144,10 @@ beforeAll(async () => {
       (${tenantA}::uuid, ${`document-a-${tenantA.slice(0, 8)}`}, 'Document tenant A', 'active'),
       (${tenantB}::uuid, ${`document-b-${tenantB.slice(0, 8)}`}, 'Document tenant B', 'active')
   `.execute(privileged.db);
+  await sql`
+    insert into erp.document_types (tenant_id, code, name)
+    values (${tenantA}::uuid, 'quote', 'Quote'), (${tenantB}::uuid, 'quote', 'Quote')
+  `.execute(privileged.db);
   foreignAccountId = randomUUID();
   foreignRelationId = randomUUID();
   await sql`

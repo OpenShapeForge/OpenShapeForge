@@ -184,6 +184,8 @@ describe("generated schema migration", () => {
           "0011_reconcile-generated-rls-policy-pairs",
           "0012_document-logical-commands",
           "0013_retire-legacy-document-commands",
+          "0014_document-artifact-binding",
+          "0015_document-type-authority",
         ]);
 
         await withDb(url, async (db) => {

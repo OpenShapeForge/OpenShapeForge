@@ -135,6 +135,10 @@ beforeAll(async () => {
       'active'
     )
   `.execute(privileged.db);
+  await sql`
+    insert into erp.document_types (tenant_id, code, name)
+    values (${tenantId}::uuid, 'memo', 'Memo')
+  `.execute(privileged.db);
 }, TEST_TIMEOUT);
 
 afterAll(async () => {

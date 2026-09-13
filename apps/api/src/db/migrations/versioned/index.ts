@@ -26,6 +26,8 @@ import m0011ReconcileGeneratedRlsPolicyPairs from "./0011_reconcile-generated-rl
 import m0012DocumentLogicalCommands from "./0012_document-logical-commands.js";
 // migration-registry:imports — `bun run db:migration:new` inserts imports below this line.
 import m0013RetireLegacyDocumentCommands from "./0013_retire-legacy-document-commands.js";
+import m0014DocumentArtifactBinding from "./0014_document-artifact-binding.js";
+import m0015DocumentTypeAuthority from "./0015_document-type-authority.js";
 
 export const versionedMigrations: VersionedMigration[] = [
   m0002OrgUnitClosureTrigger,
@@ -40,5 +42,7 @@ export const versionedMigrations: VersionedMigration[] = [
   m0011ReconcileGeneratedRlsPolicyPairs,
   m0012DocumentLogicalCommands,
   m0013RetireLegacyDocumentCommands,
+  m0014DocumentArtifactBinding,
+  m0015DocumentTypeAuthority,
   // migration-registry:entries — `bun run db:migration:new` inserts entries above this line.
 ];

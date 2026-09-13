@@ -89,6 +89,33 @@ fields:
     persisted:
       column: file_name
       storageClass: core
+  - key: artifactId
+    valueType: string
+    required: false
+    readOnly: true
+    immutable: true
+    label: { en: Artifact, nl: Bestandreferentie }
+    description:
+      en: Opaque identity of the storage-managed file bound to this version.
+      nl: Ondoorzichtige referentie naar het door opslag beheerde bestand van deze versie.
+    validation: { format: uuid }
+    persisted: { column: artifact_id, storageClass: core }
+  - key: artifactVersion
+    valueType: integer
+    required: false
+    readOnly: true
+    immutable: true
+    label: { en: Artifact version, nl: Bestandreferentieversie }
+    validation: { min: 1, max: 9007199254740991 }
+    persisted: { column: artifact_version, storageClass: core }
+  - key: byteSize
+    valueType: integer
+    required: false
+    readOnly: true
+    immutable: true
+    label: { en: File size in bytes, nl: Bestandsgrootte in bytes }
+    validation: { min: 0, max: 9007199254740991 }
+    persisted: { column: byte_size, storageClass: core }
   - key: mimeType
     valueType: string
     required: false
@@ -105,6 +132,8 @@ fields:
     valueType: string
     semanticType: fileStorageLocation
     required: false
+    readOnly: true
+    immutable: true
     label:
       en: File
       nl: Bestand
@@ -203,7 +232,7 @@ operations:
 
   create:
     name: { en: Add document version, nl: Documentversie toevoegen }
-    description: Adds a logical version and advances the owning document pointer atomically.
+    description: Adds a logical version, optionally binds a staged artifact, and advances the owning document pointer atomically.
     implementation: { type: plugin, plugin: documents, handler: createDocumentVersion, action: create }
     target: { scope: collection }
     input:
@@ -213,6 +242,14 @@ operations:
         additionalProperties: false
         properties:
           idempotencyKey: { type: string, minLength: 1, maxLength: 200 }
+          artifact:
+            type: object
+            description: Optional storage-issued handle; file facts are verified server-side.
+            required: [artifactId, expectedArtifactVersion]
+            additionalProperties: false
+            properties:
+              artifactId: { type: string, format: uuid }
+              expectedArtifactVersion: { type: integer, minimum: 1, maximum: 9007199254740991 }
           documentId: { type: string, format: uuid, x-osf-reference: { entity: Document } }
           version:
             x-osf-entityInput:
@@ -232,9 +269,9 @@ operations:
     errors:
       - { status: 400, code: VALIDATION, description: The version input is invalid. }
       - { status: 403, code: FORBIDDEN, description: The owning document is not accessible. }
-      - { status: 409, code: ARTIFACT_BIND_UNSUPPORTED, description: This operation currently accepts logical versions only. }
+      - { status: 503, code: STORAGE_UNAVAILABLE, description: No artifact storage provider is available. }
       - { status: 409, code: ALREADY_EXISTS, description: The document version label already exists. }
-      - { status: 409, code: INVALID_REFERENCE, description: A referenced record is unavailable. }
+      - { status: 404, code: REFERENCE_NOT_FOUND, description: A referenced record is unavailable. }
 
 interfaces:
   rest: {}
@@ -267,7 +304,7 @@ interfaces:
                 - createdBy
                 - fileName
                 - mimeType
-                - storageLocation
+                - byteSize
                 - checksum
                 - isMajorVersion
                 - changeSummary

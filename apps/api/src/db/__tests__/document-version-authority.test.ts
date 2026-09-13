@@ -86,6 +86,10 @@ beforeAll(async () => {
     insert into platform.tenants (id, slug, name, status)
     values (${tenantId}::uuid, ${`document-routes-${tenantId.slice(0, 8)}`}, 'Document routes', 'active')
   `.execute(privileged.db);
+  await sql`
+    insert into erp.document_types (tenant_id, code, name)
+    values (${tenantId}::uuid, 'incoming_mail', 'Incoming mail')
+  `.execute(privileged.db);
 
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??= "openshapeforge-local-dev-context-secret";
   api = createApiApp({
@@ -200,7 +204,7 @@ describe("legacy Document command URL adapters", () => {
     expect(persisted.rows[0]).toEqual({ documents: "1", versions: "1" });
   });
 
-  test("lets only the canonical schema decide enums and binary-field ownership", async () => {
+  test("enforces managed references and canonical binary-field ownership", async () => {
     const invalidEnum = await api.inject({
       method: "POST",
       url: "/api/documents",
@@ -214,8 +218,8 @@ describe("legacy Document command URL adapters", () => {
         },
       }),
     });
-    expect(invalidEnum.statusCode).toBe(400);
-    expect(invalidEnum.json().error.code).toBe("BAD_USER_INPUT");
+    expect(invalidEnum.statusCode).toBe(404);
+    expect(invalidEnum.json().error.code).toBe("REFERENCE_NOT_FOUND");
 
     for (const [field, value] of Object.entries({
       fileName: "caller.pdf",

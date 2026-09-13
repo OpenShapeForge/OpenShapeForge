@@ -24,4 +24,9 @@ test("managed document type operations preserve read access and separate deletio
   expect(web.views.record?.routes.create).toBe("/document-types/new");
   expect(web.operations.create).toBeDefined();
   expect(web.operations.delete).toBeDefined();
+  const document = buildWebManifest(compile.entities).entities.Document!;
+  expect(document.fields.documentType!.optionSource).toEqual({
+    type: "entity", source: "DocumentType", valueField: "code",
+  });
+  expect(document.fields.documentType!.options).toBeUndefined();
 }, 30_000);

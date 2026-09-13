@@ -83,6 +83,8 @@ const manifestTables = manifest.tables as unknown as ManifestTable[];
 export const nonManifestManagedTables = new Set<string>([
   "platform.schema_migrations",
   "platform.system_bypass_audit",
+  // Durable execution bookkeeping: owned by operation-execution-receipts.ts.
+  "platform.operation_execution_receipts",
   // Keycloak identity ↔ Relation link: created by migrations/identity-link.ts
   // after the generated step (its FKs point at generated tables).
   "platform.identities",

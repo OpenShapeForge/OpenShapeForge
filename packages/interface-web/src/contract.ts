@@ -191,6 +191,8 @@ export type WebRecordView = {
 export type WebEntityView = WebCollectionView | WebRecordView;
 
 export type WebEntityInterface = {
+  /** Canonical record label used outside a particular view, including selectors. */
+  displayTemplate?: string;
   entityId: string;
   entitySlug: string;
   title: LocalizedText;

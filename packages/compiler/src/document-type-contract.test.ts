@@ -19,6 +19,7 @@ test("managed document type operations preserve read access and separate deletio
   expect(defaults.allowsExternalPublication).toBe(false);
   expect(defaults.defaultConfidentiality).toBeUndefined();
   const web = buildWebManifest(compile.entities).entities.DocumentType!;
+  expect(web.displayTemplate).toBe("{{name}}");
   expect(web.views.collection.route).toBe("/document-types");
   expect(web.views.record?.routes.create).toBe("/document-types/new");
   expect(web.operations.create).toBeDefined();

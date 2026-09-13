@@ -572,6 +572,7 @@ function projectEntity(
 
   return {
     entityId: entityName,
+    ...(contract.entity.displayTemplate ? { displayTemplate: contract.entity.displayTemplate } : {}),
     entitySlug: source.slug,
     title: source.collection.title,
     fields,

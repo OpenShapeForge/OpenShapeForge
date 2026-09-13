@@ -88,6 +88,7 @@ import {
 import {
   createEntityPluginExecutor,
   registerEntityPluginExecutor,
+  verifiedSession,
 } from "../operations/entity/plugin-executor.js";
 
 declare module "fastify" {
@@ -381,9 +382,15 @@ export function createApiApp(options: {
       );
       if (databaseRuntime) registerEntityOperationAvailability(databaseRuntime.db, bindings);
       if (databaseRuntime && entityPluginContracts.length > 0) {
+        const executeEntityPlugin = createEntityPluginExecutor({ bindings, runtime: moduleContext });
         registerEntityPluginExecutor(
           databaseRuntime.db,
-          createEntityPluginExecutor({ bindings, runtime: moduleContext }),
+          modulePlatform
+            ? (session, operation, input) => modulePlatform.withActiveOperationSession(
+                verifiedSession(session),
+                (activeSession) => executeEntityPlugin(activeSession, operation, input),
+              )
+            : executeEntityPlugin,
         );
       }
       modulePlatform?.registerStaticOperations(

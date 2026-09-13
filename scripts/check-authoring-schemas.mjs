@@ -60,6 +60,8 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // excluding `_base.yaml` — a baseEntity, and so unschemad by design.
   "core-entity.schema.json": 147,
   "operation-catalog.schema.json": 0,
+  "settings-definition.schema.json": 0,
+  "settings-provider.schema.json": 0,
   "retention-policy-catalog.schema.json": 1,
   "semantic-type-catalog.schema.json": 1,
   "transform-catalog.schema.json": 1,

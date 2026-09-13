@@ -59,6 +59,8 @@ export const SCHEMA_BY_KIND: Readonly<Record<string, string>> = Object.freeze({
   retentionPolicyCatalog: "retention-policy-catalog.schema.json",
   semanticTypeCatalog: "semantic-type-catalog.schema.json",
   transformCatalog: "transform-catalog.schema.json",
+  settingsDefinition: "settings-definition.schema.json",
+  settingsProvider: "settings-provider.schema.json",
   entityProfile: "entity-profile.schema.json",
   entityMapping: "entity-mapping.schema.json",
   view: "view.schema.json",

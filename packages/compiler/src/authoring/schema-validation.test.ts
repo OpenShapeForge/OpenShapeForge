@@ -86,6 +86,8 @@ describe("the schema registry", () => {
     expect(validator.schemaFiles).toContain("connector.schema.json");
     expect(validator.schemaFiles).toContain("field-definition.schema.json");
     expect(validator.schemaFiles).toContain("field-v2.schema.json");
+    expect(validator.schemaFiles).toContain("settings-definition.schema.json");
+    expect(validator.schemaFiles).toContain("settings-provider.schema.json");
   });
 
   it("maps every kind to a schema or to a documented reason for having none", () => {
@@ -178,6 +180,76 @@ describe("the schema registry", () => {
 
   it("refuses a document with no kind", () => {
     expect(() => validator.validate({ title: "x" }, "test.yaml")).toThrow(/no `kind`/);
+  });
+
+  it("validates the closed typed settings and provider authoring shapes", () => {
+    expect(
+      validator.validate(
+        {
+          schemaVersion: 1,
+          kind: "settingsDefinition",
+          namespace: "storage.artifacts",
+          settings: [
+            { key: "enabled", type: "boolean", default: false },
+            {
+              key: "maximumBytes",
+              type: "integer",
+              default: 1_000,
+              minimum: 1,
+              maximum: 10_000,
+            },
+            {
+              key: "allowedMediaTypes",
+              type: "stringSet",
+              default: ["application/pdf"],
+              allowed: ["application/pdf", "image/png"],
+            },
+            {
+              key: "provider",
+              type: "provider",
+              capability: "artifact-storage",
+              allowedProviders: ["filesystem"],
+              enabledBy: "enabled",
+            },
+          ],
+        },
+        "settings/artifacts.yaml",
+      ),
+    ).toBe("settings-definition.schema.json");
+    expect(
+      validator.validate(
+        {
+          schemaVersion: 1,
+          kind: "settingsProvider",
+          provider: "filesystem",
+          capabilities: ["artifact-storage"],
+        },
+        "settings/filesystem.yaml",
+      ),
+    ).toBe("settings-provider.schema.json");
+    expect(() =>
+      validator.validate(
+        {
+          schemaVersion: 1,
+          kind: "settingsDefinition",
+          namespace: "storage.artifacts",
+          settings: [{ key: "token", type: "secret", default: "not-allowed" }],
+        },
+        "settings/secret.yaml",
+      ),
+    ).toThrow(/settings\/0/);
+    expect(() =>
+      validator.validate(
+        {
+          schemaVersion: 1,
+          kind: "settingsProvider",
+          provider: "filesystem",
+          capabilities: ["artifact-storage"],
+          endpoint: "https://dynamic.example.test",
+        },
+        "settings/provider.yaml",
+      ),
+    ).toThrow(/additional properties/);
   });
 
   it("reports a schema directory whose refs do not resolve", () => {

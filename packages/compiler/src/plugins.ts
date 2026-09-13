@@ -25,6 +25,7 @@ import type {
 } from "./authoring/types.js";
 import type { FieldSchemaCompiler } from "./field-json-schema.js";
 import { loadAuthoringConfig } from "./authoring/layers.js";
+import type { EffectiveSettingsPolicy } from "./settings.js";
 import type { GeneratedArtifact, PlatformSchemaManifest, TableDefinition } from "./schema.js";
 
 export type CompiledEntityInfo = {
@@ -81,6 +82,8 @@ export type PluginGenerateContext = PluginBaseContext & {
   operationCatalog: StaticOperationCatalog;
   /** Canonical build-time FieldDefinition -> compiled field/JSON Schema projection. */
   fieldSchemas: FieldSchemaCompiler;
+  /** Owner-defined settings after committed host narrowing and provider validation. */
+  settingsPolicy: EffectiveSettingsPolicy;
 };
 
 /**

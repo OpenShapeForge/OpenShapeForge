@@ -648,6 +648,39 @@ describe("authoring.config.local.yaml", () => {
     });
   });
 
+  test("loads only primitive committed settings and rejects local settings", () => {
+    const root = makeRepo();
+    mkdirSync(join(root, "base"), { recursive: true });
+    writeConfig(root, {
+      layers: ["base"],
+      settings: {
+        "storage.artifacts.enabled": false,
+        "storage.artifacts.maximumBytes": 1_000_000,
+        "storage.artifacts.allowedMediaTypes": ["application/pdf"],
+        "storage.artifacts.provider": "filesystem",
+      },
+    });
+    expect(loadAuthoringConfig(root).settings).toEqual({
+      "storage.artifacts.enabled": false,
+      "storage.artifacts.maximumBytes": 1_000_000,
+      "storage.artifacts.allowedMediaTypes": ["application/pdf"],
+      "storage.artifacts.provider": "filesystem",
+    });
+
+    writeConfig(
+      root,
+      { layers: ["base"] },
+      { settings: { "storage.artifacts.enabled": true } },
+    );
+    expect(() => loadAuthoringConfig(root)).toThrow(/cannot declare "settings"/);
+
+    writeConfig(root, {
+      layers: ["base"],
+      settings: { "storage.artifacts.provider": { secret: "not allowed" } },
+    });
+    expect(() => loadAuthoringConfig(root)).toThrow(/boolean, number, string, or string array/);
+  });
+
   test("rejects malformed, unknown, or machine-local REST API onboarding", () => {
     const malformed = makeRepo();
     mkdirSync(join(malformed, "base"), { recursive: true });

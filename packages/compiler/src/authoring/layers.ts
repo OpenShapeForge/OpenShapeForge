@@ -68,6 +68,14 @@ export type AuthoringConfig = {
   plugins?: string[];
   /** Host-owned developer onboarding rendered in the generated REST OpenAPI document. */
   restApi?: RestApiDocumentation;
+  /** Committed host selections for settings defined by their owning source. */
+  settings?: Record<string, AuthoringSettingValue>;
+};
+
+export type AuthoringSettingValue = boolean | number | string | string[];
+
+type ParsedAuthoringConfig = AuthoringConfig & {
+  plugins: string[];
 };
 
 export type RestApiDocumentation = {
@@ -117,14 +125,18 @@ const BUILD_DIR = ".authoring-build";
 function readConfigFile(
   path: string,
   filename: string,
-  { requireLayers, allowRestApi }: { requireLayers: boolean; allowRestApi: boolean },
-): { layers: string[]; plugins: string[]; restApi?: RestApiDocumentation } {
+  {
+    requireLayers,
+    allowRestApi,
+    allowSettings,
+  }: { requireLayers: boolean; allowRestApi: boolean; allowSettings: boolean },
+): ParsedAuthoringConfig {
   const parsed = YAML.parse(readFileSync(path, "utf8"));
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(`${filename} must be an object.`);
   }
   const candidate = parsed as Record<string, unknown>;
-  const allowedKeys = ["layers", "plugins", "restApi"];
+  const allowedKeys = ["layers", "plugins", "restApi", "settings"];
   const unknownKeys = Object.keys(candidate).filter((key) => !allowedKeys.includes(key));
   if (unknownKeys.length > 0) {
     throw new Error(`${filename} has unknown field(s): ${unknownKeys.sort().join(", ")}.`);
@@ -150,14 +162,47 @@ function readConfigFile(
       `${filename} cannot declare "restApi"; developer onboarding belongs in the committed config.`,
     );
   }
+  if (!allowSettings && candidate.settings !== undefined) {
+    throw new Error(
+      `${filename} cannot declare "settings"; effective settings must be selected in the committed config.`,
+    );
+  }
   const restApi = candidate.restApi === undefined
     ? undefined
     : validateRestApiDocumentation(candidate.restApi, filename);
+  const settings = candidate.settings === undefined
+    ? undefined
+    : validateAuthoringSettings(candidate.settings, filename);
   return {
     layers: layers as string[],
     plugins: plugins as string[],
     ...(restApi ? { restApi } : {}),
+    ...(settings ? { settings } : {}),
   };
+}
+
+function validateAuthoringSettings(
+  value: unknown,
+  filename: string,
+): Record<string, AuthoringSettingValue> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${filename} "settings" must be an object.`);
+  }
+  const settings: Record<string, AuthoringSettingValue> = {};
+  for (const [key, setting] of Object.entries(value as Record<string, unknown>)) {
+    const valid =
+      typeof setting === "boolean" ||
+      typeof setting === "number" ||
+      typeof setting === "string" ||
+      (Array.isArray(setting) && setting.every((item) => typeof item === "string"));
+    if (!valid) {
+      throw new Error(
+        `${filename} setting "${key}" must be a boolean, number, string, or string array.`,
+      );
+    }
+    settings[key] = Array.isArray(setting) ? [...setting] : setting;
+  }
+  return settings;
 }
 
 function nonEmptyString(value: unknown, path: string): string {
@@ -322,14 +367,19 @@ function absoluteHttpUrl(value: unknown, path: string): string {
   return url;
 }
 
-export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
+export function loadCommittedAuthoringConfig(repoRoot: string): ParsedAuthoringConfig {
   const configPath = join(repoRoot, AUTHORING_CONFIG_FILENAME);
-  const base = existsSync(configPath)
+  return existsSync(configPath)
     ? readConfigFile(configPath, AUTHORING_CONFIG_FILENAME, {
         requireLayers: true,
         allowRestApi: true,
+        allowSettings: true,
       })
     : { layers: [DEFAULT_LAYER], plugins: [] };
+}
+
+export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
+  const base = loadCommittedAuthoringConfig(repoRoot);
 
   const localPath = join(repoRoot, AUTHORING_LOCAL_CONFIG_FILENAME);
   if (!existsSync(localPath)) {
@@ -337,11 +387,13 @@ export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
       layers: base.layers,
       plugins: base.plugins,
       ...(base.restApi ? { restApi: base.restApi } : {}),
+      ...(base.settings ? { settings: base.settings } : {}),
     };
   }
   const local = readConfigFile(localPath, AUTHORING_LOCAL_CONFIG_FILENAME, {
     requireLayers: false,
     allowRestApi: false,
+    allowSettings: false,
   });
 
   // A duplicate is refused rather than de-duplicated. Appending a layer that
@@ -381,6 +433,7 @@ export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
     layers: [...base.layers, ...local.layers],
     plugins: [...base.plugins, ...local.plugins],
     ...(base.restApi ? { restApi: base.restApi } : {}),
+    ...(base.settings ? { settings: base.settings } : {}),
   };
 }
 
@@ -389,7 +442,7 @@ export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
  * to the plugin module (local specs) or at the package root (package specs).
  * Resolved synchronously — the plugin CODE is imported separately.
  */
-function pluginAuthoringDir(repoRoot: string, spec: string): string | null {
+export function pluginAuthoringDir(repoRoot: string, spec: string): string | null {
   let moduleDir: string | null = null;
   if (spec.startsWith(".") || isAbsolute(spec)) {
     const asPath = isAbsolute(spec) ? spec : resolve(repoRoot, spec);
@@ -418,7 +471,7 @@ function pluginAuthoringDir(repoRoot: string, spec: string): string | null {
  * package root contains an `authoring/` directory (so contexts can ship as
  * workspace packages).
  */
-function resolveLayerDir(repoRoot: string, layer: string): string {
+export function resolveLayerDir(repoRoot: string, layer: string): string {
   const asPath = isAbsolute(layer) ? layer : resolve(repoRoot, layer);
   if (existsSync(asPath)) {
     return asPath;

@@ -59,6 +59,11 @@ import {
   FIELD_AUTHORING_REGISTRY_PATH,
   renderFieldAuthoringRegistry,
 } from "./field-authoring-registry.js";
+import {
+  loadSettingsPolicy,
+  renderSettingsPolicy,
+  SETTINGS_POLICY_PATH,
+} from "./settings.js";
 
 export type {
   FieldDefinition,
@@ -102,6 +107,7 @@ export type {
   StaticOperationCatalog,
 } from "./plugins.js";
 export { buildWebManifest, renderWebManifest } from "./authoring/web-manifest.js";
+export { collectPluginSeedFixtures, prepareRuntimeModules } from "./prepare-runtime.js";
 export { resolveModelFields } from "./authoring/compiler/model.js";
 export {
   entityOperationControlSchema,
@@ -130,6 +136,30 @@ export {
 } from "./field-authoring-registry.js";
 export type { FieldAuthoringRegistry } from "./field-authoring-registry.js";
 export type { FieldAuthoringProfile } from "./authoring/loader.js";
+export {
+  compileSettingsPolicy,
+  loadSettingsPolicy,
+  renderSettingsPolicy,
+  SETTINGS_POLICY_PATH,
+} from "./settings.js";
+export type {
+  AuthoringConfig,
+  AuthoringSettingValue,
+} from "./authoring/layers.js";
+export type {
+  BooleanSettingDefinition,
+  ChoiceSettingDefinition,
+  EffectiveSetting,
+  EffectiveSettingsPolicy,
+  IntegerSettingDefinition,
+  OwnedSettingsSource,
+  ProviderSettingDefinition,
+  SettingDefinition,
+  SettingsDefinitionSource,
+  SettingsOwner,
+  SettingsProviderSource,
+  StringSetSettingDefinition,
+} from "./settings.js";
 export type {
   CompiledFieldSchemaOptions,
   FieldSchemaCompiler,
@@ -160,6 +190,7 @@ export type ArtifactCollection = {
     connectors: GeneratedArtifact[];
     modules: GeneratedArtifact[];
     pluginMigrations: GeneratedArtifact[];
+    settings: GeneratedArtifact[];
     operations: GeneratedArtifact[];
     referentiedata: GeneratedArtifact[];
     ui: GeneratedArtifact[];
@@ -280,6 +311,7 @@ export async function collectAllArtifacts(
   const authoringConfig = loadAuthoringConfig(repoRoot);
   const { manifest, entities, connectors, plugins, pluginEntries } =
     await loadActivePlatformCompile(repoRoot);
+  const settingsPolicy = loadSettingsPolicy(repoRoot, authoringConfig, pluginEntries);
   const authoringDir = resolveActiveAuthoringDir(repoRoot);
   // Web UI artifacts (CRUD pages, entity manifests, actions, workflow
   // contract) are only generated when the repo actually has a web app. A
@@ -347,6 +379,7 @@ export async function collectAllArtifacts(
     entities,
     operationCatalog,
     fieldSchemas,
+    settingsPolicy,
   };
   const executionCompatibility = plugins.flatMap((plugin) => {
     const authored = typeof plugin.executionCompatibility === "function"
@@ -447,6 +480,12 @@ export async function collectAllArtifacts(
               contents: renderPluginMigrationRegistry(pluginMigrationRegistry),
             },
           ],
+    settings: [
+      {
+        path: SETTINGS_POLICY_PATH,
+        contents: renderSettingsPolicy(settingsPolicy),
+      },
+    ],
     referentiedata: await generateCoreReferentiedataArtifacts(repoRoot, referentiedata),
     // Headless hosts get the API's empty persisted-operation manifest from the
     // graphql group above. Web hosts generate the populated API + web pair as
@@ -481,6 +520,7 @@ export async function collectAllArtifacts(
     ...groups.connectors,
     ...groups.modules,
     ...groups.pluginMigrations,
+    ...groups.settings,
     ...groups.referentiedata,
     ...groups.ui,
     ...groups.keycloak,

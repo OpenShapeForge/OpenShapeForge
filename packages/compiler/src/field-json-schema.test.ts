@@ -61,6 +61,16 @@ function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): 
 }
 
 describe("compiled field JSON Schema projection", () => {
+  it("projects managed entity choices as a live reference, never a static enum", () => {
+    const schema = compiledFieldSchema(field({
+      key: "category", options: { type: "entity", source: "Category", valueField: "code" },
+    }));
+    expect(schema["x-osf-reference"]).toEqual({ entity: "Category", valueField: "code" });
+    expect(schema.enum).toBeUndefined();
+    expect(compiledFieldSchema(field({ key: "category", options: { type: "entity", source: "Category" } }))["x-osf-reference"])
+      .toEqual({ entity: "Category", valueField: "id" });
+    expect(() => compiledFieldSchema(field({ key: "category", options: { type: "entity" } }))).toThrow("require a source");
+  });
   it("rebases only refs and leaves matching prose untouched", () => {
     const source = {
       $ref: "https://example.test/schema#/$defs/value",

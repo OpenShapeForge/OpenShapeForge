@@ -68,7 +68,7 @@
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": { "type": "string", "enum": ["static", "referentiedata", "remote", "dynamic"] },
+        "type": { "type": "string", "enum": ["static", "referentiedata", "remote", "dynamic", "entity"] },
         "items": {
           "type": "array",
           "items": {
@@ -86,7 +86,21 @@
         "remoteUrl": { "type": "string" },
         "valueField": { "type": "string" },
         "labelField": { "type": "string" }
-      }
+      },
+      "allOf": [{
+        "if": { "properties": { "type": { "const": "entity" } }, "required": ["type"] },
+        "then": {
+          "required": ["source"],
+          "properties": {
+            "source": { "type": "string", "minLength": 1 },
+            "valueField": { "type": "string", "minLength": 1 },
+            "items": false,
+            "referentieGroep": false,
+            "remoteUrl": false,
+            "labelField": false
+          }
+        }
+      }]
     },
     "relationship": {
       "type": "object",

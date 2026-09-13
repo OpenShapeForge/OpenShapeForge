@@ -150,7 +150,7 @@ export interface FieldOptionStatic {
 }
 
 export interface FieldOptions {
-  type: "static" | "referentiedata" | "remote" | "dynamic";
+  type: "static" | "referentiedata" | "remote" | "dynamic" | "entity";
   items?: FieldOptionStatic[];
   source?: string;
   referentieGroep?: string;

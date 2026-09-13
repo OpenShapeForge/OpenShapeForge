@@ -399,6 +399,9 @@ function projectEntity(
       ...(field.options?.type === "referentiedata" && field.options.referentieGroep
         ? { optionSource: { type: "referentiedata" as const, group: field.options.referentieGroep } }
         : {}),
+      ...(field.options?.type === "entity" && field.options.source
+        ? { optionSource: { type: "entity" as const, source: field.options.source, valueField: field.options.valueField ?? "id" } }
+        : {}),
       ...((field.options?.type === "remote" || field.options?.type === "dynamic") &&
       (field.options.remoteUrl || field.options.source)
         ? {

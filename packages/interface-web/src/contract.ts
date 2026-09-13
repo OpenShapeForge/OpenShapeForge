@@ -87,6 +87,7 @@ export type WebFieldOption = {
 
 export type WebFieldOptionSource =
   | { type: "referentiedata"; group: string }
+  | { type: "entity"; source: string; valueField: string }
   | { type: "remote" | "dynamic"; source: string };
 
 /**

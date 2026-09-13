@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { CompiledEntityContract } from "./authoring/types.js";
+import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import { compiledObjectSchema, splitBundledDefinitions } from "./field-json-schema.js";
 import { entityRelationshipKeys, withEntityRelationshipKeys, writableEntityFields } from "./entity-operation-json-schema.js";
@@ -67,6 +67,24 @@ export function materializeEntityInputSources(
   contracts: readonly CompiledEntityContract[],
   referentiedata: CoreReferentiedataSnapshot,
 ): void {
+  const byName = new Map(contracts.map(contract => [contract.entity.name, contract]));
+  function validateEntityOptions(fields: readonly CompiledField[]): void {
+    for (const field of fields) {
+      if (field.options?.type === "entity") {
+        const target = byName.get(field.options.source ?? "");
+        const valueField = field.options.valueField ?? "id";
+        const targetField = target?.model.fields.find(candidate => candidate.key === valueField);
+        const targetType = valueField === "id" ? "string" : targetField?.valueType;
+        if (!target || !targetType || targetType !== field.valueType ||
+          !["string", "integer", "number"].includes(targetType) || targetField?.cardinality === "collection") {
+          throw new Error(`Invalid entity option source for ${field.key}: ${field.options.source}.${valueField}.`);
+        }
+      }
+      if (field.children) validateEntityOptions(field.children);
+      if (field.item) validateEntityOptions([field.item]);
+    }
+  }
+  for (const contract of contracts) validateEntityOptions(contract.model.fields);
   for (const contract of contracts) {
     for (const operation of Object.values(contract.entityOperations)) {
       if (operation?.input.kind === "json-schema") operation.input.schema = resolveEntityInputSources(operation.input.schema, contracts, referentiedata);

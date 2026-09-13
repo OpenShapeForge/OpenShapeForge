@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
 import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
-import { resolveEntityInputSources } from "./entity-input-sources.js";
+import { materializeEntityInputSources, resolveEntityInputSources } from "./entity-input-sources.js";
 
 const fields: CompiledField[] = [{
   key: "title", valueType: "string", cardinality: "single", required: true,
@@ -35,4 +35,19 @@ test("references cannot override rules or select missing or server-owned fields"
   expect(() => resolveEntityInputSources(reference("Example", ["id"]), [contract], {})).toThrow("Unavailable");
   expect(() => resolveEntityInputSources(reference("Example", ["title", "title"]), [contract], {})).toThrow("unique");
   expect(() => resolveEntityInputSources({ ...reference("Example", ["title"]), additionalProperties: true }, [contract], {})).toThrow("override");
+});
+
+test("managed choices fail closed for missing or incompatible canonical sources", () => {
+  const source = (entity: string, valueField?: string) => ({ ...contract,
+    entityOperations: {}, model: { ...contract.model, fields: [{ ...fields[0]!,
+      options: { type: "entity" as const, source: entity, ...(valueField ? { valueField } : {}) },
+    }] },
+  });
+  expect(() => materializeEntityInputSources([source("Example", "title")], {})).not.toThrow();
+  expect(() => materializeEntityInputSources([source("Example")], {})).not.toThrow();
+  expect(() => materializeEntityInputSources([source("Missing")], {})).toThrow("Invalid entity option source");
+  expect(() => materializeEntityInputSources([source("Example", "missing")], {})).toThrow("Invalid entity option source");
+  const incompatible = source("Example", "title");
+  incompatible.model.fields[0]!.valueType = "boolean";
+  expect(() => materializeEntityInputSources([incompatible], {})).toThrow("Invalid entity option source");
 });

@@ -474,6 +474,13 @@ function addCompiledFieldMetadata(
   if (enumeration) {
     schema.enum = enumeration.values;
   }
+  if (field.options?.type === "entity") {
+    if (!field.options.source?.trim()) throw new Error(`Entity options for ${field.key} require a source.`);
+    schema["x-osf-reference"] = {
+      entity: field.options.source,
+      valueField: field.options.valueField ?? "id",
+    };
+  }
 
   const descriptionParts: string[] = [];
   const fieldDescription = describeField(field);

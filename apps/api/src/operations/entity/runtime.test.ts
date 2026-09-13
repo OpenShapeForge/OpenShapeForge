@@ -243,8 +243,9 @@ describe("entity operation runtime", () => {
       "PaymentDetail.delete",
       "PaymentDetail.update",
       "Relation.update",
-      "RelationGroup.delete",
-      "RelationGroup.update",
+    ]);
+    expect(restEditLeaseOperationIdsForSession({ roles: ["Relations.RelationGroups.ReadWrite"] })).toEqual([
+      "RelationGroup.delete", "RelationGroup.update", "RelationGroupMembership.delete", "RelationGroupMembership.update",
     ]);
     expect(
       restEditLeaseOperationIdsForSession({

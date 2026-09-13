@@ -406,6 +406,21 @@ export type ModuleOperationHandlerContract<Context, Result> = (
   context: Context,
 ) => Result | Promise<Result>;
 
+export type OperationAvailabilityDecision =
+  | { available: true }
+  | { available: false; error: OperationError };
+
+/** Owner policy, evaluated for authorized records only. Must have no side effects. */
+export type ModuleOperationAvailabilityHandlerContract<Database, Session> = (
+  targetIds: readonly string[],
+  context: { db: Database; session: Session },
+) => Readonly<Record<string, OperationAvailabilityDecision>>
+  | Promise<Readonly<Record<string, OperationAvailabilityDecision>>>;
+
+export type ModuleOperationAvailabilityHandler = ModuleOperationAvailabilityHandlerContract<
+  Transaction<PluginDatabaseSchema>, PluginSessionContext
+>;
+
 export type ModuleSeedResult = {
   present: boolean;
   skipped: boolean;
@@ -432,6 +447,7 @@ export type RuntimeModuleContract<
   Worker = RuntimeWorkerContract<
     RuntimeWorkerContextContract<Kysely<PluginDatabaseSchema>>
   >,
+  AvailabilityHandler = ModuleOperationAvailabilityHandler,
 > = {
   /** Must match the compiler plugin name. */
   name: string;
@@ -440,6 +456,8 @@ export type RuntimeModuleContract<
   close?(): Promise<void>;
   restRoutes?(routes: Routes, context: RuntimeContext): void;
   operationHandlers?: Record<string, OperationHandler>;
+  /** Same compiler-owned handler keys; core rechecks these policies before execution. */
+  operationAvailabilityHandlers?: Record<string, AvailabilityHandler>;
   operationProviders?: readonly OperationProvider[];
   workers?: Record<string, Worker>;
   seeds?: Seed[];

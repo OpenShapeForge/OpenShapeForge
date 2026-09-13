@@ -60,8 +60,9 @@ const session = {
   credential: "trusted-context" as const,
 };
 
-const testDatabase = (receiptExecutor?: TestReceiptExecutor) => {
+const testDatabase = (receiptExecutor?: TestReceiptExecutor, statements?: string[]) => {
   const db = new Kysely<DB>({
+    log: event => { if (event.level === "query") statements?.push(event.query.sql); },
     dialect: {
       createAdapter: () => new PostgresAdapter(),
       createDriver: () => new DummyDriver(),
@@ -206,6 +207,75 @@ const declaredConflict = {
 };
 
 describe("canonical operation runtime", () => {
+  test("owner availability is rechecked inside the same transaction as execution", async () => {
+    const statements: string[] = [];
+    const db = testDatabase(undefined, statements);
+    const platform = new ModulePlatformRuntime(db);
+    const operation: OperationContract = {
+      ...restOperation,
+      key: "demo.relation.publish",
+      handler: "publish",
+      target: { entityId: "Relation", entityName: "Relation", scope: "record", inputField: "id" },
+      inputSchema: { type: "object", required: ["id"], properties: { id: { type: "string" } } },
+      outputSchema: { type: "object" },
+      idempotency: { mode: "none" },
+      transports: { ...restOperation.transports, rest: { method: "POST", path: "/api/demo/relations/:id/publish", response: { status: 200, kind: "json" } } },
+    };
+    let allowed = false;
+    let calls = 0;
+    let policyDb: unknown;
+    const module: RuntimeModule = {
+      name: operation.plugin,
+      operationAvailabilityHandlers: { publish: async (ids, context) => {
+        policyDb = context.db;
+        return Object.fromEntries(ids.map(id => [id, allowed ? { available: true } : {
+          available: false, error: { code: "CONFLICT", message: "This record cannot be published yet.", retryable: false },
+        }]));
+      } },
+      operationHandlers: { publish: async (_input, context) => {
+        calls++;
+        await context.platform!.db.withSession(context.session!, async trx => { expect(trx === policyDb).toBe(true); });
+        return { value: {} };
+      } },
+    };
+    const bound = bindOperationHandlers([module], [operation]).get(operation.key)!;
+    const verified = { ...session, roles: ["quote-publisher"], tenantId: "22222222-2222-4222-8222-222222222222", userId: "33333333-3333-4333-8333-333333333333" };
+    try {
+      const context = { db, platform: platform.services, transport: "rest" as const, session: verified };
+      const input = { id: "44444444-4444-4444-8444-444444444444" };
+      await expect(invokeOperation(bound, input, context)).rejects.toThrow("cannot be published yet");
+      expect(calls).toBe(0);
+      allowed = true;
+      await expect(invokeOperation(bound, input, context)).resolves.toEqual({ value: {} });
+      expect(calls).toBe(1);
+      allowed = false;
+      await expect(invokeOperation(bound, input, context)).rejects.toThrow("cannot be published yet");
+      expect(calls).toBe(1);
+      const protectedBound = { ...bound, operation: { ...operation,
+        concurrency: { version: { mode: "required" as const, field: "updatedAt" as const } },
+        confirmation: { mode: "challenge" as const, challenge: {
+          kind: "type-current-field" as const, field: "displayName", issuedBy: "server" as const,
+          bindTo: ["subject", "tenant", "operation", "target.id", "target.version"] as const,
+          expiresAfter: "PT5M", singleUse: true as const,
+        } },
+        inputSchema: { type: "object", required: ["id", "expectedVersion"], properties: { id: { type: "string" }, expectedVersion: { type: "string" } } },
+      } };
+      await expect(invokeOperation(protectedBound, { ...input, expectedVersion: "2026-09-13T00:00:00.000Z" }, context))
+        .rejects.toThrow("cannot be published yet");
+      expect(statements.some(query => /insert\s+into\s+platform\.operation_confirmation_challenges/i.test(query))).toBe(false);
+      expect(calls).toBe(1);
+    } finally { await db.destroy(); }
+  });
+
+  test("availability cannot be registered outside the owning authored record operation", () => {
+    const module: RuntimeModule = { name: restOperation.plugin,
+      operationHandlers: { [restOperation.handler]: async () => ({ value: {} }) },
+      operationAvailabilityHandlers: { [restOperation.handler]: async () => ({}) },
+    };
+    expect(() => bindOperationHandlers([module], [restOperation])).toThrow("authenticated tenant record target");
+    expect(() => bindOperationHandlers([{ ...module, operationAvailabilityHandlers: { unknown: async () => ({}) } }], [restOperation]))
+      .toThrow("absent from its compiler contract");
+  });
   test("fails closed when the compiler contract has no runtime handler", () => {
     expect(() => bindOperationHandlers([])).toThrow(/has no loaded runtime module/);
     expect(() => bindOperationHandlers([{ name: "workflow" }])).toThrow(/has no runtime handler/);

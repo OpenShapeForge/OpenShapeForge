@@ -17,6 +17,7 @@ import type {
   ModuleGraphqlContribution,
   ModuleOperationErrorResult,
   ModuleOperationHandler,
+  ModuleOperationAvailabilityHandler,
   ModuleOperationResult,
   ModuleOperationSuccessResult,
   ModuleRuntimeContext,
@@ -63,6 +64,7 @@ import { sessionOperationRolesAllow } from "./session-authorization.js";
 import { operationContractFingerprint } from "./contract-fingerprint.js";
 import { executeKeyedOperation } from "./execution-receipts.js";
 import type { DB } from "../generated/db/types.js";
+import { evaluateOperationAvailability } from "./availability.js";
 
 export type OperationContract = {
   key: string;
@@ -497,6 +499,7 @@ export function runtimeStaticOperationRegistrations(
 export type BoundOperation = {
   operation: OperationContract;
   handler: ModuleOperationHandler;
+  availability?: ModuleOperationAvailabilityHandler;
 };
 type Bound = BoundOperation;
 const bindingCache = new WeakMap<readonly RuntimeModule[], Map<string, Bound>>();
@@ -547,7 +550,12 @@ export function bindOperationHandlers(
     if (!handler) {
       throw new Error(`Canonical operation "${operation.key}" has no runtime handler "${operation.handler}" in module "${operation.plugin}".`);
     }
-    bound.set(operation.key, { operation, handler });
+    const availability = module.operationAvailabilityHandlers?.[operation.handler];
+    if (availability && (operation.auth.mode !== "session" || operation.tenancy.mode !== "required" ||
+      operation.target?.scope !== "record" || !operation.target.inputField)) {
+      throw new Error(`Operation "${operation.key}" availability requires an authenticated tenant record target.`);
+    }
+    bound.set(operation.key, { operation, handler, ...(availability ? { availability } : {}) });
   }
   for (const module of modules) {
     const declared = new Set(
@@ -559,6 +567,8 @@ export function bindOperationHandlers(
     if (extras.length > 0) {
       throw new Error(`Runtime module "${module.name}" has operation handlers absent from its compiler contract: ${extras.sort().join(", ")}.`);
     }
+    const extraAvailability = Object.keys(module.operationAvailabilityHandlers ?? {}).filter(key => !declared.has(key));
+    if (extraAvailability.length > 0) throw new Error(`Runtime module "${module.name}" has availability handlers absent from its compiler contract.`);
   }
   if (usesGeneratedCatalog) bindingCache.set(modules, bound);
   return bound;
@@ -738,6 +748,7 @@ async function invokeCustomOperationWithControls(
   const recordPermissions = operationRecordPermissions(operation);
   const forcesTransaction = operationIntent(operation) !== "invoke";
   const hasGuard = Boolean(
+    bound.availability ||
     operation.concurrency ||
     confirmation.mode === "challenge" ||
     recordPermissions.length > 0 ||
@@ -838,7 +849,13 @@ async function invokeCustomOperationWithControls(
         targetId: targetValue,
         expectedVersion,
         ...(leaseToken ? { leaseToken } : {}),
-      });
+      }, bound.availability ? async trx => {
+        const decisions = await evaluateOperationAvailability(operation, bound.availability!, [targetValue], {
+          db: trx, session: context.session!,
+        });
+        const decision = decisions[targetValue]!;
+        if (!decision.available) throw operationFailure(decision.error);
+      } : undefined);
       throw operationFailure(error);
     }
     confirmationToken = requireStringControl(input, "confirmationToken");
@@ -864,6 +881,13 @@ async function invokeCustomOperationWithControls(
           targetId: targetValue,
           expectedVersion,
         });
+      }
+      if (bound.availability) {
+        const decisions = await evaluateOperationAvailability(operation, bound.availability, [targetValue], {
+          db: trx, session: context.session!,
+        });
+        const decision = decisions[targetValue]!;
+        if (!decision.available) throw operationFailure(decision.error);
       }
       if (leaseToken && expectedVersion) {
         await consumeEntityEditLeaseInTransaction(trx, context.session!, {

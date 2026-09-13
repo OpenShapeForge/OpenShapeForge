@@ -93,7 +93,7 @@ import {
   entityOperationContract,
   executeEntityOperation,
   getEntityOperationContracts,
-  getEntityOperationOffers,
+  currentRecordOffers,
   getGeneratedEntity,
   getGeneratedCrudTables,
   isGeneratedCrudOperationEnabled,
@@ -3068,19 +3068,21 @@ async function invokeTool(
         if (!canonical) return ok(data);
         return ok({
           data,
-          operations: getEntityOperationOffers(
-            entity?.entity ?? table.source?.authoringEntityName ?? table.name,
+          operations: await currentRecordOffers(
+            db,
             session,
-            ["get", "update", "delete"].filter((intent) =>
-              offerIntents.includes(intent as McpOperation),
-            ) as McpOperation[],
-            {},
+            entity?.entity ?? table.source?.authoringEntityName ?? table.name,
+            table,
             {
               id: String(data.id ?? ""),
+              row,
               ...(typeof data.updatedAt === "string"
                 ? { version: data.updatedAt }
                 : {}),
             },
+            ["get", "update", "delete"].filter((intent) =>
+              offerIntents.includes(intent as McpOperation),
+            ) as McpOperation[],
           ),
         });
       }

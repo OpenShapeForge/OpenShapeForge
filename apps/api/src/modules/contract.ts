@@ -31,6 +31,7 @@ import type {
   ModuleOperationErrorResult as PublicModuleOperationErrorResult,
   ModuleOperationContextContract,
   ModuleOperationHandlerContract,
+  ModuleOperationAvailabilityHandlerContract,
   ModuleOperationResult as PublicModuleOperationResult,
   ModuleOperationSuccessResult as PublicModuleOperationSuccessResult,
   ModuleReadinessCheck as PublicModuleReadinessCheck,
@@ -517,13 +518,18 @@ export type ModuleOperationHandler = ModuleOperationHandlerContract<
   ModuleOperationResult
 >;
 
+export type ModuleOperationAvailabilityHandler = ModuleOperationAvailabilityHandlerContract<
+  Transaction<DB>, TrustedSessionContext
+>;
+
 export type RuntimeModule = RuntimeModuleContract<
   ModuleRuntimeContext,
   ModuleOperationHandler,
   FastifyInstance,
   ModuleSeed,
   RuntimeOperationProvider,
-  ModuleWorker
+  ModuleWorker,
+  ModuleOperationAvailabilityHandler
 > & {
   graphql?(context: ModuleRuntimeContext): ModuleGraphqlContribution;
   /** Dynamic MCP projection and invocation hooks, evaluated per request. */

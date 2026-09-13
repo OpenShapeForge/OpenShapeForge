@@ -50,6 +50,7 @@ import {
 import { sessionOperationRolesAllow } from "../session-authorization.js";
 import { requireOperationPrerequisites } from "../prerequisite-receipts.js";
 import { executeEntityPlugin } from "./plugin-executor.js";
+import { entityBusinessUnavailability } from "./availability.js";
 
 const COLLECTION_OFFER_INTENTS: readonly GeneratedCrudExposureOperation[] = [
   "list",
@@ -531,7 +532,7 @@ export async function acquireEditLeaseForEntityOperation(
  */
 export function getEntityOperationOffers(
   entityName: string,
-  session: Pick<DbSessionInput, "roles">,
+  session: Pick<DbSessionInput, "roles"> & { oauthScopes?: readonly string[]; credential?: string },
   intents: readonly GeneratedCrudExposureOperation[],
   unavailable: Readonly<Record<string, OperationError | undefined>> = {},
   target?: { id: string; version?: string; row?: Readonly<Record<string, unknown>> },
@@ -578,7 +579,9 @@ export function getEntityOperationOffers(
       operation.target.scope === scope &&
       (operation.auth.mode === "public" ||
         (operation.auth.mode === "session" &&
-          sessionOperationRolesAllow(operation.auth.roles, session.roles ?? []))) &&
+          sessionOperationRolesAllow(operation.auth.roles, session.roles ?? []) &&
+          (!(operation.auth.scopes?.length) || (session.credential !== "api-key" &&
+            operation.auth.scopes.every(scope => session.oauthScopes?.includes(scope)))))) &&
       (!target ||
         operation.auth.mode !== "session" ||
         !operation.auth.recordPermission ||
@@ -607,6 +610,32 @@ export function getEntityOperationOffers(
       };
     });
   return [...generatedOffers, ...customOffers];
+}
+
+async function businessAndLeaseUnavailability(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  entityName: string,
+  table: GeneratedCrudTable,
+  targets: Array<ReturnType<typeof offerTarget>>,
+  intents: readonly GeneratedCrudExposureOperation[],
+): Promise<ReadonlyMap<string, Readonly<Record<string, OperationError>>>> {
+  const business = await entityBusinessUnavailability(db, session, targets.map(target => ({
+    id: target.id,
+    operationIds: getEntityOperationOffers(entityName, session, intents, {}, target).map(offer => offer.operation.id),
+  })));
+  const leases = await leaseUnavailabilityByTarget(db, session, entityName, table, targets.map(target => target.id));
+  for (const [id, errors] of leases) business.set(id, { ...errors, ...business.get(id) });
+  return business;
+}
+
+export async function currentRecordOffers(
+  db: OpenShapeForgeDatabase, session: DbSessionInput, entityName: string,
+  table: GeneratedCrudTable, target: ReturnType<typeof offerTarget>,
+  intents: readonly GeneratedCrudExposureOperation[],
+): Promise<EntityOperationOffer[]> {
+  const unavailable = await businessAndLeaseUnavailability(db, session, entityName, table, [target], intents);
+  return getEntityOperationOffers(entityName, session, intents, unavailable.get(target.id), target);
 }
 
 /** Bind a plugin-backed record mutation to its authorized target. */
@@ -693,13 +722,8 @@ export async function executeEntityOperation(
       return {
         intent: operation.intent,
         data,
-        operations: getEntityOperationOffers(
-          entityName,
-          session,
-          projectedOfferIntents(request, RECORD_OFFER_INTENTS),
-          {},
-          offerTarget(data, table),
-        ),
+        operations: await currentRecordOffers(db, session, entityName, table, offerTarget(data, table),
+          projectedOfferIntents(request, RECORD_OFFER_INTENTS)),
       };
     }
     switch (request.operation.intent) {
@@ -709,13 +733,13 @@ export async function executeEntityOperation(
           ...request.input,
         });
         const targets = connection.rows.map((row) => offerTarget(row, table));
-        const targetIds = targets.map(({ id }) => id);
-        const unavailableByTarget = await leaseUnavailabilityByTarget(
+        const unavailableByTarget = await businessAndLeaseUnavailability(
           db,
           session,
           entityName,
           table,
-          targetIds,
+          targets,
+          projectedOfferIntents(request, RECORD_OFFER_INTENTS),
         );
         return {
           intent: "list",
@@ -746,12 +770,13 @@ export async function executeEntityOperation(
           id: requireId(request.input),
         });
         const unavailableByTarget = data
-          ? await leaseUnavailabilityByTarget(
+          ? await businessAndLeaseUnavailability(
               db,
               session,
               entityName,
               table,
-              [offerTarget(data, table).id],
+              [offerTarget(data, table)],
+              projectedOfferIntents(request, RECORD_OFFER_INTENTS),
             )
           : new Map();
         return {
@@ -780,13 +805,8 @@ export async function executeEntityOperation(
         return {
           intent: "create",
           data,
-          operations: getEntityOperationOffers(
-            entityName,
-            session,
-            projectedOfferIntents(request, RECORD_OFFER_INTENTS),
-            {},
-            offerTarget(data, table),
-          ),
+          operations: await currentRecordOffers(db, session, entityName, table, offerTarget(data, table),
+            projectedOfferIntents(request, RECORD_OFFER_INTENTS)),
         };
       }
       case "update": {
@@ -831,13 +851,8 @@ export async function executeEntityOperation(
           intent: "update",
           data,
           operations: data
-            ? getEntityOperationOffers(
-                entityName,
-                session,
-                projectedOfferIntents(request, RECORD_OFFER_INTENTS),
-                {},
-                offerTarget(data, table),
-              )
+            ? await currentRecordOffers(db, session, entityName, table, offerTarget(data, table),
+                projectedOfferIntents(request, RECORD_OFFER_INTENTS))
             : [],
         };
       }

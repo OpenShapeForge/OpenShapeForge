@@ -7,6 +7,7 @@
  * worker, and entity-event fanout wiring are intentionally absent.
  */
 import rateLimit from "@fastify/rate-limit";
+import { registerEntityOperationAvailability } from "../operations/entity/availability.js";
 import {
   registerOperationalRoutes,
   type OperationalRoutesOptions,
@@ -376,6 +377,7 @@ export function createApiApp(options: {
         initialised.loaded,
         allOperationContracts,
       );
+      if (databaseRuntime) registerEntityOperationAvailability(databaseRuntime.db, bindings);
       if (databaseRuntime && entityPluginContracts.length > 0) {
         registerEntityPluginExecutor(
           databaseRuntime.db,

@@ -100,6 +100,8 @@ export async function issueEntityConfirmationChallenge(
     expectedVersion: string;
     leaseToken?: string;
   },
+  /** Core-owned owner policy; never populated from a transport request. */
+  authorizeInTransaction?: (trx: Transaction<DB>) => Promise<void>,
 ): Promise<OperationError> {
   const { confirmation, version } = challengeContract(input.operation);
   const versionColumn = columnForField(input.table, version.field);
@@ -111,6 +113,7 @@ export async function issueEntityConfirmationChallenge(
   const challengeToken = randomBytes(32).toString("base64url");
 
   return withDbSession(db, sessionInput, async (trx, session) => {
+    await authorizeInTransaction?.(trx);
     if (input.operation.concurrency?.editLease) {
       if (!input.leaseToken) {
         throw operationFailure({

@@ -11,6 +11,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
+import { createDocumentArtifactAuthorization } from "@openshapeforge/documents/artifact-authorization";
 import { sql, type Transaction } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../connection.js";
@@ -239,6 +240,46 @@ describe("Document artifact binding migration", () => {
       where id = ${created?.document_version_id}::uuid
     `.execute(privileged.db);
     expect(row.rows[0]).toEqual({ artifact_id: null, artifact_version: null, byte_size: null });
+  });
+
+  test("the Document policy resolves provisional and historical associations through real SQL", async () => {
+    const artifactId = randomUUID();
+    const otherUser = randomUUID();
+    const checked: string[] = [];
+    const policySession = { ...session, tenantId, userId, groups: [], credential: "bearer" as const };
+    const records = { assertAccess: async (_session: unknown, input: { entityName: string }) => {
+      checked.push(input.entityName);
+    } };
+    const policy = createDocumentArtifactAuthorization({ session: policySession, records });
+    const created = await withDbSession(restricted.db, session, async trx => {
+      const ids = await createWithArtifact(trx, "Policy association", artifactId);
+      const executor = { executeQuery: async (query: Parameters<typeof trx.executeQuery>[0]) =>
+        ({ rows: (await trx.executeQuery(query)).rows as Record<string, unknown>[] }) };
+      const input = { action: "bind" as const, artifactId,
+        owner: { entity: "DocumentVersion" as const, recordId: ids.documentVersionId } };
+      expect(await policy.resolveDocumentVersionArtifactAccess(executor, input)).toMatchObject({ artifactId, tenantId });
+      expect(checked).toEqual([]); // First-create does not imply read/update authority.
+      expect(await policy.resolveDocumentVersionArtifactAccess(executor, { ...input, expectedArtifactVersion: 1 })).toBeUndefined();
+      expect(await policy.resolveDocumentVersionArtifactAccess(executor, { ...input, artifactId: randomUUID() })).toBeUndefined();
+      const wrongActor = createDocumentArtifactAuthorization({ session: { ...policySession, userId: otherUser }, records });
+      expect(await wrongActor.resolveDocumentVersionArtifactAccess(executor, input)).toBeUndefined();
+      await finalize(trx, ids.documentVersionId, artifactId);
+      expect(await policy.resolveDocumentVersionArtifactAccess(executor, input)).toBeUndefined();
+      await sql`select document_internal.append_version(${ids.documentId}::uuid,
+        ${JSON.stringify({ versionLabel: "2", status: "draft" })}::text::jsonb)`.execute(trx);
+      return ids;
+    });
+    await withDbSession(restricted.db, { ...session, userId: otherUser }, async trx => {
+      const executor = { executeQuery: async (query: Parameters<typeof trx.executeQuery>[0]) =>
+        ({ rows: (await trx.executeQuery(query)).rows as Record<string, unknown>[] }) };
+      const reader = createDocumentArtifactAuthorization({ session: { ...policySession, userId: otherUser }, records });
+      expect(await reader.resolveDocumentVersionArtifactAccess(executor, {
+        action: "open", artifactId,
+        owner: { entity: "DocumentVersion", recordId: created.documentVersionId },
+      })).toMatchObject({ artifactId, tenantId });
+      expect(checked).toEqual(["DocumentVersion", "Document"]);
+      expect(await reader.resolvePhysicalDeleteDecision(executor, randomUUID())).toBeUndefined();
+    });
   });
 
   test("persists only finalized trusted facts and advances the matching head", async () => {

@@ -25,7 +25,7 @@ name: Web browser e2e
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 concurrency:

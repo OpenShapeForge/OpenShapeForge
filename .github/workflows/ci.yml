@@ -24,7 +24,7 @@ on:
   # Not widened: a branch with an open PR is already covered by the trigger
   # above, and widening this would run every job twice on every push.
   push:
-    branches: [main]
+    branches: [main, develop]
 
 # Cancel superseded runs on the same ref to save CI minutes.
 concurrency:

@@ -22,6 +22,7 @@ const webPresent = existsSync(join(repoRoot, "apps/web"));
 // true). The aggregate is instead projected through WebManifest for hosts, as
 // are the other schemaVersion 2 entities (Agreement, Address, AgreementParty);
 // every v1 -> v2 conversion therefore lowers this count by one.
+// Strict operation-authored entities use the Web manifest rather than v1 shards.
 const expectedGeneratedCrudEntityCount = 106;
 
 /**

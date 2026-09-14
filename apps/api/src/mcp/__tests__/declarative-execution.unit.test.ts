@@ -42,11 +42,30 @@ const WRONG_KEYRING = keyringFromEnv(
 )!;
 
 describe("binding selection and mapped paths", () => {
-  it("does not fan an empty selector out and rejects prototype paths", () => {
-    const binding = { when: { field: "provider", equals: "alpha" } };
-    expect(bindingSelected(binding, {})).toBe(true);
-    expect(bindingSelected(binding, { provider: "" })).toBe(false);
-    expect(bindingSelected(binding, { provider: "alpha" })).toBe(true);
+  it("selects presence only for populated input and preserves fixed selectors", () => {
+    const present = { when: { field: "dealId", present: true } };
+    expect(bindingSelected(present, {})).toBe(false);
+    expect(bindingSelected(present, { dealId: null })).toBe(false);
+    expect(bindingSelected(present, { dealId: "" })).toBe(false);
+    expect(bindingSelected(present, { dealId: "deal-1" })).toBe(true);
+    expect(bindingSelected(present, { dealId: 0 })).toBe(true);
+
+    const fixed = { when: { field: "provider", equals: "alpha" } };
+    expect(bindingSelected(fixed, {})).toBe(true);
+    expect(bindingSelected(fixed, { provider: null })).toBe(true);
+    expect(bindingSelected(fixed, { provider: "" })).toBe(false);
+    expect(bindingSelected(fixed, { provider: "alpha" })).toBe(true);
+    expect(bindingSelected(fixed, { provider: "beta" })).toBe(false);
+  });
+
+  it("fails malformed selectors closed and rejects prototype paths", () => {
+    expect(bindingSelected({ when: { field: "dealId" } }, { dealId: "deal-1" })).toBe(false);
+    expect(
+      bindingSelected(
+        { when: { field: "dealId", equals: "deal-1", present: true } },
+        { dealId: "deal-1" },
+      ),
+    ).toBe(false);
     expect(() => setPath({}, "a.__proto__.polluted", "yes")).toThrow(
       /unsafe segment/,
     );

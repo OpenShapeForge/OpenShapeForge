@@ -165,7 +165,9 @@ export async function validateVisibleDefinition(
     // out to every provider. Fail loudly at publish instead.
     const when = binding.when as JsonRecord | null | undefined;
     if (when !== undefined && when !== null) {
-      const whenField = typeof when === "object" ? when.field : undefined;
+      const validObject = typeof when === "object" && !Array.isArray(when);
+      const condition = validObject ? when : {};
+      const whenField = typeof condition.field === "string" ? condition.field : undefined;
       const declaredInputs = new Set(
         (Array.isArray(row[entry.inputFieldsField]) ? (row[entry.inputFieldsField] as JsonRecord[]) : [])
           .map((field) => field?.key)
@@ -178,8 +180,16 @@ export async function validateVisibleDefinition(
             `always run. Declare the selector input (e.g. provider) on the definition.`,
         );
       }
-      if (typeof (when as JsonRecord).equals !== "string" || (when as JsonRecord).equals === "") {
+      const hasEquals = Object.prototype.hasOwnProperty.call(condition, "equals");
+      const hasPresent = Object.prototype.hasOwnProperty.call(condition, "present");
+      if (Number(hasEquals) + Number(hasPresent) !== 1) {
+        problems.push(
+          `${position}: when must define exactly one condition: a non-empty equals value or present: true.`,
+        );
+      } else if (hasEquals && (typeof condition.equals !== "string" || condition.equals === "")) {
         problems.push(`${position}: when.equals must be a non-empty string.`);
+      } else if (hasPresent && condition.present !== true) {
+        problems.push(`${position}: when.present must be true.`);
       }
     }
     const operationId = binding[execution.operationRef];

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 
-import { sql } from "kysely";
+import { sql } from "../../apps/api/src/db/sql-helpers.js";
 import type {
   ModuleOperationHandler,
   ModuleOperationSuccessResult,
@@ -17,6 +17,11 @@ type SessionOperationContext = Parameters<ModuleOperationHandler>[1];
 type AvatarHandle = { artifactId: string; documentVersionId: string };
 type SidebarIdentity = { name: string; description?: string; avatar?: AvatarHandle };
 export type SessionProfile = { user: SidebarIdentity; organisation: SidebarIdentity };
+export type SessionProfileResolver = (
+  context: SessionOperationContext,
+  tenantId: string,
+  userId: string,
+) => Promise<SessionProfile | undefined>;
 
 function success(value: unknown): ModuleOperationSuccessResult {
   return { value, status: 200, headers: SECURITY_HEADERS };
@@ -112,7 +117,9 @@ async function resolveSessionProfile(
   };
 }
 
-export function createSessionOperationHandlers(): Record<string, ModuleOperationHandler> {
+export function createSessionOperationHandlers(
+  profileResolver: SessionProfileResolver = resolveSessionProfile,
+): Record<string, ModuleOperationHandler> {
   return {
     getSession: async (_input, context) => {
       const tenantId = context.session?.tenantId;
@@ -126,7 +133,7 @@ export function createSessionOperationHandlers(): Record<string, ModuleOperation
           headers: SECURITY_HEADERS,
         };
       }
-      const profile = await resolveSessionProfile(context, tenantId, userId);
+      const profile = await profileResolver(context, tenantId, userId);
       if (!profile) {
         return {
           ok: false,

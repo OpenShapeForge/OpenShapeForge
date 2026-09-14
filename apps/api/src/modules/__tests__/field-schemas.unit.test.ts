@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
 import { createRuntimeFieldSchemaCompiler, runtimeJsonSchemas } from "../field-schemas.js";
+import generatedCatalog from "../../generated/operations/catalog.json" with { type: "json" };
 
 const compiler = createRuntimeFieldSchemaCompiler({
   version: 1,
@@ -60,6 +61,39 @@ test("JSON validation covers format, recursive local refs and collection bounds"
   for (const values of [{ emails: [] }, { emails: ["invalid"] }, { emails: "test@example.test" },
     { emails: ["a@example.test", "b@example.test", "c@example.test"] }]) {
     expect(runtimeJsonSchemas.validate(schema, values)).toMatchObject({ valid: false, error: { code: "VALIDATION_FAILED" } });
+  }
+});
+
+for (const entity of ["Document", "DocumentVersion"]) {
+  test(`actual generated ${entity}.create schema accepts template preflight and verified artifact input`, () => {
+    const operation = generatedCatalog.entityOperations.find(operation => operation.id === `${entity}.create`)!;
+    expect(operation).toBeDefined();
+    const schema = operation.input.schema as Record<string, unknown>;
+    expect((schema.properties as Record<string, Record<string, unknown>>).artifact!["x-osf-control"]).toBe("artifact-upload");
+    const id = "10000000-0000-4000-8000-000000000001";
+    const metadata = {
+      ...(entity === "Document" ? { document: { title: "Blokkenproef367", documentType: "memo", status: "draft", confidentiality: "internal" } } : { documentId: id }),
+      version: { versionLabel: "1", status: "draft" }, idempotencyKey: "synthetic-materialization-regression",
+    };
+    const before = structuredClone(metadata);
+    expect(runtimeJsonSchemas.validate(schema, metadata)).toEqual({ valid: true });
+    expect(metadata).toEqual(before);
+    expect(runtimeJsonSchemas.validate(schema, { ...metadata, artifact: { artifactId: id, expectedArtifactVersion: 1 } })).toEqual({ valid: true });
+    for (const artifact of [{ artifactId: "invalid", expectedArtifactVersion: 1 }, { artifactId: id, expectedArtifactVersion: 0 },
+      { artifactId: id }, { artifactId: id, expectedArtifactVersion: 1, mediaType: "application/json" }]) {
+      expect(runtimeJsonSchemas.validate(schema, { ...metadata, artifact }))
+        .toMatchObject({ valid: false, error: { code: "VALIDATION_FAILED" } });
+    }
+  });
+}
+
+test("presentation keyword support remains strict and preserves local reference validation", () => {
+  const schema = { type: "object", properties: { artifact: { $ref: "#/$defs/artifact", "x-osf-control": "artifact-upload" } },
+    $defs: { artifact: { type: "object", required: ["artifactId"], properties: { artifactId: { type: "string", format: "uuid" } } } } };
+  expect(runtimeJsonSchemas.validate(schema, { artifact: { artifactId: "invalid" } }))
+    .toMatchObject({ valid: false, error: { code: "VALIDATION_FAILED" } });
+  for (const invalid of [{ type: "object", "x-osf-contorl": "artifact-upload" }, { type: "object", "x-osf-control": {} }]) {
+    expect(runtimeJsonSchemas.validate(invalid, {})).toMatchObject({ valid: false, error: { code: "INVALID_DEFINITION" } });
   }
 });
 

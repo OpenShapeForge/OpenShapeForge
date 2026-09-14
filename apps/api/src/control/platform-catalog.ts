@@ -31,6 +31,7 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withSystemSession } from "../db/session.js";
 import type { DB } from "../generated/db/types.js";
 import { tenantNotFound } from "./errors.js";
+import { hostTenantFilter } from "./host-tenant-filter.js";
 import { assertSlug } from "./organization-naming.js";
 import {
   systemSessionForAdministrator,
@@ -206,6 +207,7 @@ async function tenantRows(trx: Transaction<DB>): Promise<TenantRow[]> {
   const result = await sql<TenantRow>`
     select id::text as id, slug, name, status, keycloak_organization_id
       from platform.tenants
+     where ${hostTenantFilter()}
      order by slug
   `.execute(trx);
   return result.rows;

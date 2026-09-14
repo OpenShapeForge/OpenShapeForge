@@ -55,6 +55,7 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withSystemSession } from "../db/session.js";
 import { systemSessionForOperator, type ControlOperator } from "./authorization.js";
 import { ControlServiceError, tenantNotFound } from "./errors.js";
+import { hostTenantFilter } from "./host-tenant-filter.js";
 import { KeycloakAdminError } from "./keycloak-organization-admin.js";
 import type { KeycloakOrganizationAdminClient } from "./keycloak-organization-admin.js";
 import type { KeycloakSpiClient } from "./keycloak-spi-client.js";
@@ -196,6 +197,7 @@ export async function listTenants(deps: ControlDeps): Promise<ListTenantsResult>
       const result = await sql<TenantRow>`
         select ${TENANT_COLUMNS}
           from platform.tenants
+         where ${hostTenantFilter()}
          order by slug
          limit ${TENANT_LIST_LIMIT + 1}
       `.execute(trx);
@@ -386,6 +388,7 @@ export async function updateTenant(
         select ${TENANT_COLUMNS}
           from platform.tenants
          where slug = ${slug}
+           and ${hostTenantFilter()}
            for update
       `.execute(trx);
       const current = before.rows[0];
@@ -487,6 +490,7 @@ export async function loadTenantBySlug(
     select ${TENANT_COLUMNS}
       from platform.tenants
      where slug = ${slug}
+       and ${hostTenantFilter()}
   `.execute(trx);
   const row = result.rows[0];
   if (!row) throw tenantNotFound(slug);

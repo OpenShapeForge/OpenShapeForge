@@ -63,6 +63,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import rawCatalog from "../generated/mcp/tools.json" with { type: "json" };
 import { resolveSessionContext } from "../auth/identity.js";
 import { OrganizationBindingError } from "../auth/organization-binding.js";
+import { hostMcpResource, usesHostOrganizationContext } from "../config/host-organization.js";
 import {
   buildAuthenticateChallenge,
   canonicalResourceUri,
@@ -7663,6 +7664,9 @@ export function registerGeneratedMcpServer(
     resource: string;
   }> {
     const alias = (request.params as { alias?: unknown } | undefined)?.alias;
+    if (usesHostOrganizationContext() && alias !== undefined) {
+      throw new HttpError(404, "NOT_FOUND", "Unknown MCP resource.");
+    }
     if (alias !== undefined && !isOrganizationAlias(alias)) {
       throw new HttpError(404, "NOT_FOUND", "Unknown MCP resource.");
     }
@@ -7682,7 +7686,7 @@ export function registerGeneratedMcpServer(
     // Order matters: the bearer check reads the ORIGINAL headers, because
     // "you sent a cookie and no token" is the case worth naming in the answer
     // and it is invisible once the cookie has been dropped.
-    if (binding) assertBearerCredential(request.headers);
+    if (binding || usesHostOrganizationContext()) assertBearerCredential(request.headers);
     const mcpHeaders = withoutCookieIdentity(request.headers);
 
     let resolved: TrustedSessionContext;
@@ -7690,6 +7694,7 @@ export function registerGeneratedMcpServer(
       resolved = await resolveSessionContext(headersFromFastify(mcpHeaders), {
         db: options.db,
         ...(binding ? { organization: binding } : {}),
+        ...(usesHostOrganizationContext() ? { requiredAudience: hostMcpResource() } : {}),
       });
     } catch (error) {
       if (error instanceof OrganizationBindingError) {

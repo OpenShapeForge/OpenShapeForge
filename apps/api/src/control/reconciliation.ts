@@ -116,6 +116,7 @@ import { sql } from "kysely";
 import { withSystemSession } from "../db/session.js";
 import { systemSessionForOperator } from "./authorization.js";
 import { ControlServiceError, tenantNotFound } from "./errors.js";
+import { hostTenantFilter } from "./host-tenant-filter.js";
 import type { KeycloakOrganizationSnapshot } from "./keycloak-organization-admin.js";
 import { MAX_ORG_UNIT_DEPTH } from "./org-unit-registry.js";
 import {
@@ -319,6 +320,7 @@ async function scanRegistry(deps: ControlDeps): Promise<RegistryScan> {
       const tenants = await sql<TenantRowShape>`
         select id, slug, name, status, keycloak_organization_id
           from platform.tenants
+         where ${hostTenantFilter()}
          order by slug
          limit ${TENANT_LIST_LIMIT + 1}
       `.execute(trx);
@@ -339,7 +341,10 @@ async function scanRegistry(deps: ControlDeps): Promise<RegistryScan> {
             on closure.tenant_id = unit.tenant_id
            and closure.descendant_id = unit.id
           join platform.org_unit as ancestor on ancestor.id = closure.ancestor_id
-         where unit.slug is not null or unit.keycloak_organization_id is not null
+         where (unit.slug is not null or unit.keycloak_organization_id is not null)
+           and exists (select 1 from platform.tenants as host_tenant
+                        where host_tenant.id = unit.tenant_id
+                          and ${hostTenantFilter("host_tenant.keycloak_realm")})
          group by unit.id, parent.keycloak_organization_id
          -- Depth within tenant, so truncation drops the deepest units of the
          -- last tenant only and every retained node's parent is retained too.

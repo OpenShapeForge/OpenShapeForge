@@ -33,6 +33,8 @@ import {
 } from "./authorization.js";
 import { platformMcpAuthorizedParties, type ControlPlaneConfig } from "./config.js";
 import type { SystemSessionInput } from "../db/session.js";
+import { usesHostOrganizationContext } from "../config/host-organization.js";
+import { assertHostRealm, hasKeycloakRealmAdmin } from "./realm-boundary.js";
 
 /** The control realm's marker role for the integration catalog. */
 export const PLATFORM_ADMIN_ROLE = "platform_admin";
@@ -92,6 +94,7 @@ export async function resolvePlatformAdministrator(
   config: ControlPlaneConfig,
   options: PlatformAdministratorOptions = {},
 ): Promise<PlatformAdministrator> {
+  if (usesHostOrganizationContext()) assertHostRealm(config);
   const claims = await verifyControlBearer(headers, config, options);
 
   // Admitted two ways, and the second is the stronger one.
@@ -126,10 +129,10 @@ export async function resolvePlatformAdministrator(
     );
   }
 
-  if (!realmRolesOf(claims).includes(PLATFORM_ADMIN_ROLE)) {
+  if (!(usesHostOrganizationContext() ? hasKeycloakRealmAdmin(claims) : realmRolesOf(claims).includes(PLATFORM_ADMIN_ROLE))) {
     throw new ControlAuthorizationError(
       "FORBIDDEN",
-      `Not authorized to administer the platform; the ${PLATFORM_ADMIN_ROLE} realm role is required.`,
+      `Not authorized to administer the host; ${usesHostOrganizationContext() ? "realm-management/realm-admin" : PLATFORM_ADMIN_ROLE} is required.`,
     );
   }
 

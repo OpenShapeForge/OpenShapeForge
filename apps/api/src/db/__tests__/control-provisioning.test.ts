@@ -145,6 +145,32 @@ async function migratedScratchDb<T>(fn: (db: Kysely<DB>, name: string) => Promis
 }
 
 describe("tenant provisioning", () => {
+  test("host administration cannot list, read or update another realm's tenant", async () => {
+    await migratedScratchDb(async (db) => {
+      const spi = fakeSpi();
+      const deps = depsFor(db, spi);
+      await provisionTenant(deps, { slug: "host-owned", name: "Host owned" });
+      await provisionTenant({ ...deps, tenantRealm: "other-realm" }, { slug: "other-owned", name: "Other owned" });
+      const savedMode = process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT;
+      const savedRealm = process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM;
+      process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = "host";
+      process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM = TENANT_REALM;
+      try {
+        const listed = await listTenants(deps);
+        expect(listed.tenants.map(row => row.slug)).toEqual(["host-owned"]);
+        await expect(getTenant(deps, "other-owned")).rejects.toMatchObject({ code: "CONTROL_TENANT_NOT_FOUND" });
+        await expect(updateTenant(deps, "other-owned", { name: "Forbidden" })).rejects.toMatchObject({ code: "CONTROL_TENANT_NOT_FOUND" });
+        const row = (await sql<{ name: string }>`select name from platform.tenants where slug = 'other-owned'`.execute(db)).rows[0];
+        expect(row?.name).toBe("Other owned");
+      } finally {
+        if (savedMode === undefined) delete process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT;
+        else process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = savedMode;
+        if (savedRealm === undefined) delete process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM;
+        else process.env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_TENANT_REALM = savedRealm;
+      }
+    });
+  }, TEST_TIMEOUT);
+
   test("cannot replay a tenant into another realm", async () => {
     await migratedScratchDb(async (db) => {
       const spi = fakeSpi();
@@ -155,7 +181,7 @@ describe("tenant provisioning", () => {
         slug: "acme", name: "Rebound",
       })).rejects.toMatchObject({ code: "CONTROL_TENANT_NOT_FOUND" });
       expect(otherSpi.organizations.size).toBe(0);
-      const rows = await sql<{ name: string; keycloak_realm: string; keycloak_organization_id: string }>`
+      const rows = await sql<{ name: string; keycloak_realm: string; keycloak_organization_id: string | null }>`
         select name, keycloak_realm, keycloak_organization_id from platform.tenants where slug = 'acme'
       `.execute(db);
       expect(rows.rows[0]).toEqual({ name: "Acme", keycloak_realm: TENANT_REALM,

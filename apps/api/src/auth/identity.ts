@@ -11,6 +11,7 @@ import {
 } from "@openshapeforge/auth";
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import { withDbSession } from "../db/session.js";
 import { keyringFromEnv, type SecretKeyring } from "../platform/secrets.js";
 import { looksLikeApiKey } from "./api-key/format.js";
 // ---- identity ↔ Relation link (auth/identity-link.ts) ----
@@ -39,9 +40,8 @@ import {
 
 export type ResolveSessionOptions = {
   /**
-   * Required for the API key path only — it is the only credential that has to
-   * be read back from storage. Omitted, API keys are rejected and the bearer
-   * and trusted-context paths are unaffected.
+   * Required for API keys and organization-to-tenant registry resolution.
+   * Host organization mode refuses sessions without registry proof.
    */
   db?: OpenShapeForgeDatabase | undefined;
   /**
@@ -49,6 +49,10 @@ export type ResolveSessionOptions = {
    * Ordinary callers keep the historical anonymous-session fallback.
    */
   failOnUnavailable?: boolean;
+  /** Exact resource audience required in addition to the configured verifier audience.
+   * Supplying this makes the endpoint bearer-only (no API key or trusted context).
+   */
+  requiredAudience?: string;
   /**
    * Set by the per-organization MCP resource (`/api/mcp/organizations/<alias>`).
    * The session is then only produced from a bearer JWT that is bound to that
@@ -60,6 +64,11 @@ export type ResolveSessionOptions = {
    */
   organization?: OrganizationResourceBinding;
 };
+
+/** Read per request: hosts and standalone processes may configure this after import. */
+function hostOrganizationContext(): boolean {
+  return process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT === "host";
+}
 
 export class SessionAuthenticationUnavailableError extends Error {
   constructor() {
@@ -83,10 +92,11 @@ const EMPTY_SESSION: TrustedSessionContext = {
 
 let verifierInitialized = false;
 let cachedVerifier: BearerVerifier | null = null;
+let cachedResourceVerifier: BearerVerifier | null = null;
 let cachedTenantBypassRoles: ReadonlySet<string> | null = null;
 
-function getBearerVerifier(): BearerVerifier | null {
-  if (verifierInitialized) return cachedVerifier;
+function getBearerVerifier(allowResourceClient = false): BearerVerifier | null {
+  if (verifierInitialized) return allowResourceClient ? cachedResourceVerifier : cachedVerifier;
   verifierInitialized = true;
 
   const jwksUri = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI;
@@ -124,7 +134,15 @@ function getBearerVerifier(): BearerVerifier | null {
     ...(audience ? { audience } : {}),
     ...(authorizedParties ? { authorizedParties } : {}),
   });
-  return cachedVerifier;
+  // Dynamic OAuth clients cannot appear in a static azp allowlist. This
+  // verifier is used ONLY when the caller also requires an exact resource aud;
+  // signature, issuer and configured API audience checks still apply.
+  cachedResourceVerifier = createBearerVerifier({
+    jwksUri,
+    issuer,
+    ...(audience ? { audience } : {}),
+  });
+  return allowResourceClient ? cachedResourceVerifier : cachedVerifier;
 }
 
 /**
@@ -169,6 +187,7 @@ function resolveScope(roles: readonly string[], groups: readonly string[]): Sess
 export function __resetSessionResolverForTests(): void {
   verifierInitialized = false;
   cachedVerifier = null;
+  cachedResourceVerifier = null;
   cachedTenantBypassRoles = null;
   apiKeyKeyringInitialized = false;
   cachedApiKeyKeyring = null;
@@ -194,8 +213,7 @@ let tenantForOrganizationOverride: TenantForOrganization | null = null;
 // A token names its tenant in one of two ways:
 //
 //   - `tid`: a user attribute the dev realm maps straight into the token. It is
-//     the legacy shape and stays authoritative when present — nothing about a
-//     realm that still sets it changes.
+//     the legacy shape and stays authoritative only outside host mode.
 //   - `organization.<alias>.id`: Keycloak's own Organization Membership mapper
 //     (client scope `organization`, "add organization id" on). This is how a
 //     deployment that models tenants as Keycloak Organizations — the shape the
@@ -300,6 +318,62 @@ async function resolveTenantFromOrganization(
   return tenantId;
 }
 
+/** A human host session has exactly one selected, verified membership. Neither
+ * tid, organization-specific scopes nor transport input may select another one.
+ */
+async function resolveHostOrganizationTenant(
+  identity: AuthIdentity,
+  claims: Record<string, unknown>,
+  db: OpenShapeForgeDatabase | undefined,
+): Promise<string | null> {
+  const raw = claims.organization;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) ||
+      Object.keys(raw).length !== 1 || !identity.scopes?.includes("organization")) return null;
+  const memberships = Object.entries(identity.organizations ?? {});
+  if (memberships.length !== 1) return null;
+  const membership = memberships[0]![1];
+  if (!membership.id?.trim()) return null;
+  const realm = realmFromIssuer(claims.iss);
+  if (!realm) return null;
+  const tenantId = await lookupTenantForOrganization(db, realm, membership.id);
+  if (!tenantId || (claims.tid !== undefined &&
+      (typeof claims.tid !== "string" || claims.tid.toLowerCase() !== tenantId.toLowerCase()))) return null;
+  return tenantId;
+}
+
+/** Explicit service credentials supply the tenant authority. Verify that their
+ * signed tid agrees with that credential AND its realm/organization registry row.
+ * This is a tenant-scoped read, never a raw-input or cross-tenant bypass.
+ */
+async function resolveScopedServiceTenant(
+  identity: AuthIdentity,
+  claims: Record<string, unknown>,
+  credential: { tenantId: string; clientId: string },
+  db: OpenShapeForgeDatabase | undefined,
+): Promise<string | null> {
+  const realm = realmFromIssuer(claims.iss);
+  if (!db || !realm || !identity.userId ||
+      identity.tenantId?.toLowerCase() !== credential.tenantId.toLowerCase() ||
+      claims.azp !== credential.clientId ||
+      claims.preferred_username !== `service-account-${credential.clientId}`) return null;
+  const row = await withDbSession(db, {
+    tenantId: credential.tenantId, userId: identity.userId, roles: [], scope: "self",
+  }, async (trx) => {
+    const result = await sql<{ keycloak_organization_id: string | null; keycloak_realm: string | null }>`
+      select keycloak_organization_id, keycloak_realm from platform.tenants
+      where id = ${credential.tenantId}::uuid
+    `.execute(trx);
+    return result.rows[0];
+  });
+  if (!row?.keycloak_organization_id || row.keycloak_realm !== realm) return null;
+  const tenantId = await lookupTenantForOrganization(db, realm, row.keycloak_organization_id);
+  if (tenantId?.toLowerCase() !== credential.tenantId.toLowerCase()) return null;
+  // If a service token also carries membership, it may not contradict the credential.
+  if (claims.organization !== undefined &&
+      await resolveHostOrganizationTenant(identity, claims, db) !== tenantId) return null;
+  return tenantId;
+}
+
 /**
  * The per-organization resource path. Membership, audience and registry are
  * checked in auth/organization-binding.ts; this is the glue to the verifier's
@@ -361,23 +435,32 @@ function getApiKeyKeyring(): SecretKeyring | null {
  * the fields the API key resolver needs. Shared with the interactive path on
  * purpose: there is exactly one place where a token becomes an identity.
  */
-async function verifyBearerIdentity(token: string) {
+async function verifyBearerIdentity(
+  token: string,
+  credential: { tenantId: string; keycloakClientId: string },
+  db: OpenShapeForgeDatabase,
+) {
   const verifier = getBearerVerifier();
   if (!verifier) {
     throw new Error("Bearer verifier is not configured.");
   }
-  const { identity } = await verifier(token);
+  const { identity, claims } = await verifier(token);
+  const tenantId = hostOrganizationContext()
+    ? await resolveScopedServiceTenant(identity, claims, {
+        tenantId: credential.tenantId, clientId: credential.keycloakClientId,
+      }, db)
+    : identity.tenantId;
   return {
-    tenantId: identity.tenantId,
+    tenantId,
     userId: identity.userId,
-    roles: mergeIdentityRoles(identity),
+    roles: sessionIdentityRoles(identity),
     groups: identity.groups ?? [],
     scopes: identity.scopes ?? [],
   };
 }
 
 /**
- * Effective roles for a bearer identity = realm roles ∪ every
+ * Legacy effective roles for a bearer identity = realm roles ∪ every
  * `resource_access` client's roles. Keycloak expands realm and client
  * composites into per-client roles under `resource_access`, so entity roles
  * like `Relations.All.ReadWrite` only exist there — realm_access alone would
@@ -396,6 +479,17 @@ export function mergeIdentityRoles(identity: {
       ...Object.values(identity.clientRoles ?? {}).flat(),
     ]),
   ].sort();
+}
+
+function sessionIdentityRoles(identity: AuthIdentity): string[] {
+  if (!hostOrganizationContext()) return mergeIdentityRoles(identity);
+  // Client roles belong to a resource server, not every sibling client in the
+  // realm. Organization-local claims stay nested; ambiguous tokens are refused
+  // before these roles can become an authenticated session. Realm roles remain
+  // issuer-wide grants and must not contain flattened per-organization rights.
+  const audience = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE;
+  const clientRoles = audience ? identity.clientRoles?.[audience] : undefined;
+  return [...new Set([...identity.roles, ...(clientRoles ?? [])])].sort();
 }
 
 /**
@@ -418,8 +512,8 @@ export function mergeIdentityRoles(identity: {
  *       env unset would trust inbound HMAC-signed context headers instead of
  *       verifying the presented token — a materially larger attack surface
  *       than the operator intended, with no startup signal).
- * - If there is no bearer header, fall back to trusted-context HMAC
- *   verification. Trusted-context-only deployments are unaffected.
+ * - Without a bearer header, trusted-context HMAC verification remains
+ *   available only outside host mode and bearer-only resources.
  *
  * The returned `groups` are raw Keycloak group paths from the access token's
  * `groups` claim. Translation to internal org-unit UUIDs (for RLS) happens
@@ -442,12 +536,11 @@ export async function resolveSessionContext(
     // forgot to configure the keyring would silently start treating API keys as
     // JWTs, which is the same downgrade the bearer path already refuses.
     if (looksLikeApiKey(presented)) {
-      if (options.organization) {
+      if (options.organization || options.requiredAudience !== undefined) {
         // An API key proves a tenant, not an Organization membership, and
         // carries no per-resource audience. Fail closed on the bound resource.
         console.warn(
-          "[auth] An API key was presented to a per-organization MCP resource; only a " +
-            "bearer token bound to that resource is accepted there. Rejecting.",
+          "[auth] An API key was presented to a bearer-only resource. Rejecting.",
         );
         return EMPTY_SESSION;
       }
@@ -471,7 +564,7 @@ export async function resolveSessionContext(
           db: options.db,
           keyring,
           issuer,
-          verifyToken: verifyBearerIdentity,
+          verifyToken: (token, credential) => verifyBearerIdentity(token, credential, options.db!),
           resolveScope,
         },
         presented,
@@ -479,7 +572,9 @@ export async function resolveSessionContext(
       return session ?? EMPTY_SESSION;
     }
 
-    const verifier = getBearerVerifier();
+    const verifier = getBearerVerifier(
+      hostOrganizationContext() && options.requiredAudience !== undefined,
+    );
     if (!verifier) {
       // A bearer credential was presented but no verifier is configured. Fail
       // closed rather than downgrading to the trusted-context header path.
@@ -498,12 +593,27 @@ export async function resolveSessionContext(
     const token = match![1]!;
     try {
       const { identity, claims } = await verifier(token);
+      if (hostOrganizationContext() && options.requiredAudience !== undefined &&
+          (typeof claims.azp !== "string" || !claims.azp.trim())) return EMPTY_SESSION;
+      if (options.requiredAudience !== undefined &&
+          !(typeof claims.aud === "string" ? [claims.aud] : claims.aud ?? [])
+            .includes(options.requiredAudience)) return EMPTY_SESSION;
       const groups = identity.groups ?? [];
-      const roles = mergeIdentityRoles(identity);
+      const roles = sessionIdentityRoles(identity);
+      const hostMode = hostOrganizationContext();
+      const configuredService = hostMode
+        ? configuredOrganizationServiceAccount(claims, identity.tenantId)
+        : undefined;
+      const hostTenantId = hostMode
+        ? configuredService
+          ? await resolveScopedServiceTenant(identity, claims, configuredService, options.db)
+          : await resolveHostOrganizationTenant(identity, claims, options.db)
+        : null;
+      if (hostMode && (!hostTenantId || !identity.userId)) return EMPTY_SESSION;
       // On a per-organization resource the tenant is the one the path's
       // organization links to, and nothing else in the token may pick it.
-      // Elsewhere: `tid` when the realm mints one, otherwise the Organization
-      // membership resolved against the tenant registry (section above).
+      // Shared host endpoints use the verified selected organization. Legacy
+      // mode retains tid preference followed by organization resolution.
       const tenantId = options.organization
         ? await resolveTenantForBoundOrganization(
             identity,
@@ -511,12 +621,13 @@ export async function resolveSessionContext(
             options.organization,
             options.db,
           )
-        : identity.tenantId ??
+        : hostMode ? hostTenantId : identity.tenantId ??
           (await resolveTenantFromOrganization(
             identity,
             claims as Record<string, unknown>,
             options.db,
           ));
+      if (hostMode && tenantId !== hostTenantId) return EMPTY_SESSION;
       const scope = resolveScope(roles, groups);
       // ---- identity ↔ Relation link (auth/identity-link.ts) ----
       // A person's first session in a tenant links (or records) the Relation
@@ -615,10 +726,9 @@ export async function resolveSessionContext(
     }
   }
 
-  if (options.organization) {
+  if (options.organization || options.requiredAudience !== undefined || hostOrganizationContext()) {
     // Trusted-context headers name a tenant directly; they cannot prove
-    // membership of the path's organization, so the bound resource ignores
-    // them rather than letting an in-mesh hop pick any tenant by path.
+    // selected membership or resource audience. Strict endpoints refuse them.
     return EMPTY_SESSION;
   }
 

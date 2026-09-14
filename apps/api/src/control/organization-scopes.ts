@@ -124,6 +124,7 @@ import {
   organizationResourceScope,
   organizationResourceScopeNames,
 } from "../mcp/organization-resource.js";
+import { hostMcpResource, usesHostOrganizationContext } from "../config/host-organization.js";
 import { KeycloakAdminError } from "./keycloak-organization-admin.js";
 import {
   createServiceAccountTokenProvider,
@@ -511,6 +512,10 @@ export async function ensureOrganizationScope(
   alias: string,
   settings: OrganizationScopeSettings,
 ): Promise<OrganizationScopeState> {
+  // Host mode has one Git-owned resource; tenant provisioning cannot mutate it.
+  if (usesHostOrganizationContext()) return {
+    scope: "organization", audiences: [hostMcpResource()], actions: [], registrationPolicyPresent: false,
+  };
   const normalised = normaliseSettings(settings);
   const snapshot = await readSnapshot(client, normalised.clients);
   return ensureWithSnapshot(client, alias, normalised, snapshot);
@@ -546,6 +551,7 @@ export async function reconcileOrganizationScopes(
   input: ReconcileOrganizationScopesInput,
   settings: OrganizationScopeSettings,
 ): Promise<ReconcileOrganizationScopesResult> {
+  if (usesHostOrganizationContext()) return { states: [], removed: [], actions: [], registrationPolicyPresent: false };
   const normalised = normaliseSettings(settings);
   const snapshot = await readSnapshot(client, normalised.clients);
   const known = new Set(input.aliases);
@@ -607,6 +613,7 @@ export async function compareOrganizationScopes(
   input: ReconcileOrganizationScopesInput,
   settings: OrganizationScopeSettings,
 ): Promise<OrganizationScopeDrift[]> {
+  if (usesHostOrganizationContext()) return [];
   const normalised = normaliseSettings(settings);
   const snapshot = await readSnapshot(client, normalised.clients);
   const known = new Set(input.aliases);

@@ -37,6 +37,8 @@
 import { createBearerVerifier, type BearerVerifier } from "@openshapeforge/auth";
 import { SYSTEM_BYPASS_ROLE, type SystemSessionInput } from "../db/session.js";
 import type { ControlPlaneConfig } from "./config.js";
+import { usesHostOrganizationContext } from "../config/host-organization.js";
+import { assertHostRealm, hasKeycloakRealmAdmin } from "./realm-boundary.js";
 
 /**
  * The control realm's single realm role. Holding it means "may use the control
@@ -187,6 +189,7 @@ export async function resolveControlOperator(
   config: ControlPlaneConfig,
   options: ResolveOperatorOptions = {},
 ): Promise<ControlOperator> {
+  if (usesHostOrganizationContext()) assertHostRealm(config);
   const claims = await verifyControlBearer(headers, config, options);
 
   // The authorized-party check. Without it a valid issuer alone would let in a
@@ -215,11 +218,11 @@ export async function resolveControlOperator(
   }
 
   // Realm roles only; see realmRolesOf for why client roles never count.
-  const holdsOperatorRole = realmRolesOf(claims).includes(PLATFORM_OPERATOR_ROLE);
+  const holdsOperatorRole = usesHostOrganizationContext() ? hasKeycloakRealmAdmin(claims) : realmRolesOf(claims).includes(PLATFORM_OPERATOR_ROLE);
   if (!holdsOperatorRole) {
     throw new ControlAuthorizationError(
       "FORBIDDEN",
-      `Not authorized to use the control plane; the ${PLATFORM_OPERATOR_ROLE} realm role is required.`,
+      `Not authorized to use the control plane; ${usesHostOrganizationContext() ? "realm-management/realm-admin" : PLATFORM_OPERATOR_ROLE} is required.`,
     );
   }
 

@@ -214,6 +214,10 @@ export function registerProtectedResourceMetadata(app: FastifyInstance): void {
   };
 
   app.get(`${PROTECTED_RESOURCE_METADATA_PATH}/:alias`, organizationMetadata);
+  // The explicit MCP spelling `https://host/zerocopter/mcp` is what a person
+  // types into a hosted client, and RFC 9728 path insertion turns it into
+  // `/.well-known/oauth-protected-resource/zerocopter/mcp`. Same document.
+  app.get(`${PROTECTED_RESOURCE_METADATA_PATH}/:alias/mcp`, organizationMetadata);
   app.get(
     `${PROTECTED_RESOURCE_METADATA_PATH}${ORGANIZATION_MCP_PATH_PREFIX}/:alias`,
     organizationMetadata,

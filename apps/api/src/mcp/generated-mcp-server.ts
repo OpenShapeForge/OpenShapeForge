@@ -7676,19 +7676,25 @@ export function registerGeneratedMcpServer(
     const binding = alias
       ? { alias, resource: canonicalResourceUri(request, alias) }
       : null;
-    // BOLT 2 (mcp/address.ts): a JSON-RPC body only under `application/json`.
-    // Checked before anything reads the body or the credential, so a refused
-    // media type never becomes an authenticated request.
-    assertJsonRpcContentType(request.method, request.headers["content-type"]);
     // BOLT 1 (mcp/address.ts). The cookie header is dropped rather than
     // ignored on every MCP path — the app shares this origin, so the browser
     // sends its session cookie here whether or not the page meant to — and an
     // organization resource additionally requires a bearer token, which is the
     // one credential a page cannot obtain by merely being open.
-    // Order matters: the bearer check reads the ORIGINAL headers, because
-    // "you sent a cookie and no token" is the case worth naming in the answer
-    // and it is invisible once the cookie has been dropped.
+    // Order matters twice. The bearer check reads the ORIGINAL headers,
+    // because "you sent a cookie and no token" is the case worth naming in
+    // the answer and it is invisible once the cookie has been dropped. And it
+    // runs BEFORE the media-type check: a client with no credential yet must
+    // receive the 401 challenge (RFC 9728) whatever it sent — hosted clients
+    // open with a bare POST to discover where to authenticate — and answering
+    // that probe with 415 leaves the resource undiscoverable. Nothing is
+    // authenticated by this ordering: the credential is only verified after
+    // the media type has been accepted below.
     if (binding || usesHostOrganizationContext()) assertBearerCredential(request.headers);
+    // BOLT 2 (mcp/address.ts): a JSON-RPC body only under `application/json`.
+    // Checked before anything reads the body or verifies the credential, so a
+    // refused media type never becomes an authenticated request.
+    assertJsonRpcContentType(request.method, request.headers["content-type"]);
     const mcpHeaders = withoutCookieIdentity(request.headers);
 
     let resolved: TrustedSessionContext;

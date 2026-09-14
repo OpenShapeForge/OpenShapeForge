@@ -407,11 +407,9 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
   });
   test("entityValue references require target read role, record view, tenant and existence in the write transaction", async () => {
     const f = valueFixture(), seeded = await seed(0), foreign = await seed(0, otherTenant);
-    // This fixture deliberately separates child-write and target-read rights;
-    // production template administrators legitimately hold both now.
-    f.parent.source!.authorization!.roles.read = ["General.All.Read"];
     const before = await state(seeded.id);
-    await fails(insertValue(f, seeded.id, { version: seeded.id }, "Include", { ...session, roles: ["Organization.All.ReadWrite"] }), "FORBIDDEN");
+    // The role-ungated child IO helper must still enforce target read rights.
+    await fails(insertValue(f, seeded.id, { version: seeded.id }, "Include", { ...session, roles: [] }), "FORBIDDEN");
     for (const versionId of [foreign.id, randomUUID()]) await fails(insertValue(f, seeded.id, { version: versionId }), "FORBIDDEN");
     f.parent.source!.authorization!.recordPermissions = { field: "permissions", column: "permissions", empty: "restricted", createRequires: [] };
     await fails(insertValue(f, seeded.id, { version: seeded.id }), "FORBIDDEN");

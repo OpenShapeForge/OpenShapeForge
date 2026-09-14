@@ -303,16 +303,23 @@ describe("canonical operation runtime", () => {
     expect(() => bindOperationHandlers([{ name: "workflow" }])).toThrow(/has no runtime handler/);
     expect(() => bindOperationHandlers([{ name: "unrelated" }, { name: "workflow" }])).toThrow(/has no runtime handler/);
   });
-  test("a process without any operation module binds the core operations and no plugin ones", () => {
-    const bound = bindOperationHandlers([]);
-    const plugins = new Set([...bound.values()].map((entry) => entry.operation.plugin));
+  test("a process without any operation module binds core and native operations only", () => {
+    const bound = bindCanonicalOperationHandlers([]);
     expect(bound.has("workflow.instance.webhook-start")).toBe(false);
-    // The two core modules bind without any plugin module present.
-    expect([...plugins].every((plugin) => plugin === "osf-blueprints" || plugin === "osf-control")).toBe(true);
+    expect(bound.has("entityTypes.list")).toBe(true);
     expect(bound.has("control.list-tenants")).toBe(true);
+    expect(
+      [...bound.values()].every(({ operation }) =>
+        operation.implementation?.type === "collection" ||
+        operation.implementation?.type === "entity-type-list" ||
+        operation.plugin === "osf-blueprints" ||
+        operation.plugin === "osf-control"
+      ),
+    ).toBe(true);
     // Once any operation module is present, every plugin operation must bind.
-    expect(() => bindOperationHandlers([{ name: "unrelated" }])).not.toThrow();
-    expect(bindOperationHandlers([{ name: "unrelated" }]).has("workflow.instance.webhook-start")).toBe(false);
+    const noOperationModule = { name: "no-operation-module" };
+    expect(() => bindCanonicalOperationHandlers([noOperationModule])).not.toThrow();
+    expect(bindCanonicalOperationHandlers([noOperationModule]).has("workflow.instance.webhook-start")).toBe(false);
   });
 
   test("validates input and handler output against the generated contract", async () => {

@@ -6,6 +6,7 @@ import { expect, test } from "bun:test";
 import { collectAllArtifacts } from "./index.js";
 import { loadActivePlatformCompile } from "./active-manifest.js";
 import { buildWebManifest } from "./authoring/web-manifest.js";
+import { resolveEntityInputSources } from "./entity-input-sources.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -84,7 +85,7 @@ test("canonical entity input sources reach every generated operation interface",
   try {
     await writeFile(
       join(root, "authoring.config.yaml"),
-      "layers:\n  - packages/compiler/config/authoring\n",
+      `layers:\n  - packages/compiler/config/authoring\nplugins:\n  - ${JSON.stringify(new URL("../../documents/src/index.ts", import.meta.url).pathname)}\n`,
     );
     await mkdir(join(root, "apps/product-web"), { recursive: true });
 
@@ -141,6 +142,32 @@ test("canonical entity input sources reach every generated operation interface",
     expect(
       object(object(object(webDocumentVersion.operations).create).input).schema,
     ).toEqual(documentVersionInput);
+
+    // Real identity-less definitions author their materialized value shape
+    // from ordinary entity fields. Outputs must expand just like inputs.
+    for (const [name, selected, route] of [
+      ["TextBlock", ["text"], "/api/content-blocks/text/materialize"],
+      ["YouTubeEmbed", ["title", "url", "showControls"], "/api/content-blocks/video/materialize"],
+    ] as const) {
+      const key = `${name}.materialize`;
+      const operation = (catalog.operations as JsonObject[]).find(operation => operation.key === key)!;
+      expect(operation).toBeDefined();
+      const output = object(operation.outputSchema);
+      const value = object(object(output.properties).value);
+      const expected = resolveEntityInputSources({ "x-osf-entityInput": { entity: name, fields: [...selected] } }, active.entities.map(entity => entity.contract), {});
+      expect(value).toEqual(expected);
+      expect(Object.keys(object(value.properties))).toEqual([...selected]);
+      expect(value.additionalProperties).toBe(false);
+      expect(output.required).toEqual(["kind", "value"]);
+      expect(object(output.properties).kind).toEqual({ type: "string", const: "block" });
+      const source = active.entities.find(entity => entity.contract.entity.name === name)!.contract;
+      expect(source.pluginOperations!.find(operation => operation.key === "materialize")?.definition.output?.schema).toEqual(output);
+      expect((mcp.operationTools as JsonObject[]).find(tool => tool.key === key)?.outputSchema).toEqual(output);
+      const response = object(object(object(object(openApi.paths)[route]).post).responses)["200"];
+      expect(object(object(object(response).content)["application/json"]).schema).toEqual(output);
+      // No standalone CRUD or Web route is introduced for value definitions.
+      expect(webEntities[name]).toBeUndefined();
+    }
 
     expect(
       artifacts.all.filter((artifact) =>

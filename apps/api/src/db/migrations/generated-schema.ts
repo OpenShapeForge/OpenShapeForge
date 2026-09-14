@@ -69,6 +69,39 @@ export type ManifestTable = {
 const manifestTables = manifest.tables as unknown as ManifestTable[];
 
 /**
+ * Tables inside manifest-covered schemas that are managed by dedicated
+ * migrations rather than the generated manifest. They are never treated as
+ * "disappeared from the manifest" drift. platform.schema_migrations is
+ * currently in the manifest too; keeping it here is defensive.
+ *
+ * Exported because ../schema-drift.ts must apply the identical exemption: it
+ * answers "does this database carry schema the branch does not declare?", and
+ * a divergent allowlist there would report these two tables as foreign on
+ * every database.
+ */
+export const nonManifestManagedTables = new Set<string>([
+  "platform.schema_migrations",
+  "platform.system_bypass_audit",
+  // Durable execution bookkeeping: owned by operation-execution-receipts.ts.
+  "platform.operation_execution_receipts",
+  // Definition catalog: owned by the preferences plugin's 0001_definition-catalog migration.
+  "platform.preference_definitions",
+  // Keycloak identity ↔ Relation link: created by migrations/identity-link.ts
+  // after the generated step (its FKs point at generated tables).
+  "platform.identities",
+  "platform.identity_relations",
+  // Pending employee invitations: created by migrations/employee-invitations.ts
+  // after the generated step.
+  "platform.employee_invitations",
+  // Update notices and who has been told: created by migrations/update-notices.ts
+  // after the generated step, for the same reason as the two above — they are
+  // runtime bookkeeping, not authored entities, so no manifest describes them
+  // and drift detection would read them as foreign schema.
+  "platform.update_notices",
+  "platform.user_update_notices",
+]);
+
+ /**
  * Columns on generated (manifest-declared) tables that a plugin schema
  * migration owns. A `CompilerPlugin.schemaMigrations` entry is free to
  * `ALTER TABLE ... ADD COLUMN` a generated entity table — the manifest cannot
